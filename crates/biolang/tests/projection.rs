@@ -12,6 +12,7 @@
 //! A gap is a finding, not a failure. Widening the IR to make a required field optional would hide
 //! the disagreement; inventing a value for it would fabricate one.
 
+use bioprism_bioir::EvidenceId;
 use bioprism_biolang::act::{ScientificAct, ScientificActKind};
 use bioprism_biolang::bundle::Repudiability as IrRepudiability;
 use bioprism_biolang::capsule::{BioContextCapsule, Omission, Staleness, Stance};
@@ -19,7 +20,6 @@ use bioprism_biolang::ids::{ActId, MutationId};
 use bioprism_biolang::mutation::{MutationProgram, Risk, SeedDeclaration, SemanticRelation};
 use bioprism_biolang::oracle::{EvidencePlane, EvidenceTier as IrTier, Independence, OracleIr};
 use bioprism_biolang::{Projection, ProjectionGap};
-use bioprism_bioir::EvidenceId;
 use bioprism_bundle::{AuthenticationScheme, MacTag, Repudiability};
 use bioprism_mutation::{Mutation, MutationKind, Relation};
 use bioprism_oracle::{
@@ -195,17 +195,35 @@ fn project_capsule(capsule: &ContextCapsule) -> Projection<BioContextCapsule> {
     };
 
     let gaps = [
-        ("objective", "a capsule transports a projection; it carries no task"),
-        ("success_contract", "no field; 25.16 requires what counts as done"),
+        (
+            "objective",
+            "a capsule transports a projection; it carries no task",
+        ),
+        (
+            "success_contract",
+            "no field; 25.16 requires what counts as done",
+        ),
         (
             "evidence.verified/contradicted",
             "weave records selection and withholding, not epistemic stance",
         ),
         ("assumptions", "no field"),
-        ("accessible_actions", "no field; the kernel holds the action catalog"),
-        ("authority", "held in the AuthorityTable, not in the capsule"),
-        ("budget", "held in an affine Budget, which is deliberately not Clone and so cannot be projected"),
-        ("staleness", "the capsule has a digest but no built-at instant; weave reads no clock"),
+        (
+            "accessible_actions",
+            "no field; the kernel holds the action catalog",
+        ),
+        (
+            "authority",
+            "held in the AuthorityTable, not in the capsule",
+        ),
+        (
+            "budget",
+            "held in an affine Budget, which is deliberately not Clone and so cannot be projected",
+        ),
+        (
+            "staleness",
+            "the capsule has a digest but no built-at instant; weave reads no clock",
+        ),
     ]
     .into_iter()
     .map(|(field, detail)| {
@@ -297,7 +315,12 @@ fn project_oracle(manifest: &OracleManifest) -> Projection<OracleIr> {
         tier: project_tier(manifest.declared_tier),
         inputs: BTreeSet::new(),
         outputs: BTreeSet::new(),
-        establishes: manifest.establishes.iter().copied().map(project_plane).collect(),
+        establishes: manifest
+            .establishes
+            .iter()
+            .copied()
+            .map(project_plane)
+            .collect(),
         cannot_establish: manifest
             .cannot_establish
             .iter()
@@ -362,7 +385,10 @@ fn the_ir_evidence_ladder_agrees_with_the_one_bioprism_oracle_enforces() {
 #[test]
 fn an_oracle_manifest_projects_into_the_ir_and_declares_three_unfillable_fields() {
     let projection = project_oracle(&oracle_manifest());
-    projection.value.validate().expect("the projection is valid");
+    projection
+        .value
+        .validate()
+        .expect("the projection is valid");
     assert_eq!(
         projection.unfilled_fields(),
         vec!["inputs", "outputs", "priority"]
@@ -386,7 +412,9 @@ fn the_planes_bioprism_oracle_names_all_have_an_ir_counterpart() {
 fn project_mutation(mutation: &Mutation) -> Projection<MutationProgram> {
     let relation = match mutation.relation {
         Relation::PreservesVerdict => SemanticRelation::Preserving,
-        Relation::AddsWitness { .. } | Relation::RemovesWitness { .. } => SemanticRelation::Changing,
+        Relation::AddsWitness { .. } | Relation::RemovesWitness { .. } => {
+            SemanticRelation::Changing
+        }
     };
     let value = MutationProgram {
         mutation_id: MutationId::parse(&mutation.id).expect("well-formed"),
@@ -437,7 +465,10 @@ fn a_semantics_preserving_mutation_projects_and_validates() {
     );
     let projection = project_mutation(&mutation);
     assert_eq!(projection.value.relation, SemanticRelation::Preserving);
-    projection.value.validate().expect("the projection is valid");
+    projection
+        .value
+        .validate()
+        .expect("the projection is valid");
 }
 
 #[test]
@@ -450,7 +481,10 @@ fn a_leakage_injecting_mutation_projects_as_semantics_changing() {
     );
     let projection = project_mutation(&mutation);
     assert_eq!(projection.value.relation, SemanticRelation::Changing);
-    projection.value.validate().expect("the projection is valid");
+    projection
+        .value
+        .validate()
+        .expect("the projection is valid");
 }
 
 #[test]
@@ -479,24 +513,31 @@ fn the_seed_a_mutation_does_carry_lives_inside_its_kind_not_beside_it() {
 // --- 25.20: bundles -------------------------------------------------------------------------------
 
 #[test]
-fn the_platform_cannot_produce_the_signature_25_20_requires() {
+fn the_legacy_ir_projects_hmac_repudiability_without_upgrading_its_claim() {
     let scheme = AuthenticationScheme::SymmetricSharedSecret;
     assert_eq!(scheme.algorithm(), "hmac-sha256");
 
     let repudiability = Repudiability::ForgeableByAnyVerifier;
-    match repudiability {
-        Repudiability::ForgeableByAnyVerifier => {}
-    }
     assert_eq!(
-        IrRepudiability::ForgeableByAnyVerifier,
+        Some(IrRepudiability::ForgeableByAnyVerifier),
         project_repudiability(repudiability),
-        "the IR mirrors the single variant bioprism-bundle admits"
+        "the legacy IR preserves the HMAC forgeability claim"
     );
 }
 
-fn project_repudiability(repudiability: Repudiability) -> IrRepudiability {
+#[test]
+fn the_legacy_ir_refuses_to_downgrade_public_key_repudiability() {
+    assert_eq!(
+        project_repudiability(Repudiability::NotForgeableByVerifier),
+        None,
+        "an Ed25519 attestation needs a distinct IR shape; mapping it to forgeable HMAC would hide capability"
+    );
+}
+
+fn project_repudiability(repudiability: Repudiability) -> Option<IrRepudiability> {
     match repudiability {
-        Repudiability::ForgeableByAnyVerifier => IrRepudiability::ForgeableByAnyVerifier,
+        Repudiability::ForgeableByAnyVerifier => Some(IrRepudiability::ForgeableByAnyVerifier),
+        Repudiability::NotForgeableByVerifier => None,
     }
 }
 

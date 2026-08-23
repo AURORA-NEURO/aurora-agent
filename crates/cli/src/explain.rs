@@ -23,7 +23,11 @@ pub fn render(out: &CompileOutput) -> String {
             let _ = writeln!(text, "  fallback none");
         }
         Some(fallback) => {
-            let _ = writeln!(text, "  fallback {:?} — {}", fallback.reason, fallback.detail);
+            let _ = writeln!(
+                text,
+                "  fallback {:?} — {}",
+                fallback.reason, fallback.detail
+            );
         }
     }
     let _ = writeln!(text);

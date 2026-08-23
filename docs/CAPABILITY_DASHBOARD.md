@@ -48,14 +48,35 @@ import Python modules, execute a tool, or establish deployment readiness.
 
 The route reads only the in-process catalogue and MCP tool definitions. It does not inspect an
 external environment or infer capabilities from package names. Callers should use
-`capability_discover` for ranked intent matching and `capability_route_review` before constructing
-an executable `agent_mission` allow-list.
+`capability_discover` for ranked intent matching, `capability_route` to batch named cross-domain
+needs, and `capability_route_review` before constructing an executable `agent_mission` allow-list.
+
+The direct HTTP planning handoff is split into two explicit, non-executing endpoints:
+
+- `POST /v1/capabilities/route` accepts the same bounded route request as the MCP tool and returns
+  the raw `capability_route` proposal.
+- `POST /v1/capabilities/route/review` accepts that returned route plus caller-selected tools and
+  returns the raw `capability_route_review` handoff. A ready review still requires mission
+  preflight and never dispatches a tool.
+- `POST /v1/capabilities/route/plan` composes that explicit review with authoritative mission
+  preflight. It returns the generated mission, plan digest, schema findings, and a structured
+  blocked outcome when either review boundary fails; `dispatch` remains `not_started`.
+- `POST /v1/capabilities/route/plan/verify` checks a retained plan, reruns mission preflight, and
+  optionally replays route review from the original route and selections. It never dispatches and
+  distinguishes full replay verification from `verified_without_route_replay`.
+
+Both endpoints record the same tool event and use the same authoritative catalogue as MCP. They
+exist for HTTP clients and automation that should not have to unpack an MCP response envelope.
 
 ## SDK surfaces
 
 - Python: `CapabilityDashboardQueryArgs`, `CapabilityDashboardReport`, and sync/async Workspace
-  and HTTP client methods.
+  and HTTP client methods, plus `capability_route_rest(...)` and
+  `capability_route_review_rest(...)`, `capability_route_plan_rest(...)`, and
+  `capability_route_plan_verify_rest(...)` for raw planning and replay verification.
 - TypeScript: `CapabilityDashboardArgs`, `CapabilityDashboardResult`, and
-  `ApiClient.capabilityDashboard(...)`.
+  `ApiClient.capabilityDashboard(...)`, `capabilityRouteRest(...)`, and
+  `capabilityRouteReviewRest(...)`, `capabilityRoutePlanRest(...)`, and
+  `capabilityRoutePlanVerifyRest(...)`.
 - MCP: the `capability_dashboard` tool with the
   `bioprism-devplat-capability-dashboard/0.1` audit schema.

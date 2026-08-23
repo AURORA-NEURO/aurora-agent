@@ -58,14 +58,14 @@ fn main() {
                      policy_screen, bioethics_action_review, bioethics_human_subject_screen,\n\
                      bioethics_dual_use_review, bioethics_validation_check, bioethics_representation_audit,\n\
                      influence_analyze, routing_decide, token_context_plan, bioql_compile, epistemic_voi,\n\
-                     benchmark_trace_analyze, pack_catalogue, pack_health_assess, world_generate, factory_lifecycle_simulate, foundation_contract_check,\n\
+                     benchmark_trace_analyze, pack_catalogue, pack_health_assess, world_generate, factory_lifecycle_simulate, factory_authority_verify, artifact_registry_audit, foundation_contract_check,\n\
                      weavelang_compile,\n\
                      choreography_check, conformance_run,\n\
                      provider_capability_gate, sdk_registry_check, hub_submission_review, hub_disclosure_review,\n\
                      hub_card_render, hub_leaderboard_render, bioatlas_publication_audit, telemetry_project,\n\
                      governance_schema_check,\n\
-                     developer_platform_status, capability_audit, capability_dashboard, capability_discover, capability_route, agent_mission, developer_workbench, ci_provider_normalize, ci_provider_evidence_audit, ci_execution_evidence_audit, execution_provenance_audit, developer_delivery_audit, engineering_execution_plan, safety_posture, security_redteam_simulate, security_privacy_audit, sandbox_admission_audit, sandbox_runtime_simulate, security_program_audit, weave_protocol_catalog, world_index,\n\
-                     workspace_capabilities, repository_catalog, repository_bundle, repository_impact\n\
+                     developer_platform_status, capability_audit, capability_dashboard, capability_discover, capability_route, agent_mission, developer_workbench, developer_workbench_verify, developer_workbench_import, developer_workbench_query, developer_workbench_get, ci_provider_normalize, ci_provider_evidence_audit, ci_provider_evidence_import, ci_provider_evidence_query, ci_provider_evidence_get, ci_execution_evidence_audit, execution_provenance_audit, developer_delivery_audit, engineering_execution_plan, safety_posture, security_redteam_simulate, security_privacy_audit, sandbox_admission_audit, sandbox_runtime_simulate, security_program_audit, weave_protocol_catalog, world_index,\n\
+                     workspace_capabilities, brain_model_select, brain_model_select_contextual, brain_prompt_assemble, brain_plan, brain_bandit_select, brain_bandit_update, brain_outcome_record, brain_job_submit, brain_job_status, brain_job_events, brain_job_approval, brain_job_claim, brain_job_claim_next, brain_job_renew, brain_job_checkpoint, brain_job_complete, brain_job_fail, brain_job_reconcile, brain_job_cancel, brain_model_health, brain_replay_evaluate, repository_catalog, repository_bundle, repository_impact\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\
                      workspace capability catalog"
                 );

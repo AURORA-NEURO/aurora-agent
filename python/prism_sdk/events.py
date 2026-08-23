@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .errors import ArgumentError, ProtocolError
+from .capability import (
+    DomainWorkflowReconciliationPersistenceStatus,
+    DomainWorkflowReconciliationSummaryReport,
+)
 from .mission import MissionPersistenceStatus
 
 
@@ -824,6 +828,177 @@ class OperationsDomainActivity:
 
 
 @dataclass(frozen=True)
+class OperationsReconciliationPosture:
+    """Retained reconciliation posture joined to one exact capability-group workflow ID."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    state: str
+    record_count: int
+    completion_status_counts: dict[str, int]
+    ready_count: int
+    review_required_count: int
+    integrity_invalid_count: int
+    evidence_invalid_count: int
+    readiness_claimed: bool
+    scope: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsReconciliationPosture":
+        raw = _mapping("operations reconciliation posture", value)
+        workflow_id = _text("operations reconciliation posture workflow_id", raw.get("workflow_id"))
+        state = _text("operations reconciliation posture state", raw.get("state"))
+        if state not in {"missing", "invalid", "incomplete", "structurally_ready"}:
+            raise ArgumentError("operations reconciliation posture state is invalid")
+        counts_raw = _mapping(
+            "operations reconciliation posture completion_status_counts",
+            raw.get("completion_status_counts"),
+        )
+        completion_status_counts = {
+            _text("operations reconciliation posture completion status", name): _non_negative(
+                "operations reconciliation posture completion status count", count
+            )
+            for name, count in counts_raw.items()
+        }
+        numeric = {
+            name: _non_negative(f"operations reconciliation posture {name}", raw.get(name, 0))
+            for name in (
+                "record_count",
+                "ready_count",
+                "review_required_count",
+                "integrity_invalid_count",
+                "evidence_invalid_count",
+            )
+        }
+        if raw.get("readiness_claimed") is not False:
+            raise ArgumentError("operations reconciliation posture must not claim readiness")
+        return cls(
+            raw=raw,
+            workflow_id=workflow_id,
+            state=state,
+            record_count=numeric["record_count"],
+            completion_status_counts=completion_status_counts,
+            ready_count=numeric["ready_count"],
+            review_required_count=numeric["review_required_count"],
+            integrity_invalid_count=numeric["integrity_invalid_count"],
+            evidence_invalid_count=numeric["evidence_invalid_count"],
+            readiness_claimed=False,
+            scope=_text("operations reconciliation posture scope", raw.get("scope")),
+            guarantees=_texts("operations reconciliation posture guarantees", raw.get("guarantees")),
+            limitations=_texts("operations reconciliation posture limitations", raw.get("limitations")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class OperationsArtifactEvidencePosture:
+    """Digest-verified artifact evidence visible for one operations capability group."""
+
+    raw: dict[str, Any]
+    workflow: str
+    schema: str
+    group_id: str
+    requested_domains: tuple[str, ...]
+    registry_generation: int
+    registry_size: int
+    state: str
+    matching_record_count: int
+    integrity_verified_record_count: int
+    kind_counts: dict[str, int]
+    family_counts: dict[str, int]
+    verification_state_counts: dict[str, int]
+    match_basis_counts: dict[str, int]
+    subject_count: int
+    parent_linked_record_count: int
+    matched_domain_labels: tuple[str, ...]
+    scope: str
+    readiness_claimed: bool
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "OperationsArtifactEvidencePosture":
+        raw = _mapping("operations artifact evidence posture", value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("operations artifact evidence posture must be successful")
+        if raw.get("workflow") != "artifact_registry_domain_evidence_posture":
+            raise ArgumentError("operations artifact evidence posture workflow is invalid")
+        if raw.get("schema") != "bioprism-devplat-artifact-domain-evidence-posture/0.1":
+            raise ArgumentError("operations artifact evidence posture schema is invalid")
+        state = _text("operations artifact evidence posture state", raw.get("state"))
+        if state not in {"missing", "observed"}:
+            raise ArgumentError("operations artifact evidence posture state is invalid")
+        execution = _text("operations artifact evidence posture execution", raw.get("execution"))
+        if execution != "not_started":
+            raise ArgumentError("operations artifact evidence posture execution is invalid")
+
+        def counts(name: str) -> dict[str, int]:
+            values = _mapping(f"operations artifact evidence posture {name}", raw.get(name))
+            return {
+                _text(f"operations artifact evidence posture {name} key", key): _non_negative(
+                    f"operations artifact evidence posture {name} count", count
+                )
+                for key, count in values.items()
+            }
+
+        numeric = {
+            name: _non_negative(f"operations artifact evidence posture {name}", raw.get(name, 0))
+            for name in (
+                "registry_generation",
+                "registry_size",
+                "matching_record_count",
+                "integrity_verified_record_count",
+                "subject_count",
+                "parent_linked_record_count",
+            )
+        }
+        if raw.get("readiness_claimed") is not False:
+            raise ArgumentError("operations artifact evidence posture must not claim readiness")
+        return cls(
+            raw=raw,
+            workflow="artifact_registry_domain_evidence_posture",
+            schema="bioprism-devplat-artifact-domain-evidence-posture/0.1",
+            group_id=_text("operations artifact evidence posture group_id", raw.get("group_id")),
+            requested_domains=_texts(
+                "operations artifact evidence posture requested_domains",
+                raw.get("requested_domains"),
+            ),
+            registry_generation=numeric["registry_generation"],
+            registry_size=numeric["registry_size"],
+            state=state,
+            matching_record_count=numeric["matching_record_count"],
+            integrity_verified_record_count=numeric["integrity_verified_record_count"],
+            kind_counts=counts("kind_counts"),
+            family_counts=counts("family_counts"),
+            verification_state_counts=counts("verification_state_counts"),
+            match_basis_counts=counts("match_basis_counts"),
+            subject_count=numeric["subject_count"],
+            parent_linked_record_count=numeric["parent_linked_record_count"],
+            matched_domain_labels=_texts(
+                "operations artifact evidence posture matched_domain_labels",
+                raw.get("matched_domain_labels"),
+            ),
+            scope=_text("operations artifact evidence posture scope", raw.get("scope")),
+            readiness_claimed=False,
+            execution="not_started",
+            guarantees=_texts(
+                "operations artifact evidence posture guarantees", raw.get("guarantees")
+            ),
+            limitations=_texts(
+                "operations artifact evidence posture limitations", raw.get("limitations")
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
 class OperationsDomainGateGroup:
     """One capability group with pooled and domain-bound evidence-channel gate states."""
 
@@ -832,6 +1007,8 @@ class OperationsDomainGateGroup:
     gate_state: str
     readiness_claimed: bool
     gates: dict[str, dict[str, Any]]
+    reconciliation_evidence: OperationsReconciliationPosture
+    artifact_evidence: OperationsArtifactEvidencePosture
     last_event_id: int | None
     evidence_scope: str
 
@@ -862,7 +1039,61 @@ class OperationsDomainGateGroup:
             required.add("domain_evaluator_evidence")
             if not required.issubset(gates_raw):
                 raise ArgumentError("operations domain gate group is missing a required gate")
+        if "reconciliation_evidence" not in gates_raw:
+            # Older API deployments predate the reconciliation join. Preserve their explicit
+            # absence as a fail-closed posture rather than dropping the typed field or inferring
+            # that the workflow passed.
+            gates_raw = dict(gates_raw)
+            gates_raw["reconciliation_evidence"] = {
+                "workflow_id": _text("operations domain gate group id", raw.get("id")),
+                "state": "missing",
+                "record_count": 0,
+                "completion_status_counts": {},
+                "ready_count": 0,
+                "review_required_count": 0,
+                "integrity_invalid_count": 0,
+                "evidence_invalid_count": 0,
+                "readiness_claimed": False,
+                "scope": "bounded_digest_valid_reconciliation_registry",
+                "guarantees": ["legacy response omitted the retained reconciliation lookup"],
+                "limitations": ["the server predates the reconciliation gate join"],
+            }
+        if "artifact_evidence" not in gates_raw:
+            # Older API deployments predate the registry-to-operations join. Preserve that
+            # absence as an explicit advisory miss rather than inferring evidence from activity.
+            gates_raw = dict(gates_raw)
+            gates_raw["artifact_evidence"] = {
+                "ok": True,
+                "schema": "bioprism-devplat-artifact-domain-evidence-posture/0.1",
+                "workflow": "artifact_registry_domain_evidence_posture",
+                "group_id": _text("operations domain gate group id", raw.get("id")),
+                "requested_domains": list(raw.get("domains", []))
+                if isinstance(raw.get("domains"), Sequence)
+                and not isinstance(raw.get("domains"), (str, bytes))
+                else [],
+                "registry_generation": 0,
+                "registry_size": 0,
+                "state": "missing",
+                "matching_record_count": 0,
+                "integrity_verified_record_count": 0,
+                "kind_counts": {},
+                "family_counts": {},
+                "verification_state_counts": {},
+                "match_basis_counts": {},
+                "subject_count": 0,
+                "parent_linked_record_count": 0,
+                "matched_domain_labels": [],
+                "scope": "legacy_response_without_artifact_registry_join",
+                "readiness_claimed": False,
+                "execution": "not_started",
+                "guarantees": ["legacy response omitted the advisory artifact evidence lookup"],
+                "limitations": ["the server predates the artifact evidence gate join"],
+            }
         gates = {name: _mapping(f"operations domain gate {name}", gates_raw[name]) for name in gates_raw}
+        reconciliation_evidence = OperationsReconciliationPosture.from_wire(
+            gates["reconciliation_evidence"]
+        )
+        artifact_evidence = OperationsArtifactEvidencePosture.from_wire(gates["artifact_evidence"])
         last_event_id = raw.get("last_event_id")
         if last_event_id is not None:
             last_event_id = _non_negative("operations domain gate last_event_id", last_event_id)
@@ -872,6 +1103,8 @@ class OperationsDomainGateGroup:
             gate_state=gate_state,
             readiness_claimed=False,
             gates=gates,
+            reconciliation_evidence=reconciliation_evidence,
+            artifact_evidence=artifact_evidence,
             last_event_id=last_event_id,
             evidence_scope=_text("operations domain gate evidence_scope", raw.get("evidence_scope")),
         )
@@ -910,7 +1143,10 @@ class OperationsDomainGates:
         gate_digest_scope = _text(
             "operations domain gates gate_digest_scope", raw.get("gate_digest_scope")
         )
-        if gate_digest_scope != "tool_evidence_projection_without_gate_digest":
+        if gate_digest_scope not in {
+            "tool_evidence_projection_without_gate_digest",
+            "operations_evidence_and_reconciliation_projection_without_gate_digest",
+        }:
             raise ArgumentError("operations domain gates digest scope is invalid")
         event_cursor = _mapping("operations domain gates event_cursor", raw.get("event_cursor"))
         for name in ("after", "next_after", "returned_events", "dropped_events"):
@@ -941,6 +1177,11 @@ class OperationsDomainGates:
             "groups_blocked_catalogue",
             "groups_insufficient_evidence",
             "groups_review_required",
+            "groups_reconciliation_blocked",
+            "groups_with_artifact_evidence",
+            "artifact_evidence_records",
+            "artifact_registry_generation",
+            "artifact_registry_size",
         ):
             value = summary_raw.get(name, 0)
             summary[name] = _non_negative(f"operations domain gates summary {name}", value)
@@ -1091,6 +1332,8 @@ class OperationsSnapshot:
     mission_summary: dict[str, Any]
     mission_persistence: MissionPersistenceStatus
     event_persistence: EventPersistenceStatus
+    reconciliation_persistence: DomainWorkflowReconciliationPersistenceStatus
+    reconciliation_summary: DomainWorkflowReconciliationSummaryReport
     recovery: RecoveryMatrix
     domain_coverage: OperationsDomainCoverage
     consistency: dict[str, Any]
@@ -1168,6 +1411,12 @@ class OperationsSnapshot:
         persistence = _mapping("operations snapshot persistence", raw.get("persistence"))
         mission_persistence = MissionPersistenceStatus.from_wire(persistence.get("missions"))
         event_persistence = EventPersistenceStatus.from_wire(persistence.get("events"))
+        reconciliation_persistence = DomainWorkflowReconciliationPersistenceStatus.from_wire(
+            persistence.get("workflow_reconciliations")
+        )
+        reconciliation_summary = DomainWorkflowReconciliationSummaryReport.from_wire(
+            raw.get("reconciliation_summary")
+        )
         recovery = RecoveryMatrix.from_wire(raw.get("recovery"))
         domain_coverage = OperationsDomainCoverage.from_wire(raw.get("domain_coverage"))
         consistency_raw = _mapping("operations snapshot consistency", raw.get("consistency"))
@@ -1219,6 +1468,8 @@ class OperationsSnapshot:
             mission_summary=mission_summary,
             mission_persistence=mission_persistence,
             event_persistence=event_persistence,
+            reconciliation_persistence=reconciliation_persistence,
+            reconciliation_summary=reconciliation_summary,
             recovery=recovery,
             domain_coverage=domain_coverage,
             consistency=consistency,
@@ -1538,6 +1789,7 @@ __all__ = [
     "OperationsHandoff",
     "OperationsDomainActivityGroup",
     "OperationsDomainActivity",
+    "OperationsArtifactEvidencePosture",
     "OperationsDomainGateGroup",
     "OperationsDomainGates",
     "MAX_OPERATIONS_SNAPSHOT_LIMIT",

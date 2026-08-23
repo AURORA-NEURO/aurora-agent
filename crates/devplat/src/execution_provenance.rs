@@ -523,6 +523,8 @@ mod tests {
             execution: "authorized".into(),
             execution_mode: "serial".into(),
             max_parallelism: 1,
+            workflow_binding: None,
+            route_review_provenance: None,
             guarantees: vec![],
             limitations: vec![],
         };

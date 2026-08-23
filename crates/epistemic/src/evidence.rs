@@ -160,13 +160,12 @@ impl EvidencePool {
     }
 
     pub fn index_of(&self, id: &str) -> Result<usize, EpistemicError> {
-        self.items
-            .iter()
-            .position(|i| i.id == id)
-            .ok_or_else(|| EpistemicError::UnknownIdentifier {
+        self.items.iter().position(|i| i.id == id).ok_or_else(|| {
+            EpistemicError::UnknownIdentifier {
                 collection: "evidence pool".to_string(),
                 id: id.to_string(),
-            })
+            }
+        })
     }
 
     /// Total cost of a subset. This is the *rate* in rate–distortion.
@@ -228,6 +227,10 @@ impl Outcome {
     pub fn likelihood(&self, model: usize) -> f64 {
         self.likelihood.get(model).copied().unwrap_or(0.0)
     }
+
+    pub fn likelihoods(&self) -> &[f64] {
+        &self.likelihood
+    }
 }
 
 /// An evidence action: an observation that could be made, at a cost.
@@ -281,11 +284,7 @@ impl Acquisition {
                 });
             }
         }
-        Ok(Acquisition {
-            id,
-            cost,
-            outcomes,
-        })
+        Ok(Acquisition { id, cost, outcomes })
     }
 
     /// An action whose outcome distribution is the same under every model.
@@ -328,5 +327,57 @@ impl Acquisition {
 
     pub fn outcomes(&self) -> &[Outcome] {
         &self.outcomes
+    }
+
+    /// Re-check invariants after a value arrived through derived serde deserialisation.
+    pub fn check_against(&self, problem: &DecisionProblem) -> Result<(), EpistemicError> {
+        if !self.cost.is_finite() || self.cost < 0.0 {
+            return Err(EpistemicError::InadmissibleCost {
+                item: self.id.clone(),
+                value: self.cost,
+            });
+        }
+        if self.outcomes.is_empty() {
+            return Err(EpistemicError::OutcomelessAcquisition {
+                action: self.id.clone(),
+            });
+        }
+        for outcome in &self.outcomes {
+            if outcome.likelihoods().len() != problem.model_count() {
+                return Err(EpistemicError::LikelihoodShape {
+                    item: format!("{}/{}", self.id, outcome.label),
+                    got: outcome.likelihoods().len(),
+                    models: problem.model_count(),
+                });
+            }
+        }
+        for model in 0..problem.model_count() {
+            let mut sum: f64 = 0.0;
+            for outcome in &self.outcomes {
+                let value = outcome.likelihoods().get(model).copied().ok_or_else(|| {
+                    EpistemicError::LikelihoodShape {
+                        item: format!("{}/{}", self.id, outcome.label),
+                        got: outcome.likelihoods().len(),
+                        models: problem.model_count(),
+                    }
+                })?;
+                if !value.is_finite() || value < 0.0 {
+                    return Err(EpistemicError::InadmissibleLikelihood {
+                        item: format!("{}/{}", self.id, outcome.label),
+                        model,
+                        value,
+                    });
+                }
+                sum += value;
+            }
+            if (sum - 1.0).abs() > 1e-9 {
+                return Err(EpistemicError::ImproperAcquisition {
+                    action: self.id.clone(),
+                    model,
+                    sum,
+                });
+            }
+        }
+        Ok(())
     }
 }

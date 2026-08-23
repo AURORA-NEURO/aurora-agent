@@ -201,35 +201,85 @@
 //! six turned out to belong to a crate that already owns the artifact. That asymmetry is worth
 //! stating: a section can look two-thirds unimplemented while the platform underneath it is not.
 
+pub mod adapter_execution_evidence;
+pub mod adapter_execution_evidence_query;
+pub mod artifact_registry;
 pub mod audit;
 pub mod capability;
 pub mod capability_dashboard;
-pub mod citations;
 pub mod ci_evidence;
 pub mod ci_provider;
 pub mod ci_provider_evidence;
+pub mod ci_provider_evidence_registry;
+pub mod citations;
 pub mod claim;
 pub mod classify;
+pub mod cross_domain_audit;
 pub mod delivery_receipt;
-pub mod error;
-pub mod exploit;
+pub mod domain_acquisition;
+pub mod domain_decision_readiness;
+pub mod domain_evidence;
+pub mod domain_evidence_intake;
+pub mod domain_evidence_provider;
+pub mod domain_evidence_provider_external;
+pub mod domain_evidence_provider_external_execution;
+pub mod domain_evidence_provider_external_lineage;
+pub mod domain_evidence_provider_external_normalization;
+pub mod domain_evidence_provider_external_query;
+pub mod domain_evidence_provider_handoff;
+pub mod domain_evidence_source;
+pub mod domain_evidence_source_execution;
+pub mod domain_report;
 pub mod engineering;
 pub mod engineering_plan;
+pub mod error;
 pub mod evaluator;
+pub mod evidence_bundle;
+pub mod evidence_registry;
 pub mod execution_provenance;
+pub mod exploit;
 pub mod mission;
 pub mod operational_readiness;
-pub mod report;
 pub mod release_pipeline;
+pub mod report;
 pub mod repro;
-pub mod security_privacy;
-pub mod security_program;
 pub mod sandbox_admission;
 pub mod sandbox_runtime;
+pub mod security_privacy;
+pub mod security_program;
 pub mod surface;
 pub mod walkthrough;
 pub mod workbench;
+pub mod workbench_registry;
+pub mod workflow;
+pub mod workflow_execution_evidence;
+pub mod workflow_reconciliation;
+pub mod workflow_reconciliation_registry;
 
+pub use adapter_execution_evidence::{
+    record_adapter_execution_evidence, AdapterExecutionEvidenceRequest, AdapterExecutionLoss,
+    ADAPTER_EXECUTION_EVIDENCE_SCHEMA, ADAPTER_EXECUTION_EVIDENCE_WORKFLOW,
+    MAX_ADAPTER_EXECUTION_EVIDENCE_BYTES, MAX_ADAPTER_EXECUTION_EVIDENCE_DOMAINS,
+    MAX_ADAPTER_EXECUTION_EVIDENCE_ITEMS, MAX_ADAPTER_EXECUTION_EVIDENCE_LOSSES,
+    MAX_ADAPTER_EXECUTION_EVIDENCE_PARENTS, MAX_ADAPTER_EXECUTION_EVIDENCE_TEXT_BYTES,
+};
+pub use adapter_execution_evidence_query::{
+    query_adapter_execution_evidence, AdapterExecutionEvidenceJoinProjection,
+    AdapterExecutionEvidenceQueryReport, AdapterExecutionEvidenceQueryRequest,
+    AdapterExecutionEvidenceQueryRow, AdapterExecutionEvidenceQuerySummary,
+    ADAPTER_EXECUTION_EVIDENCE_QUERY_SCHEMA, ADAPTER_EXECUTION_EVIDENCE_QUERY_WORKFLOW,
+    MAX_ADAPTER_EXECUTION_EVIDENCE_QUERY_ITEMS,
+};
+pub use artifact_registry::{
+    ArtifactRecord, ArtifactRegistry, ArtifactRegistryError,
+    ARTIFACT_REGISTRY_DOMAIN_DECISION_READINESS_QUERY_SCHEMA_VERSION,
+    ARTIFACT_REGISTRY_DOMAIN_EVIDENCE_LINEAGE_SCHEMA_VERSION, ARTIFACT_REGISTRY_GET_SCHEMA_VERSION,
+    ARTIFACT_REGISTRY_LINEAGE_SCHEMA_VERSION, ARTIFACT_REGISTRY_QUERY_SCHEMA_VERSION,
+    ARTIFACT_REGISTRY_REGISTER_SCHEMA_VERSION, ARTIFACT_REGISTRY_SCHEMA_VERSION,
+    MAX_ARTIFACT_REGISTRY_BYTES, MAX_ARTIFACT_REGISTRY_DOMAINS,
+    MAX_ARTIFACT_REGISTRY_LINEAGE_NODES, MAX_ARTIFACT_REGISTRY_PARENTS,
+    MAX_ARTIFACT_REGISTRY_QUERY_ITEMS, MAX_ARTIFACT_REGISTRY_RECORDS,
+};
 pub use audit::{
     catalogues_are_disjoint, findings, recipes_are_all_in_tree, unimplemented_titles,
     DevPlatReport, Finding, WalkthroughSummary,
@@ -245,37 +295,171 @@ pub use capability_dashboard::{
 };
 pub use ci_evidence::{
     audit_ci_execution_evidence, CiCheckEvidence, CiCheckStatus, CiEvidenceError,
-    CiEvidenceFinding, CiEvidenceSource, CiExecutionEvidenceAudit,
-    CiExecutionEvidenceRequest, CiRunConclusion, CiRunEvidence, CI_EXECUTION_EVIDENCE_SCHEMA,
+    CiEvidenceFinding, CiEvidenceSource, CiExecutionEvidenceAudit, CiExecutionEvidenceRequest,
+    CiRunConclusion, CiRunEvidence, CI_EXECUTION_EVIDENCE_SCHEMA,
 };
 pub use ci_provider::{
     normalize_ci_provider_payload, CiProviderNormalization, CiProviderNormalizationError,
     CiProviderNormalizationRequest, CI_PROVIDER_NORMALIZATION_SCHEMA,
 };
 pub use ci_provider_evidence::{
-    audit_ci_provider_evidence, CiProviderArtifact, CiProviderAttestation,
-    CiProviderEvidenceAudit, CiProviderEvidenceError, CiProviderEvidenceRequest, CiProviderLog,
-    CI_PROVIDER_EVIDENCE_SCHEMA,
+    audit_ci_provider_evidence, CiProviderArtifact, CiProviderAttestation, CiProviderEvidenceAudit,
+    CiProviderEvidenceError, CiProviderEvidenceRequest, CiProviderLog, CI_PROVIDER_EVIDENCE_SCHEMA,
+    DIGEST_SCOPE_CALLER_DECLARED, DIGEST_SCOPE_LOCAL_RESPONSE_BYTES,
+    DIGEST_SCOPE_PROVIDER_METADATA,
+};
+pub use ci_provider_evidence_registry::{
+    CiProviderEvidenceRegistry, CiProviderEvidenceRegistryError,
+    CI_PROVIDER_EVIDENCE_GET_SCHEMA_VERSION, CI_PROVIDER_EVIDENCE_IMPORT_SCHEMA_VERSION,
+    CI_PROVIDER_EVIDENCE_QUERY_SCHEMA_VERSION, CI_PROVIDER_EVIDENCE_REGISTRY_SCHEMA_VERSION,
+    MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS, MAX_CI_PROVIDER_EVIDENCE_RECORDS,
+    MAX_CI_PROVIDER_EVIDENCE_REGISTRY_BYTES,
 };
 pub use citations::{audit as audit_citations, scan as scan_citations, CitationAudit};
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};
 pub use classify::{
     classification, implemented_module_ids, not_implemented, verdict_counts, ModuleVerdict, Verdict,
 };
-pub use error::{
-    CitationError, ClaimError, DevPlatError, ExploitError, ReportError, ReproError, SurfaceError,
-    WalkthroughError,
+pub use cross_domain_audit::{
+    build_cross_domain_audit, CROSS_DOMAIN_AUDIT_SCHEMA_VERSION, CROSS_DOMAIN_AUDIT_WORKFLOW,
+    MAX_CROSS_DOMAIN_AUDIT_FINDINGS,
 };
-pub use exploit::{
-    intent_verdict, release_gate, standard_remediations, task_verdict, CellScore, Containment,
-    GateOutcome, IntentVerdict, Remediation, Reward, SecurityCell, ServiceState, TamperAttempt,
-    TaskVerdict,
+pub use delivery_receipt::{
+    build_delivery_receipt, verify_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
+    DeliveryReceiptFinding, DeliveryReceiptRequest, DeliveryReceiptTarget,
+    DeliveryReceiptVerification, DeliveryReceiptVerificationRequest, DELIVERY_RECEIPT_SCHEMA,
+};
+pub use domain_acquisition::{
+    build_domain_acquisition_catalogue, DomainAcquisitionCatalogue, DomainAcquisitionError,
+    DomainAcquisitionGroup, DomainAcquisitionQuery, DomainAcquisitionRoute, DomainAdapterRoute,
+    DomainInterpretationRoute, DomainTransportRoute, DOMAIN_ACQUISITION_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_WORKFLOW, MAX_DOMAIN_ACQUISITION_ADAPTERS, MAX_DOMAIN_ACQUISITION_DOMAINS,
+    MAX_DOMAIN_ACQUISITION_GROUPS,
+};
+pub use domain_decision_readiness::{
+    audit_domain_decision_readiness, summarize_domain_decision_readiness,
+    validate_domain_decision_readiness, DomainDecisionReadinessError,
+    DOMAIN_DECISION_READINESS_SCHEMA_VERSION, DOMAIN_DECISION_READINESS_WORKFLOW,
+    MAX_DOMAIN_DECISION_READINESS_BLOCKERS, MAX_DOMAIN_DECISION_READINESS_BYTES,
+    MAX_DOMAIN_DECISION_READINESS_REPORTS, MAX_DOMAIN_DECISION_READINESS_REQUIREMENTS,
+    MAX_DOMAIN_DECISION_READINESS_TEXT_BYTES,
+};
+pub use domain_evidence::{
+    harmonize_domain_evidence, validate_domain_evidence_harmonization, DomainEvidenceError,
+    DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, MAX_DOMAIN_EVIDENCE_HARMONIZATION_BYTES,
+    MAX_DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_ITEMS, MAX_DOMAIN_EVIDENCE_LINKS,
+    MAX_DOMAIN_EVIDENCE_REPORTS, MAX_DOMAIN_EVIDENCE_REQUIREMENTS, MAX_DOMAIN_EVIDENCE_TEXT_BYTES,
+};
+pub use domain_evidence_intake::{
+    intake_domain_evidence, validate_domain_evidence_intake, DomainEvidenceIntakeError,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_INTAKE_BYTES, MAX_DOMAIN_EVIDENCE_INTAKE_DOMAINS,
+    MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS, MAX_DOMAIN_EVIDENCE_INTAKE_TEXT_BYTES,
+};
+pub use domain_evidence_provider::{
+    normalize_domain_evidence_provider, verify_domain_evidence_provider_replay,
+    DomainEvidenceProviderNormalization, DomainEvidenceProviderNormalizationError,
+    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderRecordIndex,
+    DomainEvidenceProviderReplayRequest, DomainEvidenceProviderReplayVerification,
+    DomainEvidenceProviderShapeAudit, DomainEvidenceProviderShapeCoverage,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_SHAPE_AUDIT_SCHEMA,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_BYTES, MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_PARENTS, MAX_DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_ITEMS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES,
+};
+pub use domain_evidence_provider_external::{
+    record_domain_evidence_provider_external_payload,
+    verify_domain_evidence_provider_external_payload_replay,
+    DomainEvidenceProviderExternalPayloadError, DomainEvidenceProviderExternalPayloadReceipt,
+    DomainEvidenceProviderExternalPayloadReceiptRequest,
+    DomainEvidenceProviderExternalPayloadReplayRequest,
+    DomainEvidenceProviderExternalPayloadReplayVerification,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_BYTES,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_DOMAINS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_PARENTS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_TEXT_BYTES,
+};
+pub use domain_evidence_provider_external_execution::{
+    audit_domain_evidence_provider_external_payload_execution,
+    DomainEvidenceProviderExternalPayloadExecutionEvidence,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW,
+};
+pub use domain_evidence_provider_external_lineage::{
+    audit_domain_evidence_provider_external_payload_lineage,
+    DomainEvidenceProviderExternalPayloadLineageAudit,
+    DomainEvidenceProviderExternalPayloadLineageAuditRequest,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
+};
+pub use domain_evidence_provider_external_normalization::{
+    normalize_domain_evidence_provider_external_payload,
+    DomainEvidenceProviderExternalPayloadNormalization,
+    DomainEvidenceProviderExternalPayloadNormalizationError,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
+};
+pub use domain_evidence_provider_external_query::{
+    query_domain_evidence_provider_external_payload_evidence,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryReport,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    DomainEvidenceProviderExternalPayloadEvidenceRow,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_ITEMS,
+};
+pub use domain_evidence_provider_handoff::{
+    handoff_domain_evidence_provider, DomainEvidenceProviderAuthPosture,
+    DomainEvidenceProviderConnectorManifest, DomainEvidenceProviderHandoff,
+    DomainEvidenceProviderHandoffError, DomainEvidenceProviderHandoffRequest,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA, DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_MANIFEST_SCHEMA, MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_BYTES,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_CAPABILITIES,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_DOMAINS, MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_PARENTS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SECRET_REFS,
+    MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_TEXT_BYTES,
+};
+pub use domain_evidence_source::{
+    plan_domain_evidence_source, validate_domain_evidence_source_plan,
+    DomainEvidenceSourcePlanError, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW, MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_ALLOWED_HOSTS,
+    MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_BYTES, MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_BYTES_LIMIT,
+    MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_DOMAINS, MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_NON_CLAIMS,
+    MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_PARENTS, MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TEXT_BYTES,
+    MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TIMEOUT_MS,
+};
+pub use domain_evidence_source_execution::{
+    execute_domain_evidence_source, DomainEvidenceSourceExecutionError,
+    DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION, DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
+    MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_HEADER_BYTES,
+    MAX_DOMAIN_EVIDENCE_SOURCE_EXECUTION_PREVIEW_BYTES,
+};
+pub use domain_report::{
+    classify_domain_report_bridge, project_domain_report, validate_domain_report,
+    DomainReportBridgeMetadata, DomainReportError, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
+    ADAPTER_DOMAIN_REPORT_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
+    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, MAX_DOMAIN_REPORT_BYTES,
+    MAX_DOMAIN_REPORT_DOMAINS, MAX_DOMAIN_REPORT_LIMITATIONS, MAX_DOMAIN_REPORT_NON_CLAIMS,
+    MAX_DOMAIN_REPORT_PARENTS, MAX_DOMAIN_REPORT_TEXT_BYTES, PROVIDER_DOMAIN_REPORT_SCHEMA_VERSION,
+    PROVIDER_DOMAIN_REPORT_WORKFLOW,
 };
 pub use engineering::{
-    AdrSpec, AdrStatus, EngineeringAudit, EngineeringCounts, EngineeringError,
+    AdrSpec, AdrStatus, AdrSupersession, EngineeringAudit, EngineeringCounts, EngineeringError,
     EngineeringIssue, EngineeringManifest, EngineeringPolicies, IssueSeverity, OwnershipSpec,
     PackageSpec, ProjectIdentity, TechnologyBaseline, TicketReadiness, TicketSpec, TicketStatus,
-    AdrSupersession, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_MANIFEST_SCHEMA,
+    ENGINEERING_AUDIT_SCHEMA, ENGINEERING_MANIFEST_SCHEMA,
 };
 pub use engineering_plan::{
     EngineeringPlanAudit, EngineeringPlanError, EngineeringPlanGate, EngineeringPlanPolicies,
@@ -283,61 +467,94 @@ pub use engineering_plan::{
     ENGINEERING_PLAN_AUDIT_SCHEMA, ENGINEERING_PLAN_REQUEST_SCHEMA, MAX_PLAN_PARALLELISM,
     MAX_PLAN_TICKETS,
 };
+pub use error::{
+    CitationError, ClaimError, DevPlatError, ExploitError, ReportError, ReproError, SurfaceError,
+    WalkthroughError,
+};
 pub use evaluator::{
     EvaluatorError, MissionEvaluatorAdapter, MissionEvaluatorCatalogue, MissionEvaluatorMatch,
-    MissionEvaluatorQuery, MissionEvaluatorReviewRequest, MissionEvaluatorSearch,
-    MissionEvaluatorSelection, MISSION_EVALUATOR_SCHEMA_VERSION,
+    MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MissionEvaluatorReviewRequest, MissionEvaluatorSearch, MissionEvaluatorSelection,
+    MISSION_EVALUATOR_CATALOGUE_SNAPSHOT_SCHEMA_VERSION,
+    MISSION_EVALUATOR_REPLAY_COMPARE_SCHEMA_VERSION, MISSION_EVALUATOR_SCHEMA_VERSION,
+};
+pub use evidence_bundle::{
+    verify_mission_evidence_bundle, EvidenceBundleError, MAX_EVIDENCE_BUNDLE_VERIFY_BYTES,
+    MISSION_EVIDENCE_BUNDLE_SCHEMA_VERSION, MISSION_EVIDENCE_BUNDLE_VERIFY_SCHEMA_VERSION,
+};
+pub use evidence_registry::{
+    EvidenceBundleRegistry, EvidenceRegistryError, EVIDENCE_REGISTRY_IMPORT_SCHEMA_VERSION,
+    EVIDENCE_REGISTRY_QUERY_SCHEMA_VERSION, EVIDENCE_REGISTRY_SCHEMA_VERSION,
+    MAX_EVIDENCE_REGISTRY_BUNDLES, MAX_EVIDENCE_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
 };
 pub use execution_provenance::{
     audit_execution_provenance, DelegatedCheckEvidence, ExecutionProvenanceAudit,
     ExecutionProvenanceFinding, ExecutionProvenanceRequest, EXECUTION_PROVENANCE_SCHEMA,
     MAX_DELEGATED_CHECKS, MAX_FINDINGS,
 };
-pub use delivery_receipt::{
-    build_delivery_receipt, DeliveryReceiptAudit, DeliveryReceiptEvidence,
-    verify_delivery_receipt, DeliveryReceiptFinding, DeliveryReceiptRequest,
-    DeliveryReceiptTarget, DeliveryReceiptVerification, DeliveryReceiptVerificationRequest,
-    DELIVERY_RECEIPT_SCHEMA,
+pub use exploit::{
+    intent_verdict, release_gate, standard_remediations, task_verdict, CellScore, Containment,
+    GateOutcome, IntentVerdict, Remediation, Reward, SecurityCell, ServiceState, TamperAttempt,
+    TaskVerdict,
 };
 pub use mission::{
-    apply_binding, mission_claim_lineage, mission_claim_lineage_with_review, plan_mission, MissionBinding, MissionClaimEvaluatorBinding,
-    MissionClaimRequest, MissionError, MissionPlan, MissionPolicy, MissionReport, MissionRequest, MissionStep,
-    MissionStepPlan, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
-    MAX_CLAIM_EVALUATORS, MAX_CLAIM_REFERENCES, MAX_CLAIM_REQUESTS, MISSION_SCHEMA_VERSION,
+    apply_binding, mission_claim_lineage, mission_claim_lineage_with_review, plan_mission,
+    route_review_provenance, validate_route_review_provenance, MissionBinding,
+    MissionClaimEvaluatorBinding, MissionClaimRequest, MissionError, MissionPlan, MissionPolicy,
+    MissionReport, MissionRequest, MissionStep, MissionStepPlan, MissionStepResult,
+    MissionTraceEvent, MissionTraceObserver, MAX_CLAIM_EVALUATORS, MAX_CLAIM_REFERENCES,
+    MAX_CLAIM_REQUESTS, MAX_WORKFLOW_BINDING_BYTES, MISSION_SCHEMA_VERSION,
     MISSION_TRACE_SCHEMA_VERSION,
 };
 pub use operational_readiness::{
-    DependencyCriticality, IncidentSeverity, IncidentState, IndicatorStatus,
-    OperationalContract, OperationalContractKind, OperationalControls, OperationalCriticality,
-    OperationalDependency, OperationalDependencyAudit, OperationalIncident, OperationalIncidentAudit,
-    OperationalIndicator, OperationalIndicatorAudit, OperationalIssueSeverity, OperationalReadinessAudit,
-    OperationalReadinessCounts, OperationalReadinessError, OperationalReadinessIssue,
-    OperationalReadinessManifest, OperationalReadinessPolicies, OperationalRunbook,
-    OperationalRunbookAudit, OperationalService, RunbookReviewStatus,
+    DependencyCriticality, IncidentSeverity, IncidentState, IndicatorStatus, OperationalContract,
+    OperationalContractKind, OperationalControls, OperationalCriticality, OperationalDependency,
+    OperationalDependencyAudit, OperationalIncident, OperationalIncidentAudit,
+    OperationalIndicator, OperationalIndicatorAudit, OperationalIssueSeverity,
+    OperationalReadinessAudit, OperationalReadinessCounts, OperationalReadinessError,
+    OperationalReadinessIssue, OperationalReadinessManifest, OperationalReadinessPolicies,
+    OperationalRunbook, OperationalRunbookAudit, OperationalService, RunbookReviewStatus,
     OPERATIONAL_READINESS_AUDIT_SCHEMA, OPERATIONAL_READINESS_MANIFEST_SCHEMA,
+};
+pub use release_pipeline::{
+    EnvironmentClass, PipelineArtifact, PipelineArtifactKind, PipelineAttestation,
+    PipelineAttestationKind, PipelineEnvironment, PipelineIssueSeverity, PipelineProject,
+    PipelinePromotion, PipelinePromotionAudit, PipelinePromotionKind, PipelineSource,
+    PipelineStage, PipelineStageKind, PipelineStageReadiness, ReleasePipelineAudit,
+    ReleasePipelineCounts, ReleasePipelineError, ReleasePipelineIssue, ReleasePipelineManifest,
+    ReleasePipelinePolicies, RELEASE_PIPELINE_AUDIT_SCHEMA, RELEASE_PIPELINE_MANIFEST_SCHEMA,
 };
 pub use report::{
     drifted_figures, render, render_all, Audience, Depth, EvidenceState, Figure, FigureStatus,
     Limitation, RenderedFigure, Rendering, Section, SourcePointer, Uncertainty,
 };
-pub use release_pipeline::{
-    EnvironmentClass, PipelineArtifact, PipelineArtifactKind, PipelineAttestation,
-    PipelineAttestationKind, PipelineEnvironment, PipelineIssueSeverity, PipelinePromotion,
-    PipelinePromotionAudit, PipelinePromotionKind, PipelineStage, PipelineStageKind,
-    PipelineStageReadiness, PipelineProject, PipelineSource, ReleasePipelineAudit,
-    ReleasePipelineCounts, ReleasePipelineError, ReleasePipelineIssue, ReleasePipelineManifest,
-    ReleasePipelinePolicies, RELEASE_PIPELINE_AUDIT_SCHEMA, RELEASE_PIPELINE_MANIFEST_SCHEMA,
+pub use repro::{
+    figure_reproduction_case, forbidden_by_default, summarise, Effect, MoleculeCard, Obligation,
+    ObligationLedger, ObligationStatus, ReproductionReport, ReproductionStatus,
+};
+pub use sandbox_admission::{
+    SandboxArtifact, SandboxArtifactAudit, SandboxArtifactKind, SandboxAudit, SandboxBoundaryAudit,
+    SandboxCapability, SandboxCapabilityAudit, SandboxCapabilityKind, SandboxDecision,
+    SandboxError, SandboxExecutionProfile, SandboxIssue, SandboxIssueSeverity, SandboxManifest,
+    SandboxMount, SandboxMountMode, SandboxNetworkMode, SandboxOutput, SandboxOutputAudit,
+    SandboxPolicies, SandboxProfileAudit, SandboxResourceAudit, SandboxResourceLimits,
+    SandboxSystem, SandboxTrust, SANDBOX_AUDIT_SCHEMA, SANDBOX_MANIFEST_SCHEMA,
+};
+pub use sandbox_runtime::{
+    SandboxRuntimeAudit, SandboxRuntimeDecision, SandboxRuntimeError, SandboxRuntimeIssue,
+    SandboxRuntimeManifest, SandboxRuntimePolicies, SandboxRuntimeRequest, SandboxRuntimeStepAudit,
+    SandboxRuntimeUsage, SANDBOX_RUNTIME_AUDIT_SCHEMA, SANDBOX_RUNTIME_MANIFEST_SCHEMA,
 };
 pub use security_privacy::{
-    SecurityPrivacyAsset, SecurityPrivacyAssetAudit, SecurityPrivacyAudit, SecurityPrivacyClassification,
-    SecurityPrivacyControlAudit, SecurityPrivacyControls, SecurityPrivacyError, SecurityPrivacyFlow,
-    SecurityPrivacyFlowAudit, SecurityPrivacyFlowDecision, SecurityPrivacyIdentity,
-    SecurityPrivacyIdentityAudit, SecurityPrivacyIssue, SecurityPrivacyIssueSeverity,
-    SecurityPrivacyManifest, SecurityPrivacyPolicies, SecurityPrivacyReview, SecurityPrivacyReviewAudit,
+    SecurityPrivacyAsset, SecurityPrivacyAssetAudit, SecurityPrivacyAudit,
+    SecurityPrivacyClassification, SecurityPrivacyControlAudit, SecurityPrivacyControls,
+    SecurityPrivacyCounts, SecurityPrivacyError, SecurityPrivacyFlow, SecurityPrivacyFlowAudit,
+    SecurityPrivacyFlowDecision, SecurityPrivacyIdentity, SecurityPrivacyIdentityAudit,
+    SecurityPrivacyIssue, SecurityPrivacyIssueSeverity, SecurityPrivacyManifest,
+    SecurityPrivacyPolicies, SecurityPrivacyReview, SecurityPrivacyReviewAudit,
     SecurityPrivacyReviewKind, SecurityPrivacyReviewStatus, SecurityPrivacySystem,
     SecurityPrivacyThreat, SecurityPrivacyThreatAudit, SecurityPrivacyThreatSeverity,
-    SecurityPrivacyThreatStatus, SecurityPrivacyCounts, SECURITY_PRIVACY_AUDIT_SCHEMA,
-    SECURITY_PRIVACY_MANIFEST_SCHEMA,
+    SecurityPrivacyThreatStatus, SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PRIVACY_MANIFEST_SCHEMA,
 };
 pub use security_program::{
     SecurityProgramAudit, SecurityProgramCampaign, SecurityProgramCampaignAudit,
@@ -352,33 +569,57 @@ pub use security_program::{
     SecurityProgramSystem, SecurityProgramTimelineEvent, SECURITY_PROGRAM_AUDIT_SCHEMA,
     SECURITY_PROGRAM_MANIFEST_SCHEMA,
 };
-pub use sandbox_admission::{
-    SandboxArtifact, SandboxArtifactAudit, SandboxArtifactKind, SandboxAudit, SandboxBoundaryAudit,
-    SandboxCapability, SandboxCapabilityAudit, SandboxCapabilityKind, SandboxDecision, SandboxError,
-    SandboxExecutionProfile, SandboxIssue, SandboxIssueSeverity, SandboxManifest, SandboxMount,
-    SandboxMountMode, SandboxNetworkMode, SandboxOutput, SandboxOutputAudit, SandboxPolicies,
-    SandboxProfileAudit, SandboxResourceAudit, SandboxResourceLimits, SandboxSystem, SandboxTrust,
-    SANDBOX_AUDIT_SCHEMA, SANDBOX_MANIFEST_SCHEMA,
-};
-pub use sandbox_runtime::{
-    SandboxRuntimeAudit, SandboxRuntimeDecision, SandboxRuntimeError, SandboxRuntimeIssue,
-    SandboxRuntimeManifest, SandboxRuntimePolicies, SandboxRuntimeRequest,
-    SandboxRuntimeStepAudit, SandboxRuntimeUsage, SANDBOX_RUNTIME_AUDIT_SCHEMA,
-    SANDBOX_RUNTIME_MANIFEST_SCHEMA,
-};
-pub use repro::{
-    figure_reproduction_case, forbidden_by_default, summarise, Effect, MoleculeCard, Obligation,
-    ObligationLedger, ObligationStatus, ReproductionReport, ReproductionStatus,
-};
 pub use surface::{foreign_subjects, ForeignSubject, Locale, Surface, SurfaceKind};
 pub use walkthrough::{
     recheck, standard_walkthroughs, Standing, Step, StepBody, Walkthrough, WalkthroughDraft,
     WalkthroughId,
 };
 pub use workbench::{
-    audit_session, plan_ci, query_dashboard, run_workbench, ArtifactCard, ArtifactState, CellInput,
-    CellKind, ChangeKind, CiCheck, CiPlan, CiRequest, DashboardQuery, DashboardReport,
-    DashboardRow, EvidencePosture, NotebookPolicy, SessionAudit, StudioCell, StudioChange,
-    StudioSession, WorkbenchError, WorkbenchFinding, WorkbenchReport, WorkbenchRequest,
-    WORKBENCH_SCHEMA_VERSION,
+    audit_session, plan_ci, query_dashboard, run_workbench, verify_workbench, ArtifactCard,
+    ArtifactState, CellInput, CellKind, ChangeKind, CiCheck, CiPlan, CiRequest, DashboardQuery,
+    DashboardReport, DashboardRow, EvidencePosture, NotebookPolicy, SessionAudit, StudioCell,
+    StudioChange, StudioSession, WorkbenchError, WorkbenchFinding, WorkbenchMismatch,
+    WorkbenchReport, WorkbenchRequest, WorkbenchVerificationPolicy, WorkbenchVerificationReport,
+    WorkbenchVerificationRequest, WORKBENCH_SCHEMA_VERSION, WORKBENCH_VERIFY_SCHEMA_VERSION,
+};
+pub use workbench_registry::{
+    WorkbenchRegistryError, WorkbenchReportRegistry, MAX_WORKBENCH_QUERY_ITEMS,
+    MAX_WORKBENCH_REGISTRY_BYTES, MAX_WORKBENCH_REPORTS, WORKBENCH_REGISTRY_GET_SCHEMA_VERSION,
+    WORKBENCH_REGISTRY_IMPORT_SCHEMA_VERSION, WORKBENCH_REGISTRY_QUERY_SCHEMA_VERSION,
+    WORKBENCH_REGISTRY_SCHEMA_VERSION,
+};
+pub use workflow::{
+    build_domain_workflow_catalogue, build_domain_workflow_portfolio, instantiate_domain_workflow,
+    scaffold_domain_workflow, verify_domain_workflow, verify_domain_workflow_portfolio,
+    DomainWorkflowError, DOMAIN_WORKFLOW_CATALOGUE_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_CONTRACT_SCHEMA_VERSION, DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_PORTFOLIO_SCHEMA_VERSION, DOMAIN_WORKFLOW_PORTFOLIO_VERIFY_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_SCAFFOLD_SCHEMA_VERSION, DOMAIN_WORKFLOW_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_VERIFY_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_BYTES, MAX_DOMAIN_WORKFLOW_GROUPS,
+    MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS, MAX_DOMAIN_WORKFLOW_STEPS, MAX_DOMAIN_WORKFLOW_TOOLS,
+};
+pub use workflow_execution_evidence::{
+    build_workflow_execution_evidence, validate_workflow_execution_evidence,
+    WorkflowExecutionEvidenceError, WorkflowExecutionEvidenceRegistry,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES, MAX_WORKFLOW_EXECUTION_EVIDENCE_CAPABILITIES,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_DOMAINS, MAX_WORKFLOW_EXECUTION_EVIDENCE_PARENTS,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_QUERY_ITEMS, MAX_WORKFLOW_EXECUTION_EVIDENCE_RECORDS,
+    WORKFLOW_EXECUTION_EVIDENCE_GET_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_QUERY_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_REGISTRY_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION, WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW,
+};
+pub use workflow_reconciliation::{
+    reconcile_domain_workflow, DomainWorkflowReconcileError,
+    DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_RECONCILE_BYTES,
+    MAX_DOMAIN_WORKFLOW_RECONCILE_FINDINGS, MAX_DOMAIN_WORKFLOW_RECONCILE_STEPS,
+};
+pub use workflow_reconciliation_registry::{
+    DomainWorkflowReconciliationRegistry, DomainWorkflowReconciliationRegistryError,
+    DOMAIN_WORKFLOW_RECONCILIATION_IMPORT_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_RECONCILIATION_QUERY_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_RECONCILIATION_REGISTRY_SCHEMA_VERSION,
+    DOMAIN_WORKFLOW_RECONCILIATION_SUMMARY_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+    MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES, MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
 };

@@ -44,7 +44,9 @@ impl WorkerCapability {
 pub struct Lease {
     pub job_id: String,
     pub worker_id: String,
-    /// Which attempt this lease covers. Two leases on the same attempt is the forbidden state.
+    /// Which attempt this lease covers. This is also the fencing token: every heartbeat, stage,
+    /// failure, and commit must present the same attempt, so a stale worker cannot mutate a later
+    /// lease even when its worker identity is reused.
     pub attempt: u32,
     pub granted_at: Timestamp,
     pub expires_at: Timestamp,

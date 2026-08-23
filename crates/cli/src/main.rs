@@ -9,12 +9,22 @@
 //! * every failure maps to a documented exit code (see [`exit::ExitCode`]).
 
 mod args;
-mod explain;
 mod exit;
+mod explain;
 mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
+use bioprism_devplat::{
+    audit_domain_decision_readiness, build_domain_workflow_catalogue,
+    build_domain_workflow_portfolio, instantiate_domain_workflow, reconcile_domain_workflow,
+    scaffold_domain_workflow, verify_domain_workflow_portfolio, verify_workbench, ArtifactRegistry,
+    CiProviderEvidenceRegistry, WorkbenchReportRegistry, WorkbenchVerificationRequest,
+};
+use bioprism_devplat::{
+    verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
+};
 use bioprism_fiber::compile;
+use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
 use bioprism_scope::DimensionRegistry;
 use bioprism_section::{CertificateProfile, ContextCertificate, OracleStatus};
 use bioprism_world::{validate, Severity};
@@ -24,6 +34,16 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 fn main() {
+    std::thread::Builder::new()
+        .name("bioprism-cli".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(main_inner)
+        .expect("bioprism CLI worker thread should start")
+        .join()
+        .expect("bioprism CLI worker thread should finish");
+}
+
+fn main_inner() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
 
     let parsed = match args::parse(raw) {
@@ -69,7 +89,12 @@ fn main() {
             } else {
                 match &error.subject {
                     Some(subject) => {
-                        eprintln!("error [{}]: {}: {}", error.code.slug(), subject, error.message)
+                        eprintln!(
+                            "error [{}]: {}: {}",
+                            error.code.slug(),
+                            subject,
+                            error.message
+                        )
                     }
                     None => eprintln!("error [{}]: {}", error.code.slug(), error.message),
                 }
@@ -107,19 +132,1594 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
         Command::WorldValidate { world } => world_validate(world),
         Command::WorldShow { world } => world_show(world),
         Command::WorldGenerate(options) => world_generate(options),
-        Command::WorldIndex { world, store, dry_run } => world_index(world, store, *dry_run),
-        Command::PrismFork { world, query, bundle_out, minimize } => {
-            prism_fork(world, query, bundle_out.as_deref(), *minimize)
-        }
+        Command::WorldIndex {
+            world,
+            store,
+            dry_run,
+        } => world_index(world, store, *dry_run),
+        Command::PrismFork {
+            world,
+            query,
+            bundle_out,
+            minimize,
+        } => prism_fork(world, query, bundle_out.as_deref(), *minimize),
         Command::PrismMinimize { world } => prism_minimize(world),
         Command::MutateFamily { world, out_dir } => mutate_family(world, out_dir.as_deref()),
         Command::ContextExplain { world, query } => context_explain(world, query),
         Command::ContextCompile(options) => context_compile(options),
         Command::ContextVerify { certificate } => context_verify(certificate),
-        Command::ContextCompare { world, query, markdown } => {
-            context_compare(world, query, *markdown)
+        Command::ContextCompare {
+            world,
+            query,
+            markdown,
+        } => context_compare(world, query, *markdown),
+        Command::EvidenceBundleVerify { bundle } => evidence_bundle_verify(bundle),
+        Command::EvidenceBundleImport {
+            bundle,
+            store,
+            dry_run,
+        } => evidence_bundle_import(bundle, store, *dry_run),
+        Command::EvidenceBundleQuery {
+            store,
+            mission_id,
+            domain,
+            after,
+            limit,
+            include_bundles,
+        } => evidence_bundle_query(
+            store,
+            mission_id.as_deref(),
+            domain.as_deref(),
+            after.as_deref(),
+            *limit,
+            *include_bundles,
+        ),
+        Command::EvidenceDomainLineage {
+            store,
+            digest,
+            group_id,
+            domain,
+            subject_id,
+            source_tool,
+            outcome,
+            request_digest,
+            response_digest,
+            intake_digest,
+            source_plan_digest,
+            after,
+            limit,
+            include_children,
+        } => evidence_domain_lineage(
+            store,
+            digest.as_deref(),
+            group_id.as_deref(),
+            domain.as_deref(),
+            subject_id.as_deref(),
+            source_tool.as_deref(),
+            outcome.as_deref(),
+            request_digest.as_deref(),
+            response_digest.as_deref(),
+            intake_digest.as_deref(),
+            source_plan_digest.as_deref(),
+            after.as_deref(),
+            *limit,
+            *include_children,
+        ),
+        Command::ReadinessAudit { request } => readiness_audit(request),
+        Command::ReadinessQuery {
+            store,
+            subject_id,
+            decision_state,
+            policy_satisfied,
+            after,
+            limit,
+            include_audits,
+        } => readiness_query(
+            store,
+            subject_id.as_deref(),
+            decision_state.as_deref(),
+            *policy_satisfied,
+            after.as_deref(),
+            *limit,
+            *include_audits,
+        ),
+        Command::WorkflowCatalogue => workflow_catalogue(),
+        Command::WorkflowScaffold {
+            workflow,
+            mission_id,
+            goal,
+            tools,
+            arguments,
+        } => workflow_scaffold(
+            workflow,
+            mission_id,
+            goal,
+            tools.as_deref(),
+            arguments.as_deref(),
+        ),
+        Command::WorkflowInstantiate {
+            workflow,
+            mission_id,
+            goal,
+            steps,
+            policy,
+            dry_run,
+        } => workflow_instantiate(
+            workflow,
+            mission_id,
+            goal,
+            steps,
+            policy.as_deref(),
+            *dry_run,
+        ),
+        Command::WorkflowPortfolio {
+            requests,
+            policy,
+            readiness_audit,
+            allow_partial,
+            require_complete_catalogue,
+            require_readiness,
+        } => workflow_portfolio(
+            requests,
+            policy.as_deref(),
+            readiness_audit.as_deref(),
+            *allow_partial,
+            *require_complete_catalogue,
+            *require_readiness,
+        ),
+        Command::WorkflowPortfolioVerify {
+            portfolio,
+            replay_requests,
+            policy,
+            readiness_audit,
+            allow_partial,
+            require_complete_catalogue,
+            require_replay,
+            require_readiness,
+        } => workflow_portfolio_verify(
+            portfolio,
+            replay_requests.as_deref(),
+            policy.as_deref(),
+            readiness_audit.as_deref(),
+            *allow_partial,
+            *require_complete_catalogue,
+            *require_replay,
+            *require_readiness,
+        ),
+        Command::WorkbenchVerify {
+            session,
+            report,
+            ci_replay,
+            policy,
+            expected_report_digest,
+        } => workbench_verify(
+            session,
+            report,
+            ci_replay.as_deref(),
+            policy.as_deref(),
+            expected_report_digest.as_deref(),
+        ),
+        Command::WorkbenchImport {
+            report,
+            store,
+            dry_run,
+        } => workbench_import(report, store, *dry_run),
+        Command::WorkbenchQuery {
+            store,
+            session_digest,
+            domain,
+            capability,
+            state,
+            release_ready,
+            after,
+            limit,
+            include_reports,
+        } => workbench_query(
+            store,
+            session_digest.as_deref(),
+            domain.as_deref(),
+            capability.as_deref(),
+            state.as_deref(),
+            *release_ready,
+            after.as_deref(),
+            *limit,
+            *include_reports,
+        ),
+        Command::WorkbenchGet { store, digest } => workbench_get(store, digest),
+        Command::CiProviderEvidenceImport {
+            request,
+            store,
+            dry_run,
+        } => ci_provider_evidence_import(request, store, *dry_run),
+        Command::CiProviderEvidenceQuery {
+            store,
+            provider,
+            run_id,
+            plan_digest,
+            structurally_valid,
+            conformance_ready,
+            after,
+            limit,
+            include_records,
+        } => ci_provider_evidence_query(
+            store,
+            provider.as_deref(),
+            run_id.as_deref(),
+            plan_digest.as_deref(),
+            *structurally_valid,
+            *conformance_ready,
+            after.as_deref(),
+            *limit,
+            *include_records,
+        ),
+        Command::CiProviderEvidenceGet { store, digest } => ci_provider_evidence_get(store, digest),
+        Command::WorkflowReconcile {
+            instantiation,
+            mission,
+            evidence_bundle,
+            policy,
+            readiness_audit,
+            require_readiness,
+        } => workflow_reconcile(
+            instantiation,
+            mission.as_deref(),
+            evidence_bundle.as_deref(),
+            policy.as_deref(),
+            readiness_audit.as_deref(),
+            *require_readiness,
+        ),
+        Command::WorkflowReconciliationImport {
+            record,
+            store,
+            dry_run,
+        } => workflow_reconciliation_import(record, store, *dry_run),
+        Command::WorkflowReconciliationQuery {
+            store,
+            mission_id,
+            workflow_id,
+            mission_plan_digest,
+            completion_status,
+            decision_readiness_state,
+            decision_readiness_gate_satisfied,
+            after,
+            limit,
+            include_records,
+        } => workflow_reconciliation_query(
+            store,
+            mission_id.as_deref(),
+            workflow_id.as_deref(),
+            mission_plan_digest.as_deref(),
+            completion_status.as_deref(),
+            decision_readiness_state.as_deref(),
+            *decision_readiness_gate_satisfied,
+            after.as_deref(),
+            *limit,
+            *include_records,
+        ),
+    }
+}
+
+fn workbench_verify(
+    session_path: &Path,
+    report_path: &Path,
+    ci_replay_path: Option<&Path>,
+    policy_path: Option<&Path>,
+    expected_report_digest: Option<&str>,
+) -> CliResult<Outcome> {
+    let mut request = serde_json::json!({
+        "session": io::read_json(session_path)?,
+        "report": io::read_json(report_path)?,
+    });
+    if let Some(path) = ci_replay_path {
+        request["ci_replay"] = io::read_json(path)?;
+    }
+    if let Some(path) = policy_path {
+        request["policy"] = io::read_json(path)?;
+    }
+    if let Some(digest) = expected_report_digest {
+        request["expected_report_digest"] = serde_json::json!(digest);
+    }
+    let typed: WorkbenchVerificationRequest = serde_json::from_value(request).map_err(|error| {
+        CliError::invalid(format!("invalid workbench verification request: {error}"))
+            .about(report_path.display().to_string())
+    })?;
+    let report = verify_workbench(&typed).map_err(|error| {
+        CliError::invalid(error.to_string()).about(report_path.display().to_string())
+    })?;
+    let valid = report.valid;
+    let status = report.status.clone();
+    let mismatches = report.mismatches.len();
+    let document =
+        serde_json::to_value(report).map_err(|error| CliError::internal(error.to_string()))?;
+    let human = format!(
+        "developer workbench verification\n  status: {status}\n  valid: {valid}\n  mismatches: {mismatches}\n  dashboard replay: {}\n  CI replay: {}\n  execution: not started\n  network access: not started\n\nNext: inspect the verification digest and mismatch witnesses before any separate execution or CI handoff.\n",
+        document["dashboard_verified"].as_bool().unwrap_or(false),
+        document["ci_verified"].as_bool().unwrap_or(false),
+    );
+    Ok(Outcome::ok(document, human).failing_if(!valid))
+}
+
+fn load_workbench_registry(store_path: &Path) -> CliResult<WorkbenchReportRegistry> {
+    if !store_path.exists() {
+        return Ok(WorkbenchReportRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    WorkbenchReportRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
+}
+
+fn workbench_import(report_path: &Path, store_path: &Path, dry_run: bool) -> CliResult<Outcome> {
+    let report = io::read_json(report_path)?;
+    let mut registry = load_workbench_registry(store_path)?;
+    let result = registry.import(&report).map_err(|error| {
+        CliError::invalid(error.to_string()).about(report_path.display().to_string())
+    })?;
+    let snapshot = registry.snapshot().map_err(|error| {
+        CliError::internal(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let artifact = if result.get("created").and_then(Value::as_bool) == Some(true) {
+        Some(io::write_artifact(store_path, &snapshot, dry_run)?)
+    } else {
+        None
+    };
+    let mut document = result;
+    document["store"] = json!(store_path.display().to_string());
+    document["report"] = json!(report_path.display().to_string());
+    document["dry_run"] = json!(dry_run);
+    document["state_digest"] = snapshot.get("state_digest").cloned().unwrap_or(Value::Null);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let digest = document
+        .get("workbench_report_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "developer workbench report {}\n  digest: {}\n  registry: {} (generation {})\n  state: {}\n\nNext: bioprism workbench query --store {}\n",
+        if document.get("created").and_then(Value::as_bool) == Some(true) {
+            if dry_run { "planned for import" } else { "imported" }
+        } else {
+            "already present"
+        },
+        digest,
+        store_path.display(),
+        document
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        if dry_run { "not written (dry run)" } else { "checkpoint updated" },
+        store_path.display()
+    );
+    Ok(Outcome::ok(document, human))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn workbench_query(
+    store_path: &Path,
+    session_digest: Option<&str>,
+    domain: Option<&str>,
+    capability: Option<&str>,
+    state: Option<&str>,
+    release_ready: bool,
+    after: Option<&str>,
+    limit: usize,
+    include_reports: bool,
+) -> CliResult<Outcome> {
+    let registry = load_workbench_registry(store_path)?;
+    let report = registry
+        .query(
+            session_digest,
+            domain,
+            capability,
+            state,
+            release_ready.then_some(true),
+            after,
+            limit,
+            include_reports,
+        )
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let next_after = report
+        .get("next_after")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let human = format!(
+        "developer workbench registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism workbench query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        next_after,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn workbench_get(store_path: &Path, digest: &str) -> CliResult<Outcome> {
+    let registry = load_workbench_registry(store_path)?;
+    let report = registry.get_response(digest).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let human = format!(
+        "developer workbench report\n  digest: {}\n  store: {}\n  execution: not started\n",
+        digest,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn load_ci_provider_evidence_registry(store_path: &Path) -> CliResult<CiProviderEvidenceRegistry> {
+    if !store_path.exists() {
+        return Ok(CiProviderEvidenceRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    CiProviderEvidenceRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
+}
+
+fn load_artifact_registry(store_path: &Path) -> CliResult<ArtifactRegistry> {
+    if !store_path.exists() {
+        return Ok(ArtifactRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    ArtifactRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
+}
+
+fn readiness_audit(request_path: &Path) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let audit = audit_domain_decision_readiness(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let policy_satisfied = audit
+        .get("policy_satisfied")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let human = format!(
+        "domain decision-readiness audit\n  subject: {}\n  state: {}\n  policy satisfied: {}\n  audit digest: {}\n  execution: not started\n\nCatalogue binding and artifact retention are transport responsibilities.\n",
+        audit.get("subject_id").and_then(Value::as_str).unwrap_or("unknown"),
+        audit
+            .get("decision_state")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        policy_satisfied,
+        audit.get("digest").and_then(Value::as_str).unwrap_or("<missing>"),
+    );
+    Ok(Outcome::ok(audit, human).failing_if(!policy_satisfied))
+}
+
+fn readiness_query(
+    store_path: &Path,
+    subject_id: Option<&str>,
+    decision_state: Option<&str>,
+    policy_satisfied: Option<bool>,
+    after: Option<&str>,
+    limit: usize,
+    include_audits: bool,
+) -> CliResult<Outcome> {
+    let registry = load_artifact_registry(store_path)?;
+    let report = registry
+        .domain_decision_readiness_query(
+            subject_id,
+            decision_state,
+            policy_satisfied,
+            after,
+            limit,
+            include_audits,
+        )
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let next_after = report
+        .get("next_after")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let human = format!(
+        "domain decision-readiness registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism readiness query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        next_after,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evidence_domain_lineage(
+    store_path: &Path,
+    digest: Option<&str>,
+    group_id: Option<&str>,
+    domain: Option<&str>,
+    subject_id: Option<&str>,
+    source_tool: Option<&str>,
+    outcome: Option<&str>,
+    request_digest: Option<&str>,
+    response_digest: Option<&str>,
+    intake_digest: Option<&str>,
+    source_plan_digest: Option<&str>,
+    after: Option<&str>,
+    limit: usize,
+    include_children: bool,
+) -> CliResult<Outcome> {
+    let registry = load_artifact_registry(store_path)?;
+    let mut request = json!({
+        "max_items": limit,
+        "include_children": include_children
+    });
+    let fields = [
+        ("content_digest", digest),
+        ("group_id", group_id),
+        ("domain", domain),
+        ("subject_id", subject_id),
+        ("source_tool", source_tool),
+        ("outcome", outcome),
+        ("request_digest", request_digest),
+        ("response_digest", response_digest),
+        ("intake_digest", intake_digest),
+        ("source_plan_digest", source_plan_digest),
+        ("after", after),
+    ];
+    for (name, value) in fields {
+        if let Some(value) = value {
+            request[name] = json!(value);
         }
     }
+    let report = registry
+        .domain_evidence_lineage(&request)
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let human = format!(
+        "domain evidence lineage\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n  execution: not started\n\nNext: bioprism evidence domain-lineage --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        report
+            .get("next_after")
+            .and_then(Value::as_str)
+            .unwrap_or("<none>"),
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn ci_provider_evidence_import(
+    request_path: &Path,
+    store_path: &Path,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let mut registry = load_ci_provider_evidence_registry(store_path)?;
+    let result = registry.import(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let snapshot = registry.snapshot().map_err(|error| {
+        CliError::internal(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let artifact = if result.get("created").and_then(Value::as_bool) == Some(true) {
+        Some(io::write_artifact(store_path, &snapshot, dry_run)?)
+    } else {
+        None
+    };
+    let mut document = result;
+    document["store"] = json!(store_path.display().to_string());
+    document["request"] = json!(request_path.display().to_string());
+    document["dry_run"] = json!(dry_run);
+    document["state_digest"] = snapshot.get("state_digest").cloned().unwrap_or(Value::Null);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let digest = document
+        .get("provider_evidence_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "CI provider evidence {}\n  digest: {}\n  provider: {}\n  run: {}\n  conformance ready: {}\n  lineage rows: artifacts={} logs={} attestations={}\n  registry: {} (generation {})\n  state: {}\n\nNext: bioprism ci provider-evidence-query --store {}\n",
+        if document.get("created").and_then(Value::as_bool) == Some(true) {
+            if dry_run { "planned for import" } else { "imported" }
+        } else {
+            "already present"
+        },
+        digest,
+        document.get("provider").and_then(Value::as_str).unwrap_or("<unknown>"),
+        document.get("run_id").and_then(Value::as_str).unwrap_or("<unknown>"),
+        document
+            .get("conformance_ready")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        document.get("artifact_count").and_then(Value::as_u64).unwrap_or(0),
+        document.get("log_count").and_then(Value::as_u64).unwrap_or(0),
+        document
+            .get("attestation_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        store_path.display(),
+        document
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        if dry_run { "not written (dry run)" } else { "checkpoint updated" },
+        store_path.display()
+    );
+    Ok(Outcome::ok(document, human))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ci_provider_evidence_query(
+    store_path: &Path,
+    provider: Option<&str>,
+    run_id: Option<&str>,
+    plan_digest: Option<&str>,
+    structurally_valid: bool,
+    conformance_ready: bool,
+    after: Option<&str>,
+    limit: usize,
+    include_records: bool,
+) -> CliResult<Outcome> {
+    let registry = load_ci_provider_evidence_registry(store_path)?;
+    let report = registry
+        .query(
+            provider,
+            run_id,
+            plan_digest,
+            structurally_valid.then_some(true),
+            conformance_ready.then_some(true),
+            None,
+            None,
+            None,
+            after,
+            limit,
+            include_records,
+        )
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let human = format!(
+        "CI provider evidence registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism ci provider-evidence-query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        report
+            .get("next_after")
+            .and_then(Value::as_str)
+            .unwrap_or("<none>"),
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn ci_provider_evidence_get(store_path: &Path, digest: &str) -> CliResult<Outcome> {
+    let registry = load_ci_provider_evidence_registry(store_path)?;
+    let report = registry.get(digest).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let human = format!(
+        "CI provider evidence report\n  digest: {}\n  provider: {}\n  run: {}\n  store: {}\n  execution: not started\n",
+        digest,
+        report.get("provider").and_then(Value::as_str).unwrap_or("<unknown>"),
+        report.get("run_id").and_then(Value::as_str).unwrap_or("<unknown>"),
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn workflow_catalogue() -> CliResult<Outcome> {
+    let report = build_domain_workflow_catalogue(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+    )
+    .map_err(|error| CliError::internal(error.to_string()))?;
+    let human = format!(
+        "domain workflow catalogue\n  workflows: {}\n  groups with missing tools: {}\n  domain contracts: {}\n  execution: not started\n\nNext: bioprism workflow instantiate --workflow <id> --mission-id <id> --goal <text> --steps steps.json\n",
+        report["workflow_count"].as_u64().unwrap_or_default(),
+        report["coverage"]["groups_with_missing_tools"]
+            .as_u64()
+            .unwrap_or_default(),
+        report["coverage"]["all_workflows_have_domain_contract"]
+            .as_bool()
+            .unwrap_or(false),
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn workflow_scaffold(
+    workflow: &str,
+    mission_id: &str,
+    goal: &str,
+    tools_path: Option<&Path>,
+    arguments_path: Option<&Path>,
+) -> CliResult<Outcome> {
+    let mut request = json!({
+        "workflow_id": workflow,
+        "mission_id": mission_id,
+        "goal": goal,
+    });
+    if let Some(path) = tools_path {
+        let raw = io::read_json(path)?;
+        request["tools"] = raw
+            .get("tools")
+            .cloned()
+            .filter(Value::is_array)
+            .unwrap_or(raw);
+    }
+    if let Some(path) = arguments_path {
+        request["arguments"] = io::read_json(path)?;
+    }
+    let mut report = scaffold_domain_workflow(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+        &request,
+    )
+    .map_err(|error| CliError::invalid(error.to_string()))?;
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    match server.preflight_agent_mission(&report["mission"]) {
+        Ok(preflight) => {
+            report["preflight_status"] = json!("ready");
+            report["preflight_report"] = preflight;
+        }
+        Err(error) => {
+            report["preflight_status"] = json!("blocked");
+            report["preflight_report"] = json!({
+                "ok": false,
+                "workflow": "agent_mission",
+                "preflight": true,
+                "dispatch": "not_started",
+                "schema_valid": false,
+                "error": error,
+                "readiness_claimed": false,
+            });
+        }
+    }
+    report["cli"] = json!({"execution": "not_started", "writes": false});
+    let selected = report["selection"]["selected_tools"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or_default();
+    let status = report["preflight_status"].as_str().unwrap_or("blocked");
+    let human = format!(
+        "domain workflow scaffold {}\n  mission: {}\n  selected tools: {}\n  preflight: {}\n  readiness claimed: false\n  execution: not started\n\nNext: review the scaffold, complete authoritative arguments, then run mission preflight before any explicit execution path.\n",
+        workflow, mission_id, selected, status,
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn workflow_instantiate(
+    workflow: &str,
+    mission_id: &str,
+    goal: &str,
+    steps_path: &Path,
+    policy_path: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let raw_steps = io::read_json(steps_path)?;
+    let steps = raw_steps
+        .get("steps")
+        .cloned()
+        .filter(Value::is_array)
+        .unwrap_or(raw_steps);
+    if !steps.is_array() {
+        return Err(CliError::invalid(
+            "--steps must contain a JSON array or an object with a steps array",
+        )
+        .about(steps_path.display().to_string()));
+    }
+    let policy = policy_path.map(io::read_json).transpose()?;
+    let mut request = json!({
+        "workflow_id": workflow,
+        "mission_id": mission_id,
+        "goal": goal,
+        "steps": steps,
+    });
+    if let Some(policy) = policy {
+        request["policy"] = policy;
+    }
+    let mut report = instantiate_domain_workflow(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+        &request,
+    )
+    .map_err(|error| CliError::invalid(error.to_string()))?;
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    let preflight = server
+        .preflight_agent_mission(&report["mission"])
+        .map_err(|error| {
+            CliError::invalid(format!("authoritative mission preflight refused: {error}"))
+        })?;
+    report["preflight_report"] = preflight;
+    report["dry_run"] = json!(dry_run);
+    let human = format!(
+        "domain workflow {}\n  mission: {}\n  steps: {}\n  evidence plan: per-step\n  preflight: authoritative no-dispatch\n  execution: not started\n\nNext: POST /v1/missions/preflight or `bioprism workflow instantiate --workflow {} --mission-id <id> --goal <text> --steps <path>`\n",
+        workflow,
+        mission_id,
+        report["selection"]["step_count"].as_u64().unwrap_or_default(),
+        workflow,
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn workflow_portfolio(
+    requests_path: &Path,
+    policy_path: Option<&Path>,
+    readiness_audit_path: Option<&Path>,
+    allow_partial: bool,
+    require_complete_catalogue: bool,
+    require_readiness: bool,
+) -> CliResult<Outcome> {
+    let raw = io::read_json(requests_path)?;
+    let mut arguments = if raw.is_array() {
+        json!({"requests": raw})
+    } else {
+        raw
+    };
+    if !arguments.is_object() {
+        return Err(CliError::invalid(
+            "--requests must contain a JSON array or an object with a requests array",
+        )
+        .about(requests_path.display().to_string()));
+    }
+    let mut policy = arguments
+        .get("policy")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if let Some(path) = policy_path {
+        policy = io::read_json(path)?;
+    }
+    if !policy.is_object() {
+        return Err(
+            CliError::invalid("--policy must contain a JSON object").about(
+                policy_path
+                    .map(Path::display)
+                    .map(|display| display.to_string())
+                    .unwrap_or_else(|| requests_path.display().to_string()),
+            ),
+        );
+    }
+    if allow_partial {
+        policy["allow_partial"] = json!(true);
+    }
+    if require_complete_catalogue {
+        policy["require_complete_catalogue"] = json!(true);
+    }
+    if require_readiness {
+        policy["require_readiness"] = json!(true);
+    }
+    arguments["policy"] = policy;
+    if let Some(path) = readiness_audit_path {
+        arguments["readiness_audit"] = io::read_json(path)?;
+    }
+
+    let mut report = build_domain_workflow_portfolio(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+        &arguments,
+    )
+    .map_err(|error| {
+        CliError::invalid(error.to_string()).about(requests_path.display().to_string())
+    })?;
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    let mut preflight_blocked_count = 0usize;
+    if let Some(items) = report.get_mut("items").and_then(Value::as_array_mut) {
+        for item in items.iter_mut() {
+            if item.get("status").and_then(Value::as_str) != Some("instantiated") {
+                continue;
+            }
+            let mission = item
+                .pointer("/instantiation/mission")
+                .cloned()
+                .ok_or_else(|| CliError::internal("portfolio item omitted instantiated mission"))?;
+            let preflight = match server.preflight_agent_mission(&mission) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "workflow": "agent_mission",
+                    "preflight": true,
+                    "dispatch": "not_started",
+                    "schema_valid": false,
+                    "error": error,
+                    "fail_closed": true,
+                    "readiness_claimed": false,
+                }),
+            };
+            let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+            let observed_plan_digest = preflight
+                .pointer("/plan/digest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            item["mission_preflight"] = json!({
+                "status": if preflight_ok { "matched" } else { "blocked" },
+                "matched": preflight_ok,
+                "ok": preflight_ok,
+                "observed_plan_digest": observed_plan_digest,
+                "dispatch": "not_started",
+            });
+            item["instantiation"]["preflight_report"] = preflight.clone();
+            if !preflight_ok {
+                preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                item["status"] = json!("blocked_by_mission_preflight");
+                item["issues"] = json!([{
+                    "code": "mission_preflight_blocked",
+                    "message": "authoritative mission schema preflight blocked this portfolio item",
+                    "preflight": preflight,
+                }]);
+            }
+        }
+    }
+    let kernel_valid = report
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let policy_allows_partial = report
+        .pointer("/policy/allow_partial")
+        .and_then(Value::as_bool)
+        .unwrap_or(allow_partial);
+    let valid = kernel_valid && preflight_blocked_count == 0;
+    report["valid"] = json!(valid);
+    report["portfolio_ready"] = json!(valid);
+    report["summary"]["preflight_blocked_count"] = json!(preflight_blocked_count);
+    report["summary"]["preflight_status"] = json!(if preflight_blocked_count == 0 {
+        "matched"
+    } else {
+        "blocked"
+    });
+    report["preflight"] = json!({
+        "required": true,
+        "status": if preflight_blocked_count == 0 { "matched" } else { "blocked" },
+        "matched": preflight_blocked_count == 0,
+        "blocked_count": preflight_blocked_count,
+        "dispatch": "not_started",
+    });
+    if preflight_blocked_count > 0 {
+        report["portfolio_status"] = json!(if policy_allows_partial {
+            "partial"
+        } else {
+            "blocked"
+        });
+    }
+    report["dispatch"] = json!("not_started");
+    report["execution"] = json!("not_started");
+    if let Some(object) = report.as_object_mut() {
+        object.remove("portfolio_digest");
+    }
+    let digest = bioprism_ids::ContentHash::of_value(&report)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    report["portfolio_digest"] = json!(digest.to_string());
+    let item_count = report["items"].as_array().map(Vec::len).unwrap_or_default();
+    let status = report["portfolio_status"].as_str().unwrap_or("blocked");
+    let human = format!(
+        "domain workflow portfolio\n  items: {}\n  catalogue complete: {}\n  preflight: {}\n  portfolio status: {}\n  portfolio ready: {}\n  dispatch: not started\n  execution: not started\n\nNext: complete blocked item arguments, review the portfolio digest, then run authoritative preflight before any explicit execution path.\n",
+        item_count,
+        report["coverage"]["complete_catalogue"].as_bool().unwrap_or(false),
+        report["summary"]["preflight_status"].as_str().unwrap_or("blocked"),
+        status,
+        valid,
+    );
+    Ok(Outcome::ok(report, human).failing_if(!valid))
+}
+
+fn workflow_portfolio_verify(
+    portfolio_path: &Path,
+    replay_requests_path: Option<&Path>,
+    policy_path: Option<&Path>,
+    readiness_audit_path: Option<&Path>,
+    allow_partial: bool,
+    require_complete_catalogue: bool,
+    require_replay: bool,
+    require_readiness: bool,
+) -> CliResult<Outcome> {
+    let raw_portfolio = io::read_json(portfolio_path)?;
+    let mut portfolio =
+        if raw_portfolio.get("portfolio").is_some() && raw_portfolio.get("workflow").is_none() {
+            raw_portfolio
+                .get("portfolio")
+                .cloned()
+                .ok_or_else(|| CliError::invalid("portfolio wrapper omitted portfolio"))?
+        } else {
+            raw_portfolio
+        };
+    if !portfolio.is_object() {
+        return Err(
+            CliError::invalid("--portfolio must contain a portfolio report object")
+                .about(portfolio_path.display().to_string()),
+        );
+    }
+    // REST adds request_id to response envelopes; it is transport metadata rather than part of
+    // the content-addressed portfolio artifact and is safe to remove before digest verification.
+    portfolio
+        .as_object_mut()
+        .expect("portfolio is an object")
+        .remove("request_id");
+    let mut request = json!({"portfolio": portfolio});
+    if let Some(path) = replay_requests_path {
+        let replay_requests = io::read_json(path)?;
+        request["replay_requests"] = if replay_requests.is_array() {
+            replay_requests
+        } else {
+            replay_requests
+                .get("replay_requests")
+                .cloned()
+                .ok_or_else(|| {
+                    CliError::invalid(
+                        "--replay-requests must contain an array or an object with replay_requests",
+                    )
+                    .about(path.display().to_string())
+                })?
+        };
+    }
+    let mut policy = request["portfolio"]
+        .get("policy")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if let Some(path) = policy_path {
+        policy = io::read_json(path)?;
+    }
+    if !policy.is_object() {
+        return Err(
+            CliError::invalid("--policy must contain a JSON object").about(
+                policy_path
+                    .map(Path::display)
+                    .map(|display| display.to_string())
+                    .unwrap_or_else(|| portfolio_path.display().to_string()),
+            ),
+        );
+    }
+    if allow_partial {
+        policy["allow_partial"] = json!(true);
+    }
+    if require_complete_catalogue {
+        policy["require_complete_catalogue"] = json!(true);
+    }
+    if require_replay {
+        policy["require_replay"] = json!(true);
+    }
+    if require_readiness {
+        policy["require_readiness"] = json!(true);
+    }
+    request["policy"] = policy;
+    if let Some(path) = readiness_audit_path {
+        request["readiness_audit"] = io::read_json(path)?;
+    }
+
+    let mut report = verify_domain_workflow_portfolio(
+        &workspace_capabilities(),
+        &Value::Array(tool_definitions()),
+        &request,
+    )
+    .map_err(|error| {
+        CliError::invalid(error.to_string()).about(portfolio_path.display().to_string())
+    })?;
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    let mut preflight_attempted_count = 0usize;
+    let mut preflight_blocked_count = 0usize;
+    if let Some(items) = report.get_mut("items").and_then(Value::as_array_mut) {
+        for item in items.iter_mut() {
+            if !matches!(
+                item.get("status").and_then(Value::as_str),
+                Some("verified") | Some("verified_without_replay")
+            ) {
+                continue;
+            }
+            let mission = item
+                .pointer("/instantiation/mission")
+                .cloned()
+                .ok_or_else(|| CliError::internal("verified portfolio item omitted mission"))?;
+            preflight_attempted_count = preflight_attempted_count.saturating_add(1);
+            let preflight = match server.preflight_agent_mission(&mission) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "workflow": "agent_mission",
+                    "preflight": true,
+                    "dispatch": "not_started",
+                    "schema_valid": false,
+                    "error": error,
+                    "fail_closed": true,
+                    "readiness_claimed": false,
+                }),
+            };
+            let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+            let expected_plan_digest = item
+                .pointer("/instantiation/preflight_report/plan/digest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let observed_plan_digest = preflight
+                .pointer("/plan/digest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let mut item_mismatches = item
+                .get("mismatches")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let preflight_status = if !preflight_ok {
+                item_mismatches.push(json!({
+                    "code": "mission_preflight_blocked",
+                    "expected": expected_plan_digest,
+                    "observed": observed_plan_digest,
+                }));
+                preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                item["status"] = json!("blocked_by_mission_preflight");
+                "blocked"
+            } else if expected_plan_digest.is_null() {
+                item_mismatches.push(json!({
+                    "code": "retained_preflight_missing",
+                    "observed": observed_plan_digest,
+                }));
+                preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                item["status"] = json!("blocked_by_mission_preflight");
+                "retained_projection_missing"
+            } else if expected_plan_digest != observed_plan_digest {
+                item_mismatches.push(json!({
+                    "code": "mission_plan_digest_mismatch",
+                    "expected": expected_plan_digest,
+                    "observed": observed_plan_digest,
+                }));
+                preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                item["status"] = json!("blocked_by_mission_preflight");
+                "mismatched"
+            } else {
+                "matched"
+            };
+            item["mission_preflight"] = json!({
+                "requested": true,
+                "status": preflight_status,
+                "matched": preflight_status == "matched",
+                "ok": preflight_ok,
+                "expected_plan_digest": expected_plan_digest,
+                "observed_plan_digest": observed_plan_digest,
+                "dispatch": "not_started",
+            });
+            item["verification"]["mission_preflight"] = item["mission_preflight"].clone();
+            item["verification"]["preflight_report"] = preflight.clone();
+            item["instantiation"]["preflight_report"] = preflight;
+            item["mismatches"] = Value::Array(item_mismatches);
+        }
+    }
+    let kernel_valid = report
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let valid = kernel_valid && preflight_blocked_count == 0;
+    report["valid"] = json!(valid);
+    report["portfolio_ready"] = json!(valid);
+    let kernel_blocked_count = report
+        .pointer("/summary/blocked_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    report["summary"]["blocked_count"] =
+        json!(kernel_blocked_count.saturating_add(preflight_blocked_count));
+    report["summary"]["preflight_attempted_count"] = json!(preflight_attempted_count);
+    report["summary"]["preflight_blocked_count"] = json!(preflight_blocked_count);
+    report["summary"]["preflight_status"] = json!(if preflight_blocked_count > 0 {
+        "blocked"
+    } else if preflight_attempted_count > 0 {
+        "matched"
+    } else {
+        "deferred"
+    });
+    report["preflight"] = json!({
+        "required": true,
+        "status": if preflight_blocked_count > 0 {
+            "blocked"
+        } else if preflight_attempted_count > 0 {
+            "matched"
+        } else {
+            "deferred"
+        },
+        "matched": preflight_blocked_count == 0 && preflight_attempted_count > 0,
+        "attempted_count": preflight_attempted_count,
+        "blocked_count": preflight_blocked_count,
+        "dispatch": "not_started",
+    });
+    let mut mismatches = report
+        .get("mismatches")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if preflight_blocked_count > 0 {
+        mismatches.push(json!({
+            "code": "portfolio_mission_preflight_blocked",
+            "blocked_count": preflight_blocked_count,
+        }));
+    }
+    report["mismatches"] = Value::Array(mismatches);
+    if !valid && preflight_blocked_count > 0 {
+        let allow_partial = report
+            .pointer("/policy/allow_partial")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        report["verification_status"] = json!(if allow_partial {
+            "partial"
+        } else {
+            "blocked_by_mission_preflight"
+        });
+    }
+    report["dispatch"] = json!("not_started");
+    report["execution"] = json!("not_started");
+    if let Some(object) = report.as_object_mut() {
+        object.remove("portfolio_verify_digest");
+    }
+    let digest = bioprism_ids::ContentHash::of_value(&report)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    report["portfolio_verify_digest"] = json!(digest.to_string());
+    let status = report["verification_status"].as_str().unwrap_or("blocked");
+    let human = format!(
+        "domain workflow portfolio verification\n  items: {}\n  verification status: {}\n  preflight: {}\n  portfolio ready: {}\n  dispatch: not started\n  execution: not started\n\nNext: review mismatches and replay digests, then rerun authoritative verification before any explicit execution path.\n",
+        report["items"].as_array().map(Vec::len).unwrap_or_default(),
+        status,
+        report["summary"]["preflight_status"]
+            .as_str()
+            .unwrap_or("deferred"),
+        valid,
+    );
+    Ok(Outcome::ok(report, human).failing_if(!valid))
+}
+
+fn workflow_reconcile(
+    instantiation_path: &Path,
+    mission_path: Option<&Path>,
+    evidence_bundle_path: Option<&Path>,
+    policy_path: Option<&Path>,
+    readiness_audit_path: Option<&Path>,
+    require_readiness: bool,
+) -> CliResult<Outcome> {
+    if mission_path.is_none() && evidence_bundle_path.is_none() {
+        return Err(CliError::invalid(
+            "workflow reconcile requires --mission or --evidence-bundle",
+        ));
+    }
+    let mut request = json!({
+        "instantiation": io::read_json(instantiation_path)?,
+    });
+    if let Some(path) = mission_path {
+        request["mission_report"] = io::read_json(path)?;
+    }
+    if let Some(path) = evidence_bundle_path {
+        request["evidence_bundle"] = io::read_json(path)?;
+    }
+    let mut policy = if let Some(path) = policy_path {
+        io::read_json(path)?
+    } else {
+        json!({})
+    };
+    if !policy.is_object() {
+        return Err(
+            CliError::invalid("--policy must contain a JSON object").about(
+                policy_path
+                    .map(Path::display)
+                    .map(|display| display.to_string())
+                    .unwrap_or_else(|| instantiation_path.display().to_string()),
+            ),
+        );
+    }
+    if require_readiness {
+        policy["require_readiness"] = json!(true);
+    }
+    if !policy.as_object().is_some_and(|value| value.is_empty()) {
+        request["policy"] = policy;
+    }
+    if let Some(path) = readiness_audit_path {
+        request["readiness_audit"] = io::read_json(path)?;
+    }
+    let report = reconcile_domain_workflow(&request)
+        .map_err(|error| CliError::invalid(error.to_string()))?;
+    let status = report["completion"]["status"]
+        .as_str()
+        .unwrap_or("unverified");
+    let ready = report["completion"]["ready"].as_bool().unwrap_or(false);
+    let readiness_required = report["decision_readiness"]["required"]
+        .as_bool()
+        .unwrap_or(false);
+    let readiness_gate_satisfied = report["decision_review_gate_satisfied"]
+        .as_bool()
+        .unwrap_or(!readiness_required);
+    let valid = ready && (!readiness_required || readiness_gate_satisfied);
+    let human = format!(
+        "domain workflow reconciliation\n  workflow: {}\n  mission: {}\n  completion: {}\n  evidence ready: {}\n  decision-readiness gate: {}\n  execution: not started\n",
+        report["workflow_id"].as_str().unwrap_or("unknown"),
+        report["mission_id"].as_str().unwrap_or("unknown"),
+        status,
+        ready,
+        if readiness_required {
+            if readiness_gate_satisfied { "satisfied" } else { "blocked" }
+        } else {
+            "not required"
+        },
+    );
+    Ok(Outcome::ok(report, human).failing_if(!valid))
+}
+
+fn load_workflow_reconciliation_registry(
+    store_path: &Path,
+) -> CliResult<DomainWorkflowReconciliationRegistry> {
+    if !store_path.exists() {
+        return Ok(DomainWorkflowReconciliationRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    DomainWorkflowReconciliationRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
+}
+
+fn workflow_reconciliation_import(
+    record_path: &Path,
+    store_path: &Path,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let record = io::read_json(record_path)?;
+    let mut registry = load_workflow_reconciliation_registry(store_path)?;
+    let report = registry.import(&record).map_err(|error| {
+        CliError::invalid(error.to_string()).about(record_path.display().to_string())
+    })?;
+    let snapshot = registry.snapshot().map_err(|error| {
+        CliError::internal(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let artifact = if report.get("created").and_then(Value::as_bool) == Some(true) {
+        Some(io::write_artifact(store_path, &snapshot, dry_run)?)
+    } else {
+        None
+    };
+    let mut document = report;
+    document["store"] = json!(store_path.display().to_string());
+    document["record"] = json!(record_path.display().to_string());
+    document["dry_run"] = json!(dry_run);
+    document["state_digest"] = snapshot.get("state_digest").cloned().unwrap_or(Value::Null);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let digest = document
+        .get("reconciliation_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "workflow reconciliation {}\n  digest: {}\n  registry: {} (generation {})\n  state: {}\n\nNext: bioprism workflow reconciliation-query --store {}\n",
+        if document.get("created").and_then(Value::as_bool) == Some(true) {
+            if dry_run { "planned for import" } else { "imported" }
+        } else {
+            "already present"
+        },
+        digest,
+        store_path.display(),
+        document
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        if dry_run { "not written (dry run)" } else { "checkpoint updated" },
+        store_path.display()
+    );
+    Ok(Outcome::ok(document, human))
+}
+
+fn workflow_reconciliation_query(
+    store_path: &Path,
+    mission_id: Option<&str>,
+    workflow_id: Option<&str>,
+    mission_plan_digest: Option<&str>,
+    completion_status: Option<&str>,
+    decision_readiness_state: Option<&str>,
+    decision_readiness_gate_satisfied: Option<bool>,
+    after: Option<&str>,
+    limit: usize,
+    include_records: bool,
+) -> CliResult<Outcome> {
+    let registry = load_workflow_reconciliation_registry(store_path)?;
+    let report = registry
+        .query(
+            mission_id,
+            workflow_id,
+            mission_plan_digest,
+            completion_status,
+            decision_readiness_state,
+            decision_readiness_gate_satisfied,
+            after,
+            limit,
+            include_records,
+        )
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let next_after = report
+        .get("next_after")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let human = format!(
+        "workflow reconciliation registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism workflow reconciliation-query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        next_after,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
+}
+
+fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {
+    let bundle = io::read_json(bundle_path)?;
+    let report = verify_mission_evidence_bundle(&bundle).map_err(|error| {
+        CliError::invalid(error.to_string()).about(bundle_path.display().to_string())
+    })?;
+    let valid = report
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let digest = report
+        .get("bundle_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let recomputed = report
+        .get("recomputed_bundle_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let failures = report
+        .get("failures")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let human = format!(
+        "mission evidence bundle: {}\n  declared digest: {}\n  recomputed digest: {}\n  failures: {}\n\nNext: bioprism evidence verify --bundle {}\n",
+        if valid { "verified" } else { "FAILED" },
+        digest,
+        recomputed,
+        if failures.is_empty() { "none" } else { &failures },
+        bundle_path.display()
+    );
+    Ok(Outcome::ok(report, human).failing_if(!valid))
+}
+
+fn load_evidence_registry(store_path: &Path) -> CliResult<EvidenceBundleRegistry> {
+    if !store_path.exists() {
+        return Ok(EvidenceBundleRegistry::new());
+    }
+    let snapshot = io::read_json(store_path)?;
+    EvidenceBundleRegistry::from_snapshot(&snapshot).map_err(|error| {
+        CliError::invalid(error.to_string()).about(store_path.display().to_string())
+    })
+}
+
+fn evidence_bundle_import(
+    bundle_path: &Path,
+    store_path: &Path,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let bundle = io::read_json(bundle_path)?;
+    let mut registry = load_evidence_registry(store_path)?;
+    let report = registry.import(&bundle).map_err(|error| {
+        CliError::invalid(error.to_string()).about(bundle_path.display().to_string())
+    })?;
+    let snapshot = registry.snapshot().map_err(|error| {
+        CliError::internal(error.to_string()).about(store_path.display().to_string())
+    })?;
+    let artifact = if report.get("created").and_then(Value::as_bool) == Some(true) {
+        Some(io::write_artifact(store_path, &snapshot, dry_run)?)
+    } else {
+        None
+    };
+    let mut document = report;
+    document["store"] = json!(store_path.display().to_string());
+    document["dry_run"] = json!(dry_run);
+    document["state_digest"] = snapshot.get("state_digest").cloned().unwrap_or(Value::Null);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let digest = document
+        .get("bundle_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "mission evidence bundle {}\n  digest: {}\n  registry: {} (generation {})\n  state: {}\n\nNext: bioprism evidence query --store {}\n",
+        if document.get("created").and_then(Value::as_bool) == Some(true) {
+            if dry_run { "planned for import" } else { "imported" }
+        } else {
+            "already present"
+        },
+        digest,
+        store_path.display(),
+        document
+            .get("registry_generation")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        if dry_run { "not written (dry run)" } else { "checkpoint updated" },
+        store_path.display()
+    );
+    Ok(Outcome::ok(document, human))
+}
+
+fn evidence_bundle_query(
+    store_path: &Path,
+    mission_id: Option<&str>,
+    domain: Option<&str>,
+    after: Option<&str>,
+    limit: usize,
+    include_bundles: bool,
+) -> CliResult<Outcome> {
+    let registry = load_evidence_registry(store_path)?;
+    let report = registry
+        .query(mission_id, domain, after, limit, include_bundles)
+        .map_err(|error| {
+            CliError::invalid(error.to_string()).about(store_path.display().to_string())
+        })?;
+    let rows = report
+        .get("rows")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let next_after = report
+        .get("next_after")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    let human = format!(
+        "mission evidence registry query\n  store: {}\n  rows: {}\n  has more: {}\n  next after: {}\n\nNext: bioprism evidence query --store {} --after <digest>\n",
+        store_path.display(),
+        rows,
+        report.get("has_more").and_then(Value::as_bool).unwrap_or(false),
+        next_after,
+        store_path.display()
+    );
+    Ok(Outcome::ok(report, human))
 }
 
 fn world_validate(world_path: &Path) -> CliResult<Outcome> {
@@ -243,8 +1843,14 @@ fn world_generate(options: &GenerateOptions) -> CliResult<Outcome> {
         written.push(io::write_artifact(path, &generated.query, options.dry_run)?);
     }
 
-    let facts = generated.world["facts"].as_array().map(Vec::len).unwrap_or(0);
-    let factors = generated.world["factors"].as_array().map(Vec::len).unwrap_or(0);
+    let facts = generated.world["facts"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or(0);
+    let factors = generated.world["factors"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or(0);
 
     let document = json!({
         "ok": true,
@@ -276,14 +1882,20 @@ fn world_generate(options: &GenerateOptions) -> CliResult<Outcome> {
         human.push_str(&format!(
             "  {} {} ({} bytes)
 ",
-            if artifact.written { "wrote" } else { "would write" },
+            if artifact.written {
+                "wrote"
+            } else {
+                "would write"
+            },
             artifact.path.display(),
             artifact.bytes
         ));
     }
-    human.push_str("
+    human.push_str(
+        "
 Next: bioprism context compare --world <world.json> --query <query.json>
-");
+",
+    );
 
     Ok(Outcome::ok(document, human))
 }
@@ -295,13 +1907,17 @@ fn world_index(world_path: &Path, store_path: &Path, dry_run: bool) -> CliResult
     if dry_run {
         return Ok(Outcome::ok(
             json!({ "ok": true, "dry_run": true, "store": store_path.display().to_string() }),
-            format!("would index {} into {}
-", world_path.display(), store_path.display()),
+            format!(
+                "would index {} into {}
+",
+                world_path.display(),
+                store_path.display()
+            ),
         ));
     }
 
-    let manifest = bioprism_store::build(&raw, store_path)
-        .map_err(|e| CliError::from_store(store_path, e))?;
+    let manifest =
+        bioprism_store::build(&raw, store_path).map_err(|e| CliError::from_store(store_path, e))?;
 
     let document = json!({
         "ok": true,
@@ -349,10 +1965,18 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
 
     let mut written = Vec::new();
     if let Some(path) = &options.certificate_out {
-        written.push(io::write_artifact(path, &certificate_document, options.dry_run)?);
+        written.push(io::write_artifact(
+            path,
+            &certificate_document,
+            options.dry_run,
+        )?);
     }
     if let Some(path) = &options.section_out {
-        written.push(io::write_artifact(path, &section_document, options.dry_run)?);
+        written.push(io::write_artifact(
+            path,
+            &section_document,
+            options.dry_run,
+        )?);
     }
 
     let digest = certificate_document["certificate_sha256"]
@@ -412,7 +2036,11 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
     for artifact in &written {
         human.push_str(&format!(
             "  {} {} ({} bytes)\n",
-            if artifact.written { "wrote" } else { "would write" },
+            if artifact.written {
+                "wrote"
+            } else {
+                "would write"
+            },
             artifact.path.display(),
             artifact.bytes
         ));
@@ -535,8 +2163,9 @@ fn prism_fork(
     if with_minimization {
         // A bundle carrying a minimization the oracle refused would attest a reduction that
         // preserved nothing, so the refusal ends the command rather than riding along in it.
-        let minimization = minimize_world(&world)
-            .map_err(|error| CliError::from_minimize(error).about(world_path.display().to_string()))?;
+        let minimization = minimize_world(&world).map_err(|error| {
+            CliError::from_minimize(error).about(world_path.display().to_string())
+        })?;
         bundle = bundle.with_minimization(minimization);
     }
     let attested = bundle.attest();
@@ -569,9 +2198,13 @@ fn prism_fork(
 
     let mut human = human;
     for artifact in &artifacts {
-        human.push_str(&format!("
+        human.push_str(&format!(
+            "
 wrote {} ({} bytes)
-", artifact.path.display(), artifact.bytes));
+",
+            artifact.path.display(),
+            artifact.bytes
+        ));
     }
     human.push_str(&format!(
         "
@@ -595,9 +2228,19 @@ fn mutate_family(world_path: &Path, out_dir: Option<&Path>) -> CliResult<Outcome
         for (id, world) in &family.worlds {
             let safe: String = id
                 .chars()
-                .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' })
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .collect();
-            written.push(io::write_artifact(&directory.join(format!("{safe}.json")), world, false)?);
+            written.push(io::write_artifact(
+                &directory.join(format!("{safe}.json")),
+                world,
+                false,
+            )?);
         }
     }
 
@@ -628,9 +2271,11 @@ fn mutate_family(world_path: &Path, out_dir: Option<&Path>) -> CliResult<Outcome
         family.duplicates.len(),
         family.yield_rate() * 100.0
     );
-    human.push_str("| Instance | Family | Verdict | Witnesses |
+    human.push_str(
+        "| Instance | Family | Verdict | Witnesses |
 |---|---|---|---:|
-");
+",
+    );
     for instance in &family.accepted {
         human.push_str(&format!(
             "| {} | {} | {} | {} |
@@ -642,19 +2287,31 @@ fn mutate_family(world_path: &Path, out_dir: Option<&Path>) -> CliResult<Outcome
         ));
     }
     for rejection in &family.rejected {
-        human.push_str(&format!("
+        human.push_str(&format!(
+            "
 - rejected `{}`: {}
-", rejection.mutation_id, rejection.reason));
+",
+            rejection.mutation_id, rejection.reason
+        ));
     }
-    human.push_str(&format!("
+    human.push_str(&format!(
+        "
 {}
-", diversity.headline()));
-    human.push_str(&format!("publishable as a benchmark family: {}
-", diversity.is_publishable()));
+",
+        diversity.headline()
+    ));
+    human.push_str(&format!(
+        "publishable as a benchmark family: {}
+",
+        diversity.is_publishable()
+    ));
     if !written.is_empty() {
-        human.push_str(&format!("
+        human.push_str(&format!(
+            "
 wrote {} world(s)
-", written.len()));
+",
+            written.len()
+        ));
     }
     human.push_str(&format!(
         "
@@ -709,8 +2366,10 @@ Next: bioprism prism fork --world {} --query <query.json>
         result.evaluations,
         reverification_line(&preservation),
         result.guarantee,
-        result.minimal.join("
-"),
+        result.minimal.join(
+            "
+"
+        ),
         world_path.display()
     );
 
@@ -741,7 +2400,10 @@ fn context_verify(path: &Path) -> CliResult<Outcome> {
     use bioprism_section::CertificateVerification::*;
     let (ok, detail) = match &verification {
         Valid => (true, "digest verifies".to_string()),
-        DigestMismatch { claimed, recomputed } => (
+        DigestMismatch {
+            claimed,
+            recomputed,
+        } => (
             false,
             format!("digest mismatch: claims {claimed}, recomputes to {recomputed}"),
         ),

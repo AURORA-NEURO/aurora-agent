@@ -6,11 +6,11 @@
 //! distortion of a compressed context, the value of an evidence action, whether a rebase preserved
 //! a decision — is a statement about `A` and `ℓ`.
 //!
-//! `fiber-query/0.1` carries neither. [`crate::gap`] states exactly what it would have to carry.
-//! Until then this crate takes both from the caller, and every entry point that needs them takes
-//! them as arguments rather than reading a default. There is no `DecisionProblem::default()`, and
-//! that is deliberate: a default loss is a decision made by whoever wrote the library, silently,
-//! on behalf of a caller who never saw it.
+//! The legacy `fiber-query/0.1` and `fiber-query/0.2` forms carry neither. The executable
+//! `fiber-query/0.3` boundary owns the wire conversion and passes this kernel an explicit problem.
+//! Every entry point that needs a problem still takes it from the caller rather than reading a
+//! default. There is no `DecisionProblem::default()`, and that is deliberate: a default loss is a
+//! decision made by whoever wrote the library, silently, on behalf of a caller who never saw it.
 //!
 //! ## Loss, not utility
 //!
@@ -107,6 +107,41 @@ impl DecisionProblem {
         &self.models
     }
 
+    /// Re-check invariants after a value arrived through derived serde deserialisation.
+    ///
+    /// The constructor enforces these conditions for ordinary callers, but serde can construct a
+    /// public value without invoking it. Decision-relative analyses call this gate before any
+    /// indexed matrix access so malformed wire data becomes a typed refusal instead of a panic.
+    pub fn validate(&self) -> Result<(), EpistemicError> {
+        if self.actions.is_empty() || self.models.is_empty() {
+            return Err(EpistemicError::EmptyDecisionProblem {
+                actions: self.actions.len(),
+                models: self.models.len(),
+            });
+        }
+        let want = self.actions.len() * self.models.len();
+        if self.loss.len() != want {
+            return Err(EpistemicError::LossMatrixShape {
+                got: self.loss.len(),
+                want,
+                actions: self.actions.len(),
+                models: self.models.len(),
+            });
+        }
+        crate::unique(&self.actions, "actions")?;
+        crate::unique(&self.models, "models")?;
+        for (index, value) in self.loss.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(EpistemicError::NonFiniteLoss {
+                    action: index / self.models.len(),
+                    model: index % self.models.len(),
+                    value: *value,
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn action_count(&self) -> usize {
         self.actions.len()
     }
@@ -121,23 +156,21 @@ impl DecisionProblem {
     }
 
     pub fn action_index(&self, name: &str) -> Result<usize, EpistemicError> {
-        self.actions
-            .iter()
-            .position(|a| a == name)
-            .ok_or_else(|| EpistemicError::UnknownIdentifier {
+        self.actions.iter().position(|a| a == name).ok_or_else(|| {
+            EpistemicError::UnknownIdentifier {
                 collection: "actions".to_string(),
                 id: name.to_string(),
-            })
+            }
+        })
     }
 
     pub fn model_index(&self, name: &str) -> Result<usize, EpistemicError> {
-        self.models
-            .iter()
-            .position(|m| m == name)
-            .ok_or_else(|| EpistemicError::UnknownIdentifier {
+        self.models.iter().position(|m| m == name).ok_or_else(|| {
+            EpistemicError::UnknownIdentifier {
                 collection: "models".to_string(),
                 id: name.to_string(),
-            })
+            }
+        })
     }
 
     /// Expected loss of `action` under `belief`.

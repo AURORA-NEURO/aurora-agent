@@ -1,0 +1,36 @@
+{
+  "budgets": {
+    "max_facts": 64,
+    "max_tokens": 6000
+  },
+  "decision_loss": {
+    "actions": ["accept", "defer", "reject"],
+    "loss": [
+      [0.0, 7.0, 0.0],
+      [4.0, 11.0, 5.0],
+      [8.0, 15.0, 8.0]
+    ],
+    "models": ["m-a", "m-b", "m-c"],
+    "sense": "loss"
+  },
+  "decision_time": "2025-01-01T00:00:00Z",
+  "distortion_tolerance": 0.0,
+  "permitted_actions": ["reject", "accept", "defer"],
+  "policy": ["research-only"],
+  "protected_tags": [
+    "identity",
+    "split",
+    "site",
+    "scanner",
+    "time",
+    "specimen",
+    "preprocessing",
+    "policy",
+    "negative_evidence",
+    "protected"
+  ],
+  "query_id": "audit-split-integrity-decision-v3",
+  "role": "research-auditor",
+  "schema_version": "fiber-query/0.3",
+  "targets": ["split_integrity_status"]
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from copy import deepcopy
 
 from prism_sdk import (
     ArgumentError,
@@ -431,6 +432,59 @@ class MissionPreflightTests(unittest.TestCase):
         report = preflight_mission(assembly.request, catalogue())
         self.assertTrue(report.ok)
         self.assertEqual(assembly.to_dict()["mission"]["mission_id"], "mission-from-route")
+
+        reviewed_request = assembly.request.to_mcp_arguments()
+        route_review = {
+            "ok": True,
+            "workflow": "capability_route_review",
+            "review_id": "a" * 64,
+            "route_id": "b" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": route["goal"],
+            "findings": [],
+            "review_status": "ready",
+            "handoff_status": "mission_preflight_required",
+            "execution": "not_started",
+            "evidence_digest": "e" * 64,
+            "evidence_scope": "capability_route",
+            "evidence_binding": {
+                "present": True,
+                "evidence_digest": "e" * 64,
+                "scope": "capability_route",
+                "summary": {"evidence_digest": "e" * 64, "scope": "capability_route"},
+                "posture": "carried_forward_not_recomputed",
+                "readiness_claimed": False,
+                "execution": "not_started",
+            },
+            "mission_draft": {
+                "goal": route["goal"],
+                "steps": deepcopy(reviewed_request["steps"]),
+                "dependency_waves": [["acquire"], ["audit"]],
+                "route_evidence_digest": "e" * 64,
+                "route_evidence_scope": "capability_route",
+            },
+        }
+        reviewed_assembly = mission_from_route(
+            route,
+            "mission-from-route-reviewed",
+            [
+                MissionRouteSelection("acquire", "echo", "data", "read", "acquire", {"value": 3}),
+                MissionRouteSelection("audit", "audit", "evaluation", "verify", "audit", {"value": 0}, depends_on=("acquire",)),
+            ],
+            route_review=route_review,
+        )
+        reviewed_report = preflight_mission(reviewed_assembly.request, catalogue())
+        self.assertTrue(reviewed_report.ok)
+        self.assertTrue(reviewed_report.route_review_provenance["evidence_present"])
+        self.assertEqual(reviewed_report.to_dict()["route_review_provenance"]["posture"], "carried_forward_not_recomputed")
+        route_review["mission_draft"]["steps"][0]["objective"] = "tampered after review"
+        with self.assertRaises(ArgumentError):
+            MissionRequest(
+                "tampered-route-review",
+                route["goal"],
+                reviewed_request["steps"],
+                route_review=route_review,
+            )
         with self.assertRaises(ArgumentError):
             mission_from_route(
                 route,

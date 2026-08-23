@@ -26,13 +26,23 @@ use crate::policy::{self, PolicyEnvelope, PolicyOutcome, PolicyScreen, POLICY_RE
 use crate::qir::Query;
 use crate::slice::{backward_slice, max_selected_arity};
 use crate::temporal::{temporal_cut, TemporalCut};
+use bioprism_epistemic::{
+    adaptive::AdaptivePolicy,
+    adaptive_policy as epistemic_adaptive_policy, decision_equivalence_quotient,
+    ratedistortion::{
+        frontier as epistemic_frontier, identification as epistemic_identification,
+        AbstentionReason, DistortionCriterion, Frontier, Identification, Sufficiency,
+    },
+    DecisionEquivalenceQuotient,
+};
+use bioprism_ids::ContentHash;
 use bioprism_influence::summarise;
 use bioprism_section::{
     ContextCertificate, DecisionSection, EvidenceCapsule, InfluenceClass, OmissionGroup,
     OmissionManifest, ReferenceOmissions, RefinementOption, SourceHashes, UnresolvedObligation,
 };
-use bioprism_ids::ContentHash;
 use bioprism_world::{Fact, WorldSource};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -72,6 +82,68 @@ pub struct CompileTrace {
     pub plan: PlanEvaluation,
     /// Influence bounds on the temporally withheld facts, and the split they license (43.28).
     pub withheld_influence: WithheldSplit,
+    /// The exact 43.10 quotient when the query supplied a `fiber-query/0.3` decision contract.
+    /// `None` is meaningful: older wire versions remain executable but cannot claim this pass.
+    pub decision_quotient: Option<DecisionEquivalenceQuotient>,
+    /// The exhaustive rate-distortion audit when a `fiber-query/0.4` observed-evidence contract
+    /// was supplied. `None` is meaningful: older queries cannot make a context-minimality claim.
+    pub rate_distortion: Option<RateDistortionTrace>,
+    /// The exact finite-horizon adaptive acquisition policy when a `fiber-query/0.5` contract was
+    /// supplied. This is a plan projection only; it carries no execution receipt or authority.
+    pub adaptive_acquisition: Option<AdaptiveAcquisitionTrace>,
+}
+
+/// The full bounded rate-distortion result projected into a compile trace.
+///
+/// The frontier is retained alongside identification and sufficiency because they answer
+/// different questions: model disagreement, whether any context meets tolerance, and the
+/// cheapest such context. A compact summary may omit points at the transport boundary, but the
+/// compiler keeps the exact kernel result available to explain/replay callers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RateDistortionTrace {
+    pub criterion: DistortionCriterion,
+    pub tolerance: f64,
+    pub compatibility_floor: f64,
+    pub evidence_count: usize,
+    pub full_rate: f64,
+    pub identification: Identification,
+    pub sufficiency: Sufficiency,
+    pub frontier: Frontier,
+}
+
+/// The bounded adaptive policy plus the exact caller inputs needed to replay its objective.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdaptiveAcquisitionTrace {
+    pub budget: f64,
+    pub max_steps: usize,
+    pub prior: Vec<f64>,
+    pub problem: bioprism_epistemic::DecisionProblem,
+    pub acquisitions: Vec<bioprism_epistemic::Acquisition>,
+    pub policy: AdaptivePolicy,
+}
+
+impl AdaptiveAcquisitionTrace {
+    /// Rebinds the compiler's policy projection to the execution-layer contract.
+    ///
+    /// Compilation remains side-effect free: this method only revalidates the exact policy and
+    /// returns a plan that a caller may later execute with an explicit provider grant. Keeping the
+    /// conversion here prevents SDK and MCP callers from reconstructing the prior, acquisitions,
+    /// and policy independently (which would weaken the compiler-to-executor digest boundary).
+    pub fn execution_plan(
+        &self,
+    ) -> Result<bioprism_epistemic::AdaptivePlan, bioprism_epistemic::AdaptiveExecutionError> {
+        let belief = bioprism_epistemic::Belief::new(self.prior.clone()).map_err(|error| {
+            bioprism_epistemic::AdaptiveExecutionError::InvalidPlan(error.to_string())
+        })?;
+        bioprism_epistemic::AdaptivePlan::from_policy(
+            self.problem.clone(),
+            belief,
+            self.acquisitions.clone(),
+            self.budget,
+            self.max_steps,
+            self.policy.clone(),
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -93,11 +165,195 @@ impl CompileOutput {
     }
 }
 
+fn execute_rate_distortion(
+    contract: &crate::qir::RateDistortionContract,
+    problem: &bioprism_epistemic::DecisionProblem,
+    tolerance: f64,
+) -> Result<RateDistortionTrace, FiberError> {
+    if !tolerance.is_finite() || tolerance < 0.0 {
+        return Err(FiberError::InvalidRateDistortionContract(
+            "distortion_tolerance must be finite and non-negative".into(),
+        ));
+    }
+    let identification = epistemic_identification(
+        problem,
+        &contract.prior,
+        &contract.evidence_pool,
+        tolerance,
+        contract.compatibility_floor,
+    )
+    .map_err(|error| FiberError::InvalidRateDistortionContract(error.to_string()))?;
+    let frontier = epistemic_frontier(
+        problem,
+        &contract.prior,
+        &contract.evidence_pool,
+        contract.criterion,
+        contract.compatibility_floor,
+    )
+    .map_err(|error| FiberError::InvalidRateDistortionContract(error.to_string()))?;
+    let full_rate = contract
+        .evidence_pool
+        .rate(&contract.evidence_pool.everything())
+        .map_err(|error| FiberError::InvalidRateDistortionContract(error.to_string()))?;
+
+    let sufficiency = if contract.criterion == DistortionCriterion::MinimaxRegret
+        && matches!(&identification, Identification::NonIdentified { .. })
+    {
+        let best_distortion = frontier
+            .points
+            .iter()
+            .map(|point| point.distortion)
+            .fold(f64::INFINITY, f64::min);
+        Sufficiency::Abstain {
+            reason: AbstentionReason::NonIdentifiedUnderAllEvidence,
+            best_distortion,
+            tolerance,
+        }
+    } else if let Some(point) = frontier.cheapest_within(tolerance) {
+        Sufficiency::Sufficient {
+            retained: point.retained.clone(),
+            rate: point.rate,
+            distortion: point.distortion,
+            full_rate,
+        }
+    } else {
+        let best_distortion = frontier
+            .points
+            .iter()
+            .map(|point| point.distortion)
+            .fold(f64::INFINITY, f64::min);
+        Sufficiency::Abstain {
+            reason: AbstentionReason::ToleranceUnattainable,
+            best_distortion,
+            tolerance,
+        }
+    };
+
+    Ok(RateDistortionTrace {
+        criterion: contract.criterion,
+        tolerance,
+        compatibility_floor: contract.compatibility_floor,
+        evidence_count: contract.evidence_pool.len(),
+        full_rate,
+        identification,
+        sufficiency,
+        frontier,
+    })
+}
+
+fn execute_adaptive_acquisition(
+    contract: &crate::qir::AdaptiveAcquisitionContract,
+    problem: &bioprism_epistemic::DecisionProblem,
+) -> Result<AdaptiveAcquisitionTrace, FiberError> {
+    let policy = epistemic_adaptive_policy(
+        problem,
+        &contract.prior,
+        &contract.acquisitions,
+        contract.budget,
+        contract.max_steps,
+    )
+    .map_err(|error| FiberError::InvalidAdaptiveAcquisitionContract(error.to_string()))?;
+    Ok(AdaptiveAcquisitionTrace {
+        budget: contract.budget,
+        max_steps: contract.max_steps,
+        prior: contract.prior.masses().to_vec(),
+        problem: problem.clone(),
+        acquisitions: contract.acquisitions.clone(),
+        policy,
+    })
+}
+
 pub fn compile<S: WorldSource + ?Sized>(
     source: &S,
     query: &Query,
 ) -> Result<CompileOutput, FiberError> {
     let mut passes = Vec::new();
+
+    let decision_quotient = query
+        .decision_contract
+        .as_ref()
+        .map(|contract| {
+            decision_equivalence_quotient(&contract.problem, &contract.permitted_actions)
+                .map_err(|error| FiberError::InvalidDecisionContract(error.to_string()))
+        })
+        .transpose()?;
+    if let Some(quotient) = &decision_quotient {
+        passes.push(PassReceipt {
+            name: "decision_quotient",
+            retained: quotient.quotient_model_count,
+            note: format!(
+                "{} model(s) reduced to {} decision-equivalence class(es); {} merged",
+                quotient.original_model_count,
+                quotient.quotient_model_count,
+                quotient.merged_model_count
+            ),
+        });
+    }
+
+    let rate_distortion = query
+        .rate_distortion
+        .as_ref()
+        .map(|contract| {
+            let problem = &query
+                .decision_contract
+                .as_ref()
+                .ok_or(FiberError::InvalidRateDistortionContract(
+                    "rate-distortion requires the decision contract".into(),
+                ))?
+                .problem;
+            let tolerance =
+                query
+                    .distortion_tolerance
+                    .ok_or(FiberError::InvalidRateDistortionContract(
+                        "rate-distortion requires distortion_tolerance".into(),
+                    ))?;
+            execute_rate_distortion(contract, problem, tolerance)
+        })
+        .transpose()?;
+    if let Some(report) = &rate_distortion {
+        let retained = match &report.sufficiency {
+            Sufficiency::Sufficient { retained, .. } => retained.len(),
+            Sufficiency::Abstain { .. } => 0,
+        };
+        passes.push(PassReceipt {
+            name: "rate_distortion",
+            retained,
+            note: format!(
+                "{} observed evidence item(s), {} exhaustive contexts evaluated under {}",
+                report.evidence_count,
+                report.frontier.evaluated,
+                match report.criterion {
+                    DistortionCriterion::BayesRegret => "Bayes regret",
+                    DistortionCriterion::MinimaxRegret => "minimax regret",
+                }
+            ),
+        });
+    }
+
+    let adaptive_acquisition = query
+        .adaptive_acquisition
+        .as_ref()
+        .map(|contract| {
+            let problem = &query
+                .decision_contract
+                .as_ref()
+                .ok_or(FiberError::InvalidAdaptiveAcquisitionContract(
+                    "adaptive acquisition requires the decision contract".into(),
+                ))?
+                .problem;
+            execute_adaptive_acquisition(contract, problem)
+        })
+        .transpose()?;
+    if let Some(report) = &adaptive_acquisition {
+        passes.push(PassReceipt {
+            name: "adaptive_acquisition",
+            retained: report.policy.selected_depth,
+            note: format!(
+                "exact policy under budget {} and {}-step horizon; {} state node(s) evaluated",
+                report.budget, report.max_steps, report.policy.nodes_evaluated
+            ),
+        });
+    }
 
     let envelope = PolicyEnvelope::resolve(source, query)?;
 
@@ -112,7 +368,10 @@ pub fn compile<S: WorldSource + ?Sized>(
     passes.push(PassReceipt {
         name: "backward_slice",
         retained: slice.selected_factors.len(),
-        note: format!("{} variables reachable from targets", slice.needed_variables.len()),
+        note: format!(
+            "{} variables reachable from targets",
+            slice.needed_variables.len()
+        ),
     });
 
     let mut selected_facts: BTreeSet<String> = slice
@@ -208,14 +467,18 @@ pub fn compile<S: WorldSource + ?Sized>(
         .map(|id| UnresolvedObligation::PolicyBlocked {
             detail: PolicyScreen::obligation_detail(
                 id,
-                screen.missing_for(id).expect("withheld ids carry their clauses"),
+                screen
+                    .missing_for(id)
+                    .expect("withheld ids carry their clauses"),
             ),
         })
         .collect();
     unresolved.extend(
         inaccessible
             .iter()
-            .map(|id| UnresolvedObligation::InaccessibleAtCut { fact_id: id.clone() }),
+            .map(|id| UnresolvedObligation::InaccessibleAtCut {
+                fact_id: id.clone(),
+            }),
     );
 
     let mut frontier = Vec::new();
@@ -339,6 +602,9 @@ pub fn compile<S: WorldSource + ?Sized>(
             policy: PolicyOutcome::new(&envelope, &screen),
             plan: evaluation,
             withheld_influence,
+            decision_quotient,
+            rate_distortion,
+            adaptive_acquisition,
         },
     })
 }
@@ -436,14 +702,22 @@ fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
             "43.33 orders outputs by policy label; fiber-world/0.1 declares no labels and no rules attached at scopes, so only read access is decided",
         ),
     ];
-    if query.missing_contract_fields().contains(&"decision_loss") {
+    if !query.has_decision_contract() {
         deferred.push((
             "decision_quotient",
-            "43.10 is defined relative to permitted actions and decision loss, neither of which fiber-query/0.2 carries",
+            "43.10 is defined relative to permitted actions and decision loss; fiber-query/0.1 and fiber-query/0.2 do not carry the executable contract",
         ));
+    }
+    if !query.has_rate_distortion_contract() {
         deferred.push((
             "rate_distortion",
-            "43.12 optimises against a decision loss the query does not declare",
+            "43.12 requires a normalized model prior, an ordered observed evidence-pool likelihood binding, a compatible-model floor and a distortion tolerance; fiber-query/0.1 through fiber-query/0.3 carry no complete binding",
+        ));
+    }
+    if !query.has_adaptive_acquisition_contract() {
+        deferred.push((
+            "adaptive_acquisition",
+            "43.15 requires an explicit model prior, outcome likelihood partitions, scalarized budget and finite horizon; fiber-query/0.1 through fiber-query/0.4 carry no complete binding",
         ));
     }
     deferred

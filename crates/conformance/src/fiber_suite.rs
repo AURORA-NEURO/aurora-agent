@@ -1127,6 +1127,11 @@ fn fiber_failure(error: FiberError) -> CompileFailure {
         FiberError::UnsupportedQuerySchema { .. } => "unsupported_query_schema",
         FiberError::QueryNotAnObject => "query_not_an_object",
         FiberError::UnknownQueryFields { .. } => "undeclared_query_field",
+        FiberError::InvalidDecisionContract(_) => "invalid_decision_contract",
+        FiberError::InvalidRateDistortionContract(_) => "invalid_rate_distortion_contract",
+        FiberError::InvalidAdaptiveAcquisitionContract(_) => {
+            "invalid_adaptive_acquisition_contract"
+        }
         FiberError::MissingQueryField(_) => "missing_query_field",
         FiberError::WrongQueryFieldType { .. } => "wrong_query_field_type",
         FiberError::InvalidIdentifier(_) => "invalid_identifier",

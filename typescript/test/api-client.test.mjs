@@ -11,6 +11,7 @@ import {
   ToolCatalogue,
   ToolSchemaError,
   ToolRefusalError,
+  digestJson,
   parseSse,
 } from "../dist/index.js";
 
@@ -86,6 +87,63 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         limitations: ["no network publisher"],
       } } } });
       if (path === "/v1/tools/developer_workbench") return jsonResponse({ ok: true, tool: "developer_workbench", request_id: "r4", mcp: { result: { structuredContent: { workflow: "developer_workbench", audit: { valid: true } } } } });
+      if (path === "/v1/tools/developer_workbench_verify") return jsonResponse({ ok: true, tool: "developer_workbench_verify", request_id: "r4v", mcp: { result: { structuredContent: {
+        ok: true,
+        workflow: "developer_workbench_verify",
+        valid: true,
+        status: "verified",
+        retained_report_digest: "r".repeat(64),
+        expected_report_digest: null,
+        report_digest_matched: null,
+        retained_audit_digest: "a".repeat(64),
+        observed_audit_digest: "a".repeat(64),
+        dashboard_present: true,
+        dashboard_verified: true,
+        ci_present: true,
+        ci_replay_supplied: true,
+        ci_verified: true,
+        mismatches: [],
+        execution: "not_started",
+        network_access: "not_started",
+        verification_digest: "v".repeat(64),
+        guarantees: [],
+        limitations: [],
+      } } } });
+      if (path === "/v1/tools/developer_workbench_import") return jsonResponse({ ok: true, tool: "developer_workbench_import", request_id: "r4i", mcp: { result: { structuredContent: {
+        ok: true, workflow: "developer_workbench_import", workbench_report_digest: "d".repeat(64), created: true,
+        already_present: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/tools/developer_workbench_query") return jsonResponse({ ok: true, tool: "developer_workbench_query", request_id: "r4q", mcp: { result: { structuredContent: {
+        ok: true, workflow: "developer_workbench_query", rows: [{ workbench_report_digest: "d".repeat(64), schema_version: "bioprism-devplat-workbench/0.1", session_digest: "s".repeat(64), audit_valid: true, release_ready: false, artifact_count: 1, cell_count: 0, change_count: 0, executed_cell_count: 0, dashboard_present: true, dashboard_matched: 1, dashboard_holes: 0, dashboard_stale: 0, ci_present: false, ci_digest: null, domains: ["oncology"], capabilities: ["evidence"], states: ["validated"] }], next_after: null, has_more: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/tools/developer_workbench_get") return jsonResponse({ ok: true, tool: "developer_workbench_get", request_id: "r4g", mcp: { result: { structuredContent: {
+        ok: true, workflow: "developer_workbench_get", workbench_report_digest: "d".repeat(64), report: { schema_version: "bioprism-devplat-workbench/0.1" }, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/developer-workbench/verify") return jsonResponse({
+        ok: true,
+        workflow: "developer_workbench_verify",
+        valid: true,
+        status: "verified",
+        retained_report_digest: "r".repeat(64),
+        retained_audit_digest: "a".repeat(64),
+        observed_audit_digest: "a".repeat(64),
+        dashboard_present: true,
+        dashboard_verified: true,
+        ci_present: true,
+        ci_replay_supplied: true,
+        ci_verified: true,
+        mismatches: [],
+        execution: "not_started",
+        network_access: "not_started",
+        verification_digest: "v".repeat(64),
+        guarantees: [],
+        limitations: [],
+      });
+      if (path === "/v1/developer-workbench/reports") {
+        if (init?.method === "GET") return jsonResponse({ ok: true, workflow: "developer_workbench_query", rows: [], next_after: null, has_more: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
+        return jsonResponse({ ok: true, workflow: "developer_workbench_import", workbench_report_digest: "d".repeat(64), created: true, already_present: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
+      }
+      if (path === "/v1/developer-workbench/reports/" + "d".repeat(64)) return jsonResponse({ ok: true, workflow: "developer_workbench_get", workbench_report_digest: "d".repeat(64), report: { schema_version: "bioprism-devplat-workbench/0.1" }, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
       if (path === "/v1/tools/ci_execution_evidence_audit") return jsonResponse({ ok: true, tool: "ci_execution_evidence_audit", request_id: "r27", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "ci_execution_evidence_audit",
@@ -175,15 +233,18 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           linked_artifact_count: 1,
           linked_log_count: 1,
           attestation_subject_count: 1,
+          local_byte_hash_artifact_count: 1,
+          local_byte_hash_log_count: 0,
+          attestation_subject_digest_binding_count: 1,
           evidence: { run_id: "9001", provider: "github_actions", checks: [] },
           ci_evidence: {},
-          artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64) }],
+          artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64), digest_scope: "local_response_bytes", uri: "https://example.test/artifact" }],
           logs: [{ id: "log-1", digest: "f".repeat(64) }],
-          attestations: [{ id: "attestation-1", subject: "artifact-1", issuer: "caller", statement_digest: "s".repeat(64), method: "declared" }],
+          attestations: [{ id: "attestation-1", subject: "artifact-1", issuer: "caller", statement_digest: "s".repeat(64), method: "declared", subject_digest: "d".repeat(64) }],
           structurally_valid: true,
           conformance_ready: true,
           execution: "evidence_supplied_not_executed_here",
-          verification: "structural_only",
+          verification: "structural_only_with_digest_bindings",
           findings: [],
           guarantees: [],
           limitations: [],
@@ -191,6 +252,20 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         guarantees: [],
         limitations: [],
       } } } });
+      if (path === "/v1/tools/ci_provider_evidence_import") return jsonResponse({ ok: true, tool: "ci_provider_evidence_import", request_id: "r30i", mcp: { result: { structuredContent: {
+        ok: true, workflow: "ci_provider_evidence_import", provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), artifact_record_digest: "a".repeat(64), log_record_digest: "l".repeat(64), attestation_record_digest: "t".repeat(64), structurally_valid: true, conformance_ready: true, artifact_count: 1, log_count: 1, attestation_count: 1, local_byte_hash_artifact_count: 1, local_byte_hash_log_count: 0, attestation_subject_digest_binding_count: 1, created: true, already_present: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/tools/ci_provider_evidence_query") return jsonResponse({ ok: true, tool: "ci_provider_evidence_query", request_id: "r30q", mcp: { result: { structuredContent: {
+        ok: true, workflow: "ci_provider_evidence_query", rows: [{ provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", payload_digest: "q".repeat(64), plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), structurally_valid: true, conformance_ready: true, artifact_count: 1, log_count: 1, attestation_count: 1, linked_artifact_count: 1, linked_log_count: 1, attestation_subject_count: 1, local_byte_hash_artifact_count: 1, local_byte_hash_log_count: 0, attestation_subject_digest_binding_count: 1, artifact_record_digest: "a".repeat(64), log_record_digest: "l".repeat(64), attestation_record_digest: "t".repeat(64) }], next_after: null, has_more: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/tools/ci_provider_evidence_get") return jsonResponse({ ok: true, tool: "ci_provider_evidence_get", request_id: "r30g", mcp: { result: { structuredContent: {
+        ok: true, workflow: "ci_provider_evidence_get", provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", payload_digest: "q".repeat(64), plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), local_byte_hash_artifact_count: 1, local_byte_hash_log_count: 0, attestation_subject_digest_binding_count: 1, structurally_valid: true, conformance_ready: true, audit: { run_id: "9001", artifact_count: 1 }, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [],
+      } } } });
+      if (path === "/v1/ci/provider-evidence") {
+        if (init?.method === "GET") return jsonResponse({ ok: true, workflow: "ci_provider_evidence_query", rows: [], next_after: null, has_more: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
+        return jsonResponse({ ok: true, workflow: "ci_provider_evidence_import", provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), artifact_record_digest: "a".repeat(64), log_record_digest: "l".repeat(64), attestation_record_digest: "t".repeat(64), structurally_valid: true, conformance_ready: true, artifact_count: 1, log_count: 1, attestation_count: 1, created: true, already_present: false, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
+      }
+      if (path === "/v1/ci/provider-evidence/" + "b".repeat(64)) return jsonResponse({ ok: true, workflow: "ci_provider_evidence_get", provider_evidence_digest: "b".repeat(64), provider: "github_actions", run_id: "9001", payload_digest: "q".repeat(64), plan_digest: "p".repeat(64), evidence_digest: "e".repeat(64), structurally_valid: true, conformance_ready: true, audit: { run_id: "9001", artifact_count: 1 }, registry_generation: 1, registry_size: 1, execution: "not_started", guarantees: [], limitations: [] });
       if (path === "/v1/tools/execution_provenance_audit") return jsonResponse({ ok: true, tool: "execution_provenance_audit", request_id: "r28", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "execution_provenance_audit",
@@ -295,7 +370,39 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         value: { gross: 4, cost: 0.1, net: 3.9, outcome_probabilities: [0.5, 0.5], action_without: 0, action_after: [0, 1] },
         actions: { without: "treat", after: ["treat", "abstain"] },
         complementarity: null,
-        guarantees: ["gross risk reduction and declared acquisition cost remain separate"],
+         guarantees: ["gross risk reduction and declared acquisition cost remain separate"],
+       } } } });
+      if (path === "/v1/tools/epistemic_adaptive_acquisition") return jsonResponse({ ok: true, tool: "epistemic_adaptive_acquisition", request_id: "r19a", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/epistemic-adaptive-acquisition/0.1",
+        budget: 0.11,
+        max_steps: 2,
+        problem: { actions: ["choose-m0", "choose-m1"], models: ["m0", "m1"], action_count: 2, model_count: 2 },
+        acquisitions: [
+          { id: "screen", cost: 0.01, outcomes: [{ label: "positive" }, { label: "negative" }] },
+          { id: "confirm", cost: 0.1, outcomes: [{ label: "positive" }, { label: "negative" }] },
+        ],
+        policy: {
+          expected_total: 0.12,
+          expected_terminal_risk: 0.06,
+          expected_acquisition_cost: 0.06,
+          nodes_evaluated: 7,
+          selected_depth: 2,
+          root: {
+            kind: "acquire", acquisition_index: 0, id: "screen", cost: 0.01,
+            expected_total: 0.12, expected_terminal_risk: 0.06, expected_acquisition_cost: 0.06,
+            outcomes: [
+              { label: "positive", probability: 0.5, posterior: [0.8, 0.2], next: {
+                kind: "stop", action_index: 0, action: "choose-m0", risk: 0.06,
+              } },
+              { label: "negative", probability: 0.5, posterior: [0.2, 0.8], next: {
+                kind: "stop", action_index: 1, action: "choose-m1", risk: 0.06,
+              } },
+            ],
+          },
+        },
+        guarantees: ["exact under explicit caps"],
+        limitations: ["conditional independence is assumed"],
       } } } });
       if (path === "/v1/tools/benchmark_trace_analyze") return jsonResponse({ ok: true, tool: "benchmark_trace_analyze", request_id: "r20", mcp: { result: { structuredContent: {
         ok: true,
@@ -1080,6 +1187,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
       if (path === "/v1/tools/capability_discover") return jsonResponse({ ok: true, tool: "capability_discover", request_id: "r6", mcp: { result: { structuredContent: { workflow: "capability_discover", capability_schema_version: "bioprism-devplat-capability/0.1", schema_version: "bioprism-devplat-capability/0.1", catalog_digest: "c".repeat(64), total_groups: 1, query: {}, result_count: 1, matches: [{ group: { id: "testing", domains: ["verification"], crates: ["bioprism-devplat"], mcp_tools: ["echo"], cli_entrypoints: ["bioprism test"], python_artifacts: ["prism_sdk.testing"], status: "implemented" }, score: 100, matched_fields: ["domains"], matched_tools: ["echo"], tool_schemas: [] }], schema_attachment: { requested: false, returned: 0, missing: [] } } } } });
       if (path === "/v1/tools/mission_evaluator_discover") return jsonResponse({ ok: true, tool: "mission_evaluator_discover", request_id: "r6evaluator", mcp: { result: { structuredContent: { ok: true, workflow: "mission_evaluator_discover", mission_evaluator_schema_version: "bioprism-devplat-mission-evaluator/0.1", schema_version: "bioprism-devplat-mission-evaluator/0.1", catalog_digest: "e".repeat(64), total_adapters: 29, query: {}, result_count: 1, selection_posture: "candidate_only", coverage: { capability_group_count: 29, evaluator_group_count: 29, uncovered_groups: [], unbound_groups: [], complete: true, posture: "catalogue coverage evidence only" }, matches: [{ adapter: { id: "oncoworlds.assay_fidelity", group_id: "oncoworlds_models_and_assays", domains: ["fidelity"], levels: ["evaluation"], purpose: "inspect assay fidelity", candidate_tools: ["oncoworlds_model_transport", "oncoworlds_methylation_classify"], output_pointer_examples: ["/fidelity"], status: "candidate_only" }, score: 700, matched_fields: ["domains"] }], guarantees: [], limitations: [] } } } });
       if (path === "/v1/tools/mission_evaluator_review") return jsonResponse({ ok: true, tool: "mission_evaluator_review", request_id: "r6review", mcp: { result: { structuredContent: { ok: true, schema: "bioprism-devplat-mission-evaluator/0.1", workflow: "mission_evaluator_review", review_id: "r".repeat(64), catalog_digest: "e".repeat(64), discovery_digest: "d".repeat(64), selection_count: 1, claim_count: 1, bindings: [{ id: "assay-evaluator", claim_id: "fidelity-claim", adapter_id: "oncoworlds.assay_fidelity", domain: "oncology", step_id: "assay", output_pointer: "/fidelity", required: true, candidate_found: true, domain_supported: true, binding_posture: "ready", candidate_tools: ["oncoworlds_model_transport"], output_pointer_examples: ["/fidelity"], proposed_binding: { id: "assay-evaluator", adapter_id: "oncoworlds.assay_fidelity", domain: "oncology", step_id: "assay", output_pointer: "/fidelity", required: true } }], findings: [], review_status: "ready", binding_posture: "ready_for_mission_claim_bindings", execution: "not_started", guarantees: [], limitations: [] } } } });
+      if (path === "/v1/tools/mission_evaluator_replay") return jsonResponse({ ok: true, tool: "mission_evaluator_replay", request_id: "r6replay", mcp: { result: { structuredContent: { ok: true, schema: "bioprism-devplat-mission-evaluator/0.1", workflow: "mission_evaluator_replay", mission_id: "mission-ts", mission_digest: "m".repeat(64), mission_status: "succeeded", review_provenance: { present: true }, catalog_digest: "e".repeat(64), binding_count: 0, omitted_bindings: 0, state_counts: {}, claims: [], bindings: [], coverage: { catalogue_adapter_count: 29, catalogue_group_count: 29, replayed_adapter_count: 0, replayed_group_count: 0, unrepresented_adapters: ["oncoworlds.assay_fidelity"], unrepresented_groups: ["oncoworlds_models_and_assays"], complete: false }, findings: [], replay_status: "ready", execution: "not_started", fixtures: [{ fixture_id: "mission-evaluator::oncoworlds.assay_fidelity", adapter_id: "oncoworlds.assay_fidelity", group_id: "oncoworlds_models_and_assays", domains: ["oncology"], levels: ["evaluation"], output_pointer: "/fidelity", retained_output: { fidelity: { non_semantic: true } }, retained_output_digest: "f".repeat(64), variants: [{ state: "retained" }, { state: "refused" }, { state: "omitted" }, { state: "disagreement" }], guarantee: "structural fixture coverage only" }], omitted_fixtures: 28, guarantees: [], limitations: [] } } } });
       if (path === "/v1/tools/capability_audit") return jsonResponse({ ok: true, tool: "capability_audit", request_id: "r7", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "capability_audit",
@@ -1110,6 +1218,8 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         schema: "bioprism-devplat-capability-dashboard/0.1",
         catalog_digest: "c".repeat(64),
         dashboard_digest: "d".repeat(64),
+        evidence_digest: "f".repeat(64),
+        evidence_scope: "selected_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
         capability_dashboard_ready: true,
         duplicate_schema_names: [],
         audit: {
@@ -1121,12 +1231,20 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
           callable_group_count: 1, partial_group_count: 0, declared_only_group_count: 0,
           selected_tool_memberships: 1, selected_unique_tools: 1, schema_backed_unique_tools: 1,
           readiness_counts: { callable: 1 }, gap_counts: {},
-          groups: [{ id: "testing", domains: ["verification"], status: "implemented", readiness: "callable", surfaces: { crates: 1, mcp_tools: 1, cli_entrypoints: 1, python_artifacts: 1 }, tool_count: 1, callable_tool_count: 1, schema_backed_tool_count: 1, missing_transport_schemas: [], invalid_transport_schemas: [], tools: ["echo"], gaps: [] }],
+          groups: [{ id: "testing", domains: ["verification"], status: "implemented", readiness: "callable", surfaces: { crates: 1, mcp_tools: 1, cli_entrypoints: 1, python_artifacts: 1 }, tool_count: 1, callable_tool_count: 1, schema_backed_tool_count: 1, missing_transport_schemas: [], invalid_transport_schemas: [], tools: ["echo"], gaps: [], artifact_evidence: { ok: true, schema: "bioprism-devplat-artifact-domain-evidence-posture/0.1", workflow: "artifact_registry_domain_evidence_posture", group_id: "testing", requested_domains: ["verification"], registry_generation: 4, registry_size: 8, state: "observed", matching_record_count: 2, integrity_verified_record_count: 2, kind_counts: { domain_report: 2 }, family_counts: { domain_report: 2 }, verification_state_counts: { verified_integrity: 2 }, match_basis_counts: { artifact_domain_intersection: 2 }, subject_count: 2, parent_linked_record_count: 1, matched_domain_labels: ["verification"], scope: "exact_declared_registration_domain_intersection_or_explicit_artifact_group_id", readiness_claimed: false, execution: "not_started", guarantees: [], limitations: [] }, workflow_reconciliation_evidence: { workflow_id: "testing", state: "missing", record_count: 0, completion_status_counts: {}, ready_count: 0, review_required_count: 0, integrity_invalid_count: 0, evidence_invalid_count: 0, readiness_claimed: false, scope: "bounded_digest_valid_reconciliation_registry", guarantees: [], limitations: [] } }],
+          evidence: { scope: "selected_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", evidence_digest: "f".repeat(64), artifact_registry_generation: 4, artifact_registry_size: 8, workflow_reconciliation_registry_generation: 2, workflow_reconciliation_registry_size: 0, groups_with_artifact_evidence: 1, artifact_evidence_records: 2, groups_with_workflow_reconciliation: 0, workflow_reconciliation_records: 0, readiness_claimed: false, execution: "not_started", guarantees: [], limitations: [] },
           warnings: [], guarantees: [], limitations: [], ready: true,
         },
       } } } });
-      if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started", route_coverage: { needs_total: 1, needs_resolved: 1, needs_unresolved: 0, candidate_group_count: 1, candidate_groups: ["testing"], candidate_domain_count: 1, candidate_domains: ["verification"], candidate_tool_count: 1, posture: "routing evidence only" } } } } });
-      if (path === "/v1/tools/capability_route_review") return jsonResponse({ ok: true, tool: "capability_route_review", request_id: "r9", mcp: { result: { structuredContent: { workflow: "capability_route_review", review_id: "v".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [["oncology"]], schema_review: { requested: true, checked: 1, valid: true, fully_checked: true } } } } });
+      if (path === "/v1/capabilities/dashboard") return jsonResponse({ ok: true, workflow: "capability_dashboard", schema: "bioprism-devplat-capability-dashboard/0.1", capability_dashboard_ready: true, audit: { query: { domain: "verification" }, selected_group_count: 1, groups: [{ id: "testing", readiness: "callable", tools: ["echo"] }] } });
+      if (path === "/v1/tools/capability_route") return jsonResponse({ ok: true, tool: "capability_route", request_id: "r8", mcp: { result: { structuredContent: { workflow: "capability_route", execution: "not_started", evidence_digest: "e".repeat(64), evidence_scope: "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", evidence: { scope: "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", evidence_digest: "e".repeat(64), artifact_registry_generation: 0, artifact_registry_size: 0, workflow_reconciliation_registry_generation: 0, workflow_reconciliation_registry_size: 0, candidate_group_count: 1, groups_with_artifact_evidence: 0, artifact_evidence_records: 0, groups_with_workflow_reconciliation: 0, workflow_reconciliation_records: 0, readiness_claimed: false, execution: "not_started", guarantees: [], limitations: [] }, needs: [{ id: "testing", resolution: "ranked_candidates", candidate_groups: ["testing"], candidate_domains: ["verification"], candidate_tools: ["echo"], candidate_group_evidence: [{ id: "testing", artifact_evidence: { state: "missing" }, workflow_reconciliation_evidence: { state: "missing" } }], search: {} }], route_coverage: { needs_total: 1, needs_resolved: 1, needs_unresolved: 0, candidate_group_count: 1, candidate_groups: ["testing"], candidate_domain_count: 1, candidate_domains: ["verification"], candidate_tool_count: 1, candidate_group_evidence_count: 1, posture: "routing evidence only" } } } } });
+      if (path === "/v1/tools/capability_route_review") return jsonResponse({ ok: true, tool: "capability_route_review", request_id: "r9", mcp: { result: { structuredContent: { workflow: "capability_route_review", review_id: "v".repeat(64), evidence_digest: "e".repeat(64), evidence_scope: "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", evidence_binding: { present: true, evidence_digest: "e".repeat(64), scope: "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries", posture: "carried_forward_not_recomputed", readiness_claimed: false, execution: "not_started" }, review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [["oncology"]], schema_review: { requested: true, checked: 1, valid: true, fully_checked: true } } } } });
+      if (path === "/v1/tools/capability_route_plan") return jsonResponse({ ok: true, tool: "capability_route_plan", request_id: "r9plan", mcp: { result: { structuredContent: { workflow: "capability_route_plan", ok: true, mission_id: "route-plan", route_id: "r".repeat(64), review_id: "v".repeat(64), catalog_digest: "c".repeat(64), goal: "compose evidence", plan_status: "ready_for_caller_inspection", review: { workflow: "capability_route_review", review_id: "v".repeat(64), route_id: "r".repeat(64), catalog_digest: "c".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [] }, mission: { mission_id: "route-plan" }, preflight: { ok: true, dispatch: "not_started" }, plan_digest: "a".repeat(64), dispatch: "not_started", execution: "not_started" } } } });
+      if (path === "/v1/tools/capability_route_plan_verify") return jsonResponse({ ok: true, tool: "capability_route_plan_verify", request_id: "r9verify", mcp: { result: { structuredContent: { workflow: "capability_route_plan_verify", ok: true, mission_id: "route-plan", route_id: "r".repeat(64), review_id: "v".repeat(64), catalog_digest: "c".repeat(64), plan_status: "ready_for_caller_inspection", plan_digest: "a".repeat(64), valid: true, verification_status: "verified_without_route_replay", route_replay: { requested: false, status: "not_requested" }, mission_preflight: { requested: true, status: "matched", matched: true, ok: true }, mismatches: [], dispatch: "not_started", execution: "not_started" } } } });
+      if (path === "/v1/capabilities/route") return jsonResponse({ workflow: "capability_route", execution: "not_started", route_id: "r".repeat(64), needs: [], unresolved_needs: [], recommended_tools: [], recommended_tool_count: 0, recommended_tool_overflow: 0, route_coverage: { needs_total: 0, needs_resolved: 0, needs_unresolved: 0, candidate_group_count: 0, candidate_groups: [], candidate_domain_count: 0, candidate_domains: [], candidate_tool_count: 0, posture: "routing evidence only" }, schema_attachment: {} });
+      if (path === "/v1/capabilities/route/review") return jsonResponse({ workflow: "capability_route_review", review_id: "w".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [] });
+      if (path === "/v1/capabilities/route/plan") return jsonResponse({ workflow: "capability_route_plan", ok: true, mission_id: "route-plan", route_id: "r".repeat(64), review_id: "v".repeat(64), catalog_digest: "c".repeat(64), goal: "compose evidence", plan_status: "ready_for_caller_inspection", review: { workflow: "capability_route_review", review_id: "v".repeat(64), route_id: "r".repeat(64), catalog_digest: "c".repeat(64), review_status: "ready", handoff_status: "mission_preflight_required", execution: "not_started", findings: [], dependency_waves: [] }, mission: { mission_id: "route-plan" }, preflight: { ok: true, dispatch: "not_started" }, dispatch: "not_started", execution: "not_started" });
+      if (path === "/v1/capabilities/route/plan/verify") return jsonResponse({ workflow: "capability_route_plan_verify", ok: true, mission_id: "route-plan", route_id: "r".repeat(64), review_id: "v".repeat(64), catalog_digest: "c".repeat(64), plan_status: "ready_for_caller_inspection", plan_digest: "a".repeat(64), valid: true, verification_status: "verified_without_route_replay", route_replay: { requested: false, status: "not_requested" }, mission_preflight: { requested: true, status: "matched", matched: true, ok: true }, mismatches: [], dispatch: "not_started", execution: "not_started" });
       if (path === "/v1/tools/adapter_plan") return jsonResponse({ ok: true, tool: "adapter_plan", request_id: "r10", mcp: { result: { structuredContent: {
         ok: true,
         workflow: "adapter_plan",
@@ -1178,6 +1296,14 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
         checks: [{ index: 0, kind: "conformance_run", required: true, advisory: false, evaluated: true, gate: true, passed: true, result_digest: "r".repeat(64) }],
         guarantees: ["required checks are conjunctive"],
         limitations: ["local evidence only"],
+      } } } });
+      if (path === "/v1/tools/bundle_verify") return jsonResponse({ ok: true, tool: "bundle_verify", request_id: "r13b", mcp: { result: { structuredContent: {
+        ok: true,
+        verification_mode: "ed25519_public_key",
+        manifest_digest: "m".repeat(64),
+        authentication: { outcome: "public_key_authenticated", scheme: "ed25519_public_key" },
+        guarantees: ["signature checked"],
+        limitations: ["key registry external"],
       } } } });
       if (path === "/v1/tools/operations_catalog") return jsonResponse({ ok: true, tool: "operations_catalog", request_id: "r14", mcp: { result: { structuredContent: {
         ok: true,
@@ -1538,6 +1664,65 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.deepEqual(assembly.selected_tools, ["echo"]);
   const assembledPreflight = await client.missionPreflight(assembly.mission, catalogue);
   assert.equal(assembledPreflight.ok, true);
+  const missionRouteReview = {
+    ok: true,
+    workflow: "capability_route_review",
+    review_id: "a".repeat(64),
+    route_id: "b".repeat(64),
+    catalog_digest: "d".repeat(64),
+    goal: "check routed work",
+    findings: [],
+    review_status: "ready",
+    handoff_status: "mission_preflight_required",
+    execution: "not_started",
+    evidence_digest: "e".repeat(64),
+    evidence_scope: "capability_route",
+    evidence_binding: {
+      present: true,
+      evidence_digest: "e".repeat(64),
+      scope: "capability_route",
+      summary: { evidence_digest: "e".repeat(64), scope: "capability_route" },
+      posture: "carried_forward_not_recomputed",
+      readiness_claimed: false,
+      execution: "not_started",
+    },
+    mission_draft: {
+      goal: "check routed work",
+      steps: assembly.mission.steps,
+      dependency_waves: [["echo-need"]],
+      route_evidence_digest: "e".repeat(64),
+      route_evidence_scope: "capability_route",
+    },
+  };
+  const reviewedAssembly = client.missionFromRoute(
+    assembly.mission ? {
+      workflow: "capability_route",
+      route_id: "route-ts",
+      catalog_digest: "d".repeat(64),
+      goal: "check routed work",
+      needs: [{ id: "echo-need", candidate_tools: ["echo"] }],
+      unresolved_needs: [],
+    } : {},
+    "mission-from-reviewed-route",
+    [{
+      need_id: "echo-need",
+      tool: "echo",
+      domain: "workspace",
+      capability: "discovery",
+      objective: "check routed work",
+      arguments: { value: 3 },
+    }],
+    undefined,
+    missionRouteReview,
+  );
+  const reviewedPreflight = await client.missionPreflight(reviewedAssembly.mission, catalogue);
+  assert.equal(reviewedPreflight.ok, true);
+  assert.equal(reviewedPreflight.route_review_provenance.evidence_present, true);
+  const tamperedRouteReview = structuredClone(missionRouteReview);
+  tamperedRouteReview.mission_draft.steps[0].objective = "tampered after review";
+  const tamperedRoutePreflight = await client.missionPreflight({ ...reviewedAssembly.mission, route_review: tamperedRouteReview }, catalogue);
+  assert.equal(tamperedRoutePreflight.ok, false);
+  assert.equal(tamperedRoutePreflight.issues.some((issue) => issue.includes("route_review")), true);
   assert.throws(() => client.missionFromRoute({
     workflow: "capability_route",
     route_id: "route-ts",
@@ -1580,6 +1765,37 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.deepEqual(preflight.waves, [["prepare"], ["consume"]]);
   assert.equal(preflight.steps[1].status, "ready");
   assert.equal(seen.length, callsBeforeMissionPreflight);
+  const boundEvidencePlan = {
+    schema: "workflow-contract/0.1",
+    steps: [{ step_id: "prepare", tool: "echo", required: true }],
+    completion: { required_steps: "succeeded" },
+  };
+  const workflowBinding = {
+    workflow_id: "workspace_workflows",
+    workflow_digest: "a".repeat(64),
+    catalog_digest: "b".repeat(64),
+    domain_contract_digest: "c".repeat(64),
+    domain_contract: { posture: "advisory_review_gated" },
+    evidence_plan: boundEvidencePlan,
+    evidence_plan_digest: await digestJson(boundEvidencePlan),
+  };
+  const boundPreflight = await client.missionPreflight({
+    mission_id: "mission-bound-workflow",
+    goal: "retain workflow scope",
+    steps: [{ id: "prepare", domain: "workspace", capability: "discovery", objective: "prepare", tool: "echo", arguments: { value: 3 } }],
+    workflow_binding: workflowBinding,
+  }, catalogue);
+  assert.equal(boundPreflight.ok, true);
+  const tamperedBinding = structuredClone(workflowBinding);
+  tamperedBinding.evidence_plan.steps[0].tool = "tampered";
+  const tamperedPreflight = await client.missionPreflight({
+    mission_id: "mission-bound-workflow-tampered",
+    goal: "reject a changed evidence contract",
+    steps: [{ id: "prepare", domain: "workspace", capability: "discovery", objective: "prepare", tool: "echo", arguments: { value: 3 } }],
+    workflow_binding: tamperedBinding,
+  }, catalogue);
+  assert.equal(tamperedPreflight.ok, false);
+  assert.equal(tamperedPreflight.issues.some((issue) => issue.includes("evidence_plan_digest")), true);
   const parallel = await client.missionPreflight({
     mission_id: "mission-parallel",
     goal: "prepare independent checks",
@@ -1689,6 +1905,24 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(otel.mcp.result.structuredContent.events[0].kind, "goal");
   const workbench = await client.developerWorkbench({ session: { session_id: "studio-1" }, dashboard: { include_holes: true } });
   assert.equal(workbench.mcp.result.structuredContent.workflow, "developer_workbench");
+  const workbenchVerify = await client.developerWorkbenchVerify({ session: { session_id: "studio-1" }, report: { workflow: "developer_workbench" }, ci_replay: { workflow: "contracts" }, policy: { require_ci_replay: true } });
+  assert.equal(workbenchVerify.mcp.result.structuredContent.workflow, "developer_workbench_verify");
+  assert.equal(workbenchVerify.mcp.result.structuredContent.status, "verified");
+  const workbenchVerifyQuery = await client.developerWorkbenchVerifyQuery({ session: { session_id: "studio-1" }, report: { workflow: "developer_workbench" } });
+  assert.equal(workbenchVerifyQuery.workflow, "developer_workbench_verify");
+  await assert.rejects(client.developerWorkbenchVerifyQuery({ session: {}, report: {} }), ArgumentError);
+  const workbenchImport = await client.developerWorkbenchImport({ report: { schema_version: "bioprism-devplat-workbench/0.1" } });
+  assert.equal(workbenchImport.mcp.result.structuredContent.created, true);
+  const workbenchImportRest = await client.developerWorkbenchImportRest({ report: { schema_version: "bioprism-devplat-workbench/0.1" } });
+  assert.equal(workbenchImportRest.workbench_report_digest, "d".repeat(64));
+  const workbenchQuery = await client.developerWorkbenchQuery({ domain: "oncology" });
+  assert.equal(workbenchQuery.mcp.result.structuredContent.rows[0].capabilities[0], "evidence");
+  const workbenchQueryRest = await client.developerWorkbenchQueryRest({ domain: "oncology" });
+  assert.deepEqual(workbenchQueryRest.rows, []);
+  const workbenchGet = await client.developerWorkbenchGet("d".repeat(64));
+  assert.equal(workbenchGet.mcp.result.structuredContent.report.schema_version, "bioprism-devplat-workbench/0.1");
+  const workbenchGetRest = await client.developerWorkbenchGetRest("d".repeat(64));
+  assert.equal(workbenchGetRest.workbench_report_digest, "d".repeat(64));
   const ciEvidence = await client.ciExecutionEvidenceAudit({ ci: { workflow: "contracts" }, evidence: { run_id: "run-42" } });
   assert.equal(ciEvidence.mcp.result.structuredContent.workflow, "ci_execution_evidence_audit");
   assert.equal(ciEvidence.mcp.result.structuredContent.ci_evidence_ready, true);
@@ -1710,6 +1944,30 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(providerEvidence.mcp.result.structuredContent.workflow, "ci_provider_evidence_audit");
   assert.equal(providerEvidence.mcp.result.structuredContent.conformance_ready, true);
   assert.equal(providerEvidence.mcp.result.structuredContent.audit.artifact_count, 1);
+  assert.equal(providerEvidence.mcp.result.structuredContent.audit.local_byte_hash_artifact_count, 1);
+  assert.equal(providerEvidence.mcp.result.structuredContent.audit.attestation_subject_digest_binding_count, 1);
+  const providerRegistryRequest = {
+    ci: { workflow: "contracts" },
+    provider: "github_actions",
+    payload: { run: { id: 9001, conclusion: "success" }, jobs: [{ name: "tests", conclusion: "success" }] },
+    artifacts: [{ id: "artifact-1", kind: "junit", digest: "d".repeat(64), digest_scope: "local_response_bytes", uri: "https://example.test/artifact" }],
+  };
+  const providerImported = await client.ciProviderEvidenceImport(providerRegistryRequest);
+  assert.equal(providerImported.mcp.result.structuredContent.created, true);
+  assert.equal(providerImported.mcp.result.structuredContent.artifact_record_digest.length, 64);
+  const providerImportedRest = await client.ciProviderEvidenceImportRest(providerRegistryRequest);
+  assert.equal(providerImportedRest.provider_evidence_digest, "b".repeat(64));
+  const providerQuery = await client.ciProviderEvidenceQuery({ provider: "github_actions", conformance_ready: true, min_local_byte_hash_artifacts: 1, min_attestation_subject_digest_bindings: 1, include_records: true });
+  assert.equal(providerQuery.mcp.result.structuredContent.rows[0].artifact_count, 1);
+  assert.equal(providerQuery.mcp.result.structuredContent.rows[0].attestation_subject_digest_binding_count, 1);
+  const providerQueryRest = await client.ciProviderEvidenceQueryRest({ provider: "github_actions" });
+  assert.deepEqual(providerQueryRest.rows, []);
+  await assert.rejects(client.ciProviderEvidenceQueryRest({ min_attestation_subject_digest_bindings: 129 }), ArgumentError);
+  const providerGet = await client.ciProviderEvidenceGet("b".repeat(64));
+  assert.equal(providerGet.mcp.result.structuredContent.audit.run_id, "9001");
+  const providerGetRest = await client.ciProviderEvidenceGetRest("b".repeat(64));
+  assert.equal(providerGetRest.provider_evidence_digest, "b".repeat(64));
+  await assert.rejects(client.ciProviderEvidenceGet("bad"), ArgumentError);
   const provenance = await client.executionProvenanceAudit({
     mission: { plan: { mission_id: "mission-ts", digest: "p".repeat(64) }, execution: "executed" },
     delegated_checks: [{ name: "unit_tests", kind: "test", required: true, status: "passed", result_digest: "r".repeat(64), source: "caller_attested" }],
@@ -1744,6 +2002,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(voi.mcp.result.structuredContent.value.gross, 4);
   assert.equal(voi.mcp.result.structuredContent.value.net, 3.9);
   assert.deepEqual(voi.mcp.result.structuredContent.actions.after, ["treat", "abstain"]);
+  const adaptivePolicy = await client.epistemicAdaptiveAcquisition({
+    problem: { actions: ["choose-m0", "choose-m1"], models: ["m0", "m1"], loss: [0, 1, 1, 0] },
+    belief: { mass: [0.9, 0.1] },
+    acquisitions: [{ id: "screen", cost: 0.01, outcomes: [{ label: "positive", likelihood: [0.9, 0.2] }, { label: "negative", likelihood: [0.1, 0.8] }] }],
+    budget: 0.11,
+    max_steps: 2,
+  });
+  assert.equal(adaptivePolicy.mcp.result.structuredContent.schema, "bioprism-mcp/epistemic-adaptive-acquisition/0.1");
+  assert.equal(adaptivePolicy.mcp.result.structuredContent.policy.root.id, "screen");
+  assert.equal(adaptivePolicy.mcp.result.structuredContent.policy.selected_depth, 2);
   const traceAnalysis = await client.benchmarkTraceAnalyze({
     failing: {
       trace_id: "failed-run",
@@ -2059,6 +2327,16 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(evaluatorReview.mcp.result.structuredContent.workflow, "mission_evaluator_review");
   assert.equal(evaluatorReview.mcp.result.structuredContent.review_status, "ready");
   assert.equal(evaluatorReview.mcp.result.structuredContent.bindings[0].binding_posture, "ready");
+  const evaluatorReplay = await client.missionEvaluatorReplay({
+    mission: { workflow: "agent_mission", plan: { mission_id: "mission-ts" }, claim_lineage: { claims: [] } },
+    include_fixtures: true,
+    max_items: 64,
+  });
+  assert.equal(evaluatorReplay.mcp.result.structuredContent.workflow, "mission_evaluator_replay");
+  assert.equal(evaluatorReplay.mcp.result.structuredContent.execution, "not_started");
+  assert.equal(evaluatorReplay.mcp.result.structuredContent.coverage.catalogue_adapter_count, 29);
+  assert.equal(evaluatorReplay.mcp.result.structuredContent.omitted_fixtures, 28);
+  assert.equal(evaluatorReplay.mcp.result.structuredContent.fixtures[0].variants.length, 4);
   const evidenceAudit = await client.bioCapabilityEvidenceAudit({ evidence: [], claim_requests: [], metrics: {} });
   const publicationAudit = await client.bioAtlasPublicationAudit({ atlas: { atlas_id: "atlas-1" }, release_request: { id: "publication-1", targets: ["atlas_profile"] } });
   const capabilityAudit = await client.capabilityAudit({ include_groups: false });
@@ -2068,10 +2346,32 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
     selections: [{ need_id: "oncology", tool: "echo", domain: "testing", capability: "verification", objective: "review", arguments: {} }],
     validate_schemas: true,
   });
+  const routePlan = await client.capabilityRoutePlan({
+    mission_id: "route-plan",
+    route: route.mcp.result.structuredContent,
+    selections: [{ need_id: "oncology", tool: "echo", domain: "testing", capability: "verification", objective: "review", arguments: {} }],
+  });
+  const routeRest = await client.capabilityRouteRest({ goal: "compose evidence", needs: [{ id: "oncology", query: "oncology" }] });
+  const routeReviewRest = await client.capabilityRouteReviewRest({ route: routeRest, selections: [] });
+  const routePlanRest = await client.capabilityRoutePlanRest({
+    mission_id: "route-plan",
+    route: routeRest,
+    selections: [],
+  });
+  const routePlanVerify = await client.capabilityRoutePlanVerify({
+    plan: routePlan.mcp.result.structuredContent,
+  });
+  assert.equal(routePlanVerify.mcp.result.structuredContent.verification_status, "verified_without_route_replay");
+  const routePlanVerifyRest = await client.capabilityRoutePlanVerifyRest({ plan: routePlanRest });
+  assert.equal(routePlanVerifyRest.verification_status, "verified_without_route_replay");
   const adapter = await client.adapterPlan({ source_id: "scan-1", source_kind: "bytes", declared_format: "application/dicom", available_dependencies: ["pydicom"] });
   const tabular = await client.tabularIngest({ source_id: "cohort.csv", profile: { profile_id: "RG-DEMO-001" }, csv: "subject\nS1\n", format: "text/csv", include_facts: true });
   const conformance = await client.conformanceRun({ include_details: false, max_items: 100 });
   const release = await client.releaseAudit({ checks: [{ kind: "conformance_run", arguments: {} }] });
+  const bundleVerification = await client.bundleVerify({
+    publicly_attested_bundle: { bundle: {} },
+    verification_key: { key_identity: "publisher-ed25519", public_key: `ed25519:${"a".repeat(64)}`, validity: {} },
+  });
   const operations = await client.operationsCatalog({ include_details: false, max_items: 2 });
   const acceptance = await client.opsAcceptance({ max_items: 3 });
   const safety = await client.safetyReleaseGate({ assessment: { subject: "pack/biological-design@1", category: "biological_design", ratings: { capability_uplift: "low" } } });
@@ -2114,17 +2414,38 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(capabilityAudit.mcp.result.structuredContent.catalog_digest.length, 64);
   assert.equal(capabilityAudit.mcp.result.structuredContent.schema_quality.valid, 1);
   const capabilityDashboard = await client.capabilityDashboard({ domain: "verification", include_tools: true });
+  const capabilityDashboardQuery = await client.capabilityDashboardQuery({ domain: "verification", include_tools: true });
   assert.equal(capabilityDashboard.mcp.result.structuredContent.workflow, "capability_dashboard");
   assert.equal(capabilityDashboard.mcp.result.structuredContent.capability_dashboard_ready, true);
   assert.equal(capabilityDashboard.mcp.result.structuredContent.audit.groups[0].readiness, "callable");
   assert.equal(capabilityDashboard.mcp.result.structuredContent.audit.groups[0].tools[0], "echo");
+  assert.equal(capabilityDashboard.mcp.result.structuredContent.audit.groups[0].artifact_evidence.state, "observed");
+  assert.equal(capabilityDashboard.mcp.result.structuredContent.audit.groups[0].workflow_reconciliation_evidence.state, "missing");
+  assert.equal(capabilityDashboard.mcp.result.structuredContent.audit.evidence.groups_with_artifact_evidence, 1);
+  assert.equal(capabilityDashboard.mcp.result.structuredContent.evidence_digest.length, 64);
+  assert.equal(capabilityDashboardQuery.workflow, "capability_dashboard");
+  assert.equal(capabilityDashboardQuery.audit.query.domain, "verification");
   assert.equal(route.mcp.result.structuredContent.workflow, "capability_route");
   assert.equal(route.mcp.result.structuredContent.execution, "not_started");
   assert.equal(route.mcp.result.structuredContent.route_coverage.needs_resolved, 1);
+  assert.equal(route.mcp.result.structuredContent.evidence_digest.length, 64);
+  assert.equal(route.mcp.result.structuredContent.evidence.candidate_group_count, 1);
+  assert.equal(route.mcp.result.structuredContent.needs[0].candidate_group_evidence[0].id, "testing");
   assert.equal(routeReview.mcp.result.structuredContent.review_status, "ready");
   assert.equal(routeReview.mcp.result.structuredContent.review_id.length, 64);
+  assert.equal(routeReview.mcp.result.structuredContent.evidence_digest.length, 64);
+  assert.equal(routeReview.mcp.result.structuredContent.evidence_binding.present, true);
   assert.deepEqual(routeReview.mcp.result.structuredContent.dependency_waves, [["oncology"]]);
   assert.equal(routeReview.mcp.result.structuredContent.schema_review.valid, true);
+  assert.equal(routePlan.mcp.result.structuredContent.workflow, "capability_route_plan");
+  assert.equal(routePlan.mcp.result.structuredContent.plan_status, "ready_for_caller_inspection");
+  assert.equal(routePlan.mcp.result.structuredContent.dispatch, "not_started");
+  assert.equal(routeRest.workflow, "capability_route");
+  assert.equal(routeRest.execution, "not_started");
+  assert.equal(routeReviewRest.workflow, "capability_route_review");
+  assert.equal(routeReviewRest.review_status, "ready");
+  assert.equal(routePlanRest.workflow, "capability_route_plan");
+  assert.equal(routePlanRest.preflight.ok, true);
   assert.equal(adapter.mcp.result.structuredContent.workflow, "adapter_plan");
   assert.equal(adapter.mcp.result.structuredContent.plan.candidates[0].status, "ready");
   assert.equal(adapter.mcp.result.structuredContent.selected_adapter.id, "bioprism.tabular");
@@ -2134,6 +2455,7 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(conformance.mcp.result.structuredContent.suite.pyramid.counts.unit, 1);
   assert.equal(release.mcp.result.structuredContent.release_ready, true);
   assert.equal(release.mcp.result.structuredContent.checks[0].advisory, false);
+  assert.equal(bundleVerification.mcp.result.structuredContent.verification_mode, "ed25519_public_key");
   assert.equal(operations.mcp.result.structuredContent.topologies.promise_parity.holds, true);
   assert.equal(operations.mcp.result.structuredContent.metrics.named_but_undefined, 117);
   assert.equal(acceptance.mcp.result.structuredContent.summary.is_decidable, false);
@@ -2210,6 +2532,56 @@ test("client exposes typed discovery, tool calls, and refusal preservation", asy
   assert.equal(mission.mcp.result.structuredContent.execution_trace.at(-1).event, "mission.completed");
   await assert.rejects(client.callTool("unsafe/name"), ArgumentError);
   await assert.rejects(async () => client.requireToolSuccess(await client.callTool("refuse")), ToolRefusalError);
+});
+
+test("client exposes the two-plane domain acquisition catalogue", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/domain_acquisition_catalogue");
+      return jsonResponse({
+        ok: true,
+        tool: "domain_acquisition_catalogue",
+        request_id: "acquisition-1",
+        mcp: {
+          result: {
+            structuredContent: {
+              ok: true,
+              schema: "bioprism-devplat-domain-acquisition/0.1",
+              workflow: "domain_acquisition_catalogue",
+              execution: "not_started",
+              readiness_claimed: false,
+              catalogue: {
+                schema: "bioprism-devplat-domain-acquisition/0.1",
+                workflow: "domain_acquisition_catalogue",
+                catalogue_digest: "c".repeat(64),
+                adapter_registry: "bioprism-adapter-registry/0.1",
+                adapter_registry_digest: "a".repeat(64),
+                query: { max_domains: 1 },
+                total_group_count: 29,
+                selected_group_count: 1,
+                total_domain_count: 1,
+                selected_domain_count: 1,
+                complete: true,
+                truncated: false,
+                groups: [],
+                routes: [],
+                warnings: [],
+                guarantees: [],
+                limitations: [],
+                digest: "d".repeat(64),
+              },
+              guarantees: [],
+              does_not_claim: ["scientific validity"],
+            },
+          },
+        },
+      });
+    },
+  });
+  const result = await client.domainAcquisitionCatalogue({ include_adapters: true, max_domains: 1 });
+  assert.equal(result.mcp.result.structuredContent.workflow, "domain_acquisition_catalogue");
+  assert.equal(result.mcp.result.structuredContent.catalogue.complete, true);
 });
 
 test("client exposes typed literature binding and citation refusal evidence", async () => {
@@ -2423,11 +2795,12 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
           recent_events: { events: [{ id: 1, event_type: "tool.completed", subject: "modality_catalog", request_id: "req-1", payload: {} }], after: 0, next_after: 1, oldest: 1, newest: 1, gap: false, dropped_events: 0 },
           event_metrics: { retained_events: 1, dropped_events: 0, subscriptions: 1, active_subscriptions: 1, pending_deliveries: 1, dropped_deliveries: 0, next_event_id: 2, next_delivery_id: 2, retained_delivery_attempts: 1, dropped_delivery_attempts: 0, next_attempt_id: 2 },
           mission_summary: { total: 1, status_counts: { succeeded: 1 }, recovered_after_restart: 0, cancel_requested: 0, registry_capacity: 4096 },
-          persistence: { missions: {}, events: {} },
+          persistence: { missions: {}, events: {}, workflow_reconciliations: { ok: true, enabled: true, file_present: true, file_bytes: 128, schema: "bioprism-devplat-domain-workflow-reconciliation-registry/0.1", state_digest: null, integrity_verified: null, registry_size: 1, registry_generation: 1, max_reconciliations: 512, max_file_bytes: 32 * 1024 * 1024, recovery_policy: "digest-valid reports restore", flush: "/v1/domain-workflows/reconciliations/persistence/flush" } },
+          reconciliation_summary: { ok: true, schema: "bioprism-devplat-domain-workflow-reconciliation-summary/0.1", workflow: "domain_workflow_reconciliation_summary", registry_generation: 1, registry_size: 1, completion_status_counts: { complete: 1 }, workflow_count: 1, workflow_status_counts: { oncology: { complete: 1 } }, ready_count: 1, review_required_count: 1, integrity_invalid_count: 0, evidence_invalid_count: 0, execution: "not_started", readiness_claimed: false, guarantees: ["bounded"], limitations: ["audit only"] },
           recovery: {},
           domain_coverage: { schema: "bioprism-domain-coverage/0.1", group_count: 1, returned_groups: 1, truncated: false, max_groups: 64, groups: [{ id: "operations", status: "available", domains: ["operations"], declared_tool_count: 1, advertised_tool_count: 1, missing_tool_count: 0, missing_tools: [], fully_advertised: true }], domain_label_count: 1, declared_tool_memberships: 1, unique_declared_tools: 1, advertised_tool_count: 10, fully_advertised_group_count: 1, groups_with_gaps: 0, declared_tools_not_advertised: [], omitted_declared_tools_not_advertised: 0, advertised_tools_without_group: ["echo"], omitted_advertised_tools_without_group: 0, guarantees: ["exact"], non_claims: ["runtime health"] },
           consistency: { read_model: "bounded composition of process-local stores", cross_store_atomic: false, event_cursor_authoritative: true, clock_free: true, underlying_routes_remain_authoritative: true },
-          capabilities: { tool_count: 10, resource_count: 2, rest_tools: true, json_rpc: true, event_cursor: true, async_missions: true, mission_inventory: true, operations_snapshot: true, domain_coverage: true, delivery_attempt_provenance: true, external_delivery_worker: false },
+          capabilities: { tool_count: 10, resource_count: 2, rest_tools: true, json_rpc: true, event_cursor: true, async_missions: true, mission_inventory: true, workflow_reconciliation_registry: true, workflow_reconciliation_persistence: true, operations_snapshot: true, domain_coverage: true, delivery_attempt_provenance: true, external_delivery_worker: false },
           operator_actions: ["inspect"],
           guarantees: ["bounded"],
           non_claims: ["external effects"],
@@ -2528,6 +2901,9 @@ test("client parses cursor SSE and validates webhook mutations", async () => {
   const operations = await client.operationsSnapshot(0, 2);
   assert.equal(operations.schema, "bioprism-operations-snapshot/0.1");
   assert.equal(operations.mission_summary.status_counts.succeeded, 1);
+  assert.equal(operations.reconciliation_summary.ready_count, 1);
+  assert.equal(operations.reconciliation_summary.workflow_status_counts.oncology.complete, 1);
+  assert.equal(operations.persistence.workflow_reconciliations.registry_size, 1);
   assert.equal(operations.recent_events.events[0].id, 1);
   assert.equal(operations.domain_coverage.groups[0].id, "operations");
   assert.equal(operations.consistency.cross_store_atomic, false);
@@ -2554,11 +2930,39 @@ test("client exposes asynchronous mission submission, status, and cancellation",
     baseUrl: "https://example.test",
     fetch: async (input, init) => {
       const path = new URL(String(input)).pathname;
+      const body = JSON.parse(String(init.body ?? "{}"));
       if (path === "/v1/missions" && init.method === "POST") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "queued", cancel_requested: false });
       }
       if (path === "/v1/missions/preflight" && init.method === "POST") {
         return jsonResponse({ ok: true, workflow: "agent_mission", execution: "planned", mission_status: "planned", preflight: true, dispatch: "not_started", results: [] });
+      }
+      if (path === "/v1/missions/queue" && init.method === "GET") {
+        const queue = {
+          ok: true,
+          enabled: true,
+          file_present: true,
+          file_bytes: 128,
+          schema_version: 1,
+          state_digest: "q".repeat(64),
+          integrity_verified: true,
+          max_file_bytes: 64 * 1024 * 1024,
+          admission_policy: { max_jobs: 4096, max_active_leases: 64, observed_active_leases: 0, max_jobs_by_class: { evaluate: 4096 }, max_active_leases_by_class: { evaluate: 64 }, backpressure: "refuse_before_checkpoint_mutation" },
+          authority_digest: "a".repeat(64),
+          authority: { configured: true, revision: 3, event_count: 3, queue_state_digest: "q".repeat(64), integrity_verified: true, lock_present: false, execution_scope: "cooperating processes sharing one local filesystem" },
+          registry_size: 1,
+          jobs: [{ mission_id: "async-1", resource_class: "evaluate", idempotency: "idempotent", idempotency_key: "k".repeat(64), priority: 8, max_attempts: 3, state: "succeeded", attempts: 1, attempts_remaining: 2, reason: null, spec_returned: false }],
+          startup_recoveries: [],
+          automatic_resume: false,
+          execution_scope: "cooperating processes sharing one local filesystem",
+          recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
+          does_not_claim: ["multi-host consensus or network-partition tolerance", "external effect completion", "provider authentication or tenant isolation"],
+          flush: "/v1/missions/queue/persistence/flush",
+        };
+        return jsonResponse({ ok: true, schema: "bioprism-mission-queue/0.1", queue, guarantees: ["queue state is projected from the typed factory lifecycle"], links: { persistence: "/v1/missions/queue/persistence", flush: "/v1/missions/queue/persistence/flush", mission_inventory: "/v1/missions" } });
+      }
+      if (path === "/v1/missions/queue/persistence" && init.method === "GET") {
+        return jsonResponse({ ok: true, enabled: true, file_present: true, file_bytes: 128, schema_version: 1, state_digest: "q".repeat(64), authority_digest: "a".repeat(64), authority: { configured: true, revision: 3, event_count: 3, queue_state_digest: "q".repeat(64), integrity_verified: true, lock_present: false, execution_scope: "cooperating processes sharing one local filesystem" }, integrity_verified: true, max_file_bytes: 64 * 1024 * 1024, admission_policy: { max_jobs: 4096, max_active_leases: 64, observed_active_leases: 0, max_jobs_by_class: { evaluate: 4096 }, max_active_leases_by_class: { evaluate: 64 }, backpressure: "refuse_before_checkpoint_mutation" }, registry_size: 0, jobs: [], startup_recoveries: [], automatic_resume: false, execution_scope: "cooperating processes sharing one local filesystem", recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched", does_not_claim: ["multi-host consensus or network-partition tolerance", "provider authentication or tenant isolation"], flush: "/v1/missions/queue/persistence/flush" });
       }
       if (path === "/v1/missions/async-1" && init.method === "GET") {
         return jsonResponse({ ok: true, mission_id: "async-1", status: "succeeded", cancel_requested: false, progress: { phase: "succeeded", current_wave: 0, total_steps: 1, completed_steps: 1, active_steps: 0, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, trace_sequence: 4, last_event: "mission.completed" }, result: { mission_status: "succeeded" } });
@@ -2580,6 +2984,12 @@ test("client exposes asynchronous mission submission, status, and cancellation",
       }
       if (path === "/v1/missions" && init.method === "GET") {
         return jsonResponse({ ok: true, missions: [{ mission_id: "async-1", status: "succeeded", cancel_requested: false, progress: { phase: "succeeded", current_wave: 0, total_steps: 1, completed_steps: 1, active_steps: 0, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, trace_sequence: 4, last_event: "mission.completed" }, summary: { total_steps: 1, completed_steps: 1, succeeded: 1, refused: 0, blocked: 0, cancelled: 0, required_failures: 0, returned_bytes: 14, result_available: true }, poll: "/v1/missions/async-1", cancel: "/v1/missions/async-1/cancel" }], returned: 1, total_matching: 1, limit: 5, truncated: false, status_filter: "succeeded" });
+      }
+      if (path === "/v1/missions/queue/persistence/flush" && init.method === "POST") {
+        return jsonResponse({ ok: true, bytes: 128, queue: { ok: true, enabled: true, file_present: true, file_bytes: 128, schema_version: 1, state_digest: "q".repeat(64), authority_digest: "a".repeat(64), authority: { configured: true, revision: 3, event_count: 3, queue_state_digest: "q".repeat(64), integrity_verified: true, lock_present: false, execution_scope: "cooperating processes sharing one local filesystem" }, integrity_verified: true, max_file_bytes: 64 * 1024 * 1024, admission_policy: { max_jobs: 4096, max_active_leases: 64, observed_active_leases: 0, max_jobs_by_class: { evaluate: 4096 }, max_active_leases_by_class: { evaluate: 64 }, backpressure: "refuse_before_checkpoint_mutation" }, registry_size: 0, jobs: [], startup_recoveries: [], automatic_resume: false, execution_scope: "cooperating processes sharing one local filesystem", recovery_policy: "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched", does_not_claim: ["external effect completion", "multi-host consensus or network-partition tolerance", "provider authentication or tenant isolation"], flush: "/v1/missions/queue/persistence/flush" }, request_id: "queue-flush-1", guarantees: ["the checkpoint is content-addressed and atomically replaced"] });
+      }
+      if (path === "/v1/missions/queue/authority/release-lock" && init.method === "POST") {
+        return jsonResponse({ ok: true, receipt: { operator: body.operator, reason: body.reason, previous_owner: { owner_id: "dead-api-process", acquired_unix_nanos: 7 }, recorded_revision: 4 }, request_id: "queue-unlock-1", warning: "release is an explicit operator override" });
       }
       return jsonResponse({ ok: false, error: { code: "not_found", message: path } }, 404);
     },
@@ -2612,6 +3022,17 @@ test("client exposes asynchronous mission submission, status, and cancellation",
   const inventory = await client.missions("succeeded", 5);
   assert.equal(inventory.missions[0].mission_id, "async-1");
   assert.equal(inventory.missions[0].progress.completed_steps, 1);
+  const queue = await client.missionQueue();
+  assert.equal(queue.queue.jobs[0].state, "succeeded");
+  assert.equal(queue.queue.jobs[0].spec_returned, false);
+  const queuePersistence = await client.missionQueuePersistence();
+  assert.equal(queuePersistence.automatic_resume, false);
+  assert.equal(queuePersistence.integrity_verified, true);
+  assert.equal(queuePersistence.authority.queue_state_digest, queuePersistence.state_digest);
+  const lockRelease = await client.releaseMissionQueueLock("on-call", "confirmed previous process exited");
+  assert.equal(lockRelease.receipt.previous_owner.owner_id, "dead-api-process");
+  const queueFlush = await client.flushMissionQueuePersistence();
+  assert.equal(queueFlush.bytes, 128);
   const cancelled = await client.cancelMission("async-1", "operator stop");
   assert.equal(cancelled.cancel_requested, true);
   assert.equal(cancelled.cancel_reason, "operator stop");
@@ -3367,6 +3788,41 @@ test("client exposes epistemic context frontier and subset refusal accounting", 
   assert.equal(result.mcp.result.structuredContent.subset_rows_omitted, 1);
 });
 
+test("client exposes decision-equivalence quotient compression and action boundary", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/epistemic_decision_quotient");
+      return jsonResponse({ ok: true, tool: "epistemic_decision_quotient", request_id: "quotient-1", mcp: { result: { structuredContent: {
+        ok: true,
+        schema: "bioprism-mcp/epistemic-decision-quotient/0.1",
+        quotient: {
+          schema_version: "bioprism-epistemic-decision-quotient/0.1",
+          basis: "permitted_loss_difference_profile",
+          permitted_actions: ["accept", "defer"],
+          original_model_count: 3,
+          quotient_model_count: 2,
+          merged_model_count: 1,
+          model_to_class: { "m-a": 0, "m-b": 0, "m-c": 1 },
+          classes: [
+            { class_index: 0, representative_model: "m-a", members: ["m-a", "m-b"], loss_differences: { accept: 0, defer: 4 }, preferred_actions: ["accept"] },
+            { class_index: 1, representative_model: "m-c", members: ["m-c"], loss_differences: { accept: 0, defer: 9 }, preferred_actions: ["accept"] },
+          ],
+        },
+        summary: { original_model_count: 3, quotient_model_count: 2, merged_model_count: 1, compressed: true, compression_fraction: 2 / 3 },
+        guarantees: ["exact permitted-action profile"],
+      } } } });
+    },
+  });
+  const result = await client.epistemicDecisionQuotient({
+    problem: { actions: ["accept", "defer"], models: ["m-a", "m-b", "m-c"], loss: [0, 0, 0, 4, 4, 9] },
+    permitted_actions: ["defer", "accept"],
+  });
+  assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/epistemic-decision-quotient/0.1");
+  assert.equal(result.mcp.result.structuredContent.summary.merged_model_count, 1);
+  assert.deepEqual(result.mcp.result.structuredContent.quotient.permitted_actions, ["accept", "defer"]);
+});
+
 test("client exposes epistemic selection guarantee and exactness posture", async () => {
   const client = new ApiClient({
     baseUrl: "http://127.0.0.1:18788",
@@ -3924,4 +4380,635 @@ test("client exposes contextual-integrity verdicts and Pareto safety posture", a
   assert.equal(result.mcp.result.structuredContent.schema, "bioprism-mcp/bioeval-boundary-audit/0.1");
   assert.equal(result.mcp.result.structuredContent.boundary.violation_count, 3);
   assert.equal(result.mcp.result.structuredContent.composite.status, "refused");
+});
+
+test("client exposes durable evaluator replay query retention semantics", async () => {
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/missions/mission-ts/evaluator-replay");
+      assert.equal(url.searchParams.get("include_fixtures"), "false");
+      assert.equal(url.searchParams.get("max_items"), "64");
+      return jsonResponse({
+        ok: true,
+        schema: "bioprism-api/mission-evaluator-replay-query/0.1",
+        workflow: "mission_evaluator_replay_query",
+        mission_id: "mission-ts",
+        query: { include_fixtures: false, max_items: 64 },
+        retention: {
+          mode: "summary_only",
+          result_retained: false,
+          summary_retained: true,
+          result_omitted: { bytes: 300000, sha256: "r".repeat(64) },
+        },
+        replay: {
+          schema: "bioprism-devplat-mission-evaluator-replay-summary/0.1",
+          workflow: "mission_evaluator_replay_summary",
+          mission_id: "mission-ts",
+          coverage: { catalogue_group_count: 29, replayed_group_count: 1, complete: false },
+          execution: "not_started",
+        },
+        execution: "not_started",
+        guarantees: ["summary is structural and non-executing"],
+        limitations: ["raw mission output was omitted"],
+        links: {
+          mission: "/v1/missions/mission-ts",
+          claims: "/v1/missions/mission-ts/claims",
+          replay: "/v1/missions/mission-ts/evaluator-replay",
+        },
+      });
+    },
+  });
+  const result = await client.missionEvaluatorReplayQuery("mission-ts", {
+    include_fixtures: false,
+    max_items: 64,
+  });
+  assert.equal(result.workflow, "mission_evaluator_replay_query");
+  assert.equal(result.retention.mode, "summary_only");
+  assert.equal(result.retention.result_retained, false);
+  assert.equal(result.replay.workflow, "mission_evaluator_replay_summary");
+});
+
+test("client exposes evaluator replay comparison and content-addressed evidence bundles", async () => {
+  const mcpClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/tools/mission_evaluator_replay_compare");
+      const body = JSON.parse(init.body);
+      assert.equal(body.include_fixtures, false);
+      assert.equal(body.max_items, 64);
+      return jsonResponse({
+        ok: true,
+        tool: "mission_evaluator_replay_compare",
+        request_id: "r6compare",
+        mcp: { result: { structuredContent: {
+          ok: true,
+          schema: "bioprism-devplat-mission-evaluator-replay-compare/0.1",
+          workflow: "mission_evaluator_replay_compare",
+          mission_id: "mission-ts",
+          replay: { workflow: "mission_evaluator_replay", execution: "not_started" },
+          catalog_drift: {
+            status: "drifted_with_missing_bindings",
+            digest_match: false,
+            missing_referenced_adapter_ids: ["oncoworlds.assay_fidelity"],
+          },
+          execution: "not_started",
+          guarantees: ["comparison is non-executing"],
+          limitations: ["historical catalogue rows were not retained"],
+        } } },
+      });
+    },
+  });
+  const comparison = await mcpClient.missionEvaluatorReplayCompare({
+    mission: { workflow: "agent_mission" },
+    include_fixtures: false,
+    max_items: 64,
+  });
+  assert.equal(comparison.mcp.result.structuredContent.workflow, "mission_evaluator_replay_compare");
+  assert.equal(comparison.mcp.result.structuredContent.catalog_drift.status, "drifted_with_missing_bindings");
+
+  const restClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/missions/mission-ts/evaluator-replay/compare") {
+        assert.equal(url.searchParams.get("include_fixtures"), "false");
+        assert.equal(url.searchParams.get("max_items"), "64");
+        return jsonResponse({
+          ok: true,
+          schema: "bioprism-api/mission-evaluator-replay-compare/0.1",
+          workflow: "mission_evaluator_replay_compare",
+          mission_id: "mission-ts",
+          replay: { workflow: "mission_evaluator_replay" },
+          catalog_drift: { status: "unchanged", digest_match: true },
+          execution: "not_started",
+          guarantees: [],
+          limitations: [],
+        });
+      }
+      assert.equal(url.pathname, "/v1/missions/mission-ts/evidence-bundle");
+      assert.equal(url.searchParams.get("include_result"), "false");
+      assert.equal(url.searchParams.get("include_trace"), "true");
+      assert.equal(url.searchParams.get("include_fixtures"), "false");
+      assert.equal(url.searchParams.get("max_items"), "64");
+      return jsonResponse({
+        ok: true,
+        schema: "bioprism-api/mission-evidence-bundle/0.1",
+        workflow: "mission_evidence_bundle_export",
+        mission_id: "mission-ts",
+        retention: { mode: "summary_only", result_retained: false, result_included: false },
+        result: null,
+        result_digest: null,
+        evaluator_replay: { workflow: "mission_evaluator_replay_summary" },
+        catalog_drift: { status: "unchanged" },
+        trace: [{ sequence: 1, event: "mission_succeeded" }],
+        export: { include_result: false, include_trace: true, include_fixtures: false, max_items: 64, execution: "not_started" },
+        bundle_digest: "b".repeat(64),
+        guarantees: [],
+        limitations: [],
+        links: {},
+      });
+    },
+  });
+  const restComparison = await restClient.missionEvaluatorReplayCompareQuery("mission-ts", {
+    include_fixtures: false,
+    max_items: 64,
+  });
+  assert.equal(restComparison.catalog_drift.status, "unchanged");
+  const bundle = await restClient.missionEvidenceBundle("mission-ts", {
+    include_result: false,
+    include_trace: true,
+    include_fixtures: false,
+    max_items: 64,
+  });
+  assert.equal(bundle.workflow, "mission_evidence_bundle_export");
+  assert.equal(bundle.retention.mode, "summary_only");
+  assert.equal(bundle.bundle_digest.length, 64);
+});
+
+test("client exposes portable mission evidence bundle verification over MCP and REST", async () => {
+  const bundle = { schema: "bioprism-api/mission-evidence-bundle/0.1", bundle_digest: "b".repeat(64) };
+  const verification = {
+    ok: true,
+    schema: "bioprism-devplat-mission-evidence-bundle-verify/0.1",
+    workflow: "mission_evidence_bundle_verify",
+    valid: true,
+    verification_status: "verified",
+    bundle_digest: "b".repeat(64),
+    recomputed_bundle_digest: "b".repeat(64),
+    result_digest: null,
+    recomputed_result_digest: null,
+    checks: { bundle_digest: true, retention: true, trace: true, export: true },
+    failures: [],
+    execution: "not_started",
+  };
+
+  const mcpClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/tools/mission_evidence_bundle_verify");
+      assert.deepEqual(JSON.parse(init.body), { bundle });
+      return jsonResponse({
+        ok: true,
+        tool: "mission_evidence_bundle_verify",
+        mcp: { result: { structuredContent: verification } },
+      });
+    },
+  });
+  const mcpResult = await mcpClient.missionEvidenceBundleVerify({ bundle });
+  assert.equal(mcpResult.mcp.result.structuredContent.valid, true);
+
+  const restClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/evidence-bundles/verify");
+      assert.deepEqual(JSON.parse(init.body), { bundle });
+      return jsonResponse(verification);
+    },
+  });
+  const restResult = await restClient.missionEvidenceBundleVerifyQuery(bundle);
+  assert.equal(restResult.workflow, "mission_evidence_bundle_verify");
+  assert.equal(restResult.verification_status, "verified");
+});
+
+test("client exposes evidence registry import, query, and get over REST and MCP", async () => {
+  const bundle = { schema: "bioprism-api/mission-evidence-bundle/0.1", bundle_digest: "c".repeat(64) };
+  const imported = {
+    ok: true,
+    schema: "bioprism-devplat-evidence-bundle-import/0.1",
+    workflow: "mission_evidence_bundle_import",
+    bundle_digest: "c".repeat(64),
+    created: true,
+    already_present: false,
+    registry_generation: 1,
+    registry_size: 1,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const queried = {
+    ok: true,
+    schema: "bioprism-devplat-evidence-bundle-query/0.1",
+    workflow: "mission_evidence_bundle_query",
+    filters: { domain: "oncology", max_items: 10, include_bundles: false },
+    registry_generation: 1,
+    registry_size: 1,
+    rows: [{ bundle_digest: "c".repeat(64), domains: ["oncology"] }],
+    next_after: null,
+    has_more: false,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const fetched = {
+    ok: true,
+    schema: "bioprism-mcp/mission-evidence-bundle-record/0.1",
+    workflow: "mission_evidence_bundle_get",
+    bundle_digest: "c".repeat(64),
+    bundle,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const restClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/evidence-bundles" && init.method === "POST") {
+        assert.deepEqual(JSON.parse(init.body), { bundle });
+        return jsonResponse(imported, 201);
+      }
+      if (url.pathname === "/v1/evidence-bundles") {
+        assert.equal(url.searchParams.get("domain"), "oncology");
+        assert.equal(url.searchParams.get("max_items"), "10");
+        return jsonResponse(queried);
+      }
+      assert.equal(url.pathname, `/v1/evidence-bundles/${"c".repeat(64)}`);
+      return jsonResponse(fetched);
+    },
+  });
+  assert.equal((await restClient.missionEvidenceBundleImport({ bundle })).workflow, "mission_evidence_bundle_import");
+  assert.equal((await restClient.missionEvidenceBundleQuery({ domain: "oncology", max_items: 10 })).rows.length, 1);
+  assert.equal((await restClient.missionEvidenceBundleGet("c".repeat(64))).bundle_digest.length, 64);
+
+  const mcpClient = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, `/v1/tools/${url.pathname.split("/").at(-1)}`);
+      const name = url.pathname.split("/").at(-1);
+      const body = JSON.parse(init.body);
+      const response = name === "mission_evidence_bundle_import" ? imported : name === "mission_evidence_bundle_query" ? queried : fetched;
+      if (name === "mission_evidence_bundle_import") assert.deepEqual(body, { bundle });
+      return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: response } } });
+    },
+  });
+  assert.equal((await mcpClient.missionEvidenceBundleImportTool({ bundle })).mcp.result.structuredContent.created, true);
+  assert.equal((await mcpClient.missionEvidenceBundleQueryTool({ domain: "oncology" })).mcp.result.structuredContent.rows.length, 1);
+  assert.equal((await mcpClient.missionEvidenceBundleGetTool("c".repeat(64))).mcp.result.structuredContent.workflow, "mission_evidence_bundle_get");
+});
+
+test("client exposes scoped domain workflow catalogue and instantiation over REST and MCP", async () => {
+  const catalogue = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-catalogue/0.1",
+    workflow: "domain_workflow_catalogue",
+    catalog_digest: "c".repeat(64),
+    workflow_catalog_digest: "w".repeat(64),
+    workflow_count: 29,
+    workflows: [{ workflow_id: "documentation_and_knowledge", workflow_digest: "d".repeat(64), domain_contract: { posture: "advisory_review_gated" }, domain_contract_digest: "k".repeat(64), tool_contracts: [], tools: {}, recommended_stages: [] }],
+    coverage: { group_count: 29, all_groups_have_workflow: true },
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const instantiated = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-instantiate/0.1",
+    workflow: "domain_workflow_instantiate",
+    workflow_id: "documentation_and_knowledge",
+    workflow_digest: "d".repeat(64),
+    catalog_digest: "c".repeat(64),
+    mission: { mission_id: "ts-workflow" },
+    selection: { selected_tools: ["workspace_capabilities"] },
+    domain_contract: { posture: "advisory_review_gated" },
+    domain_contract_digest: "k".repeat(64),
+    evidence_plan: { schema: "bioprism-devplat-domain-workflow-contract/0.1", steps: [{ step_id: "catalog" }], completion: {} },
+    preflight: { required: true, dispatch: "not_started" },
+    preflight_report: { workflow: "agent_mission", dispatch: "not_started" },
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const args = {
+    workflow_id: "documentation_and_knowledge",
+    mission_id: "ts-workflow",
+    goal: "discover capabilities",
+    steps: [{ id: "catalog", tool: "workspace_capabilities", arguments: {} }],
+  };
+  const verifyArgs = { instantiation: instantiated, replay_request: args };
+  const portfolioArgs = { requests: [args], policy: { require_complete_catalogue: false } };
+  const verified = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-verify/0.1",
+    workflow: "domain_workflow_verify",
+    workflow_id: "documentation_and_knowledge",
+    workflow_digest: "d".repeat(64),
+    catalog_digest: "c".repeat(64),
+    domain_contract_digest: "k".repeat(64),
+    mission_id: "ts-workflow",
+    mission_digest: "m".repeat(64),
+    structural_valid: true,
+    valid: true,
+    verification_status: "verified",
+    replay: { requested: true, status: "matched", matched: true },
+    mission_preflight: { requested: true, status: "matched", matched: true, ok: true },
+    mismatches: [],
+    preflight_report: { workflow: "agent_mission", dispatch: "not_started" },
+    dispatch: "not_started",
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const portfolio = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-portfolio/0.1",
+    workflow: "domain_workflow_portfolio",
+    portfolio_digest: "f".repeat(64),
+    valid: true,
+    portfolio_ready: true,
+    portfolio_status: "ready_for_authoritative_preflight",
+    policy: { allow_partial: false, require_complete_catalogue: false },
+    coverage: { catalogue_group_count: 29, requested_item_count: 1, complete_catalogue: false },
+    summary: { instantiated_count: 1, blocked_count: 0, preflight_blocked_count: 0, preflight_status: "matched" },
+    items: [{ workflow_id: "documentation_and_knowledge", status: "instantiated", mission_preflight: { matched: true } }],
+    preflight: { required: true, status: "matched", matched: true },
+    dispatch: "not_started",
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const portfolioVerifyArgs = {
+    portfolio,
+    replay_requests: [args],
+    policy: { require_replay: true },
+  };
+  const portfolioVerified = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-portfolio-verify/0.1",
+    workflow: "domain_workflow_portfolio_verify",
+    portfolio_digest: "f".repeat(64),
+    observed_portfolio_digest: "f".repeat(64),
+    portfolio_digest_matched: true,
+    portfolio_verify_digest: "a".repeat(64),
+    valid: true,
+    portfolio_ready: true,
+    verification_status: "verified",
+    policy: { allow_partial: false, require_complete_catalogue: false, require_replay: true },
+    coverage: { complete_catalogue: false, replay_complete: true },
+    summary: { verified_count: 1, replay_matched_count: 1 },
+    items: [{ status: "verified" }],
+    mismatches: [],
+    preflight: { required: true, status: "matched", matched: true },
+    dispatch: "not_started",
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const scaffoldArgs = {
+    workflow_id: "documentation_and_knowledge",
+    mission_id: "ts-scaffold",
+    goal: "discover capabilities",
+    tools: ["workspace_capabilities"],
+    arguments: { workspace_capabilities: {} },
+  };
+  const scaffolded = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-scaffold/0.1",
+    workflow: "domain_workflow_scaffold",
+    workflow_id: "documentation_and_knowledge",
+    workflow_digest: "d".repeat(64),
+    catalog_digest: "c".repeat(64),
+    selection: { strategy: "explicit_tools", selected_tools: ["workspace_capabilities"] },
+    instantiation: instantiated,
+    mission: { mission_id: "ts-scaffold" },
+    domain_contract: { posture: "advisory_review_gated" },
+    domain_contract_digest: "k".repeat(64),
+    evidence_plan: { schema: "bioprism-devplat-domain-workflow-contract/0.1", steps: [], completion: {} },
+    execution: "not_started",
+    readiness_claimed: false,
+    preflight: { required: true, dispatch: "not_started" },
+    preflight_status: "ready",
+    preflight_report: { workflow: "agent_mission", dispatch: "not_started" },
+    guarantees: [],
+    limitations: [],
+    next_actions: ["review"],
+  };
+  const rest = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/domain-workflows" && init.method === "GET") return jsonResponse(catalogue);
+      if (url.pathname === "/v1/domain-workflows/scaffold") {
+        assert.deepEqual(JSON.parse(init.body), scaffoldArgs);
+        return jsonResponse(scaffolded);
+      }
+      if (url.pathname === "/v1/domain-workflows/portfolio") {
+        assert.deepEqual(JSON.parse(init.body), portfolioArgs);
+        return jsonResponse(portfolio);
+      }
+      if (url.pathname === "/v1/domain-workflows/portfolio/verify") {
+        assert.deepEqual(JSON.parse(init.body), portfolioVerifyArgs);
+        return jsonResponse(portfolioVerified);
+      }
+      if (url.pathname === "/v1/domain-workflows/verify") {
+        assert.deepEqual(JSON.parse(init.body), verifyArgs);
+        return jsonResponse(verified);
+      }
+      assert.equal(url.pathname, "/v1/domain-workflows/instantiate");
+      assert.deepEqual(JSON.parse(init.body), args);
+      return jsonResponse(instantiated);
+    },
+  });
+  assert.equal((await rest.domainWorkflowCatalogueQuery()).workflow_count, 29);
+  assert.equal((await rest.domainWorkflowScaffoldQuery(scaffoldArgs)).readiness_claimed, false);
+  assert.equal((await rest.domainWorkflowInstantiateQuery(args)).preflight_report.workflow, "agent_mission");
+  assert.equal((await rest.domainWorkflowPortfolioQuery(portfolioArgs)).portfolio_ready, true);
+  assert.equal((await rest.domainWorkflowPortfolioVerifyQuery(portfolioVerifyArgs)).verification_status, "verified");
+  assert.equal((await rest.domainWorkflowVerifyQuery(verifyArgs)).verification_status, "verified");
+
+  const reconciliationArgs = {
+    instantiation: instantiated,
+    mission_report: { workflow: "agent_mission", mission_status: "succeeded" },
+  };
+  const reconciliation = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-reconcile/0.1",
+    workflow: "domain_workflow_reconcile",
+    workflow_id: "documentation_and_knowledge",
+    workflow_digest: "d".repeat(64),
+    catalog_digest: "c".repeat(64),
+    domain_contract_digest: "k".repeat(64),
+    mission_id: "ts-workflow",
+    mission_plan_digest: "p".repeat(64),
+    reconciliation_digest: "r".repeat(64),
+    source: "mission_report",
+    report: { present: true },
+    retention: {},
+    bundle_verification: {},
+    evidence: { evidence_valid: true },
+    completion: { status: "complete", ready: true },
+    integrity: { valid: true },
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const restReconcile = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/domain-workflows/reconcile");
+      assert.deepEqual(JSON.parse(init.body), reconciliationArgs);
+      return jsonResponse(reconciliation);
+    },
+  });
+  assert.equal((await restReconcile.domainWorkflowReconcileQuery(reconciliationArgs)).completion.status, "complete");
+
+  const mcp = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      const name = url.pathname.split("/").at(-1);
+      assert.equal(url.pathname, `/v1/tools/${name}`);
+      if (name === "domain_workflow_catalogue") return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: catalogue } } });
+      if (name === "domain_workflow_scaffold") {
+        assert.deepEqual(JSON.parse(init.body), scaffoldArgs);
+        return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: scaffolded } } });
+      }
+      if (name === "domain_workflow_portfolio") {
+        assert.deepEqual(JSON.parse(init.body), portfolioArgs);
+        return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: portfolio } } });
+      }
+      if (name === "domain_workflow_portfolio_verify") {
+        assert.deepEqual(JSON.parse(init.body), portfolioVerifyArgs);
+        return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: portfolioVerified } } });
+      }
+      if (name === "domain_workflow_verify") {
+        assert.deepEqual(JSON.parse(init.body), verifyArgs);
+        return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: verified } } });
+      }
+      assert.deepEqual(JSON.parse(init.body), args);
+      return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: instantiated } } });
+    },
+  });
+  assert.equal((await mcp.domainWorkflowCatalogue()).mcp.result.structuredContent.workflow_count, 29);
+  assert.equal((await mcp.domainWorkflowScaffold(scaffoldArgs)).mcp.result.structuredContent.readiness_claimed, false);
+  assert.equal((await mcp.domainWorkflowInstantiate(args)).mcp.result.structuredContent.execution, "not_started");
+  assert.equal((await mcp.domainWorkflowPortfolio(portfolioArgs)).mcp.result.structuredContent.portfolio_status, "ready_for_authoritative_preflight");
+  assert.equal((await mcp.domainWorkflowPortfolioVerify(portfolioVerifyArgs)).mcp.result.structuredContent.verification_status, "verified");
+  assert.equal((await mcp.domainWorkflowVerify(verifyArgs)).mcp.result.structuredContent.verification_status, "verified");
+  const mcpReconcile = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/v1/tools/domain_workflow_reconcile");
+      assert.deepEqual(JSON.parse(init.body), reconciliationArgs);
+      return jsonResponse({ ok: true, tool: "domain_workflow_reconcile", mcp: { result: { structuredContent: reconciliation } } });
+    },
+  });
+  assert.equal((await mcpReconcile.domainWorkflowReconcile(reconciliationArgs)).mcp.result.structuredContent.completion.ready, true);
+
+  const reconciliationDigest = reconciliation.reconciliation_digest;
+  const importReport = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-reconciliation-import/0.1",
+    workflow: "domain_workflow_reconciliation_import",
+    reconciliation_digest: reconciliationDigest,
+    created: true,
+    already_present: false,
+    registry_generation: 1,
+    registry_size: 1,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const queryReport = {
+    ok: true,
+    schema: "bioprism-devplat-domain-workflow-reconciliation-query/0.1",
+    workflow: "domain_workflow_reconciliation_query",
+    filters: { mission_id: "ts-workflow", max_items: 8, include_records: true },
+    registry_generation: 1,
+    registry_size: 1,
+    rows: [{ reconciliation_digest: reconciliationDigest, record: reconciliation }],
+    next_after: null,
+    has_more: false,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const getReport = {
+    ok: true,
+    schema: "bioprism-api/domain-workflow-reconciliation-record/0.1",
+    workflow: "domain_workflow_reconciliation_get",
+    reconciliation_digest: reconciliationDigest,
+    record: reconciliation,
+    execution: "not_started",
+    guarantees: [],
+    limitations: [],
+  };
+  const restRegistry = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/domain-workflows/reconciliations" && init.method === "POST") {
+        assert.deepEqual(JSON.parse(init.body), { record: reconciliation });
+        return jsonResponse(importReport, 201);
+      }
+      if (url.pathname === "/v1/domain-workflows/reconciliations" && init.method === "GET") {
+        assert.equal(url.searchParams.get("mission_id"), "ts-workflow");
+        assert.equal(url.searchParams.get("limit"), "8");
+        assert.equal(url.searchParams.get("include_records"), "true");
+        return jsonResponse(queryReport);
+      }
+      assert.equal(url.pathname, `/v1/domain-workflows/reconciliations/${reconciliationDigest}`);
+      assert.equal(init.method, "GET");
+      return jsonResponse(getReport);
+    },
+  });
+  assert.equal((await restRegistry.domainWorkflowReconciliationImport({ record: reconciliation })).created, true);
+  assert.equal((await restRegistry.domainWorkflowReconciliationQuery({ mission_id: "ts-workflow", max_items: 8, include_records: true })).rows.length, 1);
+  assert.equal((await restRegistry.domainWorkflowReconciliationGet(reconciliationDigest)).record.workflow, "domain_workflow_reconcile");
+
+  const mcpRegistry = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      const name = new URL(String(input)).pathname.split("/").at(-1);
+      const body = JSON.parse(init.body);
+      if (name === "domain_workflow_reconciliation_import") assert.deepEqual(body, { record: reconciliation });
+      if (name === "domain_workflow_reconciliation_query") assert.equal(body.mission_id, "ts-workflow");
+      if (name === "domain_workflow_reconciliation_get") assert.equal(body.reconciliation_digest, reconciliationDigest);
+      const payload = name.endsWith("import") ? importReport : name.endsWith("query") ? queryReport : getReport;
+      return jsonResponse({ ok: true, tool: name, mcp: { result: { structuredContent: payload } } });
+    },
+  });
+  assert.equal((await mcpRegistry.domainWorkflowReconciliationImportTool({ record: reconciliation })).mcp.result.structuredContent.created, true);
+  assert.equal((await mcpRegistry.domainWorkflowReconciliationQueryTool({ mission_id: "ts-workflow" })).mcp.result.structuredContent.rows.length, 1);
+  assert.equal((await mcpRegistry.domainWorkflowReconciliationGetTool(reconciliationDigest)).mcp.result.structuredContent.record.workflow, "domain_workflow_reconcile");
+});
+
+test("client sends registry-backed public bundle verification as an explicit policy mode", async () => {
+  const args = {
+    publicly_attested_bundle: { bundle: {}, attestation: {} },
+    trust_registry: {
+      schema_version: "bioprism-key-registry/0.1",
+      keys: {},
+      delegations: {},
+      rotations: {},
+      revocations: {},
+    },
+    trust_policy: { purpose: "publisher_manifest", max_delegation_depth: 32 },
+  };
+  const client = new ApiClient({
+    baseUrl: "http://127.0.0.1:18788",
+    fetch: async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/v1/tools/bundle_verify");
+      assert.deepEqual(JSON.parse(init.body), args);
+      return jsonResponse({ ok: true, tool: "bundle_verify", mcp: { result: { structuredContent: {
+        ok: true,
+        verification_mode: "ed25519_registry_policy",
+        manifest_digest: "a".repeat(64),
+        trust_report: { verdict: "trusted" },
+      } } } });
+    },
+  });
+  const result = await client.bundleVerify(args);
+  assert.equal(result.mcp.result.structuredContent.verification_mode, "ed25519_registry_policy");
+  await assert.rejects(
+    client.bundleVerify({ publicly_attested_bundle: {}, trust_registry: args.trust_registry, trust_policy: args.trust_policy, verification_key: { key_identity: "x", public_key: `ed25519:${"a".repeat(64)}`, validity: {} } }),
+    ArgumentError,
+  );
 });

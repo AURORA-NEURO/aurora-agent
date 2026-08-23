@@ -5,9 +5,14 @@ edition = "2021"
 description = "Developer platform remainder and reference examples: which of them are artifacts this repository can hold, and predicates over the ones that are"
 
 [dependencies]
+bioprism-adapter = { workspace = true }
 bioprism-ids = { workspace = true }
+bioprism-interweave = { workspace = true }
 bioprism-devx = { workspace = true }
 bioprism-cookbook = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-epistemic = { workspace = true }

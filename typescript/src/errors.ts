@@ -83,6 +83,108 @@ export class ToolRefusalError extends PrismSdkError {
   }
 }
 
+/** A provider credential was missing, expired, revoked, or used with the wrong provider. */
+export class CredentialError extends PrismSdkError {
+  override readonly name = "CredentialError";
+}
+
+/** A caller-owned autonomous cost ceiling refused another provider attempt. */
+export class AutonomousCostBudgetError extends ArgumentError {
+  override readonly name = "AutonomousCostBudgetError";
+  readonly maxCostUnits: number;
+  readonly consumedCostUnits: number;
+  readonly requestedCostUnits: number;
+
+  constructor(message: string, options: { maxCostUnits: number; consumedCostUnits: number; requestedCostUnits: number }) {
+    super(message);
+    this.maxCostUnits = options.maxCostUnits;
+    this.consumedCostUnits = options.consumedCostUnits;
+    this.requestedCostUnits = options.requestedCostUnits;
+  }
+}
+
+/** Stable, redacted categories for provider failures; raw provider bodies are never embedded. */
+export type ProviderErrorCode =
+  | "provider_error"
+  | "configuration"
+  | "invalid_request"
+  | "credential"
+  | "aborted"
+  | "timeout"
+  | "circuit_open"
+  | "http_4xx"
+  | "http_5xx"
+  | "transport"
+  | "response_too_large"
+  | "protocol"
+  | "invalid_response";
+
+export type ProviderFailureClass =
+  | "provider_error"
+  | "credential_error"
+  | "aborted"
+  | "timeout"
+  | "circuit_open"
+  | "http_4xx"
+  | "http_5xx"
+  | "response_too_large"
+  | "protocol_error";
+
+/** A provider invocation failed at the bounded transport or protocol boundary. */
+export class ProviderRuntimeError extends PrismSdkError {
+  override readonly name = "ProviderRuntimeError";
+  readonly retryable: boolean;
+  readonly statusCode?: number;
+  readonly circuitOpen: boolean;
+  readonly code: ProviderErrorCode;
+  readonly provider?: string;
+  readonly operation?: string;
+  readonly requestId?: string;
+  readonly retryAfterMs?: number;
+  readonly attempt?: number;
+
+  constructor(
+    message: string,
+    options: {
+      retryable?: boolean;
+      statusCode?: number;
+      circuitOpen?: boolean;
+      code?: ProviderErrorCode;
+      provider?: string;
+      operation?: string;
+      requestId?: string;
+      retryAfterMs?: number;
+      attempt?: number;
+    } = {},
+  ) {
+    super(message);
+    this.retryable = options.retryable ?? false;
+    this.statusCode = options.statusCode;
+    this.circuitOpen = options.circuitOpen ?? false;
+    this.code = options.code ?? (this.circuitOpen ? "circuit_open" : "provider_error");
+    this.provider = options.provider;
+    this.operation = options.operation;
+    this.requestId = options.requestId;
+    this.retryAfterMs = options.retryAfterMs;
+    this.attempt = options.attempt;
+  }
+
+  /** Add non-secret execution context without changing the stable failure category. */
+  withContext(context: { provider?: string; operation?: string; requestId?: string; attempt?: number }): ProviderRuntimeError {
+    return new ProviderRuntimeError(this.message, {
+      retryable: this.retryable,
+      statusCode: this.statusCode,
+      circuitOpen: this.circuitOpen,
+      code: this.code,
+      provider: context.provider ?? this.provider,
+      operation: context.operation ?? this.operation,
+      requestId: context.requestId ?? this.requestId,
+      retryAfterMs: this.retryAfterMs,
+      attempt: context.attempt ?? this.attempt,
+    });
+  }
+}
+
 export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

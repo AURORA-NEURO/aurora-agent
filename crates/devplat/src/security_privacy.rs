@@ -185,7 +185,7 @@ pub struct SecurityPrivacyReview {
     pub findings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecurityPrivacyControls {
     #[serde(default)]
     pub access_control: bool,
@@ -207,23 +207,6 @@ pub struct SecurityPrivacyControls {
     pub vendor_review: bool,
     #[serde(default)]
     pub data_subject_rights: bool,
-}
-
-impl Default for SecurityPrivacyControls {
-    fn default() -> Self {
-        Self {
-            access_control: false,
-            encryption_at_rest: false,
-            encryption_in_transit: false,
-            key_rotation: false,
-            audit_logging: false,
-            vulnerability_management: false,
-            backup_restore: false,
-            incident_response: false,
-            vendor_review: false,
-            data_subject_rights: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -405,7 +388,12 @@ impl SecurityPrivacyManifest {
 
         bound(&mut issues, "assets", self.assets.len(), MAX_ASSETS);
         bound(&mut issues, "flows", self.flows.len(), MAX_FLOWS);
-        bound(&mut issues, "identities", self.identities.len(), MAX_IDENTITIES);
+        bound(
+            &mut issues,
+            "identities",
+            self.identities.len(),
+            MAX_IDENTITIES,
+        );
         bound(&mut issues, "threats", self.threats.len(), MAX_THREATS);
         bound(&mut issues, "reviews", self.reviews.len(), MAX_REVIEWS);
         if self.schema != SECURITY_PRIVACY_MANIFEST_SCHEMA {
@@ -413,7 +401,10 @@ impl SecurityPrivacyManifest {
                 &mut issues,
                 "schema_mismatch",
                 "manifest",
-                format!("expected {SECURITY_PRIVACY_MANIFEST_SCHEMA}, got {}", self.schema),
+                format!(
+                    "expected {SECURITY_PRIVACY_MANIFEST_SCHEMA}, got {}",
+                    self.schema
+                ),
                 "regenerate the declaration with the published security/privacy schema",
             );
         }
@@ -472,7 +463,12 @@ impl SecurityPrivacyManifest {
             }
             if self.policies.require_retention
                 && sensitive
-                && asset.deletion_process.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_none()
+                && asset
+                    .deletion_process
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .is_none()
             {
                 blocking(
                     &mut issues,
@@ -500,8 +496,17 @@ impl SecurityPrivacyManifest {
             flows.insert(flow.id.clone(), flow);
             let asset_valid = assets.contains_key(&flow.asset);
             let purpose_valid = !flow.purpose.trim().is_empty();
-            let legal_basis_present = flow.legal_basis.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_some();
-            let authorization_present = flow.authorization_evidence.as_deref().map(valid_digest).unwrap_or(false);
+            let legal_basis_present = flow
+                .legal_basis
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .is_some();
+            let authorization_present = flow
+                .authorization_evidence
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
             if !asset_valid {
                 blocking(
                     &mut issues,
@@ -511,7 +516,8 @@ impl SecurityPrivacyManifest {
                     "bind every flow to an inventoried asset",
                 );
             }
-            if flow.source.trim().is_empty() || flow.destination.trim().is_empty() || !purpose_valid {
+            if flow.source.trim().is_empty() || flow.destination.trim().is_empty() || !purpose_valid
+            {
                 blocking(
                     &mut issues,
                     "flow_incomplete",
@@ -548,10 +554,22 @@ impl SecurityPrivacyManifest {
                 continue;
             }
             identities.insert(identity.id.clone(), identity);
-            let assets_valid = identity.assets.iter().all(|asset| assets.contains_key(asset));
+            let assets_valid = identity
+                .assets
+                .iter()
+                .all(|asset| assets.contains_key(asset));
             let authentication_valid = !identity.authentication.trim().is_empty();
-            let sensitive_access = identity.assets.iter().any(|asset| assets.get(asset).map(|a| a.classification.sensitive()).unwrap_or(false));
-            if identity.id.trim().is_empty() || identity.principal.trim().is_empty() || identity.role.trim().is_empty() || !authentication_valid {
+            let sensitive_access = identity.assets.iter().any(|asset| {
+                assets
+                    .get(asset)
+                    .map(|a| a.classification.sensitive())
+                    .unwrap_or(false)
+            });
+            if identity.id.trim().is_empty()
+                || identity.principal.trim().is_empty()
+                || identity.role.trim().is_empty()
+                || !authentication_valid
+            {
                 blocking(
                     &mut issues,
                     "identity_incomplete",
@@ -595,10 +613,27 @@ impl SecurityPrivacyManifest {
             }
             threats.insert(threat.id.clone(), threat);
             let high_or_worse = threat.severity.high_or_worse();
-            let control_present = threat.control.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_some();
-            let evidence_valid = threat.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let rationale_present = threat.rationale.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_some();
-            let treated = matches!(threat.status, SecurityPrivacyThreatStatus::Mitigated | SecurityPrivacyThreatStatus::Accepted);
+            let control_present = threat
+                .control
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .is_some();
+            let evidence_valid = threat
+                .evidence_digest
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
+            let rationale_present = threat
+                .rationale
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .is_some();
+            let treated = matches!(
+                threat.status,
+                SecurityPrivacyThreatStatus::Mitigated | SecurityPrivacyThreatStatus::Accepted
+            );
             if threat.id.trim().is_empty() || threat.category.trim().is_empty() {
                 blocking(
                     &mut issues,
@@ -617,7 +652,9 @@ impl SecurityPrivacyManifest {
                     "mitigate it, or record a bounded accepted-risk decision",
                 );
             }
-            if threat.status == SecurityPrivacyThreatStatus::Mitigated && (!control_present || !evidence_valid) {
+            if threat.status == SecurityPrivacyThreatStatus::Mitigated
+                && (!control_present || !evidence_valid)
+            {
                 blocking(
                     &mut issues,
                     "mitigation_evidence_missing",
@@ -626,7 +663,9 @@ impl SecurityPrivacyManifest {
                     "bind the mitigation to a control and content-addressed evidence",
                 );
             }
-            if threat.status == SecurityPrivacyThreatStatus::Accepted && (!rationale_present || !evidence_valid) {
+            if threat.status == SecurityPrivacyThreatStatus::Accepted
+                && (!rationale_present || !evidence_valid)
+            {
                 blocking(
                     &mut issues,
                     "accepted_risk_record_missing",
@@ -660,11 +699,19 @@ impl SecurityPrivacyManifest {
                 continue;
             }
             reviews.insert(review.id.clone(), review);
-            let reviewer_independent = !review.reviewer.trim().is_empty() && review.reviewer != self.system.owner;
-            let evidence_valid = review.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
+            let reviewer_independent =
+                !review.reviewer.trim().is_empty() && review.reviewer != self.system.owner;
+            let evidence_valid = review
+                .evidence_digest
+                .as_deref()
+                .map(valid_digest)
+                .unwrap_or(false);
             let current = review.status != SecurityPrivacyReviewStatus::Expired;
             let complete = review.status == SecurityPrivacyReviewStatus::Complete;
-            if review.id.trim().is_empty() || review.scope.trim().is_empty() || !reviewer_independent {
+            if review.id.trim().is_empty()
+                || review.scope.trim().is_empty()
+                || !reviewer_independent
+            {
                 blocking(
                     &mut issues,
                     "review_independence_missing",
@@ -683,7 +730,12 @@ impl SecurityPrivacyManifest {
                 );
             }
             if review.findings.len() > MAX_LIST {
-                bound(&mut issues, "review.findings", review.findings.len(), MAX_LIST);
+                bound(
+                    &mut issues,
+                    "review.findings",
+                    review.findings.len(),
+                    MAX_LIST,
+                );
             }
         }
         if self.reviews.is_empty() && self.policies.require_reviews {
@@ -698,15 +750,48 @@ impl SecurityPrivacyManifest {
 
         let controls = [
             ("access_control", self.controls.access_control, true),
-            ("encryption_at_rest", self.controls.encryption_at_rest, self.assets.iter().any(|a| a.classification.sensitive())),
-            ("encryption_in_transit", self.controls.encryption_in_transit, !self.flows.is_empty()),
-            ("key_rotation", self.controls.key_rotation, self.assets.iter().any(|a| a.classification.sensitive())),
+            (
+                "encryption_at_rest",
+                self.controls.encryption_at_rest,
+                self.assets.iter().any(|a| a.classification.sensitive()),
+            ),
+            (
+                "encryption_in_transit",
+                self.controls.encryption_in_transit,
+                !self.flows.is_empty(),
+            ),
+            (
+                "key_rotation",
+                self.controls.key_rotation,
+                self.assets.iter().any(|a| a.classification.sensitive()),
+            ),
             ("audit_logging", self.controls.audit_logging, true),
-            ("vulnerability_management", self.controls.vulnerability_management, true),
-            ("backup_restore", self.controls.backup_restore, self.assets.iter().any(|a| a.classification.sensitive())),
+            (
+                "vulnerability_management",
+                self.controls.vulnerability_management,
+                true,
+            ),
+            (
+                "backup_restore",
+                self.controls.backup_restore,
+                self.assets.iter().any(|a| a.classification.sensitive()),
+            ),
             ("incident_response", self.controls.incident_response, true),
-            ("vendor_review", self.controls.vendor_review, self.flows.iter().any(|f| f.destination.to_ascii_lowercase().contains("vendor") || f.destination.to_ascii_lowercase().contains("external"))),
-            ("data_subject_rights", self.controls.data_subject_rights, self.assets.iter().any(|a| matches!(a.classification, SecurityPrivacyClassification::Regulated))),
+            (
+                "vendor_review",
+                self.controls.vendor_review,
+                self.flows.iter().any(|f| {
+                    f.destination.to_ascii_lowercase().contains("vendor")
+                        || f.destination.to_ascii_lowercase().contains("external")
+                }),
+            ),
+            (
+                "data_subject_rights",
+                self.controls.data_subject_rights,
+                self.assets
+                    .iter()
+                    .any(|a| matches!(a.classification, SecurityPrivacyClassification::Regulated)),
+            ),
         ];
         for (name, enabled, required) in controls {
             if self.policies.require_controls && required && !enabled {
@@ -720,52 +805,215 @@ impl SecurityPrivacyManifest {
             }
         }
 
-        let asset_audits = self.assets.iter().map(|asset| {
-            let sensitive = asset.classification.sensitive();
-            let purpose_valid = !asset.purpose.trim().is_empty();
-            let retention_valid = !sensitive || asset.retention_days.is_some();
-            let residency_valid = !asset.residency.trim().is_empty();
-            let deletion_valid = !sensitive || asset.deletion_process.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_some();
-            SecurityPrivacyAssetAudit { asset_id: asset.id.clone(), purpose_valid, retention_valid, residency_valid, deletion_valid, sensitive, ready: purpose_valid && retention_valid && residency_valid && deletion_valid }
-        }).collect::<Vec<_>>();
-        let flow_audits = self.flows.iter().map(|flow| {
-            let asset_valid = assets.contains_key(&flow.asset);
-            let purpose_valid = !flow.purpose.trim().is_empty();
-            let legal_basis_present = flow.legal_basis.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_some();
-            let authorization_present = flow.authorization_evidence.as_deref().map(valid_digest).unwrap_or(false);
-            let allowed = flow.decision != SecurityPrivacyFlowDecision::Deny;
-            SecurityPrivacyFlowAudit { flow_id: flow.id.clone(), asset_valid, purpose_valid, legal_basis_present, authorization_present, allowed, ready: asset_valid && purpose_valid && (!allowed || (legal_basis_present && authorization_present)) }
-        }).collect::<Vec<_>>();
-        let identity_audits = self.identities.iter().map(|identity| {
-            let assets_valid = identity.assets.iter().all(|asset| assets.contains_key(asset));
-            let authentication_valid = !identity.authentication.trim().is_empty();
-            let sensitive_access = identity.assets.iter().any(|asset| assets.get(asset).map(|a| a.classification.sensitive()).unwrap_or(false));
-            let ready = assets_valid && authentication_valid && identity.least_privilege && (!sensitive_access || identity.mfa);
-            SecurityPrivacyIdentityAudit { identity_id: identity.id.clone(), assets_valid, authentication_valid, mfa: identity.mfa, least_privilege: identity.least_privilege, sensitive_access, ready }
-        }).collect::<Vec<_>>();
-        let threat_audits = self.threats.iter().map(|threat| {
-            let high_or_worse = threat.severity.high_or_worse();
-            let treated = matches!(threat.status, SecurityPrivacyThreatStatus::Mitigated | SecurityPrivacyThreatStatus::Accepted);
-            let control_present = threat.control.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_some();
-            let evidence_valid = threat.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let rationale_present = threat.rationale.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_some();
-            let ready = (!high_or_worse || treated) && match threat.status { SecurityPrivacyThreatStatus::Mitigated => control_present && evidence_valid, SecurityPrivacyThreatStatus::Accepted => rationale_present && evidence_valid, _ => false };
-            SecurityPrivacyThreatAudit { threat_id: threat.id.clone(), high_or_worse, treated, control_present, evidence_valid, rationale_present, ready }
-        }).collect::<Vec<_>>();
-        let review_audits = self.reviews.iter().map(|review| {
-            let reviewer_independent = !review.reviewer.trim().is_empty() && review.reviewer != self.system.owner;
-            let evidence_valid = review.evidence_digest.as_deref().map(valid_digest).unwrap_or(false);
-            let current = review.status != SecurityPrivacyReviewStatus::Expired;
-            let complete = review.status == SecurityPrivacyReviewStatus::Complete;
-            SecurityPrivacyReviewAudit { review_id: review.id.clone(), reviewer_independent, evidence_valid, current, complete, ready: reviewer_independent && evidence_valid && current && complete }
-        }).collect::<Vec<_>>();
+        let asset_audits = self
+            .assets
+            .iter()
+            .map(|asset| {
+                let sensitive = asset.classification.sensitive();
+                let purpose_valid = !asset.purpose.trim().is_empty();
+                let retention_valid = !sensitive || asset.retention_days.is_some();
+                let residency_valid = !asset.residency.trim().is_empty();
+                let deletion_valid = !sensitive
+                    || asset
+                        .deletion_process
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .is_some();
+                SecurityPrivacyAssetAudit {
+                    asset_id: asset.id.clone(),
+                    purpose_valid,
+                    retention_valid,
+                    residency_valid,
+                    deletion_valid,
+                    sensitive,
+                    ready: purpose_valid && retention_valid && residency_valid && deletion_valid,
+                }
+            })
+            .collect::<Vec<_>>();
+        let flow_audits = self
+            .flows
+            .iter()
+            .map(|flow| {
+                let asset_valid = assets.contains_key(&flow.asset);
+                let purpose_valid = !flow.purpose.trim().is_empty();
+                let legal_basis_present = flow
+                    .legal_basis
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .is_some();
+                let authorization_present = flow
+                    .authorization_evidence
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                let allowed = flow.decision != SecurityPrivacyFlowDecision::Deny;
+                SecurityPrivacyFlowAudit {
+                    flow_id: flow.id.clone(),
+                    asset_valid,
+                    purpose_valid,
+                    legal_basis_present,
+                    authorization_present,
+                    allowed,
+                    ready: asset_valid
+                        && purpose_valid
+                        && (!allowed || (legal_basis_present && authorization_present)),
+                }
+            })
+            .collect::<Vec<_>>();
+        let identity_audits = self
+            .identities
+            .iter()
+            .map(|identity| {
+                let assets_valid = identity
+                    .assets
+                    .iter()
+                    .all(|asset| assets.contains_key(asset));
+                let authentication_valid = !identity.authentication.trim().is_empty();
+                let sensitive_access = identity.assets.iter().any(|asset| {
+                    assets
+                        .get(asset)
+                        .map(|a| a.classification.sensitive())
+                        .unwrap_or(false)
+                });
+                let ready = assets_valid
+                    && authentication_valid
+                    && identity.least_privilege
+                    && (!sensitive_access || identity.mfa);
+                SecurityPrivacyIdentityAudit {
+                    identity_id: identity.id.clone(),
+                    assets_valid,
+                    authentication_valid,
+                    mfa: identity.mfa,
+                    least_privilege: identity.least_privilege,
+                    sensitive_access,
+                    ready,
+                }
+            })
+            .collect::<Vec<_>>();
+        let threat_audits = self
+            .threats
+            .iter()
+            .map(|threat| {
+                let high_or_worse = threat.severity.high_or_worse();
+                let treated = matches!(
+                    threat.status,
+                    SecurityPrivacyThreatStatus::Mitigated | SecurityPrivacyThreatStatus::Accepted
+                );
+                let control_present = threat
+                    .control
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .is_some();
+                let evidence_valid = threat
+                    .evidence_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                let rationale_present = threat
+                    .rationale
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .is_some();
+                let ready = (!high_or_worse || treated)
+                    && match threat.status {
+                        SecurityPrivacyThreatStatus::Mitigated => control_present && evidence_valid,
+                        SecurityPrivacyThreatStatus::Accepted => {
+                            rationale_present && evidence_valid
+                        }
+                        _ => false,
+                    };
+                SecurityPrivacyThreatAudit {
+                    threat_id: threat.id.clone(),
+                    high_or_worse,
+                    treated,
+                    control_present,
+                    evidence_valid,
+                    rationale_present,
+                    ready,
+                }
+            })
+            .collect::<Vec<_>>();
+        let review_audits = self
+            .reviews
+            .iter()
+            .map(|review| {
+                let reviewer_independent =
+                    !review.reviewer.trim().is_empty() && review.reviewer != self.system.owner;
+                let evidence_valid = review
+                    .evidence_digest
+                    .as_deref()
+                    .map(valid_digest)
+                    .unwrap_or(false);
+                let current = review.status != SecurityPrivacyReviewStatus::Expired;
+                let complete = review.status == SecurityPrivacyReviewStatus::Complete;
+                SecurityPrivacyReviewAudit {
+                    review_id: review.id.clone(),
+                    reviewer_independent,
+                    evidence_valid,
+                    current,
+                    complete,
+                    ready: reviewer_independent && evidence_valid && current && complete,
+                }
+            })
+            .collect::<Vec<_>>();
         let control_audits = controls_from(&self.controls, &self.assets, &self.flows);
-        let enabled_controls = control_audits.iter().filter(|control| control.enabled).count();
-        let high_or_worse_threats = self.threats.iter().filter(|threat| threat.severity.high_or_worse()).count();
-        let treated_threats = self.threats.iter().filter(|threat| matches!(threat.status, SecurityPrivacyThreatStatus::Mitigated | SecurityPrivacyThreatStatus::Accepted)).count();
-        let current_reviews = self.reviews.iter().filter(|review| review.status != SecurityPrivacyReviewStatus::Expired).count();
-        let counts = SecurityPrivacyCounts { assets: self.assets.len(), sensitive_assets: self.assets.iter().filter(|asset| asset.classification.sensitive()).count(), flows: self.flows.len(), allowed_flows: self.flows.iter().filter(|flow| flow.decision != SecurityPrivacyFlowDecision::Deny).count(), identities: self.identities.len(), hardened_identities: identity_audits.iter().filter(|identity| identity.ready).count(), threats: self.threats.len(), high_or_worse_threats, treated_threats, reviews: self.reviews.len(), current_reviews, controls: control_audits.len(), enabled_controls };
-        let valid = !issues.iter().any(|issue| issue.severity == SecurityPrivacyIssueSeverity::Blocking);
+        let enabled_controls = control_audits
+            .iter()
+            .filter(|control| control.enabled)
+            .count();
+        let high_or_worse_threats = self
+            .threats
+            .iter()
+            .filter(|threat| threat.severity.high_or_worse())
+            .count();
+        let treated_threats = self
+            .threats
+            .iter()
+            .filter(|threat| {
+                matches!(
+                    threat.status,
+                    SecurityPrivacyThreatStatus::Mitigated | SecurityPrivacyThreatStatus::Accepted
+                )
+            })
+            .count();
+        let current_reviews = self
+            .reviews
+            .iter()
+            .filter(|review| review.status != SecurityPrivacyReviewStatus::Expired)
+            .count();
+        let counts = SecurityPrivacyCounts {
+            assets: self.assets.len(),
+            sensitive_assets: self
+                .assets
+                .iter()
+                .filter(|asset| asset.classification.sensitive())
+                .count(),
+            flows: self.flows.len(),
+            allowed_flows: self
+                .flows
+                .iter()
+                .filter(|flow| flow.decision != SecurityPrivacyFlowDecision::Deny)
+                .count(),
+            identities: self.identities.len(),
+            hardened_identities: identity_audits
+                .iter()
+                .filter(|identity| identity.ready)
+                .count(),
+            threats: self.threats.len(),
+            high_or_worse_threats,
+            treated_threats,
+            reviews: self.reviews.len(),
+            current_reviews,
+            controls: control_audits.len(),
+            enabled_controls,
+        };
+        let valid = !issues
+            .iter()
+            .any(|issue| issue.severity == SecurityPrivacyIssueSeverity::Blocking);
         Ok(SecurityPrivacyAudit {
             schema: SECURITY_PRIVACY_AUDIT_SCHEMA.into(),
             manifest_schema: self.schema.clone(),
@@ -794,29 +1042,87 @@ impl SecurityPrivacyManifest {
     }
 }
 
-fn controls_from(controls: &SecurityPrivacyControls, assets: &[SecurityPrivacyAsset], flows: &[SecurityPrivacyFlow]) -> Vec<SecurityPrivacyControlAudit> {
+fn controls_from(
+    controls: &SecurityPrivacyControls,
+    assets: &[SecurityPrivacyAsset],
+    flows: &[SecurityPrivacyFlow],
+) -> Vec<SecurityPrivacyControlAudit> {
     let rows = [
         ("access_control", controls.access_control, true),
-        ("encryption_at_rest", controls.encryption_at_rest, assets.iter().any(|asset| asset.classification.sensitive())),
-        ("encryption_in_transit", controls.encryption_in_transit, !flows.is_empty()),
-        ("key_rotation", controls.key_rotation, assets.iter().any(|asset| asset.classification.sensitive())),
+        (
+            "encryption_at_rest",
+            controls.encryption_at_rest,
+            assets.iter().any(|asset| asset.classification.sensitive()),
+        ),
+        (
+            "encryption_in_transit",
+            controls.encryption_in_transit,
+            !flows.is_empty(),
+        ),
+        (
+            "key_rotation",
+            controls.key_rotation,
+            assets.iter().any(|asset| asset.classification.sensitive()),
+        ),
         ("audit_logging", controls.audit_logging, true),
-        ("vulnerability_management", controls.vulnerability_management, true),
-        ("backup_restore", controls.backup_restore, assets.iter().any(|asset| asset.classification.sensitive())),
+        (
+            "vulnerability_management",
+            controls.vulnerability_management,
+            true,
+        ),
+        (
+            "backup_restore",
+            controls.backup_restore,
+            assets.iter().any(|asset| asset.classification.sensitive()),
+        ),
         ("incident_response", controls.incident_response, true),
-        ("vendor_review", controls.vendor_review, flows.iter().any(|flow| flow.destination.to_ascii_lowercase().contains("vendor") || flow.destination.to_ascii_lowercase().contains("external"))),
-        ("data_subject_rights", controls.data_subject_rights, assets.iter().any(|asset| matches!(asset.classification, SecurityPrivacyClassification::Regulated))),
+        (
+            "vendor_review",
+            controls.vendor_review,
+            flows.iter().any(|flow| {
+                flow.destination.to_ascii_lowercase().contains("vendor")
+                    || flow.destination.to_ascii_lowercase().contains("external")
+            }),
+        ),
+        (
+            "data_subject_rights",
+            controls.data_subject_rights,
+            assets.iter().any(|asset| {
+                matches!(
+                    asset.classification,
+                    SecurityPrivacyClassification::Regulated
+                )
+            }),
+        ),
     ];
-    rows.into_iter().map(|(control, enabled, required)| SecurityPrivacyControlAudit { control: control.into(), enabled, required, ready: !required || enabled }).collect()
+    rows.into_iter()
+        .map(|(control, enabled, required)| SecurityPrivacyControlAudit {
+            control: control.into(),
+            enabled,
+            required,
+            ready: !required || enabled,
+        })
+        .collect()
 }
 
 fn valid_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn insert_unique<'a, T>(map: &mut BTreeMap<String, &'a T>, id: &str, kind: &str, issues: &mut Vec<SecurityPrivacyIssue>) -> bool {
+fn insert_unique<T>(
+    map: &mut BTreeMap<String, &T>,
+    id: &str,
+    kind: &str,
+    issues: &mut Vec<SecurityPrivacyIssue>,
+) -> bool {
     if map.contains_key(id) {
-        blocking(issues, "duplicate_id", id, format!("duplicate {kind} identifier {id}"), format!("retain one canonical {kind} row for {id}"));
+        blocking(
+            issues,
+            "duplicate_id",
+            id,
+            format!("duplicate {kind} identifier {id}"),
+            format!("retain one canonical {kind} row for {id}"),
+        );
         false
     } else {
         true
@@ -825,16 +1131,46 @@ fn insert_unique<'a, T>(map: &mut BTreeMap<String, &'a T>, id: &str, kind: &str,
 
 fn bound(issues: &mut Vec<SecurityPrivacyIssue>, field: &str, actual: usize, maximum: usize) {
     if actual > maximum {
-        blocking(issues, "bound_exceeded", field, format!("{field} contains {actual} rows, above the bound {maximum}"), format!("split or reduce {field} to at most {maximum} rows"));
+        blocking(
+            issues,
+            "bound_exceeded",
+            field,
+            format!("{field} contains {actual} rows, above the bound {maximum}"),
+            format!("split or reduce {field} to at most {maximum} rows"),
+        );
     }
 }
 
-fn blocking(issues: &mut Vec<SecurityPrivacyIssue>, code: &str, subject: impl Into<String>, detail: impl Into<String>, remediation: impl Into<String>) {
-    issues.push(SecurityPrivacyIssue { code: code.into(), severity: SecurityPrivacyIssueSeverity::Blocking, subject: subject.into(), detail: detail.into(), remediation: remediation.into() });
+fn blocking(
+    issues: &mut Vec<SecurityPrivacyIssue>,
+    code: &str,
+    subject: impl Into<String>,
+    detail: impl Into<String>,
+    remediation: impl Into<String>,
+) {
+    issues.push(SecurityPrivacyIssue {
+        code: code.into(),
+        severity: SecurityPrivacyIssueSeverity::Blocking,
+        subject: subject.into(),
+        detail: detail.into(),
+        remediation: remediation.into(),
+    });
 }
 
-fn warning(issues: &mut Vec<SecurityPrivacyIssue>, code: &str, subject: impl Into<String>, detail: impl Into<String>, remediation: impl Into<String>) {
-    issues.push(SecurityPrivacyIssue { code: code.into(), severity: SecurityPrivacyIssueSeverity::Warning, subject: subject.into(), detail: detail.into(), remediation: remediation.into() });
+fn warning(
+    issues: &mut Vec<SecurityPrivacyIssue>,
+    code: &str,
+    subject: impl Into<String>,
+    detail: impl Into<String>,
+    remediation: impl Into<String>,
+) {
+    issues.push(SecurityPrivacyIssue {
+        code: code.into(),
+        severity: SecurityPrivacyIssueSeverity::Warning,
+        subject: subject.into(),
+        detail: detail.into(),
+        remediation: remediation.into(),
+    });
 }
 
 #[cfg(test)]
@@ -844,13 +1180,71 @@ mod tests {
     fn manifest() -> SecurityPrivacyManifest {
         SecurityPrivacyManifest {
             schema: SECURITY_PRIVACY_MANIFEST_SCHEMA.into(),
-            system: SecurityPrivacySystem { id: "aurora-api".into(), version: "0.1.0".into(), owner: "platform".into() },
-            assets: vec![SecurityPrivacyAsset { id: "patient-records".into(), name: "records".into(), classification: SecurityPrivacyClassification::Regulated, owner: "privacy".into(), purpose: "care research".into(), retention_days: Some(365), residency: "us".into(), deletion_process: Some("erase workflow".into()) }],
-            flows: vec![SecurityPrivacyFlow { id: "api-to-vendor".into(), asset: "patient-records".into(), source: "api".into(), destination: "approved-vendor".into(), purpose: "care research".into(), legal_basis: Some("consent".into()), decision: SecurityPrivacyFlowDecision::Allow, authorization_evidence: Some("a".repeat(64)) }],
-            identities: vec![SecurityPrivacyIdentity { id: "researcher".into(), principal: "team".into(), role: "research".into(), authentication: "oidc".into(), mfa: true, least_privilege: true, assets: vec!["patient-records".into()] }],
-            threats: vec![SecurityPrivacyThreat { id: "exfiltration".into(), category: "data-exfiltration".into(), severity: SecurityPrivacyThreatSeverity::High, status: SecurityPrivacyThreatStatus::Mitigated, control: Some("dlp".into()), evidence_digest: Some("a".repeat(64)), rationale: None }],
-            reviews: vec![SecurityPrivacyReview { id: "pia-1".into(), kind: SecurityPrivacyReviewKind::PrivacyImpact, scope: "patient-records".into(), reviewer: "independent-reviewer".into(), status: SecurityPrivacyReviewStatus::Complete, evidence_digest: Some("a".repeat(64)), expires_at: Some("2027-01-01".into()), findings: vec!["none".into()] }],
-            controls: SecurityPrivacyControls { access_control: true, encryption_at_rest: true, encryption_in_transit: true, key_rotation: true, audit_logging: true, vulnerability_management: true, backup_restore: true, incident_response: true, vendor_review: true, data_subject_rights: true },
+            system: SecurityPrivacySystem {
+                id: "aurora-api".into(),
+                version: "0.1.0".into(),
+                owner: "platform".into(),
+            },
+            assets: vec![SecurityPrivacyAsset {
+                id: "patient-records".into(),
+                name: "records".into(),
+                classification: SecurityPrivacyClassification::Regulated,
+                owner: "privacy".into(),
+                purpose: "care research".into(),
+                retention_days: Some(365),
+                residency: "us".into(),
+                deletion_process: Some("erase workflow".into()),
+            }],
+            flows: vec![SecurityPrivacyFlow {
+                id: "api-to-vendor".into(),
+                asset: "patient-records".into(),
+                source: "api".into(),
+                destination: "approved-vendor".into(),
+                purpose: "care research".into(),
+                legal_basis: Some("consent".into()),
+                decision: SecurityPrivacyFlowDecision::Allow,
+                authorization_evidence: Some("a".repeat(64)),
+            }],
+            identities: vec![SecurityPrivacyIdentity {
+                id: "researcher".into(),
+                principal: "team".into(),
+                role: "research".into(),
+                authentication: "oidc".into(),
+                mfa: true,
+                least_privilege: true,
+                assets: vec!["patient-records".into()],
+            }],
+            threats: vec![SecurityPrivacyThreat {
+                id: "exfiltration".into(),
+                category: "data-exfiltration".into(),
+                severity: SecurityPrivacyThreatSeverity::High,
+                status: SecurityPrivacyThreatStatus::Mitigated,
+                control: Some("dlp".into()),
+                evidence_digest: Some("a".repeat(64)),
+                rationale: None,
+            }],
+            reviews: vec![SecurityPrivacyReview {
+                id: "pia-1".into(),
+                kind: SecurityPrivacyReviewKind::PrivacyImpact,
+                scope: "patient-records".into(),
+                reviewer: "independent-reviewer".into(),
+                status: SecurityPrivacyReviewStatus::Complete,
+                evidence_digest: Some("a".repeat(64)),
+                expires_at: Some("2027-01-01".into()),
+                findings: vec!["none".into()],
+            }],
+            controls: SecurityPrivacyControls {
+                access_control: true,
+                encryption_at_rest: true,
+                encryption_in_transit: true,
+                key_rotation: true,
+                audit_logging: true,
+                vulnerability_management: true,
+                backup_restore: true,
+                incident_response: true,
+                vendor_review: true,
+                data_subject_rights: true,
+            },
             policies: SecurityPrivacyPolicies::default(),
         }
     }
@@ -878,8 +1272,18 @@ mod tests {
         value.controls.encryption_at_rest = false;
         let report = value.audit().expect("audit");
         assert!(!report.valid);
-        for code in ["sensitive_retention_missing", "flow_authorization_missing", "sensitive_mfa_missing", "mitigation_evidence_missing", "review_evidence_missing", "required_control_disabled"] {
-            assert!(report.issues.iter().any(|issue| issue.code == code), "missing {code}");
+        for code in [
+            "sensitive_retention_missing",
+            "flow_authorization_missing",
+            "sensitive_mfa_missing",
+            "mitigation_evidence_missing",
+            "review_evidence_missing",
+            "required_control_disabled",
+        ] {
+            assert!(
+                report.issues.iter().any(|issue| issue.code == code),
+                "missing {code}"
+            );
         }
     }
 
@@ -890,6 +1294,9 @@ mod tests {
         value.threats[0].rationale = None;
         let report = value.audit().expect("audit");
         assert!(!report.valid);
-        assert!(report.issues.iter().any(|issue| issue.code == "accepted_risk_record_missing"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "accepted_risk_record_missing"));
     }
 }

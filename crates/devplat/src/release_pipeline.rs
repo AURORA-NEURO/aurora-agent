@@ -317,17 +317,40 @@ impl ReleasePipelineManifest {
         let mut attestations = BTreeMap::<String, &PipelineAttestation>::new();
         let mut promotions = BTreeMap::<String, &PipelinePromotion>::new();
 
-        bound(&mut issues, "environments", self.environments.len(), MAX_ENVIRONMENTS);
+        bound(
+            &mut issues,
+            "environments",
+            self.environments.len(),
+            MAX_ENVIRONMENTS,
+        );
         bound(&mut issues, "stages", self.stages.len(), MAX_STAGES);
-        bound(&mut issues, "artifacts", self.artifacts.len(), MAX_ARTIFACTS);
-        bound(&mut issues, "attestations", self.attestations.len(), MAX_ATTESTATIONS);
-        bound(&mut issues, "promotions", self.promotions.len(), MAX_PROMOTIONS);
+        bound(
+            &mut issues,
+            "artifacts",
+            self.artifacts.len(),
+            MAX_ARTIFACTS,
+        );
+        bound(
+            &mut issues,
+            "attestations",
+            self.attestations.len(),
+            MAX_ATTESTATIONS,
+        );
+        bound(
+            &mut issues,
+            "promotions",
+            self.promotions.len(),
+            MAX_PROMOTIONS,
+        );
         if self.schema != RELEASE_PIPELINE_MANIFEST_SCHEMA {
             blocking(
                 &mut issues,
                 "schema_mismatch",
                 "manifest",
-                format!("expected {RELEASE_PIPELINE_MANIFEST_SCHEMA}, got {}", self.schema),
+                format!(
+                    "expected {RELEASE_PIPELINE_MANIFEST_SCHEMA}, got {}",
+                    self.schema
+                ),
                 "regenerate the manifest with the published release-pipeline schema",
             );
         }
@@ -360,7 +383,12 @@ impl ReleasePipelineManifest {
         }
 
         for environment in &self.environments {
-            if !insert_unique(&mut environments, &environment.id, "environment", &mut issues) {
+            if !insert_unique(
+                &mut environments,
+                &environment.id,
+                "environment",
+                &mut issues,
+            ) {
                 continue;
             }
             environments.insert(environment.id.clone(), environment);
@@ -397,8 +425,7 @@ impl ReleasePipelineManifest {
                     "declare a positive approval floor for production",
                 );
             }
-            if environment.class == EnvironmentClass::Production
-                && !environment.immutable_artifacts
+            if environment.class == EnvironmentClass::Production && !environment.immutable_artifacts
             {
                 warning(
                     &mut issues,
@@ -445,7 +472,12 @@ impl ReleasePipelineManifest {
                 }
             }
             if stage.produces.len() > MAX_LIST {
-                bound(&mut issues, "stage.produces", stage.produces.len(), MAX_LIST);
+                bound(
+                    &mut issues,
+                    "stage.produces",
+                    stage.produces.len(),
+                    MAX_LIST,
+                );
             }
         }
 
@@ -556,7 +588,12 @@ impl ReleasePipelineManifest {
         }
 
         for attestation in &self.attestations {
-            if !insert_unique(&mut attestations, &attestation.id, "attestation", &mut issues) {
+            if !insert_unique(
+                &mut attestations,
+                &attestation.id,
+                "attestation",
+                &mut issues,
+            ) {
                 continue;
             }
             attestations.insert(attestation.id.clone(), attestation);
@@ -586,7 +623,10 @@ impl ReleasePipelineManifest {
                     &mut issues,
                     "attestation_artifact_missing",
                     &attestation.id,
-                    format!("attestation names undeclared artifact {}", attestation.artifact),
+                    format!(
+                        "attestation names undeclared artifact {}",
+                        attestation.artifact
+                    ),
                     "attach the attestation to a declared artifact",
                 );
             }
@@ -610,7 +650,13 @@ impl ReleasePipelineManifest {
                 continue;
             }
             promotions.insert(promotion.id.clone(), promotion);
-            self.validate_promotion_shape(promotion, &environments, &artifacts, &attestations, &mut issues);
+            self.validate_promotion_shape(
+                promotion,
+                &environments,
+                &artifacts,
+                &attestations,
+                &mut issues,
+            );
         }
         for promotion in &self.promotions {
             if let Some(target) = &promotion.rollback_target {
@@ -792,7 +838,11 @@ impl ReleasePipelineManifest {
 
         let counts = ReleasePipelineCounts {
             environments: self.environments.len(),
-            protected_environments: self.environments.iter().filter(|item| item.protected).count(),
+            protected_environments: self
+                .environments
+                .iter()
+                .filter(|item| item.protected)
+                .count(),
             stages: self.stages.len(),
             required_stages: self.stages.iter().filter(|item| item.required).count(),
             artifacts: self.artifacts.len(),
@@ -801,10 +851,17 @@ impl ReleasePipelineManifest {
             production_promotions: self
                 .promotions
                 .iter()
-                .filter(|item| environments.get(&item.to).map(|env| env.class == EnvironmentClass::Production).unwrap_or(false))
+                .filter(|item| {
+                    environments
+                        .get(&item.to)
+                        .map(|env| env.class == EnvironmentClass::Production)
+                        .unwrap_or(false)
+                })
                 .count(),
         };
-        let valid = !issues.iter().any(|issue| issue.severity == PipelineIssueSeverity::Blocking);
+        let valid = !issues
+            .iter()
+            .any(|issue| issue.severity == PipelineIssueSeverity::Blocking);
         Ok(ReleasePipelineAudit {
             schema: RELEASE_PIPELINE_AUDIT_SCHEMA.into(),
             manifest_schema: self.schema.clone(),
@@ -873,53 +930,126 @@ impl ReleasePipelineManifest {
         issues: &mut Vec<ReleasePipelineIssue>,
     ) {
         let Some(from) = environments.get(&promotion.from) else {
-            blocking(issues, "promotion_source_missing", &promotion.id, format!("source environment {} is undeclared", promotion.from), "declare the source environment");
+            blocking(
+                issues,
+                "promotion_source_missing",
+                &promotion.id,
+                format!("source environment {} is undeclared", promotion.from),
+                "declare the source environment",
+            );
             return;
         };
         let Some(to) = environments.get(&promotion.to) else {
-            blocking(issues, "promotion_target_missing", &promotion.id, format!("target environment {} is undeclared", promotion.to), "declare the target environment");
+            blocking(
+                issues,
+                "promotion_target_missing",
+                &promotion.id,
+                format!("target environment {} is undeclared", promotion.to),
+                "declare the target environment",
+            );
             return;
         };
         if promotion.from == promotion.to {
-            blocking(issues, "promotion_same_environment", &promotion.id, "source and target environments are identical", "name a real promotion boundary");
+            blocking(
+                issues,
+                "promotion_same_environment",
+                &promotion.id,
+                "source and target environments are identical",
+                "name a real promotion boundary",
+            );
         }
         match promotion.kind {
-            PipelinePromotionKind::Advance if from.class.rank() >= to.class.rank() => blocking(issues, "advance_order_invalid", &promotion.id, "an advance must move to a higher environment class", "use a forward environment transition"),
-            PipelinePromotionKind::Rollback if from.class.rank() <= to.class.rank() => blocking(issues, "rollback_order_invalid", &promotion.id, "a rollback must move to a lower environment class", "target a lower environment class"),
+            PipelinePromotionKind::Advance if from.class.rank() >= to.class.rank() => blocking(
+                issues,
+                "advance_order_invalid",
+                &promotion.id,
+                "an advance must move to a higher environment class",
+                "use a forward environment transition",
+            ),
+            PipelinePromotionKind::Rollback if from.class.rank() <= to.class.rank() => blocking(
+                issues,
+                "rollback_order_invalid",
+                &promotion.id,
+                "a rollback must move to a lower environment class",
+                "target a lower environment class",
+            ),
             _ => {}
         }
         if promotion.artifacts.is_empty() {
-            blocking(issues, "promotion_artifacts_missing", &promotion.id, "promotion names no artifacts", "promote explicit immutable artifact identifiers");
+            blocking(
+                issues,
+                "promotion_artifacts_missing",
+                &promotion.id,
+                "promotion names no artifacts",
+                "promote explicit immutable artifact identifiers",
+            );
         }
         for artifact in &promotion.artifacts {
             if !artifacts.contains_key(artifact) {
-                blocking(issues, "promotion_artifact_missing", &promotion.id, format!("artifact {artifact} is undeclared"), "declare the artifact before promotion");
+                blocking(
+                    issues,
+                    "promotion_artifact_missing",
+                    &promotion.id,
+                    format!("artifact {artifact} is undeclared"),
+                    "declare the artifact before promotion",
+                );
             }
         }
         for attestation in &promotion.required_attestations {
             if !attestations.contains_key(attestation) {
-                blocking(issues, "promotion_attestation_reference_missing", &promotion.id, format!("attestation {attestation} is undeclared"), "declare the attestation before requiring it");
+                blocking(
+                    issues,
+                    "promotion_attestation_reference_missing",
+                    &promotion.id,
+                    format!("attestation {attestation} is undeclared"),
+                    "declare the attestation before requiring it",
+                );
             }
         }
         for approval in &promotion.approvals {
-            if !attestations.get(approval).map(|item| item.kind == PipelineAttestationKind::Approval).unwrap_or(false) {
-                blocking(issues, "promotion_approval_reference_invalid", &promotion.id, format!("approval {approval} is not a declared approval attestation"), "reference an approval attestation, not an arbitrary string");
+            if !attestations
+                .get(approval)
+                .map(|item| item.kind == PipelineAttestationKind::Approval)
+                .unwrap_or(false)
+            {
+                blocking(
+                    issues,
+                    "promotion_approval_reference_invalid",
+                    &promotion.id,
+                    format!("approval {approval} is not a declared approval attestation"),
+                    "reference an approval attestation, not an arbitrary string",
+                );
             }
         }
-        if to.class == EnvironmentClass::Production && self.policies.require_protected_production && !to.protected {
-            blocking(issues, "promotion_target_unprotected", &promotion.id, "production target is not protected", "protect the production environment");
+        if to.class == EnvironmentClass::Production
+            && self.policies.require_protected_production
+            && !to.protected
+        {
+            blocking(
+                issues,
+                "promotion_target_unprotected",
+                &promotion.id,
+                "production target is not protected",
+                "protect the production environment",
+            );
         }
     }
 }
 
-fn insert_unique<'a, T>(
-    map: &mut BTreeMap<String, &'a T>,
+fn insert_unique<T>(
+    map: &mut BTreeMap<String, &T>,
     id: &str,
     kind: &'static str,
     issues: &mut Vec<ReleasePipelineIssue>,
 ) -> bool {
     if map.contains_key(id) {
-        blocking(issues, &format!("duplicate_{kind}_id"), id, format!("{kind} identifier occurs more than once"), format!("assign one stable identifier to exactly one {kind}"));
+        blocking(
+            issues,
+            &format!("duplicate_{kind}_id"),
+            id,
+            format!("{kind} identifier occurs more than once"),
+            format!("assign one stable identifier to exactly one {kind}"),
+        );
         false
     } else {
         true
@@ -928,7 +1058,13 @@ fn insert_unique<'a, T>(
 
 fn bound(issues: &mut Vec<ReleasePipelineIssue>, subject: &str, count: usize, maximum: usize) {
     if count > maximum {
-        blocking(issues, "input_bound_exceeded", subject, format!("{count} entries exceed maximum {maximum}"), "split the manifest or reduce the declared surface");
+        blocking(
+            issues,
+            "input_bound_exceeded",
+            subject,
+            format!("{count} entries exceed maximum {maximum}"),
+            "split the manifest or reduce the declared surface",
+        );
     }
 }
 
@@ -936,57 +1072,111 @@ fn valid_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn blocking(issues: &mut Vec<ReleasePipelineIssue>, code: &str, subject: impl Into<String>, detail: impl Into<String>, remediation: impl Into<String>) {
-    issues.push(ReleasePipelineIssue { code: code.into(), severity: PipelineIssueSeverity::Blocking, subject: subject.into(), detail: detail.into(), remediation: remediation.into() });
+fn blocking(
+    issues: &mut Vec<ReleasePipelineIssue>,
+    code: &str,
+    subject: impl Into<String>,
+    detail: impl Into<String>,
+    remediation: impl Into<String>,
+) {
+    issues.push(ReleasePipelineIssue {
+        code: code.into(),
+        severity: PipelineIssueSeverity::Blocking,
+        subject: subject.into(),
+        detail: detail.into(),
+        remediation: remediation.into(),
+    });
 }
 
-fn warning(issues: &mut Vec<ReleasePipelineIssue>, code: &str, subject: impl Into<String>, detail: impl Into<String>, remediation: impl Into<String>) {
-    issues.push(ReleasePipelineIssue { code: code.into(), severity: PipelineIssueSeverity::Warning, subject: subject.into(), detail: detail.into(), remediation: remediation.into() });
+fn warning(
+    issues: &mut Vec<ReleasePipelineIssue>,
+    code: &str,
+    subject: impl Into<String>,
+    detail: impl Into<String>,
+    remediation: impl Into<String>,
+) {
+    issues.push(ReleasePipelineIssue {
+        code: code.into(),
+        severity: PipelineIssueSeverity::Warning,
+        subject: subject.into(),
+        detail: detail.into(),
+        remediation: remediation.into(),
+    });
 }
 
 fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<String>>) {
-    let mut incoming = graph.keys().map(|key| (key.clone(), 0usize)).collect::<BTreeMap<_, _>>();
+    let mut incoming = graph
+        .keys()
+        .map(|key| (key.clone(), 0usize))
+        .collect::<BTreeMap<_, _>>();
     let mut outgoing = BTreeMap::<String, Vec<String>>::new();
     for (node, dependencies) in graph {
         for dependency in dependencies {
             if graph.contains_key(dependency) {
                 *incoming.entry(node.clone()).or_default() += 1;
-                outgoing.entry(dependency.clone()).or_default().push(node.clone());
+                outgoing
+                    .entry(dependency.clone())
+                    .or_default()
+                    .push(node.clone());
             }
         }
     }
-    for values in outgoing.values_mut() { values.sort(); }
-    let mut ready = incoming.iter().filter(|(_, degree)| **degree == 0).map(|(node, _)| node.clone()).collect::<BTreeSet<_>>();
+    for values in outgoing.values_mut() {
+        values.sort();
+    }
+    let mut ready = incoming
+        .iter()
+        .filter(|(_, degree)| **degree == 0)
+        .map(|(node, _)| node.clone())
+        .collect::<BTreeSet<_>>();
     let mut order = Vec::new();
     while let Some(node) = ready.pop_first() {
         order.push(node.clone());
         for dependent in outgoing.get(&node).into_iter().flatten() {
             let degree = incoming.get_mut(dependent).expect("outgoing target exists");
             *degree -= 1;
-            if *degree == 0 { ready.insert(dependent.clone()); }
+            if *degree == 0 {
+                ready.insert(dependent.clone());
+            }
         }
     }
-    let remaining = incoming.iter().filter(|(_, degree)| **degree > 0).map(|(node, _)| node.clone()).collect::<BTreeSet<_>>();
-    if remaining.is_empty() { return (order, Vec::new()); }
+    let remaining = incoming
+        .iter()
+        .filter(|(_, degree)| **degree > 0)
+        .map(|(node, _)| node.clone())
+        .collect::<BTreeSet<_>>();
+    if remaining.is_empty() {
+        return (order, Vec::new());
+    }
     let mut undirected = BTreeMap::<String, BTreeSet<String>>::new();
     for node in &remaining {
         for dependency in graph.get(node).into_iter().flatten() {
             if remaining.contains(dependency) {
-                undirected.entry(node.clone()).or_default().insert(dependency.clone());
-                undirected.entry(dependency.clone()).or_default().insert(node.clone());
+                undirected
+                    .entry(node.clone())
+                    .or_default()
+                    .insert(dependency.clone());
+                undirected
+                    .entry(dependency.clone())
+                    .or_default()
+                    .insert(node.clone());
             }
         }
     }
     let mut seen = BTreeSet::new();
     let mut cycles = Vec::new();
     for node in &remaining {
-        if !seen.insert(node.clone()) { continue; }
+        if !seen.insert(node.clone()) {
+            continue;
+        }
         let mut stack = vec![node.clone()];
         let mut component = Vec::new();
         while let Some(current) = stack.pop() {
             component.push(current.clone());
             for neighbor in undirected.get(&current).into_iter().flatten() {
-                if seen.insert(neighbor.clone()) { stack.push(neighbor.clone()); }
+                if seen.insert(neighbor.clone()) {
+                    stack.push(neighbor.clone());
+                }
             }
         }
         component.sort();
@@ -1003,23 +1193,111 @@ mod tests {
         let digest = "a".repeat(64);
         ReleasePipelineManifest {
             schema: RELEASE_PIPELINE_MANIFEST_SCHEMA.into(),
-            project: PipelineProject { id: "aurora-agent".into(), version: "0.1.0".into(), repository: "github.com/AURORA-NEURO/aurora-agent".into() },
-            source: PipelineSource { ref_name: "main".into(), commit_digest: digest.clone(), workflow: "release.yml".into() },
+            project: PipelineProject {
+                id: "aurora-agent".into(),
+                version: "0.1.0".into(),
+                repository: "github.com/AURORA-NEURO/aurora-agent".into(),
+            },
+            source: PipelineSource {
+                ref_name: "main".into(),
+                commit_digest: digest.clone(),
+                workflow: "release.yml".into(),
+            },
             environments: vec![
-                PipelineEnvironment { id: "staging".into(), class: EnvironmentClass::Staging, protected: true, required_approvals: 0, secrets_allowed: true, immutable_artifacts: true },
-                PipelineEnvironment { id: "production".into(), class: EnvironmentClass::Production, protected: true, required_approvals: 1, secrets_allowed: true, immutable_artifacts: true },
+                PipelineEnvironment {
+                    id: "staging".into(),
+                    class: EnvironmentClass::Staging,
+                    protected: true,
+                    required_approvals: 0,
+                    secrets_allowed: true,
+                    immutable_artifacts: true,
+                },
+                PipelineEnvironment {
+                    id: "production".into(),
+                    class: EnvironmentClass::Production,
+                    protected: true,
+                    required_approvals: 1,
+                    secrets_allowed: true,
+                    immutable_artifacts: true,
+                },
             ],
             stages: vec![
-                PipelineStage { id: "build".into(), kind: PipelineStageKind::Build, environment: "staging".into(), depends_on: vec![], command: Some("cargo build --locked".into()), produces: vec!["binary".into()], required: true },
-                PipelineStage { id: "test".into(), kind: PipelineStageKind::Test, environment: "staging".into(), depends_on: vec!["build".into()], command: Some("cargo test --locked".into()), produces: vec![], required: true },
+                PipelineStage {
+                    id: "build".into(),
+                    kind: PipelineStageKind::Build,
+                    environment: "staging".into(),
+                    depends_on: vec![],
+                    command: Some("cargo build --locked".into()),
+                    produces: vec!["binary".into()],
+                    required: true,
+                },
+                PipelineStage {
+                    id: "test".into(),
+                    kind: PipelineStageKind::Test,
+                    environment: "staging".into(),
+                    depends_on: vec!["build".into()],
+                    command: Some("cargo test --locked".into()),
+                    produces: vec![],
+                    required: true,
+                },
             ],
-            artifacts: vec![PipelineArtifact { id: "binary".into(), kind: PipelineArtifactKind::Binary, digest: digest.clone(), produced_by: "build".into(), inputs: vec![], attestations: vec!["prov".into(), "sig".into()], immutable: true }],
+            artifacts: vec![PipelineArtifact {
+                id: "binary".into(),
+                kind: PipelineArtifactKind::Binary,
+                digest: digest.clone(),
+                produced_by: "build".into(),
+                inputs: vec![],
+                attestations: vec!["prov".into(), "sig".into()],
+                immutable: true,
+            }],
             attestations: vec![
-                PipelineAttestation { id: "prov".into(), kind: PipelineAttestationKind::Provenance, artifact: "binary".into(), digest: digest.clone(), issuer: "ci".into(), statement: "built from pinned source".into() },
-                PipelineAttestation { id: "sig".into(), kind: PipelineAttestationKind::Signature, artifact: "binary".into(), digest: digest.clone(), issuer: "release-key".into(), statement: "signed artifact".into() },
-                PipelineAttestation { id: "approval".into(), kind: PipelineAttestationKind::Approval, artifact: "binary".into(), digest, issuer: "release-board".into(), statement: "approved".into() },
+                PipelineAttestation {
+                    id: "prov".into(),
+                    kind: PipelineAttestationKind::Provenance,
+                    artifact: "binary".into(),
+                    digest: digest.clone(),
+                    issuer: "ci".into(),
+                    statement: "built from pinned source".into(),
+                },
+                PipelineAttestation {
+                    id: "sig".into(),
+                    kind: PipelineAttestationKind::Signature,
+                    artifact: "binary".into(),
+                    digest: digest.clone(),
+                    issuer: "release-key".into(),
+                    statement: "signed artifact".into(),
+                },
+                PipelineAttestation {
+                    id: "approval".into(),
+                    kind: PipelineAttestationKind::Approval,
+                    artifact: "binary".into(),
+                    digest,
+                    issuer: "release-board".into(),
+                    statement: "approved".into(),
+                },
             ],
-            promotions: vec![PipelinePromotion { id: "to-production".into(), kind: PipelinePromotionKind::Advance, from: "staging".into(), to: "production".into(), artifacts: vec!["binary".into()], required_attestations: vec!["prov".into(), "sig".into()], approvals: vec!["approval".into()], rollback_target: Some("rollback".into()) }, PipelinePromotion { id: "rollback".into(), kind: PipelinePromotionKind::Rollback, from: "production".into(), to: "staging".into(), artifacts: vec!["binary".into()], required_attestations: vec!["prov".into()], approvals: vec![], rollback_target: None }],
+            promotions: vec![
+                PipelinePromotion {
+                    id: "to-production".into(),
+                    kind: PipelinePromotionKind::Advance,
+                    from: "staging".into(),
+                    to: "production".into(),
+                    artifacts: vec!["binary".into()],
+                    required_attestations: vec!["prov".into(), "sig".into()],
+                    approvals: vec!["approval".into()],
+                    rollback_target: Some("rollback".into()),
+                },
+                PipelinePromotion {
+                    id: "rollback".into(),
+                    kind: PipelinePromotionKind::Rollback,
+                    from: "production".into(),
+                    to: "staging".into(),
+                    artifacts: vec!["binary".into()],
+                    required_attestations: vec!["prov".into()],
+                    approvals: vec![],
+                    rollback_target: None,
+                },
+            ],
             policies: ReleasePipelinePolicies::default(),
         }
     }
@@ -1040,8 +1318,14 @@ mod tests {
         value.promotions[0].required_attestations = vec!["missing".into()];
         let report = value.audit().unwrap();
         assert!(!report.valid);
-        assert!(report.issues.iter().any(|issue| issue.code == "stage_cycle"));
-        assert!(report.issues.iter().any(|issue| issue.code == "promotion_attestation_reference_missing"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "stage_cycle"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "promotion_attestation_reference_missing"));
     }
 
     #[test]
@@ -1050,7 +1334,10 @@ mod tests {
         value.attestations[1].digest = "b".repeat(64);
         let report = value.audit().unwrap();
         assert!(!report.valid);
-        assert!(report.issues.iter().any(|issue| issue.code == "attestation_digest_mismatch"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "attestation_digest_mismatch"));
     }
 
     #[test]
@@ -1071,7 +1358,13 @@ mod tests {
         value.artifacts = vec![derived, binary];
         let report = value.audit().unwrap();
         assert!(report.valid);
-        assert!(report.artifact_audits.iter().all(|audit| audit.inputs_valid));
-        assert!(!report.issues.iter().any(|issue| issue.code == "stage_output_missing"));
+        assert!(report
+            .artifact_audits
+            .iter()
+            .all(|audit| audit.inputs_valid));
+        assert!(!report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "stage_output_missing"));
     }
 }

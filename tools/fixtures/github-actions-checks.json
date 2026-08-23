@@ -1,0 +1,15 @@
+{
+  "jobs": [
+    {
+      "name": "unit",
+      "conclusion": "success",
+      "duration_ms": 1200,
+      "detail": "fixture row for the repository action contract"
+    },
+    {
+      "name": "lint",
+      "conclusion": "skipped",
+      "detail": "optional fixture check remains visible"
+    }
+  ]
+}

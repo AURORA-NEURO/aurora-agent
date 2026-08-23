@@ -1,0 +1,9 @@
+[
+  {
+    "id": "artifact-unit",
+    "name": "junit",
+    "archive_download_url": "https://example.invalid/artifacts/artifact-unit",
+    "size_in_bytes": 4096,
+    "expired": false
+  }
+]

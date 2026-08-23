@@ -33,6 +33,8 @@ export const MAX_ALLOWED_TOOLS = 512;
 export const MAX_STEP_OUTPUT_BYTES = 20_000_000;
 export const MAX_TOTAL_OUTPUT_BYTES = 20_000_000;
 export const MAX_PARALLEL_WAVE_WIDTH = 16;
+export const MAX_WORKFLOW_BINDING_BYTES = 2_000_000;
+export const MAX_ROUTE_REVIEW_BYTES = 2_000_000;
 
 export class MissionPreflightError extends ArgumentError {
   override readonly name: string = "MissionPreflightError";
@@ -66,6 +68,122 @@ interface NormalPolicy {
   maxTotalOutputBytes: number;
 }
 
+async function collectRouteReviewProvenance(
+  value: unknown,
+  goal: string,
+  steps: AgentMissionStep[],
+  issues: string[],
+): Promise<JsonObject | null> {
+  if (value === undefined) return null;
+  const fail = (message: string): null => {
+    issues.push(`route_review: ${message}`);
+    return null;
+  };
+  if (!isObject(value)) return fail("must be a JSON object");
+  let encodedBytes = 0;
+  try {
+    encodedBytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  } catch (error) {
+    return fail(`cannot be serialized: ${String(error)}`);
+  }
+  if (encodedBytes > MAX_ROUTE_REVIEW_BYTES) {
+    return fail(`exceeds ${MAX_ROUTE_REVIEW_BYTES} serialized bytes`);
+  }
+  const review = value as JsonObject;
+  if (
+    review.ok !== true
+    || review.workflow !== "capability_route_review"
+    || review.review_status !== "ready"
+    || review.handoff_status !== "mission_preflight_required"
+    || review.execution !== "not_started"
+  ) {
+    return fail("must be an ok, ready, non-executing mission handoff");
+  }
+  if (!Array.isArray(review.findings)) return fail("findings must be an array");
+  if (review.findings.length > 0) return fail("findings must be empty before mission preflight");
+
+  const digest = (name: string, candidate: unknown): string | null => {
+    if (typeof candidate !== "string" || !/^[0-9a-f]{64}$/.test(candidate)) {
+      fail(`${name} must be a lowercase 64-character digest`);
+      return null;
+    }
+    return candidate;
+  };
+  const reviewId = digest("review_id", review.review_id);
+  const routeId = digest("route_id", review.route_id);
+  const catalogueDigest = digest("catalog_digest", review.catalog_digest);
+  if (reviewId === null || routeId === null || catalogueDigest === null) return null;
+  if (typeof review.goal !== "string" || !review.goal.trim()) return fail("goal must be a non-empty string");
+  if (review.goal !== goal) return fail("goal does not match mission goal");
+
+  if (!isObject(review.mission_draft)) return fail("ready review requires a mission_draft object");
+  const draft = review.mission_draft as JsonObject;
+  if (draft.goal !== goal) return fail("mission_draft.goal does not match mission goal");
+  if (!Array.isArray(draft.steps)) return fail("mission_draft.steps must be an array");
+  if (!Array.isArray(draft.dependency_waves)) return fail("mission_draft.dependency_waves must be an array");
+  try {
+    if (await digestJson(draft.steps) !== await digestJson(steps)) {
+      return fail("mission_draft.steps do not exactly match mission steps");
+    }
+  } catch (error) {
+    return fail(`mission_draft.steps cannot be canonically digested: ${String(error)}`);
+  }
+
+  const evidenceDigestValue = review.evidence_digest;
+  const evidenceScopeValue = review.evidence_scope;
+  let evidenceDigest: string | null = null;
+  let evidenceScope: string | null = null;
+  if (evidenceDigestValue !== undefined && evidenceDigestValue !== null) {
+    evidenceDigest = digest("evidence_digest", evidenceDigestValue);
+    if (typeof evidenceScopeValue !== "string" || !evidenceScopeValue.trim()) {
+      return fail("evidence_scope must be supplied as a non-empty string with evidence_digest");
+    }
+    evidenceScope = evidenceScopeValue;
+  } else if (evidenceScopeValue !== undefined && evidenceScopeValue !== null) {
+    return fail("evidence_digest and evidence_scope must be supplied together");
+  }
+
+  const bindingValue = review.evidence_binding === undefined ? { present: false } : review.evidence_binding;
+  if (!isObject(bindingValue)) return fail("evidence_binding must be a JSON object");
+  const binding = bindingValue as JsonObject;
+  if (typeof binding.present !== "boolean") return fail("evidence_binding.present must be a boolean");
+  if (binding.present) {
+    if (evidenceDigest === null || evidenceScope === null) return fail("present evidence_binding requires a digest and scope");
+    if (binding.evidence_digest !== evidenceDigest || binding.scope !== evidenceScope) {
+      return fail("evidence_binding digest and scope do not match review evidence");
+    }
+    if (binding.posture !== "carried_forward_not_recomputed" || binding.readiness_claimed !== false || binding.execution !== "not_started") {
+      return fail("evidence_binding must remain carried-forward, non-ready, and non-executing");
+    }
+    if (!isObject(binding.summary)) return fail("present evidence_binding requires a summary object");
+    const summary = binding.summary as JsonObject;
+    if (summary.evidence_digest !== evidenceDigest || summary.scope !== evidenceScope) {
+      return fail("evidence_binding.summary does not match review evidence");
+    }
+    if (draft.route_evidence_digest !== evidenceDigest || draft.route_evidence_scope !== evidenceScope) {
+      return fail("mission_draft route evidence does not match review evidence");
+    }
+  } else if (evidenceDigest !== null || evidenceScope !== null || (binding.posture !== undefined && binding.posture !== "not_supplied")) {
+    return fail("legacy route review cannot claim evidence without a present binding");
+  }
+
+  const provenance: JsonObject = {
+    present: true,
+    review_id: reviewId,
+    route_id: routeId,
+    catalog_digest: catalogueDigest,
+    evidence_present: binding.present,
+    posture: binding.posture ?? "not_supplied",
+    readiness_claimed: false,
+    execution: "not_started",
+  };
+  if (binding.present) {
+    provenance.evidence_digest = evidenceDigest;
+    provenance.evidence_scope = evidenceScope;
+  }
+  return provenance;
+}
+
 /**
  * Review a cross-domain mission without issuing any tool call.
  *
@@ -93,6 +211,55 @@ export async function preflightMission(
     issues.push(`request cannot be canonically digested: ${String(error)}`);
   }
 
+  const workflowBinding = request.workflow_binding;
+  if (workflowBinding !== undefined) {
+    if (!isObject(workflowBinding)) {
+      issues.push("workflow_binding must be a JSON object");
+    } else {
+      const bindingBytes = new TextEncoder().encode(JSON.stringify(workflowBinding)).byteLength;
+      if (bindingBytes > MAX_WORKFLOW_BINDING_BYTES) {
+        issues.push(`workflow_binding exceeds ${MAX_WORKFLOW_BINDING_BYTES} serialized bytes`);
+      }
+      for (const field of [
+        "workflow_id",
+        "workflow_digest",
+        "catalog_digest",
+        "domain_contract_digest",
+        "domain_contract",
+        "evidence_plan",
+        "evidence_plan_digest",
+      ]) {
+        if (!(field in workflowBinding)) issues.push(`workflow_binding is missing ${field}`);
+      }
+      for (const field of ["workflow_digest", "catalog_digest", "domain_contract_digest", "evidence_plan_digest"]) {
+        const value = workflowBinding[field];
+        if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
+          issues.push(`workflow_binding.${field} must be a lowercase 64-character digest`);
+        }
+      }
+      if (typeof workflowBinding.workflow_id !== "string" || !workflowBinding.workflow_id.trim()) {
+        issues.push("workflow_binding.workflow_id must be a non-empty string");
+      }
+      if (!isObject(workflowBinding.domain_contract)) {
+        issues.push("workflow_binding.domain_contract must be a JSON object");
+      }
+      if (!isObject(workflowBinding.evidence_plan) || !Array.isArray(workflowBinding.evidence_plan.steps)) {
+        issues.push("workflow_binding.evidence_plan.steps must be an array");
+      } else if (workflowBinding.evidence_plan.steps.length === 0 || workflowBinding.evidence_plan.steps.length > MAX_MISSION_STEPS) {
+        issues.push(`workflow_binding.evidence_plan.steps must contain 1..${MAX_MISSION_STEPS} entries`);
+      } else {
+        try {
+          const evidencePlanDigest = await digestJson(workflowBinding.evidence_plan);
+          if (workflowBinding.evidence_plan_digest !== evidencePlanDigest) {
+            issues.push("workflow_binding.evidence_plan_digest does not match evidence_plan");
+          }
+        } catch (error) {
+          issues.push(`workflow_binding.evidence_plan cannot be canonically digested: ${String(error)}`);
+        }
+      }
+    }
+  }
+
   const policyIssueStart = issues.length;
   const policy = normalisePolicy(request.policy, issues);
   const rawSteps = Array.isArray(request.steps) ? request.steps : [];
@@ -101,10 +268,22 @@ export async function preflightMission(
   if (rawSteps.length > policy.maxSteps) issues.push(`mission has ${rawSteps.length} steps; policy.max_steps is ${policy.maxSteps}`);
 
   const steps: NormalStep[] = [];
+  const canonicalSteps: AgentMissionStep[] = [];
   for (const [index, raw] of rawSteps.entries()) {
     const stepIssues: string[] = [];
     if (!isObject(raw)) {
       issues.push(`step ${index} must be a JSON object`);
+      canonicalSteps.push({
+        id: `step-${index}`,
+        domain: "",
+        capability: "",
+        objective: "",
+        tool: "",
+        arguments: {},
+        depends_on: [],
+        required: true,
+        bindings: [],
+      });
       steps.push({ id: `step-${index}`, tool: "", dependsOn: [], bindings: [], arguments: {}, issues: ["step must be a JSON object"], warnings: [] });
       continue;
     }
@@ -123,8 +302,26 @@ export async function preflightMission(
     const stepArguments = rawArguments === undefined ? {} : rawArguments;
     if (!isObject(stepArguments)) stepIssues.push("arguments must be a JSON object");
     const bindings = normaliseBindings(candidate.bindings, `${id}.bindings`, stepIssues);
+    canonicalSteps.push({
+      id,
+      domain: typeof candidate.domain === "string" ? candidate.domain : "",
+      capability: typeof candidate.capability === "string" ? candidate.capability : "",
+      objective: typeof candidate.objective === "string" ? candidate.objective : "",
+      tool,
+      arguments: isObject(stepArguments) ? stepArguments as JsonObject : {},
+      depends_on: dependsOn,
+      required: candidate.required === undefined ? true : candidate.required as boolean,
+      bindings,
+    });
     steps.push({ id, tool, dependsOn, bindings, arguments: isObject(stepArguments) ? stepArguments as JsonObject : {}, issues: stepIssues, warnings: [] });
   }
+
+  const routeReviewProvenance = await collectRouteReviewProvenance(
+    request.route_review,
+    goal,
+    canonicalSteps,
+    issues,
+  );
 
   const byId = new Map<string, NormalStep>();
   for (const step of steps) {
@@ -216,9 +413,12 @@ export async function preflightMission(
   if (policy.execute && policy.allowedTools.length === 0) issues.push("execution requires a non-empty explicit allowed_tools list");
 
   const waves: string[][] = [];
+  // Preserve the caller's reviewed order within each dependency wave. This keeps explicit
+  // provider-approved mission ordering meaningful while retaining deterministic graph closure.
+  const requestedOrder = new Map(steps.map((step, index) => [step.id, index]));
   const remaining = new Map<string, Set<string>>([...dependencies.entries()].map(([id, deps]) => [id, new Set(deps)]));
   while (remaining.size > 0) {
-    const ready = [...remaining.entries()].filter(([, deps]) => deps.size === 0).map(([id]) => id).sort();
+    const ready = [...remaining.entries()].filter(([, deps]) => deps.size === 0).map(([id]) => id).sort((left, right) => (requestedOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (requestedOrder.get(right) ?? Number.MAX_SAFE_INTEGER) || left.localeCompare(right));
     if (ready.length === 0) {
       const cycle = [...remaining.keys()].sort();
       const message = `dependency cycle contains: ${cycle.join(", ")}`;
@@ -302,6 +502,7 @@ export async function preflightMission(
     waves,
     issues: uniqueIssues,
     warnings: uniqueWarnings,
+    route_review_provenance: routeReviewProvenance,
     steps: stepResults,
     limitations: [
       "preflight checks transport shape and mission graph invariants only",
@@ -323,6 +524,7 @@ export function missionFromRoute(
   missionId: string,
   selections: readonly MissionRouteSelection[],
   policy?: AgentMissionPolicy,
+  routeReview?: JsonObject,
 ): MissionAssembly {
   if (!isObject(route)) throw new ArgumentError("route must be a JSON object");
   if (route.workflow !== "capability_route") throw new ArgumentError("route.workflow must be capability_route");
@@ -419,6 +621,7 @@ export function missionFromRoute(
     goal,
     steps,
     ...(policy === undefined ? {} : { policy }),
+    ...(routeReview === undefined ? {} : { route_review: routeReview }),
   };
   return {
     schema: MISSION_ASSEMBLY_SCHEMA,

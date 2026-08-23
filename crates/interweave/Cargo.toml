@@ -9,7 +9,10 @@ bioprism-section = { workspace = true }
 bioprism-weave = { workspace = true }
 bioprism-fabric = { workspace = true }
 bioprism-choreography = { workspace = true }
+bioprism-epistemic = { workspace = true }
+bioprism-ids = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

@@ -11,6 +11,198 @@ the integration layer above the deterministic kernel described by [ADR-001](ADR-
 Python can orchestrate and author requests, while Rust remains the owner of canonical bytes,
 domain invariants, release gates, and evidence semantics.
 
+The artifact registry is available through typed `ArtifactRegistrationRequest`,
+`ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,
+`ArtifactGetReport`, `ArtifactLineageReport`, `ArtifactDomainEvidenceLineageRequest`,
+`ArtifactDomainEvidenceLineageReport`, and `ArtifactCrossStoreAuditReport` models. `ApiClient` exposes REST registration,
+query, lookup, lineage, persistence status, and flush methods; `Workspace` and
+`AsyncWorkspace` expose the MCP `artifact_registry_audit` flow. Parent presence remains an index
+observation, missing parents remain explicit, and no client model treats a digest as scientific,
+clinical, publication, causal, or external-effect authority.
+`artifact_domain_evidence_lineage()` adds the shared-index intake trace across sync/async HTTP and
+MCP facades. Its bounded request can select any declared capability group by exact intake/content,
+request/response, source-plan, subject, source-tool, outcome, or domain digest and can include
+reverse direct-child links. Rows expose recoverable payload digests, present/missing direct parents,
+and the separate canonical source-plan digest versus indexed content-parent binding; full intake
+bodies remain available only through explicit artifact lookup.
+`ApiClient.artifact_cross_store_audit()` and `Workspace.artifact_cross_store_audit()` compare
+retained exact identities across the artifact, evidence, and reconciliation registries. They
+return missing projections, orphaned projections, wrong-kind findings, store generations, and
+checkpoint digests without implying an atomic cross-store transaction.
+The Rust boundary also appends an `artifact_registry` projection to trusted mission, replay,
+verified-bundle, and workflow-reconciliation responses. The projection is an audit lookup and may
+report an explicit indexing or checkpoint failure; generic tool results are not auto-registered.
+
+`DomainReportProjectRequest` and `DomainReportCoverageRequest` provide bounded Python models for
+the explicit cross-domain report boundary. `ApiClient.domain_report_project()` and
+`ApiClient.domain_report_coverage()` use the REST routes, while the corresponding `*_tool()`
+methods exercise the same implementation through the REST/MCP dispatcher. `Workspace` and
+`AsyncWorkspace` expose the typed MCP equivalents. Project reports retain the caller payload,
+catalogue membership, claim posture, limitations, and exact artifact digest; coverage reports
+enumerate missing capability groups. These models do not interpret report count or indexing as
+execution, scientific, clinical, provenance, or release readiness.
+`DomainEvidenceHarmonizeRequest`, `DomainEvidenceLink`, and
+`DomainEvidenceHarmonizationReport` provide the next explicit join boundary. The sync and async
+HTTP clients expose `domain_evidence_harmonize()` and `domain_evidence_harmonize_tool()`, while
+`Workspace` and `AsyncWorkspace` expose the MCP helper and typed report projection. The request
+requires exact same-subject reports and explicit support/qualification/contradiction/context
+roles; the typed result preserves traceability state, contradiction posture, catalogue digest,
+and artifact digest, plus bridge class/mode and lineage coverage from the harmonization payload,
+without treating report presence or a support link as a scientific or release claim.
+`DomainDecisionReadinessRequest` and `DomainDecisionReadinessReport` add a shared structural
+policy gate over those reports. `ApiClient.domain_decision_readiness_audit()` and its async
+counterpart, plus `Workspace.domain_decision_readiness_audit_report()` and the async workspace
+helper, preserve required group/domain coverage, support and qualification floors, explicit
+contradiction/refusal handling, review allowance, linkage, lineage, blockers, audit digest, and
+artifact-registry identity. `ready_for_human_review` means only that the supplied structural
+policy passed; the typed model rejects any response that claims readiness or execution.
+`DomainDecisionReadinessQueryRequest` / `DomainDecisionReadinessQueryReport` add exact
+subject/state/policy filters, cursor pagination, and opt-in audit bodies through
+`ApiClient.domain_decision_readiness_query()` and `domain_decision_readiness_query_tool()`, with
+matching `Workspace` and `AsyncWorkspace` helpers. Portfolio and reconciliation request models
+accept `readiness_audit` plus `policy.require_readiness`; their typed reports keep that gate
+separate from completion evidence.
+`ControlPlaneReadinessRequest` / `ControlPlaneReadinessReport` compose the returned domain audit
+with optional route, operations, release, and workflow packets. Each component remains separately
+typed as present/valid/satisfied evidence, and the top-level state is never treated as execution,
+deployment, scientific, clinical, or release authority. `ControlPlaneReadinessQueryRequest` /
+`ControlPlaneReadinessQueryReport` provide exact subject/state/policy filters and opt-in retained
+bodies. Sync/async HTTP clients expose dedicated REST and MCP variants; Workspace and
+AsyncWorkspace expose the same typed projection helpers.
+ControlPlaneReadinessCompareRequest / ControlPlaneReadinessCompareReport add a digest-verified
+before/after structural diff. The report preserves component transitions, policy changes,
+blocker/domain/parent deltas, directional evidence, and a deterministic next action through
+Workspace, AsyncWorkspace, ApiClient, and AsyncApiClient; it never reruns nested tools or turns
+an improved state into authority.
+ControlPlaneReadinessRetainedCompareRequest / ControlPlaneReadinessRetainedCompareReport resolve
+two exact retained artifact digests and perform the same subject-bound structural diff through
+MCP, REST, Workspace, AsyncWorkspace, ApiClient, and AsyncApiClient. The registry lookup verifies
+the retained kind and bytes; retention is not freshness, external completeness, or authority.
+`DomainEvidenceHarmonizationCoverageRequest` and
+`DomainEvidenceHarmonizationCoverageReport` provide the bounded retained read model through
+`ApiClient.domain_evidence_harmonization_coverage()` and its tool counterpart, plus matching
+`Workspace` and `AsyncWorkspace` helpers. Filters cover subject, domain, report bridge class/mode,
+traceability state, and an exclusive digest cursor; pages expose compact rows, lineage/posture
+summaries, and optional report digests without loading full harmonization bodies. Counts and
+`next_after` make truncation explicit, and the typed models preserve the non-claiming
+`readiness_claimed: false` / `execution: not_started` contract.
+`DomainEvidenceIntakeRequest` and `DomainEvidenceIntakeReport` add the raw-envelope boundary for
+every declared capability group. `ApiClient.domain_evidence_intake()` and its `*_tool()` variant,
+plus the `Workspace` and `AsyncWorkspace` helpers, retain optional request JSON, required response
+JSON, explicit observed/partial/refused/error/unknown outcome, separate request/response digests,
+and the indexed `domain_evidence_intake` artifact. The client preserves request omission versus
+supplied null and does not infer execution, provenance completeness, scientific validity, or
+readiness from an intake record. `DomainEvidenceIntakeRequest.source_plan_digest` optionally binds
+the envelope to a retained external-source plan; when present, the server verifies scope
+compatibility before indexing and preserves the digest in the normalized intake and parent set.
+`DomainEvidenceIntakeCoverageRequest` and `DomainEvidenceIntakeCoverageReport` expose the
+catalogue-wide intake audit through REST, the REST/MCP dispatcher, `Workspace`, and
+`AsyncWorkspace`. Coverage keeps missing groups, observed/partial/refused/error/unknown
+outcomes, source tools, subjects, reported domains, declared-tool/domain gaps, optional intake
+digests, and domain-level counts explicit; group, tool, and domain completeness remain separate,
+and a reported envelope is not treated as executed capability or valid evidence.
+`DomainEvidenceSourcePlanRequest` and `DomainEvidenceSourcePlanReport` expose the matching
+external-source boundary through sync/async HTTP and workspace helpers. They retain connector and
+locator classes, retrieval mode, expected content digest, parent links, and bounded policy while
+keeping credentials caller-managed and retrieval `not_started`; a source plan is not provenance.
+When `expected_content_digest` is supplied, a later bound intake is accepted only when the
+canonical response digest matches it.
+`DomainEvidenceSourceExecutionRequest` and `DomainEvidenceSourceExecutionReport` execute a
+retained plan through the bounded file/plain-HTTP kernel, preserve observed/partial/refused/error
+outcomes and raw-byte versus canonical-response digests, and automatically retain the result as
+intake. The sync/async HTTP clients and `Workspace`/`AsyncWorkspace` expose both REST and MCP
+helpers; unsupported connectors and unsafe transport policy remain explicit refusals.
+Acquisition route transport rows also preserve `caller_managed_tools` separately from bounded
+file/HTTP tools, so provider normalization availability is not misreported as executable network
+transport.
+`SourceAdapterProjectionRequest`, `SourceAdapterProjectionResult`, and
+`project_source_execution()` form the local handoff from that returned envelope to a concrete
+Python adapter. `ApiClient`, `AsyncApiClient`, `Workspace`, and `AsyncWorkspace` expose the same
+`domain_evidence_source_project()` helper; it performs no second fetch, requires an explicit
+adapter id, refuses omitted/binary/preview/truncated bodies, verifies the expected raw-byte
+digest when supplied, and retains source-plan/response/raw digests in a separate transport
+context rather than mislabeling them as parser provenance. A partial transport outcome remains
+partial even when the nested format audit succeeds; invalid, lossy, blocked, and refused parser
+states remain distinct.
+`SourceAdapterProjectionResult.to_adapter_execution_evidence_request(...)` carries that seam into
+the shared evidence contract. It requires explicit subject and parser-input identity, verifies
+the input digest against the retained raw-content digest when present, attaches the source-plan
+and response digests as parent lineage, and upgrades a successful nested parse to `partial` when
+the source transport was partial. Truncated, binary, omitted, or otherwise pre-parser refusals
+remain typed refused evidence when the caller supplies the declared adapter version; no locator is
+reopened and no missing parser execution is fabricated.
+`DomainEvidencePipelineRequest`, `DomainEvidencePipelineResult`, and
+`project_domain_source_execution()` add the catalogue-bound variant. It requires the exact
+catalogue digest, source-plan digest, group, domain, and adapter id; refuses incomplete or
+truncated catalogue slices and cross-domain execution envelopes; and preserves the selected route
+in the result. The four client facades expose `domain_evidence_source_project_for_domain()` as
+the same local operation. This is a routing/conformance gate, not an ontology resolver or a
+scientific authorization decision.
+`DomainEvidenceProviderNormalizationRequest` and
+`DomainEvidenceProviderNormalizationReport` cover caller-managed literature, clinical-trial,
+FHIR, object-store, and provider-API payloads. `ApiClient`, `AsyncApiClient`, `Workspace`, and
+`AsyncWorkspace` expose `domain_evidence_provider_normalize()`; the server preserves provider,
+connector, payload, and optional request digests and feeds the result through the same indexed
+intake/coverage path as bounded source reads. The typed `shape_audit` reports a structural status
+(`structured`, `partial`, `refused`, or `unclassified`), the recognized connector container,
+record/invalid-row counts, identifier field-presence coverage, and object-store content-digest
+coverage where applicable. Its `shape_digest` is computed from those shape facts rather than
+payload values; it never echoes identifiers or promotes field presence into evidence validity.
+The typed `record_index` adds at most 2,048 canonical row digests, reports omitted rows explicitly,
+and supports digest-only deduplication without exposing record contents.
+Provider authentication, signatures, retrieval, terminology expansion, and scientific/clinical
+interpretation remain explicit non-claims.
+`DomainEvidenceProviderNormalizationReport.to_adapter_execution_evidence_request(...)` projects
+the retained provider payload digest, structural shape outcome, row count, normalization digest,
+intake digest, catalogue digest, and request lineage into the shared adapter evidence contract.
+The caller must declare adapter id/version and source id; provider authenticity remains outside the
+contract. Receipt-verified external normalization exposes the same method and additionally carries
+receipt, materialized-payload, byte-length, and catalogue lineage, without reopening the locator.
+`DomainEvidenceProviderReplayRequest` and
+`DomainEvidenceProviderReplayVerificationReport` add the replay seam. The sync/async HTTP and
+workspace facades recompute payload, request, shape, normalization-envelope, and intake digests,
+return each match dimension, and retain a value-free replay artifact idempotently. A mismatch is
+reported structurally; it is never converted into an observed provider result.
+`DomainEvidenceProviderAuthPosture`, `DomainEvidenceProviderConnectorManifest`,
+`DomainEvidenceProviderHandoffRequest`, and `DomainEvidenceProviderHandoffReport` expose the
+caller-managed plugin boundary. They retain connector scope, capabilities, opaque secret labels,
+status, and digest parents through `ApiClient`, `AsyncApiClient`, `Workspace`, and
+`AsyncWorkspace`; unsupported credential fields fail locally, and every returned handoff remains
+`not_started` with readiness false until a separate caller-owned executor performs work.
+`DomainEvidenceProviderExternalPayloadReceiptRequest` and
+`DomainEvidenceProviderExternalPayloadReceiptReport` handle the out-of-line variant for large
+provider results. They carry only a caller locator/reference, exact lowercase payload digest,
+byte length, transfer id, storage/retention/availability metadata, and handoff parent. REST,
+MCP-tool, sync, async, and workspace helpers reject embedded credentials and payload material;
+the receipt does not prove that the external object can be fetched or decrypted.
+`DomainEvidenceProviderExternalPayloadReplayRequest` and
+`DomainEvidenceProviderExternalPayloadReplayVerificationReport` add a metadata-only replay
+check for the receipt digest, handoff digest, payload digest, and byte length. Matching and drift
+remain explicit, and the helper never fetches or inspects caller-managed storage.
+`DomainEvidenceProviderExternalPayloadNormalizationRequest` adds the explicit materialization
+bridge: the caller supplies bounded JSON, while the core verifies its canonical digest and byte
+length against the receipt before reusing the ordinary normalization and intake report helpers.
+Its resulting report can be projected into adapter evidence with the same explicit adapter/source
+identity requirement; a structural provider normalization is never silently presented as provider
+execution or clinical validity.
+`DomainEvidenceProviderExternalPayloadLineageAuditRequest` and
+`DomainEvidenceProviderExternalPayloadLineageAuditReport` join a receipt to the retained
+connector handoff and preserve matched/partial/mismatch/orphaned scope, payload-binding, and
+artifact-registration states. The REST, MCP-tool, sync, async, and workspace methods never open
+the locator or turn a registry match into provider authenticity or readiness.
+`DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest` and
+`DomainEvidenceProviderExternalPayloadExecutionEvidenceReport` add the caller-observation layer:
+expected receipt identity, executor status, optional observed digest/size, and observation digest
+are retained separately. Missing and conflicting observations remain typed evidence states, while
+the SDK never executes a transfer or treats `locator_opened` as an authenticated attestation.
+`DomainEvidenceProviderExternalPayloadEvidenceQueryRequest` and
+`DomainEvidenceProviderExternalPayloadEvidenceQueryReport` provide the joined read model through
+sync/async HTTP, MCP-tool, and workspace helpers. The bounded query filters and cursor through one
+registry snapshot, joins receipt/lineage/execution artifacts by receipt digest, optionally retains
+the artifact bodies, and preserves missing, receipt-only, partial, and complete joins. It is a
+structural projection only: it does not fetch external storage, validate provider authenticity, or
+claim transfer execution/readiness.
+
 ## Lifecycle
 
 Both clients enforce the MCP sequence:
@@ -116,6 +308,13 @@ invent defaults:
   joint-versus-singleton excess for explicitly non-adaptive bundles. Improper partitions and
   exhaustive-cap failures remain typed fail-closed refusals rather than being rounded into a
   negative result or silently treated as an adaptive policy.
+- `EpistemicAdaptiveArgs` and `epistemic_adaptive_report(...)` expose the exact bounded adaptive
+  policy tree through sync MCP, async MCP, and HTTP. `EpistemicAdaptiveNodeReport` preserves stop
+  and branch-dependent acquisition nodes, while the report parser validates posterior/probability
+  normalization, expected-risk/cost reconciliation, action and acquisition identity, path-level
+  non-repetition, and the 16-step/65,536-state caps. The endpoint plans only; it does not execute
+  an assay or imply causal, clinical, biological, or predictive truth. See
+  [`docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md`](EPISTEMIC_ADAPTIVE_ACQUISITION.md).
 - `EpistemicContextAuditArgs` / `epistemic_context_audit_report(...)` audit observed-evidence
   compression with typed `EpistemicEvidenceItemArgs` and `EpistemicEvidencePoolArgs`. The report
   keeps decision identification, minimal sufficient context, exhaustive rate–distortion frontier,
@@ -394,6 +593,16 @@ invent defaults:
   notebook audit with optional hole-preserving capability queries and review-only GitHub Actions
   planning. The facade validates only the outer mappings; Rust validates digests, dependencies,
   evidence posture, release readiness, safe paths, and deterministic YAML.
+- `WorkbenchVerificationRequest` and `WorkbenchVerificationReport` expose the retained-report
+  continuation. `Workspace`/`AsyncWorkspace` and `ApiClient`/`AsyncApiClient` provide typed MCP
+  bridge helpers; the HTTP clients also expose `developer_workbench_verify_rest_report(...)` for
+  the dedicated REST route. The report retains replay status, digest witnesses, mismatch mappings,
+  and the `not_started` execution/network boundary.
+- `WorkbenchRegistryImportRequest`, `WorkbenchRegistryQueryRequest`, and the corresponding typed
+  import/query/get reports expose the bounded retained-report registry. `Workspace` and
+  `AsyncWorkspace` provide MCP helpers; `ApiClient` and `AsyncApiClient` provide both MCP helpers
+  and `developer_workbench_*_rest(...)` methods for the REST routes. Query rows are digest-ordered,
+  cursored, and compact by default; full reports require `include_reports=True`.
 - `ci_execution_evidence_audit(...)` regenerates that canonical CI plan and reconciles a run report
   against its digest and exact checks. `CiExecutionEvidenceReport` preserves per-check result
   digests, missing/unknown/duplicate/non-passing findings, provider provenance, structural-only
@@ -410,6 +619,13 @@ invent defaults:
   `conformance_ready` signal across the same four facades. The SDK validates mapping/array bounds
   locally; Rust remains authoritative for digest syntax, identity binding, and attestation subject
   semantics.
+- `CiProviderEvidenceRegistryQueryRequest` plus the import/query/get report parsers expose the
+  durable provider-observed evidence index. `Workspace`/`AsyncWorkspace` provide MCP helpers, and
+  `ApiClient`/`AsyncApiClient` provide both MCP and REST helpers. Query rows are digest-ordered and
+  compact by default; `include_records=True` is explicit. Retained imports re-audit the canonical
+  request, preserve failed/unknown runs, and expose artifact/log/attestation record-family digests.
+  The registry uses the same 512-record, 32 MiB snapshot, and 256-row query bounds as the Rust
+  service and remains structural evidence rather than provider authentication or release approval.
 - `developer_delivery_audit(..., ci_provider_evidence=...)` carries that report as an independent
   fail-closed release target. `DeveloperDeliveryAuditReport` preserves the target readiness and
   provider-evidence projection, while `DeveloperDeliveryReceiptReport`/verification report expose
@@ -462,6 +678,15 @@ invent defaults:
   serial execution is the default and the executor reserves the worst-case wave output budget before
   launching work. `MissionBinding` can route a JSON-pointer field from a
   successful direct prerequisite into an existing argument slot.
+  A `MissionRequest` may also carry the `workflow_binding` returned inside a domain-workflow
+  instantiation. The typed `MissionExecutionReport.workflow_reconciliation` property exposes the
+  compact automatic reconciliation link after execution; the full digest-bound record remains
+  available through the domain-workflow reconciliation helpers.
+- A ready `capability_route_review` can be passed as `MissionRequest.route_review`. The Rust
+  boundary rechecks its ready/non-executing status, goal, exact mission-draft steps, review IDs,
+  and optional carried route evidence before dispatch. `MissionPlan` and `MissionPreflight` retain
+  compact `route_review_provenance`; it is audit structure, never authorization, readiness, or a
+  domain claim. Legacy reviews without route evidence remain explicit `evidence_present: false`.
 - `mission_preflight(request, catalogue=...)` adds a no-side-effect client review before mission
   dispatch. It returns a request digest, live-catalogue digest, deterministic waves, per-step
   schema reports, binding/dependency findings, execution authorization issues, and explicit
@@ -484,6 +709,50 @@ invent defaults:
   and RFC 6901 pointer fields; `MissionEvaluatorReviewReport` exposes ready/blocked status, findings,
   candidate membership, domain support, proposed binding rows, catalog/discovery digests, and the
   explicit `execution: "not_started"` posture across sync and async Workspace/HTTP clients.
+- `mission_evaluator_replay(...)` audits a retained `agent_mission` report without dispatching an
+  evaluator. `MissionEvaluatorReplayRequest` bounds the mission payload, fixture inclusion, and row
+  count; `MissionEvaluatorReplayReport` preserves recomputed outcome/digest counts, adapter/domain
+  matches, disagreement and omission findings, represented/missing catalogue groups, and structural
+  retained/refused/omitted/disagreement fixtures for every standard adapter. `ready` only means the
+  structural audit found no findings; it is not semantic, scientific, clinical, causal, or release
+  validation.
+- `ApiClient.mission_evaluator_replay_query(...)` and its async counterpart query the durable
+  mission checkpoint by ID. `MissionEvaluatorReplayQueryRequest` bounds `include_fixtures` and
+  `max_items`; `MissionEvaluatorReplayQueryReport.summary_only` distinguishes a full retained
+  replay from the compact digest/count/coverage summary preserved after large-result omission.
+  Summary-only evidence never reconstructs raw output or executes an evaluator, and the typed
+  report keeps retention metadata, links, guarantees, and limitations intact.
+- `MissionEvaluatorReplayCompareRequest` and `mission_evaluator_replay_comparison_report(...)`
+  expose the non-executing MCP comparison between retained evaluator provenance and the current
+  catalogue. `MissionEvaluatorReplayComparisonReport.status` distinguishes unchanged, drifted,
+  missing-binding, not-recorded, and invalid-digest states while preserving the explicit limitation
+  that a retained digest is not an historical row-by-row catalogue snapshot. The sync/async
+  `Workspace` methods and `ApiClient`/`AsyncApiClient.mission_evaluator_replay_compare(...)`
+  helpers use the same contract; REST callers use
+  `mission_evaluator_replay_compare_query(...)`.
+- `MissionEvidenceBundleRequest` bounds result/trace/fixture inclusion and `max_items` for the
+  durable `/evidence-bundle` export. `MissionEvidenceBundleReport` preserves summary-only versus
+  full retention, optional result and trace, replay/catalogue-drift projections, omission metadata,
+  execution provenance, links, and the 64-character content `bundle_digest`. The export is bounded
+  and non-executing; oversized bundles are refused rather than truncated.
+- `MissionEvaluatorReviewReport.catalogue_snapshot` preserves the bounded, content-addressed adapter
+  rows retained at review time; `snapshot_retained` is a convenient retention check. Replay comparison
+  reports exact adapter row additions, removals, changes, unchanged IDs, and changed top-level fields
+  when the snapshot is valid, while legacy digest-only checkpoints retain their explicit limitation.
+- `MissionEvidenceBundleVerifyRequest` and `MissionEvidenceBundleVerificationReport` verify an exported
+  bundle's canonical digest, retained-result digest, schema, retention, trace, and export contract
+  without executing anything. `Workspace`/`AsyncWorkspace` expose the typed MCP path, while
+  `ApiClient`/`AsyncApiClient` expose both the durable REST route and the explicitly named MCP bridge
+  (`mission_evidence_bundle_verify_tool`). REST uses `POST /v1/evidence-bundles/verify`. A tampered
+  but well-formed bundle returns `valid=False` with failure codes instead of being mistaken for a
+  transport error.
+- `MissionEvidenceBundleImportRequest`, `MissionEvidenceBundleQueryRequest`, and
+  `MissionEvidenceBundleGetRequest` expose the bounded evidence registry. The corresponding typed
+  import/query/get reports preserve idempotency, digest-ordered cursor rows, mission/domain filters,
+  and the explicit non-executing posture. `ApiClient`/`AsyncApiClient` use the durable REST routes;
+  `Workspace`/`AsyncWorkspace` and the `*_tool` methods use MCP's process-local registry bridge.
+  Configure the API's `--evidence-state` path for restart-safe persistence; restored bundles are
+  reverified and never resume execution or become scientific, clinical, provenance, or release claims.
 - `CapabilitySearchReport.from_wire(...)` plus `Workspace.capability_discover_report(...)`,
   `AsyncWorkspace.capability_discover_report(...)`, and the corresponding HTTP helpers validate
   ranked groups, cross-domain metadata, result counts, digest provenance, and optional tool
@@ -499,8 +768,16 @@ invent defaults:
 - `capability_dashboard(...)` returns a bounded, digest-bound projection of the selected catalogue
   groups. `CapabilityDashboardReport.from_wire(...)` plus the sync/async Workspace and HTTP helpers
   expose separate crate, CLI, Python, MCP-membership, and schema-backed counts, callable/partial/
-  declared-only readiness, explicit gap labels, filter provenance, and truncation warnings. A ready
-  dashboard is a transport-coverage signal only; it does not execute or authorize a tool.
+  declared-only readiness, explicit gap labels, filter provenance, and truncation warnings. Each
+  selected group also exposes optional typed `artifact_evidence` and
+  `workflow_reconciliation_evidence` postures, while `report.evidence` carries the selected-group
+  registry generations, counts, and separate evidence digest. A ready dashboard is a
+  transport-coverage signal only; the joined evidence is advisory and does not execute, authorize,
+  or validate a tool or workflow.
+- `ApiClient.capability_dashboard_rest(...)` and its async counterpart use the dedicated
+  `GET /v1/capabilities/dashboard` route with the same typed query bounds. The existing
+  `capability_dashboard(...)` tool helper remains available when callers need the MCP envelope;
+  both paths parse into the same `CapabilityDashboardReport` contract.
 - `capability_route(goal, needs, ...)` batches named needs into a digest-bound, non-executing route
   proposal, preserving explicit tool matches separately from ranked candidates. Its raw result also
   includes per-need candidate domains and a `route_coverage` ledger for resolved/unresolved needs.
@@ -511,6 +788,10 @@ invent defaults:
   `ApiClient.capability_route_report(...)`, and its async counterpart provide bounded typed views
   without executing any candidate. `report.route_coverage.fully_resolved` is routing evidence only,
   not authorization, domain validity, or scientific readiness.
+  Modern responses additionally expose an optional digest-bound evidence summary and per-need
+  `candidate_group_evidence` rows containing artifact and workflow-reconciliation postures. The
+  evidence digest is a separate observation digest from `route_id`; it binds candidate groups and
+  registry generations, and never implies execution or readiness.
 - `CapabilityRouteReviewRequest` and `capability_route_review(...)` validate caller-selected
   handoff inputs, while `CapabilityRouteReviewReport.from_wire(...)` and the corresponding sync,
   async, and HTTP `capability_route_review_report(...)` helpers expose blocked/ready findings,
@@ -519,6 +800,78 @@ invent defaults:
   `validate_schemas=True` to request authoritative per-tool schema digests and bounded issue paths
   in `report.schema_review`. The resulting `report.review_id` is a deterministic,
   content-addressed correlation key for the route provenance, selections, and validation mode.
+  Modern review reports also expose `evidence_binding`, `evidence_digest`, and `evidence_scope`,
+  preserving the route observation in the generated mission draft without recomputing or promoting
+  it to execution/readiness evidence. Legacy route payloads retain an explicit absent binding.
+  `ApiClient.capability_route_rest(...)` and `capability_route_review_rest(...)`, with async
+  counterparts, use the dedicated raw REST handoff endpoints when an HTTP automation caller does
+  not want to unpack an MCP envelope; they return the same raw and typed route contracts and still
+  preserve the non-execution boundary.
+- `CapabilityRoutePlanRequest` and `capability_route_plan(...)` compose those explicit selections
+  into one non-executing route-review plus authoritative mission-preflight projection. The request
+  rejects `policy.execute=True`, defaults `validate_schemas=True`, and carries optional claim,
+  evaluator-review, and workflow-binding inputs through the generated mission. Typed
+  `CapabilityRoutePlanReport` preserves the review, mission, preflight, plan digest, plan status,
+  and explicit blocked transport outcomes. `Workspace`, `AsyncWorkspace`, `ApiClient`, and
+  `AsyncApiClient` expose MCP and dedicated REST variants; every result remains
+  `dispatch: "not_started"` and still requires caller inspection before `agent_mission`.
+- `CapabilityRoutePlanVerifyRequest` and `capability_route_plan_verify(...)` verify a retained plan
+  without dispatch. The verifier reruns mission preflight and optionally replays route review when
+  the caller supplies the original route and selections; `CapabilityRoutePlanVerifyReport` keeps
+  replay status, mismatch diagnostics, and the explicit distinction between full verification and
+  `verified_without_route_replay`. Workspace, async Workspace, HTTP, and async HTTP clients expose
+  raw and typed MCP/REST variants.
+- `DomainWorkflowInstantiateRequest`, `DomainWorkflowCatalogueReport`, and
+  `DomainWorkflowInstantiationReport` expose the complete workflow-template bridge. Sync and async
+  `Workspace` methods call the MCP tools; `ApiClient` and `AsyncApiClient` also expose the dedicated
+  REST routes plus tool-call variants. The request validates bounded explicit steps, while typed
+  reports preserve catalogue/workflow digests, missing-tool coverage, selected-tool scope,
+  the selected domain contract, a step-level evidence plan, authoritative `preflight_report`, and
+  `execution: "not_started"`. No client method dispatches a domain tool through this workflow layer.
+  `DomainWorkflowInstantiateRequest.route_review` carries a ready capability-route handoff into
+  the generated mission after exact step normalization. The same compact route provenance is
+  visible on typed mission status/inventory and queue projections; evaluator replay exposes
+  `route_review_status`, and workflow reconciliation reports whether retained provenance still
+  matches the instantiation. These are integrity/provenance joins, not execution authorization.
+- `DomainWorkflowPortfolioRequest` and `DomainWorkflowPortfolioReport` compose up to 64 explicit
+  group-scoped workflow requests. Sync/async Workspace and HTTP clients expose MCP, REST, and
+  typed report variants. Each item retains its own instantiation, authoritative mission-preflight
+  result, digest, and refusal diagnostics; `require_complete_catalogue` and `allow_partial` keep
+  complete coverage versus deliberate partial planning explicit. A portfolio never dispatches or
+  turns `portfolio_ready` into permission, scientific validity, clinical guidance, or release approval.
+- `DomainWorkflowPortfolioVerifyRequest` and `DomainWorkflowPortfolioVerifyReport` revalidate a
+  retained portfolio as one bounded audit artifact. They recompute the portfolio digest, preserve
+  per-item identity/replay/refusal mismatches, accept an index-aligned optional replay array, and
+  expose `require_replay`, coverage, replay counts, and authoritative mission-preflight counts.
+  Sync/async Workspace and HTTP clients expose raw and typed MCP/REST variants; verification always
+  remains `dispatch: "not_started"` / `execution: "not_started"`.
+- `DomainWorkflowVerifyRequest` and `DomainWorkflowVerifyReport` verify a retained instantiation
+  against the current catalogue, domain contract, workflow binding, mission identity, and
+  authoritative mission preflight. Supplying `replay_request` reconstructs the original bounded
+  instantiation and compares its contract, evidence plan, selection, mission, and execution
+  projections; omitting it yields the explicit `verified_without_replay` posture. Sync/async
+  Workspace and HTTP clients expose raw and typed MCP/REST variants. Verification preserves compact
+  mismatch witnesses and always remains `dispatch: "not_started"` / `execution: "not_started"`.
+- `DomainWorkflowScaffoldRequest` and `DomainWorkflowScaffoldReport` provide the deterministic
+  planning shortcut for all capability groups. `ApiClient`/`AsyncApiClient` expose REST and
+  `*_tool` variants, while `Workspace`/`AsyncWorkspace` expose the MCP bridge. The typed request
+  preserves explicit tool and per-tool argument selection; the report preserves selected/omitted
+  tools, bounded live `argument_contract` facts, structured ready/blocked preflight, and the
+  invariant `readiness_claimed is False`. A scaffold never dispatches, grants permission, or makes
+  a domain conclusion.
+- `DomainWorkflowReconcileRequest` and `DomainWorkflowReconciliationReport` join that instantiation
+  to a retained `agent_mission` report or evidence bundle. `ApiClient`, `AsyncApiClient`, and
+  `Workspace` expose sync/async REST and MCP helpers; the typed report separates integrity validity,
+  per-step evidence retention, completion status, and review-required posture. Summary-only bundles
+  remain verifiable artifacts but cannot become completion evidence.
+- `DomainWorkflowReconciliationImportRequest`, `DomainWorkflowReconciliationQueryRequest`, and
+  `DomainWorkflowReconciliationGetRequest` expose the bounded durable reconciliation registry.
+  `ApiClient`/`AsyncApiClient` use the REST import/query/get routes, while `Workspace`/
+  `AsyncWorkspace` and the `*_tool` methods use the MCP bridge. Typed reports preserve idempotency,
+  digest-ordered cursor rows, mission/workflow/plan/status filters, and exact content-hash lookup.
+  Configure `--reconciliation-state` for restart-safe API persistence; restored reports remain
+  non-executing audit evidence and never become provenance, scientific, clinical, safety, or release
+  approval.
 - `ApiClient.route_review_evidence(...)` and `AsyncApiClient.route_review_evidence(...)` expose
   bounded retained event evidence for that exact id as `RouteReviewEvidence`; `event_page(...)`,
   `event_stream(...)`, and raw `events(...)` also accept `review_id=...` for transport-native
@@ -529,11 +882,12 @@ invent defaults:
   `event_stream(...)`, and raw `events(...)` accept `receipt_id=...` as a mutually exclusive
   filter. Large receipt responses retain a bounded projection in the event row; callers must still
   use the receipt verifier for integrity.
-- `mission_from_route(route, mission_id, selections, policy=...)` converts that route into a
+- `mission_from_route(route, mission_id, selections, policy=..., route_review=...)` converts that route into a
   provenance-preserving `MissionAssembly` only after every need has one caller-selected candidate,
   explicit JSON arguments, and domain-labelled mission metadata. It refuses unresolved or
   out-of-candidate tools, performs no transport call, and is intended to feed `mission_preflight()`
-  before `agent_mission()`.
+  before `agent_mission()`. An optional ready review is carried into the request and must match
+  the generated goal and steps exactly.
 - `ApiClient.submit_mission(request)` and `AsyncApiClient.submit_mission(request)` submit the same
   typed `MissionRequest` to the bounded asynchronous HTTP executor. `mission_status(mission_id)`
   returns a typed `MissionJob` with the raw authoritative report when terminal, and
@@ -560,11 +914,27 @@ invent defaults:
   mission scheduling or effect rollback. Schema-1 migration inputs report no digest before the
   gateway rewrites them as schema 2; `integrity_verified` reports whether the observed current
   file matches that digest.
+  `mission_queue()` returns a typed `MissionQueueInventory` with lifecycle state, resource class,
+  idempotency class, attempt counters, recovery metadata, and links while keeping the checkpointed
+  job specification out of the inventory. `mission_queue_persistence()` returns a typed
+  `MissionQueueStatus` with the content digest, atomic-checkpoint integrity result, and startup
+  recovery rows plus admission/backpressure limits and observed lease occupancy. Its `authority`
+  projection exposes the shared-file lock, revision, event count, authority digest, and queue
+  digest so operators can distinguish a queue projection from the journal that authorized it.
+  `flush_mission_queue_persistence()` returns a typed `MissionQueueFlushResult`. Queue attempt
+  numbers are local fencing tokens; a stale attempt is refused even when a worker identity is
+  reused.
+  `release_mission_queue_lock(operator, reason)` and its async counterpart provide the explicit,
+  attributed operator override for a stale local authority lock and return the recorded release
+  revision. These methods expose cooperating-process local-file authority; `automatic_resume` is
+  explicitly false and no method claims multi-host consensus, network-partition tolerance,
+  authentication, tenant isolation, or external-effect completion.
   `recovery_matrix()` and its async counterpart provide one typed matrix that keeps mission,
   event, subscription, outbox, secret, and external-effect recovery boundaries separate.
   `operations_snapshot(after=..., limit=...)` and its async counterpart return a typed
   `OperationsSnapshot` that composes a bounded `EventPage`, event metrics, mission status-count
-  evidence, typed mission/event persistence checks, the recovery matrix, typed domain-group/tool
+  evidence, typed mission/event/reconciliation persistence checks, the reconciliation summary,
+  including its per-workflow status matrix, the recovery matrix, typed domain-group/tool
   coverage, capability flags, consistency declaration, and operator action/non-claim text. The
   domain model preserves exact missing tool names and omission counts without calling them
   runtime or scientific readiness. The cursor remains explicit in
@@ -585,8 +955,12 @@ invent defaults:
   it is activity evidence rather than a readiness claim.
   `operations_domain_gates(after=..., limit=...)` returns typed per-domain evidence gates for
   catalogue, activity, transport completion, pooled evaluation, domain-evaluator, safety, and
-  release channels. Domain-evaluator rows retain the exact evaluator tool/event binding without
-  asserting scientific validity. Gate rows retain refusal/completion evidence and remain `insufficient_evidence` or `review_required`
+  release channels. Each `OperationsDomainGateGroup` also exposes typed
+  `reconciliation_evidence`, joined by exact capability-group `workflow_id` to the bounded
+  digest-valid registry. Its `missing`, `incomplete`, `invalid`, and `structurally_ready` states
+  remain evidence posture only: incomplete or invalid retained posture blocks review, while a
+  structurally-ready row still requires authority review. Domain-evaluator rows retain the exact
+  evaluator tool/event binding without asserting scientific validity. Gate rows retain refusal/completion evidence and remain `insufficient_evidence` or `review_required`
   until a separate authority reviews them; the typed response enforces `readiness_claimed: false`.
   `OperationsGateReviewRequest` plus `create_operations_gate_review(...)` persists a current
   operator decision. `operations_gate_reviews(...)` replays the durable record by cursor or
@@ -632,6 +1006,27 @@ invent defaults:
   scope dimensions, declared semantic-loss kinds, and non-executing limitations. The projection
   reconciles top-level and nested `executable` state and keeps a dependency-blocked candidate
   distinguishable from an unsupported format or source shape.
+- `AdapterExecutionEvidenceRequest`, `AdapterExecutionLoss`, and
+  `AdapterExecutionEvidenceReport` provide the common post-adapter handoff across all declared
+  domains. `Workspace`, `AsyncWorkspace`, `ApiClient`, and `AsyncApiClient` retain adapter/source
+  identity, input/output digests, execution and conformance status, bounded semantic-loss entries,
+  item/byte counts, refusal codes, and artifact registration. The helper records caller evidence;
+  it never executes a Python/native adapter, imports dependencies, fetches bytes, or claims
+readiness from `verified` or `lossless` labels.
+- `AdapterExecutionEvidenceQueryRequest` and `AdapterExecutionEvidenceQueryReport` expose the
+  read-only adapter evidence index through all four sync/async HTTP and workspace facades. Queries
+  are bounded and cursorable, preserve execution/conformance/loss filters, and classify explicit
+  source-plan, intake/external-payload, and workflow-reconciliation parent joins while keeping
+missing parents visible. They do not infer provenance or execute adapters.
+The typed report also exposes the page-scoped `page_summary` mapping so callers can render
+separate status, loss, join, output, and missing-parent counts without inventing a readiness score.
+- `DomainAcquisitionQuery`, `domain_acquisition_report(...)`, and the sync/async
+  `Workspace`/`ApiClient` helpers expose the digest-bound `domain_acquisition_catalogue` route.
+  Each selected domain keeps bounded transport (`file`/plain `generic_http` versus
+  caller-managed connectors) separate from native/Python-delegated adapter interpretation,
+  includes explicit scope-match evidence and limitations, and preserves truncation and
+  completeness flags. This is cross-domain routing evidence only: it does not execute a source,
+  import a Python reader, resolve an ontology, or promote a matched adapter to conformance.
 - `TabularIngestRequest` and `tabular_ingest(...)` execute the Rust CSV/TSV adapter only after an
   explicit profile and exactly one inline string or root-confined document are supplied. The
   typed `TabularIngestReport` returned by `tabular_ingest_report(...)` preserves the source and
@@ -828,12 +1223,61 @@ invent defaults:
   invalid, blocked, rejected, and unsupported states, carries the authoritative adapter descriptor,
   preserves the audit document digest, and returns typed unsupported outcomes when a selected raw
   reader is unavailable. Payload values are not echoed in the request envelope.
+- The source-to-adapter bridge is intentionally narrower than the full local runtime registry:
+  only adapters with an inline bounded body binding are eligible. Path-based and dependency-gated
+  readers must be invoked through their explicit local reader contract, because the bridge never
+  reopens a source locator and never silently turns a binary or incomplete transport projection
+  into text.
 - `ProjectionBatchRequest`, `ProjectionBatchResult`, and `execute_projection_batch(...)` compose
   heterogeneous source requests under a bounded ordered envelope. They preserve member-level
   documents, refusal/error states, status counts, adapter/failure counts, validity and publishability
   totals, semantic-loss summaries, scope dimensions, document digests, and a batch digest; optional
   stop-on-error execution reports omitted requests and marks the aggregate unaccepted instead of
   making an incomplete batch look complete.
+`AdapterExecutionResult.to_adapter_execution_evidence_request(...)` converts each declared
+runtime result into the shared digest-bound caller-evidence request. It requires explicit
+subject and source/input identity (including the source digest), preserves the adapter
+descriptor/version, maps refusal and dependency outcomes, carries document output digests and
+semantic-loss entries, and never infers source-byte identity from an inline payload or locator.
+`ProjectionBatchResult.to_adapter_execution_evidence_requests(...)` requires one digest per source
+id and one explicit subject id so heterogeneous batches cannot silently omit evidence members or
+conflate source and subject identity.
+`submit_adapter_execution_evidence(...)` and its async counterpart compose that conversion with
+the existing HTTP/MCP facade reports without giving the core execution authority. The batch
+helpers convert every member before the first call, retain remote refused reports as successful
+retention outcomes, and optionally continue after bounded transport exceptions while exposing the
+failed source member and error kind. `execute_and_submit_projection(...)` provides the same local
+runtime-to-retention handoff for one request.
+`AdapterConformanceProfile`, `adapter_conformance_profiles()`, and
+`evaluate_adapter_conformance(...)` make the required checks explicit for all concrete route
+families, including clinical FHIR, imaging, single-cell, sequencing, alignment, chemistry,
+mass-spectrometry, and multiscale imaging. Missing or failed checks remain `partial`, unavailable
+routes remain `unsupported`, and blocked/rejected runtime outcomes remain `refused`; a verified
+profile is structural evidence only and never a readiness or clinical-validity claim. Its report
+digest can be attached as a parent when constructing adapter execution evidence.
+`domain_report_from_adapter_execution(...)`,
+`domain_report_from_provider_normalization(...)`, and
+`domain_report_from_external_provider_normalization(...)` then compose those same observations
+into a `DomainReportProjectRequest` for the canonical report/intake surface. Each bridge uses a
+declared cross-domain MCP tool as `source_tool` while retaining adapter/provider identity inside
+the typed payload; it retains typed evidence and caller parents, maps refused/failed outcomes to a refused claim posture, and
+keeps explicit non-claims adjacent to the payload. External materialization retains receipt and
+payload lineage without opening the caller-owned locator; none of these bridges executes an
+adapter, contacts a provider, or claims readiness.
+`ApiClient.domain_report_from_adapter_execution()` and its async counterpart, plus the matching
+`Workspace` methods, submit the typed adapter bridge through `domain_report_project` and parse the
+combined evidence/report response as `AdapterDomainReportResult`. The transport facade preserves
+the server's indexed evidence parent, claim posture, and readiness boundary rather than treating
+successful composition as adapter execution.
+ApiClient.domain_report_from_provider_normalization() and
+domain_report_from_external_provider_normalization(), with matching Workspace and async
+facades, expose the shared provider-domain composition operations. Their
+ProviderDomainReportResult retains inline shape/index evidence or external receipt/materialization
+evidence while the canonical report stores compact digest-bound evidence and never duplicates the
+caller payload as a second report copy.
+DomainReportCoverageReport.bridge_summary and the optional per-group coverage fields expose
+ordinary versus adapter/provider bridge classes, bridge modes, and parent-link counts without
+collapsing indexed presence into execution, provenance, or scientific validity.
 - `read_nifti_header(...)` and `read_anndata_projection(...)` are verified optional bindings for
   installed `nibabel` and `anndata` environments. They inspect NIfTI headers with memory mapping
   and H5AD/Zarr metadata, then delegate to the same projection auditors; they never call a full

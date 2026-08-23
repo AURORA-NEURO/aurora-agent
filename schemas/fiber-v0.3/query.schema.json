@@ -1,0 +1,76 @@
+{
+  "$id": "https://auroraneuro.org/schemas/fiber-query-v0.3.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "fiber-query/0.3 is the first FIBER query form with an executable decision contract. The bounded loss/utility table and permitted action set are required for the decision-equivalence quotient (43.10). Compatible-model posterior and evidence-pool bindings needed by rate-distortion (43.12) remain outside this form and are reported as deferred.",
+  "properties": {
+    "budgets": {
+      "additionalProperties": false,
+      "properties": {
+        "max_facts": { "minimum": 1, "type": "integer" },
+        "max_tokens": { "minimum": 1, "type": "integer" }
+      },
+      "required": ["max_facts"],
+      "type": "object"
+    },
+    "decision_loss": {
+      "additionalProperties": false,
+      "description": "Action-by-model table. Rows are actions and columns are models. With sense=utility, values are negated once into the compiler's internal loss convention.",
+      "properties": {
+        "actions": {
+          "items": { "maxLength": 256, "minLength": 1, "type": "string" },
+          "maxItems": 1000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "loss": {
+          "items": {
+            "items": { "type": "number" },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "maxItems": 1000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "models": {
+          "items": { "maxLength": 256, "minLength": 1, "type": "string" },
+          "maxItems": 1000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "sense": { "default": "loss", "enum": ["loss", "utility"], "type": "string" }
+      },
+      "required": ["actions", "models", "loss"],
+      "type": "object"
+    },
+    "decision_time": { "type": "string" },
+    "distortion_tolerance": { "minimum": 0, "type": "number" },
+    "goal": { "type": "string" },
+    "permitted_actions": {
+      "items": { "maxLength": 256, "minLength": 1, "type": "string" },
+      "maxItems": 1000,
+      "minItems": 1,
+      "type": "array"
+    },
+    "policy": { "items": { "type": "string" }, "type": "array" },
+    "protected_tags": { "items": { "type": "string" }, "type": "array" },
+    "query_id": { "type": "string" },
+    "role": { "type": "string" },
+    "schema_version": { "const": "fiber-query/0.3" },
+    "targets": { "items": { "type": "string" }, "minItems": 1, "type": "array" }
+  },
+  "required": [
+    "schema_version",
+    "query_id",
+    "targets",
+    "protected_tags",
+    "decision_time",
+    "budgets",
+    "decision_loss",
+    "permitted_actions"
+  ],
+  "title": "AURORA FIBER Query 0.3",
+  "type": "object"
+}

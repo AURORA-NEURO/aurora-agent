@@ -15,6 +15,7 @@
 //! Omissions travel with every response at every layer. An agent that reads only L0 still learns
 //! how much was excluded and whether the sufficiency claim holds.
 
+use crate::brain_control::BrainControlState;
 use crate::rpc::{code, Request, Response};
 use bioprism_adapter::{
     certify, AdapterPlanRequest, AdapterRegistry, Source, SourceProvenance, TabularAdapter,
@@ -29,33 +30,29 @@ use bioprism_atlas::{
 };
 use bioprism_atlashub::{CiReport, ResultUnderReview};
 use bioprism_atlasx::{
-    audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility,
-    DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet,
-    Surface as AtlasxSurface, Visibility as AtlasxVisibility, ATLASX_SCHEMA_VERSION,
-    DEFINED_HERE, NAMED_NEVER_DEFINED, named_in_scope,
+    audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
+    DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
+    Visibility as AtlasxVisibility, ATLASX_SCHEMA_VERSION, DEFINED_HERE, NAMED_NEVER_DEFINED,
 };
 use bioprism_backends::{Budget as InfluenceBudget, QueryRegion, RegionFactor};
+use bioprism_benchcompiler::counterfactual::pair as benchmark_counterfactual_pair;
 use bioprism_benchcompiler::{
-    analyse as analyse_benchmark, boundaries as benchmark_boundaries,
-    assess_contamination as benchmark_assess_contamination,
-    assign_holdout as benchmark_assign_holdout, calibrate as benchmark_calibrate,
-    contrast as benchmark_contrast,
+    analyse as analyse_benchmark, assess_contamination as benchmark_assess_contamination,
+    assign_holdout as benchmark_assign_holdout, boundaries as benchmark_boundaries,
+    calibrate as benchmark_calibrate, compile as benchmark_compile, contrast as benchmark_contrast,
     deduplicate as benchmark_deduplicate, effective_diversity as benchmark_effective_diversity,
     episodes as benchmark_episodes, failure_card as benchmark_failure_card,
-    compile as benchmark_compile, ContextItem as BenchmarkContextItem,
-    InterestSignature as BenchmarkInterestSignature, MinimizeBudget as BenchmarkMinimizeBudget,
-    Compilation as BenchmarkCompilation,
     repetitions as benchmark_repetitions, Assertion as BenchmarkAssertion,
     BenchInstance as BenchmarkBenchInstance, CandidateAction as BenchmarkCandidateAction,
-    CandidateActionSet as BenchmarkCandidateActionSet, ContaminationRisk as BenchmarkContaminationRisk,
+    CandidateActionSet as BenchmarkCandidateActionSet, Compilation as BenchmarkCompilation,
+    ConstraintRecord as BenchmarkConstraintRecord, ContaminationRisk as BenchmarkContaminationRisk,
+    ContextItem as BenchmarkContextItem, ExpectedResponse as BenchmarkExpectedResponse,
     ExposureLedger as BenchmarkExposureLedger, Instance as BenchmarkInstance,
-    ExpectedResponse as BenchmarkExpectedResponse, Intervention as BenchmarkIntervention,
-    LeakProbe as BenchmarkLeakProbe, NoRealismReview as BenchmarkNoRealismReview,
-    PanelRun as BenchmarkPanelRun, ProposedOracle as BenchmarkProposedOracle,
-    ConstraintRecord as BenchmarkConstraintRecord,
-    SYNTHESIS_ORDER as BENCHMARK_SYNTHESIS_ORDER,
+    InterestSignature as BenchmarkInterestSignature, Intervention as BenchmarkIntervention,
+    LeakProbe as BenchmarkLeakProbe, MinimizeBudget as BenchmarkMinimizeBudget,
+    NoRealismReview as BenchmarkNoRealismReview, PanelRun as BenchmarkPanelRun,
+    ProposedOracle as BenchmarkProposedOracle, SYNTHESIS_ORDER as BENCHMARK_SYNTHESIS_ORDER,
 };
-use bioprism_benchcompiler::counterfactual::pair as benchmark_counterfactual_pair;
 use bioprism_bioethics::action::{refer as refer_physical_action, ActionPlan, Authorisation};
 use bioprism_bioethics::dualuse::{refer as refer_dual_use, CapabilityRelease};
 use bioprism_bioethics::humansubject::{screen as screen_human_subject, StudyDescription};
@@ -65,30 +62,41 @@ use bioprism_bioethics::representation::{
 use bioprism_bioethics::validation::ValidationDossier;
 use bioprism_bioeval::{Dispersion, ReferenceDistribution, ReferenceStandard};
 use bioprism_bioevalx::acquisition::{
-    Action as AcquisitionTraceAction, AcquisitionKind, Obligation as AcquisitionObligation,
+    AcquisitionKind, Action as AcquisitionTraceAction, Obligation as AcquisitionObligation,
     ReferencePolicy as AcquisitionReferencePolicy, Trace as AcquisitionTrace,
+};
+use bioprism_bioevalx::boundary::{
+    Assessment as BioevalBoundaryAssessment, Flow as BioevalFlow, Policy as BioevalBoundaryPolicy,
 };
 use bioprism_bioevalx::burden::{
     BranchLedger as BioevalBranchLedger, Draw as BioevalDraw, Ledger as BioevalLedger,
     Resource as BioevalResource,
 };
-use bioprism_bioevalx::boundary::{
-    Assessment as BioevalBoundaryAssessment, Flow as BioevalFlow,
-    Policy as BioevalBoundaryPolicy,
-};
-use bioprism_bioevalx::grounding::{
-    ClaimState as GroundingClaimState, EdgeKind as GroundingEdgeKind,
-    Evidence as GroundingEvidence, Grounding,
-    LocatorStatus as GroundingLocatorStatus, SupportEdge as GroundingSupportEdge,
+use bioprism_bioevalx::design::{
+    Arm as BioevalDesignArm, FactorialDesign as BioevalFactorialDesign,
 };
 use bioprism_bioevalx::estimand::{
     ClaimKind as BioevalClaimKind, Corroboration as BioevalCorroboration,
-    Estimand as BioevalEstimand, Evidentiary as BioevalEvidentiary,
-    Finding as BioevalFinding, Identification as BioevalIdentification,
+    Estimand as BioevalEstimand, Evidentiary as BioevalEvidentiary, Finding as BioevalFinding,
+    Identification as BioevalIdentification,
 };
 use bioprism_bioevalx::evaluator::{
     EvaluatorRun as BioevalEvaluatorRun, Panel as BioevalEvaluatorPanel,
     TaskOutcome as BioevalTaskOutcome,
+};
+use bioprism_bioevalx::grounding::{
+    ClaimState as GroundingClaimState, EdgeKind as GroundingEdgeKind,
+    Evidence as GroundingEvidence, Grounding, LocatorStatus as GroundingLocatorStatus,
+    SupportEdge as GroundingSupportEdge,
+};
+use bioprism_bioevalx::mesh::{
+    Disagreement as BioevalDisagreement, EvaluatorDecl as BioevalEvaluatorDecl,
+    EvaluatorVerdict as BioevalEvaluatorVerdict, Mesh as BioevalMesh,
+};
+use bioprism_bioevalx::metamorphic::{
+    verdict as bioeval_metamorphic_verdict, Family as BioevalMetamorphicFamily,
+    Relation as BioevalMetamorphicRelation, Suite as BioevalMetamorphicSuite,
+    Trial as BioevalMetamorphicTrial, TrialVerdict as BioevalTrialVerdict,
 };
 use bioprism_bioevalx::plane::{
     Cell as BioevalCell, FoldPolicy as BioevalFoldPolicy, ScorePlane as BioevalScorePlane,
@@ -96,25 +104,21 @@ use bioprism_bioevalx::plane::{
 use bioprism_bioevalx::reveal::{
     Commitment as BioevalCommitment, Outcome as BioevalOutcome, Registration as BioevalRegistration,
 };
-use bioprism_bioevalx::metamorphic::{
-    verdict as bioeval_metamorphic_verdict, Family as BioevalMetamorphicFamily,
-    Relation as BioevalMetamorphicRelation, Suite as BioevalMetamorphicSuite,
-    Trial as BioevalMetamorphicTrial, TrialVerdict as BioevalTrialVerdict,
-};
 use bioprism_bioevalx::waiver::{
     Gate as BioevalReleaseGate, ReleaseDecision as BioevalReleaseDecision,
     Waiver as BioevalReleaseWaiver,
 };
 use bioprism_bioevalx::{OutputVerdict, Reexecution, Trajectory, Worldline as EvaluationWorldline};
-use bioprism_bioevalx::design::{Arm as BioevalDesignArm, FactorialDesign as BioevalFactorialDesign};
-use bioprism_bioevalx::mesh::{
-    Disagreement as BioevalDisagreement, EvaluatorDecl as BioevalEvaluatorDecl,
-    EvaluatorVerdict as BioevalEvaluatorVerdict, Mesh as BioevalMesh,
-};
-use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_biolang::{compile as compile_bioql, QuerySchema};
 use bioprism_bioworlds::SliceCatalog;
-use bioprism_bundle::ResultBundle;
+use bioprism_brain::{
+    assemble_prompt, plan_autonomous, select_bandit_arm, select_bandit_arm_contextual,
+    select_model, select_model_contextual, update_bandit, AutonomousPlanRequest, BanditState,
+    BanditUpdate, ContextualModelSelectionRequest, ModelSelectionRequest, PromptAssemblyRequest,
+};
+use bioprism_bundle::{
+    KeyRegistry, PubliclyAttestedBundle, ResultBundle, TrustPolicy, VerificationKey,
+};
 use bioprism_choreography::{
     ExplorationBound, GlobalType, System as ChoreographySystem, WellFormedGlobal,
 };
@@ -129,51 +133,99 @@ use bioprism_dataops::{
 };
 use bioprism_devplat::{
     apply_binding, audit_ci_execution_evidence, audit_ci_provider_evidence,
-    audit_execution_provenance, build_dashboard,
-    build_delivery_receipt, plan_mission, run_workbench, verify_delivery_receipt,
-    normalize_ci_provider_payload,
-    standard_walkthroughs,
-    CapabilityCatalogue, CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest,
-    CiExecutionEvidenceRequest, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
-    DeliveryReceiptRequest,
-    DeliveryReceiptVerificationRequest,
-    DevPlatReport, ExecutionProvenanceRequest, MissionReport, mission_claim_lineage_with_review,
-    MissionRequest, MissionStep, MissionStepResult, MissionTraceEvent, MissionTraceObserver,
-    MissionEvaluatorCatalogue, MissionEvaluatorQuery, MissionEvaluatorReviewRequest,
-    MISSION_EVALUATOR_SCHEMA_VERSION,
-    WorkbenchRequest,
-    EngineeringManifest, EngineeringPlanRequest, OperationalReadinessManifest, ReleasePipelineManifest,
-    SecurityPrivacyManifest,
-    SandboxManifest,
-    SandboxRuntimeManifest,
-    SecurityProgramManifest,
-    CAPABILITY_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA, ENGINEERING_PLAN_AUDIT_SCHEMA, OPERATIONAL_READINESS_AUDIT_SCHEMA,
-    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SECURITY_PRIVACY_AUDIT_SCHEMA,
-    SANDBOX_RUNTIME_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA,
-    MISSION_SCHEMA_VERSION, WORKBENCH_SCHEMA_VERSION,
+    audit_domain_decision_readiness, audit_domain_evidence_provider_external_payload_execution,
+    audit_domain_evidence_provider_external_payload_lineage, audit_execution_provenance,
+    build_dashboard, build_delivery_receipt, build_domain_acquisition_catalogue,
+    build_domain_workflow_catalogue, build_domain_workflow_portfolio,
+    build_workflow_execution_evidence, classify_domain_report_bridge,
+    execute_domain_evidence_source, handoff_domain_evidence_provider, instantiate_domain_workflow,
+    mission_claim_lineage_with_review, normalize_ci_provider_payload,
+    normalize_domain_evidence_provider, normalize_domain_evidence_provider_external_payload,
+    plan_domain_evidence_source, plan_mission, query_adapter_execution_evidence,
+    query_domain_evidence_provider_external_payload_evidence, reconcile_domain_workflow,
+    record_adapter_execution_evidence, record_domain_evidence_provider_external_payload,
+    run_workbench, scaffold_domain_workflow, standard_walkthroughs,
+    validate_domain_decision_readiness, validate_workflow_execution_evidence,
+    verify_delivery_receipt, verify_domain_evidence_provider_external_payload_replay,
+    verify_domain_evidence_provider_replay, verify_domain_workflow_portfolio,
+    verify_mission_evidence_bundle, verify_workbench, AdapterExecutionEvidenceQueryRequest,
+    AdapterExecutionEvidenceRequest, ArtifactRegistry, CapabilityCatalogue,
+    CapabilityDashboardQuery, CapabilityQuery, CapabilityRouteRequest, CiExecutionEvidenceRequest,
+    CiProviderEvidenceRegistry, CiProviderEvidenceRequest, CiProviderNormalizationRequest,
+    DeliveryReceiptRequest, DeliveryReceiptVerificationRequest, DevPlatReport,
+    DomainAcquisitionQuery, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
+    DomainEvidenceProviderExternalPayloadLineageAuditRequest,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DomainEvidenceProviderExternalPayloadReceiptRequest,
+    DomainEvidenceProviderExternalPayloadReplayRequest, DomainEvidenceProviderHandoffRequest,
+    DomainEvidenceProviderNormalizationRequest, DomainEvidenceProviderReplayRequest,
+    DomainWorkflowReconciliationRegistry, EngineeringManifest, EngineeringPlanRequest,
+    EvidenceBundleRegistry, ExecutionProvenanceRequest, MissionEvaluatorCatalogue,
+    MissionEvaluatorQuery, MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest,
+    MissionEvaluatorReviewRequest, MissionReport, MissionRequest, MissionStep, MissionStepResult,
+    MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
+    SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
+    WorkbenchReportRegistry, WorkbenchRequest, WorkbenchVerificationRequest,
+    WorkflowExecutionEvidenceRegistry, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
+    ADAPTER_DOMAIN_REPORT_WORKFLOW, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
+    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
+    DOMAIN_DECISION_READINESS_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+    DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW, DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+    DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW, DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
+    DOMAIN_REPORT_COVERAGE_WORKFLOW, DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
+    DOMAIN_REPORT_PROJECT_WORKFLOW, DOMAIN_REPORT_SCHEMA_VERSION, ENGINEERING_AUDIT_SCHEMA,
+    ENGINEERING_PLAN_AUDIT_SCHEMA, MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+    MISSION_EVALUATOR_SCHEMA_VERSION, MISSION_SCHEMA_VERSION, OPERATIONAL_READINESS_AUDIT_SCHEMA,
+    PROVIDER_DOMAIN_REPORT_SCHEMA_VERSION, PROVIDER_DOMAIN_REPORT_WORKFLOW,
+    RELEASE_PIPELINE_AUDIT_SCHEMA, SANDBOX_AUDIT_SCHEMA, SANDBOX_RUNTIME_AUDIT_SCHEMA,
+    SECURITY_PRIVACY_AUDIT_SCHEMA, SECURITY_PROGRAM_AUDIT_SCHEMA, WORKBENCH_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION, WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION,
+    WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW,
 };
 use bioprism_devx::{audit as devx_audit, lint_catalogue, workspace_contract};
 use bioprism_docgraph::{
     compile_bundle, impact_of, lint, scan_markdown_tree, DocEdgeType, ModuleId, NodeStatus,
     ScanOptions, TaskRoute, TraversalPolicy,
 };
-use bioprism_epistemic::{
-    brute_force_optimum as epistemic_brute_force_optimum,
-    complementarity as epistemic_complementarity, joint_value as epistemic_joint_value,
-    evaluate_context as epistemic_evaluate_context,
-    frontier as epistemic_frontier,
-    greedy as epistemic_greedy,
-    lazy_greedy as epistemic_lazy_greedy,
-    identification as epistemic_identification,
-    minimal_sufficient_context as epistemic_minimal_sufficient_context,
-    Constraint as EpistemicConstraint,
-    value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
-    Belief as EpistemicBelief, DecisionProblem as EpistemicDecisionProblem,
-    DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
-    Outcome as EpistemicOutcome,
-    RegretReduction as EpistemicRegretReduction, SetFunction as EpistemicSetFunction,
-};
 use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
+use bioprism_epistemic::{
+    adaptive_policy as epistemic_adaptive_policy,
+    adaptive_policy_with_cost_vectors as epistemic_vector_adaptive_policy,
+    brute_force_optimum as epistemic_brute_force_optimum,
+    complementarity as epistemic_complementarity,
+    decision_equivalence_quotient as epistemic_decision_equivalence_quotient,
+    evaluate_context as epistemic_evaluate_context, frontier as epistemic_frontier,
+    greedy as epistemic_greedy, identification as epistemic_identification,
+    joint_value as epistemic_joint_value, lazy_greedy as epistemic_lazy_greedy,
+    minimal_sufficient_context as epistemic_minimal_sufficient_context,
+    value_of_information as epistemic_value_of_information, Acquisition as EpistemicAcquisition,
+    AdaptiveExecutionReceipt as EpistemicAdaptiveExecutionReceipt,
+    AdaptiveNode as EpistemicAdaptiveNode, AdaptivePlan as EpistemicAdaptivePlan,
+    Belief as EpistemicBelief, Constraint as EpistemicConstraint,
+    CostVector as EpistemicCostVector, CostWeights as EpistemicCostWeights,
+    CostedAcquisition as EpistemicCostedAcquisition, DecisionProblem as EpistemicDecisionProblem,
+    DistortionCriterion as EpistemicDistortionCriterion, EvidencePool as EpistemicEvidencePool,
+    ExecutionGrant as EpistemicExecutionGrant, Outcome as EpistemicOutcome,
+    RegretReduction as EpistemicRegretReduction, ScriptedExecutor as EpistemicScriptedExecutor,
+    SetFunction as EpistemicSetFunction, ADAPTIVE_EXECUTION_SCHEMA,
+};
+use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_evalengine::{
     CapabilityPosterior, CreditPolicy, Observation, ReleaseGate as EvalReleaseGate,
 };
@@ -181,8 +233,8 @@ use bioprism_fabric::synth::{
     synthesize as synthesize_fabric, unimplemented_stages, Candidate as FabricCandidate,
     Goal as FabricGoal,
 };
-use bioprism_factory::{Job as FactoryJob, JobStore, WorkerCapability};
-use bioprism_fiber::{compile, Query};
+use bioprism_factory::{ExecutionAuthoritySnapshot, Job as FactoryJob, JobStore, WorkerCapability};
+use bioprism_fiber::{compile, AdaptiveAcquisitionTrace, Query};
 use bioprism_foundation::contract::{ContractDraft, FalsifiableContract};
 use bioprism_foundation::maturity::ApplicabilityEnvelope;
 use bioprism_foundation::worldclass::{BioWorldDeclaration, CounterfactualClaim, Transition};
@@ -206,17 +258,24 @@ use bioprism_infra::{
     KeySchema, Purpose, ReferenceSets, ResourceId, ReuseRule, StorageClass, StorageQuota, Tier,
     TieringPolicy,
 };
-use bioprism_interweave::workflow::{catalogue as interweave_catalogue, outstanding_deliverables};
+use bioprism_interweave::workflow::{
+    catalogue as interweave_catalogue, outstanding_deliverables, WorkflowId as InterweaveWorkflowId,
+};
+use bioprism_interweave::workflow_execution::{
+    WorkflowExecutionBinding as InterweaveWorkflowExecutionBinding,
+    WorkflowExecutionReceipt as InterweaveWorkflowExecutionReceipt,
+    WORKFLOW_EXECUTION_SCHEMA as INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
+};
 use bioprism_lab::{
-    expand as expand_acquisitions, separate as separate_hypotheses, AcquisitionAction,
-    AcquisitionCost, HypothesisSet as LabHypothesisSet,
     evolution::{ChangeProposal, ContaminationRecord, EvolutionCard},
+    expand as expand_acquisitions,
     holdout::{Holdout, HoldoutId, HoldoutLedger, Partition},
     pareto::{Direction as LabParetoDirection, ParetoFront, Profile as LabParetoProfile},
     risk::{BranchLedger, BranchOutcome, BranchPolicy, RiskFeatures},
     rollback::{Checkpoint, Deployment},
+    separate as separate_hypotheses,
     space::{ArchitectureSpace, CandidateArchitecture, ConfigurationId},
-    Observations,
+    AcquisitionAction, AcquisitionCost, HypothesisSet as LabHypothesisSet, Observations,
 };
 use bioprism_ledger::{ClassCounts, Event, EventLedger, SubjectLatest, TemporalCut};
 use bioprism_lens::{catalogue as lens_catalogue, run as run_lens, CohortLeakageLens, CohortSplit};
@@ -225,45 +284,27 @@ use bioprism_megafactory::{
     WorkRequest, WorkerProfile,
 };
 use bioprism_metrics::{
-    analyse_analytics, breakdown as metrics_breakdown, AnalyticsInput, CapabilityVector,
-    ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting, PartialRanking,
-    CapabilityGrid, RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
+    analyse_analytics, breakdown as metrics_breakdown, AnalyticsInput, CapabilityGrid,
+    CapabilityVector, ComparabilityPolicy as MetricsComparabilityPolicy, DeclaredWeighting,
+    PartialRanking, RankInstability, ANALYTICS_SCHEMA_VERSION, METRICS_SCHEMA_VERSION,
 };
 use bioprism_modalities::{
     analysis_unit as modality_analysis_unit, catalog::all as all_modalities,
     cites as modality_cites, independent_unit as modality_independent_unit,
-    report as modality_comparability_report,
-    supported_claims as modality_supported_claims, supports_descriptor as modality_supports_descriptor,
-    ClaimKind, EvaluationHorizon, EvidenceTier, LiteratureClaim, Modality, ModalityDescriptor,
-    ModalMeasurement, ModalityTransport, Resolution, TransportKind,
+    report as modality_comparability_report, supported_claims as modality_supported_claims,
+    supports_descriptor as modality_supports_descriptor, ClaimKind, EvaluationHorizon,
+    EvidenceTier, LiteratureClaim, ModalMeasurement, Modality, ModalityDescriptor,
+    ModalityTransport, Resolution, TransportKind,
 };
-use bioprism_obligation::{may_perform, Action as ObligationAction, ObligationGraph};
 use bioprism_mutation::{
     generate as generate_mutations, measure as measure_diversity, standard_suite,
 };
+use bioprism_obligation::{may_perform, Action as ObligationAction, ObligationGraph};
 use bioprism_onco::{
     assess as onco_assess, classify as onco_classify, AcquisitionTime, AvailabilityTime,
     BoundaryRequest, ClinicalObservation, Estimand, FollowUp, Histology, ImagingObservation,
-    MarkerPanel, MolecularMarker, ProgressionEvidence, ResearchBoundary,
-    ResponseCriterion, ResponseRequest, Timepoint, TreatmentContext, TumourWorldline,
-};
-use bioprism_oncoworlds::{
-    attribute_to_treatment as onco_attribute_to_treatment,
-    as_negative_call as onco_as_negative_call,
-    assert_claim as onco_assert_radiogenomic_claim,
-    classify as onco_classify_methylation,
-    compatible_histories as onco_compatible_histories, joinable_with_bridge,
-    comparable_cohorts as onco_comparable_cohorts,
-    explain_new_alteration as onco_explain_new_alteration,
-    equity_report as onco_equity_report,
-    reconcile_versions as onco_reconcile_methylation,
-    transport_to_patients as onco_transport_model, AnalysisUnit, Artifact, ClassifierVersion,
-    CausalDesign, ClonalHistory, Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse,
-    EntityMapping, EpochBridge, EstablishmentCohort, EvaluationDesign, FidelityEvidence,
-    IdentityEvidence, JoinReport, JoinVerdict, MethylationClass, ModelResult,
-    PopulationDescriptor, PooledScore, RadiogenomicClaim, SampleContext, SiteAssayContext,
-    SpecimenObservation, TumourPopulation,
-    use_descriptor as onco_use_descriptor, VersionedResult,
+    MarkerPanel, MolecularMarker, ProgressionEvidence, ResearchBoundary, ResponseCriterion,
+    ResponseRequest, Timepoint, TreatmentContext, TumourWorldline,
 };
 use bioprism_oncoworlds::entities::{
     declare_cluster as onco_declare_cluster, handle_event as onco_handle_event,
@@ -273,6 +314,21 @@ use bioprism_oncoworlds::entities::{
 };
 use bioprism_oncoworlds::models::REQUIRED_ASSUMPTIONS as MODEL_REQUIRED_ASSUMPTIONS;
 use bioprism_oncoworlds::radiogenomics::{MECHANISM_STRATA, REQUIRED_ASSUMPTIONS};
+use bioprism_oncoworlds::{
+    as_negative_call as onco_as_negative_call, assert_claim as onco_assert_radiogenomic_claim,
+    attribute_to_treatment as onco_attribute_to_treatment, classify as onco_classify_methylation,
+    comparable_cohorts as onco_comparable_cohorts,
+    compatible_histories as onco_compatible_histories, equity_report as onco_equity_report,
+    explain_new_alteration as onco_explain_new_alteration, joinable_with_bridge,
+    reconcile_versions as onco_reconcile_methylation,
+    transport_to_patients as onco_transport_model, use_descriptor as onco_use_descriptor,
+    AnalysisUnit, Artifact, CausalDesign, ClassifierVersion, ClonalHistory,
+    Cohort as OncoShiftCohort, DeclaredTransport, DescriptorUse, EntityMapping, EpochBridge,
+    EstablishmentCohort, EvaluationDesign, FidelityEvidence, IdentityEvidence, JoinReport,
+    JoinVerdict, MethylationClass, ModelResult, PooledScore, PopulationDescriptor,
+    RadiogenomicClaim, SampleContext, SiteAssayContext, SpecimenObservation, TumourPopulation,
+    VersionedResult,
+};
 use bioprism_ops::{
     audit_statement as telemetry_audit_statement, CapacityModel, DegradationPlan, Demand,
     DomainEvent, MetricDefinition, Observations as TelemetryObservations, RedactionPolicy, TraceId,
@@ -373,17 +429,18 @@ use bioprism_worldfactory::provenance::{
     support as support_world_claim, Claim, Provenance as WorldProvenance,
 };
 use bioprism_worldgen::{generate as generate_world, WorldSpec};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub use bioprism_devplat::MISSION_TRACE_SCHEMA_VERSION;
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SERVER_NAME: &str = "bioprism";
 pub const QUERY_SCHEMA_URI: &str = "bioprism://schema/fiber-query/0.2";
+pub const ADAPTIVE_QUERY_SCHEMA_URI: &str = "bioprism://schema/fiber-query/0.5";
 pub const CERTIFICATE_SCHEMA_URI: &str = "bioprism://schema/fiber-context-certificate/0.1";
 pub const WORLD_SCHEMA_URI: &str = "bioprism://schema/fiber-world/0.1";
 pub const CAPABILITIES_URI: &str = "bioprism://capabilities/0.1";
@@ -391,6 +448,10 @@ pub const CAPABILITIES_URI: &str = "bioprism://capabilities/0.1";
 const QUERY_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../schemas/fiber-v0.1/query.schema.json"
+));
+const ADAPTIVE_QUERY_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../schemas/fiber-v0.5/query.schema.json"
 ));
 const CERTIFICATE_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -400,6 +461,103 @@ const WORLD_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../schemas/fiber-v0.1/world.schema.json"
 ));
+
+/// Convert the epistemic kernel's Rust-tagged policy tree into the stable named projection used
+/// by both the standalone adaptive route and the versioned FIBER compiler contract.
+fn project_adaptive_node(
+    node: &EpistemicAdaptiveNode,
+    problem: &EpistemicDecisionProblem,
+) -> Value {
+    match node {
+        EpistemicAdaptiveNode::Stop { action, risk } => json!({
+            "kind": "stop",
+            "action_index": action,
+            "action": problem.actions().get(*action),
+            "risk": risk,
+        }),
+        EpistemicAdaptiveNode::Acquire {
+            acquisition,
+            id,
+            cost,
+            expected_total,
+            expected_terminal_risk,
+            expected_acquisition_cost,
+            outcomes,
+        } => json!({
+            "kind": "acquire",
+            "acquisition_index": acquisition,
+            "id": id,
+            "cost": cost,
+            "expected_total": expected_total,
+            "expected_terminal_risk": expected_terminal_risk,
+            "expected_acquisition_cost": expected_acquisition_cost,
+            "outcomes": outcomes.iter().map(|outcome| json!({
+                "label": outcome.label,
+                "probability": outcome.probability,
+                "posterior": outcome.posterior,
+                "next": project_adaptive_node(&outcome.next, problem),
+            })).collect::<Vec<_>>(),
+        }),
+    }
+}
+
+fn project_fiber_adaptive_trace(
+    trace: &AdaptiveAcquisitionTrace,
+    query_sha256: &str,
+    certificate_sha256: &str,
+) -> Value {
+    json!({
+        "schema": "bioprism-mcp/fiber-adaptive-acquisition/0.1",
+        "budget": trace.budget,
+        "max_steps": trace.max_steps,
+        "prior": trace.prior,
+        "problem": {
+            "actions": trace.problem.actions(),
+            "models": trace.problem.models(),
+            "action_count": trace.problem.action_count(),
+            "model_count": trace.problem.model_count(),
+        },
+        "acquisitions": trace.acquisitions.iter().map(|acquisition| json!({
+            "id": acquisition.id,
+            "cost": acquisition.cost,
+            "outcomes": acquisition.outcomes().iter().map(|outcome| json!({
+                "label": outcome.label,
+                "likelihood": outcome.likelihoods(),
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+        "policy": {
+            "expected_total": trace.policy.expected_total,
+            "expected_terminal_risk": trace.policy.expected_terminal_risk,
+            "expected_acquisition_cost": trace.policy.expected_acquisition_cost,
+            "nodes_evaluated": trace.policy.nodes_evaluated,
+            "selected_depth": trace.policy.selected_depth,
+            "root": project_adaptive_node(&trace.policy.root, &trace.problem),
+        },
+        "certificate_binding": {
+            "query_sha256": query_sha256,
+            "certificate_sha256": certificate_sha256,
+        },
+        "execution": "not_started",
+        "authorization": "not_granted",
+        "provenance": {
+            "planner": "bioprism-epistemic::adaptive_policy",
+            "input_posture": "caller_declared_unperformed_acquisitions",
+            "independence_assumption": "conditionally_independent_given_supplied_models",
+        },
+        "guarantees": [
+            "the selected policy is exact under the 16-acquisition, 16-step, and 65536-state caps",
+            "each acquisition is used at most once and branch-dependent next choices are explicit",
+            "expected terminal risk and expected declared cost remain separate",
+            "certificate binding makes the policy input and result replayable"
+        ],
+        "limitations": [
+            "the planner assumes conditional independence given the caller-supplied models",
+            "the compiler plans but does not schedule, authorize, authenticate, execute, or observe an acquisition",
+            "costs are caller-supplied scalarizations rather than inferred resource vectors",
+            "the decision-relative policy is not causal, clinical, biological, or predictive truth"
+        ]
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
@@ -413,6 +571,13 @@ pub struct Server {
     root: PathBuf,
     lifecycle: Lifecycle,
     mission_trace_observer: Option<MissionTraceObserver>,
+    evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+    workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+    workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
+    ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
+    artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    brain_control_state: Arc<Mutex<BrainControlState>>,
 }
 
 enum ParallelPending<'a> {
@@ -1023,10 +1188,121 @@ fn validate_static_mission_schemas(request: &MissionRequest) -> Result<(), Strin
 
 impl Server {
     pub fn new(root: PathBuf) -> Self {
+        Self::with_registries_and_artifacts(
+            root,
+            Arc::new(Mutex::new(EvidenceBundleRegistry::new())),
+            Arc::new(Mutex::new(DomainWorkflowReconciliationRegistry::new())),
+            Arc::new(Mutex::new(ArtifactRegistry::new())),
+        )
+    }
+
+    /// Construct a server over caller-owned registries.
+    ///
+    /// The HTTP adapter and MCP dispatcher must share these indexes: otherwise a reconciliation
+    /// imported or produced through one transport is invisible to the other transport's gate and
+    /// operator projections. The registries remain bounded and mutex-protected at the process
+    /// boundary; this constructor only joins their ownership graph.
+    pub fn with_registries(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    ) -> Self {
+        Self::with_registries_and_artifacts(
+            root,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            Arc::new(Mutex::new(ArtifactRegistry::new())),
+        )
+    }
+
+    /// Construct a server over all caller-owned cross-domain registries.
+    ///
+    /// The artifact index is separate from evidence and reconciliation storage because it joins
+    /// their content identities without owning their semantic schemas. Sharing it here keeps MCP
+    /// and HTTP calls in one process on the same index while preserving each domain registry's
+    /// independent verification rules.
+    pub fn with_registries_and_artifacts(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+        artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    ) -> Self {
+        Self::with_registries_and_artifacts_and_workflow_execution_evidence(
+            root,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            Arc::new(Mutex::new(WorkflowExecutionEvidenceRegistry::new())),
+            artifact_registry,
+        )
+    }
+
+    /// Construct a server over every caller-owned registry, including portable workflow
+    /// execution evidence. The API gateway uses this seam so MCP and HTTP requests share both
+    /// the live digest indexes and their restart-aware persistence boundary.
+    pub fn with_registries_and_artifacts_and_workflow_execution_evidence(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+        workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+        artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    ) -> Self {
+        Self::with_all_registries(
+            root,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            workflow_execution_evidence_registry,
+            Arc::new(Mutex::new(WorkbenchReportRegistry::new())),
+            artifact_registry,
+        )
+    }
+
+    /// Construct a server over every caller-owned registry, including retained workbench reports.
+    ///
+    /// The API gateway uses this seam to share its restart-restored workbench index with both
+    /// direct HTTP handlers and the MCP dispatcher in the same process.
+    pub fn with_all_registries(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+        workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+        workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
+        artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    ) -> Self {
+        Self::with_all_registries_and_ci_provider_evidence(
+            root,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            workflow_execution_evidence_registry,
+            workbench_registry,
+            Arc::new(Mutex::new(CiProviderEvidenceRegistry::new())),
+            artifact_registry,
+        )
+    }
+
+    /// Construct a server over every caller-owned registry, including retained provider evidence.
+    ///
+    /// The API gateway uses this seam so provider imports and operator queries share the same
+    /// restart-restored index with MCP, while artifact storage remains an independent join.
+    pub fn with_all_registries_and_ci_provider_evidence(
+        root: PathBuf,
+        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+        workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+        workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
+        ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
+        artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    ) -> Self {
         Server {
             root: std::fs::canonicalize(&root).unwrap_or(root),
             lifecycle: Lifecycle::New,
             mission_trace_observer: None,
+            evidence_registry,
+            workflow_reconciliation_registry,
+            workflow_execution_evidence_registry,
+            workbench_registry,
+            ci_provider_evidence_registry,
+            artifact_registry,
+            brain_control_state: Arc::new(Mutex::new(BrainControlState::default())),
         }
     }
 
@@ -1099,7 +1375,9 @@ impl Server {
         arguments: &Value,
         cancellation: &AtomicBool,
     ) -> Result<Value, String> {
-        self.agent_mission_with_cancellation(arguments, Some(cancellation))
+        let result = self.agent_mission_with_cancellation(arguments, Some(cancellation));
+        self.attach_workflow_reconciliation(arguments, result)
+            .and_then(|report| self.index_mission_report(report))
     }
 
     /// Resolves a client-supplied path inside the root.
@@ -1112,8 +1390,27 @@ impl Server {
     /// rename can be made race-free by a pure path helper.
     pub fn resolve(&self, relative: &str) -> Result<PathBuf, String> {
         let candidate = Path::new(relative);
-        if candidate.is_absolute() {
+        // `Path` follows the host platform. The MCP boundary is cross-platform,
+        // though, so a Windows drive path must not become an ordinary filename
+        // when the server happens to run on Unix (and vice versa).
+        let bytes = relative.as_bytes();
+        let has_drive_prefix =
+            bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+        if candidate.is_absolute()
+            || relative.starts_with('/')
+            || relative.starts_with('\\')
+            || has_drive_prefix
+        {
             return Err(format!("absolute paths are refused: {relative:?}"));
+        }
+        // Check both separators lexically. On Unix, `..\\outside` would
+        // otherwise be treated as a literal filename instead of traversal.
+        for component in relative.split(['/', '\\']) {
+            if component == ".." {
+                return Err(format!(
+                    "path escapes the server root and is refused: {relative:?}"
+                ));
+            }
         }
         for component in candidate.components() {
             match component {
@@ -1271,6 +1568,9 @@ impl Server {
 
         let (mime_type, text) = match uri {
             QUERY_SCHEMA_URI => ("application/schema+json", QUERY_SCHEMA.to_string()),
+            ADAPTIVE_QUERY_SCHEMA_URI => {
+                ("application/schema+json", ADAPTIVE_QUERY_SCHEMA.to_string())
+            }
             CERTIFICATE_SCHEMA_URI => ("application/schema+json", CERTIFICATE_SCHEMA.to_string()),
             WORLD_SCHEMA_URI => ("application/schema+json", WORLD_SCHEMA.to_string()),
             CAPABILITIES_URI => ("application/json", workspace_capabilities().to_string()),
@@ -1324,6 +1624,74 @@ impl Server {
             "world_validate" => self.world_validate(&arguments),
             "world_generate" => self.world_generate(&arguments),
             "factory_lifecycle_simulate" => self.factory_lifecycle_simulate(&arguments),
+            "factory_authority_verify" => self.factory_authority_verify(&arguments),
+            "artifact_registry_audit" => self.artifact_registry_audit(&arguments),
+            "domain_report_project" => self.domain_report_project(&arguments),
+            "domain_evidence_harmonize" => self.domain_evidence_harmonize(&arguments),
+            "domain_decision_readiness_audit" => self.domain_decision_readiness_audit(&arguments),
+            "domain_decision_readiness_query" => self.domain_decision_readiness_query(&arguments),
+            "control_plane_readiness_audit" => self.control_plane_readiness_audit(&arguments),
+            "control_plane_readiness_compare" => self.control_plane_readiness_compare(&arguments),
+            "control_plane_readiness_compare_retained" => {
+                self.control_plane_readiness_compare_retained(&arguments)
+            }
+            "control_plane_readiness_query" => self.control_plane_readiness_query(&arguments),
+            "brain_model_select" => self.brain_model_select(&arguments),
+            "brain_model_select_contextual" => self.brain_model_select_contextual(&arguments),
+            "brain_prompt_assemble" => self.brain_prompt_assemble(&arguments),
+            "brain_plan" => self.brain_plan(&arguments),
+            "brain_bandit_select" => self.brain_bandit_select(&arguments),
+            "brain_bandit_update" => self.brain_bandit_update(&arguments),
+            "brain_outcome_record" => self.brain_outcome_record(&arguments),
+            "brain_job_submit" => self.brain_job_submit(&arguments),
+            "brain_job_status" => self.brain_job_status(&arguments),
+            "brain_job_events" => self.brain_job_events(&arguments),
+            "brain_job_approval" => self.brain_job_approval(&arguments),
+            "brain_job_claim" => self.brain_job_claim(&arguments),
+            "brain_job_claim_next" => self.brain_job_claim_next(&arguments),
+            "brain_job_renew" => self.brain_job_renew(&arguments),
+            "brain_job_checkpoint" => self.brain_job_checkpoint(&arguments),
+            "brain_job_complete" => self.brain_job_complete(&arguments),
+            "brain_job_fail" => self.brain_job_fail(&arguments),
+            "brain_job_reconcile" => self.brain_job_reconcile(&arguments),
+            "brain_job_cancel" => self.brain_job_cancel(&arguments),
+            "brain_model_health" => self.brain_model_health(&arguments),
+            "brain_replay_evaluate" => self.brain_replay_evaluate(&arguments),
+            "domain_evidence_harmonization_coverage" => {
+                self.domain_evidence_harmonization_coverage(&arguments)
+            }
+            "domain_evidence_intake" => self.domain_evidence_intake(&arguments),
+            "domain_evidence_coverage" => self.domain_evidence_coverage(&arguments),
+            "domain_evidence_source_plan" => self.domain_evidence_source_plan(&arguments),
+            "domain_evidence_source_execute" => self.domain_evidence_source_execute(&arguments),
+            "domain_evidence_provider_normalize" => {
+                self.domain_evidence_provider_normalize(&arguments)
+            }
+            "domain_evidence_provider_replay_verify" => {
+                self.domain_evidence_provider_replay_verify(&arguments)
+            }
+            "domain_evidence_provider_connector_handoff" => {
+                self.domain_evidence_provider_connector_handoff(&arguments)
+            }
+            "domain_evidence_provider_external_payload_receipt" => {
+                self.domain_evidence_provider_external_payload_receipt(&arguments)
+            }
+            "domain_evidence_provider_external_payload_replay_verify" => {
+                self.domain_evidence_provider_external_payload_replay_verify(&arguments)
+            }
+            "domain_evidence_provider_external_payload_normalize" => {
+                self.domain_evidence_provider_external_payload_normalize(&arguments)
+            }
+            "domain_evidence_provider_external_payload_lineage_audit" => {
+                self.domain_evidence_provider_external_payload_lineage_audit(&arguments)
+            }
+            "domain_evidence_provider_external_payload_execution_evidence" => {
+                self.domain_evidence_provider_external_payload_execution_evidence(&arguments)
+            }
+            "domain_evidence_provider_external_payload_evidence_query" => {
+                self.domain_evidence_provider_external_payload_evidence_query(&arguments)
+            }
+            "domain_acquisition_catalogue" => self.domain_acquisition_catalogue(&arguments),
             "context_compare" => self.context_compare(&arguments),
             "bioworlds_catalog" => self.bioworlds_catalog(&arguments),
             "modality_catalog" => self.modality_catalog(&arguments),
@@ -1358,6 +1726,8 @@ impl Server {
             "hub_resolve" => self.hub_resolve(&arguments),
             "hub_lock" => self.hub_lock(&arguments),
             "adapter_plan" => self.adapter_plan(&arguments),
+            "adapter_execution_evidence" => self.adapter_execution_evidence(&arguments),
+            "adapter_execution_evidence_query" => self.adapter_execution_evidence_query(&arguments),
             "tabular_ingest" => self.tabular_ingest(&arguments),
             "observed_world_declare" => self.observed_world_declare(&arguments),
             "world_claim_check" => self.world_claim_check(&arguments),
@@ -1409,6 +1779,19 @@ impl Server {
                         "outstanding counts are derived from the typed deliverable set rather than a prose percentage",
                     ],
                 }))
+            }
+            "interweave_workflow_execute" => self.interweave_workflow_execute(&arguments),
+            "interweave_workflow_execution_evidence" => {
+                self.interweave_workflow_execution_evidence(&arguments)
+            }
+            "interweave_workflow_execution_evidence_import" => {
+                self.interweave_workflow_execution_evidence_import(&arguments)
+            }
+            "interweave_workflow_execution_evidence_query" => {
+                self.interweave_workflow_execution_evidence_query(&arguments)
+            }
+            "interweave_workflow_execution_evidence_get" => {
+                self.interweave_workflow_execution_evidence_get(&arguments)
             }
             "atlas_report" => self.atlas_report(&arguments),
             "atlas_surface_audit" => self.atlas_surface_audit(&arguments),
@@ -1465,6 +1848,10 @@ impl Server {
             "token_context_plan" => self.token_context_plan(&arguments),
             "bioql_compile" => self.bioql_compile(&arguments),
             "epistemic_voi" => self.epistemic_voi(&arguments),
+            "epistemic_adaptive_acquisition" => self.epistemic_adaptive_acquisition(&arguments),
+            "epistemic_adaptive_costed" => self.epistemic_adaptive_costed(&arguments),
+            "epistemic_adaptive_execute" => self.epistemic_adaptive_execute(&arguments),
+            "epistemic_decision_quotient" => self.epistemic_decision_quotient(&arguments),
             "epistemic_context_audit" => self.epistemic_context_audit(&arguments),
             "epistemic_selection_audit" => self.epistemic_selection_audit(&arguments),
             "routing_lab_run" => self.routing_lab_run(&arguments),
@@ -1489,7 +1876,9 @@ impl Server {
             "developer_platform_status" => self.developer_platform_status(&arguments),
             "developer_delivery_audit" => self.developer_delivery_audit(&arguments),
             "developer_delivery_receipt" => self.developer_delivery_receipt(&arguments),
-            "developer_delivery_receipt_verify" => self.developer_delivery_receipt_verify(&arguments),
+            "developer_delivery_receipt_verify" => {
+                self.developer_delivery_receipt_verify(&arguments)
+            }
             "engineering_manifest_audit" => self.engineering_manifest_audit(&arguments),
             "engineering_execution_plan" => self.engineering_execution_plan(&arguments),
             "release_pipeline_audit" => self.release_pipeline_audit(&arguments),
@@ -1499,8 +1888,15 @@ impl Server {
             "sandbox_runtime_simulate" => self.sandbox_runtime_simulate(&arguments),
             "security_program_audit" => self.security_program_audit(&arguments),
             "developer_workbench" => self.developer_workbench(&arguments),
+            "developer_workbench_verify" => self.developer_workbench_verify(&arguments),
+            "developer_workbench_import" => self.developer_workbench_import(&arguments),
+            "developer_workbench_query" => self.developer_workbench_query(&arguments),
+            "developer_workbench_get" => self.developer_workbench_get(&arguments),
             "ci_provider_normalize" => self.ci_provider_normalize(&arguments),
             "ci_provider_evidence_audit" => self.ci_provider_evidence_audit(&arguments),
+            "ci_provider_evidence_import" => self.ci_provider_evidence_import(&arguments),
+            "ci_provider_evidence_query" => self.ci_provider_evidence_query(&arguments),
+            "ci_provider_evidence_get" => self.ci_provider_evidence_get(&arguments),
             "ci_execution_evidence_audit" => self.ci_execution_evidence_audit(&arguments),
             "execution_provenance_audit" => self.execution_provenance_audit(&arguments),
             "agent_mission" => self.agent_mission(&arguments),
@@ -1509,8 +1905,32 @@ impl Server {
             "capability_discover" => self.capability_discover(&arguments),
             "mission_evaluator_discover" => self.mission_evaluator_discover(&arguments),
             "mission_evaluator_review" => self.mission_evaluator_review(&arguments),
+            "mission_evaluator_replay" => self.mission_evaluator_replay(&arguments),
+            "mission_evaluator_replay_compare" => self.mission_evaluator_replay_compare(&arguments),
+            "mission_evidence_bundle_verify" => self.mission_evidence_bundle_verify(&arguments),
+            "mission_evidence_bundle_import" => self.mission_evidence_bundle_import(&arguments),
+            "mission_evidence_bundle_query" => self.mission_evidence_bundle_query(&arguments),
+            "mission_evidence_bundle_get" => self.mission_evidence_bundle_get(&arguments),
             "capability_route" => self.capability_route(&arguments),
             "capability_route_review" => self.capability_route_review(&arguments),
+            "capability_route_plan" => self.capability_route_plan(&arguments),
+            "capability_route_plan_verify" => self.capability_route_plan_verify(&arguments),
+            "domain_workflow_catalogue" => self.domain_workflow_catalogue(&arguments),
+            "domain_workflow_scaffold" => self.domain_workflow_scaffold(&arguments),
+            "domain_workflow_instantiate" => self.domain_workflow_instantiate(&arguments),
+            "domain_workflow_portfolio" => self.domain_workflow_portfolio(&arguments),
+            "domain_workflow_portfolio_verify" => self.domain_workflow_portfolio_verify(&arguments),
+            "domain_workflow_verify" => self.domain_workflow_verify(&arguments),
+            "domain_workflow_reconcile" => self.domain_workflow_reconcile(&arguments),
+            "domain_workflow_reconciliation_import" => {
+                self.domain_workflow_reconciliation_import(&arguments)
+            }
+            "domain_workflow_reconciliation_query" => {
+                self.domain_workflow_reconciliation_query(&arguments)
+            }
+            "domain_workflow_reconciliation_get" => {
+                self.domain_workflow_reconciliation_get(&arguments)
+            }
             "safety_posture" => self.safety_posture(&arguments),
             "security_redteam_simulate" => self.security_redteam_simulate(&arguments),
             "weave_protocol_catalog" => Ok(weave_protocol_catalog()),
@@ -1523,12 +1943,220 @@ impl Server {
         };
 
         match outcome {
-            Ok(value) => Response::result(id, tool_content(&value, false)),
+            Ok(mut value) => {
+                self.index_trusted_tool_output(name, &arguments, &mut value);
+                Response::result(id, tool_content(&value, false))
+            }
             Err(message) => Response::result(
                 id,
                 tool_content(&json!({ "ok": false, "error": message }), true),
             ),
         }
+    }
+
+    /// Select a provider/model from caller-supplied metadata. No credential is accepted here:
+    /// applications invoke the provider through their own secret boundary and pass only the
+    /// selected model id and value-free outcome metadata back to this server.
+    fn brain_model_select(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ModelSelectionRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid brain model-selection request: {error}"))?;
+        let report = select_model(&request)
+            .map_err(|error| format!("brain model selection refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain model-selection report: {error}"))
+    }
+
+    /// Select a model with domain/capability/risk-scoped observations. Exact contextual history
+    /// overrides global history for an arm; the caller still owns all state and credentials.
+    fn brain_model_select_contextual(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContextualModelSelectionRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| {
+                format!("invalid contextual brain model-selection request: {error}")
+            })?;
+        let report = select_model_contextual(&request)
+            .map_err(|error| format!("contextual brain model selection refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode contextual brain model-selection report: {error}")
+        })
+    }
+
+    /// Assemble a bounded prompt with explicit omission accounting. The server does not invoke a
+    /// model; the returned digest is the stable input identity a provider runtime can record.
+    fn brain_prompt_assemble(&self, arguments: &Value) -> Result<Value, String> {
+        let request: PromptAssemblyRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid brain prompt request: {error}"))?;
+        let report = assemble_prompt(&request)
+            .map_err(|error| format!("brain prompt assembly refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain prompt report: {error}"))
+    }
+
+    /// Validate and order a bounded autonomous plan. Plans are returned as not-started artifacts;
+    /// effectful steps remain approval-gated and no tool is executed by this handler.
+    fn brain_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AutonomousPlanRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid brain plan request: {error}"))?;
+        let report =
+            plan_autonomous(&request).map_err(|error| format!("brain plan refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain plan report: {error}"))
+    }
+
+    /// Select a model/tool arm from caller-persisted online-learning state. State is supplied and
+    /// returned by value so the MCP server has no hidden mutable learning memory.
+    fn brain_bandit_select(&self, arguments: &Value) -> Result<Value, String> {
+        let state_value = arguments
+            .get("state")
+            .cloned()
+            .unwrap_or_else(|| arguments.clone());
+        let state: BanditState = serde_json::from_value(state_value)
+            .map_err(|error| format!("invalid brain bandit state: {error}"))?;
+        let report = match (
+            arguments.get("context_digest").and_then(Value::as_str),
+            arguments.get("context"),
+        ) {
+            (None, None) => select_bandit_arm(&state),
+            (Some(context_digest), Some(context_value)) => {
+                let context: bioprism_brain::ModelSelectionContext =
+                    serde_json::from_value(context_value.clone())
+                        .map_err(|error| format!("invalid brain bandit context: {error}"))?;
+                select_bandit_arm_contextual(&state, context_digest, &context)
+            }
+            _ => Err(bioprism_brain::BrainError::ContextRequired),
+        }
+        .map_err(|error| format!("brain bandit selection refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode brain bandit selection: {error}"))
+    }
+
+    /// Apply one bounded evaluator reward to caller-owned bandit state and return the next state.
+    /// Reward updates are explicit; no provider response is treated as a reward implicitly.
+    fn brain_bandit_update(&self, arguments: &Value) -> Result<Value, String> {
+        let state: BanditState = serde_json::from_value(
+            arguments
+                .get("state")
+                .cloned()
+                .ok_or_else(|| "brain_bandit_update requires state".to_string())?,
+        )
+        .map_err(|error| format!("invalid brain bandit state: {error}"))?;
+        let update: BanditUpdate = serde_json::from_value(
+            arguments
+                .get("update")
+                .cloned()
+                .ok_or_else(|| "brain_bandit_update requires update".to_string())?,
+        )
+        .map_err(|error| format!("invalid brain bandit update: {error}"))?;
+        let next = update_bandit(&state, &update)
+            .map_err(|error| format!("brain bandit update refused: {error}"))?;
+        serde_json::to_value(next)
+            .map_err(|error| format!("cannot encode brain bandit state: {error}"))
+    }
+
+    /// Bind one explicit evaluator judgment to a value-only run identity and advance the
+    /// caller-owned bandit state. Provider text and credentials are never accepted here.
+    fn brain_outcome_record(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .outcome_record(arguments)
+    }
+
+    fn brain_job_submit(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .submit_job(arguments)
+    }
+
+    fn brain_job_status(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_status(arguments)
+    }
+
+    fn brain_job_events(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_events(arguments)
+    }
+
+    fn brain_job_approval(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_approval(arguments)
+    }
+
+    fn brain_job_claim(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_claim(arguments)
+    }
+
+    fn brain_job_claim_next(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_claim_next(arguments)
+    }
+
+    fn brain_job_renew(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_renew(arguments)
+    }
+
+    fn brain_job_checkpoint(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_checkpoint(arguments)
+    }
+
+    fn brain_job_complete(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_complete(arguments)
+    }
+
+    fn brain_job_fail(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_fail(arguments)
+    }
+
+    fn brain_job_reconcile(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_reconcile(arguments)
+    }
+
+    fn brain_job_cancel(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .job_cancel(arguments)
+    }
+
+    fn brain_model_health(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .model_health(arguments)
+    }
+
+    fn brain_replay_evaluate(&self, arguments: &Value) -> Result<Value, String> {
+        self.brain_control_state
+            .lock()
+            .map_err(|_| "brain control-plane state is unavailable".to_string())?
+            .replay_evaluate(arguments)
     }
 
     fn compiled(
@@ -1625,6 +2253,75 @@ impl Server {
                 }),
             );
 
+            if let Some(quotient) = &out.trace.decision_quotient {
+                map.insert(
+                    "decision_quotient".into(),
+                    json!({
+                        "schema": "bioprism-mcp/epistemic-decision-quotient/0.1",
+                        "basis": quotient.basis,
+                        "permitted_actions": quotient.permitted_actions,
+                        "original_model_count": quotient.original_model_count,
+                        "quotient_model_count": quotient.quotient_model_count,
+                        "merged_model_count": quotient.merged_model_count,
+                        "compressed": quotient.compressed(),
+                        "compression_fraction": quotient.compression_fraction(),
+                        "certificate_binding": {
+                            "query_sha256": out.certificate.source_hashes.query_sha256,
+                            "certificate_sha256": context.certificate_sha256,
+                        },
+                        "limitations": [
+                            "decision-relative model compression only; this is not a biological, causal, predictive, clinical, or likelihood equivalence",
+                            "the quotient is not a rate-distortion frontier and does not claim evidence sufficiency",
+                        ],
+                    }),
+                );
+            }
+
+            if let Some(rate_distortion) = &out.trace.rate_distortion {
+                map.insert(
+                    "rate_distortion".into(),
+                    json!({
+                        "schema": "bioprism-mcp/epistemic-context-audit/0.2",
+                        "criterion": rate_distortion.criterion,
+                        "tolerance": rate_distortion.tolerance,
+                        "compatibility_floor": rate_distortion.compatibility_floor,
+                        "evidence_count": rate_distortion.evidence_count,
+                        "full_rate": rate_distortion.full_rate,
+                        "identification": rate_distortion.identification,
+                        "sufficiency": rate_distortion.sufficiency,
+                        "frontier": rate_distortion.frontier,
+                        "certificate_binding": {
+                            "query_sha256": out.certificate.source_hashes.query_sha256,
+                            "certificate_sha256": context.certificate_sha256,
+                        },
+                        "guarantees": [
+                            "frontier is exhaustive over the bounded observed evidence pool",
+                            "rate is summed evidence cost and distortion is decision regret",
+                            "identification, sufficiency and frontier remain separate evidence layers",
+                        ],
+                        "limitations": [
+                            "evidence is caller-declared and already observed; this is not acquisition value",
+                            "decision identification is not causal, biological, clinical or predictive identification",
+                            "the compiler does not claim contexts beyond the 16-item exhaustive boundary",
+                        ],
+                    }),
+                );
+            }
+
+            if let Some(adaptive_acquisition) = &out.trace.adaptive_acquisition {
+                map.insert(
+                    "adaptive_acquisition".into(),
+                    project_fiber_adaptive_trace(
+                        adaptive_acquisition,
+                        &out.certificate.source_hashes.query_sha256,
+                        context
+                            .certificate_sha256
+                            .as_deref()
+                            .ok_or("compiled certificate has no reference digest")?,
+                    ),
+                );
+            }
+
             let world = arguments
                 .get("world")
                 .and_then(Value::as_str)
@@ -1663,7 +2360,7 @@ impl Server {
     }
 
     fn fiber_explain(&self, arguments: &Value) -> Result<Value, String> {
-        let (out, _) = self.compiled(arguments)?;
+        let (out, context) = self.compiled(arguments)?;
         Ok(json!({
             "ok": true,
             "backend": out.certificate.plan.backend.as_str(),
@@ -1673,6 +2370,15 @@ impl Server {
             "passes_not_run": out.trace.deferred_passes.iter().map(|(name, reason)| json!({
                 "name": name, "reason": reason
             })).collect::<Vec<_>>(),
+            "decision_quotient": out.trace.decision_quotient,
+            "rate_distortion": out.trace.rate_distortion,
+            "adaptive_acquisition": out.trace.adaptive_acquisition.as_ref().map(|trace| {
+                project_fiber_adaptive_trace(
+                    trace,
+                    &out.certificate.source_hashes.query_sha256,
+                    context.certificate_sha256.as_deref().unwrap_or_default(),
+                )
+            }),
             "selection": {
                 "facts": out.certificate.plan.compiled_fact_count,
                 "of_total": out.certificate.plan.total_fact_count,
@@ -2063,13 +2769,14 @@ impl Server {
                         .get("worker_id")
                         .and_then(Value::as_str)
                         .ok_or("heartbeat requires worker_id")?;
+                    let attempt = json_u32(raw_action.get("attempt"), "attempt")?;
                     let now = FactoryTimestamp::from_nanos_utc(json_i128(
                         raw_action.get("now_nanos"),
                         "now_nanos",
                     )?);
                     let duration = json_i128(raw_action.get("duration_nanos"), "duration_nanos")?;
                     store
-                        .heartbeat(job_id, worker_id, now, duration)
+                        .heartbeat(job_id, worker_id, attempt, now, duration)
                         .map_err(|error| format!("heartbeat refused: {error}"))?;
                     Ok(json!({ "job_id": job_id, "worker_id": worker_id }))
                 }
@@ -2082,6 +2789,7 @@ impl Server {
                         .get("worker_id")
                         .and_then(Value::as_str)
                         .ok_or("stage requires worker_id")?;
+                    let attempt = json_u32(raw_action.get("attempt"), "attempt")?;
                     let now = FactoryTimestamp::from_nanos_utc(json_i128(
                         raw_action.get("now_nanos"),
                         "now_nanos",
@@ -2091,7 +2799,7 @@ impl Server {
                         .cloned()
                         .ok_or("stage requires output")?;
                     store
-                        .stage(job_id, worker_id, now, output)
+                        .stage(job_id, worker_id, attempt, now, output)
                         .map_err(|error| format!("stage refused: {error}"))?;
                     Ok(json!({ "job_id": job_id, "visible_before_commit": false }))
                 }
@@ -2104,12 +2812,13 @@ impl Server {
                         .get("worker_id")
                         .and_then(Value::as_str)
                         .ok_or("commit requires worker_id")?;
+                    let attempt = json_u32(raw_action.get("attempt"), "attempt")?;
                     let now = FactoryTimestamp::from_nanos_utc(json_i128(
                         raw_action.get("now_nanos"),
                         "now_nanos",
                     )?);
                     store
-                        .commit(job_id, worker_id, now)
+                        .commit(job_id, worker_id, attempt, now)
                         .map_err(|error| format!("commit refused: {error}"))?;
                     Ok(json!({ "job_id": job_id, "committed": true }))
                 }
@@ -2122,6 +2831,7 @@ impl Server {
                         .get("worker_id")
                         .and_then(Value::as_str)
                         .ok_or("fail requires worker_id")?;
+                    let attempt = json_u32(raw_action.get("attempt"), "attempt")?;
                     let now = FactoryTimestamp::from_nanos_utc(json_i128(
                         raw_action.get("now_nanos"),
                         "now_nanos",
@@ -2131,7 +2841,7 @@ impl Server {
                         .and_then(Value::as_str)
                         .ok_or("fail requires reason")?;
                     let recovery = store
-                        .fail(job_id, worker_id, now, reason)
+                        .fail(job_id, worker_id, attempt, now, reason)
                         .map_err(|error| format!("failure report refused: {error}"))?;
                     serde_json::to_value(recovery)
                         .map_err(|error| format!("cannot serialize recovery: {error}"))
@@ -2234,6 +2944,4155 @@ impl Server {
                 "no worker process, queue, clock, filesystem, network, or external side effect is created",
             ],
         }))
+    }
+
+    /// Verify an execution-authority envelope without trusting its claimed digests or replaying
+    /// any worker effect. This is the MCP-side audit seam for API operators and offline tooling.
+    fn factory_authority_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let checkpoint = arguments
+            .get("checkpoint")
+            .cloned()
+            .ok_or("checkpoint is required and must be a serialized execution authority object")?;
+        let encoded = serde_json::to_vec(&checkpoint)
+            .map_err(|error| format!("cannot measure authority checkpoint: {error}"))?;
+        if encoded.len() > 64 * 1024 * 1024 {
+            return Err("authority checkpoint exceeds the 64 MiB safety bound".into());
+        }
+        let snapshot = ExecutionAuthoritySnapshot::from_json_bytes(&encoded)
+            .map_err(|error| format!("execution authority verification refused: {error}"))?;
+        let include_events = arguments
+            .get("include_events")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let max_events = arguments
+            .get("max_events")
+            .and_then(Value::as_u64)
+            .unwrap_or(64)
+            .min(256) as usize;
+        let events = if include_events {
+            snapshot
+                .events
+                .iter()
+                .rev()
+                .take(max_events)
+                .map(|event| {
+                    json!({
+                        "sequence": event.sequence,
+                        "operation": event.operation,
+                        "idempotency_key": event.idempotency_key,
+                        "job_id": event.job_id,
+                        "worker_id": event.worker_id,
+                        "attempt": event.attempt,
+                        "at": event.at,
+                        "digest": event.digest,
+                        "previous_digest": event.previous_digest,
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        Ok(json!({
+            "schema": "bioprism-factory-execution-authority/0.1",
+            "valid": true,
+            "schema_version": snapshot.schema_version,
+            "revision": snapshot.revision,
+            "authority_epoch": snapshot.authority_epoch,
+            "state_digest": snapshot.state_digest,
+            "queue_state_digest": snapshot.queue.state_digest,
+            "job_count": snapshot.queue.jobs.len(),
+            "active_lease_count": snapshot.queue.leases.len(),
+            "event_count": snapshot.events.len(),
+            "events": events,
+            "guarantees": [
+                "the queue snapshot and transition journal verify under one content digest",
+                "transition sequence and previous-digest links were checked before projection",
+                "legacy bare queue checkpoints are accepted only after their queue digest verifies"
+            ],
+            "does_not_claim": [
+                "multi-host consensus or network-partition tolerance",
+                "worker liveness",
+                "external provider effect completion"
+            ]
+        }))
+    }
+
+    /// Join bounded mission, evaluator, reconciliation, and domain artifacts by exact content
+    /// identity while preserving each artifact's own verification posture.
+    fn artifact_registry_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode artifact registry input: {error}"))?;
+        if encoded.len() > bioprism_devplat::MAX_ARTIFACT_REGISTRY_BYTES {
+            return Err(format!(
+                "artifact registry input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_ARTIFACT_REGISTRY_BYTES
+            ));
+        }
+        let operation = arguments
+            .get("operation")
+            .and_then(Value::as_str)
+            .unwrap_or("query");
+        if operation == "cross_store" {
+            return self.cross_store_artifact_audit();
+        }
+        let mut registry = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+        match operation {
+            "register" => {
+                let registration = arguments
+                    .get("registration")
+                    .ok_or("registration is required for artifact registry register")?;
+                registry
+                    .register(registration)
+                    .map_err(|error| format!("artifact registry registration refused: {error}"))
+            }
+            "query" => {
+                let optional_string = |name: &str| -> Result<Option<&str>, String> {
+                    arguments
+                        .get(name)
+                        .map(|value| {
+                            value
+                                .as_str()
+                                .ok_or_else(|| format!("{name} must be a string"))
+                        })
+                        .transpose()
+                };
+                let kind = optional_string("kind")?;
+                let domain = optional_string("domain")?;
+                let subject_id = optional_string("subject_id")?;
+                let after = optional_string("after")?;
+                let max_items = arguments
+                    .get("max_items")
+                    .map(|value| {
+                        value
+                            .as_u64()
+                            .ok_or_else(|| "max_items must be an integer".to_string())
+                            .and_then(|number| {
+                                usize::try_from(number)
+                                    .map_err(|_| "max_items is too large".to_string())
+                            })
+                    })
+                    .transpose()?
+                    .unwrap_or(100);
+                let include_artifacts = arguments
+                    .get("include_artifacts")
+                    .map(|value| {
+                        value
+                            .as_bool()
+                            .ok_or_else(|| "include_artifacts must be a boolean".to_string())
+                    })
+                    .transpose()?
+                    .unwrap_or(false);
+                registry
+                    .query(
+                        kind,
+                        domain,
+                        subject_id,
+                        after,
+                        max_items,
+                        include_artifacts,
+                    )
+                    .map_err(|error| format!("artifact registry query refused: {error}"))
+            }
+            "get" => {
+                let digest = arguments
+                    .get("content_digest")
+                    .and_then(Value::as_str)
+                    .ok_or("content_digest is required for artifact registry get")?;
+                registry
+                    .get(digest)
+                    .map_err(|error| format!("artifact registry get refused: {error}"))
+            }
+            "lineage" => {
+                let digest = arguments
+                    .get("content_digest")
+                    .and_then(Value::as_str)
+                    .ok_or("content_digest is required for artifact registry lineage")?;
+                registry
+                    .lineage(digest)
+                    .map_err(|error| format!("artifact registry lineage refused: {error}"))
+            }
+            "domain_evidence_lineage" => registry
+                .domain_evidence_lineage(arguments)
+                .map_err(|error| {
+                    format!("artifact registry domain evidence lineage refused: {error}")
+                }),
+            "verify_snapshot" => {
+                let snapshot = arguments
+                    .get("snapshot")
+                    .ok_or("snapshot is required for artifact registry verification")?;
+                let verified = ArtifactRegistry::from_snapshot(snapshot)
+                    .map_err(|error| format!("artifact registry snapshot refused: {error}"))?;
+                Ok(json!({
+                    "ok": true,
+                    "schema": bioprism_devplat::ARTIFACT_REGISTRY_SCHEMA_VERSION,
+                    "workflow": "artifact_registry_snapshot_verify",
+                    "valid": true,
+                    "registry_generation": verified.generation(),
+                    "registry_size": verified.len(),
+                    "execution": "not_started",
+                    "guarantees": [
+                        "the outer state digest and every indexed artifact identity were rechecked",
+                        "known evidence and reconciliation formats were independently re-verified"
+                    ],
+                    "does_not_claim": [
+                        "scientific, clinical, publication, or external provenance validity"
+                    ]
+                }))
+            }
+            other => Err(format!(
+                "unknown artifact registry operation {other:?}; choose register, query, get, lineage, domain_evidence_lineage, cross_store, or verify_snapshot"
+            )),
+        }
+    }
+
+    /// Compare the four bounded local registries by exact digest identity.
+    ///
+    /// Each mutex is observed independently so a slow or poisoned source store cannot hold the
+    /// other stores hostage. The returned generations and checkpoint digests make that
+    /// non-transactional observation explicit to callers.
+    fn cross_store_artifact_audit(&self) -> Result<Value, String> {
+        let (artifact_records, artifact_generation, artifact_state_digest) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            let snapshot = registry
+                .snapshot()
+                .map_err(|error| format!("artifact registry snapshot failed: {error}"))?;
+            (
+                registry.records_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (evidence_digests, evidence_generation, evidence_state_digest) = {
+            let registry = self
+                .evidence_registry
+                .lock()
+                .map_err(|_| "evidence registry lock is poisoned".to_string())?;
+            let snapshot = registry
+                .snapshot()
+                .map_err(|error| format!("evidence registry snapshot failed: {error}"))?;
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (reconciliation_digests, reconciliation_generation, reconciliation_state_digest) = {
+            let registry = self
+                .workflow_reconciliation_registry
+                .lock()
+                .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?;
+            let snapshot = registry.snapshot().map_err(|error| {
+                format!("workflow reconciliation registry snapshot failed: {error}")
+            })?;
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (
+            workflow_execution_evidence_digests,
+            workflow_execution_evidence_generation,
+            workflow_execution_evidence_state_digest,
+        ) = {
+            let registry = self
+                .workflow_execution_evidence_registry
+                .lock()
+                .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?;
+            let snapshot = registry.snapshot().map_err(|error| {
+                format!("workflow execution evidence registry snapshot failed: {error}")
+            })?;
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        Ok(bioprism_devplat::build_cross_domain_audit(
+            &artifact_records,
+            &evidence_digests,
+            &reconciliation_digests,
+            &workflow_execution_evidence_digests,
+            artifact_generation,
+            evidence_generation,
+            reconciliation_generation,
+            workflow_execution_evidence_generation,
+            artifact_state_digest,
+            evidence_state_digest,
+            reconciliation_state_digest,
+            workflow_execution_evidence_state_digest,
+        ))
+    }
+
+    /// Attach an index projection only to outputs that crossed an explicit integrity boundary.
+    ///
+    /// This is intentionally a small allow-list. A generic domain tool result is not silently
+    /// promoted to a durable artifact merely because it happens to contain a `domain` field.
+    /// The projection is appended after registration, so the artifact's content digest remains
+    /// the digest of the canonical report rather than a self-referential response envelope.
+    fn index_trusted_tool_output(&self, tool: &str, arguments: &Value, output: &mut Value) {
+        let (kind, subject_id, domains, parent_digests, artifact) = match tool {
+            "agent_mission" => return,
+            "mission_evidence_bundle_import" => {
+                let Some(bundle) = arguments.get("bundle") else {
+                    return;
+                };
+                (
+                    "mission_evidence_bundle",
+                    bundle
+                        .get("mission_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown-mission")
+                        .to_string(),
+                    evaluator_domains(bundle),
+                    Vec::new(),
+                    bundle.clone(),
+                )
+            }
+            "domain_workflow_reconcile" => (
+                "workflow_reconciliation",
+                output
+                    .get("mission_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown-mission")
+                    .to_string(),
+                // The canonical reconciliation record does not carry a domain-label field.
+                // Keep this projection domain-neutral so a later explicit import of the exact
+                // returned record is idempotent rather than metadata-conflicting.
+                Vec::new(),
+                Vec::new(),
+                output.clone(),
+            ),
+            "domain_workflow_reconciliation_import" => {
+                let Some(record) = arguments.get("record") else {
+                    return;
+                };
+                let artifact = without_artifact_projection(record);
+                (
+                    "workflow_reconciliation",
+                    artifact
+                        .get("mission_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown-mission")
+                        .to_string(),
+                    explicit_domains(&artifact),
+                    Vec::new(),
+                    artifact,
+                )
+            }
+            "mission_evaluator_replay" => (
+                "evaluator_replay",
+                output
+                    .get("mission_id")
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        arguments
+                            .pointer("/mission/plan/mission_id")
+                            .and_then(Value::as_str)
+                    })
+                    .unwrap_or("unknown-mission")
+                    .to_string(),
+                evaluator_domains(output),
+                projection_parent(arguments.pointer("/mission/artifact_registry")),
+                output.clone(),
+            ),
+            _ => return,
+        };
+        let projection =
+            self.index_artifact_projection(kind, &subject_id, domains, parent_digests, artifact);
+        if let Some(object) = output.as_object_mut() {
+            object.insert("artifact_registry".into(), projection);
+        }
+    }
+
+    fn index_artifact_projection(
+        &self,
+        kind: &str,
+        subject_id: &str,
+        domains: Vec<String>,
+        parent_digests: Vec<String>,
+        artifact: Value,
+    ) -> Value {
+        let registration = json!({
+            "kind": kind,
+            "subject_id": subject_id,
+            "domains": domains,
+            "parent_digests": parent_digests,
+            "artifact": artifact,
+        });
+        let result = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())
+            .and_then(|mut registry| {
+                registry
+                    .register(&registration)
+                    .map_err(|error| error.to_string())
+            });
+        match result {
+            Ok(report) => {
+                let digest = report.get("content_digest").cloned().unwrap_or(Value::Null);
+                json!({
+                    "indexed": true,
+                    "kind": kind,
+                    "subject_id": subject_id,
+                    "content_digest": digest,
+                    "created": report.get("created").cloned().unwrap_or(Value::Null),
+                    "already_present": report.get("already_present").cloned().unwrap_or(Value::Null),
+                    "verification": report.get("verification").cloned().unwrap_or(Value::Null),
+                    "lookup": digest.as_str().map(|value| format!("/v1/artifacts/{value}")).unwrap_or_default(),
+                    "execution": "not_started",
+                    "does_not_claim": [
+                        "artifact integrity establishes scientific, clinical, regulatory, publication, or external-effect validity",
+                        "automatic indexing establishes causal provenance or external storage authority"
+                    ]
+                })
+            }
+            Err(error) => json!({
+                "indexed": false,
+                "kind": kind,
+                "subject_id": subject_id,
+                "error": error,
+                "execution": "not_started",
+                "does_not_claim": [
+                    "the failed projection means the source report was invalid",
+                    "absence from the artifact registry means the source report never existed"
+                ]
+            }),
+        }
+    }
+
+    fn index_mission_report(&self, mut result: Value) -> Result<Value, String> {
+        let subject_id = result
+            .pointer("/plan/mission_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "agent mission report omitted plan.mission_id".to_string())?;
+        let parent_digests =
+            projection_parent(result.pointer("/workflow_reconciliation/artifact_registry"));
+        let projection = self.index_artifact_projection(
+            "mission_report",
+            subject_id,
+            mission_domains(&result),
+            parent_digests,
+            result.clone(),
+        );
+        result["artifact_registry"] = projection;
+        Ok(result)
+    }
+
+    /// Project one explicitly requested report through the shared domain-report contract.
+    ///
+    /// The catalogue check is intentionally performed at the transport boundary: a structurally
+    /// valid envelope is not enough if the named tool is not declared under the named capability
+    /// group. This keeps all capability groups usable while refusing invented routes and silently
+    /// broadened domain labels.
+    fn domain_report_project(&self, arguments: &Value) -> Result<Value, String> {
+        let operation = arguments
+            .get("operation")
+            .and_then(Value::as_str)
+            .unwrap_or("project");
+        match operation {
+            "project" => self.project_domain_report(arguments),
+            "coverage" => self.domain_report_coverage(arguments),
+            "from_adapter_execution" => self.project_adapter_execution_domain_report(arguments),
+            "from_provider_normalization" => {
+                self.project_provider_normalization_domain_report(arguments)
+            }
+            "from_external_provider_normalization" => {
+                self.project_external_provider_normalization_domain_report(arguments)
+            }
+            other => Err(format!(
+                "unknown domain report operation {other:?}; choose project, coverage, from_adapter_execution, from_provider_normalization, or from_external_provider_normalization"
+            )),
+        }
+    }
+
+    /// Compose one validated adapter-evidence observation into the canonical domain-report
+    /// envelope. The adapter remains caller-owned: this operation indexes the evidence handoff
+    /// and the report projection, but never imports, executes, or certifies the adapter.
+    fn project_adapter_execution_domain_report(&self, arguments: &Value) -> Result<Value, String> {
+        let evidence = arguments
+            .get("evidence")
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or("from_adapter_execution requires an evidence object")?;
+        let evidence_result = self.adapter_execution_evidence(&evidence)?;
+        let evidence_artifact = evidence_result
+            .get("evidence")
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or("adapter evidence response omitted evidence")?;
+        let group_id = evidence_artifact
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("adapter evidence omitted group_id")?;
+        let domains = evidence_artifact
+            .get("domains")
+            .filter(|value| value.is_array())
+            .cloned()
+            .ok_or("adapter evidence omitted domains")?;
+        let subject_id = evidence_artifact
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("adapter evidence omitted subject_id")?;
+        let execution_status = evidence_artifact
+            .get("execution_status")
+            .and_then(Value::as_str)
+            .ok_or("adapter evidence omitted execution_status")?;
+        let claim_status = match execution_status {
+            "succeeded" | "partial" => "observed",
+            "refused" | "failed" => "refused",
+            _ => "review_required",
+        };
+        let mut parent_digests = evidence_artifact
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if let Some(content_digest) = evidence_result
+            .get("artifact_registry")
+            .and_then(|registry| registry.get("content_digest"))
+            .and_then(Value::as_str)
+        {
+            if !parent_digests.iter().any(|parent| parent == content_digest) {
+                parent_digests.push(content_digest.to_string());
+            }
+        }
+        let mut report = json!({
+            "kind": "adapter_execution",
+            "evidence": evidence_artifact,
+            "adapter": evidence_result.get("adapter"),
+        });
+        if let Some(conformance) = arguments.get("conformance") {
+            if !conformance.is_object() {
+                return Err("conformance must be an object when supplied".into());
+            }
+            report["conformance"] = conformance.clone();
+        }
+        let report_request = json!({
+            "group_id": group_id,
+            "domains": domains,
+            "subject_id": subject_id,
+            "source_tool": "adapter_execution_evidence",
+            "report": report,
+            "claim_posture": {
+                "status": claim_status,
+                "does_not_claim": [
+                    "adapter correctness beyond the caller-supplied observation",
+                    "scientific, clinical, causal, provenance, regulatory, or release validity",
+                    "MCP-core adapter execution or readiness"
+                ],
+                "limitations": [
+                    "adapter execution remains caller-owned",
+                    "the evidence is structural and caller-attested"
+                ]
+            },
+            "parent_digests": parent_digests
+        });
+        let domain_report = self.project_domain_report(&report_request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
+            "workflow": ADAPTER_DOMAIN_REPORT_WORKFLOW,
+            "evidence": evidence_result,
+            "domain_report": domain_report,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "adapter evidence is validated and indexed before the canonical domain report is projected",
+                "adapter identity remains inside the evidence payload while the declared MCP tool anchors catalogue scope",
+                "the evidence artifact digest is retained as a parent of the domain report"
+            ],
+            "does_not_claim": [
+                "the MCP core executed or imported the adapter",
+                "caller-attested conformance proves scientific, clinical, provenance, regulatory, or release validity",
+                "report indexing proves readiness or external effects"
+            ]
+        }))
+    }
+
+    fn provider_domain_report_parents(
+        arguments: &Value,
+        normalization: &Value,
+        external: bool,
+    ) -> Result<Vec<String>, String> {
+        let mut parents = Vec::new();
+        let mut append = |value: Option<&Value>, field: &str| -> Result<(), String> {
+            let Some(value) = value else {
+                return Ok(());
+            };
+            let values = value
+                .as_array()
+                .ok_or_else(|| format!("{field} must be an array"))?;
+            for parent in values {
+                let parent = parent
+                    .as_str()
+                    .ok_or_else(|| format!("{field} must contain strings"))?;
+                if !parents.iter().any(|existing| existing == parent) {
+                    parents.push(parent.to_string());
+                }
+            }
+            Ok(())
+        };
+        append(arguments.get("parent_digests"), "parent_digests")?;
+        append(
+            normalization
+                .get("intake")
+                .and_then(|intake| intake.get("parent_digests")),
+            "normalization.intake.parent_digests",
+        )?;
+        for digest in [normalization
+            .get("artifact_registry")
+            .and_then(|registry| registry.get("content_digest"))]
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        {
+            if !parents.iter().any(|existing| existing == digest) {
+                parents.push(digest.to_string());
+            }
+        }
+        if external {
+            if let Some(digest) = normalization
+                .get("receipt_artifact_registry")
+                .and_then(|registry| registry.get("content_digest"))
+                .and_then(Value::as_str)
+            {
+                if !parents.iter().any(|existing| existing == digest) {
+                    parents.push(digest.to_string());
+                }
+            }
+        }
+        Ok(parents)
+    }
+
+    fn project_provider_normalization_domain_report(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let normalization_arguments = arguments
+            .get("normalization")
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or("from_provider_normalization requires a normalization object")?;
+        let normalization = self.domain_evidence_provider_normalize(&normalization_arguments)?;
+        self.compose_provider_domain_report(arguments, normalization, "inline")
+    }
+
+    fn project_external_provider_normalization_domain_report(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let normalization_arguments = arguments
+            .get("normalization")
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or("from_external_provider_normalization requires a normalization object")?;
+        let normalization =
+            self.domain_evidence_provider_external_payload_normalize(&normalization_arguments)?;
+        self.compose_provider_domain_report(arguments, normalization, "external_payload")
+    }
+
+    fn compose_provider_domain_report(
+        &self,
+        arguments: &Value,
+        normalization: Value,
+        mode: &str,
+    ) -> Result<Value, String> {
+        let external = mode == "external_payload";
+        let group_id = normalization
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("provider normalization omitted group_id")?;
+        let domains = normalization
+            .get("domains")
+            .filter(|value| value.is_array())
+            .cloned()
+            .ok_or("provider normalization omitted domains")?;
+        let subject_id = normalization
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("provider normalization omitted subject_id")?;
+        let outcome = normalization
+            .get("outcome")
+            .and_then(Value::as_str)
+            .ok_or("provider normalization omitted outcome")?;
+        let claim_status = match outcome {
+            "observed" | "partial" => "observed",
+            "refused" | "error" => "refused",
+            _ => "review_required",
+        };
+        let parent_digests =
+            Self::provider_domain_report_parents(arguments, &normalization, external)?;
+        let mut evidence = json!({
+            "kind": "provider_normalization",
+            "mode": mode,
+            "schema": normalization.get("schema"),
+            "workflow": normalization.get("workflow"),
+            "group_id": group_id,
+            "domains": domains,
+            "subject_id": subject_id,
+            "source_tool": normalization.get("source_tool"),
+            "connector_kind": normalization.get("connector_kind"),
+            "provider": normalization.get("provider"),
+            "outcome": outcome,
+            "payload_digest": normalization.get("payload_digest"),
+            "request_digest": normalization.get("request_digest"),
+            "shape_audit": normalization.get("shape_audit"),
+            "record_index": normalization.get("record_index"),
+            "intake_digest": normalization.get("intake").and_then(|intake| intake.get("intake_digest")),
+            "artifact_content_digest": normalization.get("artifact_registry").and_then(|registry| registry.get("content_digest")),
+        });
+        if external {
+            evidence["receipt"] = normalization.get("receipt").cloned().unwrap_or(Value::Null);
+            evidence["materialization"] = normalization
+                .get("materialization")
+                .cloned()
+                .unwrap_or(Value::Null);
+            evidence["receipt_artifact_content_digest"] = normalization
+                .get("receipt_artifact_registry")
+                .and_then(|registry| registry.get("content_digest"))
+                .cloned()
+                .unwrap_or(Value::Null);
+        }
+        let report_request = json!({
+            "group_id": group_id,
+            "domains": domains,
+            "subject_id": subject_id,
+            "source_tool": if external {
+                "domain_evidence_provider_external_payload_normalize"
+            } else {
+                "domain_evidence_provider_normalize"
+            },
+            "report": evidence,
+            "claim_posture": {
+                "status": claim_status,
+                "does_not_claim": [
+                    "provider authenticity, signature validity, or remote execution",
+                    "scientific, clinical, causal, provenance, regulatory, or release validity",
+                    "retrieval completeness, terminology resolution, or external-effect completion"
+                ],
+                "limitations": if external {
+                    [
+                        "external payload materialization remains caller-supplied and the locator remains unopened",
+                        "receipt and normalization lineage do not establish payload or provider authenticity"
+                    ]
+                } else {
+                    [
+                        "provider normalization remains caller-supplied and does not authenticate the provider",
+                        "payload shape and record indexing remain structural observations"
+                    ]
+                }
+            },
+            "parent_digests": parent_digests
+        });
+        let domain_report = self.project_domain_report(&report_request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": PROVIDER_DOMAIN_REPORT_SCHEMA_VERSION,
+            "workflow": PROVIDER_DOMAIN_REPORT_WORKFLOW,
+            "mode": mode,
+            "normalization": normalization,
+            "domain_report": domain_report,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "provider normalization is validated and indexed before the canonical domain report is projected",
+                "provider payload bytes remain outside the domain-report copy when the report is composed",
+                "normalization and receipt artifact digests remain explicit report lineage parents"
+            ],
+            "does_not_claim": [
+                "provider authenticity, scientific, clinical, provenance, regulatory, or release validity",
+                "that normalization or receipt indexing executed a provider, connector, or adapter",
+                "that report composition proves readiness or external effects"
+            ]
+        }))
+    }
+
+    fn project_domain_report(&self, arguments: &Value) -> Result<Value, String> {
+        let report = bioprism_devplat::project_domain_report(arguments)
+            .map_err(|error| format!("domain report projection refused: {error}"))?;
+        let group_id = report
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("projected domain report omitted group_id")?;
+        let source_tool = report
+            .get("source_tool")
+            .and_then(Value::as_str)
+            .ok_or("projected domain report omitted source_tool")?;
+        let domains = report
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("projected domain report omitted domains")?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+        if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+            return Err(format!(
+                "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+            ));
+        }
+        for domain in domains.iter().filter_map(Value::as_str) {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "domain label {domain:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let subject_id = report
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("projected domain report omitted subject_id")?;
+        let parent_digests = report
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let projection = self.index_artifact_projection(
+            "domain_report",
+            subject_id,
+            domains
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            parent_digests,
+            report.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain report projection could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_REPORT_PROJECT_SCHEMA_VERSION,
+            "workflow": DOMAIN_REPORT_PROJECT_WORKFLOW,
+            "report": report,
+            "artifact_registry": projection,
+            "coverage": {
+                "group_id": group.id,
+                "source_tool": source_tool,
+                "domains": domains,
+                "catalogue_digest": catalogue.digest().to_string(),
+                "group_status": group.status,
+                "declared_tool_count": group.mcp_tools.len()
+            },
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "the source tool and domains were checked against the authoritative workspace capability catalogue",
+                "the canonical report was indexed by its exact JSON content digest",
+                "the projection remains caller-supplied and does not execute the source tool"
+            ],
+            "does_not_claim": [
+                "catalogue membership proves the report is scientifically or clinically valid",
+                "artifact indexing proves completeness, provenance, readiness, or external effects"
+            ]
+        }))
+    }
+
+    fn domain_report_coverage(&self, arguments: &Value) -> Result<Value, String> {
+        const MAX_GROUPS: usize = 128;
+        let group_filter = arguments.get("group_id").and_then(Value::as_str);
+        let domain_filter = arguments.get("domain").and_then(Value::as_str);
+        let report_class_filter = arguments.get("report_class").and_then(Value::as_str);
+        let bridge_mode_filter = arguments.get("bridge_mode").and_then(Value::as_str);
+        let max_groups = arguments
+            .get("max_groups")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_groups must be an integer".to_string())
+                    .and_then(|value| {
+                        usize::try_from(value).map_err(|_| "max_groups is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(64);
+        if !(1..=MAX_GROUPS).contains(&max_groups) {
+            return Err(format!("max_groups must be between 1 and {MAX_GROUPS}"));
+        }
+        let include_report_digests = arguments
+            .get("include_report_digests")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| "include_report_digests must be a boolean".to_string())
+            })
+            .transpose()?
+            .unwrap_or(false);
+        if group_filter.is_some_and(str::is_empty)
+            || domain_filter.is_some_and(str::is_empty)
+            || report_class_filter.is_some_and(str::is_empty)
+            || bridge_mode_filter.is_some_and(str::is_empty)
+        {
+            return Err(
+                "group_id, domain, report_class, and bridge_mode filters must be non-empty".into(),
+            );
+        }
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let selected = catalogue
+            .groups()
+            .iter()
+            .filter(|group| group_filter.is_none_or(|filter| group.id == filter))
+            .filter(|group| {
+                domain_filter.is_none_or(|filter| {
+                    group
+                        .domains
+                        .iter()
+                        .any(|domain| domain.eq_ignore_ascii_case(filter))
+                })
+            })
+            .take(max_groups)
+            .collect::<Vec<_>>();
+        let selected_ids = selected
+            .iter()
+            .map(|group| group.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let records = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit();
+        let mut group_reports: BTreeMap<String, Vec<&bioprism_devplat::ArtifactRecord>> =
+            BTreeMap::new();
+        for record in &records {
+            if record.kind != "domain_report"
+                || record.artifact.get("schema").and_then(Value::as_str)
+                    != Some(DOMAIN_REPORT_SCHEMA_VERSION)
+            {
+                continue;
+            }
+            let Some(group_id) = record.artifact.get("group_id").and_then(Value::as_str) else {
+                continue;
+            };
+            let bridge_metadata = classify_domain_report_bridge(&record.artifact);
+            if report_class_filter.is_some_and(|filter| bridge_metadata.report_class != filter)
+                || bridge_mode_filter
+                    .is_some_and(|filter| bridge_metadata.mode.as_deref() != Some(filter))
+            {
+                continue;
+            }
+            if selected_ids.contains(group_id) {
+                group_reports
+                    .entry(group_id.to_string())
+                    .or_default()
+                    .push(record);
+            }
+        }
+        let mut groups = Vec::new();
+        let mut missing_group_ids = Vec::new();
+        let mut domain_summary: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+        let mut report_class_summary: BTreeMap<String, usize> = BTreeMap::new();
+        let mut bridge_parent_digest_count = 0usize;
+        let mut bridge_reports_with_parents = 0usize;
+        let mut bridge_reports_without_parents = 0usize;
+        for group in selected {
+            let reports = group_reports.get(&group.id).cloned().unwrap_or_default();
+            let report_count = reports.len();
+            let coverage_state = if report_count > 0 {
+                "reported"
+            } else {
+                missing_group_ids.push(group.id.clone());
+                "missing"
+            };
+            let mut subject_ids = BTreeSet::new();
+            let mut source_tools = BTreeSet::new();
+            let mut claim_statuses = BTreeSet::new();
+            let mut report_digests = BTreeSet::new();
+            let mut report_classes: BTreeMap<String, usize> = BTreeMap::new();
+            let mut bridge_modes = BTreeSet::new();
+            let mut lineage_parent_count = 0usize;
+            let mut reports_with_lineage_parents = 0usize;
+            for record in &reports {
+                subject_ids.insert(record.subject_id.clone());
+                if let Some(source_tool) =
+                    record.artifact.get("source_tool").and_then(Value::as_str)
+                {
+                    source_tools.insert(source_tool.to_string());
+                }
+                if let Some(status) = record
+                    .artifact
+                    .pointer("/claim_posture/status")
+                    .and_then(Value::as_str)
+                {
+                    claim_statuses.insert(status.to_string());
+                }
+                report_digests.insert(record.content_digest.clone());
+                let bridge_metadata = classify_domain_report_bridge(&record.artifact);
+                let report_class = bridge_metadata.report_class;
+                let report_mode = bridge_metadata.mode;
+                *report_classes.entry(report_class.to_string()).or_default() += 1;
+                *report_class_summary
+                    .entry(report_class.to_string())
+                    .or_default() += 1;
+                if let Some(mode) = report_mode {
+                    bridge_modes.insert(mode.to_string());
+                }
+                let parent_count = record
+                    .artifact
+                    .get("parent_digests")
+                    .and_then(Value::as_array)
+                    .map(|parents| parents.len())
+                    .unwrap_or(0);
+                lineage_parent_count += parent_count;
+                bridge_parent_digest_count += parent_count;
+                if parent_count > 0 {
+                    reports_with_lineage_parents += 1;
+                    bridge_reports_with_parents += 1;
+                } else {
+                    bridge_reports_without_parents += 1;
+                }
+            }
+            for domain in &group.domains {
+                let summary = domain_summary.entry(domain.clone()).or_default();
+                summary.0 += 1;
+                if report_count > 0 {
+                    summary.1 += 1;
+                }
+                summary.2 += report_count;
+            }
+            let mut row = json!({
+                "id": group.id,
+                "domains": group.domains,
+                "status": group.status,
+                "declared_tool_count": group.mcp_tools.len(),
+                "report_count": report_count,
+                "subject_ids": subject_ids.into_iter().collect::<Vec<_>>(),
+                "source_tools": source_tools.into_iter().collect::<Vec<_>>(),
+                "claim_statuses": claim_statuses.into_iter().collect::<Vec<_>>(),
+                "report_classes": report_classes,
+                "bridge_modes": bridge_modes.into_iter().collect::<Vec<_>>(),
+                "lineage_parent_count": lineage_parent_count,
+                "reports_with_lineage_parents": reports_with_lineage_parents,
+                "coverage_state": coverage_state
+            });
+            if include_report_digests {
+                row["report_digests"] = json!(report_digests.into_iter().collect::<Vec<_>>());
+            }
+            groups.push(row);
+        }
+        let domain_summary = domain_summary
+            .into_iter()
+            .map(
+                |(domain, (group_count, reported_group_count, report_count))| {
+                    (
+                        domain,
+                        json!({
+                            "group_count": group_count,
+                            "reported_group_count": reported_group_count,
+                            "missing_group_count": group_count.saturating_sub(reported_group_count),
+                            "report_count": report_count
+                        }),
+                    )
+                },
+            )
+            .collect::<serde_json::Map<_, _>>();
+        let mut result = json!({
+            "ok": true,
+            "schema": DOMAIN_REPORT_COVERAGE_SCHEMA_VERSION,
+            "workflow": DOMAIN_REPORT_COVERAGE_WORKFLOW,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "filters": {
+                "group_id": group_filter,
+                "domain": domain_filter,
+                "report_class": report_class_filter,
+                "bridge_mode": bridge_mode_filter,
+                "max_groups": max_groups,
+                "include_report_digests": include_report_digests
+            },
+            "group_count": groups.len(),
+            "reported_group_count": groups.iter().filter(|group| group["coverage_state"] == "reported").count(),
+            "missing_group_count": missing_group_ids.len(),
+            "missing_group_ids": missing_group_ids,
+            "complete": missing_group_ids.is_empty(),
+            "groups": groups,
+            "domain_summary": domain_summary,
+            "bridge_summary": {
+                "report_classes": report_class_summary,
+                "lineage": {
+                    "parent_digest_count": bridge_parent_digest_count,
+                    "reports_with_lineage_parents": bridge_reports_with_parents,
+                    "reports_without_lineage_parents": bridge_reports_without_parents
+                }
+            },
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "coverage counts only retained, structurally valid domain-report projections in this local artifact registry",
+                "catalogue membership and report presence remain separate dimensions",
+                "the projection does not infer scientific truth or readiness from report count"
+            ],
+            "does_not_claim": [
+                "reported coverage proves every capability group was executed or validated",
+                "missing coverage proves a capability is absent from the repository",
+                "report count proves report quality, provenance, reproducibility, or external effect completion"
+            ]
+        });
+        let coverage_digest = bioprism_ids::ContentHash::of_value(&result)
+            .map_err(|error| format!("domain report coverage could not be hashed: {error}"))?;
+        result["coverage_digest"] = json!(coverage_digest.to_string());
+        Ok(result)
+    }
+
+    /// Harmonize explicit domain reports into a traceability artifact without interpreting the
+    /// caller's claim. The catalogue checks here prevent a report row from smuggling in an
+    /// undeclared source tool or domain label before the harmonization is indexed.
+    fn domain_evidence_harmonize(&self, arguments: &Value) -> Result<Value, String> {
+        let harmonization = bioprism_devplat::harmonize_domain_evidence(arguments)
+            .map_err(|error| format!("domain evidence harmonization refused: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let reports = harmonization
+            .get("reports")
+            .and_then(Value::as_array)
+            .ok_or("harmonization omitted reports")?;
+        let mut artifact_domains = BTreeSet::new();
+        let mut parent_digests = Vec::new();
+        for row in reports {
+            let group_id = row
+                .get("group_id")
+                .and_then(Value::as_str)
+                .ok_or("harmonization report row omitted group_id")?;
+            let source_tool = row
+                .get("source_tool")
+                .and_then(Value::as_str)
+                .ok_or("harmonization report row omitted source_tool")?;
+            let group = catalogue
+                .groups()
+                .iter()
+                .find(|group| group.id == group_id)
+                .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+            if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+                return Err(format!(
+                    "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+            let domains = row
+                .get("domains")
+                .and_then(Value::as_array)
+                .ok_or("harmonization report row omitted domains")?;
+            for domain in domains.iter().filter_map(Value::as_str) {
+                if !group
+                    .domains
+                    .iter()
+                    .any(|declared| declared.eq_ignore_ascii_case(domain))
+                {
+                    return Err(format!(
+                        "domain label {domain:?} is not declared by capability group {group_id:?}"
+                    ));
+                }
+                artifact_domains.insert(domain.to_string());
+            }
+            if let Some(digest) = row.get("digest").and_then(Value::as_str) {
+                parent_digests.push(digest.to_string());
+            }
+        }
+        let subject_id = harmonization
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("harmonization omitted subject_id")?;
+        let projection = self.index_artifact_projection(
+            "domain_evidence_harmonization",
+            subject_id,
+            artifact_domains.into_iter().collect(),
+            parent_digests,
+            harmonization.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain evidence harmonization could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+            "harmonization": harmonization,
+            "artifact_registry": projection,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "all report source tools and domain labels were checked against the authoritative capability catalogue",
+                "the harmonization artifact is indexed by exact JSON content digest with report digests as parents",
+                "explicit support, qualification, contradiction, and context roles remain separate"
+            ],
+            "does_not_claim": [
+                "traceability proves any claim or chooses between contradictory reports",
+                "harmonization proves scientific, clinical, regulatory, publication, or release validity",
+                "artifact indexing proves provenance completeness or external effect completion"
+            ]
+        }))
+    }
+
+    /// Apply a caller-owned structural readiness policy to reports from any capability group.
+    ///
+    /// The core audit deliberately knows nothing about the workspace catalogue. The MCP boundary
+    /// adds that binding here, so a report cannot claim membership in a group or domain merely by
+    /// spelling the label. The retained audit is content-addressed separately from this transport
+    /// wrapper and remains a structural handoff, never a scientific or clinical conclusion.
+    fn domain_decision_readiness_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let audit = audit_domain_decision_readiness(arguments)
+            .map_err(|error| format!("domain decision-readiness audit refused: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let reports = audit
+            .pointer("/harmonization/reports")
+            .and_then(Value::as_array)
+            .ok_or("decision-readiness audit omitted harmonization reports")?;
+        let mut artifact_domains = BTreeSet::new();
+        let mut parent_digests = Vec::new();
+        for row in reports {
+            let group_id = row
+                .get("group_id")
+                .and_then(Value::as_str)
+                .ok_or("decision-readiness report omitted group_id")?;
+            let source_tool = row
+                .get("source_tool")
+                .and_then(Value::as_str)
+                .ok_or("decision-readiness report omitted source_tool")?;
+            let group = catalogue
+                .groups()
+                .iter()
+                .find(|group| group.id == group_id)
+                .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+            if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+                return Err(format!(
+                    "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+            let domains = row
+                .get("domains")
+                .and_then(Value::as_array)
+                .ok_or("decision-readiness report omitted domains")?;
+            for domain in domains.iter().filter_map(Value::as_str) {
+                if !group
+                    .domains
+                    .iter()
+                    .any(|declared| declared.eq_ignore_ascii_case(domain))
+                {
+                    return Err(format!(
+                        "domain label {domain:?} is not declared by capability group {group_id:?}"
+                    ));
+                }
+                artifact_domains.insert(domain.to_string());
+            }
+            if let Some(digest) = row.get("digest").and_then(Value::as_str) {
+                parent_digests.push(digest.to_string());
+            }
+        }
+        let subject_id = audit
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("decision-readiness audit omitted subject_id")?;
+        let projection = self.index_artifact_projection(
+            "domain_decision_readiness",
+            subject_id,
+            artifact_domains.into_iter().collect(),
+            parent_digests,
+            audit.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain decision-readiness audit could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
+            "workflow": DOMAIN_DECISION_READINESS_WORKFLOW,
+            "audit": audit,
+            "artifact_registry": projection,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "all report source tools and domain labels were checked against the authoritative 29-group catalogue",
+                "the policy result preserves separate coverage, support, qualification, contradiction, refusal, review, and lineage states",
+                "the retained audit is indexed by exact JSON content digest with source report digests as parents"
+            ],
+            "does_not_claim": [
+                "a ready_for_human_review state proves a scientific, clinical, causal, regulatory, publication, or release conclusion",
+                "catalogue membership proves that a source tool executed or that its response is authentic",
+                "artifact retention proves external provenance, consent, identity, execution, or authority"
+            ]
+        }))
+    }
+
+    /// Query exact retained decision-readiness audits by structural state or policy result.
+    ///
+    /// This intentionally uses the same artifact registry that receives an audit at creation
+    /// time. Querying never reruns harmonization, reinterprets a claim, or upgrades a retained
+    /// `ready_for_human_review` state into scientific, clinical, release, or execution authority.
+    fn domain_decision_readiness_query(&self, arguments: &Value) -> Result<Value, String> {
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| format!("{name} must be a non-empty string"))
+                })
+                .transpose()
+        };
+        let subject_id = optional_string("subject_id")?;
+        let decision_state = optional_string("decision_state")?;
+        let after = optional_string("after")?;
+        let policy_satisfied = arguments
+            .get("policy_satisfied")
+            .map(|value| value.as_bool().ok_or("policy_satisfied must be a boolean"))
+            .transpose()?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_audits = arguments
+            .get("include_audits")
+            .map(|value| value.as_bool().ok_or("include_audits must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .domain_decision_readiness_query(
+                subject_id,
+                decision_state,
+                policy_satisfied,
+                after,
+                max_items,
+                include_audits,
+            )
+            .map_err(|error| format!("domain decision-readiness query refused: {error}"))
+    }
+
+    /// Compose independently retained domain, routing, operations, release, and workflow
+    /// evidence into one bounded control-plane posture.
+    ///
+    /// This is an evidence join, not a super-gate. Every component keeps its own state and
+    /// authority boundary, while the caller's explicit policy decides which missing or unsatisfied
+    /// components block the projection. The operation never dispatches a nested tool and never
+    /// turns structural completeness into execution or release authority.
+    fn control_plane_readiness_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode control-plane readiness input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "control-plane readiness input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("control-plane readiness input must be an object")?;
+        let subject_id = object
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("subject_id must be a non-empty string")?;
+        let policy_object = object
+            .get("policy")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let policy_bool = |name: &str, default: bool| -> Result<bool, String> {
+            match policy_object.get(name) {
+                None => Ok(default),
+                Some(value) => value
+                    .as_bool()
+                    .ok_or_else(|| format!("policy.{name} must be a boolean")),
+            }
+        };
+        let require_domain_readiness = policy_bool("require_domain_readiness", true)?;
+        let require_route_review = policy_bool("require_route_review", false)?;
+        let require_route_plan = policy_bool("require_route_plan", false)?;
+        let require_operations_acceptance = policy_bool("require_operations_acceptance", false)?;
+        let require_release_ready = policy_bool("require_release_ready", false)?;
+        let require_workflow_evidence = policy_bool("require_workflow_evidence", false)?;
+        let policy = json!({
+            "require_domain_readiness": require_domain_readiness,
+            "require_route_review": require_route_review,
+            "require_route_plan": require_route_plan,
+            "require_operations_acceptance": require_operations_acceptance,
+            "require_release_ready": require_release_ready,
+            "require_workflow_evidence": require_workflow_evidence
+        });
+
+        let valid_digest = |value: Option<&Value>| -> Option<String> {
+            value
+                .and_then(Value::as_str)
+                .filter(|digest| bioprism_ids::ContentHash::parse((*digest).to_string()).is_ok())
+                .map(str::to_string)
+        };
+        let mut parent_digests = BTreeSet::new();
+        let mut domains = BTreeSet::new();
+        let mut components = Map::new();
+
+        let readiness_component = if let Some(value) = object.get("readiness_audit") {
+            let mut valid = true;
+            let mut errors: Vec<String> = Vec::new();
+            if value.get("workflow").and_then(Value::as_str)
+                != Some(DOMAIN_DECISION_READINESS_WORKFLOW)
+            {
+                valid = false;
+                errors.push("workflow must be domain_decision_readiness_audit".to_string());
+            }
+            if value.get("schema").and_then(Value::as_str)
+                != Some(DOMAIN_DECISION_READINESS_SCHEMA_VERSION)
+            {
+                valid = false;
+                errors.push("schema must be the domain decision-readiness schema".to_string());
+            }
+            if value.get("ok").and_then(Value::as_bool) != Some(true)
+                || value.get("readiness_claimed").and_then(Value::as_bool) != Some(false)
+                || value.get("execution").and_then(Value::as_str) != Some("not_started")
+            {
+                valid = false;
+                errors.push("readiness audit must be successful and non-executing".to_string());
+            }
+            let audit = value.get("audit");
+            if let Some(audit) = audit {
+                if let Err(error) = validate_domain_decision_readiness(audit) {
+                    valid = false;
+                    errors.push(format!("audit integrity validation failed: {error}"));
+                }
+                if audit.get("subject_id").and_then(Value::as_str) != Some(subject_id) {
+                    valid = false;
+                    errors.push(
+                        "audit subject_id does not match the control-plane subject_id".into(),
+                    );
+                }
+                if let Some(reports) = audit
+                    .pointer("/harmonization/reports")
+                    .and_then(Value::as_array)
+                {
+                    for report in reports {
+                        if let Some(values) = report.get("domains").and_then(Value::as_array) {
+                            domains.extend(
+                                values.iter().filter_map(Value::as_str).map(str::to_string),
+                            );
+                        }
+                    }
+                }
+            } else {
+                valid = false;
+                errors.push("audit is required".into());
+            }
+            let satisfied = valid
+                && value
+                    .pointer("/audit/policy_satisfied")
+                    .and_then(Value::as_bool)
+                    == Some(true);
+            let state = value
+                .pointer("/audit/decision_state")
+                .and_then(Value::as_str)
+                .unwrap_or(if valid { "incomplete" } else { "blocked" });
+            let registry_digest = valid_digest(value.pointer("/artifact_registry/content_digest"));
+            if value
+                .pointer("/artifact_registry/indexed")
+                .and_then(Value::as_bool)
+                != Some(true)
+                || value
+                    .pointer("/artifact_registry/kind")
+                    .and_then(Value::as_str)
+                    != Some("domain_decision_readiness")
+            {
+                valid = false;
+                errors.push(
+                    "artifact_registry must identify an indexed domain_decision_readiness artifact"
+                        .into(),
+                );
+            }
+            if let Some(digest) = registry_digest.as_ref() {
+                parent_digests.insert(digest.clone());
+            } else {
+                valid = false;
+                errors.push("artifact_registry.content_digest must be a valid digest".into());
+            }
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": satisfied && valid,
+                "state": if valid { state } else { "blocked" },
+                "workflow": DOMAIN_DECISION_READINESS_WORKFLOW,
+                "evidence_digest": value.pointer("/audit/digest"),
+                "content_digest": registry_digest,
+                "errors": errors,
+                "authority": "structural_domain_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": DOMAIN_DECISION_READINESS_WORKFLOW,
+                "errors": ["readiness_audit was not supplied"],
+                "authority": "structural_domain_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("domain_decision_readiness".into(), readiness_component);
+
+        let route_plan = object.get("route_plan");
+        let route_review = object.get("route_review");
+        let route_component = if let Some(value) = route_plan.or(route_review) {
+            let is_plan = route_plan.is_some();
+            let mut valid = true;
+            let mut errors: Vec<String> = Vec::new();
+            let review = if is_plan {
+                value.get("review")
+            } else {
+                Some(value)
+            };
+            if value.get("workflow").and_then(Value::as_str)
+                != Some(if is_plan {
+                    "capability_route_plan"
+                } else {
+                    "capability_route_review"
+                })
+            {
+                valid = false;
+                errors.push("route packet workflow is not the declared route workflow".into());
+            }
+            if value.get("execution").and_then(Value::as_str) != Some("not_started")
+                || (is_plan && value.get("dispatch").and_then(Value::as_str) != Some("not_started"))
+            {
+                valid = false;
+                errors.push("route packet must remain non-executing".into());
+            }
+            let review_ready = review
+                .and_then(|review| review.get("review_status").and_then(Value::as_str))
+                == Some("ready");
+            if !review_ready {
+                errors.push("route review_status is not ready".into());
+            }
+            if review.is_none() {
+                valid = false;
+                errors.push("route plan/review must contain a review object".into());
+            }
+            let plan_ready = !is_plan
+                || value.get("plan_status").and_then(Value::as_str)
+                    == Some("ready_for_caller_inspection");
+            if is_plan && !plan_ready {
+                errors.push("route plan is not ready_for_caller_inspection".into());
+            }
+            let route_id = valid_digest(review.and_then(|row| row.get("route_id")));
+            let review_id = valid_digest(review.and_then(|row| row.get("review_id")));
+            let plan_digest = valid_digest(value.get("plan_digest"));
+            if route_id.is_none() || review_id.is_none() || (is_plan && plan_digest.is_none()) {
+                valid = false;
+                errors
+                    .push("route identities and plan digest must be valid content digests".into());
+            }
+            for digest in [route_id.clone(), review_id.clone(), plan_digest.clone()]
+                .into_iter()
+                .flatten()
+            {
+                parent_digests.insert(digest);
+            }
+            let satisfied = valid && review_ready && plan_ready;
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": satisfied,
+                "state": if satisfied { "ready_for_human_review" } else if valid { "incomplete" } else { "blocked" },
+                "workflow": value.get("workflow"),
+                "route_id": route_id,
+                "review_id": review_id,
+                "plan_digest": plan_digest,
+                "errors": errors,
+                "authority": "non_executing_route_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": "capability_route_review",
+                "errors": ["route_review or route_plan was not supplied"],
+                "authority": "non_executing_route_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("capability_route".into(), route_component);
+
+        let operations_projection = object
+            .get("operations_gate_projection")
+            .or_else(|| object.get("operations_gate"));
+        let operations_review = object.get("operations_gate_review");
+        let operations_component = if let Some(value) = operations_projection {
+            let mut valid = true;
+            let mut errors: Vec<String> = Vec::new();
+            if value.get("schema").and_then(Value::as_str)
+                != Some("bioprism-operations-preflight-evidence/0.1")
+            {
+                valid = false;
+                errors.push("operations projection schema is invalid".into());
+            }
+            if value.get("readiness_claimed").and_then(Value::as_bool) == Some(true)
+                || value
+                    .get("acceptance_matches_current_gates")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                || value.get("review_present").and_then(Value::as_bool) != Some(true)
+            {
+                valid = false;
+                errors
+                    .push("operations projection is not bound to a current retained review".into());
+            }
+            let gate_digest = valid_digest(value.get("gate_digest"));
+            let review_id = valid_digest(value.get("review_id"));
+            if gate_digest.is_none() || review_id.is_none() {
+                valid = false;
+                errors.push(
+                    "operations gate_digest and review_id must be valid content digests".into(),
+                );
+            }
+            if let Some(review) = operations_review {
+                if review.get("workflow").and_then(Value::as_str) != Some("operations_gate_review")
+                    || review.get("readiness_claimed").and_then(Value::as_bool) == Some(true)
+                    || valid_digest(review.get("review_id")) != review_id
+                    || valid_digest(review.get("gate_digest")) != gate_digest
+                {
+                    valid = false;
+                    errors.push(
+                        "operations gate review does not match the projection identities".into(),
+                    );
+                }
+            }
+            for digest in [gate_digest.clone(), review_id.clone()]
+                .into_iter()
+                .flatten()
+            {
+                parent_digests.insert(digest);
+            }
+            let acceptance_valid =
+                value.get("acceptance_valid").and_then(Value::as_bool) == Some(true);
+            let satisfied = valid && acceptance_valid;
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": satisfied,
+                "state": if satisfied { "ready_for_human_review" } else if valid { "review_required" } else { "blocked" },
+                "workflow": "operations_gate_review",
+                "gate_digest": gate_digest,
+                "review_id": review_id,
+                "acceptance_valid": acceptance_valid,
+                "review_supplied": operations_review.is_some(),
+                "errors": errors,
+                "authority": "operator_gate_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": "operations_gate_review",
+                "errors": ["operations_gate_projection was not supplied"],
+                "authority": "operator_gate_evidence_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("operations_acceptance".into(), operations_component);
+
+        let release_component = if let Some(value) = object.get("release_audit") {
+            let workflow = value.get("workflow").and_then(Value::as_str).unwrap_or("");
+            let workflow_allowed = matches!(workflow, "release_audit" | "release_pipeline_audit");
+            let valid = workflow_allowed
+                && value.get("ok").and_then(Value::as_bool) == Some(true)
+                && value.get("readiness_claimed").and_then(Value::as_bool) != Some(true)
+                && value.get("execution").and_then(Value::as_str) != Some("started");
+            let satisfied = valid
+                && (value.get("release_ready").and_then(Value::as_bool) == Some(true)
+                    || (workflow == "release_pipeline_audit"
+                        && value.get("valid").and_then(Value::as_bool) == Some(true)));
+            let digest = bioprism_ids::ContentHash::of_value(value)
+                .map_err(|error| format!("release audit could not be digested: {error}"))?
+                .to_string();
+            parent_digests.insert(digest.clone());
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": satisfied,
+                "state": if satisfied { "ready_for_human_review" } else if valid { "incomplete" } else { "blocked" },
+                "workflow": workflow,
+                "content_digest": digest,
+                "release_ready": value.get("release_ready").or_else(|| value.get("valid")),
+                "errors": if valid { json!([]) } else { json!(["release audit workflow, ok, or non-executing posture is invalid"]) },
+                "authority": "local_release_structure_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": "release_audit",
+                "errors": ["release_audit was not supplied"],
+                "authority": "local_release_structure_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("release".into(), release_component);
+
+        let workflow_component = if let Some(value) = object.get("workflow_evidence") {
+            let workflow = value.get("workflow").and_then(Value::as_str).unwrap_or("");
+            let valid = !workflow.trim().is_empty()
+                && value.get("ok").and_then(Value::as_bool) == Some(true)
+                && value.get("readiness_claimed").and_then(Value::as_bool) != Some(true)
+                && value.get("execution").and_then(Value::as_str) != Some("started");
+            let digest = bioprism_ids::ContentHash::of_value(value)
+                .map_err(|error| format!("workflow evidence could not be digested: {error}"))?
+                .to_string();
+            parent_digests.insert(digest.clone());
+            json!({
+                "present": true,
+                "valid": valid,
+                "satisfied": valid,
+                "state": if valid { "ready_for_human_review" } else { "blocked" },
+                "workflow": workflow,
+                "content_digest": digest,
+                "errors": if valid { json!([]) } else { json!(["workflow evidence must be successful and non-executing"]) },
+                "authority": "workflow_structure_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        } else {
+            json!({
+                "present": false,
+                "valid": false,
+                "satisfied": false,
+                "state": "incomplete",
+                "workflow": "workflow_evidence",
+                "errors": ["workflow_evidence was not supplied"],
+                "authority": "workflow_structure_only",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            })
+        };
+        components.insert("workflow".into(), workflow_component);
+
+        let requirements = [
+            ("domain_decision_readiness", require_domain_readiness),
+            (
+                "capability_route",
+                require_route_review || require_route_plan,
+            ),
+            ("operations_acceptance", require_operations_acceptance),
+            ("release", require_release_ready),
+            ("workflow", require_workflow_evidence),
+        ];
+        let mut blockers = Vec::new();
+        let mut incomplete = false;
+        let mut blocked = false;
+        for (name, required) in requirements {
+            if !required {
+                continue;
+            }
+            let component = components
+                .get(name)
+                .expect("all control-plane components inserted");
+            if component.get("present").and_then(Value::as_bool) != Some(true) {
+                incomplete = true;
+                blockers.push(json!({
+                    "code": "required_component_missing",
+                    "severity": "error",
+                    "component": name,
+                    "message": "the caller's control-plane policy requires this evidence component"
+                }));
+            } else if component.get("valid").and_then(Value::as_bool) != Some(true) {
+                blocked = true;
+                blockers.push(json!({
+                    "code": "component_invalid",
+                    "severity": "error",
+                    "component": name,
+                    "errors": component.get("errors").cloned().unwrap_or_else(|| json!([])),
+                    "message": "a required evidence component failed its structural integrity checks"
+                }));
+            } else if component.get("satisfied").and_then(Value::as_bool) != Some(true) {
+                let state = component
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("incomplete");
+                if state == "blocked" {
+                    blocked = true;
+                } else {
+                    incomplete = true;
+                }
+                blockers.push(json!({
+                    "code": "required_component_not_satisfied",
+                    "severity": "error",
+                    "component": name,
+                    "state": state,
+                    "errors": component.get("errors").cloned().unwrap_or_else(|| json!([])),
+                    "message": "the required component is present but its own structural policy is not satisfied"
+                }));
+            }
+        }
+        if require_route_review && route_review.is_none() {
+            incomplete = true;
+            blockers.push(json!({
+                "code": "required_component_missing",
+                "severity": "error",
+                "component": "route_review",
+                "message": "policy.require_route_review requires the original capability_route_review packet"
+            }));
+        }
+        if require_route_plan && route_plan.is_none() {
+            incomplete = true;
+            blockers.push(json!({
+                "code": "required_component_missing",
+                "severity": "error",
+                "component": "route_plan",
+                "message": "policy.require_route_plan requires the non-executing capability_route_plan packet"
+            }));
+        }
+        let control_plane_state = if blocked {
+            "blocked"
+        } else if incomplete {
+            "incomplete"
+        } else if requirements.iter().any(|(_, required)| *required) {
+            "ready_for_human_review"
+        } else {
+            "review_required"
+        };
+        let policy_satisfied = control_plane_state == "ready_for_human_review";
+        let component_states = components
+            .iter()
+            .map(|(name, component)| {
+                (
+                    name.clone(),
+                    json!({
+                        "present": component.get("present"),
+                        "valid": component.get("valid"),
+                        "satisfied": component.get("satisfied"),
+                        "state": component.get("state"),
+                        "content_digest": component.get("content_digest").or_else(|| component.get("plan_digest")),
+                        "authority": component.get("authority")
+                    }),
+                )
+            })
+            .collect::<Map<_, _>>();
+        let mut audit = json!({
+            "schema": "bioprism-control-plane-readiness/0.1",
+            "workflow": "control_plane_readiness_audit",
+            "subject_id": subject_id,
+            "policy": policy,
+            "components": components,
+            "component_states": component_states,
+            "component_count": 5,
+            "parent_digests": parent_digests.iter().cloned().collect::<Vec<_>>(),
+            "domains": domains.iter().cloned().collect::<Vec<_>>(),
+            "control_plane_state": control_plane_state,
+            "policy_satisfied": policy_satisfied,
+            "blockers": blockers,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "each component retains its own structural state and non-authority boundary",
+                "only explicitly required components can block policy_satisfied",
+                "valid content digests are retained as parent edges for replayable lineage"
+            ],
+            "does_not_claim": [
+                "structural completeness proves scientific, clinical, causal, regulatory, publication, or release validity",
+                "an operations acceptance grants authorization to execute a mission",
+                "a release audit proves deployment, signature verification, or external runner success",
+                "absence of an optional component is a negative result"
+            ]
+        });
+        audit["digest"] = Value::String(
+            bioprism_ids::ContentHash::of_value(&audit)
+                .map_err(|error| format!("control-plane readiness could not be digested: {error}"))?
+                .to_string(),
+        );
+        let projection = self.index_artifact_projection(
+            "control_plane_readiness",
+            subject_id,
+            domains.into_iter().collect(),
+            parent_digests.into_iter().collect(),
+            audit.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "control-plane readiness could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-control-plane-readiness/0.1",
+            "workflow": "control_plane_readiness_audit",
+            "audit": audit,
+            "artifact_registry": projection,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "the projection joins supplied evidence without dispatching or recomputing nested tools",
+                "component authority is not widened by the overall state",
+                "the exact projection is retained in the digest-verified artifact registry"
+            ],
+            "does_not_claim": [
+                "a ready_for_human_review state is execution, deployment, scientific, clinical, or regulatory authorization",
+                "optional evidence absence is a failed domain result",
+                "local retained evidence is complete external history"
+            ]
+        }))
+    }
+
+    /// Compare two digest-verified control-plane projections without rerunning nested evidence.
+    ///
+    /// This is intentionally a structural diff: a stronger state is not a scientific or
+    /// deployment claim, and a weaker state is not a domain-result failure. Keeping the diff
+    /// beside the original content digests makes readiness regressions and recoveries inspectable
+    /// across every capability group without widening any component's authority.
+    fn control_plane_readiness_compare(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode control-plane readiness comparison: {error}")
+        })?;
+        if encoded.len() > 40_000_000 {
+            return Err(
+                "control-plane readiness comparison input exceeds the 40000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("control-plane readiness comparison input must be an object")?;
+
+        let extract = |name: &str| -> Result<(String, Value), String> {
+            let wrapper = object
+                .get(name)
+                .ok_or_else(|| format!("{name} is required"))?;
+            if wrapper.get("ok").and_then(Value::as_bool) != Some(true)
+                || wrapper.get("schema").and_then(Value::as_str)
+                    != Some("bioprism-control-plane-readiness/0.1")
+                || wrapper.get("workflow").and_then(Value::as_str)
+                    != Some("control_plane_readiness_audit")
+                || wrapper.get("readiness_claimed").and_then(Value::as_bool) != Some(false)
+                || wrapper.get("execution").and_then(Value::as_str) != Some("not_started")
+            {
+                return Err(format!(
+                    "{name} must be a successful, non-executing control_plane_readiness_audit wrapper"
+                ));
+            }
+            if wrapper
+                .pointer("/artifact_registry/indexed")
+                .and_then(Value::as_bool)
+                != Some(true)
+            {
+                return Err(format!("{name}.artifact_registry must be indexed"));
+            }
+            let audit = wrapper
+                .get("audit")
+                .and_then(Value::as_object)
+                .ok_or_else(|| format!("{name}.audit must be an object"))?;
+            if audit.get("schema").and_then(Value::as_str)
+                != Some("bioprism-control-plane-readiness/0.1")
+                || audit.get("workflow").and_then(Value::as_str)
+                    != Some("control_plane_readiness_audit")
+                || audit.get("readiness_claimed").and_then(Value::as_bool) != Some(false)
+                || audit.get("execution").and_then(Value::as_str) != Some("not_started")
+            {
+                return Err(format!(
+                    "{name}.audit has an invalid workflow or authority posture"
+                ));
+            }
+            let subject_id = audit
+                .get("subject_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| format!("{name}.audit.subject_id must be non-empty"))?
+                .to_string();
+            let digest = audit
+                .get("digest")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("{name}.audit.digest is required"))?;
+            let parsed_digest = bioprism_ids::ContentHash::parse(digest.to_string())
+                .map_err(|error| format!("{name}.audit.digest is invalid: {error}"))?;
+            let mut unsigned = audit.clone();
+            unsigned.remove("digest");
+            let computed = bioprism_ids::ContentHash::of_value(&Value::Object(unsigned))
+                .map_err(|error| format!("{name}.audit could not be hashed: {error}"))?;
+            if parsed_digest != computed {
+                return Err(format!("{name}.audit.digest does not match its content"));
+            }
+            if !audit.get("components").and_then(Value::as_object).is_some() {
+                return Err(format!("{name}.audit.components must be an object"));
+            }
+            if !audit.get("blockers").is_none_or(Value::is_array)
+                || !audit.get("domains").is_none_or(Value::is_array)
+                || !audit.get("parent_digests").is_none_or(Value::is_array)
+            {
+                return Err(format!("{name}.audit arrays are malformed"));
+            }
+            Ok((subject_id, Value::Object(audit.clone())))
+        };
+
+        let (before_subject, before) = extract("before")?;
+        let (after_subject, after) = extract("after")?;
+        if before_subject != after_subject {
+            return Err("before and after control-plane subjects must match".into());
+        }
+        if let Some(subject_id) = object.get("subject_id") {
+            if subject_id.as_str() != Some(before_subject.as_str()) {
+                return Err("subject_id must match both compared control-plane projections".into());
+            }
+        }
+        let before = before
+            .as_object()
+            .expect("extracted control-plane audit is an object");
+        let after = after
+            .as_object()
+            .expect("extracted control-plane audit is an object");
+        let before_components = before
+            .get("components")
+            .and_then(Value::as_object)
+            .expect("validated before components");
+        let after_components = after
+            .get("components")
+            .and_then(Value::as_object)
+            .expect("validated after components");
+        let mut component_names = BTreeSet::new();
+        component_names.extend(before_components.keys().cloned());
+        component_names.extend(after_components.keys().cloned());
+        let state_rank = |state: Option<&str>| match state {
+            Some("ready_for_human_review") => 3,
+            Some("review_required") => 2,
+            Some("incomplete") => 1,
+            Some("blocked") => 0,
+            _ => -1,
+        };
+        let mut component_changes = Vec::new();
+        let mut improvements = Vec::new();
+        let mut regressions = Vec::new();
+        for name in component_names {
+            let before_component = before_components.get(&name);
+            let after_component = after_components.get(&name);
+            let before_state = before_component
+                .and_then(|value| value.get("state"))
+                .and_then(Value::as_str);
+            let after_state = after_component
+                .and_then(|value| value.get("state"))
+                .and_then(Value::as_str);
+            let fields = ["present", "valid", "satisfied", "state"];
+            let changed_fields = fields
+                .into_iter()
+                .filter(|field| {
+                    before_component.and_then(|value| value.get(*field))
+                        != after_component.and_then(|value| value.get(*field))
+                })
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if changed_fields.is_empty() {
+                continue;
+            }
+            let row = json!({
+                "component": name,
+                "changed_fields": changed_fields,
+                "before": before_component.cloned().unwrap_or_else(|| json!({})),
+                "after": after_component.cloned().unwrap_or_else(|| json!({})),
+                "state_rank_delta": state_rank(after_state) - state_rank(before_state)
+            });
+            let rank_delta = state_rank(after_state) - state_rank(before_state);
+            let before_satisfied = before_component
+                .and_then(|value| value.get("satisfied"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let after_satisfied = after_component
+                .and_then(|value| value.get("satisfied"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if rank_delta > 0 || (!before_satisfied && after_satisfied) {
+                improvements.push(json!({
+                    "kind": if rank_delta > 0 { "component_state_improved" } else { "component_satisfied" },
+                    "component": row["component"].clone(),
+                    "before_state": before_state,
+                    "after_state": after_state
+                }));
+            }
+            if rank_delta < 0 || (before_satisfied && !after_satisfied) {
+                regressions.push(json!({
+                    "kind": if rank_delta < 0 { "component_state_regressed" } else { "component_unsatisfied" },
+                    "component": row["component"].clone(),
+                    "before_state": before_state,
+                    "after_state": after_state
+                }));
+            }
+            component_changes.push(row);
+        }
+
+        let digest_rows = |field: &str| -> Result<(Vec<Value>, Vec<Value>), String> {
+            let digest = |value: &Value| -> Result<String, String> {
+                bioprism_ids::ContentHash::of_value(value)
+                    .map(|hash| hash.to_string())
+                    .map_err(|error| format!("{field} row could not be hashed: {error}"))
+            };
+            let before_rows = before
+                .get(field)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let after_rows = after
+                .get(field)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let before_map = before_rows
+                .iter()
+                .map(|row| digest(row).map(|hash| (hash, row.clone())))
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            let after_map = after_rows
+                .iter()
+                .map(|row| digest(row).map(|hash| (hash, row.clone())))
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            Ok((
+                after_map
+                    .iter()
+                    .filter(|(hash, _)| !before_map.contains_key(*hash))
+                    .map(|(_, row)| row.clone())
+                    .collect(),
+                before_map
+                    .iter()
+                    .filter(|(hash, _)| !after_map.contains_key(*hash))
+                    .map(|(_, row)| row.clone())
+                    .collect(),
+            ))
+        };
+        let (blockers_added, blockers_removed) = digest_rows("blockers")?;
+        if !blockers_added.is_empty() {
+            regressions.push(json!({
+                "kind": "blockers_added",
+                "count": blockers_added.len()
+            }));
+        }
+        if !blockers_removed.is_empty() {
+            improvements.push(json!({
+                "kind": "blockers_removed",
+                "count": blockers_removed.len()
+            }));
+        }
+        let (domains_added, domains_removed) = digest_rows("domains")?;
+        let (parents_added, parents_removed) = digest_rows("parent_digests")?;
+        let before_state = before
+            .get("control_plane_state")
+            .and_then(Value::as_str)
+            .unwrap_or("blocked");
+        let after_state = after
+            .get("control_plane_state")
+            .and_then(Value::as_str)
+            .unwrap_or("blocked");
+        let before_policy = before.get("policy").cloned().unwrap_or_else(|| json!({}));
+        let after_policy = after.get("policy").cloned().unwrap_or_else(|| json!({}));
+        if before_policy != after_policy {
+            improvements.push(json!({
+                "kind": "policy_changed",
+                "note": "policy changes alter the meaning of policy_satisfied and require human review"
+            }));
+        }
+        let state_delta = state_rank(Some(after_state)) - state_rank(Some(before_state));
+        let state_direction = if state_delta > 0 {
+            "improved"
+        } else if state_delta < 0 {
+            "regressed"
+        } else {
+            "unchanged"
+        };
+        let evidence_direction = if !regressions.is_empty() && !improvements.is_empty() {
+            "mixed"
+        } else if !regressions.is_empty() {
+            "regressed"
+        } else if !improvements.is_empty() {
+            "improved"
+        } else {
+            "unchanged"
+        };
+        let next_action = match after_state {
+            "ready_for_human_review" => "obtain the separate human or domain-authority review; this projection is not authorization",
+            "review_required" => "inspect optional evidence and obtain the required human review",
+            "incomplete" => "supply the missing required evidence components or revise the explicit policy",
+            "blocked" => "resolve structural integrity errors and re-run the non-executing audit",
+            _ => "inspect the invalid control-plane state",
+        };
+        let mut comparison = json!({
+            "schema": "bioprism-control-plane-readiness-compare/0.1",
+            "workflow": "control_plane_readiness_compare",
+            "subject_id": before_subject,
+            "before": {
+                "audit_digest": before.get("digest"),
+                "control_plane_state": before_state,
+                "policy_satisfied": before.get("policy_satisfied")
+            },
+            "after": {
+                "audit_digest": after.get("digest"),
+                "control_plane_state": after_state,
+                "policy_satisfied": after.get("policy_satisfied")
+            },
+            "state_delta": state_delta,
+            "state_direction": state_direction,
+            "evidence_direction": evidence_direction,
+            "policy_changed": before_policy != after_policy,
+            "component_changes": component_changes,
+            "blockers_added": blockers_added,
+            "blockers_removed": blockers_removed,
+            "domains_added": domains_added,
+            "domains_removed": domains_removed,
+            "parent_digests_added": parents_added,
+            "parent_digests_removed": parents_removed,
+            "improvements": improvements,
+            "regressions": regressions,
+            "next_action": next_action,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "both inputs are content-digest verified control-plane audits",
+                "component states, policy changes, blocker changes, domains, and parent edges remain separately inspectable",
+                "the comparison never reruns nested tools or infers a scientific, clinical, deployment, or release result"
+            ],
+            "does_not_claim": [
+                "a state improvement is authorization or proof of external execution",
+                "a state regression is failure of the underlying scientific or domain result",
+                "unchanged structural state means unchanged external reality"
+            ]
+        });
+        comparison["comparison_digest"] = Value::String(
+            bioprism_ids::ContentHash::of_value(&comparison)
+                .map_err(|error| {
+                    format!("control-plane comparison could not be digested: {error}")
+                })?
+                .to_string(),
+        );
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-control-plane-readiness-compare/0.1",
+            "workflow": "control_plane_readiness_compare",
+            "comparison": comparison,
+            "readiness_claimed": false,
+            "execution": "not_started"
+        }))
+    }
+
+    /// Compare two complete control-plane audits already retained by the content-addressed
+    /// artifact registry. The registry lookup is authoritative for identity and integrity; the
+    /// comparison remains the same structural, non-executing diff as the inline route.
+    fn control_plane_readiness_compare_retained(&self, arguments: &Value) -> Result<Value, String> {
+        let object = arguments
+            .as_object()
+            .ok_or("retained control-plane comparison input must be an object")?;
+        let digest_text = |name: &str| -> Result<String, String> {
+            let value = object
+                .get(name)
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| format!("{name} must be a non-empty content digest"))?;
+            bioprism_ids::ContentHash::parse(value.to_string())
+                .map(|digest| digest.to_string())
+                .map_err(|error| format!("{name} is not a valid content digest: {error}"))
+        };
+        let before_content_digest = digest_text("before_content_digest")?;
+        let after_content_digest = digest_text("after_content_digest")?;
+        let subject_id = object
+            .get("subject_id")
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| "subject_id must be a non-empty string".to_string())
+                    .map(str::to_string)
+            })
+            .transpose()?;
+
+        let load = |digest: &str, name: &str| -> Result<(String, Value), String> {
+            let response = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?
+                .get(digest)
+                .map_err(|error| format!("{name} retained readiness lookup refused: {error}"))?;
+            let record = response
+                .get("record")
+                .and_then(Value::as_object)
+                .ok_or_else(|| format!("{name} retained artifact record is malformed"))?;
+            if record.get("kind").and_then(Value::as_str) != Some("control_plane_readiness") {
+                return Err(format!(
+                    "{name} content digest is not a control_plane_readiness artifact"
+                ));
+            }
+            let record_subject = record
+                .get("subject_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| format!("{name} retained artifact subject_id is missing"))?;
+            let artifact = record
+                .get("artifact")
+                .cloned()
+                .ok_or_else(|| format!("{name} retained readiness artifact body is missing"))?;
+            if !artifact.is_object() {
+                return Err(format!(
+                    "{name} retained readiness artifact body must be an object"
+                ));
+            }
+            let wrapper = json!({
+                "ok": true,
+                "schema": "bioprism-control-plane-readiness/0.1",
+                "workflow": "control_plane_readiness_audit",
+                "audit": artifact,
+                "artifact_registry": {
+                    "indexed": true,
+                    "kind": "control_plane_readiness",
+                    "content_digest": record.get("content_digest"),
+                    "verification": record.get("verification")
+                },
+                "readiness_claimed": false,
+                "execution": "not_started"
+            });
+            Ok((record_subject.to_string(), wrapper))
+        };
+
+        let (before_subject, before) = load(&before_content_digest, "before_content_digest")?;
+        let (after_subject, after) = load(&after_content_digest, "after_content_digest")?;
+        if before_subject != after_subject {
+            return Err("retained before and after readiness subjects must match".into());
+        }
+        if subject_id
+            .as_deref()
+            .is_some_and(|value| value != before_subject)
+        {
+            return Err("subject_id must match both retained readiness artifacts".into());
+        }
+        let comparison = self.control_plane_readiness_compare(&json!({
+            "subject_id": before_subject,
+            "before": before,
+            "after": after
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-control-plane-readiness-compare-retained/0.1",
+            "workflow": "control_plane_readiness_compare_retained",
+            "subject_id": before_subject,
+            "before_content_digest": before_content_digest,
+            "after_content_digest": after_content_digest,
+            "comparison": comparison.get("comparison"),
+            "source": "content_addressed_artifact_registry",
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "both inputs were resolved by exact content digest from the verified artifact registry",
+                "the retained records were required to be control_plane_readiness artifacts for one subject",
+                "the structural comparison reused the digest-verified non-executing comparison contract"
+            ],
+            "does_not_claim": [
+                "registry retention proves that the readiness state was current or externally complete",
+                "an improved comparison is authorization or proof of execution",
+                "a retained artifact is a scientific, clinical, deployment, release, or regulatory authority"
+            ]
+        }))
+    }
+
+    /// Query retained control-plane projections by structural state or explicit policy result.
+    fn control_plane_readiness_query(&self, arguments: &Value) -> Result<Value, String> {
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| format!("{name} must be a non-empty string"))
+                })
+                .transpose()
+        };
+        let subject_id = optional_string("subject_id")?;
+        let control_plane_state = optional_string("control_plane_state")?;
+        let after = optional_string("after")?;
+        let policy_satisfied = arguments
+            .get("policy_satisfied")
+            .map(|value| value.as_bool().ok_or("policy_satisfied must be a boolean"))
+            .transpose()?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_audits = arguments
+            .get("include_audits")
+            .map(|value| value.as_bool().ok_or("include_audits must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .control_plane_readiness_query(
+                subject_id,
+                control_plane_state,
+                policy_satisfied,
+                after,
+                max_items,
+                include_audits,
+            )
+            .map_err(|error| format!("control-plane readiness query refused: {error}"))
+    }
+
+    /// Query retained harmonization artifacts as a cross-domain observability surface.
+    ///
+    /// The registry is content-addressed and ordered by digest, so this route exposes bounded
+    /// cursoring without reinterpreting any claim. Rows summarize traceability, bridge classes,
+    /// contradiction posture, and lineage; full harmonization bodies remain available through the
+    /// exact artifact digest when a caller explicitly asks for them.
+    fn domain_evidence_harmonization_coverage(&self, arguments: &Value) -> Result<Value, String> {
+        const MAX_ITEMS: usize = bioprism_devplat::MAX_DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_ITEMS;
+        let subject_filter = arguments.get("subject_id").and_then(Value::as_str);
+        let domain_filter = arguments.get("domain").and_then(Value::as_str);
+        let report_class_filter = arguments.get("report_class").and_then(Value::as_str);
+        let bridge_mode_filter = arguments.get("bridge_mode").and_then(Value::as_str);
+        let traceability_filter = arguments.get("traceability_state").and_then(Value::as_str);
+        let after = arguments.get("after").and_then(Value::as_str);
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|value| {
+                        usize::try_from(value).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        if !(1..=MAX_ITEMS).contains(&max_items) {
+            return Err(format!("max_items must be between 1 and {MAX_ITEMS}"));
+        }
+        let include_report_digests = arguments
+            .get("include_report_digests")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| "include_report_digests must be a boolean".to_string())
+            })
+            .transpose()?
+            .unwrap_or(false);
+        for (name, value) in [
+            ("subject_id", subject_filter),
+            ("domain", domain_filter),
+            ("report_class", report_class_filter),
+            ("bridge_mode", bridge_mode_filter),
+            ("traceability_state", traceability_filter),
+            ("after", after),
+        ] {
+            if value.is_some_and(str::is_empty) {
+                return Err(format!("{name} must be non-empty when supplied"));
+            }
+        }
+        if let Some(after) = after {
+            bioprism_ids::ContentHash::parse(after.to_string())
+                .map_err(|_| "after must be a lowercase SHA-256 content digest".to_string())?;
+        }
+        if let Some(state) = traceability_filter {
+            if !["complete", "requirements_missing", "links_missing"].contains(&state) {
+                return Err(
+                    "traceability_state must be complete, requirements_missing, or links_missing"
+                        .into(),
+                );
+            }
+        }
+        let records = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit();
+        let mut all_rows = Vec::new();
+        let mut traceability_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut report_class_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut bridge_mode_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut domain_counts: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+        let mut subject_ids = BTreeSet::new();
+        let mut contradiction_count = 0usize;
+        let mut qualification_count = 0usize;
+        let mut parent_digest_count = 0usize;
+        let mut reports_with_lineage_parents = 0usize;
+        let mut reports_without_lineage_parents = 0usize;
+        for record in records.iter().filter(|record| {
+            record.kind == "domain_evidence_harmonization"
+                && record.artifact.get("schema").and_then(Value::as_str)
+                    == Some(bioprism_devplat::DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION)
+                && after.is_none_or(|cursor| record.content_digest.as_str() > cursor)
+        }) {
+            if subject_filter.is_some_and(|filter| record.subject_id != filter) {
+                continue;
+            }
+            let artifact = &record.artifact;
+            let traceability_state = artifact
+                .pointer("/coverage/traceability_state")
+                .and_then(Value::as_str)
+                .unwrap_or("links_missing");
+            if traceability_filter.is_some_and(|filter| traceability_state != filter) {
+                continue;
+            }
+            let report_rows = artifact
+                .get("reports")
+                .and_then(Value::as_array)
+                .ok_or("retained harmonization omitted reports")?;
+            let matches_domain = domain_filter.is_none_or(|filter| {
+                report_rows.iter().any(|row| {
+                    row.get("domains")
+                        .and_then(Value::as_array)
+                        .is_some_and(|domains| {
+                            domains
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .any(|domain| domain.eq_ignore_ascii_case(filter))
+                        })
+                })
+            });
+            if !matches_domain {
+                continue;
+            }
+            let matches_class = report_class_filter.is_none_or(|filter| {
+                report_rows
+                    .iter()
+                    .any(|row| row.get("report_class").and_then(Value::as_str) == Some(filter))
+            });
+            if !matches_class {
+                continue;
+            }
+            let matches_mode = bridge_mode_filter.is_none_or(|filter| {
+                report_rows
+                    .iter()
+                    .any(|row| row.get("bridge_mode").and_then(Value::as_str) == Some(filter))
+            });
+            if !matches_mode {
+                continue;
+            }
+            let bridge_summary = artifact
+                .pointer("/coverage/bridge_summary")
+                .and_then(Value::as_object);
+            let report_classes = bridge_summary
+                .and_then(|summary| summary.get("report_classes"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let bridge_modes = bridge_summary
+                .and_then(|summary| summary.get("modes"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            for (class, count) in report_classes.as_object().into_iter().flatten() {
+                let count = count.as_u64().unwrap_or(0) as usize;
+                *report_class_counts.entry(class.clone()).or_default() += count;
+            }
+            for (mode, count) in bridge_modes.as_object().into_iter().flatten() {
+                let count = count.as_u64().unwrap_or(0) as usize;
+                *bridge_mode_counts.entry(mode.clone()).or_default() += count;
+            }
+            let lineage = bridge_summary
+                .and_then(|summary| summary.get("lineage"))
+                .and_then(Value::as_object);
+            let harmonization_parent_count = record.parent_digests.len();
+            let report_parent_count = lineage
+                .and_then(|lineage| lineage.get("parent_digest_count"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            parent_digest_count += harmonization_parent_count;
+            reports_with_lineage_parents += lineage
+                .and_then(|lineage| lineage.get("reports_with_lineage_parents"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            reports_without_lineage_parents += lineage
+                .and_then(|lineage| lineage.get("reports_without_lineage_parents"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let posture = artifact.get("posture").and_then(Value::as_object);
+            let has_contradiction = posture
+                .and_then(|posture| posture.get("explicit_contradiction_declared"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let has_qualification = posture
+                .and_then(|posture| posture.get("qualification_declared"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            contradiction_count += usize::from(has_contradiction);
+            qualification_count += usize::from(has_qualification);
+            *traceability_counts
+                .entry(traceability_state.to_string())
+                .or_default() += 1;
+            subject_ids.insert(record.subject_id.clone());
+            let report_digests = report_rows
+                .iter()
+                .filter_map(|row| row.get("digest").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            for report in report_rows {
+                for domain in report
+                    .get("domains")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                {
+                    let summary = domain_counts.entry(domain.to_string()).or_default();
+                    summary.0 += 1;
+                    summary.1 += 1;
+                }
+            }
+            let mut row = json!({
+                "content_digest": record.content_digest,
+                "subject_id": record.subject_id,
+                "domains": record.domains,
+                "claim_id": artifact.pointer("/claim/id"),
+                "report_count": artifact.get("report_count"),
+                "link_count": artifact.pointer("/links").and_then(Value::as_array).map(Vec::len),
+                "traceability_state": traceability_state,
+                "requirements_complete": artifact.pointer("/coverage/requirements_complete"),
+                "all_reports_linked": artifact.pointer("/coverage/all_reports_linked"),
+                "contradiction_declared": has_contradiction,
+                "qualification_declared": has_qualification,
+                "report_classes": report_classes,
+                "bridge_modes": bridge_modes,
+                "lineage": {
+                    "harmonization_parent_count": harmonization_parent_count,
+                    "report_parent_digest_count": report_parent_count,
+                    "reports_with_lineage_parents": lineage
+                        .and_then(|lineage| lineage.get("reports_with_lineage_parents")),
+                    "reports_without_lineage_parents": lineage
+                        .and_then(|lineage| lineage.get("reports_without_lineage_parents"))
+                },
+                "missing_group_ids": artifact.get("missing_group_ids"),
+                "missing_domains": artifact.get("missing_domains")
+            });
+            if include_report_digests {
+                row["report_digests"] = json!(report_digests);
+            }
+            all_rows.push((record.content_digest.clone(), row));
+        }
+        let matching_count = all_rows.len();
+        let has_more = matching_count > max_items;
+        let rows = all_rows
+            .into_iter()
+            .take(max_items)
+            .map(|(_, row)| row)
+            .collect::<Vec<_>>();
+        let next_after = if has_more {
+            rows.last()
+                .and_then(|row| row.get("content_digest"))
+                .cloned()
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+        let domain_summary = domain_counts
+            .into_iter()
+            .map(|(domain, (harmonization_count, report_count))| {
+                (
+                    domain,
+                    json!({
+                        "harmonization_count": harmonization_count,
+                        "report_count": report_count
+                    }),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let mut result = json!({
+            "ok": true,
+            "schema": bioprism_devplat::DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_SCHEMA_VERSION,
+            "workflow": bioprism_devplat::DOMAIN_EVIDENCE_HARMONIZATION_COVERAGE_WORKFLOW,
+            "filters": {
+                "subject_id": subject_filter,
+                "domain": domain_filter,
+                "report_class": report_class_filter,
+                "bridge_mode": bridge_mode_filter,
+                "traceability_state": traceability_filter,
+                "after": after,
+                "max_items": max_items,
+                "include_report_digests": include_report_digests
+            },
+            "registry_size": records.len(),
+            "matching_count": matching_count,
+            "returned_count": rows.len(),
+            "has_more": has_more,
+            "next_after": next_after,
+            "rows": rows,
+            "summary": {
+                "subject_count": subject_ids.len(),
+                "traceability_states": traceability_counts,
+                "report_classes": report_class_counts,
+                "bridge_modes": bridge_mode_counts,
+                "lineage": {
+                    "harmonization_parent_digest_count": parent_digest_count,
+                    "reports_with_lineage_parents": reports_with_lineage_parents,
+                    "reports_without_lineage_parents": reports_without_lineage_parents
+                },
+                "posture": {
+                    "harmonizations_with_contradictions": contradiction_count,
+                    "harmonizations_with_qualifications": qualification_count
+                },
+                "domain_summary": domain_summary
+            },
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "rows are bounded, digest-ordered retained harmonization summaries",
+                "filters match explicit subject, domain, bridge, and traceability fields only",
+                "full claim bodies remain behind exact artifact digests and are not interpreted"
+            ],
+            "does_not_claim": [
+                "indexed harmonization means the joined claim is true or scientifically valid",
+                "complete traceability means every domain, source, or provenance obligation is satisfied",
+                "absence from this bounded registry means an harmonization never existed"
+            ]
+        });
+        let coverage_digest = bioprism_ids::ContentHash::of_value(&result)
+            .map_err(|error| format!("harmonization coverage could not be hashed: {error}"))?;
+        result["coverage_digest"] = json!(coverage_digest.to_string());
+        Ok(result)
+    }
+
+    /// Plan a caller-managed external evidence connector without fetching or executing it.
+    fn domain_evidence_source_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let plan = plan_domain_evidence_source(arguments)
+            .map_err(|error| format!("domain evidence source plan refused: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group_id = plan
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence source plan omitted group_id")?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+        if let Some(source_tool) = plan.get("source_tool").and_then(Value::as_str) {
+            if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+                return Err(format!(
+                    "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let domains = plan
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("domain evidence source plan omitted domains")?;
+        for domain in domains.iter().filter_map(Value::as_str) {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "domain label {domain:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let subject_id = plan
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence source plan omitted subject_id")?;
+        let parent_digests = plan
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let projection = self.index_artifact_projection(
+            "domain_evidence_source_plan",
+            subject_id,
+            domains
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            parent_digests,
+            plan.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain evidence source plan could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW,
+            "plan_digest": plan.get("plan_digest"),
+            "group_id": plan.get("group_id"),
+            "domains": plan.get("domains"),
+            "subject_id": plan.get("subject_id"),
+            "source_tool": plan.get("source_tool"),
+            "connector_kind": plan.get("connector_kind"),
+            "locator_kind": plan.get("locator_kind"),
+            "locator": plan.get("locator"),
+            "retrieval_mode": plan.get("retrieval_mode"),
+            "expected_content_digest": plan.get("expected_content_digest"),
+            "parent_digests": plan.get("parent_digests"),
+            "retrieval_policy": plan.get("retrieval_policy"),
+            "plan": plan,
+            "artifact_registry": projection,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "retrieval_status": "not_started",
+            "guarantees": [
+                "connector kind, locator shape, policy, group, and domain membership were structurally checked",
+                "the exact source plan is indexed and its plan digest can parent later caller-controlled intake",
+                "credentials remain caller-managed and no external connector is invoked"
+            ],
+            "does_not_claim": [
+                "the locator exists, was reachable, or identifies an authentic source",
+                "a planned retrieval occurred or that future bytes will match the expected digest",
+                "planning establishes scientific, clinical, causal, provenance, regulatory, or release validity"
+            ]
+        }))
+    }
+
+    /// Execute one retained source plan through the bounded in-process connector kernel.
+    ///
+    /// Execution is intentionally separate from planning and intake. The plan is looked up by
+    /// its declared digest, the current catalogue is checked again, the connector returns an
+    /// explicit observed/partial/refused/error outcome, and only then is that response passed
+    /// through the ordinary intake path. This keeps a successful file or HTTP read from becoming
+    /// a scientific or provenance claim merely because it was reachable.
+    fn domain_evidence_source_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let source_plan_digest = arguments
+            .get("source_plan_digest")
+            .and_then(Value::as_str)
+            .ok_or("source_plan_digest is required")?;
+        let plan_record = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit()
+            .into_iter()
+            .find(|record| {
+                record.kind == "domain_evidence_source_plan"
+                    && record.artifact.get("plan_digest").and_then(Value::as_str)
+                        == Some(source_plan_digest)
+            })
+            .ok_or_else(|| {
+                format!("source_plan_digest {source_plan_digest:?} is not a retained source plan")
+            })?;
+        let plan = plan_record.artifact;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group_id = plan
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("retained source plan omitted group_id")?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+        let domains = plan
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("retained source plan omitted domains")?;
+        for domain in domains.iter().filter_map(Value::as_str) {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "retained source plan domain {domain:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let source_tool = arguments
+            .get("source_tool")
+            .and_then(Value::as_str)
+            .or_else(|| plan.get("source_tool").and_then(Value::as_str))
+            .ok_or("source_tool is required when the retained source plan has no source_tool")?;
+        if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+            return Err(format!(
+                "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+            ));
+        }
+        if plan
+            .get("source_tool")
+            .and_then(Value::as_str)
+            .is_some_and(|planned| planned != source_tool)
+        {
+            return Err("execution source_tool does not match retained source plan".into());
+        }
+        let execution = execute_domain_evidence_source(self.root(), &plan)
+            .map_err(|error| format!("domain evidence source execution refused: {error}"))?;
+        let request = arguments.get("request").cloned().unwrap_or_else(|| {
+            json!({
+                "connector_kind": plan.get("connector_kind"),
+                "locator_kind": plan.get("locator_kind"),
+                "retrieval_mode": plan.get("retrieval_mode"),
+                "execution": DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW
+            })
+        });
+        let claim_posture = arguments.get("claim_posture").cloned().unwrap_or_else(|| {
+            json!({
+                "status": "review_required",
+                "does_not_claim": [
+                    "source authenticity or scientific truth",
+                    "clinical, regulatory, causal, or release validity",
+                    "provenance completeness or external authorization"
+                ],
+                "limitations": [
+                    "bounded connector output is retained as caller-declared evidence only"
+                ]
+            })
+        });
+        let mut parent_digests = arguments
+            .get("parent_digests")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let parents = parent_digests
+            .as_array_mut()
+            .ok_or("parent_digests must be an array when supplied")?;
+        if !parents
+            .iter()
+            .any(|value| value.as_str() == Some(plan_record.content_digest.as_str()))
+        {
+            parents.push(json!(plan_record.content_digest));
+        }
+        let intake_arguments = json!({
+            "group_id": plan.get("group_id"),
+            "domains": plan.get("domains"),
+            "subject_id": plan.get("subject_id"),
+            "source_tool": source_tool,
+            "request": request,
+            "response": execution.get("response"),
+            "outcome": execution.get("outcome"),
+            "claim_posture": claim_posture,
+            "source_plan_digest": source_plan_digest,
+            "parent_digests": parents
+        });
+        let intake = self.domain_evidence_intake(&intake_arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_SOURCE_EXECUTION_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_SOURCE_EXECUTION_WORKFLOW,
+            "source_plan_digest": source_plan_digest,
+            "group_id": plan.get("group_id"),
+            "domains": plan.get("domains"),
+            "subject_id": plan.get("subject_id"),
+            "source_tool": source_tool,
+            "outcome": execution.get("outcome"),
+            "retrieval_status": execution.get("retrieval_status"),
+            "execution": execution.get("execution"),
+            "raw_content_digest": execution.get("raw_content_digest"),
+            "response_digest": execution.get("response_digest"),
+            "byte_length": execution.get("byte_length"),
+            "content_type": execution.get("content_type"),
+            "source_plan": plan,
+            "execution_result": execution,
+            "intake": intake,
+            "artifact_registry": intake.get("artifact_registry"),
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "guarantees": [
+                "the retained plan and current capability catalogue were checked before connector execution",
+                "the connector response carries separate raw-byte and canonical-JSON digests",
+                "the response is indexed through domain_evidence_intake with the source-plan digest and exact plan artifact as parents"
+            ],
+            "does_not_claim": [
+                "a successful read proves source authenticity, scientific validity, clinical validity, or provenance completeness",
+                "the named source_tool was executed or interpreted by this connector",
+                "a refused, error, or partial transport outcome is equivalent to an observed result"
+            ]
+        }))
+    }
+
+    /// Normalize caller-managed provider evidence and retain it through the ordinary intake
+    /// boundary. No provider is contacted and no provider-shaped field is interpreted as truth.
+    fn domain_evidence_provider_normalize(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode provider normalization input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "provider normalization input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderNormalizationRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid provider normalization input: {error}"))?;
+        let normalized = normalize_domain_evidence_provider(&request)
+            .map_err(|error| format!("domain evidence provider normalization refused: {error}"))?;
+        let intake = self.domain_evidence_intake(&normalized.intake_arguments)?;
+        let catalogue_digest = intake
+            .get("catalogue_digest")
+            .and_then(Value::as_str)
+            .ok_or("provider normalization intake omitted catalogue_digest")?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_WORKFLOW,
+            "group_id": normalized.group_id,
+            "domains": normalized.domains,
+            "subject_id": normalized.subject_id,
+            "source_tool": normalized.source_tool,
+            "connector_kind": normalized.connector_kind,
+            "provider": normalized.provider,
+            "outcome": normalized.outcome,
+            "payload_digest": normalized.payload_digest,
+            "request_digest": normalized.request_digest,
+            "response": normalized.response,
+            "shape_audit": normalized.shape_audit,
+            "record_index": normalized.record_index,
+            "normalization": normalized,
+            "intake": intake,
+            "artifact_registry": intake.get("artifact_registry"),
+            "catalogue_digest": catalogue_digest,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "caller-managed provider payloads use the same catalogue-bound intake and coverage path as bounded source reads",
+                "provider, connector, payload, and optional request identities remain explicit and digest-addressed",
+                "connector-specific shape audit facts are deterministic, bounded, and value-free",
+                "caller-supplied outcomes are preserved without inferring success from payload shape"
+            ],
+            "does_not_claim": [
+                "provider authenticity, signature validity, or remote execution",
+                "scientific, clinical, causal, provenance, regulatory, or release validity",
+                "retrieval completeness, terminology resolution, or external-effect completion"
+            ]
+        }))
+    }
+
+    /// Verify a caller-managed provider payload against retained digest identities and index the
+    /// value-free replay record idempotently. No connector, provider, or external effect runs.
+    fn domain_evidence_provider_replay_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode provider replay input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("provider replay input exceeds the 20000000-byte safety bound".into());
+        }
+        let request: DomainEvidenceProviderReplayRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid provider replay input: {error}"))?;
+        let verification = verify_domain_evidence_provider_replay(&request)
+            .map_err(|error| format!("domain evidence provider replay refused: {error}"))?;
+        let artifact = serde_json::to_value(&verification)
+            .map_err(|error| format!("cannot encode provider replay verification: {error}"))?;
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_replay",
+                "subject_id": verification.subject_id,
+                "domains": verification.domains,
+                "parent_digests": [verification.expected_intake_digest, verification.expected_normalization_digest],
+                "declared_digest": verification.replay_digest,
+                "artifact": artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_REPLAY_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_REPLAY_WORKFLOW,
+            "replay": verification,
+            "matched": artifact["matched"],
+            "replay_status": artifact["replay_status"],
+            "replay_digest": artifact["replay_digest"],
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "the supplied payload is compared to retained identities without provider contact",
+                "mismatch dimensions remain visible instead of being collapsed into a success flag",
+                "the value-free replay verification is retained through the idempotent artifact registry"
+            ],
+            "does_not_claim": [
+                "provider authenticity, request execution, or retrieval completeness",
+                "scientific, clinical, causal, regulatory, provenance, or release validity",
+                "that a matching JSON replay proves the provider returned the payload originally"
+            ]
+        }))
+    }
+
+    /// Register a caller-managed provider connector declaration before payload intake. This is
+    /// deliberately a handoff boundary: the core validates scope and digests, but never launches
+    /// a plugin, resolves credentials, authenticates a provider, or contacts a network.
+    fn domain_evidence_provider_connector_handoff(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode provider handoff input: {error}"))?;
+        if encoded.len() > 2_000_000 {
+            return Err("provider handoff input exceeds the 2000000-byte safety bound".into());
+        }
+        let request: DomainEvidenceProviderHandoffRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid provider handoff input: {error}"))?;
+        let handoff = handoff_domain_evidence_provider(&request)
+            .map_err(|error| format!("domain evidence provider handoff refused: {error}"))?;
+        let artifact = serde_json::to_value(&handoff)
+            .map_err(|error| format!("cannot encode provider handoff artifact: {error}"))?;
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_handoff",
+                "subject_id": handoff.subject_id,
+                "domains": handoff.domains,
+                "parent_digests": handoff.parent_digests,
+                "declared_digest": handoff.handoff_digest,
+                "artifact": artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_HANDOFF_WORKFLOW,
+            "handoff": handoff,
+            "manifest_digest": handoff.manifest_digest,
+            "handoff_digest": handoff.handoff_digest,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "connector scope, capabilities, and auth posture are validated before payload intake",
+                "only opaque caller-owned secret references may be retained",
+                "request and payload identities can parent a later provider-normalization artifact"
+            ],
+            "does_not_claim": [
+                "plugin launch, provider authentication, authorization, or network execution",
+                "provider authenticity, retrieval completeness, or payload correctness",
+                "scientific, clinical, causal, provenance, regulatory, or release validity"
+            ]
+        }))
+    }
+
+    /// Retain caller-owned metadata for a large provider payload stored outside the core. The
+    /// receipt is an integrity/lineage record only; it never opens the locator or copies payload
+    /// bytes into MCP.
+    fn domain_evidence_provider_external_payload_receipt(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode external payload receipt input: {error}"))?;
+        if encoded.len() > 2_000_000 {
+            return Err(
+                "external payload receipt input exceeds the 2000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadReceiptRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid external payload receipt input: {error}"))?;
+        let receipt = record_domain_evidence_provider_external_payload(&request)
+            .map_err(|error| format!("external payload receipt refused: {error}"))?;
+        let artifact = serde_json::to_value(&receipt)
+            .map_err(|error| format!("cannot encode external payload receipt artifact: {error}"))?;
+        let mut parents = receipt.parent_digests.clone();
+        parents.push(receipt.handoff_digest.clone());
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload",
+                "subject_id": receipt.subject_id,
+                "domains": receipt.domains,
+                "parent_digests": parents,
+                "declared_digest": receipt.receipt_digest,
+                "artifact": artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW,
+            "receipt": receipt,
+            "handoff_digest": receipt.handoff_digest,
+            "payload_digest": receipt.payload_digest,
+            "receipt_digest": receipt.receipt_digest,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "the external payload is represented by exact digest, byte length, and transfer metadata",
+                "the locator remains caller-owned and the receipt can parent later normalization",
+                "the durable registry retains the receipt without copying payload bytes"
+            ],
+            "does_not_claim": [
+                "store accessibility, retention, payload availability, or transfer completion beyond caller status",
+                "payload authenticity, provider authenticity, decryption, or independent byte inspection",
+                "scientific, clinical, causal, provenance, regulatory, or release validity"
+            ]
+        }))
+    }
+
+    /// Verify an out-of-line payload receipt against retained metadata identities. This route
+    /// never dereferences the locator, reads bytes, or contacts the provider/store.
+    fn domain_evidence_provider_external_payload_replay_verify(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode external payload replay input: {error}"))?;
+        if encoded.len() > 2_000_000 {
+            return Err(
+                "external payload replay input exceeds the 2000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadReplayRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid external payload replay input: {error}"))?;
+        let verification = verify_domain_evidence_provider_external_payload_replay(&request)
+            .map_err(|error| format!("external payload replay refused: {error}"))?;
+        let artifact = serde_json::to_value(&verification)
+            .map_err(|error| format!("cannot encode external payload replay artifact: {error}"))?;
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload_replay",
+                "subject_id": verification.subject_id,
+                "domains": verification.domains,
+                "parent_digests": [
+                    verification.receipt.receipt_digest,
+                    verification.observed_handoff_digest
+                ],
+                "declared_digest": verification.replay_digest,
+                "artifact": artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_REPLAY_WORKFLOW,
+            "replay": verification,
+            "matched": artifact["matched"],
+            "replay_status": artifact["replay_status"],
+            "replay_digest": artifact["replay_digest"],
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "external receipt identities are compared without opening the caller locator",
+                "digest, handoff, payload, and byte-length drift remain individually visible",
+                "the value-free replay verification is retained idempotently"
+            ],
+            "does_not_claim": [
+                "external-store accessibility, byte re-reading, decryption, or provider contact",
+                "payload or provider authenticity, retention, scientific, clinical, provenance, or release validity"
+            ]
+        }))
+    }
+
+    /// Materialize a bounded caller-owned JSON payload against an external receipt, then pass
+    /// the digest-verified value through ordinary provider normalization and domain intake.
+    /// Neither this bridge nor the receipt registration opens the caller locator.
+    fn domain_evidence_provider_external_payload_normalize(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode external payload normalization input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "external payload normalization input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadNormalizationRequest =
+            serde_json::from_value(arguments.clone()).map_err(|error| {
+                format!("invalid external payload normalization input: {error}")
+            })?;
+        let bridged = normalize_domain_evidence_provider_external_payload(&request)
+            .map_err(|error| format!("external payload normalization refused: {error}"))?;
+        let receipt_artifact = serde_json::to_value(&bridged.receipt)
+            .map_err(|error| format!("cannot encode external payload receipt artifact: {error}"))?;
+        let mut receipt_parents = bridged.receipt.parent_digests.clone();
+        receipt_parents.push(bridged.receipt.handoff_digest.clone());
+        let receipt_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload",
+                "subject_id": bridged.receipt.subject_id,
+                "domains": bridged.receipt.domains,
+                "parent_digests": receipt_parents,
+                "declared_digest": bridged.receipt.receipt_digest,
+                "artifact": receipt_artifact
+            }
+        }))?;
+        let intake = self.domain_evidence_intake(&bridged.normalization.intake_arguments)?;
+        let catalogue_digest = intake
+            .get("catalogue_digest")
+            .and_then(Value::as_str)
+            .ok_or("external payload normalization intake omitted catalogue_digest")?;
+        let normalization = &bridged.normalization;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_NORMALIZATION_WORKFLOW,
+            "group_id": normalization.group_id,
+            "domains": normalization.domains,
+            "subject_id": normalization.subject_id,
+            "source_tool": normalization.source_tool,
+            "connector_kind": normalization.connector_kind,
+            "provider": normalization.provider,
+            "outcome": normalization.outcome,
+            "payload_digest": normalization.payload_digest,
+            "request_digest": normalization.request_digest,
+            "response": normalization.response,
+            "shape_audit": normalization.shape_audit,
+            "record_index": normalization.record_index,
+            "normalization": normalization,
+            "receipt": bridged.receipt,
+            "receipt_digest": bridged.receipt.receipt_digest,
+            "materialization": {
+                "mode": "canonical_json",
+                "matched": true,
+                "materialized_payload_digest": bridged.materialized_payload_digest,
+                "receipt_payload_digest": bridged.receipt.payload_digest,
+                "receipt_byte_length": bridged.receipt.byte_length,
+                "receipt_content_encoding": bridged.receipt.content_encoding,
+                "locator_opened": false
+            },
+            "intake": intake,
+            "artifact_registry": intake.get("artifact_registry"),
+            "receipt_artifact_registry": receipt_registry,
+            "catalogue_digest": catalogue_digest,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "the caller-materialized canonical JSON digest exactly matches the external receipt payload digest",
+                "the verified materialization uses the ordinary provider shape audit and catalogue-bound intake path",
+                "the external locator remains unopened and the receipt remains an explicit lineage parent"
+            ],
+            "does_not_claim": [
+                "external-store accessibility, transfer completion, decryption, or byte inspection beyond the supplied materialization",
+                "provider authenticity, payload authenticity, scientific, clinical, causal, provenance, regulatory, or release validity",
+                "execution or external effects; readiness remains false"
+            ]
+        }))
+    }
+
+    /// Audit an external receipt against the retained connector handoff in the local registry.
+    /// Missing or mismatched lineage is reported explicitly and never becomes readiness.
+    fn domain_evidence_provider_external_payload_lineage_audit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode external payload lineage input: {error}"))?;
+        if encoded.len() > 2_000_000 {
+            return Err(
+                "external payload lineage input exceeds the 2000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadLineageAuditRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid external payload lineage input: {error}"))?;
+        let receipt = record_domain_evidence_provider_external_payload(&request.receipt)
+            .map_err(|error| format!("external payload lineage receipt refused: {error}"))?;
+        let handoff_value = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit()
+            .into_iter()
+            .find(|record| {
+                record.kind == "domain_evidence_provider_handoff"
+                    && record
+                        .artifact
+                        .get("handoff_digest")
+                        .and_then(Value::as_str)
+                        == Some(receipt.handoff_digest.as_str())
+            })
+            .map(|record| record.artifact);
+        let handoff = handoff_value
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("retained connector handoff is malformed: {error}"))
+            })
+            .transpose()?;
+        let receipt_artifact = serde_json::to_value(&receipt)
+            .map_err(|error| format!("cannot encode external payload receipt: {error}"))?;
+        let mut receipt_parents = receipt.parent_digests.clone();
+        receipt_parents.push(receipt.handoff_digest.clone());
+        let receipt_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload",
+                "subject_id": receipt.subject_id,
+                "domains": receipt.domains,
+                "parent_digests": receipt_parents,
+                "declared_digest": receipt.receipt_digest,
+                "artifact": receipt_artifact
+            }
+        }))?;
+        let audit = audit_domain_evidence_provider_external_payload_lineage(receipt, handoff)
+            .map_err(|error| format!("external payload lineage audit refused: {error}"))?;
+        let audit_artifact = serde_json::to_value(&audit)
+            .map_err(|error| format!("cannot encode external payload lineage audit: {error}"))?;
+        let audit_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload_lineage_audit",
+                "subject_id": audit.subject_id,
+                "domains": audit.domains,
+                "parent_digests": [audit.receipt.receipt_digest, audit.receipt.handoff_digest],
+                "declared_digest": audit.lineage_digest,
+                "artifact": audit_artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
+            "audit": audit,
+            "lineage_status": audit.lineage_status,
+            "payload_binding_status": audit.payload_binding_status,
+            "lineage_digest": audit.lineage_digest,
+            "receipt_registry": receipt_registry,
+            "artifact_registry": audit_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "receipt identity is checked against a retained connector handoff when present",
+                "orphaned, partial, and mismatched lineage states remain distinct",
+                "the audit never contacts providers, stores, locators, or credential systems"
+            ],
+            "does_not_claim": [
+                "provider authentication, connector execution, transfer completion, or payload availability",
+                "scientific, clinical, causal, provenance, regulatory, or release validity",
+                "readiness; even matched lineage remains not_started"
+            ]
+        }))
+    }
+
+    /// Retain caller-reported transfer observations and compare them with a registry receipt.
+    /// The status is evidence about the caller's observation, never provider authenticity or
+    /// readiness, and this method performs no external I/O.
+    fn domain_evidence_provider_external_payload_execution_evidence(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode external payload execution evidence input: {error}")
+        })?;
+        if encoded.len() > 2_000_000 {
+            return Err(
+                "external payload execution evidence input exceeds the 2000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest =
+            serde_json::from_value(arguments.clone()).map_err(|error| {
+                format!("invalid external payload execution evidence input: {error}")
+            })?;
+        let receipt = record_domain_evidence_provider_external_payload(&request.receipt)
+            .map_err(|error| format!("external payload execution receipt refused: {error}"))?;
+        let retained_value = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?
+            .records_for_audit()
+            .into_iter()
+            .find(|record| {
+                record.kind == "domain_evidence_provider_external_payload"
+                    && record
+                        .artifact
+                        .get("receipt_digest")
+                        .and_then(Value::as_str)
+                        == Some(request.expected_receipt_digest.as_str())
+            })
+            .map(|record| record.artifact);
+        let retained_receipt = retained_value
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("retained external receipt is malformed: {error}"))
+            })
+            .transpose()?;
+        let receipt_artifact = serde_json::to_value(&receipt)
+            .map_err(|error| format!("cannot encode external payload receipt: {error}"))?;
+        let mut receipt_parents = receipt.parent_digests.clone();
+        receipt_parents.push(receipt.handoff_digest.clone());
+        let receipt_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload",
+                "subject_id": receipt.subject_id,
+                "domains": receipt.domains,
+                "parent_digests": receipt_parents,
+                "declared_digest": receipt.receipt_digest,
+                "artifact": receipt_artifact
+            }
+        }))?;
+        let evidence = audit_domain_evidence_provider_external_payload_execution(
+            receipt,
+            retained_receipt,
+            &request,
+        )
+        .map_err(|error| format!("external payload execution evidence refused: {error}"))?;
+        let evidence_artifact = serde_json::to_value(&evidence).map_err(|error| {
+            format!("cannot encode external payload execution evidence: {error}")
+        })?;
+        let artifact_registry = self.artifact_registry_audit(&json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_evidence_provider_external_payload_execution_evidence",
+                "subject_id": evidence.subject_id,
+                "domains": evidence.domains,
+                "parent_digests": [evidence.receipt.receipt_digest, evidence.receipt.handoff_digest],
+                "declared_digest": evidence.evidence_digest,
+                "artifact": evidence_artifact
+            }
+        }))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
+            "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW,
+            "evidence": evidence,
+            "evidence_status": evidence.evidence_status,
+            "evidence_digest": evidence.evidence_digest,
+            "receipt_registry": receipt_registry,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "caller-reported execution observations are compared with retained receipt metadata",
+                "missing observations and mismatches remain visible rather than becoming success",
+                "the core never contacts providers, stores, locators, credentials, or payloads"
+            ],
+            "does_not_claim": [
+                "transfer execution by the core, provider authentication, or cryptographic attestation",
+                "payload authenticity, scientific, clinical, causal, provenance, regulatory, or release validity",
+                "readiness; every response remains not_started"
+            ]
+        }))
+    }
+
+    /// Return a deterministic joined receipt/lineage/execution projection from the local registry.
+    /// This is read-only and never treats a complete join as external execution or readiness.
+    fn domain_evidence_provider_external_payload_evidence_query(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode external payload evidence query: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "external payload evidence query exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid external payload evidence query: {error}"))?;
+        let (records, generation) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            (registry.records_for_audit(), registry.generation())
+        };
+        let report =
+            query_domain_evidence_provider_external_payload_evidence(&records, generation, request)
+                .map_err(|error| format!("external payload evidence query refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode external payload evidence query: {error}"))
+    }
+
+    /// Intake one raw request/response envelope and bind it to the authoritative catalogue.
+    /// Intake is deliberately separate from execution: callers may submit a retained tool
+    /// response, a refusal, or an externally produced envelope, but this operation never calls
+    /// the named source tool on their behalf.
+    fn domain_evidence_intake(&self, arguments: &Value) -> Result<Value, String> {
+        let mut expected_content_digest = None;
+        let mut source_plan_content_digest = None;
+        if let Some(source_plan_digest) =
+            arguments.get("source_plan_digest").and_then(Value::as_str)
+        {
+            let group_id = arguments
+                .get("group_id")
+                .and_then(Value::as_str)
+                .ok_or("source-plan-bound intake omitted group_id")?;
+            let subject_id = arguments
+                .get("subject_id")
+                .and_then(Value::as_str)
+                .ok_or("source-plan-bound intake omitted subject_id")?;
+            let source_tool = arguments
+                .get("source_tool")
+                .and_then(Value::as_str)
+                .ok_or("source-plan-bound intake omitted source_tool")?;
+            let domains = arguments
+                .get("domains")
+                .and_then(Value::as_array)
+                .ok_or("source-plan-bound intake omitted domains")?;
+            let records = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?
+                .records_for_audit();
+            let plan = records
+                .iter()
+                .find(|record| {
+                    record.kind == "domain_evidence_source_plan"
+                        && record.artifact.get("plan_digest").and_then(Value::as_str)
+                            == Some(source_plan_digest)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "source_plan_digest {source_plan_digest:?} is not a retained source plan"
+                    )
+                })?;
+            if plan.artifact.get("group_id").and_then(Value::as_str) != Some(group_id)
+                || plan.artifact.get("subject_id").and_then(Value::as_str) != Some(subject_id)
+            {
+                return Err("source plan group_id or subject_id does not match intake".into());
+            }
+            if plan
+                .artifact
+                .get("source_tool")
+                .and_then(Value::as_str)
+                .is_some_and(|planned_tool| planned_tool != source_tool)
+            {
+                return Err("source plan source_tool does not match intake".into());
+            }
+            let planned_domains = plan
+                .artifact
+                .get("domains")
+                .and_then(Value::as_array)
+                .ok_or("retained source plan omitted domains")?;
+            for domain in domains.iter().filter_map(Value::as_str) {
+                if !planned_domains
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|planned| planned.eq_ignore_ascii_case(domain))
+                {
+                    return Err(format!(
+                        "source plan does not cover intake domain {domain:?}"
+                    ));
+                }
+            }
+            expected_content_digest = plan
+                .artifact
+                .get("expected_content_digest")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            source_plan_content_digest = Some(plan.content_digest.clone());
+        }
+        let mut intake_arguments = arguments.clone();
+        if let Some(source_plan_content_digest) = source_plan_content_digest {
+            let parents = intake_arguments
+                .as_object_mut()
+                .ok_or("domain evidence intake arguments must be an object")?
+                .entry("parent_digests")
+                .or_insert_with(|| json!([]));
+            let parents = parents
+                .as_array_mut()
+                .ok_or("parent_digests must be an array")?;
+            if !parents
+                .iter()
+                .any(|value| value.as_str() == Some(source_plan_content_digest.as_str()))
+            {
+                parents.push(json!(source_plan_content_digest));
+            }
+        }
+        let intake = bioprism_devplat::intake_domain_evidence(&intake_arguments)
+            .map_err(|error| format!("domain evidence intake refused: {error}"))?;
+        if let Some(expected_content_digest) = expected_content_digest {
+            let outcome = intake.get("outcome").and_then(Value::as_str);
+            if matches!(outcome, Some("observed" | "partial"))
+                && intake.get("response_digest").and_then(Value::as_str)
+                    != Some(expected_content_digest.as_str())
+            {
+                return Err(format!(
+                    "source plan expected response digest {expected_content_digest}, but intake response digest differs"
+                ));
+            }
+        }
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group_id = intake
+            .get("group_id")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence intake omitted group_id")?;
+        let source_tool = intake
+            .get("source_tool")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence intake omitted source_tool")?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| format!("unknown capability group {group_id:?}"))?;
+        if !group.mcp_tools.iter().any(|tool| tool == source_tool) {
+            return Err(format!(
+                "source_tool {source_tool:?} is not declared by capability group {group_id:?}"
+            ));
+        }
+        let domains = intake
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("domain evidence intake omitted domains")?;
+        for domain in domains.iter().filter_map(Value::as_str) {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "domain label {domain:?} is not declared by capability group {group_id:?}"
+                ));
+            }
+        }
+        let subject_id = intake
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("domain evidence intake omitted subject_id")?;
+        let parent_digests = intake
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let projection = self.index_artifact_projection(
+            "domain_evidence_intake",
+            subject_id,
+            domains
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            parent_digests,
+            intake.clone(),
+        );
+        if projection.get("indexed") != Some(&Value::Bool(true)) {
+            return Err(format!(
+                "domain evidence intake could not be indexed: {}",
+                projection
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown artifact registry error")
+            ));
+        }
+        let report = intake
+            .get("report")
+            .cloned()
+            .ok_or("domain evidence intake omitted canonical report")?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+            "group_id": intake.get("group_id"),
+            "domains": intake.get("domains"),
+            "subject_id": intake.get("subject_id"),
+            "source_tool": intake.get("source_tool"),
+            "request_supplied": intake.get("request_supplied"),
+            "request_digest": intake.get("request_digest"),
+            "response_digest": intake.get("response_digest"),
+            "intake_digest": intake.get("intake_digest"),
+            "outcome": intake.get("outcome"),
+            "source_plan_digest": intake.get("source_plan_digest"),
+            "parent_digests": intake.get("parent_digests"),
+            "report": report,
+            "intake": intake,
+            "artifact_registry": projection,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "the source tool and domains were checked against the authoritative workspace capability catalogue",
+                "request and response JSON remain recoverable through the indexed canonical intake artifact",
+                "the intake records a supplied envelope and never executes the named source tool"
+            ],
+            "does_not_claim": [
+                "intake proves that a source tool was executed or that its response is true",
+                "catalogue membership or exact digests prove scientific, clinical, causal, provenance, or release validity",
+                "a refusal or partial response is silently equivalent to a successful observation"
+            ]
+        }))
+    }
+
+    /// Project retained intake artifacts against the authoritative catalogue without treating
+    /// presence as execution coverage. Group rows retain subjects, source tools, outcomes, and
+    /// exact artifact digests; missing groups and domain-level gaps remain explicit.
+    fn domain_evidence_coverage(&self, arguments: &Value) -> Result<Value, String> {
+        const MAX_GROUPS: usize = 128;
+        let group_filter = arguments.get("group_id").and_then(Value::as_str);
+        let domain_filter = arguments.get("domain").and_then(Value::as_str);
+        let max_groups = arguments
+            .get("max_groups")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_groups must be an integer".to_string())
+                    .and_then(|value| {
+                        usize::try_from(value).map_err(|_| "max_groups is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(64);
+        if !(1..=MAX_GROUPS).contains(&max_groups) {
+            return Err(format!("max_groups must be between 1 and {MAX_GROUPS}"));
+        }
+        let include_intake_digests = arguments
+            .get("include_intake_digests")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| "include_intake_digests must be a boolean".to_string())
+            })
+            .transpose()?
+            .unwrap_or(false);
+        if group_filter.is_some_and(str::is_empty) || domain_filter.is_some_and(str::is_empty) {
+            return Err("group_id and domain filters must be non-empty".into());
+        }
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let selected = catalogue
+            .groups()
+            .iter()
+            .filter(|group| group_filter.is_none_or(|filter| group.id == filter))
+            .filter(|group| {
+                domain_filter.is_none_or(|filter| {
+                    group
+                        .domains
+                        .iter()
+                        .any(|domain| domain.eq_ignore_ascii_case(filter))
+                })
+            })
+            .take(max_groups)
+            .collect::<Vec<_>>();
+        let selected_ids = selected
+            .iter()
+            .map(|group| group.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let artifact_registry = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+        let artifact_registry_generation = artifact_registry.generation();
+        let artifact_registry_size = artifact_registry.len();
+        let records = artifact_registry.records_for_audit();
+        let mut group_intakes: BTreeMap<String, Vec<&bioprism_devplat::ArtifactRecord>> =
+            BTreeMap::new();
+        for record in &records {
+            if record.kind != "domain_evidence_intake"
+                || record.artifact.get("schema").and_then(Value::as_str)
+                    != Some(bioprism_devplat::DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION)
+            {
+                continue;
+            }
+            let Some(group_id) = record.artifact.get("group_id").and_then(Value::as_str) else {
+                continue;
+            };
+            if selected_ids.contains(group_id) {
+                group_intakes
+                    .entry(group_id.to_string())
+                    .or_default()
+                    .push(record);
+            }
+        }
+
+        let mut groups = Vec::new();
+        let mut missing_group_ids = Vec::new();
+        let mut missing_tool_group_ids = Vec::new();
+        let mut missing_domain_group_ids = Vec::new();
+        let mut domain_summary: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+        let mut groups_with_artifact_evidence = 0usize;
+        let mut artifact_evidence_records = 0usize;
+        for group in selected {
+            let intakes = group_intakes.get(&group.id).cloned().unwrap_or_default();
+            let artifact_evidence =
+                artifact_registry.domain_evidence_posture(&group.id, &group.domains);
+            let matching_artifact_records = artifact_evidence
+                .get("matching_record_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            if matching_artifact_records > 0 {
+                groups_with_artifact_evidence += 1;
+                artifact_evidence_records =
+                    artifact_evidence_records.saturating_add(matching_artifact_records);
+            }
+            if intakes.is_empty() {
+                missing_group_ids.push(group.id.clone());
+            }
+            let mut subject_ids = BTreeSet::new();
+            let mut source_tools = BTreeSet::new();
+            let mut outcomes = BTreeSet::new();
+            let mut reported_domains = BTreeSet::new();
+            let mut intake_digests = BTreeSet::new();
+            let mut tool_intakes: BTreeMap<String, Vec<&bioprism_devplat::ArtifactRecord>> =
+                BTreeMap::new();
+            for record in &intakes {
+                subject_ids.insert(record.subject_id.clone());
+                if let Some(source_tool) =
+                    record.artifact.get("source_tool").and_then(Value::as_str)
+                {
+                    source_tools.insert(source_tool.to_string());
+                    tool_intakes
+                        .entry(source_tool.to_string())
+                        .or_default()
+                        .push(record);
+                }
+                if let Some(outcome) = record.artifact.get("outcome").and_then(Value::as_str) {
+                    outcomes.insert(outcome.to_string());
+                }
+                if let Some(domains) = record.artifact.get("domains").and_then(Value::as_array) {
+                    reported_domains
+                        .extend(domains.iter().filter_map(Value::as_str).map(str::to_string));
+                }
+                intake_digests.insert(record.content_digest.clone());
+            }
+            for domain in &group.domains {
+                let domain_intakes = intakes
+                    .iter()
+                    .filter(|record| {
+                        record
+                            .artifact
+                            .get("domains")
+                            .and_then(Value::as_array)
+                            .is_some_and(|domains| {
+                                domains
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .any(|candidate| candidate.eq_ignore_ascii_case(domain))
+                            })
+                    })
+                    .count();
+                let summary = domain_summary.entry(domain.clone()).or_default();
+                summary.0 += 1;
+                if domain_intakes > 0 {
+                    summary.1 += 1;
+                }
+                summary.2 += domain_intakes;
+            }
+            let missing_domains = group
+                .domains
+                .iter()
+                .filter(|domain| {
+                    !reported_domains
+                        .iter()
+                        .any(|reported| reported.eq_ignore_ascii_case(domain))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let missing_source_tools = group
+                .mcp_tools
+                .iter()
+                .filter(|tool| !tool_intakes.contains_key(*tool))
+                .cloned()
+                .collect::<Vec<_>>();
+            let source_tool_coverage = group
+                .mcp_tools
+                .iter()
+                .map(|tool| {
+                    let rows = tool_intakes.get(tool);
+                    let tool_outcomes = rows
+                        .into_iter()
+                        .flat_map(|records| records.iter())
+                        .filter_map(|record| record.artifact.get("outcome").and_then(Value::as_str))
+                        .collect::<BTreeSet<_>>();
+                    json!({
+                        "tool": tool,
+                        "intake_count": rows.map_or(0, Vec::len),
+                        "outcomes": tool_outcomes.into_iter().collect::<Vec<_>>(),
+                        "coverage_state": if rows.is_some() { "reported" } else { "missing" }
+                    })
+                })
+                .collect::<Vec<_>>();
+            let tool_coverage_state = if missing_source_tools.is_empty() {
+                "complete"
+            } else if tool_intakes.is_empty() {
+                "missing"
+            } else {
+                "partial"
+            };
+            let domain_coverage_state = if missing_domains.is_empty() {
+                "complete"
+            } else if reported_domains.is_empty() {
+                "missing"
+            } else {
+                "partial"
+            };
+            if !missing_source_tools.is_empty() {
+                missing_tool_group_ids.push(group.id.clone());
+            }
+            if !missing_domains.is_empty() {
+                missing_domain_group_ids.push(group.id.clone());
+            }
+            let mut row = json!({
+                "id": group.id,
+                "domains": group.domains,
+                "status": group.status,
+                "declared_tool_count": group.mcp_tools.len(),
+                "declared_tools": group.mcp_tools,
+                "intake_count": intakes.len(),
+                "subject_ids": subject_ids.into_iter().collect::<Vec<_>>(),
+                "source_tools": source_tools.into_iter().collect::<Vec<_>>(),
+                "outcomes": outcomes.into_iter().collect::<Vec<_>>(),
+                "reported_domains": reported_domains.into_iter().collect::<Vec<_>>(),
+                "missing_source_tools": missing_source_tools,
+                "source_tool_coverage": source_tool_coverage,
+                "missing_domains": missing_domains,
+                "tool_coverage_state": tool_coverage_state,
+                "domain_coverage_state": domain_coverage_state,
+                "coverage_state": if intakes.is_empty() { "missing" } else { "reported" },
+                "artifact_evidence": artifact_evidence,
+                "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches"
+            });
+            if include_intake_digests {
+                row["intake_digests"] = json!(intake_digests.into_iter().collect::<Vec<_>>());
+            }
+            groups.push(row);
+        }
+        let domain_summary = domain_summary
+            .into_iter()
+            .map(
+                |(domain, (group_count, reported_group_count, intake_count))| {
+                    (
+                        domain,
+                        json!({
+                            "group_count": group_count,
+                            "reported_group_count": reported_group_count,
+                            "missing_group_count": group_count.saturating_sub(reported_group_count),
+                            "intake_count": intake_count
+                        }),
+                    )
+                },
+            )
+            .collect::<serde_json::Map<_, _>>();
+        let mut result = json!({
+            "ok": true,
+            "schema": DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
+            "workflow": DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
+            "catalogue_digest": catalogue.digest().to_string(),
+            "filters": {
+                "group_id": group_filter,
+                "domain": domain_filter,
+                "max_groups": max_groups,
+                "include_intake_digests": include_intake_digests
+            },
+            "group_count": groups.len(),
+            "reported_group_count": groups.iter().filter(|group| group["coverage_state"] == "reported").count(),
+            "missing_group_count": missing_group_ids.len(),
+            "missing_group_ids": missing_group_ids,
+            "complete": missing_group_ids.is_empty(),
+            "tool_coverage_complete": missing_tool_group_ids.is_empty(),
+            "missing_tool_group_ids": missing_tool_group_ids,
+            "domain_coverage_complete": missing_domain_group_ids.is_empty(),
+            "missing_domain_group_ids": missing_domain_group_ids,
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches",
+            "groups": groups,
+            "domain_summary": domain_summary,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "coverage counts only retained, structurally verified domain-evidence-intake artifacts",
+                "group, domain, outcome, subject, source-tool, and digest rows remain separately inspectable",
+                "declared source-tool and domain gaps remain explicit instead of being hidden by one intake",
+                "missing intake remains visible instead of being inferred as absent capability",
+                "artifact-family evidence is joined for every selected capability group without changing intake coverage semantics"
+            ],
+            "does_not_claim": [
+                "intake presence proves that every tool was executed or that a response is true",
+                "artifact-family presence proves that a provider, adapter, source, report, or workflow was executed",
+                "complete local intake coverage proves scientific, clinical, causal, provenance, release, or readiness validity",
+                "missing intake proves that a capability or external source does not exist"
+            ]
+        });
+        let coverage_digest = bioprism_ids::ContentHash::of_value(&result).map_err(|error| {
+            format!("domain evidence intake coverage could not be hashed: {error}")
+        })?;
+        result["coverage_digest"] = json!(coverage_digest.to_string());
+        Ok(result)
     }
 
     fn context_compare(&self, arguments: &Value) -> Result<Value, String> {
@@ -2451,8 +7310,9 @@ impl Server {
                     "refusal_text": Value::Null,
                 }),
                 Err(refusal) => {
-                    let refusal_value = serde_json::to_value(&refusal)
-                        .map_err(|error| format!("cannot serialize analysis-unit refusal: {error}"))?;
+                    let refusal_value = serde_json::to_value(&refusal).map_err(|error| {
+                        format!("cannot serialize analysis-unit refusal: {error}")
+                    })?;
                     json!({
                         "requested": true,
                         "counted": counted,
@@ -2551,7 +7411,9 @@ impl Server {
             ));
         }
         if source.purpose.len() > 100_000 {
-            return Err("source modality descriptor purpose exceeds the 100000-byte safety bound".into());
+            return Err(
+                "source modality descriptor purpose exceeds the 100000-byte safety bound".into(),
+            );
         }
         let kind: TransportKind = serde_json::from_value(
             arguments
@@ -2605,7 +7467,9 @@ impl Server {
                 })
                 .map_err(|error| format!("cannot serialize modality transport refusal: {error}"))
         };
-        let support_row = |descriptor: &ModalityDescriptor, claim: ClaimKind| -> Result<Value, String> {
+        let support_row = |descriptor: &ModalityDescriptor,
+                           claim: ClaimKind|
+         -> Result<Value, String> {
             match modality_supports_descriptor(descriptor, claim) {
                 Ok(()) => Ok(json!({
                     "claim": claim,
@@ -2661,7 +7525,9 @@ impl Server {
                 let mapped = transport.to_scope_mapping();
                 let mapping_check = match mapped.check() {
                     bioprism_scope::MappingCheck::Sound => "sound",
-                    bioprism_scope::MappingCheck::MisdeclaredRestriction => "misdeclared_restriction",
+                    bioprism_scope::MappingCheck::MisdeclaredRestriction => {
+                        "misdeclared_restriction"
+                    }
                     bioprism_scope::MappingCheck::UndeclaredLoss => "undeclared_loss",
                 };
                 let inverse = match transport.invert() {
@@ -2700,22 +7566,30 @@ impl Server {
                                 }))
                             })
                             .collect::<Result<Vec<_>, String>>()?;
-                        (json!({
-                            "descriptor": {
-                                "modality": descriptor.modality,
-                                "measurand": descriptor.measurand,
-                                "design": descriptor.design,
-                                "complete": descriptor.is_complete(),
-                                "resolutions": Resolution::ALL.into_iter().map(|axis| json!({"axis": axis, "status": descriptor.resolution(axis)})).collect::<Vec<_>>(),
-                                "resolved_axes": descriptor.resolved_axes(),
-                                "unresolved_axes": descriptor.unresolved_axes(),
-                                "undeclared_axes": descriptor.undeclared_axes(),
-                            }
-                        }), json!({"applied": true, "refusal": Value::Null, "refusal_kind": Value::Null, "refusal_text": Value::Null}), claim_rows)
+                        (
+                            json!({
+                                "descriptor": {
+                                    "modality": descriptor.modality,
+                                    "measurand": descriptor.measurand,
+                                    "design": descriptor.design,
+                                    "complete": descriptor.is_complete(),
+                                    "resolutions": Resolution::ALL.into_iter().map(|axis| json!({"axis": axis, "status": descriptor.resolution(axis)})).collect::<Vec<_>>(),
+                                    "resolved_axes": descriptor.resolved_axes(),
+                                    "unresolved_axes": descriptor.unresolved_axes(),
+                                    "undeclared_axes": descriptor.undeclared_axes(),
+                                }
+                            }),
+                            json!({"applied": true, "refusal": Value::Null, "refusal_kind": Value::Null, "refusal_text": Value::Null}),
+                            claim_rows,
+                        )
                     }
                     Err(refusal) => {
                         let projection = refusal_projection(&refusal)?;
-                        (Value::Null, json!({"applied": false, "refusal": projection["refusal"].clone(), "refusal_kind": projection["refusal_kind"].clone(), "refusal_text": projection["refusal_text"].clone()}), Vec::new())
+                        (
+                            Value::Null,
+                            json!({"applied": false, "refusal": projection["refusal"].clone(), "refusal_kind": projection["refusal_kind"].clone(), "refusal_text": projection["refusal_text"].clone()}),
+                            Vec::new(),
+                        )
                     }
                 };
                 Ok(json!({
@@ -2831,7 +7705,9 @@ impl Server {
             return Err("literature claim text exceeds the 100000-byte safety bound".into());
         }
         if claim.provenance.identifier.is_empty() || claim.provenance.identifier.len() > 2_000 {
-            return Err("literature source identifier must contain between 1 and 2000 bytes".into());
+            return Err(
+                "literature source identifier must contain between 1 and 2000 bytes".into(),
+            );
         }
         let target: ScopeKey = serde_json::from_value(
             arguments
@@ -2931,8 +7807,8 @@ impl Server {
                 }
             }
             Err(refusal) => {
-                let refusal_value = serde_json::to_value(&refusal)
-                    .map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["outcome_kind"] = json!("refused");
                 projection["refusal"] = refusal_value.clone();
                 projection["refusal_kind"] = refusal_value["binding_refusal"].clone();
@@ -5940,6 +10816,104 @@ impl Server {
         }))
     }
 
+    /// Retain caller-supplied execution and semantic-loss observations for one declared adapter.
+    /// The core validates catalogue/group scope and indexes the evidence, but never runs the
+    /// adapter or imports a delegated dependency.
+    fn adapter_execution_evidence(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode adapter execution evidence: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err("adapter execution evidence exceeds the 1000000-byte safety bound".into());
+        }
+        let request: AdapterExecutionEvidenceRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid adapter execution evidence: {error}"))?;
+        let adapter_registry = AdapterRegistry::default();
+        let adapter = adapter_registry
+            .descriptors()
+            .iter()
+            .find(|descriptor| descriptor.id == request.adapter_id)
+            .ok_or_else(|| {
+                format!(
+                    "adapter_id {:?} is not in the declared adapter registry",
+                    request.adapter_id
+                )
+            })?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let group = catalogue
+            .groups()
+            .iter()
+            .find(|group| group.id == request.group_id)
+            .ok_or_else(|| format!("unknown capability group {:?}", request.group_id))?;
+        for domain in &request.domains {
+            if !group
+                .domains
+                .iter()
+                .any(|declared| declared.eq_ignore_ascii_case(domain))
+            {
+                return Err(format!(
+                    "domain label {:?} is not declared by capability group {:?}",
+                    domain, request.group_id
+                ));
+            }
+        }
+        let subject_id = request.subject_id.clone();
+        let domains = request.domains.clone();
+        let parent_digests = request.parent_digests.clone();
+        let adapter_summary = json!({
+            "id": adapter.id,
+            "version": adapter.version,
+            "execution": adapter.execution,
+            "conformance_level": adapter.conformance_level,
+            "optional_dependency": adapter.optional_dependency,
+            "declared_loss_kinds": adapter.declared_loss_kinds,
+            "scope_dimensions": adapter.scope_dimensions,
+        });
+        let evidence = record_adapter_execution_evidence(request)
+            .map_err(|error| format!("adapter execution evidence refused: {error}"))?;
+        let evidence_artifact = evidence
+            .get("evidence")
+            .cloned()
+            .ok_or("adapter execution evidence omitted nested evidence")?;
+        let projection = self.index_artifact_projection(
+            "adapter_execution_evidence",
+            &subject_id,
+            domains,
+            parent_digests,
+            evidence_artifact,
+        );
+        let mut result = evidence;
+        result["adapter"] = adapter_summary;
+        result["artifact_registry"] = projection;
+        Ok(result)
+    }
+
+    /// Query retained adapter observations and classify only explicit parent joins to source or
+    /// workflow projections. The query never executes adapters or infers provenance from labels.
+    fn adapter_execution_evidence_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode adapter execution evidence query: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "adapter execution evidence query exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let request: AdapterExecutionEvidenceQueryRequest =
+            serde_json::from_value(arguments.clone())
+                .map_err(|error| format!("invalid adapter execution evidence query: {error}"))?;
+        let (records, generation) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            (registry.records_for_audit(), registry.generation())
+        };
+        let report = query_adapter_execution_evidence(&records, generation, request)
+            .map_err(|error| format!("adapter execution evidence query refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode adapter execution evidence query: {error}"))
+    }
+
     fn tabular_ingest(&self, arguments: &Value) -> Result<Value, String> {
         let profile: TabularProfile = serde_json::from_value(
             arguments
@@ -6079,6 +11053,34 @@ impl Server {
                 "optional dependency absence or uncertainty is surfaced before execution",
                 "the planner does not fetch bytes, import packages, execute adapters, or grant credentials",
             ],
+        }))
+    }
+
+    fn domain_acquisition_catalogue(&self, arguments: &Value) -> Result<Value, String> {
+        let query: DomainAcquisitionQuery = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid domain acquisition query: {error}"))?;
+        let catalogue = CapabilityCatalogue::from_value(&workspace_capabilities())
+            .map_err(|error| format!("workspace capability catalogue is invalid: {error}"))?;
+        let report =
+            build_domain_acquisition_catalogue(&catalogue, &AdapterRegistry::default(), &query)
+                .map_err(|error| format!("domain acquisition catalogue refused: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": DOMAIN_ACQUISITION_SCHEMA_VERSION,
+            "workflow": DOMAIN_ACQUISITION_WORKFLOW,
+            "catalogue": report,
+            "execution": "not_started",
+            "readiness_claimed": false,
+            "guarantees": [
+                "transport and adapter interpretation are exposed as separate planes for every selected declared domain",
+                "the report is bound to both the authoritative workspace catalogue digest and adapter registry digest",
+                "the operation performs no I/O, source retrieval, Python import, adapter execution, or credential resolution"
+            ],
+            "does_not_claim": [
+                "scope-label overlap is ontology resolution or scientific validity",
+                "declared transport membership proves an external source was called or is authentic",
+                "a native or Python-delegated route proves source-specific conformance or dependency availability"
+            ]
         }))
     }
 
@@ -7078,7 +12080,9 @@ impl Server {
         let mut space = ArchitectureSpace::new();
         let mut candidate_rows = Vec::with_capacity(raw_candidates.len());
         for (index, raw_candidate) in raw_candidates.iter().enumerate() {
-            let candidate: CandidateArchitecture = match serde_json::from_value(raw_candidate.clone()) {
+            let candidate: CandidateArchitecture = match serde_json::from_value(
+                raw_candidate.clone(),
+            ) {
                 Ok(candidate) => candidate,
                 Err(error) => {
                     return Ok(json!({
@@ -7117,9 +12121,11 @@ impl Server {
                 .map(|component| component.parameters.len())
                 .sum::<usize>();
             if let Err(error) = candidate.validate(cost_ceiling) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 candidate_rows.push(json!({
                     "index": index,
                     "id": candidate.id,
@@ -7160,9 +12166,11 @@ impl Server {
                 }));
             }
             if let Err(error) = space.register(candidate.clone()) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 candidate_rows.push(json!({
                     "index": index,
                     "id": candidate.id,
@@ -7213,8 +12221,10 @@ impl Server {
                 "registration": "registered",
             });
             if include_components {
-                row["components"] = serde_json::to_value(candidate.components)
-                    .map_err(|error| format!("cannot serialize architecture components: {error}"))?;
+                row["components"] =
+                    serde_json::to_value(candidate.components).map_err(|error| {
+                        format!("cannot serialize architecture components: {error}")
+                    })?;
             }
             candidate_rows.push(row);
         }
@@ -7244,9 +12254,9 @@ impl Server {
             let candidate = space.get(&configuration).ok_or_else(|| {
                 format!("inspect[{index}] names unknown configuration `{configuration}`")
             })?;
-            let lineage = space
-                .lineage(&configuration)
-                .map_err(|error| format!("cannot resolve lineage for `{configuration}`: {error}"))?;
+            let lineage = space.lineage(&configuration).map_err(|error| {
+                format!("cannot resolve lineage for `{configuration}`: {error}")
+            })?;
             let root = lineage.last().cloned();
             let mut row = json!({
                 "index": index,
@@ -7379,8 +12389,9 @@ impl Server {
             .iter()
             .enumerate()
             .map(|(index, value)| {
-                let objective: bioprism_lab::pareto::Objective = serde_json::from_value(value.clone())
-                    .map_err(|error| format!("invalid objectives[{index}]: {error}"))?;
+                let objective: bioprism_lab::pareto::Objective =
+                    serde_json::from_value(value.clone())
+                        .map_err(|error| format!("invalid objectives[{index}]: {error}"))?;
                 if objective.axis.trim().is_empty() || objective.axis.len() > 256 {
                     return Err(format!(
                         "objectives[{index}].axis must contain between 1 and 256 bytes"
@@ -7440,9 +12451,11 @@ impl Server {
         let mut front = match ParetoFront::new(objectives.clone()) {
             Ok(front) => front,
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "pareto_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "pareto_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-pareto-audit/0.1",
@@ -7464,9 +12477,11 @@ impl Server {
             let admission = match front.insert(profile) {
                 Ok(admission) => admission,
                 Err(error) => {
-                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                        "error": "pareto_error_serialization_failed"
-                    }));
+                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                        json!({
+                            "error": "pareto_error_serialization_failed"
+                        })
+                    });
                     return Ok(json!({
                         "ok": false,
                         "schema": "bioprism-mcp/lab-pareto-audit/0.1",
@@ -7611,9 +12626,11 @@ impl Server {
         ) {
             Ok(policy) => policy,
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "branch_policy_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "branch_policy_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-branch-audit/0.1",
@@ -7772,9 +12789,11 @@ impl Server {
                 ));
             }
             if let Err(error) = candidate.validate(cost_ceiling) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-holdout-audit/0.1",
@@ -7791,9 +12810,11 @@ impl Server {
                 }));
             }
             if let Err(error) = space.register(candidate) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-holdout-audit/0.1",
@@ -7840,13 +12861,17 @@ impl Server {
             let query_budget = object
                 .get("query_budget")
                 .and_then(Value::as_u64)
-                .ok_or_else(|| format!("holdouts[{index}].query_budget must be a non-negative integer"))?;
+                .ok_or_else(|| {
+                    format!("holdouts[{index}].query_budget must be a non-negative integer")
+                })?;
             if query_budget > u32::MAX as u64 {
                 return Err(format!("holdouts[{index}].query_budget exceeds u32"));
             }
             holdouts
                 .register(Holdout::new(id, partition, query_budget as u32))
-                .map_err(|error| format!("holdout registration refused holdouts[{index}]: {error}"))?;
+                .map_err(|error| {
+                    format!("holdout registration refused holdouts[{index}]: {error}")
+                })?;
         }
 
         let current = arguments
@@ -7857,9 +12882,11 @@ impl Server {
         let mut deployment = match Deployment::new(space, holdouts, current) {
             Ok(deployment) => deployment,
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "rollback_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "rollback_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-holdout-audit/0.1",
@@ -7908,10 +12935,14 @@ impl Server {
                         .and_then(Value::as_str)
                         .ok_or_else(|| format!("operations[{index}].label must be a string"))?;
                     if label.trim().is_empty() || label.len() > 512 {
-                        return Err(format!("operations[{index}].label must contain between 1 and 512 bytes"));
+                        return Err(format!(
+                            "operations[{index}].label must contain between 1 and 512 bytes"
+                        ));
                     }
                     if checkpoints.contains_key(label) {
-                        return Err(format!("operations[{index}] duplicates checkpoint label {label:?}"));
+                        return Err(format!(
+                            "operations[{index}] duplicates checkpoint label {label:?}"
+                        ));
                     }
                     let checkpoint = deployment.checkpoint(label);
                     checkpoints.insert(label.to_string(), checkpoint.clone());
@@ -7926,15 +12957,16 @@ impl Server {
                     let configuration = object
                         .get("configuration")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| format!("operations[{index}].configuration must be a string"))?;
+                        .ok_or_else(|| {
+                            format!("operations[{index}].configuration must be a string")
+                        })?;
                     let configuration = ConfigurationId::new(configuration);
                     let selected_using = object
                         .get("selected_using")
                         .map(|value| {
-                            value
-                                .as_str()
-                                .map(HoldoutId::new)
-                                .ok_or_else(|| format!("operations[{index}].selected_using must be a string"))
+                            value.as_str().map(HoldoutId::new).ok_or_else(|| {
+                                format!("operations[{index}].selected_using must be a string")
+                            })
                         })
                         .transpose()?;
                     let rationale = object
@@ -7943,7 +12975,9 @@ impl Server {
                         .ok_or_else(|| format!("operations[{index}].rationale must be a string"))?;
                     deployment
                         .promote(&configuration, selected_using.as_ref(), rationale)
-                        .map_err(|error| format!("operations[{index}] promotion refused: {error}"))?;
+                        .map_err(|error| {
+                            format!("operations[{index}] promotion refused: {error}")
+                        })?;
                     json!({
                         "index": index,
                         "kind": kind,
@@ -7960,9 +12994,13 @@ impl Server {
                     let raw_configurations = object
                         .get("configurations")
                         .and_then(Value::as_array)
-                        .ok_or_else(|| format!("operations[{index}].configurations must be an array"))?;
+                        .ok_or_else(|| {
+                            format!("operations[{index}].configurations must be an array")
+                        })?;
                     if raw_configurations.is_empty() || raw_configurations.len() > 512 {
-                        return Err(format!("operations[{index}].configurations must contain between 1 and 512 ids"));
+                        return Err(format!(
+                            "operations[{index}].configurations must contain between 1 and 512 ids"
+                        ));
                     }
                     let configurations: Vec<ConfigurationId> = raw_configurations
                         .iter()
@@ -7998,7 +13036,9 @@ impl Server {
                     let configuration = object
                         .get("configuration")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| format!("operations[{index}].configuration must be a string"))?;
+                        .ok_or_else(|| {
+                            format!("operations[{index}].configuration must be a string")
+                        })?;
                     let metric = object
                         .get("metric")
                         .and_then(Value::as_str)
@@ -8026,9 +13066,11 @@ impl Server {
                         }
                         Err(error) => {
                             measurement_refusal_count += 1;
-                            let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                                "error": "holdout_error_serialization_failed"
-                            }));
+                            let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                                json!({
+                                    "error": "holdout_error_serialization_failed"
+                                })
+                            });
                             json!({
                                 "index": index,
                                 "kind": kind,
@@ -8044,14 +13086,15 @@ impl Server {
                     let label = object
                         .get("checkpoint")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| format!("operations[{index}].checkpoint must be a string"))?;
-                    let checkpoint = checkpoints
-                        .get(label)
-                        .cloned()
-                        .ok_or_else(|| format!("operations[{index}] names unknown checkpoint {label:?}"))?;
-                    let receipt = deployment
-                        .rollback(&checkpoint)
-                        .map_err(|error| format!("operations[{index}] rollback refused: {error}"))?;
+                        .ok_or_else(|| {
+                            format!("operations[{index}].checkpoint must be a string")
+                        })?;
+                    let checkpoint = checkpoints.get(label).cloned().ok_or_else(|| {
+                        format!("operations[{index}] names unknown checkpoint {label:?}")
+                    })?;
+                    let receipt = deployment.rollback(&checkpoint).map_err(|error| {
+                        format!("operations[{index}] rollback refused: {error}")
+                    })?;
                     rollback_count += 1;
                     json!({
                         "index": index,
@@ -8170,16 +13213,21 @@ impl Server {
             .and_then(Value::as_array)
             .ok_or("candidates is required and must be an array")?;
         if raw_candidates.len() != 2 {
-            return Err("candidates must contain exactly baseline and candidate architecture bundles".into());
+            return Err(
+                "candidates must contain exactly baseline and candidate architecture bundles"
+                    .into(),
+            );
         }
         let mut space = ArchitectureSpace::new();
         for (index, raw_candidate) in raw_candidates.iter().enumerate() {
             let candidate: CandidateArchitecture = serde_json::from_value(raw_candidate.clone())
                 .map_err(|error| format!("invalid candidates[{index}]: {error}"))?;
             if let Err(error) = candidate.validate(cost_ceiling) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-evolution-audit/0.1",
@@ -8194,9 +13242,11 @@ impl Server {
                 }));
             }
             if let Err(error) = space.register(candidate) {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "space_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "space_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-evolution-audit/0.1",
@@ -8360,9 +13410,11 @@ impl Server {
                     if first_refusal.is_none() {
                         first_refusal = Some((configuration_id.clone(), error.clone()));
                     }
-                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                        "error": "holdout_error_serialization_failed"
-                    }));
+                    let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                        json!({
+                            "error": "holdout_error_serialization_failed"
+                        })
+                    });
                     measurement_rows.push(json!({
                         "index": index,
                         "configuration": configuration_id,
@@ -8442,9 +13494,11 @@ impl Server {
         ) {
             Ok(card) => card,
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "evolution_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "evolution_error_serialization_failed"
+                    })
+                });
                 return Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/lab-evolution-audit/0.1",
@@ -8485,9 +13539,11 @@ impl Server {
                 ]
             })),
             Err(error) => {
-                let detail = serde_json::to_value(&error).unwrap_or_else(|_| json!({
-                    "error": "evolution_error_serialization_failed"
-                }));
+                let detail = serde_json::to_value(&error).unwrap_or_else(|_| {
+                    json!({
+                        "error": "evolution_error_serialization_failed"
+                    })
+                });
                 Ok(json!({
                     "ok": true,
                     "schema": "bioprism-mcp/lab-evolution-audit/0.1",
@@ -8559,7 +13615,9 @@ impl Server {
         let frontier = graph.frontier().ok();
         let undischarged = graph.undischarged().ok();
         let topological_count = topological.as_ref().map_or(0, Vec::len);
-        let effective_count = effective.as_ref().map_or(0, std::collections::BTreeMap::len);
+        let effective_count = effective
+            .as_ref()
+            .map_or(0, std::collections::BTreeMap::len);
         let frontier_count = frontier.as_ref().map_or(0, Vec::len);
         let undischarged_count = undischarged.as_ref().map_or(0, Vec::len);
         let topological = topological
@@ -8570,30 +13628,29 @@ impl Server {
                 states
                     .into_iter()
                     .take(max_items)
-                    .map(|(obligation, state)| json!({
-                        "obligation": obligation,
-                        "effective": state,
-                    }))
+                    .map(|(obligation, state)| {
+                        json!({
+                            "obligation": obligation,
+                            "effective": state,
+                        })
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
         let frontier = frontier
-            .map(|entries| {
-                entries
-                    .into_iter()
-                    .take(max_items)
-                    .collect::<Vec<_>>()
-            })
+            .map(|entries| entries.into_iter().take(max_items).collect::<Vec<_>>())
             .unwrap_or_default();
         let undischarged = undischarged
             .map(|entries| {
                 entries
                     .into_iter()
                     .take(max_items)
-                    .map(|(obligation, state)| json!({
-                        "obligation": obligation,
-                        "effective": state,
-                    }))
+                    .map(|(obligation, state)| {
+                        json!({
+                            "obligation": obligation,
+                            "effective": state,
+                        })
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -9553,8 +14610,9 @@ impl Server {
         }
         let pool = EpistemicEvidencePool::new(parsed_pool.items().to_vec())
             .map_err(|error| format!("evidence pool invariant failed: {error}"))?;
-        pool.check_against(&problem)
-            .map_err(|error| format!("evidence pool is incompatible with the decision problem: {error}"))?;
+        pool.check_against(&problem).map_err(|error| {
+            format!("evidence pool is incompatible with the decision problem: {error}")
+        })?;
 
         let parse_optional_cardinality = |key: &str| -> Result<Option<usize>, String> {
             raw_constraint
@@ -9586,9 +14644,9 @@ impl Server {
                 .iter()
                 .enumerate()
                 .map(|(index, value)| {
-                    value.as_f64().ok_or_else(|| {
-                        format!("constraint costs[{index}] must be a finite number")
-                    })
+                    value
+                        .as_f64()
+                        .ok_or_else(|| format!("constraint costs[{index}] must be a finite number"))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             None => pool.items().iter().map(|item| item.cost).collect(),
@@ -9803,25 +14861,22 @@ impl Server {
                 "cap": 20,
             })
         } else {
-            let (chosen, value) = match epistemic_brute_force_optimum(
-                &objective,
-                &constraint,
-                &protected,
-            ) {
-                Ok(result) => result,
-                Err(error) => {
-                    return Ok(json!({
-                        "ok": false,
-                        "schema": SCHEMA,
-                        "stage": "exact_optimum",
-                        "refusal": error.to_string(),
-                        "fail_closed": true,
-                        "submodularity": submodularity,
-                        "greedy": project_selection(&selection),
-                        "lazy": lazy_selection.as_ref().map(project_selection),
-                    }))
-                }
-            };
+            let (chosen, value) =
+                match epistemic_brute_force_optimum(&objective, &constraint, &protected) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        return Ok(json!({
+                            "ok": false,
+                            "schema": SCHEMA,
+                            "stage": "exact_optimum",
+                            "refusal": error.to_string(),
+                            "fail_closed": true,
+                            "submodularity": submodularity,
+                            "greedy": project_selection(&selection),
+                            "lazy": lazy_selection.as_ref().map(project_selection),
+                        }))
+                    }
+                };
             let selected_value = selection.value;
             let (ratio, ratio_status) = if value.abs() <= 1e-12 {
                 (Value::Null, "undefined_zero_optimum")
@@ -9965,7 +15020,9 @@ impl Server {
             parsed_problem.actions().to_vec(),
             parsed_problem.models().to_vec(),
             (0..action_count)
-                .flat_map(|action| (0..model_count).map(move |model| problem_ref.loss(action, model)))
+                .flat_map(|action| {
+                    (0..model_count).map(move |model| problem_ref.loss(action, model))
+                })
                 .collect(),
         )
         .map_err(|error| format!("decision problem invariant failed: {error}"))?;
@@ -10079,17 +15136,22 @@ impl Server {
             let mut refusal = None;
             for (position, value) in values.iter().enumerate() {
                 let Some(raw_index) = value.as_u64() else {
-                    refusal = Some(format!("subsets[{index}][{position}] must be a non-negative integer"));
+                    refusal = Some(format!(
+                        "subsets[{index}][{position}] must be a non-negative integer"
+                    ));
                     break;
                 };
-                let evidence_index = usize::try_from(raw_index)
-                    .map_err(|_| format!("subsets[{index}][{position}] is outside the supported range"))?;
+                let evidence_index = usize::try_from(raw_index).map_err(|_| {
+                    format!("subsets[{index}][{position}] is outside the supported range")
+                })?;
                 if evidence_index >= pool.len() {
                     refusal = Some(format!("subsets[{index}] names evidence index {evidence_index}, outside pool size {}", pool.len()));
                     break;
                 }
                 if !subset.insert(evidence_index) {
-                    refusal = Some(format!("subsets[{index}] repeats evidence index {evidence_index}"));
+                    refusal = Some(format!(
+                        "subsets[{index}] repeats evidence index {evidence_index}"
+                    ));
                     break;
                 }
             }
@@ -10177,6 +15239,107 @@ impl Server {
             return Err("epistemic context result exceeds the 20000000-byte safety bound".into());
         }
         Ok(output)
+    }
+
+    fn epistemic_decision_quotient(&self, arguments: &Value) -> Result<Value, String> {
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required and must be a serialized epistemic DecisionProblem")?;
+        let raw_actions = arguments
+            .get("permitted_actions")
+            .and_then(Value::as_array)
+            .ok_or("permitted_actions is required and must be an array of action names")?;
+        if raw_actions.is_empty() || raw_actions.len() > 1_000 {
+            return Err("permitted_actions must contain between 1 and 1000 actions".into());
+        }
+        let permitted_actions = raw_actions
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let action = value
+                    .as_str()
+                    .ok_or_else(|| format!("permitted_actions[{index}] must be a string"))?;
+                if action.trim().is_empty() || action.len() > 256 {
+                    return Err(format!(
+                        "permitted_actions[{index}] must contain between 1 and 256 bytes"
+                    ));
+                }
+                Ok(action.to_string())
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "permitted_actions": permitted_actions.clone(),
+        }))
+        .map_err(|error| format!("cannot measure decision quotient envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("decision quotient input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let parsed_problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        parsed_problem
+            .validate()
+            .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+        if parsed_problem.action_count() > 1_000 || parsed_problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let action_count = parsed_problem.action_count();
+        let model_count = parsed_problem.model_count();
+        let problem_ref = &parsed_problem;
+        let loss = (0..action_count)
+            .flat_map(|action| (0..model_count).map(move |model| problem_ref.loss(action, model)))
+            .collect::<Vec<_>>();
+        let problem = EpistemicDecisionProblem::new(
+            parsed_problem.actions().to_vec(),
+            parsed_problem.models().to_vec(),
+            loss,
+        )
+        .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+
+        let quotient = match epistemic_decision_equivalence_quotient(&problem, &permitted_actions) {
+            Ok(quotient) => quotient,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": "bioprism-mcp/epistemic-decision-quotient/0.1",
+                    "stage": "decision_quotient",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "an empty, duplicate, or unknown permitted-action set is refused rather than treated as all actions",
+                        "malformed or non-finite decision losses remain refusals",
+                    ],
+                    "limitations": [
+                        "the quotient is decision-relative to the supplied loss table and permitted action names",
+                    ],
+                }))
+            }
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/epistemic-decision-quotient/0.1",
+            "quotient": quotient,
+            "summary": {
+                "original_model_count": problem.model_count(),
+                "quotient_model_count": quotient.quotient_model_count,
+                "merged_model_count": quotient.merged_model_count,
+                "compressed": quotient.compressed(),
+                "compression_fraction": quotient.compression_fraction(),
+            },
+            "guarantees": [
+                "models merge only when their permitted-action loss-difference profiles are exactly equal",
+                "model identities, class membership, preferred-action ties, and the permitted action boundary remain visible",
+                "the relation is transitive and deterministic under model or action input reordering",
+                "the quotient preserves permitted-action ordering and regret profiles, not absolute loss baselines",
+            ],
+            "limitations": [
+                "this is not causal, biological, clinical, predictive, or likelihood equivalence",
+                "forbidden actions and distinctions outside the supplied loss table are intentionally not preserved",
+                "fiber-query/0.2 still cannot invoke this pass because it carries neither permitted_actions nor decision_loss",
+            ],
+        }))
     }
 
     fn epistemic_voi(&self, arguments: &Value) -> Result<Value, String> {
@@ -10340,6 +15503,857 @@ impl Server {
         }))
     }
 
+    fn epistemic_adaptive_acquisition(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/epistemic-adaptive-acquisition/0.1";
+        const MAX_ACQUISITIONS: usize = 16;
+        const MAX_STEPS: usize = 16;
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required and must be a serialized epistemic DecisionProblem")?;
+        let raw_belief = arguments
+            .get("belief")
+            .cloned()
+            .ok_or("belief is required and must be a serialized epistemic Belief")?;
+        let raw_acquisitions = arguments
+            .get("acquisitions")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or("acquisitions is required and must be an array")?;
+        if raw_acquisitions.is_empty() || raw_acquisitions.len() > MAX_ACQUISITIONS {
+            return Err(format!(
+                "acquisitions must contain between 1 and {MAX_ACQUISITIONS} actions"
+            ));
+        }
+        let budget = arguments
+            .get("budget")
+            .and_then(Value::as_f64)
+            .ok_or("budget is required and must be a finite non-negative number")?;
+        if !budget.is_finite() || budget < 0.0 {
+            return Err("budget must be finite and non-negative".into());
+        }
+        let max_steps = arguments
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or("max_steps is required and must be an integer")?
+            as usize;
+        if max_steps > MAX_STEPS {
+            return Err(format!(
+                "max_steps must not exceed the exact horizon cap of {MAX_STEPS}"
+            ));
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "belief": raw_belief.clone(),
+            "acquisitions": raw_acquisitions.clone(),
+            "budget": budget,
+            "max_steps": max_steps,
+        }))
+        .map_err(|error| format!("cannot measure adaptive epistemic envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("adaptive epistemic input exceeds the 20000000-byte safety bound".into());
+        }
+
+        let problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        problem
+            .validate()
+            .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+        if problem.action_count() > 1_000 || problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let parsed_belief: EpistemicBelief = serde_json::from_value(raw_belief)
+            .map_err(|error| format!("invalid belief: {error}"))?;
+        if parsed_belief.len() > 1_000 {
+            return Err("belief is bounded at 1000 models".into());
+        }
+        let belief = EpistemicBelief::new(parsed_belief.masses().to_vec())
+            .map_err(|error| format!("belief invariant failed: {error}"))?;
+
+        let parse_acquisition = |raw: &Value| -> Result<EpistemicAcquisition, String> {
+            let id = raw
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("each acquisition requires an id")?;
+            if id.trim().is_empty() || id.len() > 256 {
+                return Err("acquisition ids must contain between 1 and 256 bytes".into());
+            }
+            let cost = raw
+                .get("cost")
+                .and_then(Value::as_f64)
+                .ok_or_else(|| format!("acquisition {id:?} requires a finite numeric cost"))?;
+            let raw_outcomes = raw
+                .get("outcomes")
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("acquisition {id:?} requires outcomes"))?;
+            if raw_outcomes.is_empty() || raw_outcomes.len() > 1_000 {
+                return Err(format!(
+                    "acquisition {id:?} must contain 1 to 1000 outcomes"
+                ));
+            }
+            let mut outcomes = Vec::with_capacity(raw_outcomes.len());
+            for raw_outcome in raw_outcomes {
+                let label = raw_outcome
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("acquisition {id:?} outcomes require labels"))?;
+                if label.trim().is_empty() || label.len() > 256 {
+                    return Err(format!(
+                        "acquisition {id:?} outcome labels must contain between 1 and 256 bytes"
+                    ));
+                }
+                let likelihood = raw_outcome
+                    .get("likelihood")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| format!("acquisition {id:?}/{label:?} requires likelihood"))?
+                    .iter()
+                    .map(|value| {
+                        value.as_f64().ok_or_else(|| {
+                            format!("acquisition {id:?}/{label:?} has a non-numeric likelihood")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                outcomes.push(EpistemicOutcome::new(label, likelihood));
+            }
+            EpistemicAcquisition::new(id, cost, outcomes, problem.model_count())
+                .map_err(|error| format!("acquisition {id:?} invariant failed: {error}"))
+        };
+        let acquisitions = raw_acquisitions
+            .iter()
+            .map(parse_acquisition)
+            .collect::<Result<Vec<_>, _>>()?;
+        let policy = match epistemic_adaptive_policy(
+            &problem,
+            &belief,
+            &acquisitions,
+            budget,
+            max_steps,
+        ) {
+            Ok(policy) => policy,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": SCHEMA,
+                    "stage": "adaptive_policy",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantees": [
+                        "the endpoint never executes an acquisition or claims that an observation was collected",
+                        "budget, horizon, unique-acquisition, likelihood-partition, and exact-state caps are refusal boundaries",
+                        "a refusal is never converted into a sampled or approximate policy",
+                    ],
+                    "limitations": [
+                        "outcomes are conditionally independent given the supplied models",
+                        "declared costs are caller-supplied scalarizations rather than inferred resource vectors",
+                        "the result is decision-relative and is not causal, clinical, biological, or predictive truth",
+                    ],
+                }));
+            }
+        };
+
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "budget": budget,
+            "max_steps": max_steps,
+            "problem": {
+                "actions": problem.actions(),
+                "models": problem.models(),
+                "action_count": problem.action_count(),
+                "model_count": problem.model_count(),
+            },
+            "acquisitions": acquisitions.iter().map(|acquisition| json!({
+                "id": acquisition.id,
+                "cost": acquisition.cost,
+                "outcomes": acquisition.outcomes().iter().map(|outcome| json!({
+                    "label": outcome.label,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "policy": {
+                "expected_total": policy.expected_total,
+                "expected_terminal_risk": policy.expected_terminal_risk,
+                "expected_acquisition_cost": policy.expected_acquisition_cost,
+                "nodes_evaluated": policy.nodes_evaluated,
+                "selected_depth": policy.selected_depth,
+                "root": project_adaptive_node(&policy.root, &problem),
+            },
+            "guarantees": [
+                "the returned policy is exact under the stated 16-acquisition, 16-step, and 65536-state enumeration caps",
+                "each acquisition is used at most once and branch-dependent next choices are explicit",
+                "expected terminal risk and expected declared cost remain separate from their scalarized total",
+                "posterior model masses and outcome probabilities are serialized at every branch",
+            ],
+            "limitations": [
+                "conditional independence given the caller-supplied models is assumed",
+                "the endpoint plans but does not execute, authenticate, schedule, or observe acquisitions",
+                "the decision-relative policy is not causal, clinical, biological, or predictive truth",
+                "costs are a caller-supplied scalarization of burden, latency, privacy, compute, or money",
+            ],
+        }))
+    }
+
+    fn epistemic_adaptive_costed(&self, arguments: &Value) -> Result<Value, String> {
+        const SCHEMA: &str = "bioprism-mcp/epistemic-adaptive-costed/0.1";
+        let raw_problem = arguments
+            .get("problem")
+            .cloned()
+            .ok_or("problem is required")?;
+        let raw_belief = arguments
+            .get("belief")
+            .cloned()
+            .ok_or("belief is required")?;
+        let raw_acquisitions = arguments
+            .get("acquisitions")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or("acquisitions is required and must be an array")?;
+        if raw_acquisitions.is_empty() || raw_acquisitions.len() > 16 {
+            return Err("acquisitions must contain between 1 and 16 actions".into());
+        }
+        let raw_budget = arguments
+            .get("budget")
+            .cloned()
+            .ok_or("budget is required and must be a seven-dimensional cost vector")?;
+        let raw_weights = arguments
+            .get("weights")
+            .cloned()
+            .ok_or("weights is required and must be a seven-dimensional cost vector")?;
+        let budget: EpistemicCostVector = serde_json::from_value(raw_budget)
+            .map_err(|error| format!("invalid vector budget: {error}"))?;
+        let weights: EpistemicCostWeights = serde_json::from_value(raw_weights)
+            .map_err(|error| format!("invalid vector weights: {error}"))?;
+        let max_steps = arguments
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or("max_steps is required and must be an integer")?
+            as usize;
+        if max_steps > 16 {
+            return Err("max_steps must not exceed the exact horizon cap of 16".into());
+        }
+        let encoded = serde_json::to_vec(&json!({
+            "problem": raw_problem.clone(),
+            "belief": raw_belief.clone(),
+            "acquisitions": raw_acquisitions.clone(),
+            "budget": budget,
+            "weights": weights,
+            "max_steps": max_steps,
+        }))
+        .map_err(|error| format!("cannot measure vector-cost envelope: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err("vector-cost adaptive input exceeds the 20000000-byte safety bound".into());
+        }
+        let problem: EpistemicDecisionProblem = serde_json::from_value(raw_problem)
+            .map_err(|error| format!("invalid decision problem: {error}"))?;
+        problem
+            .validate()
+            .map_err(|error| format!("decision problem invariant failed: {error}"))?;
+        if problem.action_count() > 1_000 || problem.model_count() > 1_000 {
+            return Err("decision problems are bounded at 1000 actions and 1000 models".into());
+        }
+        let belief: EpistemicBelief = serde_json::from_value(raw_belief)
+            .map_err(|error| format!("invalid belief: {error}"))?;
+        if belief.len() > 1_000 {
+            return Err("belief is bounded at 1000 models".into());
+        }
+        belief
+            .check_against(&problem)
+            .map_err(|error| format!("belief invariant failed: {error}"))?;
+        let acquisitions: Vec<EpistemicCostedAcquisition> =
+            serde_json::from_value(Value::Array(raw_acquisitions))
+                .map_err(|error| format!("invalid vector-cost acquisitions: {error}"))?;
+        let policy = match epistemic_vector_adaptive_policy(
+            &problem,
+            &belief,
+            &acquisitions,
+            budget,
+            weights,
+            max_steps,
+        ) {
+            Ok(policy) => policy,
+            Err(error) => {
+                return Ok(json!({
+                    "ok": false,
+                    "schema": SCHEMA,
+                    "stage": "adaptive_vector_policy",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "cost_dimensions": bioprism_epistemic::COST_DIMENSIONS,
+                    "guarantees": [
+                        "every acquisition path is checked component-wise against the remaining vector budget",
+                        "scalar weights compare only policies that already satisfy every component budget",
+                        "no scalar cost is substituted for an omitted vector dimension",
+                    ],
+                }));
+            }
+        };
+        Ok(json!({
+            "ok": true,
+            "schema": SCHEMA,
+            "cost_dimensions": bioprism_epistemic::COST_DIMENSIONS,
+            "budget": budget,
+            "weights": weights,
+            "max_steps": max_steps,
+            "problem": {
+                "actions": problem.actions(),
+                "models": problem.models(),
+                "action_count": problem.action_count(),
+                "model_count": problem.model_count(),
+            },
+            "acquisitions": acquisitions,
+            "policy": policy,
+            "guarantees": [
+                "the exact finite-horizon policy is feasible in every declared cost dimension",
+                "expected acquisition cost is returned as a vector and as its explicit scalarization",
+                "branch-dependent next acquisitions and posterior masses remain serialized",
+            ],
+            "limitations": [
+                "the planner assumes conditional independence given caller-supplied models",
+                "cost vectors and weights are caller declarations, not provider telemetry",
+                "the result plans but does not execute acquisitions or establish causal, clinical, biological, or predictive truth",
+            ],
+        }))
+    }
+
+    fn epistemic_adaptive_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let mode = arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("simulate");
+        if mode != "simulate" && mode != "replay" {
+            return Err("mode must be \"simulate\" or \"replay\"".into());
+        }
+        let problem: EpistemicDecisionProblem = serde_json::from_value(
+            arguments
+                .get("problem")
+                .cloned()
+                .ok_or("problem is required")?,
+        )
+        .map_err(|error| format!("invalid decision problem: {error}"))?;
+        let belief: EpistemicBelief = serde_json::from_value(
+            arguments
+                .get("belief")
+                .cloned()
+                .ok_or("belief is required")?,
+        )
+        .map_err(|error| format!("invalid belief: {error}"))?;
+        let acquisitions: Vec<EpistemicAcquisition> = serde_json::from_value(
+            arguments
+                .get("acquisitions")
+                .cloned()
+                .ok_or("acquisitions is required")?,
+        )
+        .map_err(|error| format!("invalid acquisitions: {error}"))?;
+        let budget = arguments
+            .get("budget")
+            .and_then(Value::as_f64)
+            .ok_or("budget is required and must be a finite non-negative number")?;
+        let max_steps = arguments
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or("max_steps is required and must be an integer")?
+            as usize;
+        let plan = EpistemicAdaptivePlan::new(problem, belief, acquisitions, budget, max_steps)
+            .map_err(|error| format!("adaptive plan refused: {error}"))?;
+        let plan_digest = plan
+            .digest()
+            .map_err(|error| format!("cannot digest adaptive plan: {error}"))?;
+        let provider = arguments
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("mcp-simulated")
+            .to_string();
+
+        let receipt = if mode == "replay" {
+            let prior: EpistemicAdaptiveExecutionReceipt = serde_json::from_value(
+                arguments
+                    .get("receipt")
+                    .cloned()
+                    .ok_or("receipt is required in replay mode")?,
+            )
+            .map_err(|error| format!("invalid adaptive execution receipt: {error}"))?;
+            plan.replay(&prior)
+                .map_err(|error| format!("adaptive replay refused: {error}"))?
+        } else {
+            let grant = match arguments.get("authorization") {
+                None => None,
+                Some(raw) => {
+                    let object = raw.as_object().ok_or("authorization must be an object")?;
+                    let grant_id = object
+                        .get("grant_id")
+                        .and_then(Value::as_str)
+                        .ok_or("authorization.grant_id is required")?;
+                    let authorized_provider = object
+                        .get("provider")
+                        .and_then(Value::as_str)
+                        .ok_or("authorization.provider is required")?;
+                    Some(
+                        EpistemicExecutionGrant::issue(
+                            grant_id,
+                            plan_digest.clone(),
+                            authorized_provider,
+                        )
+                        .map_err(|error| format!("authorization refused: {error}"))?,
+                    )
+                }
+            };
+            let raw_observations = arguments
+                .get("observations")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if raw_observations.len() > 16 {
+                return Err("observations cannot exceed the exact 16-step bound".into());
+            }
+            let script = raw_observations
+                .iter()
+                .enumerate()
+                .map(|(index, raw)| {
+                    let object = raw
+                        .as_object()
+                        .ok_or_else(|| format!("observations[{index}] must be an object"))?;
+                    let acquisition_id = object
+                        .get("acquisition_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("observations[{index}].acquisition_id is required")
+                        })?;
+                    let outcome_label = object
+                        .get("outcome_label")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("observations[{index}].outcome_label is required")
+                        })?;
+                    Ok((acquisition_id.to_string(), outcome_label.to_string()))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let mut executor = EpistemicScriptedExecutor::simulated(provider, script);
+            plan.execute(grant.as_ref(), &mut executor)
+                .map_err(|error| format!("adaptive execution refused: {error}"))?
+        };
+        let (observed, simulated, replayed) = receipt.provenance_counts();
+        Ok(json!({
+            "ok": true,
+            "schema": ADAPTIVE_EXECUTION_SCHEMA,
+            "mode": mode,
+            "plan_digest": plan_digest,
+            "completed": receipt.is_completed(),
+            "receipt": receipt,
+            "provenance_counts": {
+                "observed": observed,
+                "simulated": simulated,
+                "replayed": replayed,
+            },
+            "guarantees": [
+                "no provider call occurs without an explicit plan-scoped grant",
+                "provider identity, acquisition identity, declared outcome labels, evidence digests, path budget, and policy order are checked",
+                "partial and refused runs retain their validated prefix rather than being upgraded to completion",
+                "replay uses a receipt-only executor with no live-source fallback",
+            ],
+            "limitations": [
+                "the MCP surface provides a simulated adapter for local contract testing; external providers must implement the Rust acquisition seam",
+                "an observed provenance label is a provider declaration, not authentication, consent, chain of custody, or clinical/release authority",
+                "the decision policy remains conditional-independence, model-relative planning rather than causal or predictive truth",
+            ],
+        }))
+    }
+
+    fn interweave_workflow_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let mode = arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("simulate");
+        if mode != "simulate" && mode != "replay" {
+            return Err("mode must be \"simulate\" or \"replay\"".into());
+        }
+        let workflow: InterweaveWorkflowId = serde_json::from_value(
+            arguments
+                .get("workflow")
+                .cloned()
+                .ok_or("workflow is required and must be one of the six reference workflow ids")?,
+        )
+        .map_err(|error| format!("invalid workflow: {error}"))?;
+        let problem: EpistemicDecisionProblem = serde_json::from_value(
+            arguments
+                .get("problem")
+                .cloned()
+                .ok_or("problem is required")?,
+        )
+        .map_err(|error| format!("invalid decision problem: {error}"))?;
+        let belief: EpistemicBelief = serde_json::from_value(
+            arguments
+                .get("belief")
+                .cloned()
+                .ok_or("belief is required")?,
+        )
+        .map_err(|error| format!("invalid belief: {error}"))?;
+        let acquisitions: Vec<EpistemicAcquisition> = serde_json::from_value(
+            arguments
+                .get("acquisitions")
+                .cloned()
+                .ok_or("acquisitions is required")?,
+        )
+        .map_err(|error| format!("invalid acquisitions: {error}"))?;
+        let budget = arguments
+            .get("budget")
+            .and_then(Value::as_f64)
+            .ok_or("budget is required and must be a finite non-negative number")?;
+        let max_steps = arguments
+            .get("max_steps")
+            .and_then(Value::as_u64)
+            .ok_or("max_steps is required and must be an integer")?
+            as usize;
+        let plan = EpistemicAdaptivePlan::new(problem, belief, acquisitions, budget, max_steps)
+            .map_err(|error| format!("adaptive plan refused: {error}"))?;
+        let plan_digest = plan
+            .digest()
+            .map_err(|error| format!("cannot digest adaptive plan: {error}"))?;
+        let provider = arguments
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("mcp-simulated")
+            .to_string();
+        let capabilities = arguments
+            .get("capabilities")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("capabilities[{index}] must be a non-empty string"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let binding = InterweaveWorkflowExecutionBinding::bind(
+            workflow,
+            &plan,
+            provider.clone(),
+            capabilities,
+        )
+        .map_err(|error| format!("workflow binding refused: {error}"))?;
+
+        let receipt = if mode == "replay" {
+            let prior: InterweaveWorkflowExecutionReceipt = serde_json::from_value(
+                arguments
+                    .get("receipt")
+                    .cloned()
+                    .ok_or("receipt is required in replay mode")?,
+            )
+            .map_err(|error| format!("invalid workflow execution receipt: {error}"))?;
+            binding
+                .replay(&plan, &prior)
+                .map_err(|error| format!("workflow replay refused: {error}"))?
+        } else {
+            let grant = match arguments.get("authorization") {
+                None => None,
+                Some(raw) => {
+                    let object = raw.as_object().ok_or("authorization must be an object")?;
+                    let grant_id = object
+                        .get("grant_id")
+                        .and_then(Value::as_str)
+                        .ok_or("authorization.grant_id is required")?;
+                    let authorized_provider = object
+                        .get("provider")
+                        .and_then(Value::as_str)
+                        .ok_or("authorization.provider is required")?;
+                    Some(
+                        EpistemicExecutionGrant::issue(
+                            grant_id,
+                            plan_digest.clone(),
+                            authorized_provider,
+                        )
+                        .map_err(|error| format!("authorization refused: {error}"))?,
+                    )
+                }
+            };
+            let raw_observations = arguments
+                .get("observations")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if raw_observations.len() > 16 {
+                return Err("observations cannot exceed the exact 16-step bound".into());
+            }
+            let script = raw_observations
+                .iter()
+                .enumerate()
+                .map(|(index, raw)| {
+                    let object = raw
+                        .as_object()
+                        .ok_or_else(|| format!("observations[{index}] must be an object"))?;
+                    let acquisition_id = object
+                        .get("acquisition_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("observations[{index}].acquisition_id is required")
+                        })?;
+                    let outcome_label = object
+                        .get("outcome_label")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            format!("observations[{index}].outcome_label is required")
+                        })?;
+                    Ok((acquisition_id.to_string(), outcome_label.to_string()))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let mut executor = EpistemicScriptedExecutor::simulated(provider, script);
+            binding
+                .execute(&plan, grant.as_ref(), &mut executor)
+                .map_err(|error| format!("workflow execution refused: {error}"))?
+        };
+        let (observed, simulated, replayed) = receipt.provenance_counts();
+        let mut output = json!({
+            "ok": true,
+            "schema": INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
+            "mode": mode,
+            "workflow": workflow,
+            "plan_digest": plan_digest,
+            "binding_digest": binding.digest(),
+            "binding": binding,
+            "completed": receipt.is_completed(),
+            "release_posture": receipt.release_posture(),
+            "receipt": receipt,
+            "provenance_counts": {
+                "observed": observed,
+                "simulated": simulated,
+                "replayed": replayed,
+            },
+            "guarantees": [
+                "workflow identity, workflow specification, adaptive plan, provider, and capability declarations are digest-bound",
+                "no provider call occurs without an explicit plan-scoped authorization grant",
+                "simulation rows remain simulated and replay rows remain replayed",
+                "workflow effect prohibitions are returned as metadata and are not silently treated as release authority",
+            ],
+            "limitations": [
+                "the built-in MCP adapter is a deterministic simulator; real providers remain external Rust acquisition executors",
+                "capability labels and provider provenance are declarations until a domain authority verifies them",
+                "this route produces a receipt and never schedules participants, publishes results, or authorizes an external effect",
+            ],
+        });
+        if let Some(config) = arguments.get("evidence") {
+            let config_object = config
+                .as_object()
+                .ok_or("evidence must be an object when supplied")?;
+            let mut evidence_arguments = Value::Object(config_object.clone());
+            evidence_arguments["binding"] = output["binding"].clone();
+            evidence_arguments["receipt"] = output["receipt"].clone();
+            output["workflow_execution_evidence"] =
+                self.interweave_workflow_execution_evidence(&evidence_arguments)?;
+        }
+        Ok(output)
+    }
+
+    /// Convert an already-produced workflow receipt into portable evidence and index it. This
+    /// route is intentionally receipt-only: it never replays, executes, dereferences a provider,
+    /// or upgrades a simulated/replayed provenance label.
+    fn interweave_workflow_execution_evidence(&self, arguments: &Value) -> Result<Value, String> {
+        let binding = arguments.get("binding").ok_or("binding is required")?;
+        let receipt = arguments.get("receipt").ok_or("receipt is required")?;
+        let subject_id = arguments
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("subject_id is required and must be a non-empty string")?;
+        let domains = arguments
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("domains is required and must be an array")?
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("domains[{index}] must be a non-empty string"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let parent_digests = arguments
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .unwrap_or(&Vec::new())
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("parent_digests[{index}] must be a non-empty digest"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let evidence = build_workflow_execution_evidence(
+            binding,
+            receipt,
+            subject_id,
+            &domains,
+            &parent_digests,
+        )
+        .map_err(|error| format!("workflow execution evidence refused: {error}"))?;
+        let import = self
+            .workflow_execution_evidence_registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
+            .import(&evidence)
+            .map_err(|error| format!("workflow execution evidence import refused: {error}"))?;
+        let artifact_registry = self.index_artifact_projection(
+            "workflow_execution_evidence",
+            subject_id,
+            domains,
+            parent_digests,
+            evidence.clone(),
+        );
+        Ok(json!({
+            "ok": true,
+            "schema": WORKFLOW_EXECUTION_EVIDENCE_SCHEMA_VERSION,
+            "workflow": WORKFLOW_EXECUTION_EVIDENCE_WORKFLOW,
+            "evidence_digest": evidence["evidence_digest"],
+            "evidence": evidence,
+            "registry": import,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "guarantees": [
+                "the binding and receipt were independently validated before evidence indexing",
+                "the exact receipt digest and provenance counts remain recoverable",
+                "artifact and evidence registry projections are content-addressed and idempotent"
+            ],
+            "does_not_claim": [
+                "indexing proves provider authentication, consent, scientific truth, or release readiness",
+                "a simulated or replayed receipt is an observed-world result",
+                "this operation executes or authorizes any workflow effect"
+            ]
+        }))
+    }
+
+    fn interweave_workflow_execution_evidence_import(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let evidence = arguments.get("evidence").ok_or("evidence is required")?;
+        validate_workflow_execution_evidence(evidence)
+            .map_err(|error| format!("workflow execution evidence refused: {error}"))?;
+        let subject_id = evidence
+            .get("subject_id")
+            .and_then(Value::as_str)
+            .ok_or("validated evidence omitted subject_id")?;
+        let domains = evidence
+            .get("domains")
+            .and_then(Value::as_array)
+            .ok_or("validated evidence omitted domains")?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let parent_digests = evidence
+            .get("parent_digests")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let import = self
+            .workflow_execution_evidence_registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
+            .import(evidence)
+            .map_err(|error| format!("workflow execution evidence import refused: {error}"))?;
+        let artifact_registry = self.index_artifact_projection(
+            "workflow_execution_evidence",
+            subject_id,
+            domains,
+            parent_digests,
+            evidence.clone(),
+        );
+        Ok(json!({
+            "ok": true,
+            "schema": WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION,
+            "workflow": "interweave_workflow_execution_evidence_import",
+            "evidence_digest": evidence["evidence_digest"],
+            "registry": import,
+            "artifact_registry": artifact_registry,
+            "execution": "not_started",
+            "guarantees": [
+                "the portable record was revalidated before import",
+                "identical evidence imports are idempotent",
+                "import does not execute or replay a workflow"
+            ],
+            "does_not_claim": [
+                "registry presence establishes external provenance or domain validity"
+            ]
+        }))
+    }
+
+    fn interweave_workflow_execution_evidence_query(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let optional_text = |field: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(field)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|text| !text.trim().is_empty())
+                        .ok_or_else(|| format!("{field} must be a non-empty string"))
+                })
+                .transpose()
+        };
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|value| {
+                        usize::try_from(value).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_records = arguments
+            .get("include_records")
+            .map(|value| value.as_bool().ok_or("include_records must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.workflow_execution_evidence_registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
+            .query(
+                optional_text("workflow_id")?,
+                optional_text("subject_id")?,
+                optional_text("domain")?,
+                optional_text("plan_digest")?,
+                optional_text("binding_digest")?,
+                optional_text("receipt_status")?,
+                optional_text("provenance_mode")?,
+                optional_text("after")?,
+                max_items,
+                include_records,
+            )
+            .map_err(|error| format!("workflow execution evidence query refused: {error}"))
+    }
+
+    fn interweave_workflow_execution_evidence_get(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let digest = arguments
+            .get("evidence_digest")
+            .and_then(Value::as_str)
+            .ok_or("evidence_digest is required")?;
+        self.workflow_execution_evidence_registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
+            .get(digest)
+            .map_err(|error| format!("workflow execution evidence get refused: {error}"))
+    }
+
     fn benchmark_trace_analyze(&self, arguments: &Value) -> Result<Value, String> {
         let raw_failing = arguments
             .get("failing")
@@ -10451,11 +16465,13 @@ impl Server {
         }))
         .map_err(|error| format!("cannot measure benchmark decision-audit envelope: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("benchmark decision-audit input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "benchmark decision-audit input exceeds the 20000000-byte safety bound".into(),
+            );
         }
 
-        let trace: TraceIr = serde_json::from_value(raw_trace)
-            .map_err(|error| format!("invalid trace: {error}"))?;
+        let trace: TraceIr =
+            serde_json::from_value(raw_trace).map_err(|error| format!("invalid trace: {error}"))?;
         if trace.events.len() > 100_000 {
             return Err("trace is bounded at 100000 events".into());
         }
@@ -10472,13 +16488,15 @@ impl Server {
             return Err("reference trace is bounded at 100000 events".into());
         }
 
-        let mut candidate_actions: Vec<BenchmarkCandidateAction> = serde_json::from_value(raw_actions)
-            .map_err(|error| format!("invalid candidate action: {error}"))?;
+        let mut candidate_actions: Vec<BenchmarkCandidateAction> =
+            serde_json::from_value(raw_actions)
+                .map_err(|error| format!("invalid candidate action: {error}"))?;
         if candidate_actions.len() > 10_000 {
             return Err("candidate actions are bounded at 10000 items".into());
         }
-        let constraints: Vec<BenchmarkConstraintRecord> = serde_json::from_value(raw_constraints)
-            .map_err(|error| format!("invalid constraint record: {error}"))?;
+        let constraints: Vec<BenchmarkConstraintRecord> =
+            serde_json::from_value(raw_constraints)
+                .map_err(|error| format!("invalid constraint record: {error}"))?;
         if constraints.len() > 10_000 {
             return Err("constraint records are bounded at 10000 items".into());
         }
@@ -10489,11 +16507,7 @@ impl Server {
         }
         let evaluator_dispute = match arguments.get("evaluator_dispute") {
             None => None,
-            Some(value) => Some(
-                value
-                    .as_str()
-                    .ok_or("evaluator_dispute must be a string")?,
-            ),
+            Some(value) => Some(value.as_str().ok_or("evaluator_dispute must be a string")?),
         };
 
         let analysis = match analyse_benchmark(&trace, reference.as_ref()) {
@@ -10524,29 +16538,27 @@ impl Server {
             ),
         };
         let selected_step = match explicit_decision_step {
-            Some(step) => {
-                match analysis.localise_to(&trace, step) {
-                    Ok(step) => step,
-                    Err(error) => {
-                        return Ok(json!({
-                            "ok": false,
-                            "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
-                            "stage": "decision_selection",
-                            "refusal": error.to_string(),
-                            "fail_closed": true,
-                            "trace_id": trace.trace_id,
-                            "analysis": {
-                                "verdict": analysis.verdict,
-                                "localized_step": analysis.first_causal_step(),
-                            },
-                            "guarantees": [
-                                "observations and results are never silently replaced by their nearest decision",
-                                "an explicit decision step is checked against the actual trace before reconstruction",
-                            ],
-                        }))
-                    }
+            Some(step) => match analysis.localise_to(&trace, step) {
+                Ok(step) => step,
+                Err(error) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "schema": "bioprism-mcp/benchmark-decision-audit/0.1",
+                        "stage": "decision_selection",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "trace_id": trace.trace_id,
+                        "analysis": {
+                            "verdict": analysis.verdict,
+                            "localized_step": analysis.first_causal_step(),
+                        },
+                        "guarantees": [
+                            "observations and results are never silently replaced by their nearest decision",
+                            "an explicit decision step is checked against the actual trace before reconstruction",
+                        ],
+                    }))
                 }
-            }
+            },
             None => match analysis.first_causal_step() {
                 Some(step) => step,
                 None => {
@@ -10606,7 +16618,7 @@ impl Server {
                         "future-sourced options remain available for validation but cannot be mislabeled as visible at decision time",
                         "a candidate with false visible provenance is rejected before coverage is reported",
                     ],
-                }))
+                }));
             }
         }
 
@@ -10624,11 +16636,7 @@ impl Server {
             .take(max_items)
             .cloned()
             .collect::<Vec<_>>();
-        let visible_actions = visible
-            .iter()
-            .take(max_items)
-            .cloned()
-            .collect::<Vec<_>>();
+        let visible_actions = visible.iter().take(max_items).cloned().collect::<Vec<_>>();
         let validation_actions = validation_only
             .iter()
             .take(max_items)
@@ -10640,12 +16648,7 @@ impl Server {
             .cloned()
             .collect::<Vec<_>>();
 
-        let card = benchmark_failure_card(
-            &analysis,
-            &constraints,
-            evaluator_dispute,
-            claims,
-        );
+        let card = benchmark_failure_card(&analysis, &constraints, evaluator_dispute, claims);
         let mut card_projection = card.clone();
         let card_omitted = json!({
             "recommended_cell_steps": card.recommended_cell_steps.len().saturating_sub(max_items),
@@ -10808,8 +16811,9 @@ impl Server {
         if panel_runs.len() > 100_000 {
             return Err("panel_runs are bounded at 100000 items".into());
         }
-        let bench_instances: Vec<BenchmarkBenchInstance> = serde_json::from_value(raw_bench_instances)
-            .map_err(|error| format!("invalid effective-diversity instance: {error}"))?;
+        let bench_instances: Vec<BenchmarkBenchInstance> =
+            serde_json::from_value(raw_bench_instances)
+                .map_err(|error| format!("invalid effective-diversity instance: {error}"))?;
         if bench_instances.len() > 100_000 {
             return Err("bench_instances are bounded at 100000 items".into());
         }
@@ -10845,8 +16849,9 @@ impl Server {
             );
         }
 
-        let exposure: BTreeMap<String, BenchmarkExposureLedger> = serde_json::from_value(raw_exposure)
-            .map_err(|error| format!("invalid exposure ledger map: {error}"))?;
+        let exposure: BTreeMap<String, BenchmarkExposureLedger> =
+            serde_json::from_value(raw_exposure)
+                .map_err(|error| format!("invalid exposure ledger map: {error}"))?;
         if exposure.len() > 100_000 {
             return Err("exposure is bounded at 100000 instance entries".into());
         }
@@ -10871,11 +16876,8 @@ impl Server {
         let mut holdout_counts: BTreeMap<String, usize> = BTreeMap::new();
         for instance in &instances {
             let fingerprint = bioprism_benchcompiler::content_fingerprint(instance);
-            let holdout = benchmark_assign_holdout(
-                instance,
-                private_share as u8,
-                rotating_panels as usize,
-            );
+            let holdout =
+                benchmark_assign_holdout(instance, private_share as u8, rotating_panels as usize);
             let label = match &holdout {
                 bioprism_benchcompiler::Holdout::Public => "public",
                 bioprism_benchcompiler::Holdout::Private => "private",
@@ -11157,9 +17159,7 @@ impl Server {
         let grade = match arguments.get("grade") {
             None => Value::Null,
             Some(raw_grade) => {
-                let grade = raw_grade
-                    .as_object()
-                    .ok_or("grade must be an object")?;
+                let grade = raw_grade.as_object().ok_or("grade must be an object")?;
                 let verdict = grade
                     .get("verdict")
                     .and_then(Value::as_str)
@@ -11198,23 +17198,17 @@ impl Server {
         let cell = match arguments.get("cell") {
             None => Value::Null,
             Some(raw_cell) => {
-                let cell = raw_cell
-                    .as_object()
-                    .ok_or("cell must be an object")?;
+                let cell = raw_cell.as_object().ok_or("cell must be an object")?;
                 let cell_id = cell
                     .get("cell_id")
                     .and_then(Value::as_str)
                     .ok_or("cell.cell_id must be a string")?;
                 let world: bioprism_prism::InputRef = serde_json::from_value(
-                    cell.get("world")
-                        .cloned()
-                        .ok_or("cell.world is required")?,
+                    cell.get("world").cloned().ok_or("cell.world is required")?,
                 )
                 .map_err(|error| format!("invalid cell.world InputRef: {error}"))?;
                 let query: bioprism_prism::InputRef = serde_json::from_value(
-                    cell.get("query")
-                        .cloned()
-                        .ok_or("cell.query is required")?,
+                    cell.get("query").cloned().ok_or("cell.query is required")?,
                 )
                 .map_err(|error| format!("invalid cell.query InputRef: {error}"))?;
                 serde_json::to_value(reviewed.clone().into_cell(cell_id, world, query))
@@ -11271,11 +17265,17 @@ impl Server {
                     .map_err(|error| format!("invalid benchmark reference trace: {error}"))?,
             ),
         };
-        if reference.as_ref().is_some_and(|trace| trace.events.len() > 100_000) {
+        if reference
+            .as_ref()
+            .is_some_and(|trace| trace.events.len() > 100_000)
+        {
             return Err("reference trace may contain at most 100000 events".into());
         }
         let context: Vec<BenchmarkContextItem> = serde_json::from_value(
-            arguments.get("context").cloned().unwrap_or_else(|| json!([])),
+            arguments
+                .get("context")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
         )
         .map_err(|error| format!("invalid benchmark context: {error}"))?;
         if context.len() > 5_000 {
@@ -11350,14 +17350,20 @@ impl Server {
             return Err("budget.max_evaluations must be between 1 and 100000".into());
         }
         let ledger: Vec<BenchmarkConstraintRecord> = serde_json::from_value(
-            arguments.get("ledger").cloned().unwrap_or_else(|| json!([])),
+            arguments
+                .get("ledger")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
         )
         .map_err(|error| format!("invalid benchmark constraint ledger: {error}"))?;
         if ledger.len() > 10_000 {
             return Err("ledger may contain at most 10000 records".into());
         }
         let claims: Vec<BenchmarkAssertion> = serde_json::from_value(
-            arguments.get("claims").cloned().unwrap_or_else(|| json!([])),
+            arguments
+                .get("claims")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
         )
         .map_err(|error| format!("invalid benchmark claims: {error}"))?;
         if claims.len() > 10_000 {
@@ -11528,7 +17534,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure compile-review input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("benchmark compile-review input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "benchmark compile-review input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let compiled = self.benchmark_compile(arguments)?;
         if compiled.get("ok") != Some(&Value::Bool(true)) {
@@ -11573,9 +17581,7 @@ impl Server {
         let grade = match arguments.get("grade") {
             None => Value::Null,
             Some(raw_grade) => {
-                let grade = raw_grade
-                    .as_object()
-                    .ok_or("grade must be an object")?;
+                let grade = raw_grade.as_object().ok_or("grade must be an object")?;
                 let verdict = grade
                     .get("verdict")
                     .and_then(Value::as_str)
@@ -12687,7 +18693,11 @@ impl Server {
         let report = pack_coverage(&selected);
         let matrix = pack_coverage_matrix(&selected);
         let max_items = max_items as usize;
-        let covered = report.rows.iter().filter(|row| !row.packs.is_empty()).count();
+        let covered = report
+            .rows
+            .iter()
+            .filter(|row| !row.packs.is_empty())
+            .count();
         Ok(json!({
             "ok": true,
             "schema": "bioprism-mcp/pack-coverage-audit/0.1",
@@ -12768,7 +18778,10 @@ impl Server {
                 }
             }
         } else {
-            selected = all_packs().iter().filter(|pack| section_matches(pack)).collect();
+            selected = all_packs()
+                .iter()
+                .filter(|pack| section_matches(pack))
+                .collect();
             selected_ids.extend(selected.iter().map(|pack| pack.id.to_string()));
         }
         if !unknown.is_empty() || !out_of_section.is_empty() {
@@ -12796,7 +18809,8 @@ impl Server {
                 "guarantees": ["an empty portfolio is not rendered as a complete release plan"],
             }));
         }
-        let selected_ids: BTreeSet<String> = selected.iter().map(|pack| pack.id.to_string()).collect();
+        let selected_ids: BTreeSet<String> =
+            selected.iter().map(|pack| pack.id.to_string()).collect();
         let global_release = pack_release_order();
         let global_positions: BTreeMap<&str, usize> = global_release
             .iter()
@@ -13334,20 +19348,16 @@ impl Server {
         if browse_subject.trim().is_empty() || browse_subject.len() > 4_096 {
             return Err("failure_subject must be a non-empty string of at most 4096 bytes".into());
         }
-        let browse = match atlasx_browse_with_visibility(
-            browse_subject,
-            &failures,
-            facet,
-            &visibility,
-        ) {
-            Ok(browse) => browse,
-            Err(error) => {
-                return Ok(refusal(
-                    "failure_browse",
-                    format!("cannot construct failure browse: {error}"),
-                ))
-            }
-        };
+        let browse =
+            match atlasx_browse_with_visibility(browse_subject, &failures, facet, &visibility) {
+                Ok(browse) => browse,
+                Err(error) => {
+                    return Ok(refusal(
+                        "failure_browse",
+                        format!("cannot construct failure browse: {error}"),
+                    ))
+                }
+            };
         if require_no_withheld && browse.withheld() > 0 {
             return Ok(refusal(
                 "visibility_policy",
@@ -13521,13 +19531,49 @@ impl Server {
 
     fn bundle_verify(&self, arguments: &Value) -> Result<Value, String> {
         let inline = arguments.get("bundle").cloned();
+        let publicly_attested = arguments.get("publicly_attested_bundle").cloned();
         let document = arguments.get("document").and_then(Value::as_str);
-        if inline.is_some() && document.is_some() {
-            return Err("provide either bundle or document, not both".into());
+        let verification_key = arguments.get("verification_key").cloned();
+        let trust_registry = arguments.get("trust_registry").cloned();
+        let trust_policy = arguments.get("trust_policy").cloned();
+        if [
+            inline.is_some(),
+            publicly_attested.is_some(),
+            document.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count()
+            > 1
+        {
+            return Err(
+                "provide either bundle or document, or publicly_attested_bundle as the signed-bundle alternative".into(),
+            );
         }
-        let raw = match (inline, document) {
-            (Some(bundle), None) => bundle,
-            (None, Some(relative)) => {
+        if verification_key.is_some() && trust_registry.is_some() {
+            return Err(
+                "verification_key and trust_registry are mutually exclusive verification modes"
+                    .into(),
+            );
+        }
+        if trust_registry.is_some() != trust_policy.is_some() {
+            return Err("trust_registry and trust_policy must be supplied together".into());
+        }
+        if publicly_attested.is_some() && verification_key.is_none() && trust_registry.is_none() {
+            return Err(
+                "publicly_attested_bundle requires verification_key or trust_registry".into(),
+            );
+        }
+        if trust_registry.is_some() && inline.is_some() {
+            return Err(
+                "trust_registry requires publicly attested bundle input, not a legacy HMAC bundle"
+                    .into(),
+            );
+        }
+        let raw = match (inline, publicly_attested, document) {
+            (Some(bundle), None, None) => bundle,
+            (None, Some(bundle), None) => bundle,
+            (None, None, Some(relative)) => {
                 let path = self.resolve(relative)?;
                 if path.is_dir() {
                     return Err(
@@ -13541,9 +19587,102 @@ impl Server {
                 }
                 self.read_json(&path)?
             }
-            (None, None) => return Err("bundle_verify requires bundle or document".into()),
-            (Some(_), Some(_)) => unreachable!("bundle inputs were checked as exclusive"),
+            (None, None, None) => return Err("bundle_verify requires bundle or document".into()),
+            _ => unreachable!("bundle inputs were checked as exclusive"),
         };
+        if verification_key.is_some() || trust_registry.is_some() {
+            let signed: PubliclyAttestedBundle = serde_json::from_value(raw)
+                .map_err(|error| format!("invalid publicly attested result bundle: {error}"))?;
+            if signed.bundle.manifest.entries.len() > 10_000
+                || signed.bundle.contents.len() > 10_000
+            {
+                return Err(
+                    "bundle may contain at most 10000 manifest entries and contents".into(),
+                );
+            }
+            if let Some(raw_registry) = trust_registry {
+                let registry: KeyRegistry = serde_json::from_value(raw_registry)
+                    .map_err(|error| format!("invalid trust registry: {error}"))?;
+                let policy: TrustPolicy =
+                    serde_json::from_value(trust_policy.ok_or_else(|| {
+                        "trust_policy is required with trust_registry".to_string()
+                    })?)
+                    .map_err(|error| format!("invalid trust policy: {error}"))?;
+                return match signed.verify_with_registry(&registry, &policy) {
+                    Ok((verified, authenticated, trust_report)) => Ok(json!({
+                        "ok": true,
+                        "verification_mode": "ed25519_registry_policy",
+                        "schema_version": signed.bundle.manifest.schema_version,
+                        "bundle_id": signed.bundle.manifest.bundle_id,
+                        "manifest_digest": verified.manifest_digest(),
+                        "entry_checks": verified.entry_checks(),
+                        "not_recomputed": verified.not_recomputed(),
+                        "certificate": verified.certificate(),
+                        "supply_chain_posture": verified.supply_chain_posture(),
+                        "authentication": authenticated,
+                        "trust_report": trust_report,
+                        "honest_label": authenticated.honest_label(),
+                        "guarantees": [
+                            "every carried inline digest is recomputed before registry policy accepts the Ed25519 signature",
+                            "the registry snapshot authorizes purpose, role, producer binding, validity, delegation, revocation, and rotation",
+                            "registry policy is evaluated at the explicit signed_at or as_of instant without reading the verifier clock",
+                        ],
+                        "limitations": [
+                            "the registry is caller-supplied and is not an external identity, transparency, or timestamp authority",
+                            "reference locators are not dereferenced; this is a local value check, not closure fetching",
+                            "verification establishes cryptographic origin and local authorization, not scientific validity, provenance truth, or deployment security",
+                        ],
+                    })),
+                    Err(error) => Ok(json!({
+                        "ok": false,
+                        "verification_mode": "ed25519_registry_policy",
+                        "stage": "bundle_verification",
+                        "refusal": error.to_string(),
+                        "fail_closed": true,
+                        "guarantee": "a registry, lifecycle, role, producer, digest, signature, purpose, identity, or key-validity mismatch never becomes a successful release result",
+                    })),
+                };
+            }
+            let raw_key = verification_key.ok_or_else(|| {
+                "verification_key is required for direct public-key verification".to_string()
+            })?;
+            let key: VerificationKey = serde_json::from_value(raw_key)
+                .map_err(|error| format!("invalid Ed25519 verification key: {error}"))?;
+            return match signed.verify(&key) {
+                Ok((verified, authenticated)) => Ok(json!({
+                    "ok": true,
+                    "verification_mode": "ed25519_public_key",
+                    "schema_version": signed.bundle.manifest.schema_version,
+                    "bundle_id": signed.bundle.manifest.bundle_id,
+                    "manifest_digest": verified.manifest_digest(),
+                    "entry_checks": verified.entry_checks(),
+                    "not_recomputed": verified.not_recomputed(),
+                    "certificate": verified.certificate(),
+                    "supply_chain_posture": verified.supply_chain_posture(),
+                    "authentication": authenticated,
+                    "honest_label": authenticated.honest_label(),
+                    "guarantees": [
+                        "every carried inline digest is recomputed before the Ed25519 signature is accepted",
+                        "the signature is bound to the manifest digest, purpose, key identity, producer claim, nonce, and signed instant",
+                        "bounded key validity is checked against the caller-supplied signed_at value without reading the verifier clock",
+                    ],
+                    "limitations": [
+                        "reference locators are not dereferenced; this is a local value check, not closure fetching",
+                        "the public key identity and claimed producer are not authenticated by a registry or certificate chain",
+                        "signed_at is caller-supplied and is not timestamp-authority evidence",
+                        "verification establishes cryptographic origin of bytes, not scientific validity, provenance truth, or deployment security",
+                    ],
+                })),
+                Err(error) => Ok(json!({
+                    "ok": false,
+                    "verification_mode": "ed25519_public_key",
+                    "stage": "bundle_verification",
+                    "refusal": error.to_string(),
+                    "fail_closed": true,
+                    "guarantee": "a digest, signature, purpose, identity, or key-validity mismatch never becomes a successful release result",
+                })),
+            };
+        }
         let bundle: ResultBundle = serde_json::from_value(raw)
             .map_err(|error| format!("invalid result bundle: {error}"))?;
         if bundle.manifest.entries.len() > 10_000 || bundle.contents.len() > 10_000 {
@@ -14147,13 +20286,20 @@ impl Server {
                     if values.len() > MAX_GRAPH_ROWS {
                         return Ok(refusal(
                             "evidence_validation",
-                            format!("evidence[{index}].lineage is bounded at {MAX_GRAPH_ROWS} entries"),
+                            format!(
+                                "evidence[{index}].lineage is bounded at {MAX_GRAPH_ROWS} entries"
+                            ),
                         ));
                     }
                     let mut lineage = Vec::with_capacity(values.len());
                     for (lineage_index, value) in values.iter().enumerate() {
                         let ancestor = match value.as_str() {
-                            Some(ancestor) if !ancestor.trim().is_empty() && ancestor.len() <= MAX_ID_BYTES => ancestor,
+                            Some(ancestor)
+                                if !ancestor.trim().is_empty()
+                                    && ancestor.len() <= MAX_ID_BYTES =>
+                            {
+                                ancestor
+                            }
                             _ => {
                                 return Ok(refusal(
                                     "evidence_validation",
@@ -14168,15 +20314,17 @@ impl Server {
             };
             let locator = match raw.get("locator_status") {
                 None | Some(Value::Null) => GroundingLocatorStatus::NotChecked,
-                Some(value) => match serde_json::from_value::<GroundingLocatorStatus>(value.clone()) {
-                    Ok(locator) => locator,
-                    Err(error) => {
-                        return Ok(refusal(
-                            "evidence_validation",
-                            format!("evidence[{index}].locator_status is invalid: {error}"),
-                        ));
+                Some(value) => {
+                    match serde_json::from_value::<GroundingLocatorStatus>(value.clone()) {
+                        Ok(locator) => locator,
+                        Err(error) => {
+                            return Ok(refusal(
+                                "evidence_validation",
+                                format!("evidence[{index}].locator_status is invalid: {error}"),
+                            ));
+                        }
                     }
-                },
+                }
             };
             let evidence = GroundingEvidence {
                 id: id.to_string(),
@@ -14207,7 +20355,9 @@ impl Server {
                 }
             };
             let evidence = match raw.get("evidence").and_then(Value::as_str) {
-                Some(evidence) if !evidence.trim().is_empty() && evidence.len() <= MAX_ID_BYTES => evidence,
+                Some(evidence) if !evidence.trim().is_empty() && evidence.len() <= MAX_ID_BYTES => {
+                    evidence
+                }
                 Some(_) => {
                     return Ok(refusal(
                         "edge_validation",
@@ -14250,7 +20400,9 @@ impl Server {
         let freeze = match arguments.get("stale_against") {
             None | Some(Value::Null) => None,
             Some(value) => {
-                let raw = value.as_str().ok_or("stale_against must be an RFC-3339 string")?;
+                let raw = value
+                    .as_str()
+                    .ok_or("stale_against must be an RFC-3339 string")?;
                 match FactoryTimestamp::parse(raw) {
                     Ok(timestamp) => Some(timestamp),
                     Err(error) => {
@@ -14450,7 +20602,9 @@ impl Server {
             .count();
         let unresolvable_count = evidence_records
             .values()
-            .filter(|(_, _, locator)| matches!(locator, GroundingLocatorStatus::Unresolvable { .. }))
+            .filter(|(_, _, locator)| {
+                matches!(locator, GroundingLocatorStatus::Unresolvable { .. })
+            })
             .count();
         let support_edge_count = graph
             .edges()
@@ -14579,17 +20733,12 @@ impl Server {
         let outcome = text_field("outcome")?;
         let horizon = text_field("horizon")?;
         let scope = text_field("scope")?;
-        let estimand = match BioevalEstimand::declare(
-            intervention,
-            comparator,
-            unit,
-            outcome,
-            horizon,
-            scope,
-        ) {
-            Ok(estimand) => estimand,
-            Err(error) => return Ok(refusal("estimand_validation", error.to_string())),
-        };
+        let estimand =
+            match BioevalEstimand::declare(intervention, comparator, unit, outcome, horizon, scope)
+            {
+                Ok(estimand) => estimand,
+                Err(error) => return Ok(refusal("estimand_validation", error.to_string())),
+            };
 
         let kind = match arguments.get("kind") {
             Some(value) => match serde_json::from_value::<BioevalClaimKind>(value.clone()) {
@@ -14779,7 +20928,9 @@ impl Server {
                 .get("declared_scopes")
                 .ok_or_else(|| format!("transport_requests[{index}] requires declared_scopes"))?
                 .as_array()
-                .ok_or_else(|| format!("transport_requests[{index}].declared_scopes must be an array"))?;
+                .ok_or_else(|| {
+                    format!("transport_requests[{index}].declared_scopes must be an array")
+                })?;
             let mut declared_scopes = BTreeSet::new();
             for (scope_index, scope) in declared.iter().enumerate() {
                 let scope = scope.as_str().ok_or_else(|| {
@@ -14788,7 +20939,9 @@ impl Server {
                 if scope.trim().is_empty() || scope.len() > MAX_TEXT_BYTES {
                     return Ok(refusal(
                         "transport_validation",
-                        format!("transport_requests[{index}].declared_scopes[{scope_index}] is invalid"),
+                        format!(
+                            "transport_requests[{index}].declared_scopes[{scope_index}] is invalid"
+                        ),
                     ));
                 }
                 declared_scopes.insert(scope.to_string());
@@ -15007,11 +21160,7 @@ impl Server {
                         BioevalTaskOutcome::NotMet => not_met_count += 1,
                         BioevalTaskOutcome::Inapplicable => inapplicable_count += 1,
                     }
-                    (
-                        json!(task_outcome_name(outcome)),
-                        "accepted",
-                        Value::Null,
-                    )
+                    (json!(task_outcome_name(outcome)), "accepted", Value::Null)
                 }
                 Err(error) => {
                     refused_ids.insert(run.evaluator.clone());
@@ -15055,7 +21204,8 @@ impl Server {
         {
             return Ok(refusal(
                 "panel_policy",
-                "require_task_evidence was true but no evaluator produced a usable task outcome".into(),
+                "require_task_evidence was true but no evaluator produced a usable task outcome"
+                    .into(),
             ));
         }
         if arguments
@@ -15066,7 +21216,10 @@ impl Server {
         {
             return Ok(refusal(
                 "hidden_data_policy",
-                format!("fail_on_hidden_data refused {} evaluator row(s)", hidden_ids.len()),
+                format!(
+                    "fail_on_hidden_data refused {} evaluator row(s)",
+                    hidden_ids.len()
+                ),
             ));
         }
         let bounded_rows = |rows: &[Value]| {
@@ -15143,10 +21296,9 @@ impl Server {
         const MAX_TRIALS: usize = 4_096;
         const MAX_ID_BYTES: usize = 256;
 
-        let raw_families = arguments
-            .get("families")
-            .and_then(Value::as_array)
-            .ok_or("families is required and must be an array of serialized metamorphic Family values")?;
+        let raw_families = arguments.get("families").and_then(Value::as_array).ok_or(
+            "families is required and must be an array of serialized metamorphic Family values",
+        )?;
         if raw_families.is_empty() || raw_families.len() > MAX_FAMILIES {
             return Err("families must contain 1 to 1024 family rows".into());
         }
@@ -15219,7 +21371,10 @@ impl Server {
             if parsed.trials().is_empty() || parsed.trials().len() > MAX_TRIALS {
                 return Ok(refusal(
                     "family_validation",
-                    format!("family {:?} must contain 1 to {MAX_TRIALS} trials", parsed.id),
+                    format!(
+                        "family {:?} must contain 1 to {MAX_TRIALS} trials",
+                        parsed.id
+                    ),
                 ));
             }
             trial_total = trial_total.saturating_add(parsed.trials().len());
@@ -15252,10 +21407,12 @@ impl Server {
         let has_invariant = suite
             .relations_covered()
             .contains(&BioevalMetamorphicRelation::Invariant);
-        let has_directional = suite
-            .relations_covered()
-            .iter()
-            .any(|relation| matches!(relation, BioevalMetamorphicRelation::DirectionalChange { .. }));
+        let has_directional = suite.relations_covered().iter().any(|relation| {
+            matches!(
+                relation,
+                BioevalMetamorphicRelation::DirectionalChange { .. }
+            )
+        });
         if arguments
             .get("require_both_relations")
             .and_then(Value::as_bool)
@@ -15545,7 +21702,9 @@ impl Server {
                 Err(error) => {
                     return Ok(refusal(
                         "waiver_validation",
-                        format!("waivers[{index}].expiry is not a valid RFC-3339 timestamp: {error}"),
+                        format!(
+                            "waivers[{index}].expiry is not a valid RFC-3339 timestamp: {error}"
+                        ),
                     ))
                 }
             };
@@ -15850,7 +22009,10 @@ impl Server {
                 ));
             }
             for (factor, level) in &arm.levels {
-                if factor.len() > MAX_ID_BYTES || level.trim().is_empty() || level.len() > MAX_ID_BYTES {
+                if factor.len() > MAX_ID_BYTES
+                    || level.trim().is_empty()
+                    || level.len() > MAX_ID_BYTES
+                {
                     return Ok(refusal(
                         "arm_validation",
                         format!("arms[{index}] has a factor or level outside the {MAX_ID_BYTES}-byte bound"),
@@ -16054,7 +22216,9 @@ impl Server {
             return Err("mesh audit input exceeds the 20000000-byte safety bound".into());
         }
         let parse_strings = |name: &str, raw: Option<&Value>| -> Result<Vec<String>, String> {
-            let Some(raw) = raw else { return Ok(Vec::new()) };
+            let Some(raw) = raw else {
+                return Ok(Vec::new());
+            };
             let values = raw
                 .as_array()
                 .ok_or_else(|| format!("{name} must be an array of strings"))?;
@@ -16072,26 +22236,26 @@ impl Server {
             }
             Ok(output)
         };
-        let system_artifacts = match parse_strings(
-            "system_artifacts",
-            arguments.get("system_artifacts"),
-        ) {
-            Ok(values) => {
-                let mut seen = BTreeSet::new();
-                if values.iter().any(|value| !seen.insert(value.clone())) {
-                    return Ok(refusal(
-                        "mesh_validation",
-                        "system_artifacts must be unique".into(),
-                    ));
+        let system_artifacts =
+            match parse_strings("system_artifacts", arguments.get("system_artifacts")) {
+                Ok(values) => {
+                    let mut seen = BTreeSet::new();
+                    if values.iter().any(|value| !seen.insert(value.clone())) {
+                        return Ok(refusal(
+                            "mesh_validation",
+                            "system_artifacts must be unique".into(),
+                        ));
+                    }
+                    values
                 }
-                values
-            }
-            Err(error) => return Ok(refusal("mesh_validation", error)),
-        };
+                Err(error) => return Ok(refusal("mesh_validation", error)),
+            };
         let raw_evaluators = arguments
             .get("evaluators")
             .and_then(Value::as_array)
-            .ok_or("evaluators is required and must be an array of serialized EvaluatorDecl values")?;
+            .ok_or(
+                "evaluators is required and must be an array of serialized EvaluatorDecl values",
+            )?;
         if raw_evaluators.is_empty() || raw_evaluators.len() > MAX_EVALUATORS {
             return Err("evaluators must contain 1 to 1024 rows".into());
         }
@@ -16152,8 +22316,14 @@ impl Server {
                     format!("evaluator {:?} appears more than once", evaluator.id),
                 ));
             }
-            if evaluator.inputs.iter().any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
-                || evaluator.derived_from.iter().any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
+            if evaluator
+                .inputs
+                .iter()
+                .any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
+                || evaluator
+                    .derived_from
+                    .iter()
+                    .any(|input| input.trim().is_empty() || input.len() > MAX_ID_BYTES)
             {
                 return Ok(refusal(
                     "evaluator_validation",
@@ -16186,10 +22356,15 @@ impl Server {
             if !verdict_ids.insert(verdict.evaluator.clone()) {
                 return Ok(refusal(
                     "verdict_validation",
-                    format!("verdicts contain more than one row for evaluator {:?}", verdict.evaluator),
+                    format!(
+                        "verdicts contain more than one row for evaluator {:?}",
+                        verdict.evaluator
+                    ),
                 ));
             }
-            if !verdict.abstained && (verdict.position.trim().is_empty() || verdict.position.len() > MAX_ID_BYTES) {
+            if !verdict.abstained
+                && (verdict.position.trim().is_empty() || verdict.position.len() > MAX_ID_BYTES)
+            {
                 return Ok(refusal(
                     "verdict_validation",
                     format!("verdicts[{index}].position must contain 1 to {MAX_ID_BYTES} bytes for a called evaluator"),
@@ -16205,7 +22380,8 @@ impl Server {
         if require_independence && !census.independence_verified() {
             return Ok(refusal(
                 "independence_policy",
-                "require_independence was true but one or more evaluators declared no inputs".into(),
+                "require_independence was true but one or more evaluators declared no inputs"
+                    .into(),
             ));
         }
         let classes = mesh.independence_classes();
@@ -16232,7 +22408,8 @@ impl Server {
                 })
             })
             .collect::<Vec<_>>();
-        let (rating_status, rating_rows, rating_refusal) = match mesh.independent_ratings(&verdicts) {
+        let (rating_status, rating_rows, rating_refusal) = match mesh.independent_ratings(&verdicts)
+        {
             Ok(ratings) => (
                 "accepted",
                 serde_json::to_value(ratings).expect("ratings serialize"),
@@ -16432,9 +22609,7 @@ impl Server {
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("{name} must be a string"))?;
             if value.trim().is_empty() || value.len() > MAX_ID_BYTES {
-                return Err(format!(
-                    "{name} must contain 1 to {MAX_ID_BYTES} bytes"
-                ));
+                return Err(format!("{name} must contain 1 to {MAX_ID_BYTES} bytes"));
             }
             Ok(value.to_string())
         };
@@ -16525,19 +22700,18 @@ impl Server {
                     format!("branches[{index}] must be an object"),
                 ));
             };
-            let id = match bounded_text(
-                &format!("branches[{index}].id"),
-                object.get("id"),
-            ) {
+            let id = match bounded_text(&format!("branches[{index}].id"), object.get("id")) {
                 Ok(id) => id,
                 Err(error) => return Ok(refusal("branch_validation", error)),
             };
             let parent = match object.get("parent") {
                 None | Some(Value::Null) => root.clone(),
-                Some(value) => match bounded_text(&format!("branches[{index}].parent"), Some(value)) {
-                    Ok(parent) => parent,
-                    Err(error) => return Ok(refusal("branch_validation", error)),
-                },
+                Some(value) => {
+                    match bounded_text(&format!("branches[{index}].parent"), Some(value)) {
+                        Ok(parent) => parent,
+                        Err(error) => return Ok(refusal("branch_validation", error)),
+                    }
+                }
             };
             if !branch_ids.insert(id.clone()) {
                 return Ok(refusal(
@@ -16565,10 +22739,8 @@ impl Server {
                     format!("draws[{index}] must be an object"),
                 ));
             };
-            let branch = match bounded_text(
-                &format!("draws[{index}].branch"),
-                object.get("branch"),
-            ) {
+            let branch = match bounded_text(&format!("draws[{index}].branch"), object.get("branch"))
+            {
                 Ok(branch) => branch,
                 Err(error) => return Ok(refusal("draw_validation", error)),
             };
@@ -16683,15 +22855,18 @@ impl Server {
             ));
         }
 
-        let class_counts = resources.iter().fold(BTreeMap::<String, usize>::new(), |mut counts, resource| {
-            let class = serde_json::to_value(resource.class)
-                .expect("resource class serializes")
-                .as_str()
-                .expect("resource class is a string")
-                .to_string();
-            *counts.entry(class).or_default() += 1;
-            counts
-        });
+        let class_counts =
+            resources
+                .iter()
+                .fold(BTreeMap::<String, usize>::new(), |mut counts, resource| {
+                    let class = serde_json::to_value(resource.class)
+                        .expect("resource class serializes")
+                        .as_str()
+                        .expect("resource class is a string")
+                        .to_string();
+                    *counts.entry(class).or_default() += 1;
+                    counts
+                });
         let nonrenewable_resources = resources
             .iter()
             .filter(|resource| resource.class.is_nonrenewable())
@@ -16707,8 +22882,9 @@ impl Server {
             .iter()
             .take(max_items)
             .map(|branch| {
-                let branch_ledger: &BioevalBranchLedger =
-                    ledger.branch(branch).expect("branch selection was validated");
+                let branch_ledger: &BioevalBranchLedger = ledger
+                    .branch(branch)
+                    .expect("branch selection was validated");
                 let residual = ledger.residual(branch).expect("branch residual is valid");
                 let consumed = resources
                     .iter()
@@ -16861,15 +23037,16 @@ impl Server {
                 "reveal audit input exceeds the {MAX_INPUT_BYTES}-byte safety bound"
             ));
         }
-        let bounded_text = |name: &str, value: Option<&Value>, limit: usize| -> Result<String, String> {
-            let value = value
-                .and_then(Value::as_str)
-                .ok_or_else(|| format!("{name} must be a string"))?;
-            if value.trim().is_empty() || value.len() > limit {
-                return Err(format!("{name} must contain 1 to {limit} bytes"));
-            }
-            Ok(value.to_string())
-        };
+        let bounded_text =
+            |name: &str, value: Option<&Value>, limit: usize| -> Result<String, String> {
+                let value = value
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("{name} must be a string"))?;
+                if value.trim().is_empty() || value.len() > limit {
+                    return Err(format!("{name} must contain 1 to {limit} bytes"));
+                }
+                Ok(value.to_string())
+            };
         let study = bounded_text("study", arguments.get("study"), MAX_ID_BYTES)?;
         let sealed_at_text = bounded_text("sealed_at", arguments.get("sealed_at"), MAX_TEXT_BYTES)?;
         let sealed_at = match bioprism_scope::Timestamp::parse(&sealed_at_text) {
@@ -17004,7 +23181,13 @@ impl Server {
         };
         let (scoring_status, scoring_value, scoring_refusal, scoring_complete, unrevealed_targets) =
             match score_rubric.as_ref() {
-                None => ("not_requested", Value::Null, Value::Null, Value::Null, Vec::new()),
+                None => (
+                    "not_requested",
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Vec::new(),
+                ),
                 Some(score_rubric) => match revealed.score_under(score_rubric) {
                     Ok(scoring) => {
                         let complete = scoring.complete();
@@ -17031,14 +23214,17 @@ impl Server {
                 "rubric_integrity_policy",
                 format!(
                     "require_rubric_match was true but scoring was not admitted: {}",
-                    scoring_refusal.as_str().unwrap_or("scoring was not requested")
+                    scoring_refusal
+                        .as_str()
+                        .unwrap_or("scoring was not requested")
                 ),
             ));
         }
         if require_complete && (scoring_status != "accepted" || scoring_complete != json!(true)) {
             return Ok(refusal(
                 "completeness_policy",
-                "require_complete was true but the admitted scoring projection is not complete".into(),
+                "require_complete was true but the admitted scoring projection is not complete"
+                    .into(),
             ));
         }
         let bounded_ids = |values: BTreeSet<String>| {
@@ -17215,7 +23401,9 @@ impl Server {
             {
                 return Ok(refusal(
                     "policy_validation",
-                    format!("policies[{index}] id and transmission_principle must be bounded strings"),
+                    format!(
+                        "policies[{index}] id and transmission_principle must be bounded strings"
+                    ),
                 ));
             }
             if !policy_ids.insert(policy.id.clone()) {
@@ -17248,12 +23436,12 @@ impl Server {
                 ("recipient", flow.recipient.as_str()),
                 ("information_type", flow.information_type.as_str()),
                 ("purpose", flow.purpose.as_str()),
-                ("transmission_principle", flow.transmission_principle.as_str()),
+                (
+                    "transmission_principle",
+                    flow.transmission_principle.as_str(),
+                ),
             ];
-            if fields
-                .iter()
-                .any(|(_, value)| value.len() > MAX_TEXT_BYTES)
-            {
+            if fields.iter().any(|(_, value)| value.len() > MAX_TEXT_BYTES) {
                 return Ok(refusal(
                     "flow_validation",
                     format!("flows[{index}] contains text over the {MAX_TEXT_BYTES}-byte bound"),
@@ -17539,21 +23727,29 @@ impl Server {
             if !dimension.weight.is_finite() || dimension.weight <= 0.0 {
                 return Ok(refusal(
                     "plane_validation",
-                    format!("dimension {:?} has a non-positive or non-finite weight", dimension.id),
+                    format!(
+                        "dimension {:?} has a non-positive or non-finite weight",
+                        dimension.id
+                    ),
                 ));
             }
-            let cell = plane.cell(&dimension.id).ok_or_else(|| {
-                format!("dimension {:?} has no corresponding cell", dimension.id)
-            })?;
+            let cell = plane
+                .cell(&dimension.id)
+                .ok_or_else(|| format!("dimension {:?} has no corresponding cell", dimension.id))?;
             let cell_value = serde_json::to_value(cell).expect("Cell serializes");
-            let parsed_cell: BioevalCell = serde_json::from_value(cell_value.clone())
-                .map_err(|error| format!("dimension {:?} has an invalid Cell: {error}", dimension.id))?;
+            let parsed_cell: BioevalCell =
+                serde_json::from_value(cell_value.clone()).map_err(|error| {
+                    format!("dimension {:?} has an invalid Cell: {error}", dimension.id)
+                })?;
             match &parsed_cell {
                 BioevalCell::Scored { .. } => {
                     if !plane.tier.admits(dimension.required) {
                         return Ok(refusal(
                             "plane_validation",
-                            format!("dimension {:?} is scored despite being out of tier", dimension.id),
+                            format!(
+                                "dimension {:?} is scored despite being out of tier",
+                                dimension.id
+                            ),
                         ));
                     }
                     scored_count += 1;
@@ -17566,7 +23762,10 @@ impl Server {
                     if *required != dimension.required || *declared != plane.tier {
                         return Ok(refusal(
                             "plane_validation",
-                            format!("dimension {:?} carries an inconsistent inapplicable tier", dimension.id),
+                            format!(
+                                "dimension {:?} carries an inconsistent inapplicable tier",
+                                dimension.id
+                            ),
                         ));
                     }
                     inapplicable_count += 1;
@@ -17689,7 +23888,9 @@ impl Server {
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("obligations[{index}] requires an id"))?;
             if id.trim().is_empty() || id.len() > 256 {
-                return Err(format!("obligations[{index}] ids must contain 1 to 256 bytes"));
+                return Err(format!(
+                    "obligations[{index}] ids must contain 1 to 256 bytes"
+                ));
             }
             if !obligation_ids.insert(id.to_string()) {
                 return Err(format!("obligations[{index}] duplicates id {id:?}"));
@@ -17719,7 +23920,9 @@ impl Server {
                     .cloned()
                     .ok_or_else(|| format!("actions[{index}] requires kind"))?,
             )
-            .map_err(|error| format!("actions[{index}] has an invalid acquisition kind: {error}"))?;
+            .map_err(|error| {
+                format!("actions[{index}] has an invalid acquisition kind: {error}")
+            })?;
             let cost = raw
                 .get("cost")
                 .and_then(Value::as_u64)
@@ -17735,7 +23938,9 @@ impl Server {
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             if raw_closes.len() > 512 {
-                return Err(format!("actions[{index}].closes is bounded at 512 obligations"));
+                return Err(format!(
+                    "actions[{index}].closes is bounded at 512 obligations"
+                ));
             }
             let mut closes = BTreeSet::new();
             let mut action = AcquisitionTraceAction::new(id, kind, cost);
@@ -17814,7 +24019,10 @@ impl Server {
         }
 
         let open = trace.open();
-        let open_ids: BTreeSet<&str> = open.iter().map(|obligation| obligation.id.as_str()).collect();
+        let open_ids: BTreeSet<&str> = open
+            .iter()
+            .map(|obligation| obligation.id.as_str())
+            .collect();
         let redundant: BTreeSet<&str> = trace
             .redundant()
             .iter()
@@ -17871,7 +24079,11 @@ impl Server {
             .collect::<Vec<_>>();
         let regret = reference
             .as_ref()
-            .map(|policy| trace.regret_against(Some(policy)).map_err(|error| error.to_string()))
+            .map(|policy| {
+                trace
+                    .regret_against(Some(policy))
+                    .map_err(|error| error.to_string())
+            })
             .transpose()?;
         let reference_projection = reference.as_ref().map(|policy| {
             json!({
@@ -18658,7 +24870,8 @@ impl Server {
                 }))
             }
         };
-        let disposition_value = serde_json::to_value(&disposition).map_err(|error| error.to_string())?;
+        let disposition_value =
+            serde_json::to_value(&disposition).map_err(|error| error.to_string())?;
         let disposition_kind = disposition_value["disposition"]
             .as_str()
             .ok_or("boundary disposition must carry a tagged disposition")?;
@@ -18794,7 +25007,8 @@ impl Server {
                 }))
             }
         };
-        let assessment_value = serde_json::to_value(&assessment).map_err(|error| error.to_string())?;
+        let assessment_value =
+            serde_json::to_value(&assessment).map_err(|error| error.to_string())?;
         let call_kind = assessment_value["call"]["call"]
             .as_str()
             .ok_or("response assessment must carry a tagged call")?;
@@ -19148,7 +25362,8 @@ impl Server {
         let bias_count = all_bias_flags.len();
         let informative_bias_count = informative_bias_flags.len();
         let outcome = analysis.outcome;
-        let censoring_informative = censoring_reason.map(|reason| reason.is_potentially_informative());
+        let censoring_informative =
+            censoring_reason.map(|reason| reason.is_potentially_informative());
         Ok(json!({
             "ok": true,
             "schema": "bioprism-mcp/onco-outcome-analyze/0.1",
@@ -19228,10 +25443,8 @@ impl Server {
                 })
             })
             .collect();
-        let transport_assumption_names: Vec<String> = transport
-            .assumption_names()
-            .map(str::to_owned)
-            .collect();
+        let transport_assumption_names: Vec<String> =
+            transport.assumption_names().map(str::to_owned).collect();
         let model_identity = json!({
             "model": result.model.model,
             "system": result.model.system,
@@ -19281,7 +25494,8 @@ impl Server {
                 ]
             })),
             Err(refusal) => {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/oncoworlds-model-transport/0.1",
@@ -19332,16 +25546,21 @@ impl Server {
                 .ok_or("context is required and must be a SampleContext")?,
         )
         .map_err(|error| format!("invalid methylation sample context: {error}"))?;
-        let classifier_value = serde_json::to_value(&classifier).map_err(|error| error.to_string())?;
+        let classifier_value =
+            serde_json::to_value(&classifier).map_err(|error| error.to_string())?;
         let qc_value = serde_json::to_value(&context.qc).map_err(|error| error.to_string())?;
         let tumour_content_value =
-            serde_json::to_value(&context.tumour_content).map_err(|error| error.to_string())?;
-        let score_classes: Vec<String> = scores.keys().map(|class| class.as_str().to_owned()).collect();
+            serde_json::to_value(context.tumour_content).map_err(|error| error.to_string())?;
+        let score_classes: Vec<String> = scores
+            .keys()
+            .map(|class| class.as_str().to_owned())
+            .collect();
         match onco_classify_methylation(&classifier, &scores, &context) {
             Ok(report) => {
                 let classified = report.outcome.is_classified();
                 let class = report.outcome.class().cloned();
-                let report_value = serde_json::to_value(&report).map_err(|error| error.to_string())?;
+                let report_value =
+                    serde_json::to_value(&report).map_err(|error| error.to_string())?;
                 let outcome_kind = report_value["outcome"]["outcome"]
                     .as_str()
                     .ok_or("methylation report must carry a tagged outcome")?;
@@ -19412,9 +25631,12 @@ impl Server {
         )
         .map_err(|error| format!("invalid right versioned result: {error}"))?;
         let comparison = onco_reconcile_methylation(&left, &right);
-        let comparison_value = serde_json::to_value(&comparison).map_err(|error| error.to_string())?;
-        let left_outcome = serde_json::to_value(&left.outcome).map_err(|error| error.to_string())?;
-        let right_outcome = serde_json::to_value(&right.outcome).map_err(|error| error.to_string())?;
+        let comparison_value =
+            serde_json::to_value(&comparison).map_err(|error| error.to_string())?;
+        let left_outcome =
+            serde_json::to_value(&left.outcome).map_err(|error| error.to_string())?;
+        let right_outcome =
+            serde_json::to_value(&right.outcome).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
             "schema": "bioprism-mcp/oncoworlds-methylation-compare/0.1",
@@ -19477,10 +25699,8 @@ impl Server {
             "strata": design.strata,
             "mechanism_strata_present": MECHANISM_STRATA.iter().all(|stratum| design.strata.contains(*stratum))
         });
-        let transport_assumption_names: Vec<String> = transport
-            .assumption_names()
-            .map(str::to_owned)
-            .collect();
+        let transport_assumption_names: Vec<String> =
+            transport.assumption_names().map(str::to_owned).collect();
         match onco_assert_radiogenomic_claim(claim, &design, &observation, &transport) {
             Ok(supported) => Ok(json!({
                 "ok": true,
@@ -19609,9 +25829,7 @@ impl Server {
         let mut checks = serde_json::Map::new();
 
         if let Some(value) = arguments.get("promotion") {
-            let object = value
-                .as_object()
-                .ok_or("promotion must be an object")?;
+            let object = value.as_object().ok_or("promotion must be an object")?;
             let observation: SpecimenObservation = serde_json::from_value(
                 object
                     .get("observation")
@@ -19654,9 +25872,7 @@ impl Server {
         }
 
         if let Some(value) = arguments.get("resistance") {
-            let object = value
-                .as_object()
-                .ok_or("resistance must be an object")?;
+            let object = value.as_object().ok_or("resistance must be an object")?;
             let diagnosis: SpecimenObservation = serde_json::from_value(
                 object
                     .get("diagnosis")
@@ -19686,8 +25902,8 @@ impl Server {
             });
             match sole {
                 Ok(explanation) => {
-                    projection["unique_explanation"] = serde_json::to_value(explanation)
-                        .map_err(|error| error.to_string())?;
+                    projection["unique_explanation"] =
+                        serde_json::to_value(explanation).map_err(|error| error.to_string())?;
                     projection["refusal"] = Value::Null;
                     projection["refusal_kind"] = Value::Null;
                 }
@@ -19703,9 +25919,7 @@ impl Server {
         }
 
         if let Some(value) = arguments.get("attribution") {
-            let object = value
-                .as_object()
-                .ok_or("attribution must be an object")?;
+            let object = value.as_object().ok_or("attribution must be an object")?;
             let treatment = object
                 .get("treatment")
                 .and_then(Value::as_str)
@@ -19736,7 +25950,8 @@ impl Server {
                 "allowed": result.is_ok()
             });
             let refusal = result.expect_err("temporal-attribution design is always refused");
-            let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+            let refusal_value =
+                serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
             projection["refusal"] = refusal_value.clone();
             projection["refusal_kind"] = refusal_value["refusal"].clone();
             projection["refusal_text"] = json!(refusal.to_string());
@@ -19799,7 +26014,10 @@ impl Server {
             .map(serde_json::from_value)
             .transpose()
             .map_err(|error| format!("invalid OncoWorlds entity mapping: {error}"))?;
-        if mapping.as_ref().is_some_and(|item| item.fate_count() > 10_000) {
+        if mapping
+            .as_ref()
+            .is_some_and(|item| item.fate_count() > 10_000)
+        {
             return Err("OncoWorlds entity mapping exceeds the 10000-label safety bound".into());
         }
         let assays: Vec<SiteAssayContext> = arguments
@@ -19819,8 +26037,10 @@ impl Server {
                     .map_err(|error| error.to_string())?;
                 let observation = serde_json::to_value(context.observation())
                     .map_err(|error| error.to_string())?;
-                let refusal = onco_as_negative_call(context).expect_err("negative conversion always refuses");
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal =
+                    onco_as_negative_call(context).expect_err("negative conversion always refuses");
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 Ok(json!({
                     "site": context.site,
                     "assay": context.assay,
@@ -19838,7 +26058,9 @@ impl Server {
             .cloned()
             .unwrap_or_default();
         if descriptor_values.len() > 100 {
-            return Err("population descriptor check panel exceeds the 100-check safety bound".into());
+            return Err(
+                "population descriptor check panel exceeds the 100-check safety bound".into(),
+            );
         }
         let descriptor_projections: Vec<Value> = descriptor_values
             .iter()
@@ -19857,7 +26079,8 @@ impl Server {
                         .ok_or("descriptor check requires use")?,
                 )
                 .map_err(|error| format!("invalid population descriptor use: {error}"))?;
-                let descriptor_value = serde_json::to_value(descriptor).map_err(|error| error.to_string())?;
+                let descriptor_value =
+                    serde_json::to_value(descriptor).map_err(|error| error.to_string())?;
                 let use_value = serde_json::to_value(use_).map_err(|error| error.to_string())?;
                 match onco_use_descriptor(descriptor, use_) {
                     Ok(()) => Ok(json!({
@@ -19869,7 +26092,8 @@ impl Server {
                         "allowed": true
                     })),
                     Err(refusal) => {
-                        let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                        let refusal_value =
+                            serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                         Ok(json!({
                             "descriptor": descriptor_value,
                             "descriptor_label": descriptor.as_str(),
@@ -19933,7 +26157,8 @@ impl Server {
                 ]
             })),
             Err(refusal) => {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/oncoworlds-era-shift-check/0.1",
@@ -20006,7 +26231,8 @@ impl Server {
                 }))
             }
             Err(refusal) => {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 Ok(json!({
                     "ok": false,
                     "schema": "bioprism-mcp/oncoworlds-equity-check/0.1",
@@ -20032,9 +26258,7 @@ impl Server {
         let mut checks = serde_json::Map::new();
 
         if let Some(value) = arguments.get("provenance") {
-            let object = value
-                .as_object()
-                .ok_or("provenance must be an object")?;
+            let object = value.as_object().ok_or("provenance must be an object")?;
             let left: TissueProvenance = serde_json::from_value(
                 object
                     .get("left")
@@ -20063,7 +26287,8 @@ impl Server {
                 "allowed": result.is_ok()
             });
             if let Err(refusal) = result {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["refusal"] = refusal_value.clone();
                 projection["refusal_kind"] = refusal_value["refusal"].clone();
                 projection["refusal_text"] = json!(refusal.to_string());
@@ -20075,9 +26300,7 @@ impl Server {
         }
 
         if let Some(value) = arguments.get("alterations") {
-            let object = value
-                .as_object()
-                .ok_or("alterations must be an object")?;
+            let object = value.as_object().ok_or("alterations must be an object")?;
             let left: AlterationMechanism = serde_json::from_value(
                 object
                     .get("left")
@@ -20104,7 +26327,8 @@ impl Server {
                 "allowed": result.is_ok()
             });
             if let Err(refusal) = result {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["refusal"] = refusal_value.clone();
                 projection["refusal_kind"] = refusal_value["refusal"].clone();
                 projection["refusal_text"] = json!(refusal.to_string());
@@ -20116,9 +26340,7 @@ impl Server {
         }
 
         if let Some(value) = arguments.get("benchmark") {
-            let object = value
-                .as_object()
-                .ok_or("benchmark must be an object")?;
+            let object = value.as_object().ok_or("benchmark must be an object")?;
             let macro_score = object
                 .get("macro_score")
                 .and_then(Value::as_f64)
@@ -20152,15 +26374,16 @@ impl Server {
                     let feasibility = serde_json::to_value(published.feasibility())
                         .map_err(|error| error.to_string())?;
                     projection["allowed"] = json!(true);
-                    projection["published"] = serde_json::to_value(&published)
-                        .map_err(|error| error.to_string())?;
+                    projection["published"] =
+                        serde_json::to_value(&published).map_err(|error| error.to_string())?;
                     projection["feasibility"] = feasibility.clone();
                     projection["feasibility_kind"] = feasibility["feasibility"].clone();
                     projection["refusal"] = Value::Null;
                     projection["refusal_kind"] = Value::Null;
                 }
                 Err(refusal) => {
-                    let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                    let refusal_value =
+                        serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                     projection["refusal"] = refusal_value.clone();
                     projection["refusal_kind"] = refusal_value["refusal"].clone();
                     projection["refusal_text"] = json!(refusal.to_string());
@@ -20186,7 +26409,9 @@ impl Server {
                     as usize,
             };
             if set.lesions > 1_000_000 || set.participants > 1_000_000 {
-                return Err("lesion analysis counts exceed the 1000000-subject safety bound".into());
+                return Err(
+                    "lesion analysis counts exceed the 1000000-subject safety bound".into(),
+                );
             }
             let cluster_declared = object
                 .get("cluster_declared")
@@ -20227,7 +26452,8 @@ impl Server {
                 "allowed": cluster_result.is_ok() && event_result.is_ok()
             });
             if let Err(refusal) = cluster_result {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["cluster_refusal"] = refusal_value.clone();
                 projection["cluster_refusal_kind"] = refusal_value["refusal"].clone();
                 projection["cluster_refusal_text"] = json!(refusal.to_string());
@@ -20236,7 +26462,8 @@ impl Server {
                 projection["cluster_refusal_kind"] = Value::Null;
             }
             if let Err(refusal) = event_result {
-                let refusal_value = serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
+                let refusal_value =
+                    serde_json::to_value(&refusal).map_err(|error| error.to_string())?;
                 projection["event_refusal"] = refusal_value.clone();
                 projection["event_refusal_kind"] = refusal_value["refusal"].clone();
                 projection["event_refusal_text"] = json!(refusal.to_string());
@@ -21370,7 +27597,7 @@ impl Server {
             .map_err(|error| format!("cannot serialize routing-lab regret account: {error}"))?;
         let calibration = serde_json::to_value(&report.calibration)
             .map_err(|error| format!("cannot serialize routing-lab calibration: {error}"))?;
-        let verdict = serde_json::to_value(&report.verdict)
+        let verdict = serde_json::to_value(report.verdict)
             .map_err(|error| format!("cannot serialize routing-lab verdict: {error}"))?;
         Ok(json!({
             "ok": true,
@@ -22159,6 +28386,652 @@ impl Server {
         Ok(result)
     }
 
+    /// Build the complete deterministic workflow catalogue, including a per-group domain contract
+    /// for scope, evidence retention, review gates, and completion posture.
+    ///
+    /// This is intentionally a planning operation, not a semantic router or permission grant.
+    /// Domain contracts are structural handoff evidence; they do not infer domain truth or
+    /// readiness and do not dispatch any tool.
+    fn domain_workflow_catalogue(&self, arguments: &Value) -> Result<Value, String> {
+        if !arguments
+            .as_object()
+            .is_some_and(|object| object.is_empty())
+        {
+            return Err("domain_workflow_catalogue accepts an empty arguments object".into());
+        }
+        build_domain_workflow_catalogue(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+        )
+        .map_err(|error| format!("domain workflow catalogue refused: {error}"))
+    }
+
+    /// Build an execution-disabled, schema-aware starting mission for one capability group.
+    ///
+    /// Kernel scaffolding chooses tools; this transport layer adds the authoritative live
+    /// `tools/list` preflight. Missing required arguments therefore remain a structured blocked
+    /// handoff rather than being turned into a transport-level success or an opaque failure.
+    fn domain_workflow_scaffold(&self, arguments: &Value) -> Result<Value, String> {
+        let mut output = scaffold_domain_workflow(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow scaffold refused: {error}"))?;
+        let mission = output
+            .get("mission")
+            .cloned()
+            .ok_or_else(|| "domain workflow scaffold omitted mission".to_string())?;
+        let preflight_report = match self.preflight_agent_mission(&mission) {
+            Ok(report) => report,
+            Err(error) => json!({
+                "ok": false,
+                "workflow": "agent_mission",
+                "preflight": true,
+                "dispatch": "not_started",
+                "schema_valid": false,
+                "error": error,
+                "guarantees": [
+                    "the scaffold remains execution-disabled",
+                    "authoritative schema refusal is retained for caller correction"
+                ],
+                "readiness_claimed": false
+            }),
+        };
+        let preflight_ok = preflight_report.get("ok") == Some(&Value::Bool(true));
+        output["preflight_status"] = json!(if preflight_ok { "ready" } else { "blocked" });
+        output["preflight_report"] = preflight_report.clone();
+        output["instantiation"]["preflight_report"] = preflight_report;
+        output["next_actions"] = if preflight_ok {
+            json!([
+                "review the selected and omitted tools for domain-specific sufficiency",
+                "obtain any required operations gate acceptance",
+                "execute only through an explicit allow-list and reconcile the retained report"
+            ])
+        } else {
+            json!([
+                "fill every reported required argument field from the authoritative tool schema",
+                "rerun the scaffold or mission preflight after correcting arguments",
+                "obtain any required operations gate acceptance before execution"
+            ])
+        };
+        Ok(output)
+    }
+
+    /// Instantiate one explicitly selected, group-scoped workflow into a validated mission and
+    /// a step-by-step evidence plan.
+    ///
+    /// The kernel validates mission invariants here; the server then adds the authoritative MCP
+    /// schema preflight report. Neither operation dispatches a selected tool, and unavailable
+    /// tools or out-of-scope policy entries fail before preflight.
+    fn domain_workflow_instantiate(&self, arguments: &Value) -> Result<Value, String> {
+        let mut output = instantiate_domain_workflow(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow instantiation refused: {error}"))?;
+        let mission = output
+            .get("mission")
+            .cloned()
+            .ok_or_else(|| "domain workflow instantiation omitted mission".to_string())?;
+        let preflight_report = self
+            .preflight_agent_mission(&mission)
+            .map_err(|error| format!("domain workflow mission preflight refused: {error}"))?;
+        output["preflight_report"] = preflight_report;
+        Ok(output)
+    }
+
+    /// Plan multiple group-scoped workflows while retaining independent authoritative preflight
+    /// outcomes for each item. This is a composition boundary only; it never dispatches a group
+    /// tool or turns a complete portfolio into execution authorization.
+    fn domain_workflow_portfolio(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode domain workflow portfolio input: {error}"))?;
+        if encoded.len() > bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES {
+            return Err(format!(
+                "domain workflow portfolio input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES
+            ));
+        }
+        let mut output = build_domain_workflow_portfolio(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow portfolio refused: {error}"))?;
+        let mut preflight_blocked_count = 0usize;
+        if let Some(items) = output.get_mut("items").and_then(Value::as_array_mut) {
+            for item in items.iter_mut() {
+                if item.get("status").and_then(Value::as_str) != Some("instantiated") {
+                    continue;
+                }
+                let mission = item
+                    .pointer("/instantiation/mission")
+                    .cloned()
+                    .ok_or_else(|| "portfolio item omitted instantiated mission".to_string())?;
+                let preflight = match self.preflight_agent_mission(&mission) {
+                    Ok(value) => value,
+                    Err(error) => json!({
+                        "ok": false,
+                        "workflow": "agent_mission",
+                        "preflight": true,
+                        "dispatch": "not_started",
+                        "schema_valid": false,
+                        "error": error,
+                        "fail_closed": true,
+                        "readiness_claimed": false
+                    }),
+                };
+                let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+                let observed_plan_digest = preflight
+                    .pointer("/plan/digest")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let preflight_status = if preflight_ok { "matched" } else { "blocked" };
+                item["mission_preflight"] = json!({
+                    "status": preflight_status,
+                    "matched": preflight_ok,
+                    "ok": preflight_ok,
+                    "observed_plan_digest": observed_plan_digest,
+                    "dispatch": "not_started"
+                });
+                item["instantiation"]["preflight_report"] = preflight.clone();
+                if !preflight_ok {
+                    preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                    item["status"] = json!("blocked_by_mission_preflight");
+                    item["issues"] = json!([{
+                        "code": "mission_preflight_blocked",
+                        "message": "authoritative mission schema preflight blocked this portfolio item",
+                        "preflight": preflight
+                    }]);
+                }
+            }
+        }
+        let kernel_valid = output
+            .get("valid")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let valid = kernel_valid && preflight_blocked_count == 0;
+        output["valid"] = json!(valid);
+        output["portfolio_ready"] = json!(valid);
+        output["summary"]["preflight_blocked_count"] = json!(preflight_blocked_count);
+        output["summary"]["preflight_status"] = json!(if preflight_blocked_count == 0 {
+            "matched"
+        } else {
+            "blocked"
+        });
+        output["preflight"] = json!({
+            "required": true,
+            "status": if preflight_blocked_count == 0 { "matched" } else { "blocked" },
+            "matched": preflight_blocked_count == 0,
+            "blocked_count": preflight_blocked_count,
+            "dispatch": "not_started"
+        });
+        if preflight_blocked_count > 0 {
+            let allow_partial = output
+                .pointer("/policy/allow_partial")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            output["portfolio_status"] = json!(if allow_partial { "partial" } else { "blocked" });
+        }
+        output["dispatch"] = json!("not_started");
+        output["execution"] = json!("not_started");
+        if let Some(object) = output.as_object_mut() {
+            object.remove("portfolio_digest");
+        }
+        let digest = bioprism_ids::ContentHash::of_value(&output)
+            .map_err(|error| format!("cannot digest domain workflow portfolio: {error}"))?;
+        output["portfolio_digest"] = json!(digest.to_string());
+        Ok(output)
+    }
+
+    /// Verify a retained multi-domain portfolio, replay aligned requests when supplied, and
+    /// preflight every structurally successful item against the authoritative live tool schemas.
+    /// This is an audit projection only: no selected tool is dispatched, retried, resumed, or
+    /// promoted to execution readiness.
+    fn domain_workflow_portfolio_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode domain workflow portfolio verification input: {error}")
+        })?;
+        if encoded.len() > bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES {
+            return Err(format!(
+                "domain workflow portfolio verification input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES
+            ));
+        }
+        let mut output = verify_domain_workflow_portfolio(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow portfolio verification refused: {error}"))?;
+        let mut preflight_attempted_count = 0usize;
+        let mut preflight_blocked_count = 0usize;
+        if let Some(items) = output.get_mut("items").and_then(Value::as_array_mut) {
+            for item in items.iter_mut() {
+                let structurally_verified = matches!(
+                    item.get("status").and_then(Value::as_str),
+                    Some("verified") | Some("verified_without_replay")
+                );
+                if !structurally_verified {
+                    continue;
+                }
+                let mission = item
+                    .pointer("/instantiation/mission")
+                    .cloned()
+                    .ok_or_else(|| {
+                        "portfolio verification item omitted verified mission".to_string()
+                    })?;
+                preflight_attempted_count = preflight_attempted_count.saturating_add(1);
+                let preflight = match self.preflight_agent_mission(&mission) {
+                    Ok(value) => value,
+                    Err(error) => json!({
+                        "ok": false,
+                        "workflow": "agent_mission",
+                        "preflight": true,
+                        "dispatch": "not_started",
+                        "schema_valid": false,
+                        "error": error,
+                        "fail_closed": true,
+                        "readiness_claimed": false
+                    }),
+                };
+                let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+                let expected_plan_digest = item
+                    .pointer("/instantiation/preflight_report/plan/digest")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let observed_plan_digest = preflight
+                    .pointer("/plan/digest")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let mut item_mismatches = item
+                    .get("mismatches")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let preflight_status = if !preflight_ok {
+                    item_mismatches.push(json!({
+                        "code": "mission_preflight_blocked",
+                        "expected": expected_plan_digest,
+                        "observed": observed_plan_digest,
+                        "message": "authoritative mission schema preflight blocked this portfolio verification item"
+                    }));
+                    preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                    item["status"] = json!("blocked_by_mission_preflight");
+                    "blocked"
+                } else if expected_plan_digest.is_null() {
+                    item_mismatches.push(json!({
+                        "code": "retained_preflight_missing",
+                        "message": "the retained instantiation has no authoritative preflight plan digest",
+                        "observed": observed_plan_digest
+                    }));
+                    preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                    item["status"] = json!("blocked_by_mission_preflight");
+                    "retained_projection_missing"
+                } else if expected_plan_digest != observed_plan_digest {
+                    item_mismatches.push(json!({
+                        "code": "mission_plan_digest_mismatch",
+                        "expected": expected_plan_digest,
+                        "observed": observed_plan_digest
+                    }));
+                    preflight_blocked_count = preflight_blocked_count.saturating_add(1);
+                    item["status"] = json!("blocked_by_mission_preflight");
+                    "mismatched"
+                } else {
+                    "matched"
+                };
+                item["mission_preflight"] = json!({
+                    "requested": true,
+                    "status": preflight_status,
+                    "matched": preflight_status == "matched",
+                    "ok": preflight_ok,
+                    "expected_plan_digest": expected_plan_digest,
+                    "observed_plan_digest": observed_plan_digest,
+                    "dispatch": "not_started"
+                });
+                item["verification"]["mission_preflight"] = item["mission_preflight"].clone();
+                item["verification"]["preflight_report"] = preflight.clone();
+                item["instantiation"]["preflight_report"] = preflight;
+                item["mismatches"] = Value::Array(item_mismatches);
+            }
+        }
+        let kernel_valid = output
+            .get("valid")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let valid = kernel_valid && preflight_blocked_count == 0;
+        output["valid"] = json!(valid);
+        output["portfolio_ready"] = json!(valid);
+        let kernel_blocked_count = output
+            .pointer("/summary/blocked_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        output["summary"]["blocked_count"] =
+            json!(kernel_blocked_count.saturating_add(preflight_blocked_count));
+        output["summary"]["preflight_attempted_count"] = json!(preflight_attempted_count);
+        output["summary"]["preflight_blocked_count"] = json!(preflight_blocked_count);
+        output["summary"]["preflight_status"] = json!(if preflight_blocked_count > 0 {
+            "blocked"
+        } else if preflight_attempted_count > 0 {
+            "matched"
+        } else {
+            "deferred"
+        });
+        output["preflight"] = json!({
+            "required": true,
+            "status": if preflight_blocked_count > 0 {
+                "blocked"
+            } else if preflight_attempted_count > 0 {
+                "matched"
+            } else {
+                "deferred"
+            },
+            "matched": preflight_blocked_count == 0 && preflight_attempted_count > 0,
+            "attempted_count": preflight_attempted_count,
+            "blocked_count": preflight_blocked_count,
+            "dispatch": "not_started"
+        });
+        let mut mismatches = output
+            .get("mismatches")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if preflight_blocked_count > 0 {
+            mismatches.push(json!({
+                "code": "portfolio_mission_preflight_blocked",
+                "blocked_count": preflight_blocked_count
+            }));
+        }
+        output["mismatches"] = Value::Array(mismatches);
+        let status = if valid {
+            output
+                .get("verification_status")
+                .cloned()
+                .unwrap_or_else(|| json!("verified"))
+        } else if preflight_blocked_count > 0 {
+            json!(if output
+                .pointer("/policy/allow_partial")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                "partial"
+            } else {
+                "blocked_by_mission_preflight"
+            })
+        } else {
+            output
+                .get("verification_status")
+                .cloned()
+                .unwrap_or_else(|| json!("mismatch"))
+        };
+        output["verification_status"] = status;
+        output["dispatch"] = json!("not_started");
+        output["execution"] = json!("not_started");
+        if let Some(object) = output.as_object_mut() {
+            object.remove("portfolio_verify_digest");
+        }
+        let digest = bioprism_ids::ContentHash::of_value(&output).map_err(|error| {
+            format!("cannot digest domain workflow portfolio verification: {error}")
+        })?;
+        output["portfolio_verify_digest"] = json!(digest.to_string());
+        Ok(output)
+    }
+
+    /// Verify a retained domain workflow against the live catalogue and authoritative mission
+    /// preflight without dispatching any selected tool.
+    fn domain_workflow_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode domain workflow verification input: {error}")
+        })?;
+        if encoded.len() > bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES {
+            return Err(format!(
+                "domain workflow verification input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_BYTES
+            ));
+        }
+        let mut output = bioprism_devplat::verify_domain_workflow(
+            &workspace_capabilities(),
+            &Value::Array(tool_definitions()),
+            arguments,
+        )
+        .map_err(|error| format!("domain workflow verification refused: {error}"))?;
+        let instantiation = arguments
+            .get("instantiation")
+            .ok_or("domain workflow verification requires instantiation")?;
+        let mission = instantiation
+            .get("mission")
+            .ok_or("domain workflow verification instantiation omitted mission")?;
+        let preflight = match self.preflight_agent_mission(mission) {
+            Ok(value) => value,
+            Err(error) => json!({
+                "ok": false,
+                "workflow": "agent_mission",
+                "preflight": true,
+                "dispatch": "not_started",
+                "schema_valid": false,
+                "error": error,
+                "fail_closed": true,
+            }),
+        };
+        let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+        let expected_plan_digest = instantiation
+            .pointer("/preflight_report/plan/digest")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let observed_plan_digest = preflight
+            .pointer("/plan/digest")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let mut mismatches = output
+            .get("mismatches")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let preflight_status = if !preflight_ok {
+            mismatches.push(json!({
+                "code": "mission_preflight_blocked",
+                "expected": expected_plan_digest,
+                "observed": observed_plan_digest,
+            }));
+            "blocked"
+        } else if expected_plan_digest.is_null() {
+            mismatches.push(json!({
+                "code": "retained_preflight_missing",
+                "message": "the retained instantiation has no authoritative preflight plan digest",
+                "observed": observed_plan_digest,
+            }));
+            "retained_projection_missing"
+        } else if expected_plan_digest != observed_plan_digest {
+            mismatches.push(json!({
+                "code": "mission_plan_digest_mismatch",
+                "expected": expected_plan_digest,
+                "observed": observed_plan_digest,
+            }));
+            "mismatched"
+        } else {
+            "matched"
+        };
+        output["mission_preflight"] = json!({
+            "requested": true,
+            "status": preflight_status,
+            "matched": preflight_status == "matched",
+            "ok": preflight_ok,
+            "expected_plan_digest": expected_plan_digest,
+            "observed_plan_digest": observed_plan_digest,
+            "dispatch": "not_started",
+        });
+        output["preflight_report"] = preflight;
+        output["mismatches"] = Value::Array(mismatches.clone());
+        let valid = mismatches.is_empty();
+        let replay_status = output
+            .pointer("/replay/status")
+            .and_then(Value::as_str)
+            .unwrap_or("not_requested")
+            .to_owned();
+        let replay_requested = output
+            .pointer("/replay/requested")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        output["valid"] = json!(valid);
+        output["verification_status"] = json!(if valid {
+            if replay_requested {
+                "verified"
+            } else {
+                "verified_without_replay"
+            }
+        } else if replay_status == "blocked" {
+            "blocked_by_replay"
+        } else if preflight_status == "blocked" || preflight_status == "retained_projection_missing"
+        {
+            "blocked_by_mission_preflight"
+        } else {
+            "mismatch"
+        });
+        output["execution"] = json!("not_started");
+        output["dispatch"] = json!("not_started");
+        Ok(output)
+    }
+
+    /// Reconcile a retained mission report or evidence bundle against an instantiated workflow.
+    ///
+    /// This is an audit projection only. It checks plan and tool identity, result counters,
+    /// trace lifecycle, output retention, refusal/omission posture, and completion readiness;
+    /// it never retries or dispatches a domain tool.
+    fn domain_workflow_reconcile(&self, arguments: &Value) -> Result<Value, String> {
+        reconcile_domain_workflow(arguments)
+            .map_err(|error| format!("domain workflow reconciliation refused: {error}"))
+    }
+
+    /// Import a previously produced reconciliation report into the bounded process-local audit
+    /// registry. The report digest is recomputed before it becomes queryable.
+    fn domain_workflow_reconciliation_import(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode domain workflow reconciliation import input: {error}")
+        })?;
+        if encoded.len() > bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES {
+            return Err(format!(
+                "domain workflow reconciliation import input exceeds the {}-byte bound",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES
+            ));
+        }
+        let record = arguments.get("record").ok_or("record is required")?;
+        self.workflow_reconciliation_registry
+            .lock()
+            .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?
+            .import(record)
+            .map_err(|error| format!("domain workflow reconciliation import refused: {error}"))
+    }
+
+    /// Query digest-ordered reconciliation rows without executing or re-evaluating anything.
+    fn domain_workflow_reconciliation_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode domain workflow reconciliation query input: {error}")
+        })?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "domain workflow reconciliation query input exceeds the 1000000-byte bound".into(),
+            );
+        }
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{name} must be a string"))
+                })
+                .transpose()
+        };
+        let mission_id = optional_string("mission_id")?;
+        let workflow_id = optional_string("workflow_id")?;
+        let mission_plan_digest = optional_string("mission_plan_digest")?;
+        let completion_status = optional_string("completion_status")?;
+        let decision_readiness_state = optional_string("decision_readiness_state")?;
+        let after = optional_string("after")?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        if !(1..=bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS)
+            .contains(&max_items)
+        {
+            return Err(format!(
+                "max_items must be between 1 and {}",
+                bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS
+            ));
+        }
+        let include_records = arguments
+            .get("include_records")
+            .map(|value| value.as_bool().ok_or("include_records must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        let decision_readiness_gate_satisfied = arguments
+            .get("decision_readiness_gate_satisfied")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or("decision_readiness_gate_satisfied must be a boolean")
+            })
+            .transpose()?;
+        self.workflow_reconciliation_registry
+            .lock()
+            .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?
+            .query(
+                mission_id,
+                workflow_id,
+                mission_plan_digest,
+                completion_status,
+                decision_readiness_state,
+                decision_readiness_gate_satisfied,
+                after,
+                max_items,
+                include_records,
+            )
+            .map_err(|error| format!("domain workflow reconciliation query refused: {error}"))
+    }
+
+    /// Fetch one imported reconciliation report by its content hash.
+    fn domain_workflow_reconciliation_get(&self, arguments: &Value) -> Result<Value, String> {
+        let digest = arguments
+            .get("reconciliation_digest")
+            .and_then(Value::as_str)
+            .ok_or("reconciliation_digest is required and must be a content hash")?;
+        bioprism_ids::ContentHash::parse(digest.to_string())
+            .map_err(|error| format!("reconciliation_digest is invalid: {error}"))?;
+        let record = self
+            .workflow_reconciliation_registry
+            .lock()
+            .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?
+            .get(digest)
+            .ok_or_else(|| format!("reconciliation {digest:?} is not present in the registry"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/domain-workflow-reconciliation-record/0.1",
+            "workflow": "domain_workflow_reconciliation_get",
+            "reconciliation_digest": digest,
+            "record": record,
+            "execution": "not_started",
+            "guarantees": [
+                "the returned report passed the shared reconciliation digest check before import",
+                "lookup does not execute, retry, resume, or mutate a mission"
+            ],
+            "limitations": [
+                "the process-local registry is bounded and is not a distributed audit store",
+                "report presence does not establish scientific validity, clinical safety, or release approval"
+            ]
+        }))
+    }
+
     /// Search the complete workspace capability catalogue and optionally attach authoritative MCP
     /// schemas for the matched tools.
     ///
@@ -22273,8 +29146,9 @@ impl Server {
             .cloned()
             .collect::<Vec<_>>();
         let coverage_complete = uncovered_groups.is_empty() && unbound_groups.is_empty();
-        let mut output = serde_json::to_value(search)
-            .map_err(|error| format!("cannot encode mission evaluator discovery result: {error}"))?;
+        let mut output = serde_json::to_value(search).map_err(|error| {
+            format!("cannot encode mission evaluator discovery result: {error}")
+        })?;
         output["ok"] = json!(true);
         output["workflow"] = json!("mission_evaluator_discover");
         output["mission_evaluator_schema_version"] = json!(MISSION_EVALUATOR_SCHEMA_VERSION);
@@ -22316,7 +29190,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode mission evaluator review input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("mission evaluator review input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "mission evaluator review input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let request: MissionEvaluatorReviewRequest = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("invalid mission evaluator review input: {error}"))?;
@@ -22327,9 +29203,199 @@ impl Server {
         let output_bytes = serde_json::to_vec(&output)
             .map_err(|error| format!("cannot measure mission evaluator review result: {error}"))?;
         if output_bytes.len() > 20_000_000 {
-            return Err("mission evaluator review result exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "mission evaluator review result exceeds the 20000000-byte safety bound".into(),
+            );
         }
         Ok(output)
+    }
+
+    /// Replay retained mission evaluator lineage against the current catalogue without dispatch.
+    fn mission_evaluator_replay(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode mission evaluator replay input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "mission evaluator replay input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        let request: MissionEvaluatorReplayRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid mission evaluator replay input: {error}"))?;
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let output = catalogue
+            .replay(&request)
+            .map_err(|error| format!("mission evaluator replay refused: {error}"))?;
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure mission evaluator replay result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "mission evaluator replay result exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        Ok(output)
+    }
+
+    /// Compare retained evaluator evidence with the current catalogue without dispatch.
+    fn mission_evaluator_replay_compare(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode mission evaluator replay comparison input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "mission evaluator replay comparison input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let request: MissionEvaluatorReplayCompareRequest =
+            serde_json::from_value(arguments.clone()).map_err(|error| {
+                format!("invalid mission evaluator replay comparison input: {error}")
+            })?;
+        let output = MissionEvaluatorCatalogue::standard()
+            .compare(&request)
+            .map_err(|error| format!("mission evaluator replay comparison refused: {error}"))?;
+        let output_bytes = serde_json::to_vec(&output).map_err(|error| {
+            format!("cannot measure mission evaluator replay comparison result: {error}")
+        })?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "mission evaluator replay comparison result exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        Ok(output)
+    }
+
+    /// Verify a portable mission evidence bundle without executing any contained workflow.
+    fn mission_evidence_bundle_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode mission evidence bundle verification input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "mission evidence bundle verification input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let bundle = arguments.get("bundle").ok_or("bundle is required")?;
+        let output = verify_mission_evidence_bundle(bundle)
+            .map_err(|error| format!("mission evidence bundle verification refused: {error}"))?;
+        let output_bytes = serde_json::to_vec(&output).map_err(|error| {
+            format!("cannot measure mission evidence bundle verification result: {error}")
+        })?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "mission evidence bundle verification result exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        Ok(output)
+    }
+
+    /// Import a verified evidence bundle into the bounded in-process registry.
+    ///
+    /// The MCP surface intentionally shares the same verifier and registry kernel as REST. It
+    /// is a process-local index (REST can add restart persistence); importing never turns an
+    /// evidence artifact into execution state or a scientific/release claim.
+    fn mission_evidence_bundle_import(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode mission evidence bundle import input: {error}")
+        })?;
+        if encoded.len() > bioprism_devplat::MAX_EVIDENCE_REGISTRY_BYTES {
+            return Err(format!(
+                "mission evidence bundle import input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_EVIDENCE_REGISTRY_BYTES
+            ));
+        }
+        let bundle = arguments.get("bundle").ok_or("bundle is required")?;
+        self.evidence_registry
+            .lock()
+            .map_err(|_| "mission evidence registry lock is poisoned".to_string())?
+            .import(bundle)
+            .map_err(|error| format!("mission evidence bundle import refused: {error}"))
+    }
+
+    /// Query deterministic, digest-ordered registry rows without executing anything.
+    fn mission_evidence_bundle_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode mission evidence bundle query input: {error}")
+        })?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "mission evidence bundle query input exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{name} must be a string"))
+                })
+                .transpose()
+        };
+        let mission_id = optional_string("mission_id")?;
+        let domain = optional_string("domain")?;
+        let after = optional_string("after")?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        if !(1..=MAX_EVIDENCE_REGISTRY_QUERY_ITEMS).contains(&max_items) {
+            return Err(format!(
+                "max_items must be between 1 and {MAX_EVIDENCE_REGISTRY_QUERY_ITEMS}"
+            ));
+        }
+        let include_bundles = arguments
+            .get("include_bundles")
+            .map(|value| value.as_bool().ok_or("include_bundles must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.evidence_registry
+            .lock()
+            .map_err(|_| "mission evidence registry lock is poisoned".to_string())?
+            .query(mission_id, domain, after, max_items, include_bundles)
+            .map_err(|error| format!("mission evidence bundle query refused: {error}"))
+    }
+
+    /// Fetch one imported bundle by its content hash.
+    fn mission_evidence_bundle_get(&self, arguments: &Value) -> Result<Value, String> {
+        let digest = arguments
+            .get("bundle_digest")
+            .and_then(Value::as_str)
+            .ok_or("bundle_digest is required and must be a content hash")?;
+        bioprism_ids::ContentHash::parse(digest.to_string())
+            .map_err(|error| format!("bundle_digest is invalid: {error}"))?;
+        let bundle = self
+            .evidence_registry
+            .lock()
+            .map_err(|_| "mission evidence registry lock is poisoned".to_string())?
+            .get(digest)
+            .ok_or_else(|| format!("bundle {digest:?} is not present in the registry"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "bioprism-mcp/mission-evidence-bundle-record/0.1",
+            "workflow": "mission_evidence_bundle_get",
+            "bundle_digest": digest,
+            "bundle": bundle,
+            "execution": "not_started",
+            "guarantees": [
+                "the returned bundle was accepted by the shared independent verifier before import",
+                "lookup does not execute a mission, evaluator, domain tool, or external effect"
+            ],
+            "limitations": [
+                "the process-local registry is bounded and is not a distributed object store",
+                "bundle presence does not establish scientific validity or release approval"
+            ]
+        }))
     }
 
     /// Verify that the explicit cross-domain catalogue and authoritative MCP tool definitions
@@ -22566,31 +29632,198 @@ impl Server {
         }
         let audit = build_dashboard(&catalogue, &schema_quality, &query)
             .map_err(|error| format!("capability dashboard refused: {error}"))?;
+        let mut audit_value = serde_json::to_value(&audit).map_err(|error| {
+            format!("capability dashboard audit could not be serialized: {error}")
+        })?;
+        let selected_groups = audit_value
+            .get("groups")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|group| {
+                let id = group.get("id").and_then(Value::as_str)?.to_string();
+                let domains = group
+                    .get("domains")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                Some((id, domains))
+            })
+            .collect::<Vec<_>>();
+        let (artifact_registry_generation, artifact_registry_size, artifact_postures) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            let postures = selected_groups
+                .iter()
+                .map(|(id, domains)| (id.clone(), registry.domain_evidence_posture(id, domains)))
+                .collect::<BTreeMap<_, _>>();
+            (registry.generation(), registry.len(), postures)
+        };
+        let (
+            workflow_reconciliation_registry_generation,
+            workflow_reconciliation_registry_size,
+            reconciliation_postures,
+        ) = {
+            let registry = self
+                .workflow_reconciliation_registry
+                .lock()
+                .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?;
+            let postures = selected_groups
+                .iter()
+                .map(|(id, _)| (id.clone(), registry.workflow_posture(id)))
+                .collect::<BTreeMap<_, _>>();
+            (registry.generation(), registry.len(), postures)
+        };
+        let mut groups_with_artifact_evidence = 0usize;
+        let mut artifact_evidence_records = 0usize;
+        let mut groups_with_workflow_reconciliation = 0usize;
+        let mut workflow_reconciliation_records = 0usize;
+        let mut evidence_rows = Vec::new();
+        if let Some(groups) = audit_value.get_mut("groups").and_then(Value::as_array_mut) {
+            for group in groups {
+                let Some(group_object) = group.as_object_mut() else {
+                    continue;
+                };
+                let Some(id) = group_object
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                else {
+                    continue;
+                };
+                let artifact_evidence = artifact_postures.get(&id).cloned().unwrap_or_else(|| {
+                    json!({
+                        "ok": true,
+                        "state": "missing",
+                        "group_id": id,
+                        "matching_record_count": 0,
+                        "readiness_claimed": false,
+                        "execution": "not_started"
+                    })
+                });
+                let reconciliation_evidence = reconciliation_postures
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        json!({
+                            "workflow_id": id,
+                            "state": "missing",
+                            "record_count": 0,
+                            "readiness_claimed": false,
+                            "scope": "bounded_digest_valid_reconciliation_registry"
+                        })
+                    });
+                let artifact_records = artifact_evidence
+                    .get("matching_record_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                let reconciliation_records = reconciliation_evidence
+                    .get("record_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                if artifact_records > 0 {
+                    groups_with_artifact_evidence += 1;
+                    artifact_evidence_records =
+                        artifact_evidence_records.saturating_add(artifact_records);
+                }
+                if reconciliation_records > 0 {
+                    groups_with_workflow_reconciliation += 1;
+                    workflow_reconciliation_records =
+                        workflow_reconciliation_records.saturating_add(reconciliation_records);
+                }
+                group_object.insert("artifact_evidence".into(), artifact_evidence.clone());
+                group_object.insert(
+                    "workflow_reconciliation_evidence".into(),
+                    reconciliation_evidence.clone(),
+                );
+                evidence_rows.push(json!({
+                    "id": id,
+                    "artifact_evidence": artifact_evidence,
+                    "workflow_reconciliation_evidence": reconciliation_evidence
+                }));
+            }
+        }
+        let evidence_scope =
+            "selected_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries";
+        let evidence_document = json!({
+            "scope": evidence_scope,
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "workflow_reconciliation_registry_generation": workflow_reconciliation_registry_generation,
+            "workflow_reconciliation_registry_size": workflow_reconciliation_registry_size,
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "groups_with_workflow_reconciliation": groups_with_workflow_reconciliation,
+            "workflow_reconciliation_records": workflow_reconciliation_records,
+            "groups": evidence_rows
+        });
+        let evidence_digest =
+            bioprism_ids::ContentHash::of_value(&evidence_document).map_err(|error| {
+                format!("capability dashboard evidence could not be hashed: {error}")
+            })?;
+        audit_value["evidence"] = json!({
+            "scope": evidence_scope,
+            "evidence_digest": evidence_digest.to_string(),
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "workflow_reconciliation_registry_generation": workflow_reconciliation_registry_generation,
+            "workflow_reconciliation_registry_size": workflow_reconciliation_registry_size,
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "groups_with_workflow_reconciliation": groups_with_workflow_reconciliation,
+            "workflow_reconciliation_records": workflow_reconciliation_records,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "every returned capability group receives an independent artifact and reconciliation posture",
+                "postures are joined only from the bounded current registries and preserve their own verification semantics",
+                "the evidence digest binds the selected group rows and registry snapshot metadata"
+            ],
+            "limitations": [
+                "registry observations are not one atomic cross-store transaction",
+                "artifact or reconciliation presence does not prove execution, scientific validity, release readiness, or external effect completion",
+                "bounded or filtered output does not describe unselected capability groups"
+            ]
+        });
         let output = json!({
             "ok": true,
             "workflow": "capability_dashboard",
             "schema": bioprism_devplat::CAPABILITY_DASHBOARD_SCHEMA,
             "catalog_digest": audit.catalog_digest,
             "dashboard_digest": audit.dashboard_digest,
+            "evidence_digest": evidence_digest.to_string(),
+            "evidence_scope": evidence_scope,
             "capability_dashboard_ready": audit.ready,
-            "audit": audit,
+            "audit": audit_value,
             "schema_source": "authoritative tools/list definitions",
             "duplicate_schema_names": duplicate_schema_names,
             "guarantees": [
                 "domain rows are sorted and bound to the catalogue digest and query",
                 "MCP callable status requires a present, well-formed authoritative input schema",
-                "crate, CLI, Python, and MCP surfaces are reported independently rather than collapsed into one score"
+                "crate, CLI, Python, and MCP surfaces are reported independently rather than collapsed into one score",
+                "artifact and workflow-reconciliation evidence are advisory joins and never promote the dashboard to readiness"
             ],
             "limitations": [
                 "declared crate, CLI, and Python surfaces are not executed or import-checked",
                 "callable means transport-schema availability, not permission, scientific validity, or execution success",
-                "filtered or bounded output must not be interpreted as a complete inventory without its warnings"
+                "filtered or bounded output must not be interpreted as a complete inventory without its warnings",
+                "evidence registries are observed independently and do not provide an atomic cross-store snapshot"
             ]
         });
         let output_bytes = serde_json::to_vec(&output)
             .map_err(|error| format!("cannot measure capability dashboard result: {error}"))?;
         if output_bytes.len() > 20_000_000 {
-            return Err("capability dashboard result exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "capability dashboard result exceeds the 20000000-byte safety bound".into(),
+            );
         }
         Ok(output)
     }
@@ -22630,6 +29863,7 @@ impl Server {
         let mut unresolved = Vec::new();
         let mut need_reports = Vec::new();
         let mut route_groups = BTreeSet::new();
+        let mut route_group_domains = BTreeMap::<String, BTreeSet<String>>::new();
         let mut route_domains = BTreeSet::new();
         for need in request.needs {
             let mut query = need.query.clone();
@@ -22652,6 +29886,10 @@ impl Server {
                 candidate_groups.insert(matched.group.id.clone());
                 candidate_domains.extend(matched.group.domains.iter().cloned());
                 candidate_tools.extend(matched.matched_tools.iter().cloned());
+                route_group_domains
+                    .entry(matched.group.id.clone())
+                    .or_default()
+                    .extend(matched.group.domains.iter().cloned());
             }
             route_groups.extend(candidate_groups.iter().cloned());
             route_domains.extend(candidate_domains.iter().cloned());
@@ -22674,6 +29912,142 @@ impl Server {
             }));
         }
 
+        let selected_groups = route_group_domains
+            .iter()
+            .map(|(id, domains)| (id.clone(), domains.iter().cloned().collect::<Vec<_>>()))
+            .collect::<Vec<_>>();
+        let (artifact_registry_generation, artifact_registry_size, artifact_postures) = {
+            let registry = self
+                .artifact_registry
+                .lock()
+                .map_err(|_| "artifact registry lock is poisoned".to_string())?;
+            let postures = selected_groups
+                .iter()
+                .map(|(id, domains)| (id.clone(), registry.domain_evidence_posture(id, domains)))
+                .collect::<BTreeMap<_, _>>();
+            (registry.generation(), registry.len(), postures)
+        };
+        let (
+            workflow_reconciliation_registry_generation,
+            workflow_reconciliation_registry_size,
+            reconciliation_postures,
+        ) = {
+            let registry = self
+                .workflow_reconciliation_registry
+                .lock()
+                .map_err(|_| "workflow reconciliation registry lock is poisoned".to_string())?;
+            let postures = selected_groups
+                .iter()
+                .map(|(id, _)| (id.clone(), registry.workflow_posture(id)))
+                .collect::<BTreeMap<_, _>>();
+            (registry.generation(), registry.len(), postures)
+        };
+        let evidence_scope =
+            "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries";
+        let mut groups_with_artifact_evidence = 0usize;
+        let mut artifact_evidence_records = 0usize;
+        let mut groups_with_workflow_reconciliation = 0usize;
+        let mut workflow_reconciliation_records = 0usize;
+        let mut evidence_rows = Vec::new();
+        let mut evidence_by_group = BTreeMap::new();
+        for (id, _) in &selected_groups {
+            let artifact_evidence = artifact_postures.get(id).cloned().unwrap_or_else(|| {
+                json!({
+                    "ok": true,
+                    "state": "missing",
+                    "group_id": id,
+                    "matching_record_count": 0,
+                    "readiness_claimed": false,
+                    "execution": "not_started"
+                })
+            });
+            let reconciliation_evidence =
+                reconciliation_postures.get(id).cloned().unwrap_or_else(|| {
+                    json!({
+                        "workflow_id": id,
+                        "state": "missing",
+                        "record_count": 0,
+                        "readiness_claimed": false,
+                        "scope": "bounded_digest_valid_reconciliation_registry"
+                    })
+                });
+            let artifact_records = artifact_evidence
+                .get("matching_record_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let reconciliation_records = reconciliation_evidence
+                .get("record_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            if artifact_records > 0 {
+                groups_with_artifact_evidence += 1;
+                artifact_evidence_records =
+                    artifact_evidence_records.saturating_add(artifact_records);
+            }
+            if reconciliation_records > 0 {
+                groups_with_workflow_reconciliation += 1;
+                workflow_reconciliation_records =
+                    workflow_reconciliation_records.saturating_add(reconciliation_records);
+            }
+            let row = json!({
+                "id": id,
+                "artifact_evidence": artifact_evidence,
+                "workflow_reconciliation_evidence": reconciliation_evidence
+            });
+            evidence_by_group.insert(id.clone(), row.clone());
+            evidence_rows.push(row);
+        }
+        for need_report in &mut need_reports {
+            let candidate_group_evidence = need_report
+                .get("candidate_groups")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter_map(|id| evidence_by_group.get(id).cloned())
+                .collect::<Vec<_>>();
+            need_report["candidate_group_evidence"] = Value::Array(candidate_group_evidence);
+        }
+        let evidence_document = json!({
+            "scope": evidence_scope,
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "workflow_reconciliation_registry_generation": workflow_reconciliation_registry_generation,
+            "workflow_reconciliation_registry_size": workflow_reconciliation_registry_size,
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "groups_with_workflow_reconciliation": groups_with_workflow_reconciliation,
+            "workflow_reconciliation_records": workflow_reconciliation_records,
+            "groups": evidence_rows
+        });
+        let evidence_digest = bioprism_ids::ContentHash::of_value(&evidence_document)
+            .map_err(|error| format!("capability route evidence could not be hashed: {error}"))?;
+        let evidence_summary = json!({
+            "scope": evidence_scope,
+            "evidence_digest": evidence_digest.to_string(),
+            "artifact_registry_generation": artifact_registry_generation,
+            "artifact_registry_size": artifact_registry_size,
+            "workflow_reconciliation_registry_generation": workflow_reconciliation_registry_generation,
+            "workflow_reconciliation_registry_size": workflow_reconciliation_registry_size,
+            "candidate_group_count": selected_groups.len(),
+            "groups_with_artifact_evidence": groups_with_artifact_evidence,
+            "artifact_evidence_records": artifact_evidence_records,
+            "groups_with_workflow_reconciliation": groups_with_workflow_reconciliation,
+            "workflow_reconciliation_records": workflow_reconciliation_records,
+            "readiness_claimed": false,
+            "execution": "not_started",
+            "guarantees": [
+                "each candidate capability group has separate artifact and reconciliation posture rows",
+                "postures are read from bounded current registries and retain their own verification semantics",
+                "the evidence digest binds candidate group rows and registry snapshot metadata"
+            ],
+            "limitations": [
+                "registry observations are not one atomic cross-store transaction",
+                "evidence presence does not prove execution, scientific validity, release readiness, or external effect completion",
+                "unresolved needs have no candidate-group evidence rows"
+            ]
+        });
+
         let recommended_tool_count = recommended.len();
         let recommended_tools = recommended
             .iter()
@@ -22688,6 +30062,8 @@ impl Server {
             "capability_schema_version": CAPABILITY_SCHEMA_VERSION,
             "route_id": route_id,
             "catalog_digest": catalogue.digest().to_string(),
+            "evidence_digest": evidence_digest.to_string(),
+            "evidence_scope": evidence_scope,
             "goal": request.goal,
             "needs": need_reports,
             "unresolved_needs": unresolved,
@@ -22703,8 +30079,10 @@ impl Server {
                 "candidate_domain_count": route_domains.len(),
                 "candidate_domains": route_domains,
                 "candidate_tool_count": recommended_tool_count,
+                "candidate_group_evidence_count": selected_groups.len(),
                 "posture": "routing evidence only; caller must review domain contracts, arguments, policy, and authorization"
             },
+            "evidence": evidence_summary,
             "execution": "not_started",
             "guarantees": [
                 "each need retains its complete bounded ranked search result",
@@ -22716,6 +30094,7 @@ impl Server {
                 "candidate ranking does not validate domain-specific arguments",
                 "a route is not an agent_mission allow-list until the caller reviews it",
                 "free-text matches are routing evidence, not scientific or readiness claims",
+                "evidence posture is advisory and does not replace route review, mission preflight, authorization, or execution evidence",
             ],
         });
         if request.include_tools {
@@ -22797,6 +30176,77 @@ impl Server {
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
             .ok_or("route.catalog_digest must be a non-empty string")?;
+        let route_evidence_digest = match route.get("evidence_digest") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let digest = value
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or("route.evidence_digest must be a non-empty string")?;
+                bioprism_ids::ContentHash::parse(digest.to_string())
+                    .map_err(|_| "route.evidence_digest must be a valid content digest")?;
+                Some(digest.to_string())
+            }
+        };
+        let route_evidence_scope = match route.get("evidence_scope") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or("route.evidence_scope must be a non-empty string")?
+                    .to_string(),
+            ),
+        };
+        let route_evidence = route.get("evidence").cloned();
+        if route_evidence_digest.is_some() != route_evidence.is_some()
+            || route_evidence_digest.is_some() != route_evidence_scope.is_some()
+        {
+            return Err(
+                "route evidence must provide evidence_digest, evidence_scope, and evidence together"
+                    .into(),
+            );
+        }
+        if let (Some(evidence_digest), Some(evidence_scope), Some(evidence)) = (
+            route_evidence_digest.as_deref(),
+            route_evidence_scope.as_deref(),
+            route_evidence.as_ref(),
+        ) {
+            let evidence_object = evidence
+                .as_object()
+                .ok_or("route.evidence must be an object")?;
+            if evidence_object
+                .get("evidence_digest")
+                .and_then(Value::as_str)
+                != Some(evidence_digest)
+                || evidence_object.get("scope").and_then(Value::as_str) != Some(evidence_scope)
+            {
+                return Err(
+                    "route evidence summary does not match its top-level digest and scope".into(),
+                );
+            }
+        }
+        let evidence_binding = match (
+            route_evidence_digest.as_deref(),
+            route_evidence_scope.as_deref(),
+            route_evidence.as_ref(),
+        ) {
+            (Some(digest), Some(scope), Some(evidence)) => json!({
+                "present": true,
+                "evidence_digest": digest,
+                "scope": scope,
+                "summary": evidence,
+                "posture": "carried_forward_not_recomputed",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            }),
+            _ => json!({
+                "present": false,
+                "posture": "not_supplied",
+                "readiness_claimed": false,
+                "execution": "not_started"
+            }),
+        };
         let goal = route
             .get("goal")
             .and_then(Value::as_str)
@@ -22891,6 +30341,7 @@ impl Server {
         let review_document = json!({
             "route_id": route_id,
             "catalog_digest": catalog_digest,
+            "evidence_digest": route_evidence_digest,
             "selections": raw_selections,
             "validate_schemas": validate_schemas,
         });
@@ -23246,6 +30697,8 @@ impl Server {
                 "goal": goal,
                 "steps": ordered_steps,
                 "dependency_waves": dependency_waves.clone(),
+                "route_evidence_digest": route_evidence_digest,
+                "route_evidence_scope": route_evidence_scope,
             })
         });
         let mut output = json!({
@@ -23254,6 +30707,8 @@ impl Server {
             "review_id": review_id,
             "route_id": route_id,
             "catalog_digest": catalog_digest,
+            "evidence_digest": route_evidence_digest,
+            "evidence_scope": route_evidence_scope,
             "goal": goal,
             "need_count": need_ids.len(),
             "selection_count": raw_selections.len(),
@@ -23265,6 +30720,7 @@ impl Server {
             "review_status": if ready_for_handoff { "ready" } else { "blocked" },
             "handoff_status": if ready_for_handoff { "mission_preflight_required" } else { "requires_caller_correction" },
             "mission_draft": mission_draft,
+            "evidence_binding": evidence_binding,
             "schema_review": {
                 "requested": validate_schemas,
                 "checked": schema_reports.len(),
@@ -23279,6 +30735,7 @@ impl Server {
                 "route candidates were reviewed without executing any tool",
                 "each ready selection is present in its need's bounded candidate list",
                 "dependency waves are deterministic and use only explicit caller selections",
+                "when supplied, the route evidence digest and scope are carried into review provenance and the mission draft",
             ],
             "limitations": [
                 "this review checks transport-shaped handoff structure, not domain-specific argument semantics",
@@ -23298,6 +30755,442 @@ impl Server {
             );
         }
         Ok(output)
+    }
+
+    /// Compile an explicitly reviewed capability route into a mission preflight handoff.
+    ///
+    /// This is intentionally a composition boundary rather than a second planner: the route
+    /// review remains responsible for candidate membership, dependency structure, and review
+    /// evidence, while `preflight_agent_mission` remains authoritative for the normalized mission
+    /// graph and every selected tool schema. The result is always planned and never dispatches a
+    /// nested tool. Callers still choose every tool, domain label, objective, argument object, and
+    /// dependency; route scores never become an allow-list implicitly.
+    fn capability_route_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode capability route plan input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "capability route plan input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("capability route plan input must be an object")?;
+        let mission_id = object
+            .get("mission_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("capability route plan requires a non-empty mission_id")?;
+        let route = object
+            .get("route")
+            .and_then(Value::as_object)
+            .ok_or("capability route plan requires a route object")?;
+        if route.get("workflow").and_then(Value::as_str) != Some("capability_route") {
+            return Err("route.workflow must be capability_route".into());
+        }
+        let selections = object
+            .get("selections")
+            .and_then(Value::as_array)
+            .ok_or("capability route plan requires a selections array")?;
+        if selections.is_empty() || selections.len() > 128 {
+            return Err("selections must contain between 1 and 128 choices".into());
+        }
+        let validate_schemas = match object.get("validate_schemas") {
+            None => true,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err("validate_schemas must be a boolean".into()),
+        };
+        if object
+            .get("policy")
+            .and_then(Value::as_object)
+            .and_then(|policy| policy.get("execute"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            return Err(
+                "capability_route_plan is non-executing; call agent_mission only after inspecting its preflight"
+                    .into(),
+            );
+        }
+        if object.get("policy").is_some_and(|value| !value.is_object()) {
+            return Err("policy must be an object when supplied".into());
+        }
+
+        let review_arguments = json!({
+            "route": route,
+            "selections": selections,
+            "validate_schemas": validate_schemas,
+        });
+        let route_input_digest = bioprism_ids::ContentHash::of_value(&Value::Object(route.clone()))
+            .map_err(|error| format!("cannot hash capability route plan route input: {error}"))?
+            .to_string();
+        let selection_digest =
+            bioprism_ids::ContentHash::of_value(&Value::Array(selections.clone()))
+                .map_err(|error| format!("cannot hash capability route plan selections: {error}"))?
+                .to_string();
+        let review = self.capability_route_review(&review_arguments)?;
+        let review_ready = review.get("review_status").and_then(Value::as_str) == Some("ready");
+
+        let mut output = json!({
+            "ok": true,
+            "workflow": "capability_route_plan",
+            "mission_id": mission_id,
+            "route_id": review.get("route_id").cloned().unwrap_or(Value::Null),
+            "review_id": review.get("review_id").cloned().unwrap_or(Value::Null),
+            "catalog_digest": review.get("catalog_digest").cloned().unwrap_or(Value::Null),
+            "goal": review.get("goal").cloned().unwrap_or(Value::Null),
+            "review": review.clone(),
+            "route_input_digest": route_input_digest,
+            "selection_digest": selection_digest,
+            "selection_count": selections.len(),
+            "mission": Value::Null,
+            "preflight": Value::Null,
+            "plan_status": if review_ready { "preflight_pending" } else { "blocked_by_route_review" },
+            "dispatch": "not_started",
+            "execution": "not_started",
+            "guarantees": [
+                "route review and authoritative mission preflight are composed without dispatch",
+                "caller-selected tools and arguments remain explicit and candidate-bound",
+                "schema validation is requested by default and remains transport-shape evidence only",
+                "a blocked route review never becomes a partial mission plan",
+            ],
+            "limitations": [
+                "the compiler does not infer missing tools, arguments, dependencies, or domain meaning",
+                "route and preflight digests are provenance and do not authorize execution",
+                "domain semantics, provider availability, and scientific or clinical interpretation remain outside this boundary",
+            ],
+        });
+
+        if !review_ready {
+            return Ok(output);
+        }
+        let mission_draft = review
+            .get("mission_draft")
+            .and_then(Value::as_object)
+            .ok_or("ready route review did not provide a mission_draft")?;
+        let mut mission = Map::new();
+        mission.insert("mission_id".into(), json!(mission_id));
+        mission.insert(
+            "goal".into(),
+            mission_draft.get("goal").cloned().unwrap_or(Value::Null),
+        );
+        mission.insert(
+            "steps".into(),
+            mission_draft
+                .get("steps")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        );
+        mission.insert(
+            "policy".into(),
+            object.get("policy").cloned().unwrap_or_else(|| json!({})),
+        );
+        mission.insert("route_review".into(), output["review"].clone());
+        for field in ["claim_requests", "evaluator_review", "workflow_binding"] {
+            if let Some(value) = object.get(field) {
+                mission.insert(field.into(), value.clone());
+            }
+        }
+        let mission = Value::Object(mission);
+        let preflight = match self.preflight_agent_mission(&mission) {
+            Ok(report) => report,
+            Err(error) => json!({
+                "ok": false,
+                "workflow": "agent_mission",
+                "preflight": true,
+                "dispatch": "not_started",
+                "refusal": error,
+                "fail_closed": true,
+                "issues": [error],
+            }),
+        };
+        let preflight_ok = preflight.get("ok").and_then(Value::as_bool) == Some(true);
+        output["mission"] = mission;
+        output["preflight"] = preflight.clone();
+        output["plan_status"] = json!(if preflight_ok {
+            "ready_for_caller_inspection"
+        } else {
+            "blocked_by_mission_preflight"
+        });
+        output["plan_digest"] = preflight
+            .pointer("/plan/digest")
+            .cloned()
+            .unwrap_or(Value::Null);
+        output["route_review_provenance"] = preflight
+            .pointer("/plan/route_review_provenance")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let output_bytes = serde_json::to_vec(&output)
+            .map_err(|error| format!("cannot measure capability route plan result: {error}"))?;
+        if output_bytes.len() > 20_000_000 {
+            return Err(
+                "capability route plan result exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        Ok(output)
+    }
+
+    /// Verify a previously returned route plan against its content-addressed inputs and the live
+    /// authoritative mission boundary without executing any nested tool.
+    ///
+    /// A caller may provide the original route and selections to replay the complete route-review
+    /// and preflight composition. Without them, the verifier still checks the retained plan shape,
+    /// nested identities, and mission preflight, but reports that route replay was not requested;
+    /// it never upgrades that weaker check into proof that the original candidate membership is
+    /// still current.
+    fn capability_route_plan_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode capability route plan verification input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "capability route plan verification input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("capability route plan verification input must be an object")?;
+        let plan = object
+            .get("plan")
+            .and_then(Value::as_object)
+            .ok_or("capability route plan verification requires a plan object")?;
+        let plan_value = Value::Object(plan.clone());
+        if plan.get("workflow").and_then(Value::as_str) != Some("capability_route_plan") {
+            return Err("plan.workflow must be capability_route_plan".into());
+        }
+        let mission_id = plan
+            .get("mission_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("plan.mission_id must be a non-empty string")?;
+        let plan_status = plan
+            .get("plan_status")
+            .and_then(Value::as_str)
+            .ok_or("plan.plan_status must be a non-empty string")?;
+        let route_id = plan
+            .get("route_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("plan.route_id must be a non-empty string")?;
+        let review_id = plan
+            .get("review_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("plan.review_id must be a non-empty string")?;
+        let catalog_digest = plan
+            .get("catalog_digest")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("plan.catalog_digest must be a non-empty string")?;
+        let review = plan
+            .get("review")
+            .and_then(Value::as_object)
+            .ok_or("plan.review must be an object")?;
+        let mut mismatches = Vec::<Value>::new();
+        for (field, expected) in [
+            ("route_id", route_id),
+            ("review_id", review_id),
+            ("catalog_digest", catalog_digest),
+        ] {
+            if review.get(field).and_then(Value::as_str) != Some(expected) {
+                mismatches.push(json!({
+                    "code": "review_identity_mismatch",
+                    "field": field,
+                    "expected": expected,
+                    "observed": review.get(field).cloned().unwrap_or(Value::Null),
+                }));
+            }
+        }
+        if plan.get("dispatch").and_then(Value::as_str) != Some("not_started") {
+            mismatches.push(json!({
+                "code": "dispatch_started",
+                "message": "a route plan verifier accepts only non-dispatching plans"
+            }));
+        }
+        if plan.get("execution").and_then(Value::as_str) != Some("not_started") {
+            mismatches.push(json!({
+                "code": "execution_started",
+                "message": "a route plan verifier accepts only non-executing plans"
+            }));
+        }
+        let route = object.get("route");
+        let selections = object.get("selections");
+        if route.is_some() != selections.is_some() {
+            mismatches.push(json!({
+                "code": "incomplete_route_replay_input",
+                "message": "route and selections must be supplied together for route replay"
+            }));
+        }
+        let validate_schemas = match object.get("validate_schemas") {
+            None => review
+                .get("schema_review")
+                .and_then(Value::as_object)
+                .and_then(|schema| schema.get("requested"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err("validate_schemas must be a boolean".into()),
+        };
+        let mut route_replay = json!({
+            "requested": false,
+            "status": "not_requested",
+            "matched": Value::Null,
+        });
+        if let (Some(route), Some(selections)) = (route, selections) {
+            let route = route
+                .as_object()
+                .ok_or("route replay route must be an object")?;
+            let selections = selections
+                .as_array()
+                .ok_or("route replay selections must be an array")?;
+            let mut replay_arguments = json!({
+                "mission_id": mission_id,
+                "route": route,
+                "selections": selections,
+                "validate_schemas": validate_schemas,
+                "policy": plan_value.pointer("/mission/policy").cloned().unwrap_or_else(|| json!({})),
+                "claim_requests": plan_value.pointer("/mission/claim_requests").cloned().unwrap_or_else(|| json!([])),
+            });
+            for field in ["evaluator_review", "workflow_binding"] {
+                if let Some(value) = plan_value.pointer(&format!("/mission/{field}")) {
+                    if !value.is_null() {
+                        replay_arguments[field] = value.clone();
+                    }
+                }
+            }
+            let replay = match self.capability_route_plan(&replay_arguments) {
+                Ok(value) => value,
+                Err(error) => {
+                    mismatches.push(json!({
+                        "code": "route_replay_blocked",
+                        "message": error.clone(),
+                    }));
+                    route_replay = json!({
+                        "requested": true,
+                        "status": "blocked",
+                        "matched": false,
+                        "error": error,
+                    });
+                    Value::Null
+                }
+            };
+            if replay.is_object() {
+                let mut replay_mismatches = Vec::new();
+                for field in [
+                    "route_id",
+                    "review_id",
+                    "catalog_digest",
+                    "plan_digest",
+                    "plan_status",
+                    "route_input_digest",
+                    "selection_digest",
+                    "selection_count",
+                ] {
+                    if plan.get(field) != replay.get(field) {
+                        replay_mismatches.push(json!({
+                            "code": "replay_field_mismatch",
+                            "field": field,
+                            "expected": plan.get(field).cloned().unwrap_or(Value::Null),
+                            "observed": replay.get(field).cloned().unwrap_or(Value::Null),
+                        }));
+                    }
+                }
+                let matched = replay_mismatches.is_empty();
+                route_replay = json!({
+                    "requested": true,
+                    "status": if matched { "matched" } else { "mismatched" },
+                    "matched": matched,
+                    "mismatches": replay_mismatches,
+                    "route_input_digest": replay.get("route_input_digest").cloned().unwrap_or(Value::Null),
+                    "selection_digest": replay.get("selection_digest").cloned().unwrap_or(Value::Null),
+                });
+                if !matched {
+                    if let Some(rows) = route_replay.get("mismatches").and_then(Value::as_array) {
+                        mismatches.extend(rows.iter().cloned());
+                    }
+                }
+            }
+        }
+        let mut mission_preflight = json!({
+            "requested": false,
+            "status": "not_requested",
+            "matched": Value::Null,
+        });
+        if let Some(mission) = plan.get("mission").and_then(Value::as_object) {
+            let preflight = match self.preflight_agent_mission(&Value::Object(mission.clone())) {
+                Ok(value) => value,
+                Err(error) => json!({
+                    "ok": false,
+                    "dispatch": "not_started",
+                    "error": error,
+                    "fail_closed": true,
+                }),
+            };
+            let preflight_ok = preflight.get("ok") == Some(&Value::Bool(true));
+            let expected_digest = plan.get("plan_digest").cloned().unwrap_or(Value::Null);
+            let observed_digest = preflight
+                .pointer("/plan/digest")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let matched = preflight_ok && expected_digest == observed_digest;
+            if !matched {
+                mismatches.push(json!({
+                    "code": if preflight_ok { "mission_plan_digest_mismatch" } else { "mission_preflight_blocked" },
+                    "expected": expected_digest,
+                    "observed": observed_digest,
+                }));
+            }
+            mission_preflight = json!({
+                "requested": true,
+                "status": if matched { "matched" } else if preflight_ok { "mismatched" } else { "blocked" },
+                "matched": matched,
+                "ok": preflight_ok,
+                "plan_digest": observed_digest,
+                "dispatch": "not_started",
+            });
+        }
+        let valid = mismatches.is_empty();
+        let verification_status = if valid {
+            if route_replay["requested"] == json!(true) {
+                "verified"
+            } else {
+                "verified_without_route_replay"
+            }
+        } else if route_replay["status"] == json!("blocked") {
+            "blocked_by_route_replay"
+        } else if mission_preflight["status"] == json!("blocked") {
+            "blocked_by_mission_preflight"
+        } else {
+            "mismatch"
+        };
+        Ok(json!({
+            "ok": true,
+            "workflow": "capability_route_plan_verify",
+            "mission_id": mission_id,
+            "route_id": route_id,
+            "review_id": review_id,
+            "catalog_digest": catalog_digest,
+            "plan_status": plan_status,
+            "plan_digest": plan.get("plan_digest").cloned().unwrap_or(Value::Null),
+            "valid": valid,
+            "verification_status": verification_status,
+            "route_replay": route_replay,
+            "mission_preflight": mission_preflight,
+            "mismatches": mismatches,
+            "dispatch": "not_started",
+            "execution": "not_started",
+            "guarantees": [
+                "verification is non-executing and reruns only route review and mission preflight",
+                "route replay is explicit; omitted route inputs never become a claim of current candidate membership",
+                "identity and plan-digest mismatches remain visible instead of being coerced into validity"
+            ],
+            "limitations": [
+                "verification cannot establish domain semantics, provider availability, scientific validity, or authorization",
+                "without route and selections, only the retained plan shape and mission preflight are checked",
+                "the verifier does not persist a distributed audit record or resume a mission"
+            ]
+        }))
     }
 
     /// Reconcile a returned mission report with delegated check evidence without executing it.
@@ -23325,8 +31218,122 @@ impl Server {
     /// MCP boundary, but only after the typed mission contract has required an allow-list and
     /// applied side-effect and output budgets. Nested results remain raw MCP envelopes so a
     /// refusal cannot be silently converted into a successful scientific conclusion.
+    fn attach_workflow_reconciliation(
+        &self,
+        arguments: &Value,
+        result: Result<Value, String>,
+    ) -> Result<Value, String> {
+        let Ok(mut result) = result else {
+            return result;
+        };
+        if arguments
+            .pointer("/policy/execute")
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return Ok(result);
+        }
+        let Some(binding) = arguments.get("workflow_binding") else {
+            return Ok(result);
+        };
+        let Some(binding_object) = binding.as_object() else {
+            return Ok(result);
+        };
+        let instantiation = json!({
+            "ok": true,
+            "schema": bioprism_devplat::DOMAIN_WORKFLOW_INSTANTIATE_SCHEMA_VERSION,
+            "workflow": "domain_workflow_instantiate",
+            "workflow_id": binding_object.get("workflow_id").cloned().unwrap_or(Value::Null),
+            "workflow_digest": binding_object.get("workflow_digest").cloned().unwrap_or(Value::Null),
+            "catalog_digest": binding_object.get("catalog_digest").cloned().unwrap_or(Value::Null),
+            "domain_contract_digest": binding_object.get("domain_contract_digest").cloned().unwrap_or(Value::Null),
+            "domain_contract": binding_object.get("domain_contract").cloned().unwrap_or(Value::Null),
+            "mission": arguments,
+            "evidence_plan": binding_object.get("evidence_plan").cloned().unwrap_or(Value::Null),
+        });
+        let reconciliation_request = json!({
+            "instantiation": instantiation,
+            "mission_report": result,
+        });
+        let reconciliation = match reconcile_domain_workflow(&reconciliation_request) {
+            Ok(record) => record,
+            Err(error) => {
+                result["workflow_reconciliation"] = json!({
+                    "present": false,
+                    "automatic": true,
+                    "error": error.to_string(),
+                    "fail_closed": true,
+                    "readiness_claimed": false,
+                });
+                return Ok(result);
+            }
+        };
+        let import_response = match self.workflow_reconciliation_registry.lock() {
+            Ok(mut registry) => registry.import(&reconciliation),
+            Err(_) => Err(
+                bioprism_devplat::DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                    "workflow reconciliation registry lock is poisoned".into(),
+                ),
+            ),
+        };
+        match import_response {
+            Ok(import_response) => {
+                let digest = reconciliation
+                    .get("reconciliation_digest")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let artifact_projection = self.index_artifact_projection(
+                    "workflow_reconciliation",
+                    reconciliation
+                        .get("mission_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown-mission"),
+                    // Reconciliation's canonical digest intentionally contains workflow and
+                    // mission identities, not a second inferred domain taxonomy. Mission-report
+                    // parents retain the concrete step domains separately.
+                    Vec::new(),
+                    Vec::new(),
+                    reconciliation.clone(),
+                );
+                result["workflow_reconciliation"] = json!({
+                    "present": true,
+                    "automatic": true,
+                    "reconciliation_digest": digest,
+                    "workflow_id": reconciliation.get("workflow_id").cloned().unwrap_or(Value::Null),
+                    "mission_id": reconciliation.get("mission_id").cloned().unwrap_or(Value::Null),
+                    "completion": reconciliation.get("completion").cloned().unwrap_or(Value::Null),
+                    "evidence": {
+                        "evidence_valid": reconciliation.pointer("/evidence/evidence_valid").cloned().unwrap_or(Value::Null),
+                        "required_success": reconciliation.pointer("/evidence/required_success").cloned().unwrap_or(Value::Null),
+                        "required_outputs_retained": reconciliation.pointer("/evidence/required_outputs_retained").cloned().unwrap_or(Value::Null),
+                    },
+                    "integrity": reconciliation.get("integrity").cloned().unwrap_or(Value::Null),
+                    "registry_import": import_response,
+                    "artifact_registry": artifact_projection,
+                    "lookup": format!(
+                        "/v1/domain-workflows/reconciliations/{}",
+                        reconciliation.get("reconciliation_digest").and_then(Value::as_str).unwrap_or("unknown")
+                    ),
+                    "readiness_claimed": false,
+                });
+            }
+            Err(error) => {
+                result["workflow_reconciliation"] = json!({
+                    "present": false,
+                    "automatic": true,
+                    "error": error.to_string(),
+                    "fail_closed": true,
+                    "readiness_claimed": false,
+                });
+            }
+        }
+        Ok(result)
+    }
+
     fn agent_mission(&self, arguments: &Value) -> Result<Value, String> {
-        self.agent_mission_with_cancellation(arguments, None)
+        let result = self.agent_mission_with_cancellation(arguments, None);
+        self.attach_workflow_reconciliation(arguments, result)
+            .and_then(|report| self.index_mission_report(report))
     }
 
     fn agent_mission_with_cancellation(
@@ -24293,6 +32300,129 @@ impl Server {
         Ok(output)
     }
 
+    /// Verify a retained authoring/notebook report without executing cells or contacting CI.
+    fn developer_workbench_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot encode developer workbench verification input: {error}")
+        })?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "developer workbench verification input exceeds the 20000000-byte safety bound"
+                    .into(),
+            );
+        }
+        let request: WorkbenchVerificationRequest = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid developer workbench verification input: {error}"))?;
+        let report = verify_workbench(&request)
+            .map_err(|error| format!("developer workbench verification refused: {error}"))?;
+        let mut output = serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode developer workbench verification report: {error}")
+        })?;
+        output["ok"] = json!(true);
+        output["workflow"] = json!("developer_workbench_verify");
+        output["workbench_verify_schema_version"] =
+            json!(bioprism_devplat::WORKBENCH_VERIFY_SCHEMA_VERSION);
+        Ok(output)
+    }
+
+    /// Retain a structurally valid developer workbench report in the bounded shared registry.
+    ///
+    /// This is an explicit handoff: generating a report never silently mutates retention state.
+    /// The import kernel strips transport metadata and revalidates the typed report before the
+    /// canonical report digest becomes queryable.
+    fn developer_workbench_import(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode developer workbench import input: {error}"))?;
+        if encoded.len() > bioprism_devplat::MAX_WORKBENCH_REGISTRY_BYTES {
+            return Err(format!(
+                "developer workbench import input exceeds the {}-byte safety bound",
+                bioprism_devplat::MAX_WORKBENCH_REGISTRY_BYTES
+            ));
+        }
+        let report = arguments.get("report").ok_or("report is required")?;
+        self.workbench_registry
+            .lock()
+            .map_err(|_| "workbench registry lock is poisoned".to_string())?
+            .import(report)
+            .map_err(|error| format!("developer workbench import refused: {error}"))
+    }
+
+    /// Query retained workbench reports by session and dashboard posture without executing work.
+    fn developer_workbench_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode developer workbench query input: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "developer workbench query input exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{name} must be a string"))
+                })
+                .transpose()
+        };
+        let session_digest = optional_string("session_digest")?;
+        let domain = optional_string("domain")?;
+        let capability = optional_string("capability")?;
+        let state = optional_string("state")?;
+        let after = optional_string("after")?;
+        let release_ready = arguments
+            .get("release_ready")
+            .map(|value| value.as_bool().ok_or("release_ready must be a boolean"))
+            .transpose()?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_reports = arguments
+            .get("include_reports")
+            .map(|value| value.as_bool().ok_or("include_reports must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.workbench_registry
+            .lock()
+            .map_err(|_| "workbench registry lock is poisoned".to_string())?
+            .query(
+                session_digest,
+                domain,
+                capability,
+                state,
+                release_ready,
+                after,
+                max_items,
+                include_reports,
+            )
+            .map_err(|error| format!("developer workbench query refused: {error}"))
+    }
+
+    /// Fetch one retained workbench report by its canonical content hash.
+    fn developer_workbench_get(&self, arguments: &Value) -> Result<Value, String> {
+        let digest = arguments
+            .get("workbench_report_digest")
+            .and_then(Value::as_str)
+            .ok_or("workbench_report_digest is required and must be a content hash")?;
+        bioprism_ids::ContentHash::parse(digest.to_string())
+            .map_err(|error| format!("workbench_report_digest is invalid: {error}"))?;
+        self.workbench_registry
+            .lock()
+            .map_err(|_| "workbench registry lock is poisoned".to_string())?
+            .get_response(digest)
+            .map_err(|error| format!("developer workbench get refused: {error}"))
+    }
+
     /// Reconcile caller-supplied CI evidence against a freshly generated workbench plan.
     ///
     /// This is deliberately a structural audit: it never contacts a provider or executes the
@@ -24303,7 +32433,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode CI execution evidence input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("CI execution evidence input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "CI execution evidence input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let request: CiExecutionEvidenceRequest = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("invalid CI execution evidence input: {error}"))?;
@@ -24339,7 +32471,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot encode CI provider normalization input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("CI provider normalization input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "CI provider normalization input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let request: CiProviderNormalizationRequest = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("invalid CI provider normalization input: {error}"))?;
@@ -24409,6 +32543,127 @@ impl Server {
                 "caller-supplied record digests identify declarations and do not prove the content at a remote URI"
             ]
         }))
+    }
+
+    /// Re-audit and retain one provider evidence request in the shared bounded registry.
+    fn ci_provider_evidence_import(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode CI provider evidence import input: {error}"))?;
+        if encoded.len() > 20_000_000 {
+            return Err(
+                "CI provider evidence import input exceeds the 20000000-byte safety bound".into(),
+            );
+        }
+        self.ci_provider_evidence_registry
+            .lock()
+            .map_err(|_| "CI provider evidence registry lock is poisoned".to_string())?
+            .import(arguments)
+            .map_err(|error| format!("CI provider evidence import refused: {error}"))
+    }
+
+    /// Query retained provider evidence without contacting a provider or executing checks.
+    fn ci_provider_evidence_query(&self, arguments: &Value) -> Result<Value, String> {
+        let encoded = serde_json::to_vec(arguments)
+            .map_err(|error| format!("cannot encode CI provider evidence query input: {error}"))?;
+        if encoded.len() > 1_000_000 {
+            return Err(
+                "CI provider evidence query input exceeds the 1000000-byte safety bound".into(),
+            );
+        }
+        let optional_string = |name: &str| -> Result<Option<&str>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{name} must be a string"))
+                })
+                .transpose()
+        };
+        let optional_usize = |name: &str| -> Result<Option<usize>, String> {
+            arguments
+                .get(name)
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .ok_or_else(|| format!("{name} must be an integer"))
+                        .and_then(|number| {
+                            usize::try_from(number)
+                                .map_err(|_| format!("{name} is too large"))
+                                .and_then(|value| {
+                                    if value <= 128 {
+                                        Ok(value)
+                                    } else {
+                                        Err(format!("{name} must be between 0 and 128"))
+                                    }
+                                })
+                        })
+                })
+                .transpose()
+        };
+        let structurally_valid = arguments
+            .get("structurally_valid")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or("structurally_valid must be a boolean")
+            })
+            .transpose()?;
+        let conformance_ready = arguments
+            .get("conformance_ready")
+            .map(|value| value.as_bool().ok_or("conformance_ready must be a boolean"))
+            .transpose()?;
+        let min_local_byte_hash_artifacts = optional_usize("min_local_byte_hash_artifacts")?;
+        let min_local_byte_hash_logs = optional_usize("min_local_byte_hash_logs")?;
+        let min_attestation_subject_digest_bindings =
+            optional_usize("min_attestation_subject_digest_bindings")?;
+        let max_items = arguments
+            .get("max_items")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "max_items must be an integer".to_string())
+                    .and_then(|number| {
+                        usize::try_from(number).map_err(|_| "max_items is too large".to_string())
+                    })
+            })
+            .transpose()?
+            .unwrap_or(100);
+        let include_records = arguments
+            .get("include_records")
+            .map(|value| value.as_bool().ok_or("include_records must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        self.ci_provider_evidence_registry
+            .lock()
+            .map_err(|_| "CI provider evidence registry lock is poisoned".to_string())?
+            .query(
+                optional_string("provider")?,
+                optional_string("run_id")?,
+                optional_string("plan_digest")?,
+                structurally_valid,
+                conformance_ready,
+                min_local_byte_hash_artifacts,
+                min_local_byte_hash_logs,
+                min_attestation_subject_digest_bindings,
+                optional_string("after")?,
+                max_items,
+                include_records,
+            )
+            .map_err(|error| format!("CI provider evidence query refused: {error}"))
+    }
+
+    /// Fetch one retained provider evidence audit by its canonical record digest.
+    fn ci_provider_evidence_get(&self, arguments: &Value) -> Result<Value, String> {
+        let digest = arguments
+            .get("provider_evidence_digest")
+            .and_then(Value::as_str)
+            .ok_or("provider_evidence_digest is required and must be a content hash")?;
+        self.ci_provider_evidence_registry
+            .lock()
+            .map_err(|_| "CI provider evidence registry lock is poisoned".to_string())?
+            .get(digest)
+            .map_err(|error| format!("CI provider evidence get refused: {error}"))
     }
 
     fn engineering_manifest_audit(&self, arguments: &Value) -> Result<Value, String> {
@@ -24625,12 +32880,16 @@ impl Server {
         let blocking_issue_count = audit
             .issues
             .iter()
-            .filter(|issue| issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Blocking)
+            .filter(|issue| {
+                issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Blocking
+            })
             .count();
         let warning_count = audit
             .issues
             .iter()
-            .filter(|issue| issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Warning)
+            .filter(|issue| {
+                issue.severity == bioprism_devplat::SecurityPrivacyIssueSeverity::Warning
+            })
             .count();
         Ok(json!({
             "ok": true,
@@ -24771,12 +33030,16 @@ impl Server {
         let blocking_issue_count = audit
             .issues
             .iter()
-            .filter(|issue| issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Blocking)
+            .filter(|issue| {
+                issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Blocking
+            })
             .count();
         let warning_count = audit
             .issues
             .iter()
-            .filter(|issue| issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Warning)
+            .filter(|issue| {
+                issue.severity == bioprism_devplat::SecurityProgramIssueSeverity::Warning
+            })
             .count();
         Ok(json!({
             "ok": true,
@@ -24898,15 +33161,17 @@ impl Server {
             }
             None => None,
         };
-        let ci_evidence = ci_evidence.or_else(|| {
-            ci_provider_normalization
-                .as_ref()
-                .map(|(_, audit)| audit.clone())
-        }).or_else(|| {
-            ci_provider_evidence
-                .as_ref()
-                .map(|(_, audit)| audit.clone())
-        });
+        let ci_evidence = ci_evidence
+            .or_else(|| {
+                ci_provider_normalization
+                    .as_ref()
+                    .map(|(_, audit)| audit.clone())
+            })
+            .or_else(|| {
+                ci_provider_evidence
+                    .as_ref()
+                    .map(|(_, audit)| audit.clone())
+            });
         let execution_provenance = match arguments.get("execution_provenance") {
             Some(raw) => Some(self.execution_provenance_audit(raw)?),
             None => None,
@@ -25054,10 +33319,7 @@ impl Server {
         let ci_evidence_ready = ci_evidence
             .as_ref()
             .map(|value| {
-                value
-                    .get("ok")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
                     && value
                         .get("ci_evidence_ready")
                         .and_then(Value::as_bool)
@@ -25067,10 +33329,7 @@ impl Server {
         let ci_provider_evidence_ready = ci_provider_evidence
             .as_ref()
             .map(|(value, _)| {
-                value
-                    .get("ok")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
+                value.get("ok").and_then(Value::as_bool).unwrap_or(false)
                     && value
                         .get("conformance_ready")
                         .and_then(Value::as_bool)
@@ -25434,7 +33693,9 @@ impl Server {
         let encoded = serde_json::to_vec(arguments)
             .map_err(|error| format!("cannot measure developer-delivery receipt input: {error}"))?;
         if encoded.len() > 20_000_000 {
-            return Err("developer-delivery receipt input exceeds the 20000000-byte safety bound".into());
+            return Err(
+                "developer-delivery receipt input exceeds the 20000000-byte safety bound".into(),
+            );
         }
         let receipt_id = arguments
             .get("receipt_id")
@@ -25464,8 +33725,9 @@ impl Server {
     }
 
     fn developer_delivery_receipt_verify(&self, arguments: &Value) -> Result<Value, String> {
-        let encoded = serde_json::to_vec(arguments)
-            .map_err(|error| format!("cannot measure developer-delivery receipt verification input: {error}"))?;
+        let encoded = serde_json::to_vec(arguments).map_err(|error| {
+            format!("cannot measure developer-delivery receipt verification input: {error}")
+        })?;
         if encoded.len() > 20_000_000 {
             return Err("developer-delivery receipt verification input exceeds the 20000000-byte safety bound".into());
         }
@@ -25477,12 +33739,11 @@ impl Server {
             .get("delivery")
             .cloned()
             .ok_or("delivery is required and must be the completed developer delivery audit")?;
-        let verification = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
-            receipt,
-            delivery,
+        let verification =
+            verify_delivery_receipt(&DeliveryReceiptVerificationRequest { receipt, delivery })?;
+        let mut output = serde_json::to_value(&verification).map_err(|error| {
+            format!("cannot encode developer-delivery receipt verification: {error}")
         })?;
-        let mut output = serde_json::to_value(&verification)
-            .map_err(|error| format!("cannot encode developer-delivery receipt verification: {error}"))?;
         output["ok"] = json!(true);
         output["workflow"] = json!("developer_delivery_receipt_verify");
         output["verified"] = json!(verification.valid);
@@ -26590,6 +34851,14 @@ fn json_i128(raw: Option<&Value>, field: &str) -> Result<i128, String> {
     Err(format!("{field} is required and must be an integer"))
 }
 
+fn json_u32(raw: Option<&Value>, field: &str) -> Result<u32, String> {
+    let value = raw
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("{field} is required and must be a non-negative 32-bit integer"))?;
+    u32::try_from(value)
+        .map_err(|_| format!("{field} is required and must be a non-negative 32-bit integer"))
+}
+
 fn content_hash_argument(
     raw: Option<&Value>,
     field: &str,
@@ -27049,6 +35318,99 @@ fn tool_content(value: &Value, is_error: bool) -> Value {
     })
 }
 
+fn without_artifact_projection(value: &Value) -> Value {
+    let Some(object) = value.as_object() else {
+        return value.clone();
+    };
+    let mut object = object.clone();
+    object.remove("artifact_registry");
+    object.remove("__isError");
+    object.remove("request_id");
+    Value::Object(object)
+}
+
+fn projection_parent(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(|projection| projection.get("content_digest"))
+        .and_then(Value::as_str)
+        .filter(|digest| digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .map(|digest| vec![digest.to_string()])
+        .unwrap_or_default()
+}
+
+fn mission_domains(value: &Value) -> Vec<String> {
+    let mut domains = BTreeSet::new();
+    for path in ["/plan/steps", "/steps"] {
+        if let Some(steps) = value.pointer(path).and_then(Value::as_array) {
+            for step in steps {
+                if let Some(domain) = step.get("domain").and_then(Value::as_str) {
+                    if !domain.trim().is_empty() {
+                        domains.insert(domain.to_string());
+                    }
+                }
+            }
+        }
+    }
+    domains.into_iter().collect()
+}
+
+fn evaluator_domains(value: &Value) -> Vec<String> {
+    let mut domains = BTreeSet::new();
+    let mut add_binding = |binding: &Value| {
+        if let Some(domain) = binding.get("domain").and_then(Value::as_str) {
+            if !domain.trim().is_empty() {
+                domains.insert(domain.to_string());
+            }
+        }
+    };
+    if let Some(bindings) = value
+        .pointer("/evaluator_replay/bindings")
+        .and_then(Value::as_array)
+    {
+        for binding in bindings {
+            add_binding(binding);
+        }
+    }
+    if let Some(claims) = value
+        .pointer("/evaluator_replay/claims")
+        .and_then(Value::as_array)
+    {
+        for claim in claims {
+            if let Some(bindings) = claim.get("bindings").and_then(Value::as_array) {
+                for binding in bindings {
+                    add_binding(binding);
+                }
+            }
+        }
+    }
+    if let Some(bindings) = value.pointer("/bindings").and_then(Value::as_array) {
+        for binding in bindings {
+            add_binding(binding);
+        }
+    }
+    domains.into_iter().collect()
+}
+
+fn explicit_domains(value: &Value) -> Vec<String> {
+    let mut domains = BTreeSet::new();
+    for path in ["/domains", "/domain_contract/domains"] {
+        match value.pointer(path) {
+            Some(Value::String(domain)) if !domain.trim().is_empty() => {
+                domains.insert(domain.clone());
+            }
+            Some(Value::Array(values)) => {
+                for domain in values.iter().filter_map(Value::as_str) {
+                    if !domain.trim().is_empty() {
+                        domains.insert(domain.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    domains.into_iter().collect()
+}
+
 /// Structured audit record on stderr, keeping stdout a clean protocol channel.
 fn audit(tool: &str, arguments: &Value) {
     eprintln!(
@@ -27095,6 +35457,12 @@ pub fn resource_definitions() -> Vec<Value> {
             "uri": QUERY_SCHEMA_URI,
             "name": "fiber-query/0.2 schema",
             "description": "The strict query document schema accepted by the FIBER compiler.",
+            "mimeType": "application/schema+json",
+        }),
+        json!({
+            "uri": ADAPTIVE_QUERY_SCHEMA_URI,
+            "name": "fiber-query/0.5 schema",
+            "description": "The strict adaptive-acquisition query schema accepted by the FIBER compiler.",
             "mimeType": "application/schema+json",
         }),
         json!({
@@ -27157,7 +35525,7 @@ fn dashboard_schema_is_valid(definition: &Value) -> bool {
 }
 
 pub fn workspace_capabilities() -> Value {
-    json!([
+    let mut catalogue = json!([
         {
             "id": "world_and_ingestion",
             "domains": ["world modeling", "data ingestion", "provenance"],
@@ -27194,7 +35562,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -27306,7 +35674,16 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "mission_evaluator_discover", "mission_evaluator_review"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "interweave_workflow_execution_evidence", "interweave_workflow_execution_evidence_import", "interweave_workflow_execution_evidence_query", "interweave_workflow_execution_evidence_get", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "autonomous_brain",
+            "domains": ["model selection", "prompt assembly", "bounded autonomous planning", "online bandit adaptation", "evaluator-backed learning evidence", "provider-neutral invocation contracts"],
+            "crates": ["bioprism-brain", "bioprism-runtime", "bioprism-routing", "bioprism-adaptive"],
+            "python_artifacts": ["python/prism_sdk/llm_runtime.py", "python/prism_sdk/brain.py"],
+            "mcp_tools": ["brain_model_select", "brain_model_select_contextual", "brain_prompt_assemble", "brain_plan", "brain_bandit_select", "brain_bandit_update", "brain_outcome_record", "brain_job_submit", "brain_job_status", "brain_job_events", "brain_job_approval", "brain_job_claim", "brain_job_claim_next", "brain_job_renew", "brain_job_checkpoint", "brain_job_complete", "brain_job_fail", "brain_job_reconcile", "brain_job_cancel", "brain_model_health", "brain_replay_evaluate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -27314,7 +35691,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -27378,7 +35755,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "documentation_and_knowledge",
             "domains": ["repository navigation", "documentation graph", "task routes", "context bundles"],
             "crates": ["bioprism-docgraph", "bioprism-graph", "bioprism-lens"],
-            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
+            "mcp_tools": ["workspace_capabilities", "capability_audit", "capability_dashboard", "capability_discover", "capability_route", "capability_route_review", "capability_route_plan", "capability_route_plan_verify", "domain_workflow_catalogue", "domain_workflow_scaffold", "domain_workflow_instantiate", "domain_workflow_portfolio", "domain_workflow_portfolio_verify", "domain_workflow_verify", "domain_workflow_reconcile", "domain_workflow_reconciliation_import", "domain_workflow_reconciliation_query", "domain_workflow_reconciliation_get", "repository_catalog", "repository_bundle", "repository_impact", "lens_catalogue", "lens_leakage_check", "projection_bundle"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -27387,11 +35764,63 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_workbench_verify", "developer_workbench_import", "developer_workbench_query", "developer_workbench_get", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_provider_evidence_import", "ci_provider_evidence_query", "ci_provider_evidence_get", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
-    ])
+    ]);
+    // Evidence acquisition is a cross-cutting capability: every declared domain can retain a
+    // bounded source plan, execute the in-process file/HTTP subset, and bind the response to
+    // intake. Keeping these memberships explicit lets the intake handlers enforce group/domain
+    // scope instead of treating the registry-operations group as a hidden universal escape hatch.
+    let cross_domain_tools = [
+        "domain_evidence_source_plan",
+        "domain_evidence_source_execute",
+        "domain_evidence_provider_normalize",
+        "domain_evidence_provider_replay_verify",
+        "domain_evidence_provider_connector_handoff",
+        "domain_evidence_provider_external_payload_receipt",
+        "domain_evidence_provider_external_payload_replay_verify",
+        "domain_evidence_provider_external_payload_normalize",
+        "domain_evidence_provider_external_payload_lineage_audit",
+        "domain_evidence_provider_external_payload_execution_evidence",
+        "domain_evidence_provider_external_payload_evidence_query",
+        "adapter_execution_evidence",
+        "adapter_execution_evidence_query",
+        "domain_evidence_intake",
+        "domain_evidence_coverage",
+        "domain_decision_readiness_audit",
+        "domain_decision_readiness_query",
+        "control_plane_readiness_audit",
+        "control_plane_readiness_compare",
+        "control_plane_readiness_compare_retained",
+        "control_plane_readiness_query",
+    ];
+    if let Some(groups) = catalogue.as_array_mut() {
+        for group in groups {
+            if let Some(tools) = group.get_mut("mcp_tools").and_then(Value::as_array_mut) {
+                for tool in cross_domain_tools {
+                    if !tools
+                        .iter()
+                        .any(|candidate| candidate.as_str() == Some(tool))
+                    {
+                        tools.push(Value::String(tool.into()));
+                    }
+                }
+            }
+            if group.get("id").and_then(Value::as_str) == Some("documentation_and_knowledge") {
+                if let Some(tools) = group.get_mut("mcp_tools").and_then(Value::as_array_mut) {
+                    if !tools
+                        .iter()
+                        .any(|candidate| candidate.as_str() == Some("domain_acquisition_catalogue"))
+                    {
+                        tools.push(Value::String("domain_acquisition_catalogue".into()));
+                    }
+                }
+            }
+        }
+    }
+    catalogue
 }
 
 pub fn tool_definitions() -> Vec<Value> {
@@ -27399,25 +35828,142 @@ pub fn tool_definitions() -> Vec<Value> {
         "type": "object",
         "properties": {
             "world": { "type": "string", "description": "Path to a fiber-world/0.1 document or an indexed store directory, relative to the server root." },
-            "query": { "type": "string", "description": "Path to a fiber-query/0.2 document, relative to the server root. A document still labelled fiber-query/0.1 is read; one carrying a key the schema does not declare is refused under either label." }
+            "query": { "type": "string", "description": "Path to a fiber-query/0.1 through fiber-query/0.5 document, relative to the server root. The 0.3 form carries the explicit decision-loss matrix and permitted-action boundary; 0.4 additionally carries bounded observed evidence for executable rate-distortion; 0.5 carries an exact finite-horizon adaptive acquisition plan." }
         },
         "required": ["world", "query"]
     });
 
-    vec![
+    let definitions = vec![
+        json!({
+            "name": "brain_model_select",
+            "description": "Select an available provider/model from explicit capability, context-window, quality, latency, cost, reliability, and caller-owned online-learning observations. An optional min_selection_confidence floor abstains on near-tied eligible ranks. Every rejected candidate remains visible, along with normalized rank-separation confidence. This tool accepts no API key, opens no network connection, and does not claim that a future model response will be correct.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string" },
+                    "required_capabilities": { "type": "array", "maxItems": 64, "items": { "type": "string" } },
+                    "input_tokens": { "type": "integer", "minimum": 0 },
+                    "requested_output_tokens": { "type": "integer", "minimum": 0 },
+                    "max_cost_per_million_tokens": { "type": ["integer", "null"] },
+                    "max_latency_ms": { "type": ["integer", "null"] },
+                    "min_quality": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+                    "min_selection_confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Optional normalized rank-separation floor; below it the selector abstains." },
+                    "models": { "type": "array", "minItems": 1, "maxItems": 256 },
+                    "observations": { "type": "array", "maxItems": 256 },
+                    "weights": { "type": "object" },
+                    "provider_health": { "type": "object", "description": "Provider readiness and circuit metadata only; credentials and provider responses are never accepted." },
+                    "model_health": { "type": "object", "description": "Optional provider/model transport evidence. It adapts reliability and latency with a capped confidence; it is never a credential, task reward, or model-level hard gate." }
+                },
+                "required": ["task", "input_tokens", "requested_output_tokens", "models"]
+            }
+        }),
+        json!({
+            "name": "brain_model_select_contextual",
+            "description": "Select a provider/model using domain, capability, risk-class, and optional task-family context. Exact context observations override global observations per arm; missing context history falls back to global history. The context digest is returned for caller-owned persistence. No API key, network call, or hidden server state is used.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "context": {
+                        "type": "object",
+                        "properties": {
+                            "domain": { "type": "string" },
+                            "capability": { "type": "string" },
+                            "risk_class": { "type": "string" },
+                            "task_family": { "type": ["string", "null"] }
+                        },
+                        "required": ["domain", "capability", "risk_class"]
+                    },
+                    "base": { "type": "object", "description": "Ordinary brain_model_select request, including candidate models and global observations." },
+                    "observations": { "type": "array", "maxItems": 256, "description": "Context-scoped observations whose context_digest must match the returned context identity." }
+                },
+                "required": ["context", "base"]
+            }
+        }),
+        json!({
+            "name": "brain_prompt_assemble",
+            "description": "Assemble a deterministic, bounded prompt from system/developer instructions, a task, and prioritized context chunks. Required content fails closed; optional omissions are listed and digest-bound. No provider is contacted and no credential is accepted.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "system": { "type": ["string", "null"] },
+                    "developer": { "type": ["string", "null"] },
+                    "task": { "type": "string" },
+                    "context": { "type": "array", "maxItems": 512 },
+                    "output_contract": { "type": ["string", "null"] },
+                    "max_input_tokens": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["task", "max_input_tokens"]
+            }
+        }),
+        json!({
+            "name": "brain_plan",
+            "description": "Validate and topologically order a bounded autonomous plan against an explicit tool allow-list and cost budget. The plan is always not_started; provider calls, external writes, irreversible effects, and approvals remain outside this planning tool.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "objective": { "type": "string" },
+                    "steps": { "type": "array", "minItems": 1, "maxItems": 256 },
+                    "allowed_tools": { "type": "array", "maxItems": 256, "items": { "type": "string" } },
+                    "max_cost": { "type": "integer", "minimum": 0 },
+                    "require_approval_for_effects": { "type": "boolean" }
+                },
+                "required": ["objective", "steps", "allowed_tools", "max_cost"]
+            }
+        }),
+        json!({
+            "name": "brain_bandit_select",
+            "description": "Select an arm from caller-persisted UCB1, epsilon-greedy, or deterministic Thompson-sampling online-learning state. Untested arms receive an explicit exploration bonus or Beta-posterior draw; Thompson rankings retain posterior metadata; disabled arms are excluded; optional context_digest/context selects a scoped ledger with global cold-start fallback; the server keeps no hidden state.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "state": { "type": "object" },
+                    "context_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+                    "context": { "type": ["object", "null"], "description": "Bounded domain/capability/risk/task-family identity matching context_digest." }
+                },
+                "required": ["state"]
+            }
+        }),
+        json!({
+            "name": "brain_bandit_update",
+            "description": "Apply one explicit bounded evaluator reward to caller-owned bandit state. Rewards outside policy bounds, disabled arms, unknown arms, and mismatched contextual identities are refused; contextual credit is isolated by canonical domain/capability/risk/task-family identity; provider responses never become rewards implicitly.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "state": { "type": "object" }, "update": { "type": "object", "description": "arm_id/reward plus optional context_digest and context; both contextual fields must be supplied together." } },
+                "required": ["state", "update"]
+            }
+        }),
+        json!({
+            "name": "brain_outcome_record",
+            "description": "Bind one explicit evaluator judgment to a value-only brain run identity, advance caller-owned bandit state, and return digest-bound learning evidence. The request accepts no provider response text or credential; passed/failed judgments are explicit, reward bounds are enforced, and persistence remains the caller's responsibility.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run": { "type": "object", "description": "Run ID plus selection, prompt, plan, and outcome SHA-256 digests and provider/model metadata; contains no response text." },
+                    "assessment": { "type": "object", "description": "Explicit evaluator ID/version, bounded reward, pass/fail state, and optional value-free evidence metadata." },
+                    "bandit_state": { "type": "object" },
+                    "arm_id": { "type": "string" },
+                    "context_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "Optional canonical digest of context; context and digest must agree." },
+                    "context": { "type": ["object", "null"], "description": "Optional bounded domain/capability/risk/task-family identity." },
+                    "idempotency_key": { "type": "string", "maxLength": 256, "description": "Optional caller-owned retry identity. Reusing it with a different evaluator contract is refused." }
+                },
+                "required": ["run", "assessment", "bandit_state", "arm_id"]
+            }
+        }),
         json!({
             "name": "fiber_compile",
             "description": "Compile a typed decision query into the smallest decision-sufficient \
                 context. Returns the L0 decision contract — goal, verdict, what was omitted, and \
                 whether the sufficiency claim holds — plus a content-addressed handle for descending \
-                to evidence. It \
+                to evidence. A fiber-query/0.4 input also returns the exhaustive decision-relative \
+                rate-distortion identification, frontier and minimal-context result; a \
+                fiber-query/0.5 input returns a certificate-bound exact adaptive policy tree. It \
                 deliberately does not return the evidence: call fiber_refine when the contract is \
                 not enough to act on.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "world": { "type": "string", "description": "Path to a world document or store directory, relative to the server root." },
-                    "query": { "type": "string", "description": "Path to a query document, relative to the server root." },
+                    "query": { "type": "string", "description": "Path to a fiber-query/0.1 through fiber-query/0.5 document, relative to the server root." },
                     "layer": { "type": "string", "enum": ["l0", "l1", "l2", "l3", "l4"], "description": "Starting layer. Defaults to l0." }
                 },
                 "required": ["world", "query"]
@@ -27529,9 +36075,50 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "jobs": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Serialized bioprism-factory Job values initially enqueued into the simulation." },
                     "workers": { "type": "array", "minItems": 1, "maxItems": 256, "description": "Serialized WorkerCapability values; worker_id values must be unique." },
-                    "actions": { "type": "array", "maxItems": 2000, "description": "Ordered actions: enqueue, lease, heartbeat, stage, commit, fail, recover_expired, compensate, release_quarantine, or cancel." }
+                    "actions": { "type": "array", "maxItems": 2000, "description": "Ordered actions: enqueue, lease, heartbeat, stage, commit, fail, recover_expired, compensate, release_quarantine, or cancel. Heartbeat, stage, commit, and fail require the attempt returned by the corresponding lease; the attempt is a fencing token." }
                 },
                 "required": ["jobs", "workers", "actions"]
+            }
+        }),
+        json!({
+            "name": "factory_authority_verify",
+            "description": "Verify a serialized factory execution-authority envelope, including the queue snapshot digest, transition-chain links, revision, and bounded lease/event counts. This audits durable state without dispatching workers or claiming provider-effect completion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "checkpoint": { "type": "object", "description": "Serialized bioprism-factory execution-authority snapshot, or a legacy digest-verified JobStoreSnapshot for migration audit." },
+                    "include_events": { "type": "boolean", "description": "Include up to max_events newest transition metadata rows; defaults false." },
+                    "max_events": { "type": "integer", "minimum": 0, "maximum": 256, "description": "Maximum transition metadata rows to return when include_events is true." }
+                },
+                "required": ["checkpoint"]
+            }
+        }),
+        json!({
+            "name": "artifact_registry_audit",
+            "description": "Register, query, fetch, and traverse a bounded cross-domain artifact index keyed by exact JSON content digest. domain_evidence_lineage adds a digest-bound intake trace with request/response/intake identities, source-plan binding posture, declared parent presence, and reverse retained-child links for any capability group. Trusted mission, evaluator-replay, verified evidence-bundle, and workflow-reconciliation boundaries also project records automatically; generic domain results remain manual. Known evidence bundles and workflow reconciliation records are independently re-verified before registration. The registry preserves missing parents and never turns index presence into scientific, clinical, publication, or external-provenance authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation": { "type": "string", "enum": ["register", "query", "get", "lineage", "domain_evidence_lineage", "cross_store", "verify_snapshot"], "description": "Operation to perform; defaults to query. domain_evidence_lineage traces retained domain_evidence_intake rows; cross_store compares exact identities across the artifact, mission evidence, workflow reconciliation, and workflow execution evidence registries." },
+                    "registration": { "type": "object", "description": "For register: {kind, subject_id, domains, parent_digests, declared_digest?, artifact}." },
+                    "kind": { "type": "string", "description": "For query: artifact kind such as mission_evidence_bundle, workflow_reconciliation, evaluator_replay, domain_report, or domain_evidence_harmonization." },
+                    "domain": { "type": "string", "description": "For query: one explicit domain label." },
+                    "subject_id": { "type": "string", "description": "For query: mission or subject identifier." },
+                    "after": { "type": "string", "description": "For query: exclusive content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "For query: bounded row count; defaults to 100." },
+                    "include_artifacts": { "type": "boolean", "description": "For query: include full bounded artifact bodies; defaults false." },
+                    "content_digest": { "type": "string", "description": "For get or lineage: exact content digest returned by register/query." },
+                    "group_id": { "type": "string", "description": "For domain_evidence_lineage: optional exact capability-group filter." },
+                    "source_tool": { "type": "string", "description": "For domain_evidence_lineage: optional exact retained source-tool filter." },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"], "description": "For domain_evidence_lineage: optional caller-declared intake outcome filter." },
+                    "request_digest": { "type": "string", "description": "For domain_evidence_lineage: optional exact canonical request digest." },
+                    "response_digest": { "type": "string", "description": "For domain_evidence_lineage: optional exact canonical response digest." },
+                    "intake_digest": { "type": "string", "description": "For domain_evidence_lineage: optional exact canonical intake digest." },
+                    "source_plan_digest": { "type": "string", "description": "For domain_evidence_lineage: optional canonical source plan digest; the result separately reports its retained content-parent binding." },
+                    "include_children": { "type": "boolean", "description": "For domain_evidence_lineage: include direct retained child links found by exact parent content digest; defaults true." },
+                    "snapshot": { "type": "object", "description": "For verify_snapshot: serialized artifact registry checkpoint." }
+                },
+                "required": []
             }
         }),
         json!({
@@ -27544,6 +36131,514 @@ pub fn tool_definitions() -> Vec<Value> {
                     "query": { "type": "string", "description": "Path to a FIBER query document, relative to the server root." }
                 },
                 "required": ["world", "query"]
+            }
+        }),
+        json!({
+            "name": "domain_report_project",
+            "description": "Project a caller-supplied report from any declared workspace capability group into the bounded domain-report envelope, compose validated adapter or provider evidence into that envelope, or audit which of the 29 catalogue groups have retained structured projections. The tool validates group, source-tool, and domain membership, preserves claim posture and limitations, indexes exact report JSON digests, and keeps coverage separate from scientific, clinical, release, provenance, and readiness claims.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation": { "type": "string", "enum": ["project", "coverage", "from_adapter_execution", "from_provider_normalization", "from_external_provider_normalization"], "description": "project creates one explicit report projection; from_adapter_execution validates/indexes nested adapter evidence; from_provider_normalization and from_external_provider_normalization validate/index provider evidence and compose a canonical report; coverage summarizes retained structured projections. Defaults to project." },
+                    "group_id": { "type": "string", "description": "For project: exact workspace capability-group id; for coverage: optional exact group filter." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "For project: domain labels declared by the selected capability group." },
+                    "domain": { "type": "string", "description": "For coverage: optional case-insensitive domain-label filter." },
+                    "report_class": { "type": "string", "description": "For coverage: optional report-class filter such as ordinary, adapter_execution, provider_normalization_inline, or provider_normalization_external_payload." },
+                    "bridge_mode": { "type": "string", "description": "For coverage: optional explicit bridge-mode filter such as inline or external_payload." },
+                    "subject_id": { "type": "string", "description": "For project: caller-owned subject, dataset, run, or report identity." },
+                    "source_tool": { "type": "string", "description": "For project: callable MCP tool declared under group_id." },
+                    "report": { "type": "object", "description": "For project: bounded caller-supplied report payload; it is retained but not executed or scientifically interpreted." },
+                    "claim_posture": { "type": "object", "description": "For project: {status, does_not_claim, limitations?}; status is observed, derived, review_required, refused, or not_applicable and does_not_claim must be non-empty." },
+                    "evidence": { "type": "object", "description": "For from_adapter_execution: serialized AdapterExecutionEvidenceRequest. The adapter is caller-executed; this operation validates and indexes the observation but never runs it." },
+                    "conformance": { "type": "object", "description": "For from_adapter_execution: optional caller-supplied bounded conformance report retained inside the canonical report payload." },
+                    "normalization": { "type": "object", "description": "For from_provider_normalization: serialized DomainEvidenceProviderNormalizationRequest; for from_external_provider_normalization: serialized DomainEvidenceProviderExternalPayloadNormalizationRequest. The provider/connector remains caller-managed." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "For projection operations: optional lowercase SHA-256 parent artifact digests." },
+                    "max_groups": { "type": "integer", "minimum": 1, "maximum": 128, "description": "For coverage: maximum catalogue groups to include; defaults to 64." },
+                    "include_report_digests": { "type": "boolean", "description": "For coverage: include exact indexed report digests per group; defaults false." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "domain_evidence_harmonize",
+            "description": "Harmonize explicit canonical domain-report projections into a digest-addressed traceability artifact. The operation requires exact subject identity, validates every report and source-tool/domain declaration against the workspace catalogue, requires every report to have an explicit support/qualification/contradiction/context link, preserves missing requirements and contradiction posture, and always requires human review; it never interprets the claim or asserts scientific, clinical, causal, publication, release, provenance, or readiness validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Exact subject identity shared by every canonical domain report." },
+                    "claim": { "type": "object", "description": "Opaque caller claim descriptor: {id, statement?, scope?}; the statement is retained but not interpreted." },
+                    "reports": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "object" }, "description": "Canonical domain_report bodies or project-response wrappers. Every report must have the same subject_id and is content-digested exactly." },
+                    "links": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "type": "object" }, "description": "Explicit links {report_index, role, note?, report_digest?}; role is supports, qualifies, contradicts, or context. Qualifies and contradicts require a note." },
+                    "required_group_ids": { "type": "array", "maxItems": 64, "items": { "type": "string" }, "description": "Optional capability groups that must be represented; missing groups remain explicit." },
+                    "required_domains": { "type": "array", "maxItems": 64, "items": { "type": "string" }, "description": "Optional domain labels that must be represented; missing labels remain explicit." }
+                },
+                "required": ["subject_id", "claim", "reports", "links"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_harmonization_coverage",
+            "description": "Query retained cross-domain harmonization artifacts by exact subject, domain, bridge class/mode, and traceability state. Results are digest-ordered and bounded, preserving contradiction posture, lineage totals, missing requirements, and domain summaries without interpreting caller claims or treating registry presence as validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Optional exact subject filter." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive domain filter matched against joined report rows." },
+                    "report_class": { "type": "string", "description": "Optional explicit bridge class filter, such as ordinary, adapter_execution, provider_normalization_inline, or provider_normalization_external_payload." },
+                    "bridge_mode": { "type": "string", "description": "Optional explicit bridge mode filter, such as inline or external_payload." },
+                    "traceability_state": { "type": "string", "enum": ["complete", "requirements_missing", "links_missing"], "description": "Optional traceability-state filter." },
+                    "after": { "type": "string", "description": "Exclusive lowercase SHA-256 content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "Maximum summary rows; defaults to 100." },
+                    "include_report_digests": { "type": "boolean", "description": "Include joined report digests in each summary row; defaults false." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "domain_decision_readiness_audit",
+            "description": "Apply an explicit fail-closed structural policy to reports spanning any selected capability domains. It reuses domain evidence harmonization, checks required groups/domains, support and qualification floors, explicit contradictions, refused and review-required reports, report links, and lineage-parent requirements, then returns a digest-bound readiness state. ready_for_human_review means only that the caller's structural policy was satisfied; it never means scientific, clinical, causal, regulatory, publication, release, or execution validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Exact subject identity shared by every report." },
+                    "claim": { "type": "object", "description": "Opaque caller claim descriptor with a required non-empty id." },
+                    "reports": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "object" }, "description": "Canonical domain_report bodies or domain_report_project response wrappers." },
+                    "links": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "type": "object" }, "description": "Explicit report links with report_index, role, and report_digest; supports, qualifies, contradicts, and context remain distinct." },
+                    "policy": { "type": "object", "description": "Caller-owned gate policy: required_group_ids, required_domains, minimum_supporting_reports (default 1), minimum_qualifying_reports (default 0), require_all_reports_linked (default true), reject_contradictions (default true), reject_refused_reports (default true), allow_review_required (default false), and require_lineage_parents (default false)." }
+                },
+                "required": ["subject_id", "claim", "reports", "links", "policy"]
+            }
+        }),
+        json!({
+            "name": "domain_decision_readiness_query",
+            "description": "Query the bounded artifact registry for retained domain decision-readiness audits by exact subject, structural decision state, or policy result. Results are digest-ordered and full audit bodies are opt-in. Querying never reruns harmonization, interprets a claim, or treats ready_for_human_review as scientific, clinical, release, or execution authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Optional exact subject filter." },
+                    "decision_state": { "type": "string", "enum": ["ready_for_human_review", "review_required", "incomplete", "blocked"], "description": "Optional structural state filter." },
+                    "policy_satisfied": { "type": "boolean", "description": "Optional exact policy-satisfied filter." },
+                    "after": { "type": "string", "description": "Exclusive content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "Bounded row count; defaults to 100." },
+                    "include_audits": { "type": "boolean", "description": "Include full retained audit bodies; defaults false." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "control_plane_readiness_audit",
+            "description": "Join independently supplied domain decision-readiness, capability-route, operations-gate, release, and workflow evidence into one digest-bound structural control-plane posture. Each component retains its own authority boundary; only components explicitly required by policy can block the projection. The tool never dispatches nested tools, authorizes execution, or turns ready_for_human_review into scientific, clinical, deployment, or release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Caller-owned identity shared with the supplied domain decision-readiness audit." },
+                    "policy": { "type": "object", "description": "Optional explicit component policy: require_domain_readiness (default true), require_route_review, require_route_plan, require_operations_acceptance, require_release_ready, and require_workflow_evidence (all default false except domain readiness)." },
+                    "readiness_audit": { "type": "object", "description": "Validated domain_decision_readiness_audit response wrapper; required by default and retained as the domain component." },
+                    "route_review": { "type": "object", "description": "Optional non-executing capability_route_review response." },
+                    "route_plan": { "type": "object", "description": "Optional non-executing capability_route_plan response; when supplied it is checked more strictly than a review alone." },
+                    "operations_gate_projection": { "type": "object", "description": "Optional operations preflight projection with current gate, review, and acceptance identities." },
+                    "operations_gate_review": { "type": "object", "description": "Optional retained operations_gate_review response to cross-check against the projection." },
+                    "release_audit": { "type": "object", "description": "Optional release_audit or release_pipeline_audit response; release readiness remains local structural evidence." },
+                    "workflow_evidence": { "type": "object", "description": "Optional successful, non-executing workflow evidence packet supplied by the caller." }
+                },
+                "required": ["subject_id"]
+            }
+        }),
+        json!({
+            "name": "control_plane_readiness_query",
+            "description": "Query digest-ordered retained control-plane readiness projections by subject, structural state, or explicit policy result. Full projection bodies are opt-in; querying never reruns nested evidence, interprets a claim, or grants execution, scientific, clinical, deployment, or release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Optional exact subject filter." },
+                    "control_plane_state": { "type": "string", "enum": ["ready_for_human_review", "review_required", "incomplete", "blocked"], "description": "Optional structural control-plane state filter." },
+                    "policy_satisfied": { "type": "boolean", "description": "Optional exact policy-satisfied filter." },
+                    "after": { "type": "string", "description": "Exclusive content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "description": "Bounded row count; defaults to 100." },
+                    "include_audits": { "type": "boolean", "description": "Include full retained projections; defaults false." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "control_plane_readiness_compare",
+            "description": "Compare two successful, digest-verified control-plane readiness projections and expose component state changes, policy changes, added or removed blockers, domain and parent-digest changes, directional evidence, and the next structural review action. The comparison never reruns nested tools and never turns improvement into scientific, clinical, deployment, or release authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject_id": { "type": "string", "description": "Optional subject identity; when supplied it must match both compared audits." },
+                    "before": { "type": "object", "description": "Successful non-executing control_plane_readiness_audit response wrapper used as the earlier structural snapshot." },
+                    "after": { "type": "object", "description": "Successful non-executing control_plane_readiness_audit response wrapper used as the later structural snapshot." }
+                },
+                "required": ["before", "after"]
+            }
+        }),
+        json!({
+            "name": "control_plane_readiness_compare_retained",
+            "description": "Resolve two retained control_plane_readiness artifacts by exact content digest and compare their structural readiness state for one subject. The registry verifies the artifact bytes before comparison; the tool never reconstructs missing history, reruns nested evidence, or turns an improved state into scientific, clinical, deployment, release, or execution authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "before_content_digest": { "type": "string", "description": "Exact content digest of the earlier retained control_plane_readiness artifact." },
+                    "after_content_digest": { "type": "string", "description": "Exact content digest of the later retained control_plane_readiness artifact." },
+                    "subject_id": { "type": "string", "description": "Optional subject identity; when supplied it must match both retained artifacts." }
+                },
+                "required": ["before_content_digest", "after_content_digest"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_intake",
+            "description": "Normalize a supplied raw request/response envelope from any declared capability-group tool into an exact-digest domain report and indexed intake artifact. The operation checks the source tool and domain labels against the authoritative catalogue, preserves observed, partial, refused, error, and unknown outcomes, and never executes or interprets the named tool; it is a provenance-aware evidence boundary, not a scientific, clinical, causal, release, or readiness decision.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning source_tool." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Domain labels declared by group_id for the supplied envelope." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, run, mission, or report identity." },
+                    "source_tool": { "type": "string", "description": "Exact MCP tool name declared under group_id whose envelope is being retained." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Optional original JSON request; null is retained when omitted and request_supplied distinguishes the cases." },
+                    "response": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Required raw JSON response, refusal, or error envelope to retain." },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"], "description": "Caller-declared envelope outcome; no outcome is inferred from response shape." },
+                    "claim_posture": { "type": "object", "description": "Explicit domain-report claim posture with status, non-claims, and optional limitations." },
+                    "source_plan_digest": { "type": ["string", "null"], "description": "Optional exact plan_digest from a retained domain_evidence_source_plan; when supplied, group, subject, source tool, and domains must match before intake is indexed." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional lowercase SHA-256 artifact parents already known or intentionally missing." }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "response", "outcome", "claim_posture"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_coverage",
+            "description": "Audit retained raw domain-evidence intake across the authoritative capability catalogue and join advisory digest-verified evidence from adapter, provider, source/harmonization, domain-report, workflow/mission, and external-reference artifact families. The coverage rows preserve missing groups, declared domains, intake counts, subjects, source tools, outcome states, exact artifact-family posture, and optional exact intake digests; complete local intake or artifact presence is never treated as execution coverage, scientific or clinical validity, provenance completeness, release readiness, or external-effect completion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Optional exact capability-group filter." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive declared-domain filter." },
+                    "max_groups": { "type": "integer", "minimum": 1, "maximum": 128, "description": "Maximum selected groups; defaults to 64." },
+                    "include_intake_digests": { "type": "boolean", "description": "Include exact indexed intake artifact digests in each group row." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "domain_evidence_source_plan",
+            "description": "Build and index a deterministic, domain-scoped plan for a caller-managed external evidence connector. It validates connector and locator classes, rejects embedded credentials and invalid digests, normalizes bounded retrieval policy, and preserves a plan digest that can parent later raw intake; it never fetches files, contacts networks, resolves credentials, follows redirects, or treats a locator as provenance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning this source plan." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Domain labels declared by group_id." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, study, run, or report identity." },
+                    "source_tool": { "type": ["string", "null"], "description": "Optional exact MCP tool declared under group_id that will later consume the source." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "file", "provider_api", "generic_http"], "description": "Declared future connector family; it is not invoked by this plan." },
+                    "locator_kind": { "type": "string", "enum": ["uri", "path", "opaque"], "description": "How the caller represents locator without exposing credentials." },
+                    "locator": { "type": "string", "description": "Bounded source locator or opaque reference. Embedded credentials and control line breaks are refused." },
+                    "retrieval_mode": { "type": "string", "enum": ["reference_only", "metadata_only", "content"], "description": "Requested future retrieval depth; all modes remain not_started here." },
+                    "expected_content_digest": { "type": ["string", "null"], "description": "Optional lowercase SHA-256 digest expected from a later connector." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional artifact parents for this source declaration." },
+                    "retrieval_policy": { "type": "object", "description": "Optional bounded policy: network disabled/caller_managed/enabled, max_bytes 1..67108864, cache no_cache/content_addressed. Credentials are never accepted." },
+                    "does_not_claim": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Caller-owned non-claims that remain attached to the plan." }
+                },
+                "required": ["group_id", "domains", "subject_id", "connector_kind", "locator_kind", "locator", "retrieval_mode", "does_not_claim"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_source_execute",
+            "description": "Execute a retained domain_evidence_source_plan through the bounded connector kernel. Local files are confined to the server root; plain HTTP requires an enabled exact host allow-list; HTTPS, redirects, unsupported connector families, policy refusals, and transport failures remain explicit outcomes. Successful and partial reads produce raw-byte and canonical-JSON digests and are automatically retained through domain_evidence_intake; no scientific, clinical, provenance, or release claim is inferred.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_plan_digest": { "type": "string", "description": "Exact plan_digest from a retained domain_evidence_source_plan artifact." },
+                    "source_tool": { "type": "string", "description": "Optional declared capability-group MCP tool used as the intake source; required when the plan omitted source_tool." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Optional caller-owned request envelope retained alongside the connector response." },
+                    "claim_posture": { "type": "object", "description": "Optional explicit claim posture; defaults to review_required with connector non-claims." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional exact artifact parents; the retained plan artifact content digest is added automatically." }
+                },
+                "required": ["source_plan_digest"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_normalize",
+            "description": "Normalize caller-supplied literature, clinical-trial, FHIR, object-store, or provider-API payloads into the same catalogue-bound domain-evidence intake artifact used by bounded source reads. The route returns a structural-only shape audit with recognized-container, row, identifier-presence, and object-store digest-coverage facts plus a bounded digest-only record index for deduplication. It preserves explicit provider/payload/request digests and caller-supplied observed/partial/refused/error/unknown outcomes, but never contacts or authenticates a provider, interprets domain values, or claims provenance, scientific, clinical, or release validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning this provider evidence." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Domain labels declared by group_id." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, study, run, or report identity." },
+                    "source_tool": { "type": "string", "description": "Exact declared MCP source tool associated with the provider response." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"], "description": "Caller-managed provider connector family; no connector is invoked." },
+                    "provider": { "type": "string", "description": "Caller-declared provider or registry name; this is not authenticated." },
+                    "payload": { "type": ["object", "array"], "description": "Opaque provider-shaped response payload retained structurally and content-digested." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Optional caller request sent to the provider; retained and separately digested." },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"], "description": "Caller-supplied transport/observation outcome; unknown is the default and no outcome is inferred." },
+                    "claim_posture": { "type": "object", "description": "Optional explicit claim posture; defaults to review_required with provider non-claims." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional lowercase SHA-256 artifact parents." },
+                    "source_plan_digest": { "type": ["string", "null"], "description": "Optional retained source-plan digest; when supplied, intake verifies group, subject, tool, and domain scope." }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "connector_kind", "provider", "payload"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_replay_verify",
+            "description": "Recompute a caller-managed provider normalization, shape audit, and catalogue-independent intake identity against retained expected digests. The route never contacts a provider or re-executes a request; it returns matched/mismatch dimensions and indexes only the value-free replay verification artifact idempotently.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id used by the retained observation." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Domain labels used by the retained observation." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, study, run, or report identity." },
+                    "source_tool": { "type": "string", "description": "Exact declared source tool used by the retained observation." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "provider": { "type": "string", "description": "Caller-declared provider label; it is compared as metadata and not authenticated." },
+                    "payload": { "type": ["object", "array"], "description": "The caller-supplied payload to compare; its values are not returned in the replay verification." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"] },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"] },
+                    "claim_posture": { "type": "object" },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "source_plan_digest": { "type": ["string", "null"] },
+                    "expected_payload_digest": { "type": "string", "description": "Required retained canonical payload digest." },
+                    "expected_request_digest": { "type": ["string", "null"], "description": "Retained request digest, or null when the original request was omitted." },
+                    "expected_shape_digest": { "type": "string", "description": "Required value-free shape-audit digest." },
+                    "expected_normalization_digest": { "type": "string", "description": "Required digest of the public normalization envelope." },
+                    "expected_intake_digest": { "type": "string", "description": "Required digest of the recomputed domain-evidence intake envelope." }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "connector_kind", "provider", "payload", "expected_payload_digest", "expected_shape_digest", "expected_normalization_digest", "expected_intake_digest"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_connector_handoff",
+            "description": "Validate and retain a caller-managed provider connector manifest before payload intake. The handoff is digest-addressed and idempotently indexed, permits only opaque secret references, and explicitly records that plugin launch, credentials, authentication, network execution, and provider validity remain outside the core.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning this provider handoff." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Requested domain labels; each must be covered by the manifest." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject, dataset, study, run, or report identity." },
+                    "source_tool": { "type": "string", "description": "Caller-owned source tool associated with the external connector." },
+                    "provider": { "type": "string", "description": "Caller-declared provider label; it is not authenticated by this core." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "manifest": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "schema": { "type": "string", "const": "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1" },
+                            "connector_id": { "type": "string" },
+                            "version": { "type": "string" },
+                            "provider": { "type": "string" },
+                            "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                            "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                            "capabilities": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                            "transport": { "type": "string", "const": "caller_managed" },
+                            "auth_posture": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "status": { "type": "string", "enum": ["none", "caller_asserted", "delegated", "unknown"] },
+                                    "secret_refs": { "type": "array", "maxItems": 32, "items": { "type": "string" } },
+                                    "does_not_claim": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } }
+                                },
+                                "required": ["status", "does_not_claim"]
+                            }
+                        },
+                        "required": ["schema", "connector_id", "version", "provider", "connector_kind", "domains", "capabilities", "transport", "auth_posture"]
+                    },
+                    "status": { "type": "string", "enum": ["prepared", "submitted", "observed", "partial", "refused", "error", "unknown"], "default": "unknown" },
+                    "request_digest": { "type": ["string", "null"] },
+                    "payload_digest": { "type": ["string", "null"] },
+                    "source_plan_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "attempt_id": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "manifest"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_receipt",
+            "description": "Retain a digest-bound receipt for a large caller-managed provider payload stored outside the MCP core. The receipt records exact payload digest, byte length, transfer identity, storage backend, locator class, media metadata, availability, retention, and connector-handoff parent without fetching or copying payload bytes.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string", "description": "Exact authoritative capability-group id owning this external payload receipt." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string", "description": "Caller-declared provider label; it is not authenticated here." },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string", "description": "Digest of the retained caller-managed connector handoff." },
+                    "transfer_id": { "type": "string", "description": "Caller-owned transfer or export attempt identity." },
+                    "payload_digest": { "type": "string", "description": "Lowercase SHA-256 digest of the out-of-line payload bytes or canonical payload representation." },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string", "description": "Caller-owned locator/reference; embedded credentials and control line breaks are refused." },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"], "default": "unknown" },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"], "default": "unknown" },
+                    "attempt_id": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_replay_verify",
+            "description": "Replay an external payload receipt's metadata contract without opening its locator. It compares expected receipt, connector-handoff, payload, and byte-length identities, returns matched/mismatch dimensions, and retains only the value-free replay verification artifact.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string" },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string" },
+                    "transfer_id": { "type": "string" },
+                    "payload_digest": { "type": "string" },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string" },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"] },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"] },
+                    "attempt_id": { "type": ["string", "null"] },
+                    "expected_receipt_digest": { "type": "string", "description": "Retained receipt digest to compare." },
+                    "expected_handoff_digest": { "type": "string", "description": "Retained connector-handoff digest to compare." },
+                    "expected_payload_digest": { "type": "string", "description": "Retained external payload digest to compare." },
+                    "expected_byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator", "expected_receipt_digest", "expected_handoff_digest", "expected_payload_digest", "expected_byte_length"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_normalize",
+            "description": "Materialize a bounded caller-owned JSON provider payload against an external receipt, require its canonical JSON digest to match the receipt payload digest, and then route it through ordinary provider shape auditing and catalogue-bound intake. The bridge never opens the caller locator, copies an out-of-line payload implicitly, authenticates a provider, or claims readiness.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string" },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string" },
+                    "transfer_id": { "type": "string" },
+                    "payload_digest": { "type": "string", "description": "Receipt digest of the canonical JSON representation supplied in payload." },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string" },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"], "default": "unknown" },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"], "default": "unknown" },
+                    "attempt_id": { "type": ["string", "null"] },
+                    "payload": { "type": ["object", "array"], "description": "Explicit bounded JSON materialization; its canonical digest must equal payload_digest." },
+                    "request": { "type": ["object", "array", "string", "number", "boolean", "null"] },
+                    "outcome": { "type": "string", "enum": ["observed", "partial", "refused", "error", "unknown"], "default": "unknown" },
+                    "claim_posture": { "type": "object" },
+                    "source_plan_digest": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator", "payload"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_lineage_audit",
+            "description": "Audit an external provider payload receipt against the retained connector handoff in the local artifact registry. It distinguishes matched, partial, mismatched, and orphaned lineage, including optional payload-digest binding, without contacting providers, stores, locators, or credential systems.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string" },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string" },
+                    "transfer_id": { "type": "string" },
+                    "payload_digest": { "type": "string" },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string" },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"], "default": "unknown" },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"], "default": "unknown" },
+                    "attempt_id": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_execution_evidence",
+            "description": "Retain caller-supplied transfer observations for an external provider payload and compare observed digest/size with a retained receipt. This is an evidence and attestation boundary only: the core performs no transfer or external I/O and never turns caller assertions into provider authenticity or readiness.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "source_tool": { "type": "string" },
+                    "provider": { "type": "string" },
+                    "connector_kind": { "type": "string", "enum": ["literature", "clinical_trial", "fhir", "object_store", "provider_api"] },
+                    "handoff_digest": { "type": "string" },
+                    "transfer_id": { "type": "string" },
+                    "payload_digest": { "type": "string" },
+                    "byte_length": { "type": "integer", "minimum": 1, "maximum": 68719476736u64 },
+                    "storage_backend": { "type": "string", "enum": ["object_store", "file", "database", "caller_managed"] },
+                    "locator_kind": { "type": "string", "enum": ["opaque", "uri", "path"] },
+                    "locator": { "type": "string" },
+                    "content_type": { "type": ["string", "null"] },
+                    "content_encoding": { "type": ["string", "null"] },
+                    "request_digest": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "availability": { "type": "string", "enum": ["available", "partial", "missing", "unknown"], "default": "unknown" },
+                    "retention": { "type": "string", "enum": ["ephemeral", "durable", "unknown"], "default": "unknown" },
+                    "attempt_id": { "type": ["string", "null"] },
+                    "expected_receipt_digest": { "type": "string" },
+                    "execution_status": { "type": "string", "enum": ["submitted", "transferred", "partial", "refused", "error", "unknown"] },
+                    "executor_id": { "type": "string" },
+                    "observed_payload_digest": { "type": ["string", "null"] },
+                    "observed_byte_length": { "type": ["integer", "null"], "minimum": 1, "maximum": 68719476736u64 },
+                    "locator_opened": { "type": "boolean", "default": false },
+                    "observation_digest": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "source_tool", "provider", "connector_kind", "handoff_digest", "transfer_id", "payload_digest", "byte_length", "storage_backend", "locator_kind", "locator", "expected_receipt_digest", "execution_status", "executor_id"]
+            }
+        }),
+        json!({
+            "name": "domain_evidence_provider_external_payload_evidence_query",
+            "description": "Return a bounded read-only joined projection of external payload receipt, lineage-audit, and caller execution-evidence artifacts. It preserves receipt-only, missing-receipt, partial-join, and complete-join states with deterministic cursors and never contacts providers, stores, locators, credentials, or payloads.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": ["string", "null"] },
+                    "domain": { "type": ["string", "null"] },
+                    "subject_id": { "type": ["string", "null"] },
+                    "after": { "type": ["string", "null"] },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 128, "default": 100 },
+                    "include_artifacts": { "type": "boolean", "default": false }
+                },
+                "required": []
             }
         }),
         json!({
@@ -28039,6 +37134,77 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "adapter_execution_evidence",
+            "description": "Retain a bounded caller-supplied observation for one declared native or Python-delegated adapter. It binds capability-group/domain scope, adapter and source identity, input/output digests, execution and conformance states, semantic-loss entries, and artifact lineage without executing adapters, importing dependencies, fetching sources, or claiming readiness.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": "string" },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" } },
+                    "subject_id": { "type": "string" },
+                    "adapter_id": { "type": "string" },
+                    "adapter_version": { "type": "string" },
+                    "source_id": { "type": "string" },
+                    "input_digest": { "type": "string" },
+                    "output_digest": { "type": ["string", "null"] },
+                    "execution_status": { "type": "string", "enum": ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown"] },
+                    "conformance_status": { "type": "string", "enum": ["verified", "partial", "refused", "not_run", "unknown"] },
+                    "semantic_loss_status": { "type": "string", "enum": ["lossless", "lossy", "unknown", "not_applicable"] },
+                    "losses": { "type": "array", "maxItems": 128, "items": { "type": "object", "additionalProperties": false, "properties": {
+                        "kind": { "type": "string" },
+                        "severity": { "type": "string", "enum": ["info", "warning", "blocking"] },
+                        "detail": { "type": "string" },
+                        "source_path": { "type": ["string", "null"] },
+                        "target_path": { "type": ["string", "null"] }
+                    }, "required": ["kind", "severity", "detail"] } },
+                    "item_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 2000000 },
+                    "byte_length": { "type": ["integer", "null"], "minimum": 0, "maximum": 68719476736u64 },
+                    "error_code": { "type": ["string", "null"] },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" } },
+                    "attempt_id": { "type": ["string", "null"] }
+                },
+                "required": ["group_id", "domains", "subject_id", "adapter_id", "adapter_version", "source_id", "input_digest", "execution_status", "conformance_status", "semantic_loss_status"]
+            }
+        }),
+        json!({
+            "name": "adapter_execution_evidence_query",
+            "description": "Query the bounded digest-ordered adapter execution evidence registry by capability group, domain, subject, adapter, source, execution, conformance, or semantic-loss state. The result classifies only explicit retained parent links to source projections and workflow reconciliations; it never infers provenance from labels and never executes adapters, imports dependencies, fetches sources, or changes workflow state.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "group_id": { "type": ["string", "null"] },
+                    "domain": { "type": ["string", "null"] },
+                    "subject_id": { "type": ["string", "null"] },
+                    "adapter_id": { "type": ["string", "null"] },
+                    "source_id": { "type": ["string", "null"] },
+                    "execution_status": { "type": ["string", "null"], "enum": ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown", null] },
+                    "conformance_status": { "type": ["string", "null"], "enum": ["verified", "partial", "refused", "not_run", "unknown", null] },
+                    "semantic_loss_status": { "type": ["string", "null"], "enum": ["lossless", "lossy", "unknown", "not_applicable", null] },
+                    "after": { "type": ["string", "null"], "description": "Exclusive content-digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 128, "default": 100 },
+                    "include_artifacts": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "domain_acquisition_catalogue",
+            "description": "Build a deterministic acquisition and adapter-conformance route for every selected declared domain. Keeps bounded file/HTTP transport, caller-managed connector families, native adapters, Python-delegated adapters, domain-tool-only coverage, and unmapped domains separate; scope-label matches are routing hints only and this tool never fetches, imports, executes, or grants credentials.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group_id": { "type": "string", "description": "Optional exact or prefix capability-group filter." },
+                    "domain": { "type": "string", "description": "Optional case-insensitive substring filter over declared domain labels." },
+                    "include_adapters": { "type": "boolean", "description": "Include full matched adapter descriptors; defaults to false." },
+                    "max_groups": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Maximum selected capability groups; defaults to 64." },
+                    "max_domains": { "type": "integer", "minimum": 1, "maximum": 512, "description": "Maximum selected domain route rows; defaults to 512." }
+                },
+                "required": []
+            }
+        }),
+        json!({
             "name": "observed_world_declare",
             "description": "Validate and seal an observed-world declaration from pinned SourceRef values, a StudyDesign, and outcome labels. It checks source pinning, stratum reconciliation, selection requirements for population claims, controlled-source boundaries, and returns the resulting provenance ladder.",
             "inputSchema": {
@@ -28396,6 +37562,86 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "interweave_workflow_execute",
+            "description": "Bind one of the six typed Agent Interweave workflows to a validated epistemic adaptive plan and return a deterministic simulated or receipt-only replay result. Authorization, provenance, workflow identity, effect prohibitions, and release limitations remain explicit; this tool never performs an external workflow effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow": { "type": "string", "enum": ["reliable_software_repair", "scientific_claim_reproduction", "biomedical_research_data_audit", "incident_response", "evidence_grounded_policy_comparison", "dataset_transformation_molecule"], "description": "One of the six closed reference workflow identities." },
+                    "problem": { "type": "object", "description": "Serialized epistemic DecisionProblem defining actions, outcomes, and utilities." },
+                    "belief": { "type": "object", "description": "Serialized epistemic Belief over the declared outcome space." },
+                    "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "Serialized bounded information acquisitions available to the adaptive plan." },
+                    "budget": { "type": "number", "minimum": 0, "description": "Finite non-negative scalar path budget for the adaptive plan." },
+                    "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of adaptive acquisition steps." },
+                    "mode": { "type": "string", "enum": ["simulate", "replay"], "default": "simulate", "description": "Simulate through the deterministic local adapter or replay a supplied receipt." },
+                    "provider": { "type": "string", "description": "Provider identity bound into the workflow execution digest; defaults to mcp-simulated." },
+                    "capabilities": { "type": "array", "maxItems": 32, "items": { "type": "string" }, "description": "Optional non-empty capability labels bound into the workflow execution digest." },
+                    "authorization": { "type": "object", "description": "Optional {grant_id, provider} plan-scoped authorization. Omission returns a structured no-grant refusal." },
+                    "observations": { "type": "array", "maxItems": 16, "description": "Optional deterministic simulated rows of {acquisition_id, outcome_label}; omitted rows are not fabricated." },
+                    "receipt": { "type": "object", "description": "Required in replay mode: a prior workflow execution receipt from this same binding and plan." },
+                    "evidence": { "type": "object", "description": "Optional {subject_id, domains, parent_digests} configuration. When supplied, the produced binding and receipt are converted into indexed workflow execution evidence without another execution." }
+                },
+                "required": ["workflow", "problem", "belief", "acquisitions", "budget", "max_steps"]
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execution_evidence",
+            "description": "Convert an already-produced interweave workflow binding and receipt into a portable, digest-addressed evidence record and index it in the bounded local registries. The route validates workflow identity, provider, plan digest, receipt shape, provenance counts, subject, domains, and parent digests; it never executes, replays, dereferences a provider, or authorizes an external effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "binding": { "type": "object", "description": "The binding returned by interweave_workflow_execute." },
+                    "receipt": { "type": "object", "description": "The receipt returned by interweave_workflow_execute." },
+                    "subject_id": { "type": "string", "description": "Caller-owned subject or case identity for later query." },
+                    "domains": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string" }, "description": "Caller-owned domain labels; labels are indexed, not semantically inferred." },
+                    "parent_digests": { "type": "array", "maxItems": 128, "items": { "type": "string" }, "description": "Optional content-hash parents from source plans, reports, or external handoffs." }
+                },
+                "required": ["binding", "receipt", "subject_id", "domains"]
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execution_evidence_import",
+            "description": "Import a portable workflow execution evidence record after revalidating its binding, receipt, provenance counts, parent digests, and canonical evidence digest. Identical imports are idempotent; import never executes or replays a workflow.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "evidence": { "type": "object", "description": "The complete evidence record returned by interweave_workflow_execution_evidence." }
+                },
+                "required": ["evidence"]
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execution_evidence_query",
+            "description": "Query the bounded workflow execution evidence registry by workflow, subject, domain, plan, binding, receipt status, provenance mode, or digest cursor. Full records are opt-in and the query never executes, retries, or re-evaluates a workflow.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string" },
+                    "subject_id": { "type": "string" },
+                    "domain": { "type": "string" },
+                    "plan_digest": { "type": "string" },
+                    "binding_digest": { "type": "string" },
+                    "receipt_status": { "type": "string", "enum": ["completed", "partial", "refused"] },
+                    "provenance_mode": { "type": "string", "enum": ["none", "observed_declared", "simulated", "replayed", "mixed"] },
+                    "after": { "type": "string", "description": "Exclusive evidence digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_records": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "interweave_workflow_execution_evidence_get",
+            "description": "Fetch one previously imported workflow execution evidence record by its SHA-256 evidence digest. Lookup is bounded, non-executing, and does not turn presence into provider or domain authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "evidence_digest": { "type": "string", "description": "The evidence digest returned by import or query." }
+                },
+                "required": ["evidence_digest"]
+            }
+        }),
+        json!({
             "name": "atlas_report",
             "description": "Produce a bounded capability-atlas coverage and failure-debt report from a serialized Atlas, preserving measured-versus-unmeasured distinctions, family/depth/failure histograms, inconsistencies, claim-supporting coverage, and optional predeclared composite eligibility. Unmeasured capabilities never become numeric zeroes and an ineligible composite returns a refusal.",
             "inputSchema": {
@@ -28432,12 +37678,16 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "bundle_verify",
-            "description": "Recompute and verify an inline or root-confined ResultBundle. It checks carried entry digests, unlisted or missing content, embedded certificate integrity, and provenance posture; referenced entries remain not-recomputed and symmetric attestation is explicitly outside this keyless tool.",
+            "description": "Recompute and verify an inline or root-confined ResultBundle, or verify a PubliclyAttestedBundle with either a direct Ed25519 public key or an offline trust registry and explicit policy. Registry mode checks carried entry digests, lifecycle signatures, purpose, role, producer binding, delegation, rotation, revocation, and bounded key validity; referenced entries remain not-recomputed and external authority boundaries remain explicit.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "bundle": { "type": "object", "description": "Optional inline bioprism-bundle ResultBundle; mutually exclusive with document." },
-                    "document": { "type": "string", "description": "Optional root-confined JSON ResultBundle path; mutually exclusive with bundle." }
+                    "bundle": { "type": "object", "description": "Optional inline bioprism-bundle ResultBundle; mutually exclusive with document and publicly_attested_bundle." },
+                    "document": { "type": "string", "description": "Optional root-confined JSON ResultBundle or PubliclyAttestedBundle path; mutually exclusive with bundle and publicly_attested_bundle." },
+                    "publicly_attested_bundle": { "type": "object", "description": "Optional inline bioprism-bundle PubliclyAttestedBundle; requires exactly one of verification_key or trust_registry and is mutually exclusive with bundle/document." },
+                    "verification_key": { "type": "object", "description": "Direct Ed25519 VerificationKey for a public attestation. It carries key_identity, public_key as ed25519:<64 hex>, and validity {not_before?, not_after?}; mutually exclusive with trust_registry." },
+                    "trust_registry": { "type": "object", "description": "Offline bioprism-key-registry/0.1 snapshot containing registered keys and signed delegation, rotation, and revocation records; mutually exclusive with verification_key." },
+                    "trust_policy": { "type": "object", "description": "Explicit registry policy containing purpose plus optional required_role, expected_producer, validity instant as_of, root/delegation requirements, and max_delegation_depth; required with trust_registry." }
                 },
                 "required": []
             }
@@ -29218,6 +38468,69 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "epistemic_adaptive_acquisition",
+            "description": "Compute an exact bounded finite-horizon adaptive acquisition policy against an explicit decision problem and belief. The next acquisition may depend on each observed outcome; expected terminal risk, declared acquisition cost, posterior branches, state-node caps, and refusal boundaries remain separate. The endpoint plans only and never executes acquisitions or invents causal, clinical, biological, or predictive claims.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem with explicit actions, models, and row-major loss matrix." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief over the problem models." },
+                    "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "Distinct acquisitions. Each has id, non-negative scalar cost, and a complete outcome likelihood partition." },
+                    "budget": { "type": "number", "minimum": 0, "description": "Maximum scalarized acquisition cost paid along any policy path." },
+                    "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of distinct acquisitions on any branch." }
+                },
+                "required": ["problem", "belief", "acquisitions", "budget", "max_steps"]
+            }
+        }),
+        json!({
+            "name": "epistemic_adaptive_costed",
+            "description": "Compute an exact finite-horizon adaptive acquisition policy with seven explicit resource dimensions: tokens, compute time, latency, money, privacy loss, specimen units, and expert minutes. Component-wise feasibility is checked before explicit scalar weights compare policies; the endpoint plans only and never executes acquisitions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief." },
+                    "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "Items shaped as {acquisition: {id, cost, outcomes}, cost: {tokens, compute_ms, latency_ms, money_usd, privacy_loss, specimen_units, expert_minutes}}." },
+                    "budget": { "type": "object", "description": "Seven-dimensional component budget with the exact cost dimension keys." },
+                    "weights": { "type": "object", "description": "Non-negative comparison weights over the same seven dimensions; at least one must be positive." },
+                    "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of distinct acquisitions on any branch." }
+                },
+                "required": ["problem", "belief", "acquisitions", "budget", "weights", "max_steps"]
+            }
+        }),
+        json!({
+            "name": "epistemic_adaptive_execute",
+            "description": "Run or replay a previously planned adaptive policy through an explicit provider boundary. Simulation is the only provider built into this MCP surface and is always labelled simulated; external adapters implement the typed Rust acquisition seam. Execution without a plan-scoped authorization returns a refusal without calling the provider. Every accepted branch is checked for plan digest, provider identity, declared outcome labels, evidence digest shape, path budget, and provenance; partial runs never become completed runs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mode": { "type": "string", "enum": ["simulate", "replay"], "default": "simulate", "description": "Simulate caller-supplied outcomes or replay a prior receipt without a live source." },
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem used to bind the policy digest." },
+                    "belief": { "type": "object", "description": "Serialized normalized bioprism-epistemic Belief." },
+                    "acquisitions": { "type": "array", "minItems": 1, "maxItems": 16, "description": "The exact acquisition definitions used by the policy." },
+                    "budget": { "type": "number", "minimum": 0, "description": "Maximum scalarized cost on any policy path." },
+                    "max_steps": { "type": "integer", "minimum": 0, "maximum": 16, "description": "Maximum number of acquisitions on any branch." },
+                    "provider": { "type": "string", "maxLength": 256, "default": "mcp-simulated", "description": "Provider identity. The built-in adapter only simulates and cannot claim external observation." },
+                    "authorization": { "type": "object", "description": "Optional explicit {grant_id, provider}; absent authorization is a fail-closed no-call refusal." },
+                    "observations": { "type": "array", "maxItems": 16, "description": "Simulation script rows {acquisition_id, outcome_label}; outcomes are labelled simulated." },
+                    "receipt": { "type": "object", "description": "Prior adaptive execution receipt required in replay mode." }
+                },
+                "required": ["problem", "belief", "acquisitions", "budget", "max_steps"]
+            }
+        }),
+        json!({
+            "name": "epistemic_decision_quotient",
+            "description": "Compute the deterministic 43.10 decision-equivalence quotient of an explicit loss table under an explicit permitted-action set. Models merge only when their permitted-action loss-difference profiles are exactly equal; model identities, ties, compression, and the refusal boundary remain visible. This is decision-relative, not causal, biological, clinical, or predictive equivalence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "problem": { "type": "object", "description": "Serialized bioprism-epistemic DecisionProblem with explicit actions, models, and finite row-major loss matrix." },
+                    "permitted_actions": { "type": "array", "minItems": 1, "maxItems": 1000, "items": { "type": "string", "minLength": 1, "maxLength": 256 }, "description": "Action identifiers this query is allowed to distinguish between. The endpoint canonicalises their order." }
+                },
+                "required": ["problem", "permitted_actions"]
+            }
+        }),
+        json!({
             "name": "epistemic_context_audit",
             "description": "Audit decision-relative context compression over an explicit DecisionProblem, Belief, and observed EvidencePool. It uses the epistemic kernel's identification, exhaustive rate-distortion frontier, minimal-sufficient-context, and requested-subset evaluation; it preserves minimax abstention, contradictory-subset refusals, and the distinction between decision identification and causal or clinical claims.",
             "inputSchema": {
@@ -29531,7 +38844,7 @@ pub fn tool_definitions() -> Vec<Value> {
                     "release": { "type": "object", "description": "Optional exact arguments for release_audit. Required for release readiness." },
                     "ci_evidence": { "type": "object", "description": "Optional exact CiExecutionEvidenceRequest arguments with ci and evidence. Mutually exclusive with ci_provider and ci_provider_evidence; it is structurally reconciled and never executed here." },
                     "ci_provider": { "type": "object", "description": "Optional CiProviderNormalizationRequest with ci, provider (github_actions, gitlab_ci, or generic), payload, and optional source. It is normalized into canonical evidence and then structurally audited; mutually exclusive with ci_evidence and ci_provider_evidence and never authenticated or executed here." },
-                    "ci_provider_evidence": { "type": "object", "description": "Optional CiProviderEvidenceRequest with ci, provider, payload, and bounded artifacts, logs, and attestations. It is normalized, structurally audited, and exposed as its own delivery target; mutually exclusive with ci_evidence and ci_provider." },
+                    "ci_provider_evidence": { "type": "object", "description": "Optional CiProviderEvidenceRequest with ci, provider, payload, and bounded artifacts, logs, and attestations. Artifact/log rows may declare provider_metadata, caller_declared, or local_response_bytes digest_scope; attestations may carry subject_digest for content binding. It is normalized, structurally audited, and exposed as its own delivery target; signatures and provider identity remain unverified; mutually exclusive with ci_evidence and ci_provider." },
                     "execution_provenance": { "type": "object", "description": "Optional exact ExecutionProvenanceRequest arguments with mission and delegated_checks. Required for the execution_provenance target; it reconciles a supplied mission trace without replaying it." },
                     "release_request": { "type": "object", "description": "Optional explicit request {id, targets}. Targets: local_delivery, developer_platform, developer_claims, repository_scope, repository_impact, sdk_admission, conformance, provider_capability, governance_schema, release, ci_execution_evidence, ci_provider_evidence, or execution_provenance. Omit it to receive no readiness claim." }
                 },
@@ -29652,7 +38965,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "capability_route",
-            "description": "Batch multiple named cross-domain needs into one digest-bound candidate report. Each need preserves its bounded ranked discovery result; explicit tool filters are distinguished from free-text/domain/group candidates. The route never executes tools, grants permission, validates domain arguments, or replaces review of an agent_mission allow-list.",
+            "description": "Batch multiple named cross-domain needs into one digest-bound candidate report. Each need preserves its bounded ranked discovery result and candidate-group artifact/workflow-reconciliation posture; explicit tool filters are distinguished from free-text/domain/group candidates. The route never executes tools, grants permission, validates domain arguments, or replaces review of an agent_mission allow-list.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -29729,6 +39042,80 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "mission_evaluator_replay",
+            "description": "Replay a retained agent_mission claim_lineage against the current digest-bound evaluator catalogue without executing any evaluator or domain tool. It validates adapter identity, domain-label coverage, outcome counts, output-digest shape, disagreement summaries, and coverage across all 29 evaluator groups, and returns deterministic structural fixtures for retained/refused/omitted/disagreement variants.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission": { "type": "object", "description": "The exact agent_mission report containing workflow, plan or mission_id, mission_status, and claim_lineage." },
+                    "include_fixtures": { "type": "boolean", "default": true, "description": "Include one bounded structural fixture family for every standard evaluator adapter." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128, "description": "Maximum retained claims/binding rows returned by the replay projection." }
+                },
+                "required": ["mission"]
+            }
+        }),
+        json!({
+            "name": "mission_evaluator_replay_compare",
+            "description": "Compare a retained agent_mission evaluator replay with the current digest-bound catalogue without executing any evaluator or domain tool. Separates historical review/discovery digest drift from current adapter compatibility and explicitly reports when historical catalogue rows were not retained.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission": { "type": "object", "description": "The exact agent_mission report containing workflow, plan or mission_id, mission_status, claim_lineage, and optional evaluator-review provenance." },
+                    "include_fixtures": { "type": "boolean", "default": true, "description": "Include the bounded structural replay fixture family in the nested replay projection." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128, "description": "Maximum retained claims, bindings, and fixture rows returned by the nested replay projection." }
+                },
+                "required": ["mission"]
+            }
+        }),
+        json!({
+            "name": "mission_evidence_bundle_verify",
+            "description": "Verify a portable mission_evidence_bundle_export without executing a mission, evaluator, domain tool, or external effect. Recomputes the canonical bundle digest, checks the retention contract, and verifies the optional retained-result digest while keeping invalid verification evidence explicit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle": { "type": "object", "description": "The complete JSON object returned by the mission evidence bundle export route, including bundle_digest." }
+                },
+                "required": ["bundle"]
+            }
+        }),
+        json!({
+            "name": "mission_evidence_bundle_import",
+            "description": "Import a portable mission evidence bundle after independently verifying its schema, retention contract, and content digests. Re-imports of the same canonical bundle are idempotent. The process-local bounded registry indexes evidence only; import does not execute a mission, evaluator, domain tool, or external effect and does not establish scientific validity or release approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle": { "type": "object", "description": "The complete JSON object returned by mission evidence bundle export, including bundle_digest." }
+                },
+                "required": ["bundle"]
+            }
+        }),
+        json!({
+            "name": "mission_evidence_bundle_query",
+            "description": "Query the bounded process-local mission evidence registry by mission id or evaluator domain. Rows are ordered by canonical bundle digest, cursor-paginated, and omit full bundle bodies unless explicitly requested. Query is an index operation only and never executes a mission, evaluator, domain tool, or external effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission_id": { "type": "string", "description": "Optional exact mission identity filter." },
+                    "domain": { "type": "string", "description": "Optional exact evaluator-domain filter." },
+                    "after": { "type": "string", "description": "Optional last-seen bundle digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_bundles": { "type": "boolean", "default": false, "description": "Include complete verified bundle bodies in each row." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "mission_evidence_bundle_get",
+            "description": "Fetch one previously imported mission evidence bundle by its content hash from the bounded process-local registry. Lookup does not execute a mission, evaluator, domain tool, or external effect and bundle presence is not a scientific or release claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle_digest": { "type": "string", "description": "The sha256 content hash returned by evidence bundle import or query." }
+                },
+                "required": ["bundle_digest"]
+            }
+        }),
+        json!({
             "name": "capability_audit",
             "description": "Audit the complete cross-domain capability catalogue against the authoritative tools/list schema set. Returns the catalogue digest, group coverage, catalog-only and uncatalogued tools, duplicate schema names, intentional multi-group memberships, and a healthy invariant. This is a deterministic local contract audit, not a permission grant, readiness claim, or scientific validation.",
             "inputSchema": {
@@ -29737,6 +39124,162 @@ pub fn tool_definitions() -> Vec<Value> {
                     "include_groups": { "type": "boolean", "default": true, "description": "Include per-domain group coverage rows; set false for a compact invariant report." }
                 },
                 "required": []
+            }
+        }),
+        json!({
+            "name": "domain_workflow_catalogue",
+            "description": "Build the deterministic workflow-template catalogue for every explicit capability group. Each template binds declared domains, crates, CLI entrypoints, available and missing MCP tools, advisory stage hints, a digest-bound domain contract for pre-dispatch review, per-step evidence retention, refusal/omission handling, and completion posture. This is planning evidence only: it does not select domain arguments, grant permission, execute tools, or claim scientific, clinical, operational, or release readiness.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
+            "name": "domain_workflow_scaffold",
+            "description": "Generate a deterministic, execution-disabled starting mission for one capability-group workflow. By default it selects one available tool per lexical stage; explicit tools and per-tool argument objects may be supplied. The response includes bounded argument contracts, selected/omitted tools, a digest-bound workflow binding, and live authoritative schema preflight. Missing required arguments remain a blocked correction posture; this never grants permission, executes tools, infers semantic sufficiency, or claims domain readiness.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string", "description": "Capability-group workflow id returned by domain_workflow_catalogue." },
+                    "mission_id": { "type": "string", "description": "Stable caller-owned mission identity for the planned scaffold." },
+                    "goal": { "type": "string", "description": "Caller-owned objective for the planned mission." },
+                    "tools": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "type": "string" }, "description": "Optional explicit available tools. If omitted, the scaffold selects one available tool per lexical stage." },
+                    "arguments": { "type": "object", "description": "Optional map from selected tool name to an explicit JSON argument object. Unselected tool names are refused." }
+                },
+                "required": ["workflow_id", "mission_id", "goal"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_instantiate",
+            "description": "Instantiate a caller-selected domain workflow template into a bounded, group-scoped mission, explicit per-step evidence plan, digest-bound workflow_binding, and authoritative no-dispatch mission preflight. Every selected tool must be both declared and available in tools/list; policy allow-lists cannot escape the selected group. This never dispatches a tool, infers domain semantics, or turns a valid plan into a readiness or truth claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": { "type": "string", "description": "Capability-group workflow id returned by domain_workflow_catalogue." },
+                    "mission_id": { "type": "string", "description": "Stable caller-owned mission identity." },
+                    "goal": { "type": "string", "description": "Caller-owned objective for the planned mission." },
+                    "steps": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "type": "object" }, "description": "Explicit steps; each tool must belong to the selected workflow and arguments remain domain-specific JSON objects." },
+                    "policy": { "type": "object", "description": "Optional mission execution and resource policy; execution still remains outside this kernel." },
+                    "claim_requests": { "type": "array", "maxItems": 64, "items": { "type": "object" } },
+                    "evaluator_review": { "type": "object" },
+                    "route_review": { "type": "object", "description": "Optional ready, non-executing capability_route_review handoff. It must match the exact normalized steps and is retained as provenance only." }
+                },
+                "required": ["workflow_id", "mission_id", "goal", "steps"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_reconcile",
+            "description": "Reconcile a retained agent_mission report or verified mission evidence bundle against an instantiated domain workflow. Checks workflow and mission-plan digests, planned step/tool identity, result counters, trace lifecycle, raw-output retention, refusals, blocks, cancellations, and summary-only omissions, then returns structural completion and optional decision-readiness posture. This never retries or dispatches a tool and never turns completion evidence or readiness posture into a scientific, clinical, operational, regulatory, or release claim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "instantiation": { "type": "object", "description": "The complete accepted result returned by domain_workflow_instantiate." },
+                    "mission_report": { "type": "object", "description": "The exact agent_mission report, when retained. Provide this or evidence_bundle." },
+                    "evidence_bundle": { "type": "object", "description": "A verified mission_evidence_bundle_export, including result when full retention is available. Provide this or mission_report." },
+                    "policy": { "type": "object", "properties": { "require_readiness": { "type": "boolean", "description": "Require the supplied readiness_audit to be ready_for_human_review; completion evidence remains a separate field." } } },
+                    "readiness_audit": { "type": "object", "description": "Optional validated domain_decision_readiness_audit to retain beside completion evidence." }
+                },
+                "required": ["instantiation"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_verify",
+            "description": "Verify a retained domain_workflow_instantiate result against its internal workflow binding, the live catalogue, and authoritative no-dispatch mission preflight. Optionally replay the original instantiation request and compare workflow, catalogue, domain-contract, evidence-plan, mission, selection, and execution identities. This is a structural freshness check only: it never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, or provider validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "instantiation": { "type": "object", "description": "Complete result returned by domain_workflow_instantiate, including its authoritative preflight_report." },
+                    "replay_request": { "type": "object", "description": "Optional original domain_workflow_instantiate request. When supplied, the live catalogue is used to recompute and compare the retained contract." }
+                },
+                "required": ["instantiation"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_portfolio",
+            "description": "Plan a bounded portfolio of explicit domain_workflow_instantiate requests across capability groups. Each item is scoped independently, receives authoritative no-dispatch mission preflight, and retains structured blocked outcomes. Complete-catalogue coverage and an explicit decision-readiness gate are optional but explicit; the portfolio never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, provider, or release validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "requests": { "type": "array", "minItems": 1, "maxItems": 64, "description": "Explicit domain_workflow_instantiate request objects, at most one per workflow_id and mission_id." },
+                    "policy": {
+                        "type": "object",
+                        "properties": {
+                            "allow_partial": { "type": "boolean", "description": "Retain blocked items as a partial portfolio instead of presenting the portfolio as blocked." },
+                            "require_complete_catalogue": { "type": "boolean", "description": "Require one successful request for every live capability-group workflow." },
+                            "require_readiness": { "type": "boolean", "description": "Require readiness_audit to satisfy its structural policy and be ready_for_human_review." }
+                        },
+                        "additionalProperties": false
+                    },
+                    "readiness_audit": { "type": "object", "description": "Optional validated domain_decision_readiness_audit bound to the portfolio digest and retained separately from preflight." }
+                },
+                "required": ["requests"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "domain_workflow_portfolio_verify",
+            "description": "Verify a retained domain_workflow_portfolio artifact as one bounded audit object. Recomputes the retained portfolio digest, checks coverage and aligned replay request digests, verifies every item independently, and adds authoritative no-dispatch mission preflight to structurally successful items. Blocked and mismatched items remain visible; this never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, provider, or release validity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "portfolio": { "type": "object", "description": "Complete retained result returned by domain_workflow_portfolio, including portfolio_digest, coverage, and items." },
+                    "replay_requests": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": ["object", "null"] }, "description": "Optional array aligned by item index with the original instantiate requests; null skips replay for that item." },
+                    "policy": {
+                        "type": "object",
+                        "properties": {
+                            "allow_partial": { "type": "boolean", "description": "Retain blocked verification items as partial instead of reporting the portfolio as blocked." },
+                            "require_complete_catalogue": { "type": "boolean", "description": "Require the retained portfolio coverage to include every live capability-group workflow." },
+                            "require_replay": { "type": "boolean", "description": "Require an aligned replay request and matching replay for every portfolio item." },
+                            "require_readiness": { "type": "boolean", "description": "Require the retained portfolio readiness projection to satisfy its structural policy." }
+                        },
+                        "additionalProperties": false
+                    },
+                    "readiness_audit": { "type": "object", "description": "Optional readiness audit to compare against the retained portfolio readiness projection." }
+                },
+                "required": ["portfolio"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "domain_workflow_reconciliation_import",
+            "description": "Import a previously produced domain_workflow_reconcile report into the bounded process-local audit registry after recomputing its reconciliation_digest. Import is idempotent and never executes, retries, resumes, or mutates a mission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "record": { "type": "object", "description": "The complete report returned by domain_workflow_reconcile, without transport-only request metadata." }
+                },
+                "required": ["record"]
+            }
+        }),
+        json!({
+            "name": "domain_workflow_reconciliation_query",
+            "description": "Query bounded digest-ordered domain workflow reconciliation records by mission, workflow, plan digest, completion status, or retained decision-readiness posture. This is an audit index query and never re-executes or re-evaluates a mission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission_id": { "type": "string" },
+                    "workflow_id": { "type": "string" },
+                    "mission_plan_digest": { "type": "string" },
+                    "completion_status": { "type": "string", "enum": ["complete", "partial", "failed", "complete_with_output_omissions", "unverified"] },
+                    "decision_readiness_state": { "type": "string", "enum": ["ready_for_human_review", "review_required", "incomplete", "blocked"] },
+                    "decision_readiness_gate_satisfied": { "type": "boolean" },
+                    "after": { "type": "string", "description": "Exclusive reconciliation digest cursor." },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_records": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "domain_workflow_reconciliation_get",
+            "description": "Fetch one imported domain workflow reconciliation report by its SHA-256 reconciliation digest. Lookup is bounded and non-executing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reconciliation_digest": { "type": "string", "description": "The content hash returned by reconciliation import or query." }
+                },
+                "required": ["reconciliation_digest"]
             }
         }),
         json!({
@@ -29773,6 +39316,38 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "capability_route_plan",
+            "description": "Compile one explicitly reviewed capability_route into a non-executing agent_mission request and authoritative mission preflight. The compiler composes candidate membership, dependency waves, route evidence, and live tools/list schema checks for every workspace capability group. It never chooses tools, invents arguments, grants permission, or dispatches a nested tool; callers must inspect the returned mission and preflight before calling agent_mission.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mission_id": { "type": "string", "description": "Stable mission identity for the generated plan." },
+                    "route": { "type": "object", "description": "The complete JSON result returned by capability_route." },
+                    "selections": { "type": "array", "minItems": 1, "maxItems": 128, "description": "Explicit caller-selected route candidates; each row must include need_id, tool, domain, capability, objective, and arguments." },
+                    "validate_schemas": { "type": "boolean", "default": true, "description": "Run authoritative tools/list argument checks during route review before mission preflight." },
+                    "policy": { "type": "object", "description": "Optional mission policy for the generated request. execute=true is refused because this tool is always non-executing." },
+                    "claim_requests": { "type": "array", "maxItems": 64, "description": "Optional caller-owned mission claim requests passed through to mission preflight." },
+                    "evaluator_review": { "type": "object", "description": "Optional ready mission_evaluator_review binding passed through to mission preflight." },
+                    "workflow_binding": { "type": "object", "description": "Optional digest-bound domain_workflow_instantiate binding passed through to mission preflight." }
+                },
+                "required": ["mission_id", "route", "selections"]
+            }
+        }),
+        json!({
+            "name": "capability_route_plan_verify",
+            "description": "Verify a previously returned capability_route_plan against its retained identities and the live authoritative mission preflight without dispatch. Supplying the original route and selections explicitly replays route review and compares route, selection, review, catalogue, plan digest, and status fields; omitting them performs only retained-plan shape and mission-preflight verification and reports that route replay was not requested.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "plan": { "type": "object", "description": "Complete capability_route_plan result to verify." },
+                    "route": { "type": "object", "description": "Optional original capability_route result. Must be supplied with selections to request route replay." },
+                    "selections": { "type": "array", "minItems": 1, "maxItems": 128, "description": "Optional original caller selections. Must be supplied with route to request route replay." },
+                    "validate_schemas": { "type": "boolean", "description": "Optional schema-validation mode for explicit route replay; defaults to the retained review mode." }
+                },
+                "required": ["plan"]
+            }
+        }),
+        json!({
             "name": "capability_discover",
             "description": "Search the complete explicit workspace capability catalogue across all domain groups. Query by free-text intent, group id, domain, or MCP tool; results are deterministic, bounded, digest-bound, and retain routing labels. Optional tool schema attachment comes from the authoritative tools/list definitions. Scores are label-match routing evidence, not permission, readiness, or scientific truth.",
             "inputSchema": {
@@ -29790,7 +39365,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "agent_mission",
-            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. Optional caller-authored claim_requests produce a bounded claim-to-step evidence lineage projection with explicit refusal, omission, disagreement, and non-claim posture; they never become semantic truth assertions. An optional ready evaluator_review binds those claims to the digest-fresh discovery/review checkpoint and is revalidated before dispatch. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
+            "description": "Plan or execute a bounded cross-domain DAG of existing MCP tools. Planning is the default and returns deterministic dependency waves plus a content digest. Execution requires an explicit allow-list, preserves raw nested refusal envelopes, blocks dependent work after failures, bounds per-step and total output, and refuses confirmation flags unless side effects are explicitly enabled. An optional workflow_binding carries the digest-bound workflow, domain contract, and evidence plan from domain_workflow_instantiate; executed bound missions automatically produce a structural reconciliation record in the shared audit registry. Optional caller-authored claim_requests produce a bounded claim-to-step evidence lineage projection with explicit refusal, omission, disagreement, and non-claim posture; they never become semantic truth assertions. An optional ready evaluator_review binds those claims to the digest-fresh discovery/review checkpoint and is revalidated before dispatch. An optional ready route_review binds the exact capability-route goal and mission draft steps, carries route evidence provenance without claiming readiness, and is revalidated before dispatch. The explicit execution_mode can run independent waves concurrently inside this bounded process, and executed reports include a clock-free sequence-addressed execution_trace; it never invokes itself or becomes a distributed scheduler.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -29833,6 +39408,16 @@ pub fn tool_definitions() -> Vec<Value> {
                     "evaluator_review": {
                         "type": "object",
                         "description": "Optional ready, non-executing mission_evaluator_review response. When supplied, every evaluator binding must match its reviewed claim, adapter, domain, step, pointer, and required posture; stale or blocked reviews refuse before nested dispatch."
+                    },
+                    "workflow_binding": {
+                        "type": "object",
+                        "description": "Optional digest-bound domain_workflow_instantiate mission.workflow_binding. It binds workflow_id, workflow/catalogue/domain-contract digests, contract snapshots, and evidence_plan_digest; it is structural provenance, not permission or readiness.",
+                        "required": ["workflow_id", "workflow_digest", "catalog_digest", "domain_contract_digest", "domain_contract", "evidence_plan", "evidence_plan_digest"]
+                    },
+                    "route_review": {
+                        "type": "object",
+                        "description": "Optional ready, non-executing capability_route_review response. It must match the mission goal and exact steps, preserve review and route digests, and carry evidence posture as provenance only; it never authorizes execution. Legacy reviews without route evidence remain structurally compatible.",
+                        "required": ["ok", "workflow", "review_id", "route_id", "catalog_digest", "goal", "findings", "review_status", "handoff_status", "mission_draft", "execution"]
                     },
                     "steps": {
                         "type": "array",
@@ -29893,6 +39478,68 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "developer_workbench_verify",
+            "description": "Verify a retained developer_workbench authoring/notebook report against the current session, deterministically replay its dashboard projection, and optionally replay the original CiRequest. Digest and structural mismatches remain visible; this tool never runs notebook cells, writes YAML, contacts GitHub, executes CI, or grants release, scientific, clinical, safety, or production authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session": { "type": "object", "description": "Current serialized bioprism-devplat StudioSession." },
+                    "report": { "type": "object", "description": "Complete retained developer_workbench report to verify." },
+                    "expected_report_digest": { "type": "string", "minLength": 64, "maxLength": 64, "description": "Optional lowercase SHA-256 digest of the canonical retained report." },
+                    "ci_replay": { "type": "object", "description": "Optional original CiRequest. Supplying it re-generates and compares the retained CI plan without executing it." },
+                    "policy": {
+                        "type": "object",
+                        "properties": {
+                            "require_dashboard": { "type": "boolean", "default": false },
+                            "require_ci": { "type": "boolean", "default": false },
+                            "require_ci_replay": { "type": "boolean", "default": false }
+                        }
+                    }
+                },
+                "required": ["session", "report"]
+            }
+        }),
+        json!({
+            "name": "developer_workbench_import",
+            "description": "Retain a structurally valid developer_workbench report in the bounded digest-addressed local registry. MCP/REST transport metadata is ignored for canonical identity; import is idempotent and never executes notebook cells, CI, GitHub, or external effects.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "report": { "type": "object", "description": "Complete developer_workbench report, either direct or with the returned transport envelope fields." }
+                },
+                "required": ["report"]
+            }
+        }),
+        json!({
+            "name": "developer_workbench_query",
+            "description": "Query the bounded retained developer-workbench report registry by session digest, dashboard domain/capability/state, release-ready posture, and a digest cursor. Rows are deterministic and report bodies are opt-in; the query never executes or re-evaluates a workbench.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+                    "domain": { "type": "string" },
+                    "capability": { "type": "string" },
+                    "state": { "type": "string", "enum": ["draft", "validated", "released", "withdrawn"] },
+                    "release_ready": { "type": "boolean" },
+                    "after": { "type": "string", "minLength": 64, "maxLength": 64 },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_reports": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "developer_workbench_get",
+            "description": "Fetch one retained developer_workbench report by its canonical SHA-256 content digest. The report was structurally validated at import; lookup never executes or re-evaluates it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workbench_report_digest": { "type": "string", "minLength": 64, "maxLength": 64 }
+                },
+                "required": ["workbench_report_digest"]
+            }
+        }),
+        json!({
             "name": "ci_provider_normalize",
             "description": "Normalize a caller-supplied GitHub Actions-shaped or generic provider payload into canonical CiRunEvidence. Missing per-check result digests are derived from the supplied check objects and labeled; unknown and non-passing states remain visible to ci_execution_evidence_audit. This route never contacts a provider, verifies signatures, fetches logs, executes checks, or grants release authority.",
             "inputSchema": {
@@ -29942,6 +39589,55 @@ pub fn tool_definitions() -> Vec<Value> {
                     }
                 },
                 "required": ["ci", "provider", "payload"]
+            }
+        }),
+        json!({
+            "name": "ci_provider_evidence_import",
+            "description": "Re-run ci_provider_evidence_audit and retain its complete provider/run/artifact/log/attestation report in the bounded shared registry. Failed and unknown runs remain explicit records; import never contacts a provider, executes checks, verifies signatures, or approves a release.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ci": { "type": "object", "description": "Canonical CiRequest used to regenerate the exact plan." },
+                    "provider": { "type": "string", "enum": ["github_actions", "gitlab_ci", "generic"] },
+                    "payload": { "type": "object", "description": "Provider-shaped run and check payload." },
+                    "source": { "type": "string", "enum": ["caller_attested", "provider_observed"] },
+                    "artifacts": { "type": "array", "maxItems": 128, "items": { "type": "object" } },
+                    "logs": { "type": "array", "maxItems": 128, "items": { "type": "object" } },
+                    "attestations": { "type": "array", "maxItems": 128, "items": { "type": "object" } }
+                },
+                "required": ["ci", "provider", "payload"]
+            }
+        }),
+        json!({
+            "name": "ci_provider_evidence_query",
+            "description": "Query the bounded retained provider evidence registry by provider, run, plan digest, structural validity, conformance posture, minimum local-byte hash counts, minimum attestation subject-digest bindings, and digest cursor. Full audits are opt-in and the query never contacts a provider or executes checks.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider": { "type": "string" },
+                    "run_id": { "type": "string" },
+                    "plan_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+                    "structurally_valid": { "type": "boolean" },
+                    "conformance_ready": { "type": "boolean" },
+                    "min_local_byte_hash_artifacts": { "type": "integer", "minimum": 0, "maximum": 128 },
+                    "min_local_byte_hash_logs": { "type": "integer", "minimum": 0, "maximum": 128 },
+                    "min_attestation_subject_digest_bindings": { "type": "integer", "minimum": 0, "maximum": 128 },
+                    "after": { "type": "string", "minLength": 64, "maxLength": 64 },
+                    "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 100 },
+                    "include_records": { "type": "boolean", "default": false }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "ci_provider_evidence_get",
+            "description": "Fetch one retained provider evidence audit by its canonical SHA-256 registry digest. Lookup returns the exact re-audited record and never re-executes or recontacts the provider.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider_evidence_digest": { "type": "string", "minLength": 64, "maxLength": 64 }
+                },
+                "required": ["provider_evidence_digest"]
             }
         }),
         json!({
@@ -30027,7 +39723,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "capability_dashboard",
-            "description": "Build a bounded digest-bound dashboard over every selected capability group. It separates callable MCP tools, authoritative schema coverage, crate ownership, CLI entrypoints, Python artifacts, readiness classes, and explicit gaps; it does not grant permission, execute tools, or claim scientific or deployment readiness.",
+            "description": "Build a bounded digest-bound dashboard over every selected capability group. It separates callable MCP tools, authoritative schema coverage, crate ownership, CLI entrypoints, Python artifacts, readiness classes, explicit gaps, digest-verified artifact evidence, and workflow-reconciliation posture; it does not grant permission, execute tools, or claim scientific, clinical, release, or deployment readiness.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -30100,5 +39796,8 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["event", "policy", "trace"]
             }
         }),
-    ]
+    ];
+    let mut control = crate::brain_control::tool_definitions();
+    control.extend(definitions);
+    control
 }

@@ -1,0 +1,14 @@
+[package]
+name = "bioprism-brain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Provider-neutral autonomous brain kernel: model routing, prompt assembly, bounded plans, and online bandit state"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }

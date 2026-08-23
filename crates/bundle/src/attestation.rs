@@ -16,10 +16,10 @@
 //!
 //! > party P produced these bytes.
 //!
-//! The second is what a reader wants and what a public-key signature would give. It is unavailable
-//! here, and the difference is not a rounding error: the set of parties that could have produced a
-//! tag is *exactly* the set that can check it, so a tag is evidence of key possession and of nothing
-//! else. If two teams share a key so both can verify, a tag distinguishes neither from the other.
+//! The second is what a reader wants and what the sibling Ed25519 path gives. This module retains
+//! the symmetric form for compatibility: the set of parties that could have produced a tag is
+//! *exactly* the set that can check it, so a tag is evidence of key possession and of nothing else.
+//! If two teams share a key so both can verify, a tag distinguishes neither from the other.
 //!
 //! # How the gap is enforced
 //!
@@ -44,10 +44,10 @@
 //!
 //! # Deliberately not implemented
 //!
-//! No certificate chain, no trust root, no key validity window, no revocation check (13.20
-//! §Verification asks for "key validity at signing time, and revocation status"; neither exists
-//! here). No countersignature, no threshold or multi-party attestation, no timestamp — a `recorded_at`
-//! string is caller-asserted and corroborated by nothing, because this crate reads no clock.
+//! No certificate chain, no trust root, no revocation check, no countersignature, no threshold or
+//! multi-party attestation, and no timestamp authority. The Ed25519 sibling adds a caller-declared
+//! numeric validity window, but a `recorded_at` string and `signed_at` value remain caller supplied
+//! and corroborated by nothing because this crate reads no clock.
 
 use crate::error::BundleError;
 use crate::mac::{AuthenticationScheme, KeyIdentity, MacTag, Repudiability, SecretKey};
@@ -233,13 +233,13 @@ impl Attestation {
                 key_identity: self.key_identity.clone(),
             };
         }
-        AttestationCheck::KeyHolderAuthenticated(KeyHolderAuthenticated {
-            key_identity: self.key_identity.clone(),
-            subject_digest: self.subject_digest.clone(),
-            purpose: self.purpose,
-            scheme: self.scheme,
-            repudiability: self.repudiability,
-        })
+        AttestationCheck::KeyHolderAuthenticated(KeyHolderAuthenticated::verified(
+            self.key_identity.clone(),
+            self.subject_digest.clone(),
+            self.purpose,
+            self.scheme,
+            self.repudiability,
+        ))
     }
 }
 
@@ -307,6 +307,36 @@ pub struct KeyHolderAuthenticated {
 }
 
 impl KeyHolderAuthenticated {
+    pub(crate) fn verified(
+        key_identity: KeyIdentity,
+        subject_digest: ContentHash,
+        purpose: AttestationPurpose,
+        scheme: AuthenticationScheme,
+        repudiability: Repudiability,
+    ) -> Self {
+        Self {
+            key_identity,
+            subject_digest,
+            purpose,
+            scheme,
+            repudiability,
+        }
+    }
+
+    pub(crate) fn public_key_verified(
+        key_identity: KeyIdentity,
+        subject_digest: ContentHash,
+        purpose: AttestationPurpose,
+    ) -> Self {
+        Self::verified(
+            key_identity,
+            subject_digest,
+            purpose,
+            AuthenticationScheme::Ed25519PublicKey,
+            Repudiability::NotForgeableByVerifier,
+        )
+    }
+
     /// The key whose holder produced the attested bytes. This is the strongest available statement
     /// of origin, and it names a key rather than a party.
     pub fn key_identity(&self) -> &KeyIdentity {
@@ -333,13 +363,22 @@ impl KeyHolderAuthenticated {
     ///
     /// Deliberately mentions the key and not a producer, and says what the tag does not establish.
     pub fn honest_label(&self) -> String {
-        format!(
-            "a holder of key `{}` produced the bytes digesting to {} for purpose `{}`; \
-             hmac-sha256 under a shared secret, so every party able to check this could also have \
-             produced it — this authenticates a key, not a party, establishes no origin and is not \
-             a signature",
-            self.key_identity, self.subject_digest, self.purpose
-        )
+        match self.scheme {
+            AuthenticationScheme::SymmetricSharedSecret => format!(
+                "a holder of key `{}` produced the bytes digesting to {} for purpose `{}`; \
+                 hmac-sha256 under a shared secret, so every party able to check this could also \
+                 have produced it — this authenticates a key, not a party, establishes no origin \
+                 and is not a signature",
+                self.key_identity, self.subject_digest, self.purpose
+            ),
+            AuthenticationScheme::Ed25519PublicKey => format!(
+                "the holder of the private key corresponding to public key `{}` produced the bytes \
+                 digesting to {} for purpose `{}`; third parties can verify this Ed25519 signature, \
+                 but key ownership, producer identity, authorization, and timestamp provenance \
+                 remain external policy claims",
+                self.key_identity, self.subject_digest, self.purpose
+            ),
+        }
     }
 }
 
@@ -415,7 +454,10 @@ mod tests {
             !label.contains("AURORA Working Group"),
             "a verified result must not surface the self-reported producer: {label}"
         );
-        assert!(label.contains("authenticates a key, not a party"), "{label}");
+        assert!(
+            label.contains("authenticates a key, not a party"),
+            "{label}"
+        );
 
         let rendered = serde_json::to_string(&authenticated).expect("serialises");
         assert!(

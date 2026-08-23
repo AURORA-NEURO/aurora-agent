@@ -12,12 +12,134 @@ import asyncio
 import http.client
 import json
 import math
+import re
 import ssl
 import time
 from typing import Any, Mapping, Sequence
 from urllib.parse import quote, urlencode, urlsplit
 
 from .biological import AdapterPlanReport, AdapterPlanRequest, adapter_plan_report
+from .adapter_execution_evidence import (
+    AdapterExecutionEvidenceReport,
+    AdapterExecutionEvidenceRequest,
+    adapter_execution_evidence_report,
+)
+from .adapter_execution_evidence_query import (
+    AdapterExecutionEvidenceQueryReport,
+    AdapterExecutionEvidenceQueryRequest,
+    adapter_execution_evidence_query_report,
+)
+from .artifacts import (
+    ArtifactCrossStoreAuditReport,
+    ArtifactDomainEvidenceLineageReport,
+    ArtifactDomainEvidenceLineageRequest,
+    ArtifactGetReport,
+    ArtifactGetRequest,
+    ArtifactLineageReport,
+    ArtifactQueryReport,
+    ArtifactQueryRequest,
+    ArtifactRegistrationReport,
+    ArtifactRegistrationRequest,
+)
+from .domain_reports import (
+    DomainReportCoverageReport,
+    DomainReportCoverageRequest,
+    DomainReportProjectReport,
+    DomainReportProjectRequest,
+)
+from .domain_report_bridges import (
+    AdapterDomainReportResult,
+    adapter_domain_report_arguments,
+    ProviderDomainReportResult,
+    provider_domain_report_arguments,
+    external_provider_domain_report_arguments,
+)
+from .domain_evidence import (
+    DomainEvidenceHarmonizationCoverageReport,
+    DomainEvidenceHarmonizationCoverageRequest,
+    DomainEvidenceHarmonizationReport,
+    DomainEvidenceHarmonizeRequest,
+)
+from .domain_decision_readiness import (
+    DomainDecisionReadinessReport,
+    DomainDecisionReadinessRequest,
+    DomainDecisionReadinessQueryReport,
+    DomainDecisionReadinessQueryRequest,
+)
+from .control_plane_readiness import (
+    ControlPlaneReadinessCompareReport,
+    ControlPlaneReadinessCompareRequest,
+    ControlPlaneReadinessReport,
+    ControlPlaneReadinessRequest,
+    ControlPlaneReadinessRetainedCompareReport,
+    ControlPlaneReadinessRetainedCompareRequest,
+    ControlPlaneReadinessQueryReport,
+    ControlPlaneReadinessQueryRequest,
+)
+from .domain_evidence_intake import (
+    DomainEvidenceIntakeCoverageReport,
+    DomainEvidenceIntakeCoverageRequest,
+    DomainEvidenceIntakeReport,
+    DomainEvidenceIntakeRequest,
+)
+from .domain_evidence_source import (
+    DomainEvidenceSourceExecutionReport,
+    DomainEvidenceSourceExecutionRequest,
+    DomainEvidenceSourcePlanReport,
+    DomainEvidenceSourcePlanRequest,
+)
+from .adapter_runtime import AdapterRuntime
+from .source_adapter import (
+    SourceAdapterProjectionRequest,
+    SourceAdapterProjectionResult,
+    project_source_execution,
+)
+from .domain_evidence_pipeline import (
+    DomainEvidencePipelineRequest,
+    DomainEvidencePipelineResult,
+    project_domain_source_execution,
+)
+from .domain_evidence_provider import (
+    DomainEvidenceProviderNormalizationReport,
+    DomainEvidenceProviderNormalizationRequest,
+    DomainEvidenceProviderReplayRequest,
+    DomainEvidenceProviderReplayVerificationReport,
+    domain_evidence_provider_normalization_report,
+    domain_evidence_provider_replay_verification_report,
+)
+from .domain_evidence_provider_handoff import (
+    DomainEvidenceProviderHandoffReport,
+    DomainEvidenceProviderHandoffRequest,
+    domain_evidence_provider_handoff_report,
+)
+from .domain_evidence_provider_external import (
+    DomainEvidenceProviderExternalPayloadReceiptReport,
+    DomainEvidenceProviderExternalPayloadReceiptRequest,
+    DomainEvidenceProviderExternalPayloadReplayRequest,
+    DomainEvidenceProviderExternalPayloadReplayVerificationReport,
+    DomainEvidenceProviderExternalPayloadNormalizationRequest,
+    DomainEvidenceProviderExternalPayloadNormalizationReport,
+    DomainEvidenceProviderExternalPayloadLineageAuditRequest,
+    DomainEvidenceProviderExternalPayloadLineageAuditReport,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
+    DomainEvidenceProviderExternalPayloadExecutionEvidenceReport,
+    domain_evidence_provider_external_payload_receipt_report,
+    domain_evidence_provider_external_payload_replay_verification_report,
+    domain_evidence_provider_external_payload_normalization_report,
+    domain_evidence_provider_external_payload_lineage_audit_report,
+    domain_evidence_provider_external_payload_execution_evidence_report,
+)
+from .domain_evidence_provider_external_query import (
+    DomainEvidenceProviderExternalPayloadEvidenceQueryReport,
+    DomainEvidenceProviderExternalPayloadEvidenceQueryRequest,
+    domain_evidence_provider_external_payload_evidence_query_report,
+)
+from .domain_acquisition import (
+    DOMAIN_ACQUISITION_WORKFLOW,
+    DomainAcquisitionQuery,
+    DomainAcquisitionReport,
+    domain_acquisition_report,
+)
 from .capability import (
     CapabilityAuditReport,
     CapabilitySearchReport,
@@ -26,8 +148,47 @@ from .capability import (
     CapabilityRouteReport,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
+    CapabilityRoutePlanReport,
+    CapabilityRoutePlanRequest,
+    CapabilityRoutePlanVerifyReport,
+    CapabilityRoutePlanVerifyRequest,
     CapabilityRouteRequest,
+    DomainWorkflowCatalogueReport,
+    DomainWorkflowInstantiateRequest,
+    DomainWorkflowInstantiationReport,
+    DomainWorkflowPortfolioRequest,
+    DomainWorkflowPortfolioReport,
+    DomainWorkflowPortfolioVerifyRequest,
+    DomainWorkflowPortfolioVerifyReport,
+    DomainWorkflowVerifyRequest,
+    DomainWorkflowVerifyReport,
+    DomainWorkflowScaffoldRequest,
+    DomainWorkflowScaffoldReport,
+    DomainWorkflowReconcileRequest,
+    DomainWorkflowReconciliationReport,
+    DomainWorkflowReconciliationImportRequest,
+    DomainWorkflowReconciliationQueryRequest,
+    DomainWorkflowReconciliationGetRequest,
+    DomainWorkflowReconciliationImportReport,
+    DomainWorkflowReconciliationQueryReport,
+    DomainWorkflowReconciliationGetReport,
     MissionEvaluatorQuery,
+    MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayComparisonReport,
+    MissionEvaluatorReplayReport,
+    MissionEvaluatorReplayRequest,
+    MissionEvaluatorReplayQueryReport,
+    MissionEvaluatorReplayQueryRequest,
+    MissionEvidenceBundleReport,
+    MissionEvidenceBundleRequest,
+    MissionEvidenceBundleImportReport,
+    MissionEvidenceBundleImportRequest,
+    MissionEvidenceBundleQueryReport,
+    MissionEvidenceBundleQueryRequest,
+    MissionEvidenceBundleGetReport,
+    MissionEvidenceBundleGetRequest,
+    MissionEvidenceBundleVerificationReport,
+    MissionEvidenceBundleVerifyRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
@@ -35,8 +196,22 @@ from .capability import (
     capability_route_report,
     capability_discover_report,
     capability_route_review_report,
+    capability_route_plan_report,
+    capability_route_plan_verify_report,
+    domain_workflow_catalogue_report,
+    domain_workflow_instantiation_report,
+    domain_workflow_portfolio_report,
+    domain_workflow_portfolio_verify_report,
+    domain_workflow_verify_report,
+    domain_workflow_scaffold_report,
+    domain_workflow_reconciliation_report,
     mission_evaluator_discover_report,
     mission_evaluator_review_report,
+    mission_evaluator_replay_report,
+    mission_evaluator_replay_comparison_report,
+    mission_evaluator_replay_query_report,
+    mission_evidence_bundle_report,
+    mission_evidence_bundle_verification_report,
 )
 from .capability_dashboard import CapabilityDashboardQueryArgs, CapabilityDashboardReport, capability_dashboard_report
 from .ci_evidence import CiExecutionEvidenceReport, CiExecutionEvidenceRequest, ci_execution_evidence_report
@@ -48,9 +223,34 @@ from .ci_provider import (
 from .ci_provider_evidence import (
     CiProviderEvidenceReport,
     CiProviderEvidenceRequest,
+    CiProviderEvidenceRegistryGetReport,
+    CiProviderEvidenceRegistryImportReport,
+    CiProviderEvidenceRegistryQueryReport,
+    CiProviderEvidenceRegistryQueryRequest,
     ci_provider_evidence_report,
+    ci_provider_evidence_registry_get_report,
+    ci_provider_evidence_registry_import_report,
+    ci_provider_evidence_registry_query_report,
 )
 from .execution_provenance import ExecutionProvenanceReport, ExecutionProvenanceRequest, execution_provenance_report
+from .adaptive_execution import (
+    AdaptiveCostedReport,
+    AdaptiveCostedRequest,
+    AdaptiveExecutionReport,
+    AdaptiveExecutionRequest,
+    adaptive_costed_report,
+    adaptive_execution_report,
+)
+from .workflow_execution import (
+    WorkflowExecutionReport,
+    WorkflowExecutionRequest,
+    workflow_execution_report,
+)
+from .workflow_execution_evidence import (
+    WorkflowExecutionEvidenceReport,
+    WorkflowExecutionEvidenceRequest,
+    workflow_execution_evidence_report,
+)
 from .delivery_receipt import (
     DeveloperDeliveryReceiptReport,
     DeveloperDeliveryReceiptRequest,
@@ -68,11 +268,32 @@ from .context_requests import (
     FiberVerifyRequest,
     ProjectionBundleRequest,
 )
+from .fiber_contract import (
+    FiberAdaptiveAcquisitionSummary,
+    FiberDecisionQuotientSummary,
+    FiberRateDistortionSummary,
+    fiber_adaptive_acquisition_summary,
+    fiber_decision_quotient_summary,
+    fiber_rate_distortion_summary,
+)
 from .delivery import DeveloperDeliveryAuditReport, developer_delivery_audit_report
 from .developer_platform import (
     DeveloperPlatformStatusArgs,
     DeveloperPlatformStatusReport,
     developer_platform_status_report,
+)
+from .workbench import (
+    WorkbenchRegistryGetReport,
+    WorkbenchRegistryImportReport,
+    WorkbenchRegistryImportRequest,
+    WorkbenchRegistryQueryReport,
+    WorkbenchRegistryQueryRequest,
+    WorkbenchVerificationReport,
+    WorkbenchVerificationRequest,
+    workbench_registry_get_report,
+    workbench_registry_import_report,
+    workbench_registry_query_report,
+    workbench_verification_report,
 )
 from .errors import ApiError, ArgumentError, MissionWaitTimeout, TransportError
 from .events import (
@@ -126,6 +347,10 @@ from .mission import (
     MissionExecutionProvenance,
     MissionInventoryPage,
     MissionPersistenceStatus,
+    MissionQueueFlushResult,
+    MissionQueueInventory,
+    MissionQueueLockReleaseResult,
+    MissionQueueStatus,
     MissionPolicy,
     MissionPreflight,
     MissionRequest,
@@ -136,7 +361,14 @@ from .mission import (
     preflight_mission,
 )
 from .publication import BioAtlasPublicationAuditReport, bioatlas_publication_audit_report
-from .release import ReleaseAuditArgs, ReleaseAuditReport, release_audit_report
+from .release import (
+    BundleVerifyArgs,
+    BundleVerifyReport,
+    ReleaseAuditArgs,
+    ReleaseAuditReport,
+    bundle_verify_report,
+    release_audit_report,
+)
 from .operations import (
     OpsAcceptanceArgs,
     OpsAcceptanceReport,
@@ -247,6 +479,8 @@ from .sdk_registry import SdkRegistryCheckArgs, SdkRegistryCheckReport, sdk_regi
 from .token_context import TokenContextPlanArgs, TokenContextPlanningReport, token_context_plan_report
 from .weavelang import WeaveLangCompileArgs, WeaveLangCompileReport, weavelang_compile_report
 from .epistemic import EpistemicVoiArgs, EpistemicVoiReport, epistemic_voi_report
+from .epistemic_adaptive import EpistemicAdaptiveArgs, EpistemicAdaptiveReport, epistemic_adaptive_report
+from .epistemic_quotient import EpistemicDecisionQuotientArgs, EpistemicDecisionQuotientReport, epistemic_decision_quotient_report
 from .epistemic_context import EpistemicContextAuditArgs, EpistemicContextAuditReport, epistemic_context_audit_report
 from .epistemic_selection import EpistemicSelectionAuditArgs, EpistemicSelectionAuditReport, epistemic_selection_audit_report
 from .bioeval_acquisition import BioevalAcquisitionAuditArgs, BioevalAcquisitionAuditReport, bioeval_acquisition_audit_report
@@ -608,6 +842,1245 @@ class ApiClient:
             raise ArgumentError("tool name must be a non-empty path-safe string")
         return self.request("POST", f"/v1/tools/{name}", dict(arguments or {}))
 
+    def register_artifact(
+        self,
+        request: ArtifactRegistrationRequest | Mapping[str, Any],
+    ) -> ArtifactRegistrationReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactRegistrationRequest)
+            else ArtifactRegistrationRequest(**dict(request))
+        )
+        return ArtifactRegistrationReport.from_wire(
+            self.request("POST", "/v1/artifacts", normalized.to_arguments())
+        )
+
+    def query_artifacts(
+        self,
+        request: ArtifactQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactQueryReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactQueryRequest)
+            else ArtifactQueryRequest(**dict(request or {}))
+        )
+        return ArtifactQueryReport.from_wire(
+            self.request("GET", f"/v1/artifacts?{urlencode(normalized.to_query_params())}")
+        )
+
+    def get_artifact(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactGetReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactGetRequest)
+            else ArtifactGetRequest(request)
+            if isinstance(request, str)
+            else ArtifactGetRequest(**dict(request))
+        )
+        return ArtifactGetReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/artifacts/{quote(normalized.content_digest, safe='')}",
+            )
+        )
+
+    def artifact_lineage(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactLineageReport:
+        normalized = (
+            request
+            if isinstance(request, ArtifactGetRequest)
+            else ArtifactGetRequest(request)
+            if isinstance(request, str)
+            else ArtifactGetRequest(**dict(request))
+        )
+        return ArtifactLineageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/artifacts/{quote(normalized.content_digest, safe='')}/lineage",
+            )
+        )
+
+    def domain_evidence_lineage(
+        self,
+        request: ArtifactDomainEvidenceLineageRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactDomainEvidenceLineageReport:
+        """Read exact intake digests and retained direct parent/child linkage over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, ArtifactDomainEvidenceLineageRequest)
+            else ArtifactDomainEvidenceLineageRequest(**dict(request or {}))
+        )
+        return ArtifactDomainEvidenceLineageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-evidence/lineage?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def artifact_registry_persistence(self) -> dict[str, Any]:
+        return self.request("GET", "/v1/artifacts/persistence")
+
+    def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
+        """Compare retained evidence/reconciliation identities with artifact projections."""
+
+        return ArtifactCrossStoreAuditReport.from_wire(
+            self.request("GET", "/v1/artifacts/cross-store")
+        )
+
+    def flush_artifact_registry_persistence(self) -> dict[str, Any]:
+        return self.request("POST", "/v1/artifacts/persistence/flush", {})
+
+    def artifact_registry_audit(self, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Call the MCP artifact registry tool while preserving its bounded evidence envelope."""
+
+        return self.call_tool("artifact_registry_audit", arguments)
+
+    def domain_report_project(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        """Project and index one explicit caller-supplied report over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainReportProjectRequest)
+            else DomainReportProjectRequest(**dict(request))
+        )
+        return DomainReportProjectReport.from_wire(
+            self.request("POST", "/v1/domain-reports", normalized.to_arguments())
+        )
+
+    def domain_report_coverage(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        """Report retained structured projections by capability group over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainReportCoverageRequest)
+            else DomainReportCoverageRequest(**dict(request or {}))
+        )
+        return DomainReportCoverageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-reports/coverage?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def domain_report_project_tool(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        normalized = (
+            request
+            if isinstance(request, DomainReportProjectRequest)
+            else DomainReportProjectRequest(**dict(request))
+        )
+        return DomainReportProjectReport.from_wire(
+            self.call_tool("domain_report_project", normalized.to_arguments())
+        )
+
+    def domain_report_from_adapter_execution(
+        self,
+        evidence: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+        conformance: Mapping[str, Any] | None = None,
+    ) -> AdapterDomainReportResult:
+        """Validate/index adapter evidence and compose its canonical domain report over MCP."""
+
+        return AdapterDomainReportResult.from_wire(
+            self.call_tool(
+                "domain_report_project",
+                adapter_domain_report_arguments(evidence, conformance),
+            )
+        )
+
+    def domain_report_from_provider_normalization(
+        self,
+        normalization: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> ProviderDomainReportResult:
+        """Normalize provider evidence and compose its canonical domain report over MCP."""
+
+        return ProviderDomainReportResult.from_wire(
+            self.call_tool(
+                "domain_report_project",
+                provider_domain_report_arguments(normalization),
+            )
+        )
+
+    def domain_report_from_external_provider_normalization(
+        self,
+        normalization: DomainEvidenceProviderExternalPayloadNormalizationRequest
+        | Mapping[str, Any],
+    ) -> ProviderDomainReportResult:
+        """Compose a domain report from receipt-verified external provider normalization."""
+
+        return ProviderDomainReportResult.from_wire(
+            self.call_tool(
+                "domain_report_project",
+                external_provider_domain_report_arguments(normalization),
+            )
+        )
+
+    def domain_report_coverage_tool(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        normalized = (
+            request
+            if isinstance(request, DomainReportCoverageRequest)
+            else DomainReportCoverageRequest(**dict(request or {}))
+        )
+        return DomainReportCoverageReport.from_wire(
+            self.call_tool("domain_report_project", normalized.to_arguments())
+        )
+
+    def domain_evidence_harmonize(
+        self,
+        request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceHarmonizationReport:
+        """Join exact domain reports into a traceability-only artifact over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizeRequest)
+            else DomainEvidenceHarmonizeRequest(**dict(request))
+        )
+        return DomainEvidenceHarmonizationReport.from_wire(
+            self.request("POST", "/v1/domain-evidence/harmonize", normalized.to_arguments())
+        )
+
+    def domain_evidence_harmonize_tool(
+        self,
+        request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceHarmonizationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizeRequest)
+            else DomainEvidenceHarmonizeRequest(**dict(request))
+        )
+        return DomainEvidenceHarmonizationReport.from_wire(
+            self.call_tool("domain_evidence_harmonize", normalized.to_arguments())
+        )
+
+    def domain_decision_readiness_audit(
+        self,
+        request: DomainDecisionReadinessRequest | Mapping[str, Any],
+    ) -> DomainDecisionReadinessReport:
+        """Apply a digest-bound structural readiness policy through the MCP tool route."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainDecisionReadinessRequest)
+            else DomainDecisionReadinessRequest(**dict(request))
+        )
+        return DomainDecisionReadinessReport.from_wire(
+            self.call_tool("domain_decision_readiness_audit", normalized.to_arguments())
+        )
+
+    def domain_decision_readiness_query(
+        self,
+        request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainDecisionReadinessQueryReport:
+        """Query retained readiness audits without re-running harmonization."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainDecisionReadinessQueryRequest)
+            else DomainDecisionReadinessQueryRequest(**dict(request or {}))
+        )
+        return DomainDecisionReadinessQueryReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-decision-readiness?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def domain_decision_readiness_query_tool(
+        self,
+        request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainDecisionReadinessQueryReport:
+        normalized = (
+            request
+            if isinstance(request, DomainDecisionReadinessQueryRequest)
+            else DomainDecisionReadinessQueryRequest(**dict(request or {}))
+        )
+        return DomainDecisionReadinessQueryReport.from_wire(
+            self.call_tool("domain_decision_readiness_query", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_audit(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        """Compose explicitly supplied cross-control-plane evidence through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRequest)
+            else ControlPlaneReadinessRequest(**dict(request))
+        )
+        return ControlPlaneReadinessReport.from_wire(
+            self.request("POST", "/v1/control-plane-readiness", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_audit_tool(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRequest)
+            else ControlPlaneReadinessRequest(**dict(request))
+        )
+        return ControlPlaneReadinessReport.from_wire(
+            self.call_tool("control_plane_readiness_audit", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_compare(
+        self,
+        request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessCompareReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessCompareRequest)
+            else ControlPlaneReadinessCompareRequest(**dict(request))
+        )
+        return ControlPlaneReadinessCompareReport.from_wire(
+            self.request("POST", "/v1/control-plane-readiness/compare", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_compare_tool(
+        self,
+        request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessCompareReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessCompareRequest)
+            else ControlPlaneReadinessCompareRequest(**dict(request))
+        )
+        return ControlPlaneReadinessCompareReport.from_wire(
+            self.call_tool("control_plane_readiness_compare", normalized.to_arguments())
+        )
+
+    def control_plane_readiness_compare_retained(
+        self,
+        request: ControlPlaneReadinessRetainedCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessRetainedCompareReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRetainedCompareRequest)
+            else ControlPlaneReadinessRetainedCompareRequest(**dict(request))
+        )
+        return ControlPlaneReadinessRetainedCompareReport.from_wire(
+            self.request(
+                "POST",
+                "/v1/control-plane-readiness/compare-retained",
+                normalized.to_arguments(),
+            )
+        )
+
+    def control_plane_readiness_compare_retained_tool(
+        self,
+        request: ControlPlaneReadinessRetainedCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessRetainedCompareReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessRetainedCompareRequest)
+            else ControlPlaneReadinessRetainedCompareRequest(**dict(request))
+        )
+        return ControlPlaneReadinessRetainedCompareReport.from_wire(
+            self.call_tool(
+                "control_plane_readiness_compare_retained",
+                normalized.to_arguments(),
+            )
+        )
+
+    def control_plane_readiness_query(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessQueryRequest)
+            else ControlPlaneReadinessQueryRequest(**dict(request or {}))
+        )
+        return ControlPlaneReadinessQueryReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/control-plane-readiness?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def control_plane_readiness_query_tool(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        normalized = (
+            request
+            if isinstance(request, ControlPlaneReadinessQueryRequest)
+            else ControlPlaneReadinessQueryRequest(**dict(request or {}))
+        )
+        return ControlPlaneReadinessQueryReport.from_wire(
+            self.call_tool("control_plane_readiness_query", normalized.to_arguments())
+        )
+
+    def domain_evidence_harmonization_coverage(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        """Query retained harmonization rows through the cursor-based REST route."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizationCoverageRequest)
+            else DomainEvidenceHarmonizationCoverageRequest(**dict(request or {}))
+        )
+        return DomainEvidenceHarmonizationCoverageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-evidence/harmonization/coverage?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def domain_evidence_harmonization_coverage_tool(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceHarmonizationCoverageRequest)
+            else DomainEvidenceHarmonizationCoverageRequest(**dict(request or {}))
+        )
+        return DomainEvidenceHarmonizationCoverageReport.from_wire(
+            self.call_tool(
+                "domain_evidence_harmonization_coverage", normalized.to_arguments()
+            )
+        )
+
+    def domain_evidence_intake(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        """Retain one raw source-tool envelope as an exact-digest intake artifact over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeRequest)
+            else DomainEvidenceIntakeRequest(**dict(request))
+        )
+        return DomainEvidenceIntakeReport.from_wire(
+            self.request("POST", "/v1/domain-evidence/intake", normalized.to_arguments())
+        )
+
+    def domain_evidence_intake_tool(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeRequest)
+            else DomainEvidenceIntakeRequest(**dict(request))
+        )
+        return DomainEvidenceIntakeReport.from_wire(
+            self.call_tool("domain_evidence_intake", normalized.to_arguments())
+        )
+
+    def domain_evidence_coverage(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        """Report retained raw-intake coverage by authoritative group over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeCoverageRequest)
+            else DomainEvidenceIntakeCoverageRequest(**dict(request or {}))
+        )
+        return DomainEvidenceIntakeCoverageReport.from_wire(
+            self.request(
+                "GET",
+                f"/v1/domain-evidence/coverage?{urlencode(normalized.to_query_params())}",
+            )
+        )
+
+    def domain_evidence_coverage_tool(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceIntakeCoverageRequest)
+            else DomainEvidenceIntakeCoverageRequest(**dict(request or {}))
+        )
+        return DomainEvidenceIntakeCoverageReport.from_wire(
+            self.call_tool("domain_evidence_coverage", normalized.to_arguments())
+        )
+
+    def domain_evidence_source_plan(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        """Plan and index a non-fetching external evidence source over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceSourcePlanRequest)
+            else DomainEvidenceSourcePlanRequest(**dict(request))
+        )
+        return DomainEvidenceSourcePlanReport.from_wire(
+            self.request("POST", "/v1/domain-evidence/sources", normalized.to_arguments())
+        )
+
+    def domain_evidence_source_plan_tool(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceSourcePlanRequest)
+            else DomainEvidenceSourcePlanRequest(**dict(request))
+        )
+        return DomainEvidenceSourcePlanReport.from_wire(
+            self.call_tool("domain_evidence_source_plan", normalized.to_arguments())
+        )
+
+    def domain_evidence_source_execute(
+        self,
+        request: DomainEvidenceSourceExecutionRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourceExecutionReport:
+        """Execute a retained source plan through the bounded connector kernel over REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceSourceExecutionRequest)
+            else DomainEvidenceSourceExecutionRequest(**dict(request))
+        )
+        return DomainEvidenceSourceExecutionReport.from_wire(
+            self.request("POST", "/v1/domain-evidence/sources/execute", normalized.to_arguments())
+        )
+
+    def domain_evidence_source_execute_tool(
+        self,
+        request: DomainEvidenceSourceExecutionRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourceExecutionReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceSourceExecutionRequest)
+            else DomainEvidenceSourceExecutionRequest(**dict(request))
+        )
+        return DomainEvidenceSourceExecutionReport.from_wire(
+            self.call_tool("domain_evidence_source_execute", normalized.to_arguments())
+        )
+
+    def domain_evidence_source_project(
+        self,
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: SourceAdapterProjectionRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> SourceAdapterProjectionResult:
+        """Project a returned bounded source envelope through one local Python adapter.
+
+        This is deliberately a local operation: it never performs another HTTP request or reads
+        the original locator. The source response remains the sole parser input.
+        """
+
+        normalized_execution = (
+            execution.to_dict()
+            if isinstance(execution, DomainEvidenceSourceExecutionReport)
+            else dict(execution)
+        )
+        normalized_request = (
+            request
+            if isinstance(request, SourceAdapterProjectionRequest)
+            else SourceAdapterProjectionRequest(**dict(request))
+        )
+        return project_source_execution(normalized_execution, normalized_request, runtime=runtime)
+
+    def domain_evidence_source_project_for_domain(
+        self,
+        catalogue: DomainAcquisitionReport | Mapping[str, Any],
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: DomainEvidencePipelineRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> DomainEvidencePipelineResult:
+        """Project a source envelope only when the selected adapter is declared for its domain."""
+
+        normalized_request = (
+            request
+            if isinstance(request, DomainEvidencePipelineRequest)
+            else DomainEvidencePipelineRequest(**dict(request))
+        )
+        normalized_execution = (
+            execution.to_dict()
+            if isinstance(execution, DomainEvidenceSourceExecutionReport)
+            else dict(execution)
+        )
+        return project_domain_source_execution(catalogue, normalized_execution, normalized_request, runtime=runtime)
+
+    def domain_evidence_provider_normalize(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        """Normalize and retain a caller-managed provider payload through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderNormalizationRequest)
+            else DomainEvidenceProviderNormalizationRequest(**dict(request))
+        )
+        return domain_evidence_provider_normalization_report(
+            self.request("POST", "/v1/tools/domain_evidence_provider_normalize", normalized.to_mcp_arguments())
+        )
+
+    def domain_evidence_provider_normalize_tool(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderNormalizationRequest)
+            else DomainEvidenceProviderNormalizationRequest(**dict(request))
+        )
+        return domain_evidence_provider_normalization_report(
+            self.call_tool("domain_evidence_provider_normalize", normalized.to_mcp_arguments())
+        )
+
+    def domain_evidence_provider_replay_verify(
+        self,
+        request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderReplayVerificationReport:
+        """Verify a caller-managed provider payload against retained identities through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderReplayRequest)
+            else DomainEvidenceProviderReplayRequest(**dict(request))
+        )
+        return domain_evidence_provider_replay_verification_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_replay_verify",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_replay_verify_tool(
+        self,
+        request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderReplayVerificationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderReplayRequest)
+            else DomainEvidenceProviderReplayRequest(**dict(request))
+        )
+        return domain_evidence_provider_replay_verification_report(
+            self.call_tool(
+                "domain_evidence_provider_replay_verify", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_connector_handoff(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        """Declare and retain a caller-managed connector boundary through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderHandoffRequest)
+            else DomainEvidenceProviderHandoffRequest.from_wire(request)
+        )
+        return domain_evidence_provider_handoff_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_connector_handoff",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_connector_handoff_tool(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderHandoffRequest)
+            else DomainEvidenceProviderHandoffRequest.from_wire(request)
+        )
+        return domain_evidence_provider_handoff_report(
+            self.call_tool(
+                "domain_evidence_provider_connector_handoff", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_receipt(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReceiptRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
+        """Retain metadata for an out-of-line provider payload through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadReceiptRequest)
+            else DomainEvidenceProviderExternalPayloadReceiptRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_receipt_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_receipt",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_receipt_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReceiptRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadReceiptRequest)
+            else DomainEvidenceProviderExternalPayloadReceiptRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_receipt_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_receipt", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_replay_verify(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReplayVerificationReport:
+        """Verify retained external receipt metadata through the REST tool route."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadReplayRequest)
+            else DomainEvidenceProviderExternalPayloadReplayRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_replay_verification_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_replay_verify",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_replay_verify_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReplayVerificationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadReplayRequest)
+            else DomainEvidenceProviderExternalPayloadReplayRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_replay_verification_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_replay_verify", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_normalize(
+        self,
+        request: DomainEvidenceProviderExternalPayloadNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadNormalizationRequest)
+            else DomainEvidenceProviderExternalPayloadNormalizationRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_normalization_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_normalize",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_normalize_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadNormalizationRequest)
+            else DomainEvidenceProviderExternalPayloadNormalizationRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_normalization_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_normalize", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_lineage_audit(
+        self,
+        request: DomainEvidenceProviderExternalPayloadLineageAuditRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadLineageAuditReport:
+        """Audit external receipt lineage against a retained handoff through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadLineageAuditRequest)
+            else DomainEvidenceProviderExternalPayloadLineageAuditRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_lineage_audit_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_lineage_audit",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_lineage_audit_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadLineageAuditRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadLineageAuditReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadLineageAuditRequest)
+            else DomainEvidenceProviderExternalPayloadLineageAuditRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_lineage_audit_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_lineage_audit", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_execution_evidence(
+        self,
+        request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+        """Retain caller-reported external transfer evidence through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest)
+            else DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_execution_evidence_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_execution_evidence",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_execution_evidence_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest)
+            else DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest.from_wire(request)
+        )
+        return domain_evidence_provider_external_payload_execution_evidence_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_execution_evidence", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_evidence_provider_external_payload_evidence_query(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        """Return a joined receipt/lineage/execution projection through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest)
+            else DomainEvidenceProviderExternalPayloadEvidenceQueryRequest.from_wire(request or {})
+        )
+        return domain_evidence_provider_external_payload_evidence_query_report(
+            self.request(
+                "POST",
+                "/v1/tools/domain_evidence_provider_external_payload_evidence_query",
+                normalized.to_mcp_arguments(),
+            )
+        )
+
+    def domain_evidence_provider_external_payload_evidence_query_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        normalized = (
+            request
+            if isinstance(request, DomainEvidenceProviderExternalPayloadEvidenceQueryRequest)
+            else DomainEvidenceProviderExternalPayloadEvidenceQueryRequest.from_wire(request or {})
+        )
+        return domain_evidence_provider_external_payload_evidence_query_report(
+            self.call_tool(
+                "domain_evidence_provider_external_payload_evidence_query", normalized.to_mcp_arguments()
+            )
+        )
+
+    def domain_workflow_catalogue(self) -> dict[str, Any]:
+        """Read the deterministic workflow template for every capability group."""
+
+        return self.request("GET", "/v1/domain-workflows")
+
+    def domain_workflow_catalogue_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(self.domain_workflow_catalogue())
+
+    def domain_workflow_scaffold(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Build and preflight an execution-disabled scaffold for one capability group."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowScaffoldRequest)
+            else DomainWorkflowScaffoldRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/domain-workflows/scaffold", normalized.to_arguments())
+
+    def domain_workflow_scaffold_report(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> DomainWorkflowScaffoldReport:
+        return domain_workflow_scaffold_report(self.domain_workflow_scaffold(request))
+
+    def domain_workflow_instantiate(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Instantiate and authoritative-preflight one group-scoped workflow without dispatch."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowInstantiateRequest)
+            else DomainWorkflowInstantiateRequest(**dict(request))
+        )
+        return self.request(
+            "POST", "/v1/domain-workflows/instantiate", normalized.to_arguments()
+        )
+
+    def domain_workflow_instantiation_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(self.domain_workflow_instantiate(request))
+
+    def domain_workflow_portfolio(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a bounded multi-domain workflow portfolio through REST."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowPortfolioRequest)
+            else DomainWorkflowPortfolioRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/domain-workflows/portfolio", normalized.to_arguments())
+
+    def domain_workflow_portfolio_report(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioReport:
+        return domain_workflow_portfolio_report(self.domain_workflow_portfolio(request))
+
+    def domain_workflow_portfolio_verify(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained portfolio through the dedicated REST route."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowPortfolioVerifyRequest)
+            else DomainWorkflowPortfolioVerifyRequest(**dict(request))
+        )
+        return self.request(
+            "POST", "/v1/domain-workflows/portfolio/verify", normalized.to_arguments()
+        )
+
+    def domain_workflow_portfolio_verify_report(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioVerifyReport:
+        return domain_workflow_portfolio_verify_report(self.domain_workflow_portfolio_verify(request))
+
+    def domain_workflow_verify(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained workflow contract through the dedicated REST route."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowVerifyRequest)
+            else DomainWorkflowVerifyRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/domain-workflows/verify", normalized.to_arguments())
+
+    def domain_workflow_verify_report(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowVerifyReport:
+        return domain_workflow_verify_report(self.domain_workflow_verify(request))
+
+    def domain_workflow_reconcile(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Reconcile retained mission evidence against a workflow contract without dispatch."""
+
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconcileRequest)
+            else DomainWorkflowReconcileRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/domain-workflows/reconcile", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(self.domain_workflow_reconcile(request))
+
+    def domain_workflow_catalogue_tool(self) -> dict[str, Any]:
+        return self.call_tool("domain_workflow_catalogue", {})
+
+    def domain_workflow_catalogue_tool_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(self.domain_workflow_catalogue_tool())
+
+    def domain_workflow_scaffold_tool(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowScaffoldRequest)
+            else DomainWorkflowScaffoldRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_scaffold", normalized.to_arguments())
+
+    def domain_workflow_scaffold_tool_report(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> DomainWorkflowScaffoldReport:
+        return domain_workflow_scaffold_report(self.domain_workflow_scaffold_tool(request))
+
+    def domain_workflow_instantiate_tool(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowInstantiateRequest)
+            else DomainWorkflowInstantiateRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_instantiate", normalized.to_arguments())
+
+    def domain_workflow_instantiation_tool_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(self.domain_workflow_instantiate_tool(request))
+
+    def domain_workflow_portfolio_tool(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowPortfolioRequest)
+            else DomainWorkflowPortfolioRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_portfolio", normalized.to_arguments())
+
+    def domain_workflow_portfolio_tool_report(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioReport:
+        return domain_workflow_portfolio_report(self.domain_workflow_portfolio_tool(request))
+
+    def domain_workflow_portfolio_verify_tool(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowPortfolioVerifyRequest)
+            else DomainWorkflowPortfolioVerifyRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_portfolio_verify", normalized.to_arguments())
+
+    def domain_workflow_portfolio_verify_tool_report(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioVerifyReport:
+        return domain_workflow_portfolio_verify_report(
+            self.domain_workflow_portfolio_verify_tool(request)
+        )
+
+    def domain_workflow_verify_tool(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowVerifyRequest)
+            else DomainWorkflowVerifyRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_verify", normalized.to_arguments())
+
+    def domain_workflow_verify_tool_report(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowVerifyReport:
+        return domain_workflow_verify_report(self.domain_workflow_verify_tool(request))
+
+    def domain_workflow_reconcile_tool(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconcileRequest)
+            else DomainWorkflowReconcileRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_reconcile", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_tool_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(self.domain_workflow_reconcile_tool(request))
+
+    def domain_workflow_reconciliation_import(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationImportRequest)
+            else DomainWorkflowReconciliationImportRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/domain-workflows/reconciliations", normalized.to_http_body())
+
+    def domain_workflow_reconciliation_import_report(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationImportReport:
+        return DomainWorkflowReconciliationImportReport.from_wire(
+            self.domain_workflow_reconciliation_import(request)
+        )
+
+    def domain_workflow_reconciliation_query(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationQueryRequest)
+            else DomainWorkflowReconciliationQueryRequest(**dict(request or {}))
+        )
+        query = urlencode(normalized.to_query_params())
+        return self.request("GET", f"/v1/domain-workflows/reconciliations?{query}")
+
+    def domain_workflow_reconciliation_query_report(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainWorkflowReconciliationQueryReport:
+        return DomainWorkflowReconciliationQueryReport.from_wire(
+            self.domain_workflow_reconciliation_query(request)
+        )
+
+    def domain_workflow_reconciliation_get(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationGetRequest)
+            else DomainWorkflowReconciliationGetRequest(request)
+            if isinstance(request, str)
+            else DomainWorkflowReconciliationGetRequest(**dict(request))
+        )
+        return self.request(
+            "GET",
+            f"/v1/domain-workflows/reconciliations/{quote(normalized.reconciliation_digest, safe='')}",
+        )
+
+    def domain_workflow_reconciliation_get_report(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> DomainWorkflowReconciliationGetReport:
+        return DomainWorkflowReconciliationGetReport.from_wire(
+            self.domain_workflow_reconciliation_get(request)
+        )
+
+    def domain_workflow_reconciliation_import_tool(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationImportRequest)
+            else DomainWorkflowReconciliationImportRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_reconciliation_import", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_import_tool_report(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationImportReport:
+        return DomainWorkflowReconciliationImportReport.from_wire(
+            self.domain_workflow_reconciliation_import_tool(request)
+        )
+
+    def domain_workflow_reconciliation_query_tool(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationQueryRequest)
+            else DomainWorkflowReconciliationQueryRequest(**dict(request or {}))
+        )
+        return self.call_tool("domain_workflow_reconciliation_query", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_query_tool_report(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainWorkflowReconciliationQueryReport:
+        return DomainWorkflowReconciliationQueryReport.from_wire(
+            self.domain_workflow_reconciliation_query_tool(request)
+        )
+
+    def domain_workflow_reconciliation_get_tool(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        normalized = (
+            request
+            if isinstance(request, DomainWorkflowReconciliationGetRequest)
+            else DomainWorkflowReconciliationGetRequest(request)
+            if isinstance(request, str)
+            else DomainWorkflowReconciliationGetRequest(**dict(request))
+        )
+        return self.call_tool("domain_workflow_reconciliation_get", normalized.to_arguments())
+
+    def domain_workflow_reconciliation_get_tool_report(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> DomainWorkflowReconciliationGetReport:
+        return DomainWorkflowReconciliationGetReport.from_wire(
+            self.domain_workflow_reconciliation_get_tool(request)
+        )
+
     def submit_mission(self, request: MissionRequest | Mapping[str, Any]) -> MissionJob:
         """Submit a validated mission to the cooperative asynchronous HTTP executor."""
 
@@ -635,6 +2108,184 @@ class ApiClient:
         return MissionClaimLineage.from_wire(
             self.request("GET", f"/v1/missions/{mission_id}/claims")
         )
+
+    def mission_evaluator_replay_query(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Read durable full or summary-only evaluator replay evidence for one mission."""
+
+        if isinstance(request, MissionEvaluatorReplayQueryRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvaluatorReplayQueryRequest(request)
+        elif isinstance(request, Mapping):
+            normalized = MissionEvaluatorReplayQueryRequest(**dict(request))
+        else:
+            raise ArgumentError("mission evaluator replay query must be a request, mapping, or mission id")
+        self._mission_id(normalized.mission_id)
+        query = urlencode(normalized.to_query_params())
+        return self.request(
+            "GET",
+            f"/v1/missions/{quote(normalized.mission_id, safe='')}/evaluator-replay?{query}",
+        )
+
+    def mission_evaluator_replay_query_report(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> MissionEvaluatorReplayQueryReport:
+        """Return the typed durable evaluator replay query projection."""
+
+        return mission_evaluator_replay_query_report(self.mission_evaluator_replay_query(request))
+
+    def mission_evaluator_replay_compare_query(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Compare durable replay evidence with the current evaluator catalogue."""
+
+        if isinstance(request, MissionEvaluatorReplayQueryRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvaluatorReplayQueryRequest(request)
+        elif isinstance(request, Mapping):
+            normalized = MissionEvaluatorReplayQueryRequest(**dict(request))
+        else:
+            raise ArgumentError("mission evaluator replay comparison query must be a request, mapping, or mission id")
+        self._mission_id(normalized.mission_id)
+        query = urlencode(normalized.to_query_params())
+        return self.request(
+            "GET",
+            f"/v1/missions/{quote(normalized.mission_id, safe='')}/evaluator-replay/compare?{query}",
+        )
+
+    def mission_evaluator_replay_compare_query_report(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed catalog-drift comparison evidence from the durable REST route."""
+
+        return mission_evaluator_replay_comparison_report(
+            self.mission_evaluator_replay_compare_query(request)
+        )
+
+    def mission_evidence_bundle(
+        self,
+        request: MissionEvidenceBundleRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Export a bounded content-addressed mission evidence bundle."""
+
+        if isinstance(request, MissionEvidenceBundleRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvidenceBundleRequest(request)
+        elif isinstance(request, Mapping):
+            normalized = MissionEvidenceBundleRequest(**dict(request))
+        else:
+            raise ArgumentError("mission evidence bundle must be a request, mapping, or mission id")
+        self._mission_id(normalized.mission_id)
+        query = urlencode(normalized.to_query_params())
+        return self.request(
+            "GET",
+            f"/v1/missions/{quote(normalized.mission_id, safe='')}/evidence-bundle?{query}",
+        )
+
+    def mission_evidence_bundle_report(
+        self,
+        request: MissionEvidenceBundleRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleReport:
+        """Return the typed durable mission evidence bundle."""
+
+        return mission_evidence_bundle_report(self.mission_evidence_bundle(request))
+
+    def mission_evidence_bundle_verify(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify one portable mission evidence bundle through the REST gateway."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleVerifyRequest)
+            else MissionEvidenceBundleVerifyRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/evidence-bundles/verify", normalized.to_http_body())
+
+    def mission_evidence_bundle_verification_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed portable mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(self.mission_evidence_bundle_verify(request))
+
+    def mission_evidence_bundle_import(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Import one verified evidence bundle into the durable REST registry."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleImportRequest)
+            else MissionEvidenceBundleImportRequest(**dict(request))
+        )
+        return self.request("POST", "/v1/evidence-bundles", normalized.to_http_body())
+
+    def mission_evidence_bundle_import_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        """Return typed idempotent evidence registry import evidence."""
+
+        return MissionEvidenceBundleImportReport.from_wire(self.mission_evidence_bundle_import(request))
+
+    def mission_evidence_bundle_query(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query deterministic mission/domain rows in the durable REST registry."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleQueryRequest)
+            else MissionEvidenceBundleQueryRequest(**dict(request or {}))
+        )
+        query = urlencode(normalized.to_query_params())
+        return self.request("GET", f"/v1/evidence-bundles?{query}")
+
+    def mission_evidence_bundle_query_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        """Return typed deterministic evidence registry index evidence."""
+
+        return MissionEvidenceBundleQueryReport.from_wire(self.mission_evidence_bundle_query(request))
+
+    def mission_evidence_bundle_get(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Fetch one verified evidence bundle from the durable REST registry."""
+
+        if isinstance(request, MissionEvidenceBundleGetRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvidenceBundleGetRequest(request)
+        else:
+            normalized = MissionEvidenceBundleGetRequest(**dict(request))
+        return self.request(
+            "GET",
+            f"/v1/evidence-bundles/{quote(normalized.bundle_digest, safe='')}",
+        )
+
+    def mission_evidence_bundle_get_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        """Return typed lookup evidence for one registry bundle."""
+
+        return MissionEvidenceBundleGetReport.from_wire(self.mission_evidence_bundle_get(request))
 
     def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Read a bounded cursor page from the authoritative clock-free mission trace."""
@@ -757,6 +2408,40 @@ class ApiClient:
             self.request("POST", "/v1/missions/persistence/flush", {})
         )
 
+    def mission_queue(self) -> MissionQueueInventory:
+        """Return the bounded queue projection without exposing checkpointed job specifications."""
+
+        return MissionQueueInventory.from_wire(self.request("GET", "/v1/missions/queue"))
+
+    def mission_queue_persistence(self) -> MissionQueueStatus:
+        """Inspect the queue checkpoint digest, recovery rows, and no-resume boundary."""
+
+        return MissionQueueStatus.from_wire(
+            self.request("GET", "/v1/missions/queue/persistence")
+        )
+
+    def flush_mission_queue_persistence(self) -> MissionQueueFlushResult:
+        """Atomically checkpoint the queue and return the resulting integrity projection."""
+
+        return MissionQueueFlushResult.from_wire(
+            self.request("POST", "/v1/missions/queue/persistence/flush", {})
+        )
+
+    def release_mission_queue_lock(self, operator: str, reason: str) -> MissionQueueLockReleaseResult:
+        """Explicitly release an orphaned shared-authority lock with an auditable operator reason."""
+
+        if not isinstance(operator, str) or not operator.strip():
+            raise ArgumentError("operator must be a non-empty string")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ArgumentError("reason must be a non-empty string")
+        return MissionQueueLockReleaseResult.from_wire(
+            self.request(
+                "POST",
+                "/v1/missions/queue/authority/release-lock",
+                {"operator": operator, "reason": reason},
+            )
+        )
+
     def missions(self, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
         """Backward-compatible raw mission inventory response."""
 
@@ -855,6 +2540,108 @@ class ApiClient:
             self.developer_platform_status(include_details=include_details, max_items=max_items)
         )
 
+    def developer_workbench_verify(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained workbench report through the MCP-compatible HTTP bridge."""
+
+        normalized = request if isinstance(request, WorkbenchVerificationRequest) else WorkbenchVerificationRequest(**dict(request))
+        return self.call_tool("developer_workbench_verify", normalized.to_mcp_arguments())
+
+    def developer_workbench_verify_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed workbench verification evidence from the MCP-compatible bridge."""
+
+        return workbench_verification_report(self.developer_workbench_verify(request))
+
+    def developer_workbench_verify_rest(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained workbench report through the dedicated REST route."""
+
+        normalized = request if isinstance(request, WorkbenchVerificationRequest) else WorkbenchVerificationRequest(**dict(request))
+        return self.request("POST", "/v1/developer-workbench/verify", normalized.to_mcp_arguments())
+
+    def developer_workbench_verify_rest_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed workbench verification evidence from the dedicated REST route."""
+
+        return workbench_verification_report(self.developer_workbench_verify_rest(request))
+
+    def developer_workbench_import(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryImportRequest) else WorkbenchRegistryImportRequest(**dict(request))
+        return self.call_tool("developer_workbench_import", normalized.to_mcp_arguments())
+
+    def developer_workbench_import_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(self.developer_workbench_import(request))
+
+    def developer_workbench_import_rest(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryImportRequest) else WorkbenchRegistryImportRequest(**dict(request))
+        return self.request("POST", "/v1/developer-workbench/reports", normalized.to_mcp_arguments())
+
+    def developer_workbench_import_rest_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(self.developer_workbench_import_rest(request))
+
+    def developer_workbench_query(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryQueryRequest) else WorkbenchRegistryQueryRequest(**dict(request or {}))
+        return self.call_tool("developer_workbench_query", normalized.to_mcp_arguments())
+
+    def developer_workbench_query_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(self.developer_workbench_query(request))
+
+    def developer_workbench_query_rest(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, WorkbenchRegistryQueryRequest) else WorkbenchRegistryQueryRequest(**dict(request or {}))
+        return self.request("GET", f"/v1/developer-workbench/reports?{urlencode(normalized.to_http_query())}")
+
+    def developer_workbench_query_rest_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(self.developer_workbench_query_rest(request))
+
+    def developer_workbench_get(self, digest: str) -> dict[str, Any]:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ArgumentError("workbench_report_digest must be a lowercase SHA-256 digest")
+        return self.call_tool("developer_workbench_get", {"workbench_report_digest": digest})
+
+    def developer_workbench_get_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(self.developer_workbench_get(digest))
+
+    def developer_workbench_get_rest(self, digest: str) -> dict[str, Any]:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ArgumentError("workbench_report_digest must be a lowercase SHA-256 digest")
+        return self.request("GET", f"/v1/developer-workbench/reports/{quote(digest, safe='')}")
+
+    def developer_workbench_get_rest_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(self.developer_workbench_get_rest(digest))
+
     def token_context_plan(
         self,
         request: TokenContextPlanArgs | Mapping[str, Any],
@@ -910,6 +2697,137 @@ class ApiClient:
         """Return typed HTTP value-of-information evidence."""
 
         return epistemic_voi_report(self.epistemic_voi(request))
+
+    def epistemic_adaptive_acquisition(
+        self,
+        request: EpistemicAdaptiveArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a bounded exact adaptive acquisition policy without executing it."""
+
+        normalized = request if isinstance(request, EpistemicAdaptiveArgs) else EpistemicAdaptiveArgs.from_wire(request)
+        return self.call_tool("epistemic_adaptive_acquisition", normalized.to_mcp_arguments())
+
+    def epistemic_adaptive_acquisition_report(
+        self,
+        request: EpistemicAdaptiveArgs | Mapping[str, Any],
+    ) -> EpistemicAdaptiveReport:
+        """Return a validated adaptive policy tree or fail-closed refusal."""
+
+        return epistemic_adaptive_report(self.epistemic_adaptive_acquisition(request))
+
+    def epistemic_adaptive_execute(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Execute or replay an adaptive policy through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AdaptiveExecutionRequest) else AdaptiveExecutionRequest.from_wire(request)
+        return self.call_tool("epistemic_adaptive_execute", normalized.to_mcp_arguments())
+
+    def epistemic_adaptive_execute_report(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> AdaptiveExecutionReport:
+        """Return typed HTTP adaptive execution and provenance evidence."""
+
+        return adaptive_execution_report(self.epistemic_adaptive_execute(request))
+
+    def epistemic_adaptive_costed(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a component-wise feasible adaptive policy through HTTP."""
+
+        normalized = request if isinstance(request, AdaptiveCostedRequest) else AdaptiveCostedRequest.from_wire(request)
+        return self.call_tool("epistemic_adaptive_costed", normalized.to_mcp_arguments())
+
+    def epistemic_adaptive_costed_report(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> AdaptiveCostedReport:
+        """Return typed HTTP vector-cost planning evidence."""
+
+        return adaptive_costed_report(self.epistemic_adaptive_costed(request))
+
+    def interweave_workflow_execute(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Simulate or replay a workflow-bound adaptive execution through HTTP."""
+
+        normalized = request if isinstance(request, WorkflowExecutionRequest) else WorkflowExecutionRequest.from_wire(request)
+        return self.call_tool("interweave_workflow_execute", normalized.to_mcp_arguments())
+
+    def interweave_workflow_execute_report(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionReport:
+        """Return typed HTTP workflow execution and provenance evidence."""
+
+        return workflow_execution_report(self.interweave_workflow_execute(request))
+
+    def interweave_workflow_execution_evidence(
+        self,
+        request: WorkflowExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Index a workflow receipt as portable evidence through the HTTP tool dispatcher."""
+
+        normalized = request if isinstance(request, WorkflowExecutionEvidenceRequest) else WorkflowExecutionEvidenceRequest.from_wire(request)
+        return self.call_tool(
+            "interweave_workflow_execution_evidence", normalized.to_mcp_arguments()
+        )
+
+    def interweave_workflow_execution_evidence_report(
+        self,
+        request: WorkflowExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionEvidenceReport:
+        """Return typed HTTP workflow execution evidence."""
+
+        return workflow_execution_evidence_report(self.interweave_workflow_execution_evidence(request))
+
+    def interweave_workflow_execution_evidence_import(
+        self,
+        evidence: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Import one portable workflow execution evidence record through HTTP."""
+
+        return self.call_tool(
+            "interweave_workflow_execution_evidence_import", {"evidence": dict(evidence)}
+        )
+
+    def interweave_workflow_execution_evidence_query(
+        self,
+        filters: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query bounded workflow execution evidence through HTTP."""
+
+        return self.call_tool(
+            "interweave_workflow_execution_evidence_query", dict(filters or {})
+        )
+
+    def interweave_workflow_execution_evidence_get(self, evidence_digest: str) -> dict[str, Any]:
+        """Fetch one retained workflow execution evidence record through HTTP."""
+
+        return self.call_tool(
+            "interweave_workflow_execution_evidence_get", {"evidence_digest": evidence_digest}
+        )
+
+    def epistemic_decision_quotient(
+        self,
+        request: EpistemicDecisionQuotientArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compute a decision-relative model quotient through HTTP."""
+
+        normalized = request if isinstance(request, EpistemicDecisionQuotientArgs) else EpistemicDecisionQuotientArgs.from_wire(request)
+        return self.call_tool("epistemic_decision_quotient", normalized.to_mcp_arguments())
+
+    def epistemic_decision_quotient_report(
+        self,
+        request: EpistemicDecisionQuotientArgs | Mapping[str, Any],
+    ) -> EpistemicDecisionQuotientReport:
+        """Return typed class membership, compression, and refusal evidence."""
+
+        return epistemic_decision_quotient_report(self.epistemic_decision_quotient(request))
 
     def epistemic_context_audit(
         self,
@@ -1460,6 +3378,119 @@ class ApiClient:
 
         return mission_evaluator_review_report(self.mission_evaluator_review(request))
 
+    def mission_evaluator_replay(
+        self,
+        request: MissionEvaluatorReplayRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Replay retained mission evaluator lineage without executing domain tools."""
+
+        normalized = request if isinstance(request, MissionEvaluatorReplayRequest) else MissionEvaluatorReplayRequest(**dict(request))
+        return self.call_tool("mission_evaluator_replay", normalized.to_mcp_arguments())
+
+    def mission_evaluator_replay_report(
+        self,
+        request: MissionEvaluatorReplayRequest | Mapping[str, Any],
+    ) -> MissionEvaluatorReplayReport:
+        """Return typed evaluator replay, fixture, and coverage evidence through HTTP."""
+
+        return mission_evaluator_replay_report(self.mission_evaluator_replay(request))
+
+    def mission_evaluator_replay_compare(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compare a retained mission replay with the current catalogue over MCP."""
+
+        normalized = request if isinstance(request, MissionEvaluatorReplayCompareRequest) else MissionEvaluatorReplayCompareRequest(**dict(request))
+        return self.call_tool("mission_evaluator_replay_compare", normalized.to_mcp_arguments())
+
+    def mission_evaluator_replay_compare_report(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed MCP catalog-drift comparison evidence."""
+
+        return mission_evaluator_replay_comparison_report(self.mission_evaluator_replay_compare(request))
+
+    def mission_evidence_bundle_verify_tool(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify one portable mission evidence bundle through MCP."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleVerifyRequest)
+            else MissionEvidenceBundleVerifyRequest(**dict(request))
+        )
+        return self.call_tool("mission_evidence_bundle_verify", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_verification_tool_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed MCP portable mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(self.mission_evidence_bundle_verify_tool(request))
+
+    def mission_evidence_bundle_import_tool(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Import one verified evidence bundle through the MCP bridge."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleImportRequest)
+            else MissionEvidenceBundleImportRequest(**dict(request))
+        )
+        return self.call_tool("mission_evidence_bundle_import", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_import_tool_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        return MissionEvidenceBundleImportReport.from_wire(self.mission_evidence_bundle_import_tool(request))
+
+    def mission_evidence_bundle_query_tool(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query the process-local MCP evidence registry."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleQueryRequest)
+            else MissionEvidenceBundleQueryRequest(**dict(request or {}))
+        )
+        return self.call_tool("mission_evidence_bundle_query", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_query_tool_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        return MissionEvidenceBundleQueryReport.from_wire(self.mission_evidence_bundle_query_tool(request))
+
+    def mission_evidence_bundle_get_tool(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Fetch one verified bundle through the MCP bridge."""
+
+        if isinstance(request, MissionEvidenceBundleGetRequest):
+            normalized = request
+        elif isinstance(request, str):
+            normalized = MissionEvidenceBundleGetRequest(request)
+        else:
+            normalized = MissionEvidenceBundleGetRequest(**dict(request))
+        return self.call_tool("mission_evidence_bundle_get", normalized.to_mcp_arguments())
+
+    def mission_evidence_bundle_get_tool_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        return MissionEvidenceBundleGetReport.from_wire(self.mission_evidence_bundle_get_tool(request))
+
     def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
@@ -1480,6 +3511,17 @@ class ApiClient:
         """Return typed capability dashboard evidence through HTTP."""
 
         return capability_dashboard_report(self.capability_dashboard(request))
+
+    def capability_dashboard_rest(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Query the capability dashboard through the direct cache-friendly REST route."""
+
+        normalized = request if isinstance(request, CapabilityDashboardQueryArgs) else CapabilityDashboardQueryArgs(**dict(request or {}))
+        return self.request("GET", f"/v1/capabilities/dashboard?{urlencode(normalized.to_query_params())}")
+
+    def capability_dashboard_rest_report(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> CapabilityDashboardReport:
+        """Return a typed report from the direct capability dashboard REST route."""
+
+        return capability_dashboard_report(self.capability_dashboard_rest(request))
 
     def ci_execution_evidence_audit(
         self,
@@ -1531,6 +3573,74 @@ class ApiClient:
         """Return typed structural provider-evidence conformance evidence."""
 
         return ci_provider_evidence_report(self.ci_provider_evidence_audit(request))
+
+    def ci_provider_evidence_import(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRequest) else CiProviderEvidenceRequest(**dict(request))
+        return self.call_tool("ci_provider_evidence_import", normalized.to_mcp_arguments())
+
+    def ci_provider_evidence_import_report(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> CiProviderEvidenceRegistryImportReport:
+        return ci_provider_evidence_registry_import_report(self.ci_provider_evidence_import(request))
+
+    def ci_provider_evidence_import_rest(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRequest) else CiProviderEvidenceRequest(**dict(request))
+        return self.request("POST", "/v1/ci/provider-evidence", normalized.to_mcp_arguments())
+
+    def ci_provider_evidence_import_rest_report(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> CiProviderEvidenceRegistryImportReport:
+        return ci_provider_evidence_registry_import_report(self.ci_provider_evidence_import_rest(request))
+
+    def ci_provider_evidence_query(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRegistryQueryRequest) else CiProviderEvidenceRegistryQueryRequest(**dict(request or {}))
+        return self.call_tool("ci_provider_evidence_query", normalized.to_mcp_arguments())
+
+    def ci_provider_evidence_query_report(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> CiProviderEvidenceRegistryQueryReport:
+        return ci_provider_evidence_registry_query_report(self.ci_provider_evidence_query(request))
+
+    def ci_provider_evidence_query_rest(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRegistryQueryRequest) else CiProviderEvidenceRegistryQueryRequest(**dict(request or {}))
+        return self.request("GET", f"/v1/ci/provider-evidence?{urlencode(normalized.to_http_query())}")
+
+    def ci_provider_evidence_query_rest_report(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> CiProviderEvidenceRegistryQueryReport:
+        return ci_provider_evidence_registry_query_report(self.ci_provider_evidence_query_rest(request))
+
+    def ci_provider_evidence_get(self, digest: str) -> dict[str, Any]:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ArgumentError("provider_evidence_digest must be a lowercase SHA-256 digest")
+        return self.call_tool("ci_provider_evidence_get", {"provider_evidence_digest": digest})
+
+    def ci_provider_evidence_get_report(self, digest: str) -> CiProviderEvidenceRegistryGetReport:
+        return ci_provider_evidence_registry_get_report(self.ci_provider_evidence_get(digest))
+
+    def ci_provider_evidence_get_rest(self, digest: str) -> dict[str, Any]:
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ArgumentError("provider_evidence_digest must be a lowercase SHA-256 digest")
+        return self.request("GET", f"/v1/ci/provider-evidence/{quote(digest, safe='')}")
+
+    def ci_provider_evidence_get_rest_report(self, digest: str) -> CiProviderEvidenceRegistryGetReport:
+        return ci_provider_evidence_registry_get_report(self.ci_provider_evidence_get_rest(digest))
 
     def execution_provenance_audit(
         self,
@@ -1613,6 +3723,47 @@ class ApiClient:
             )
         )
 
+    def capability_route_rest(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Submit a non-executing route proposal through the dedicated REST endpoint."""
+
+        request = CapabilityRouteRequest(
+            goal,
+            needs,
+            max_candidates_per_need,
+            max_tools,
+            include_tools,
+        )
+        return self.request("POST", "/v1/capabilities/route", request.to_mcp_arguments())
+
+    def capability_route_rest_report(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> CapabilityRouteReport:
+        """Return a typed report from the dedicated route REST endpoint."""
+
+        return capability_route_report(
+            self.capability_route_rest(
+                goal,
+                needs,
+                max_candidates_per_need=max_candidates_per_need,
+                max_tools=max_tools,
+                include_tools=include_tools,
+            )
+        )
+
     def capability_route_review(
         self,
         route: Mapping[str, Any],
@@ -1637,6 +3788,183 @@ class ApiClient:
         return capability_route_review_report(
             self.capability_route_review(route, selections, validate_schemas=validate_schemas)
         )
+
+    def capability_route_review_rest(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
+    ) -> dict[str, Any]:
+        """Review route selections through the dedicated raw REST endpoint."""
+
+        request = CapabilityRouteReviewRequest(route, selections, validate_schemas)
+        return self.request("POST", "/v1/capabilities/route/review", request.to_mcp_arguments())
+
+    def capability_route_review_rest_report(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
+    ) -> CapabilityRouteReviewReport:
+        """Return typed route-review diagnostics from the dedicated REST endpoint."""
+
+        return capability_route_review_report(
+            self.capability_route_review_rest(
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+            )
+        )
+
+    def capability_route_plan(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compose a reviewed route into a non-executing mission preflight."""
+
+        request = CapabilityRoutePlanRequest(
+            mission_id,
+            route,
+            selections,
+            validate_schemas,
+            policy,
+            claim_requests,
+            evaluator_review,
+            workflow_binding,
+        )
+        return self.call_tool("capability_route_plan", request.to_mcp_arguments())
+
+    def capability_route_plan_report(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> CapabilityRoutePlanReport:
+        """Return the typed route-review and mission-preflight composition."""
+
+        return capability_route_plan_report(
+            self.capability_route_plan(
+                mission_id,
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+                policy=policy,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
+            )
+        )
+
+    def capability_route_plan_rest(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Submit the route-to-plan composition through its dedicated REST endpoint."""
+
+        request = CapabilityRoutePlanRequest(
+            mission_id,
+            route,
+            selections,
+            validate_schemas,
+            policy,
+            claim_requests,
+            evaluator_review,
+            workflow_binding,
+        )
+        return self.request("POST", "/v1/capabilities/route/plan", request.to_mcp_arguments())
+
+    def capability_route_plan_rest_report(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> CapabilityRoutePlanReport:
+        """Return typed route-plan diagnostics from direct REST."""
+
+        return capability_route_plan_report(
+            self.capability_route_plan_rest(
+                mission_id,
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+                policy=policy,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
+            )
+        )
+
+    def capability_route_plan_verify(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained route plan through MCP without dispatch or execution."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanVerifyRequest)
+            else CapabilityRoutePlanVerifyRequest(**dict(request))
+        )
+        return self.call_tool("capability_route_plan_verify", normalized.to_mcp_arguments())
+
+    def capability_route_plan_verify_report(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanVerifyReport:
+        return capability_route_plan_verify_report(self.capability_route_plan_verify(request))
+
+    def capability_route_plan_verify_rest(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Verify a retained route plan through the dedicated REST endpoint."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanVerifyRequest)
+            else CapabilityRoutePlanVerifyRequest(**dict(request))
+        )
+        return self.request(
+            "POST",
+            "/v1/capabilities/route/plan/verify",
+            normalized.to_mcp_arguments(),
+        )
+
+    def capability_route_plan_verify_rest_report(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanVerifyReport:
+        return capability_route_plan_verify_report(self.capability_route_plan_verify_rest(request))
 
     def adapter_plan(
         self,
@@ -1678,6 +4006,57 @@ class ApiClient:
                 available_dependencies=available_dependencies,
             )
         )
+
+    def adapter_execution_evidence(
+        self,
+        request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Retain caller-supplied adapter execution evidence through the HTTP gateway."""
+
+        normalized = request if isinstance(request, AdapterExecutionEvidenceRequest) else AdapterExecutionEvidenceRequest.from_wire(request)
+        return self.call_tool("adapter_execution_evidence", normalized.to_mcp_arguments())
+
+    def adapter_execution_evidence_report(
+        self,
+        request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> AdapterExecutionEvidenceReport:
+        return adapter_execution_evidence_report(self.adapter_execution_evidence(request))
+
+    def adapter_execution_evidence_query(
+        self,
+        request: AdapterExecutionEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Query retained adapter observations and explicit source/workflow joins."""
+
+        normalized = request or AdapterExecutionEvidenceQueryRequest()
+        if not isinstance(normalized, AdapterExecutionEvidenceQueryRequest):
+            normalized = AdapterExecutionEvidenceQueryRequest.from_wire(request or {})
+        return self.call_tool("adapter_execution_evidence_query", normalized.to_mcp_arguments())
+
+    def adapter_execution_evidence_query_report(
+        self,
+        request: AdapterExecutionEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> AdapterExecutionEvidenceQueryReport:
+        return adapter_execution_evidence_query_report(self.adapter_execution_evidence_query(request))
+
+    def domain_acquisition_catalogue(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> dict[str, Any]:
+        """Build the digest-bound two-plane route catalogue over all declared domains."""
+
+        normalized = query or DomainAcquisitionQuery()
+        if not isinstance(normalized, DomainAcquisitionQuery):
+            raise TypeError("query must be a DomainAcquisitionQuery")
+        return self.call_tool(DOMAIN_ACQUISITION_WORKFLOW, normalized.to_mcp_arguments())
+
+    def domain_acquisition_catalogue_report(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> DomainAcquisitionReport:
+        """Return typed acquisition routes and explicit adapter interpretation boundaries."""
+
+        return domain_acquisition_report(self.domain_acquisition_catalogue(query))
 
     def tabular_ingest(self, request: TabularIngestRequest) -> dict[str, Any]:
         """Execute the Rust CSV/TSV adapter through the HTTP gateway."""
@@ -1728,6 +4107,17 @@ class ApiClient:
         """Return typed HTTP release readiness and delegated check evidence."""
 
         return release_audit_report(self.release_audit(request))
+
+    def bundle_verify(self, request: BundleVerifyArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Verify a local result bundle, optionally with an Ed25519 public key."""
+
+        normalized = request if isinstance(request, BundleVerifyArgs) else BundleVerifyArgs(**dict(request))
+        return self.call_tool("bundle_verify", normalized.to_mcp_arguments())
+
+    def bundle_verify_report(self, request: BundleVerifyArgs | Mapping[str, Any]) -> BundleVerifyReport:
+        """Return a typed digest/signature/refusal projection."""
+
+        return bundle_verify_report(self.bundle_verify(request))
 
     def operations_catalog(
         self,
@@ -3246,6 +5636,39 @@ class ApiClient:
             request = FiberCompileRequest(world, query, layer)
         return self.call_tool("fiber_compile", request.to_mcp_arguments())
 
+    def fiber_compile_decision_quotient(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberDecisionQuotientSummary:
+        """Compile and validate the executable 0.3 decision-quotient projection."""
+
+        return fiber_decision_quotient_summary(self.fiber_compile(world, query, layer=layer))
+
+    def fiber_compile_rate_distortion(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberRateDistortionSummary:
+        """Compile and validate the executable 0.4 rate-distortion projection."""
+
+        return fiber_rate_distortion_summary(self.fiber_compile(world, query, layer=layer))
+
+    def fiber_compile_adaptive_acquisition(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberAdaptiveAcquisitionSummary:
+        """Compile and validate the certificate-bound 0.5 adaptive policy projection."""
+
+        return fiber_adaptive_acquisition_summary(self.fiber_compile(world, query, layer=layer))
+
     def fiber_refine(
         self,
         layer: ContextLayer | str | FiberRefineRequest,
@@ -3725,6 +6148,663 @@ class AsyncApiClient:
     async def call_tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.client.call_tool, name, arguments)
 
+    async def register_artifact(
+        self,
+        request: ArtifactRegistrationRequest | Mapping[str, Any],
+    ) -> ArtifactRegistrationReport:
+        return await asyncio.to_thread(self.client.register_artifact, request)
+
+    async def query_artifacts(
+        self,
+        request: ArtifactQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactQueryReport:
+        return await asyncio.to_thread(self.client.query_artifacts, request)
+
+    async def get_artifact(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactGetReport:
+        return await asyncio.to_thread(self.client.get_artifact, request)
+
+    async def artifact_lineage(
+        self,
+        request: ArtifactGetRequest | Mapping[str, Any] | str,
+    ) -> ArtifactLineageReport:
+        return await asyncio.to_thread(self.client.artifact_lineage, request)
+
+    async def domain_evidence_lineage(
+        self,
+        request: ArtifactDomainEvidenceLineageRequest | Mapping[str, Any] | None = None,
+    ) -> ArtifactDomainEvidenceLineageReport:
+        return await asyncio.to_thread(self.client.domain_evidence_lineage, request)
+
+    async def artifact_registry_persistence(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.artifact_registry_persistence)
+
+    async def artifact_cross_store_audit(self) -> ArtifactCrossStoreAuditReport:
+        return await asyncio.to_thread(self.client.artifact_cross_store_audit)
+
+    async def flush_artifact_registry_persistence(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.flush_artifact_registry_persistence)
+
+    async def artifact_registry_audit(self, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.artifact_registry_audit, arguments)
+
+    async def domain_report_project(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        return await asyncio.to_thread(self.client.domain_report_project, request)
+
+    async def domain_report_coverage(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        return await asyncio.to_thread(self.client.domain_report_coverage, request)
+
+    async def domain_report_project_tool(
+        self,
+        request: DomainReportProjectRequest | Mapping[str, Any],
+    ) -> DomainReportProjectReport:
+        return await asyncio.to_thread(self.client.domain_report_project_tool, request)
+
+    async def domain_report_from_adapter_execution(
+        self,
+        evidence: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+        conformance: Mapping[str, Any] | None = None,
+    ) -> AdapterDomainReportResult:
+        return await asyncio.to_thread(
+            self.client.domain_report_from_adapter_execution,
+            evidence,
+            conformance,
+        )
+
+    async def domain_report_from_provider_normalization(
+        self,
+        normalization: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> ProviderDomainReportResult:
+        return await asyncio.to_thread(
+            self.client.domain_report_from_provider_normalization,
+            normalization,
+        )
+
+    async def domain_report_from_external_provider_normalization(
+        self,
+        normalization: DomainEvidenceProviderExternalPayloadNormalizationRequest
+        | Mapping[str, Any],
+    ) -> ProviderDomainReportResult:
+        return await asyncio.to_thread(
+            self.client.domain_report_from_external_provider_normalization,
+            normalization,
+        )
+
+    async def domain_report_coverage_tool(
+        self,
+        request: DomainReportCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainReportCoverageReport:
+        return await asyncio.to_thread(self.client.domain_report_coverage_tool, request)
+
+    async def domain_evidence_harmonize(
+        self,
+        request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceHarmonizationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_harmonize, request)
+
+    async def domain_evidence_harmonize_tool(
+        self,
+        request: DomainEvidenceHarmonizeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceHarmonizationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_harmonize_tool, request)
+
+    async def domain_decision_readiness_audit(
+        self,
+        request: DomainDecisionReadinessRequest | Mapping[str, Any],
+    ) -> DomainDecisionReadinessReport:
+        return await asyncio.to_thread(self.client.domain_decision_readiness_audit, request)
+
+    async def domain_decision_readiness_query(
+        self,
+        request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainDecisionReadinessQueryReport:
+        return await asyncio.to_thread(self.client.domain_decision_readiness_query, request)
+
+    async def domain_decision_readiness_query_tool(
+        self,
+        request: DomainDecisionReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainDecisionReadinessQueryReport:
+        return await asyncio.to_thread(self.client.domain_decision_readiness_query_tool, request)
+
+    async def control_plane_readiness_audit(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_audit, request)
+
+    async def control_plane_readiness_audit_tool(
+        self,
+        request: ControlPlaneReadinessRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_audit_tool, request)
+
+    async def control_plane_readiness_compare(
+        self,
+        request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessCompareReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_compare, request)
+
+    async def control_plane_readiness_compare_tool(
+        self,
+        request: ControlPlaneReadinessCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessCompareReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_compare_tool, request)
+
+    async def control_plane_readiness_compare_retained(
+        self,
+        request: ControlPlaneReadinessRetainedCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessRetainedCompareReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_compare_retained, request)
+
+    async def control_plane_readiness_compare_retained_tool(
+        self,
+        request: ControlPlaneReadinessRetainedCompareRequest | Mapping[str, Any],
+    ) -> ControlPlaneReadinessRetainedCompareReport:
+        return await asyncio.to_thread(
+            self.client.control_plane_readiness_compare_retained_tool,
+            request,
+        )
+
+    async def control_plane_readiness_query(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_query, request)
+
+    async def control_plane_readiness_query_tool(
+        self,
+        request: ControlPlaneReadinessQueryRequest | Mapping[str, Any] | None = None,
+    ) -> ControlPlaneReadinessQueryReport:
+        return await asyncio.to_thread(self.client.control_plane_readiness_query_tool, request)
+
+    async def domain_evidence_harmonization_coverage(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        return await asyncio.to_thread(self.client.domain_evidence_harmonization_coverage, request)
+
+    async def domain_evidence_harmonization_coverage_tool(
+        self,
+        request: DomainEvidenceHarmonizationCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceHarmonizationCoverageReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_harmonization_coverage_tool, request
+        )
+
+    async def domain_evidence_intake(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        return await asyncio.to_thread(self.client.domain_evidence_intake, request)
+
+    async def domain_evidence_intake_tool(
+        self,
+        request: DomainEvidenceIntakeRequest | Mapping[str, Any],
+    ) -> DomainEvidenceIntakeReport:
+        return await asyncio.to_thread(self.client.domain_evidence_intake_tool, request)
+
+    async def domain_evidence_coverage(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        return await asyncio.to_thread(self.client.domain_evidence_coverage, request)
+
+    async def domain_evidence_coverage_tool(
+        self,
+        request: DomainEvidenceIntakeCoverageRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceIntakeCoverageReport:
+        return await asyncio.to_thread(self.client.domain_evidence_coverage_tool, request)
+
+    async def domain_evidence_source_plan(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        return await asyncio.to_thread(self.client.domain_evidence_source_plan, request)
+
+    async def domain_evidence_source_plan_tool(
+        self,
+        request: DomainEvidenceSourcePlanRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourcePlanReport:
+        return await asyncio.to_thread(self.client.domain_evidence_source_plan_tool, request)
+
+    async def domain_evidence_source_execute(
+        self,
+        request: DomainEvidenceSourceExecutionRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourceExecutionReport:
+        return await asyncio.to_thread(self.client.domain_evidence_source_execute, request)
+
+    async def domain_evidence_source_execute_tool(
+        self,
+        request: DomainEvidenceSourceExecutionRequest | Mapping[str, Any],
+    ) -> DomainEvidenceSourceExecutionReport:
+        return await asyncio.to_thread(self.client.domain_evidence_source_execute_tool, request)
+
+    async def domain_evidence_source_project(
+        self,
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: SourceAdapterProjectionRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> SourceAdapterProjectionResult:
+        """Project a returned source envelope locally without another network call."""
+
+        return await asyncio.to_thread(
+            self.client.domain_evidence_source_project,
+            execution,
+            request,
+            runtime=runtime,
+        )
+
+    async def domain_evidence_source_project_for_domain(
+        self,
+        catalogue: DomainAcquisitionReport | Mapping[str, Any],
+        execution: DomainEvidenceSourceExecutionReport | Mapping[str, Any],
+        request: DomainEvidencePipelineRequest | Mapping[str, Any],
+        *,
+        runtime: AdapterRuntime | None = None,
+    ) -> DomainEvidencePipelineResult:
+        """Project a source envelope through a catalogue-bound adapter route locally."""
+
+        return await asyncio.to_thread(
+            self.client.domain_evidence_source_project_for_domain,
+            catalogue,
+            execution,
+            request,
+            runtime=runtime,
+        )
+
+    async def domain_evidence_provider_normalize(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_provider_normalize, request)
+
+    async def domain_evidence_provider_normalize_tool(
+        self,
+        request: DomainEvidenceProviderNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderNormalizationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_provider_normalize_tool, request)
+
+    async def domain_evidence_provider_replay_verify(
+        self,
+        request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderReplayVerificationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_provider_replay_verify, request)
+
+    async def domain_evidence_provider_replay_verify_tool(
+        self,
+        request: DomainEvidenceProviderReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderReplayVerificationReport:
+        return await asyncio.to_thread(self.client.domain_evidence_provider_replay_verify_tool, request)
+
+    async def domain_evidence_provider_connector_handoff(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_connector_handoff, request
+        )
+
+    async def domain_evidence_provider_connector_handoff_tool(
+        self,
+        request: DomainEvidenceProviderHandoffRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderHandoffReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_connector_handoff_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_receipt(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReceiptRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_receipt, request
+        )
+
+    async def domain_evidence_provider_external_payload_receipt_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReceiptRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReceiptReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_receipt_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_replay_verify(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReplayVerificationReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_replay_verify, request
+        )
+
+    async def domain_evidence_provider_external_payload_replay_verify_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadReplayRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadReplayVerificationReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_replay_verify_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_normalize(
+        self,
+        request: DomainEvidenceProviderExternalPayloadNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_normalize, request
+        )
+
+    async def domain_evidence_provider_external_payload_normalize_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadNormalizationRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadNormalizationReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_normalize_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_lineage_audit(
+        self,
+        request: DomainEvidenceProviderExternalPayloadLineageAuditRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadLineageAuditReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_lineage_audit, request
+        )
+
+    async def domain_evidence_provider_external_payload_lineage_audit_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadLineageAuditRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadLineageAuditReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_lineage_audit_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_execution_evidence(
+        self,
+        request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_execution_evidence, request
+        )
+
+    async def domain_evidence_provider_external_payload_execution_evidence_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> DomainEvidenceProviderExternalPayloadExecutionEvidenceReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_execution_evidence_tool, request
+        )
+
+    async def domain_evidence_provider_external_payload_evidence_query(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_evidence_query, request
+        )
+
+    async def domain_evidence_provider_external_payload_evidence_query_tool(
+        self,
+        request: DomainEvidenceProviderExternalPayloadEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainEvidenceProviderExternalPayloadEvidenceQueryReport:
+        return await asyncio.to_thread(
+            self.client.domain_evidence_provider_external_payload_evidence_query_tool, request
+        )
+
+    async def domain_workflow_catalogue(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_catalogue)
+
+    async def domain_workflow_catalogue_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(await self.domain_workflow_catalogue())
+
+    async def domain_workflow_scaffold(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_scaffold, request)
+
+    async def domain_workflow_scaffold_report(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> DomainWorkflowScaffoldReport:
+        return domain_workflow_scaffold_report(await self.domain_workflow_scaffold(request))
+
+    async def domain_workflow_instantiate(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_instantiate, request)
+
+    async def domain_workflow_instantiation_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(await self.domain_workflow_instantiate(request))
+
+    async def domain_workflow_portfolio(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_portfolio, request)
+
+    async def domain_workflow_portfolio_report(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioReport:
+        return domain_workflow_portfolio_report(await self.domain_workflow_portfolio(request))
+
+    async def domain_workflow_portfolio_verify(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_portfolio_verify, request)
+
+    async def domain_workflow_portfolio_verify_report(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioVerifyReport:
+        return domain_workflow_portfolio_verify_report(
+            await self.domain_workflow_portfolio_verify(request)
+        )
+
+    async def domain_workflow_verify(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_verify, request)
+
+    async def domain_workflow_verify_report(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowVerifyReport:
+        return domain_workflow_verify_report(await self.domain_workflow_verify(request))
+
+    async def domain_workflow_reconcile(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconcile, request)
+
+    async def domain_workflow_reconciliation_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(await self.domain_workflow_reconcile(request))
+
+    async def domain_workflow_catalogue_tool(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_catalogue_tool)
+
+    async def domain_workflow_catalogue_tool_report(self) -> DomainWorkflowCatalogueReport:
+        return domain_workflow_catalogue_report(await self.domain_workflow_catalogue_tool())
+
+    async def domain_workflow_scaffold_tool(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_scaffold_tool, request)
+
+    async def domain_workflow_scaffold_tool_report(
+        self,
+        request: DomainWorkflowScaffoldRequest | Mapping[str, Any],
+    ) -> DomainWorkflowScaffoldReport:
+        return domain_workflow_scaffold_report(await self.domain_workflow_scaffold_tool(request))
+
+    async def domain_workflow_instantiate_tool(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_instantiate_tool, request)
+
+    async def domain_workflow_instantiation_tool_report(
+        self,
+        request: DomainWorkflowInstantiateRequest | Mapping[str, Any],
+    ) -> DomainWorkflowInstantiationReport:
+        return domain_workflow_instantiation_report(
+            await self.domain_workflow_instantiate_tool(request)
+        )
+
+    async def domain_workflow_portfolio_tool(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_portfolio_tool, request)
+
+    async def domain_workflow_portfolio_tool_report(
+        self,
+        request: DomainWorkflowPortfolioRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioReport:
+        return domain_workflow_portfolio_report(await self.domain_workflow_portfolio_tool(request))
+
+    async def domain_workflow_portfolio_verify_tool(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_portfolio_verify_tool, request)
+
+    async def domain_workflow_portfolio_verify_tool_report(
+        self,
+        request: DomainWorkflowPortfolioVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowPortfolioVerifyReport:
+        return domain_workflow_portfolio_verify_report(
+            await self.domain_workflow_portfolio_verify_tool(request)
+        )
+
+    async def domain_workflow_verify_tool(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_verify_tool, request)
+
+    async def domain_workflow_verify_tool_report(
+        self,
+        request: DomainWorkflowVerifyRequest | Mapping[str, Any],
+    ) -> DomainWorkflowVerifyReport:
+        return domain_workflow_verify_report(await self.domain_workflow_verify_tool(request))
+
+    async def domain_workflow_reconcile_tool(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconcile_tool, request)
+
+    async def domain_workflow_reconciliation_tool_report(
+        self,
+        request: DomainWorkflowReconcileRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationReport:
+        return domain_workflow_reconciliation_report(
+            await self.domain_workflow_reconcile_tool(request)
+        )
+
+    async def domain_workflow_reconciliation_import(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconciliation_import, request)
+
+    async def domain_workflow_reconciliation_import_report(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationImportReport:
+        return DomainWorkflowReconciliationImportReport.from_wire(
+            await self.domain_workflow_reconciliation_import(request)
+        )
+
+    async def domain_workflow_reconciliation_query(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconciliation_query, request)
+
+    async def domain_workflow_reconciliation_query_report(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainWorkflowReconciliationQueryReport:
+        return DomainWorkflowReconciliationQueryReport.from_wire(
+            await self.domain_workflow_reconciliation_query(request)
+        )
+
+    async def domain_workflow_reconciliation_get(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconciliation_get, request)
+
+    async def domain_workflow_reconciliation_get_report(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> DomainWorkflowReconciliationGetReport:
+        return DomainWorkflowReconciliationGetReport.from_wire(
+            await self.domain_workflow_reconciliation_get(request)
+        )
+
+    async def domain_workflow_reconciliation_import_tool(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconciliation_import_tool, request)
+
+    async def domain_workflow_reconciliation_import_tool_report(
+        self,
+        request: DomainWorkflowReconciliationImportRequest | Mapping[str, Any],
+    ) -> DomainWorkflowReconciliationImportReport:
+        return DomainWorkflowReconciliationImportReport.from_wire(
+            await self.domain_workflow_reconciliation_import_tool(request)
+        )
+
+    async def domain_workflow_reconciliation_query_tool(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconciliation_query_tool, request)
+
+    async def domain_workflow_reconciliation_query_tool_report(
+        self,
+        request: DomainWorkflowReconciliationQueryRequest | Mapping[str, Any] | None = None,
+    ) -> DomainWorkflowReconciliationQueryReport:
+        return DomainWorkflowReconciliationQueryReport.from_wire(
+            await self.domain_workflow_reconciliation_query_tool(request)
+        )
+
+    async def domain_workflow_reconciliation_get_tool(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.domain_workflow_reconciliation_get_tool, request)
+
+    async def domain_workflow_reconciliation_get_tool_report(
+        self,
+        request: DomainWorkflowReconciliationGetRequest | Mapping[str, Any] | str,
+    ) -> DomainWorkflowReconciliationGetReport:
+        return DomainWorkflowReconciliationGetReport.from_wire(
+            await self.domain_workflow_reconciliation_get_tool(request)
+        )
+
     async def submit_mission(self, request: MissionRequest | Mapping[str, Any]) -> MissionJob:
         return await asyncio.to_thread(self.client.submit_mission, request)
 
@@ -3740,6 +6820,108 @@ class AsyncApiClient:
         """Async read of the bounded claim-to-step evidence projection."""
 
         return await asyncio.to_thread(self.client.mission_claim_lineage, mission_id)
+
+    async def mission_evaluator_replay_query(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Async read of durable full or summary-only evaluator replay evidence."""
+
+        return await asyncio.to_thread(self.client.mission_evaluator_replay_query, request)
+
+    async def mission_evaluator_replay_query_report(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> MissionEvaluatorReplayQueryReport:
+        """Return the typed async durable evaluator replay query projection."""
+
+        return mission_evaluator_replay_query_report(await self.mission_evaluator_replay_query(request))
+
+    async def mission_evaluator_replay_compare_query(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Async durable REST replay comparison."""
+
+        return await asyncio.to_thread(self.client.mission_evaluator_replay_compare_query, request)
+
+    async def mission_evaluator_replay_compare_query_report(
+        self,
+        request: MissionEvaluatorReplayQueryRequest | Mapping[str, Any] | str,
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed async durable REST replay comparison evidence."""
+
+        return mission_evaluator_replay_comparison_report(
+            await self.mission_evaluator_replay_compare_query(request)
+        )
+
+    async def mission_evidence_bundle(
+        self,
+        request: MissionEvidenceBundleRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        """Async durable mission evidence bundle export."""
+
+        return await asyncio.to_thread(self.client.mission_evidence_bundle, request)
+
+    async def mission_evidence_bundle_report(
+        self,
+        request: MissionEvidenceBundleRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleReport:
+        """Return typed async durable mission evidence bundle."""
+
+        return mission_evidence_bundle_report(await self.mission_evidence_bundle(request))
+
+    async def mission_evidence_bundle_verify(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async durable REST mission evidence bundle verification."""
+
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_verify, request)
+
+    async def mission_evidence_bundle_verification_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed async durable mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(await self.mission_evidence_bundle_verify(request))
+
+    async def mission_evidence_bundle_import(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_import, request)
+
+    async def mission_evidence_bundle_import_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        return MissionEvidenceBundleImportReport.from_wire(await self.mission_evidence_bundle_import(request))
+
+    async def mission_evidence_bundle_query(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_query, request)
+
+    async def mission_evidence_bundle_query_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        return MissionEvidenceBundleQueryReport.from_wire(await self.mission_evidence_bundle_query(request))
+
+    async def mission_evidence_bundle_get(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_get, request)
+
+    async def mission_evidence_bundle_get_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        return MissionEvidenceBundleGetReport.from_wire(await self.mission_evidence_bundle_get(request))
 
     async def mission_trace(self, mission_id: str, *, after: int = 0, limit: int = 100) -> MissionTracePage:
         """Async bounded cursor page over the authoritative mission trace."""
@@ -3986,6 +7168,26 @@ class AsyncApiClient:
 
         return await asyncio.to_thread(self.client.flush_mission_persistence)
 
+    async def mission_queue(self) -> MissionQueueInventory:
+        """Async typed projection of the bounded mission queue inventory."""
+
+        return await asyncio.to_thread(self.client.mission_queue)
+
+    async def mission_queue_persistence(self) -> MissionQueueStatus:
+        """Async inspection of queue checkpoint integrity and startup recoveries."""
+
+        return await asyncio.to_thread(self.client.mission_queue_persistence)
+
+    async def flush_mission_queue_persistence(self) -> MissionQueueFlushResult:
+        """Async atomic queue checkpoint flush."""
+
+        return await asyncio.to_thread(self.client.flush_mission_queue_persistence)
+
+    async def release_mission_queue_lock(self, operator: str, reason: str) -> MissionQueueLockReleaseResult:
+        """Async attributed release of an orphaned shared-authority lock."""
+
+        return await asyncio.to_thread(self.client.release_mission_queue_lock, operator, reason)
+
     async def delivery_page(self, subscription_id: str, *, after: int = 0, limit: int = 100) -> DeliveryPage:
         """Async typed cursor page over pending signed deliveries."""
 
@@ -4103,6 +7305,98 @@ class AsyncApiClient:
             await self.developer_platform_status(include_details=include_details, max_items=max_items)
         )
 
+    async def developer_workbench_verify(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async workbench verification through the MCP-compatible HTTP bridge."""
+
+        return await asyncio.to_thread(self.client.developer_workbench_verify, request)
+
+    async def developer_workbench_verify_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed async workbench verification evidence from the MCP bridge."""
+
+        return workbench_verification_report(await self.developer_workbench_verify(request))
+
+    async def developer_workbench_verify_rest(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async workbench verification through the dedicated REST route."""
+
+        return await asyncio.to_thread(self.client.developer_workbench_verify_rest, request)
+
+    async def developer_workbench_verify_rest_report(
+        self,
+        request: WorkbenchVerificationRequest | Mapping[str, Any],
+    ) -> WorkbenchVerificationReport:
+        """Return typed async workbench verification evidence from the REST route."""
+
+        return workbench_verification_report(await self.developer_workbench_verify_rest(request))
+
+    async def developer_workbench_import(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_import, request)
+
+    async def developer_workbench_import_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(await self.developer_workbench_import(request))
+
+    async def developer_workbench_import_rest(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_import_rest, request)
+
+    async def developer_workbench_import_rest_report(
+        self,
+        request: WorkbenchRegistryImportRequest | Mapping[str, Any],
+    ) -> WorkbenchRegistryImportReport:
+        return workbench_registry_import_report(await self.developer_workbench_import_rest(request))
+
+    async def developer_workbench_query(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_query, request)
+
+    async def developer_workbench_query_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(await self.developer_workbench_query(request))
+
+    async def developer_workbench_query_rest(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_query_rest, request)
+
+    async def developer_workbench_query_rest_report(
+        self,
+        request: WorkbenchRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> WorkbenchRegistryQueryReport:
+        return workbench_registry_query_report(await self.developer_workbench_query_rest(request))
+
+    async def developer_workbench_get(self, digest: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_get, digest)
+
+    async def developer_workbench_get_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(await self.developer_workbench_get(digest))
+
+    async def developer_workbench_get_rest(self, digest: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.developer_workbench_get_rest, digest)
+
+    async def developer_workbench_get_rest_report(self, digest: str) -> WorkbenchRegistryGetReport:
+        return workbench_registry_get_report(await self.developer_workbench_get_rest(digest))
+
     async def token_context_plan(
         self,
         request: TokenContextPlanArgs | Mapping[str, Any],
@@ -4158,6 +7452,139 @@ class AsyncApiClient:
         """Return async typed HTTP value-of-information evidence."""
 
         return epistemic_voi_report(await self.epistemic_voi(request))
+
+    async def epistemic_adaptive_acquisition(
+        self,
+        request: EpistemicAdaptiveArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Plan a bounded exact adaptive acquisition policy without executing it."""
+
+        normalized = request if isinstance(request, EpistemicAdaptiveArgs) else EpistemicAdaptiveArgs.from_wire(request)
+        return await self.call_tool("epistemic_adaptive_acquisition", normalized.to_mcp_arguments())
+
+    async def epistemic_adaptive_acquisition_report(
+        self,
+        request: EpistemicAdaptiveArgs | Mapping[str, Any],
+    ) -> EpistemicAdaptiveReport:
+        """Return a validated adaptive policy tree or fail-closed refusal."""
+
+        return epistemic_adaptive_report(await self.epistemic_adaptive_acquisition(request))
+
+    async def epistemic_adaptive_execute(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP execution or receipt-only replay through the adaptive boundary."""
+
+        normalized = request if isinstance(request, AdaptiveExecutionRequest) else AdaptiveExecutionRequest.from_wire(request)
+        return await self.call_tool("epistemic_adaptive_execute", normalized.to_mcp_arguments())
+
+    async def epistemic_adaptive_execute_report(
+        self,
+        request: AdaptiveExecutionRequest | Mapping[str, Any],
+    ) -> AdaptiveExecutionReport:
+        """Return typed async HTTP adaptive execution and provenance evidence."""
+
+        return adaptive_execution_report(await self.epistemic_adaptive_execute(request))
+
+    async def epistemic_adaptive_costed(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP vector-cost adaptive planning."""
+
+        normalized = request if isinstance(request, AdaptiveCostedRequest) else AdaptiveCostedRequest.from_wire(request)
+        return await self.call_tool("epistemic_adaptive_costed", normalized.to_mcp_arguments())
+
+    async def epistemic_adaptive_costed_report(
+        self,
+        request: AdaptiveCostedRequest | Mapping[str, Any],
+    ) -> AdaptiveCostedReport:
+        """Return typed async HTTP vector-cost planning evidence."""
+
+        return adaptive_costed_report(await self.epistemic_adaptive_costed(request))
+
+    async def interweave_workflow_execute(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Simulate or replay a workflow-bound adaptive execution through async HTTP."""
+
+        normalized = request if isinstance(request, WorkflowExecutionRequest) else WorkflowExecutionRequest.from_wire(request)
+        return await self.call_tool("interweave_workflow_execute", normalized.to_mcp_arguments())
+
+    async def interweave_workflow_execute_report(
+        self,
+        request: WorkflowExecutionRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionReport:
+        """Return typed async HTTP workflow execution and provenance evidence."""
+
+        return workflow_execution_report(await self.interweave_workflow_execute(request))
+
+    async def interweave_workflow_execution_evidence(
+        self,
+        request: WorkflowExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP receipt-to-evidence conversion."""
+
+        normalized = request if isinstance(request, WorkflowExecutionEvidenceRequest) else WorkflowExecutionEvidenceRequest.from_wire(request)
+        return await self.call_tool(
+            "interweave_workflow_execution_evidence", normalized.to_mcp_arguments()
+        )
+
+    async def interweave_workflow_execution_evidence_report(
+        self,
+        request: WorkflowExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> WorkflowExecutionEvidenceReport:
+        """Return typed async HTTP workflow execution evidence."""
+
+        return workflow_execution_evidence_report(
+            await self.interweave_workflow_execution_evidence(request)
+        )
+
+    async def interweave_workflow_execution_evidence_import(
+        self,
+        evidence: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async HTTP import of a portable workflow execution evidence record."""
+
+        return await self.call_tool(
+            "interweave_workflow_execution_evidence_import", {"evidence": dict(evidence)}
+        )
+
+    async def interweave_workflow_execution_evidence_query(
+        self,
+        filters: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async bounded HTTP query over workflow execution evidence."""
+
+        return await self.call_tool(
+            "interweave_workflow_execution_evidence_query", dict(filters or {})
+        )
+
+    async def interweave_workflow_execution_evidence_get(
+        self, evidence_digest: str
+    ) -> dict[str, Any]:
+        """Async HTTP fetch of one retained workflow execution evidence record."""
+
+        return await self.call_tool(
+            "interweave_workflow_execution_evidence_get", {"evidence_digest": evidence_digest}
+        )
+
+    async def epistemic_decision_quotient(
+        self,
+        request: EpistemicDecisionQuotientArgs | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compute a decision-relative model quotient through async HTTP."""
+
+        normalized = request if isinstance(request, EpistemicDecisionQuotientArgs) else EpistemicDecisionQuotientArgs.from_wire(request)
+        return await self.call_tool("epistemic_decision_quotient", normalized.to_mcp_arguments())
+
+    async def epistemic_decision_quotient_report(
+        self,
+        request: EpistemicDecisionQuotientArgs | Mapping[str, Any],
+    ) -> EpistemicDecisionQuotientReport:
+        return epistemic_decision_quotient_report(await self.epistemic_decision_quotient(request))
 
     async def epistemic_context_audit(
         self,
@@ -4708,6 +8135,106 @@ class AsyncApiClient:
 
         return mission_evaluator_review_report(await self.mission_evaluator_review(request))
 
+    async def mission_evaluator_replay(
+        self,
+        request: MissionEvaluatorReplayRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async replay of retained mission evaluator lineage without dispatch."""
+
+        normalized = request if isinstance(request, MissionEvaluatorReplayRequest) else MissionEvaluatorReplayRequest(**dict(request))
+        return await self.call_tool("mission_evaluator_replay", normalized.to_mcp_arguments())
+
+    async def mission_evaluator_replay_report(
+        self,
+        request: MissionEvaluatorReplayRequest | Mapping[str, Any],
+    ) -> MissionEvaluatorReplayReport:
+        """Return typed async evaluator replay and fixture evidence through HTTP."""
+
+        return mission_evaluator_replay_report(await self.mission_evaluator_replay(request))
+
+    async def mission_evaluator_replay_compare(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async MCP replay comparison."""
+
+        return await asyncio.to_thread(self.client.mission_evaluator_replay_compare, request)
+
+    async def mission_evaluator_replay_compare_report(
+        self,
+        request: MissionEvaluatorReplayCompareRequest | Mapping[str, Any],
+    ) -> MissionEvaluatorReplayComparisonReport:
+        """Return typed async MCP catalog-drift comparison evidence."""
+
+        return mission_evaluator_replay_comparison_report(
+            await self.mission_evaluator_replay_compare(request)
+        )
+
+    async def mission_evidence_bundle_verify_tool(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async MCP mission evidence bundle verification."""
+
+        normalized = (
+            request
+            if isinstance(request, MissionEvidenceBundleVerifyRequest)
+            else MissionEvidenceBundleVerifyRequest(**dict(request))
+        )
+        return await self.call_tool("mission_evidence_bundle_verify", normalized.to_mcp_arguments())
+
+    async def mission_evidence_bundle_verification_tool_report(
+        self,
+        request: MissionEvidenceBundleVerifyRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleVerificationReport:
+        """Return typed async MCP mission evidence verification evidence."""
+
+        return mission_evidence_bundle_verification_report(
+            await self.mission_evidence_bundle_verify_tool(request)
+        )
+
+    async def mission_evidence_bundle_import_tool(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_import_tool, request)
+
+    async def mission_evidence_bundle_import_tool_report(
+        self,
+        request: MissionEvidenceBundleImportRequest | Mapping[str, Any],
+    ) -> MissionEvidenceBundleImportReport:
+        return MissionEvidenceBundleImportReport.from_wire(
+            await self.mission_evidence_bundle_import_tool(request)
+        )
+
+    async def mission_evidence_bundle_query_tool(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_query_tool, request)
+
+    async def mission_evidence_bundle_query_tool_report(
+        self,
+        request: MissionEvidenceBundleQueryRequest | Mapping[str, Any] | None = None,
+    ) -> MissionEvidenceBundleQueryReport:
+        return MissionEvidenceBundleQueryReport.from_wire(
+            await self.mission_evidence_bundle_query_tool(request)
+        )
+
+    async def mission_evidence_bundle_get_tool(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.mission_evidence_bundle_get_tool, request)
+
+    async def mission_evidence_bundle_get_tool_report(
+        self,
+        request: MissionEvidenceBundleGetRequest | Mapping[str, Any] | str,
+    ) -> MissionEvidenceBundleGetReport:
+        return MissionEvidenceBundleGetReport.from_wire(
+            await self.mission_evidence_bundle_get_tool(request)
+        )
+
     async def capability_audit(self, *, include_groups: bool = True) -> dict[str, Any]:
         if not isinstance(include_groups, bool):
             raise ArgumentError("include_groups must be a boolean")
@@ -4730,6 +8257,16 @@ class AsyncApiClient:
         """Return async typed capability dashboard evidence through HTTP."""
 
         return capability_dashboard_report(await self.capability_dashboard(request))
+
+    async def capability_dashboard_rest(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Async direct REST query for the bounded capability dashboard."""
+
+        return await asyncio.to_thread(self.client.capability_dashboard_rest, request)
+
+    async def capability_dashboard_rest_report(self, request: CapabilityDashboardQueryArgs | Mapping[str, Any] | None = None) -> CapabilityDashboardReport:
+        """Return a typed report from the async direct capability dashboard route."""
+
+        return capability_dashboard_report(await self.capability_dashboard_rest(request))
 
     async def ci_execution_evidence_audit(
         self,
@@ -4781,6 +8318,68 @@ class AsyncApiClient:
         """Return typed async provider-evidence conformance evidence."""
 
         return ci_provider_evidence_report(await self.ci_provider_evidence_audit(request))
+
+    async def ci_provider_evidence_import(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRequest) else CiProviderEvidenceRequest(**dict(request))
+        return await self.call_tool("ci_provider_evidence_import", normalized.to_mcp_arguments())
+
+    async def ci_provider_evidence_import_report(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> CiProviderEvidenceRegistryImportReport:
+        return ci_provider_evidence_registry_import_report(await self.ci_provider_evidence_import(request))
+
+    async def ci_provider_evidence_import_rest(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.ci_provider_evidence_import_rest, request)
+
+    async def ci_provider_evidence_import_rest_report(
+        self,
+        request: CiProviderEvidenceRequest | Mapping[str, Any],
+    ) -> CiProviderEvidenceRegistryImportReport:
+        return ci_provider_evidence_registry_import_report(await self.ci_provider_evidence_import_rest(request))
+
+    async def ci_provider_evidence_query(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = request if isinstance(request, CiProviderEvidenceRegistryQueryRequest) else CiProviderEvidenceRegistryQueryRequest(**dict(request or {}))
+        return await self.call_tool("ci_provider_evidence_query", normalized.to_mcp_arguments())
+
+    async def ci_provider_evidence_query_report(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> CiProviderEvidenceRegistryQueryReport:
+        return ci_provider_evidence_registry_query_report(await self.ci_provider_evidence_query(request))
+
+    async def ci_provider_evidence_query_rest(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.ci_provider_evidence_query_rest, request)
+
+    async def ci_provider_evidence_query_rest_report(
+        self,
+        request: CiProviderEvidenceRegistryQueryRequest | Mapping[str, Any] | None = None,
+    ) -> CiProviderEvidenceRegistryQueryReport:
+        return ci_provider_evidence_registry_query_report(await self.ci_provider_evidence_query_rest(request))
+
+    async def ci_provider_evidence_get(self, digest: str) -> dict[str, Any]:
+        return await self.call_tool("ci_provider_evidence_get", {"provider_evidence_digest": digest})
+
+    async def ci_provider_evidence_get_report(self, digest: str) -> CiProviderEvidenceRegistryGetReport:
+        return ci_provider_evidence_registry_get_report(await self.ci_provider_evidence_get(digest))
+
+    async def ci_provider_evidence_get_rest(self, digest: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.client.ci_provider_evidence_get_rest, digest)
+
+    async def ci_provider_evidence_get_rest_report(self, digest: str) -> CiProviderEvidenceRegistryGetReport:
+        return ci_provider_evidence_registry_get_report(await self.ci_provider_evidence_get_rest(digest))
 
     async def execution_provenance_audit(
         self,
@@ -4863,6 +8462,47 @@ class AsyncApiClient:
             )
         )
 
+    async def capability_route_rest(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> dict[str, Any]:
+        """Async direct REST route proposal without an MCP envelope."""
+
+        return await asyncio.to_thread(
+            self.client.capability_route_rest,
+            goal,
+            needs,
+            max_candidates_per_need=max_candidates_per_need,
+            max_tools=max_tools,
+            include_tools=include_tools,
+        )
+
+    async def capability_route_rest_report(
+        self,
+        goal: str,
+        needs: Sequence[CapabilityRouteNeed | Mapping[str, Any]],
+        *,
+        max_candidates_per_need: int = 10,
+        max_tools: int = 128,
+        include_tools: bool = False,
+    ) -> CapabilityRouteReport:
+        """Return typed async diagnostics from the direct route REST endpoint."""
+
+        return capability_route_report(
+            await self.capability_route_rest(
+                goal,
+                needs,
+                max_candidates_per_need=max_candidates_per_need,
+                max_tools=max_tools,
+                include_tools=include_tools,
+            )
+        )
+
     async def capability_route_review(
         self,
         route: Mapping[str, Any],
@@ -4887,6 +8527,186 @@ class AsyncApiClient:
         return capability_route_review_report(
             await self.capability_route_review(route, selections, validate_schemas=validate_schemas)
         )
+
+    async def capability_route_review_rest(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
+    ) -> dict[str, Any]:
+        """Async route review through the dedicated raw REST endpoint."""
+
+        return await asyncio.to_thread(
+            self.client.capability_route_review_rest,
+            route,
+            selections,
+            validate_schemas=validate_schemas,
+        )
+
+    async def capability_route_review_rest_report(
+        self,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = False,
+    ) -> CapabilityRouteReviewReport:
+        """Return typed async route-review diagnostics from direct REST."""
+
+        return capability_route_review_report(
+            await self.capability_route_review_rest(
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+            )
+        )
+
+    async def capability_route_plan(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.capability_route_plan`."""
+
+        request = CapabilityRoutePlanRequest(
+            mission_id,
+            route,
+            selections,
+            validate_schemas,
+            policy,
+            claim_requests,
+            evaluator_review,
+            workflow_binding,
+        )
+        return await self.call_tool("capability_route_plan", request.to_mcp_arguments())
+
+    async def capability_route_plan_report(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> CapabilityRoutePlanReport:
+        """Return typed async route-plan diagnostics."""
+
+        return capability_route_plan_report(
+            await self.capability_route_plan(
+                mission_id,
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+                policy=policy,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
+            )
+        )
+
+    async def capability_route_plan_rest(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async direct REST route-to-plan composition."""
+
+        return await asyncio.to_thread(
+            self.client.capability_route_plan_rest,
+            mission_id,
+            route,
+            selections,
+            validate_schemas=validate_schemas,
+            policy=policy,
+            claim_requests=claim_requests,
+            evaluator_review=evaluator_review,
+            workflow_binding=workflow_binding,
+        )
+
+    async def capability_route_plan_rest_report(
+        self,
+        mission_id: str,
+        route: Mapping[str, Any],
+        selections: Sequence[Mapping[str, Any]],
+        *,
+        validate_schemas: bool = True,
+        policy: Mapping[str, Any] | None = None,
+        claim_requests: Sequence[Mapping[str, Any]] = (),
+        evaluator_review: Mapping[str, Any] | None = None,
+        workflow_binding: Mapping[str, Any] | None = None,
+    ) -> CapabilityRoutePlanReport:
+        """Return typed async route-plan diagnostics from direct REST."""
+
+        return capability_route_plan_report(
+            await self.capability_route_plan_rest(
+                mission_id,
+                route,
+                selections,
+                validate_schemas=validate_schemas,
+                policy=policy,
+                claim_requests=claim_requests,
+                evaluator_review=evaluator_review,
+                workflow_binding=workflow_binding,
+            )
+        )
+
+    async def capability_route_plan_verify(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async MCP verification of a retained route plan."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanVerifyRequest)
+            else CapabilityRoutePlanVerifyRequest(**dict(request))
+        )
+        return await self.call_tool("capability_route_plan_verify", normalized.to_mcp_arguments())
+
+    async def capability_route_plan_verify_report(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanVerifyReport:
+        return capability_route_plan_verify_report(await self.capability_route_plan_verify(request))
+
+    async def capability_route_plan_verify_rest(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async REST verification of a retained route plan."""
+
+        normalized = (
+            request
+            if isinstance(request, CapabilityRoutePlanVerifyRequest)
+            else CapabilityRoutePlanVerifyRequest(**dict(request))
+        )
+        return await asyncio.to_thread(
+            self.client.capability_route_plan_verify_rest,
+            normalized,
+        )
+
+    async def capability_route_plan_verify_rest_report(
+        self,
+        request: CapabilityRoutePlanVerifyRequest | Mapping[str, Any],
+    ) -> CapabilityRoutePlanVerifyReport:
+        return capability_route_plan_verify_report(await self.capability_route_plan_verify_rest(request))
 
     async def adapter_plan(
         self,
@@ -4928,6 +8748,57 @@ class AsyncApiClient:
                 available_dependencies=available_dependencies,
             )
         )
+
+    async def adapter_execution_evidence(
+        self,
+        request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.adapter_execution_evidence`."""
+
+        normalized = request if isinstance(request, AdapterExecutionEvidenceRequest) else AdapterExecutionEvidenceRequest.from_wire(request)
+        return await self.call_tool("adapter_execution_evidence", normalized.to_mcp_arguments())
+
+    async def adapter_execution_evidence_report(
+        self,
+        request: AdapterExecutionEvidenceRequest | Mapping[str, Any],
+    ) -> AdapterExecutionEvidenceReport:
+        return adapter_execution_evidence_report(await self.adapter_execution_evidence(request))
+
+    async def adapter_execution_evidence_query(
+        self,
+        request: AdapterExecutionEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.adapter_execution_evidence_query`."""
+
+        normalized = request or AdapterExecutionEvidenceQueryRequest()
+        if not isinstance(normalized, AdapterExecutionEvidenceQueryRequest):
+            normalized = AdapterExecutionEvidenceQueryRequest.from_wire(request or {})
+        return await self.call_tool("adapter_execution_evidence_query", normalized.to_mcp_arguments())
+
+    async def adapter_execution_evidence_query_report(
+        self,
+        request: AdapterExecutionEvidenceQueryRequest | Mapping[str, Any] | None = None,
+    ) -> AdapterExecutionEvidenceQueryReport:
+        return adapter_execution_evidence_query_report(await self.adapter_execution_evidence_query(request))
+
+    async def domain_acquisition_catalogue(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.domain_acquisition_catalogue`."""
+
+        normalized = query or DomainAcquisitionQuery()
+        if not isinstance(normalized, DomainAcquisitionQuery):
+            raise TypeError("query must be a DomainAcquisitionQuery")
+        return await self.call_tool(DOMAIN_ACQUISITION_WORKFLOW, normalized.to_mcp_arguments())
+
+    async def domain_acquisition_catalogue_report(
+        self,
+        query: DomainAcquisitionQuery | None = None,
+    ) -> DomainAcquisitionReport:
+        """Return typed async acquisition routes and adapter boundaries."""
+
+        return domain_acquisition_report(await self.domain_acquisition_catalogue(query))
 
     async def tabular_ingest(self, request: TabularIngestRequest) -> dict[str, Any]:
         """Async counterpart to :meth:`ApiClient.tabular_ingest`."""
@@ -4978,6 +8849,17 @@ class AsyncApiClient:
         """Return typed async HTTP release gates and delegated evidence."""
 
         return release_audit_report(await self.release_audit(request))
+
+    async def bundle_verify(self, request: BundleVerifyArgs | Mapping[str, Any]) -> dict[str, Any]:
+        """Async counterpart to :meth:`ApiClient.bundle_verify`."""
+
+        normalized = request if isinstance(request, BundleVerifyArgs) else BundleVerifyArgs(**dict(request))
+        return await self.call_tool("bundle_verify", normalized.to_mcp_arguments())
+
+    async def bundle_verify_report(self, request: BundleVerifyArgs | Mapping[str, Any]) -> BundleVerifyReport:
+        """Return a typed async digest/signature/refusal projection."""
+
+        return bundle_verify_report(await self.bundle_verify(request))
 
     async def operations_catalog(
         self,
@@ -6489,6 +10371,39 @@ class AsyncApiClient:
                 raise ArgumentError("query is required when world is a path string")
             request = FiberCompileRequest(world, query, layer)
         return await self.call_tool("fiber_compile", request.to_mcp_arguments())
+
+    async def fiber_compile_decision_quotient(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberDecisionQuotientSummary:
+        """Async counterpart to :meth:`ApiClient.fiber_compile_decision_quotient`."""
+
+        return fiber_decision_quotient_summary(await self.fiber_compile(world, query, layer=layer))
+
+    async def fiber_compile_rate_distortion(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberRateDistortionSummary:
+        """Async counterpart to :meth:`ApiClient.fiber_compile_rate_distortion`."""
+
+        return fiber_rate_distortion_summary(await self.fiber_compile(world, query, layer=layer))
+
+    async def fiber_compile_adaptive_acquisition(
+        self,
+        world: str | FiberCompileRequest,
+        query: str | None = None,
+        *,
+        layer: ContextLayer | str = ContextLayer.L0,
+    ) -> FiberAdaptiveAcquisitionSummary:
+        """Async counterpart to :meth:`ApiClient.fiber_compile_adaptive_acquisition`."""
+
+        return fiber_adaptive_acquisition_summary(await self.fiber_compile(world, query, layer=layer))
 
     async def fiber_refine(
         self,

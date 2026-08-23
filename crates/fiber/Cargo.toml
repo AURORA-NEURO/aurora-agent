@@ -9,6 +9,7 @@ description = "The FIBER query compiler: protected closure, dependency slicing, 
 
 [dependencies]
 bioprism-backends = { workspace = true }
+bioprism-epistemic = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-influence = { workspace = true }
 bioprism-scope = { workspace = true }

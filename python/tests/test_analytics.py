@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 import sys
@@ -15,7 +16,9 @@ from prism_sdk import (
     AdapterRegistry,
     AnalyticsDirection,
     AnalyticsEvidence,
+    ApiClient,
     AsyncClient,
+    AsyncApiClient,
     AsyncWorkspace,
     CalibrationObservation,
     CapabilityAuditGroupReport,
@@ -28,15 +31,54 @@ from prism_sdk import (
     MissionEvaluatorBindingReport,
     MissionEvaluatorCoverageReport,
     MissionEvaluatorQuery,
+    MissionEvaluatorReplayReport,
+    MissionEvaluatorReplayRequest,
+    MissionEvaluatorReplayCompareRequest,
+    MissionEvaluatorReplayComparisonReport,
+    MissionEvaluatorReplayQueryReport,
+    MissionEvaluatorReplayQueryRequest,
+    MissionEvidenceBundleReport,
+    MissionEvidenceBundleRequest,
+    MissionEvidenceBundleImportReport,
+    MissionEvidenceBundleImportRequest,
+    MissionEvidenceBundleQueryReport,
+    MissionEvidenceBundleQueryRequest,
+    MissionEvidenceBundleGetReport,
+    MissionEvidenceBundleGetRequest,
+    MissionEvidenceBundleVerificationReport,
+    MissionEvidenceBundleVerifyRequest,
     MissionEvaluatorReviewReport,
     MissionEvaluatorReviewRequest,
     MissionEvaluatorSearchReport,
     CapabilityRouteReport,
     CapabilityRouteNeed,
+    CapabilityRoutePlanReport,
+    CapabilityRoutePlanRequest,
+    CapabilityRoutePlanVerifyReport,
+    CapabilityRoutePlanVerifyRequest,
     CapabilityRouteRequest,
     CapabilityRouteReviewReport,
     CapabilityRouteReviewRequest,
     CapabilitySchemaQualityReport,
+    DomainWorkflowCatalogueReport,
+    DomainWorkflowInstantiateRequest,
+    DomainWorkflowInstantiationReport,
+    DomainWorkflowPortfolioRequest,
+    DomainWorkflowPortfolioReport,
+    DomainWorkflowPortfolioVerifyRequest,
+    DomainWorkflowPortfolioVerifyReport,
+    DomainWorkflowVerifyRequest,
+    DomainWorkflowVerifyReport,
+    DomainWorkflowScaffoldRequest,
+    DomainWorkflowScaffoldReport,
+    DomainWorkflowReconcileRequest,
+    DomainWorkflowReconciliationReport,
+    DomainWorkflowReconciliationImportReport,
+    DomainWorkflowReconciliationImportRequest,
+    DomainWorkflowReconciliationQueryReport,
+    DomainWorkflowReconciliationQueryRequest,
+    DomainWorkflowReconciliationGetReport,
+    DomainWorkflowReconciliationGetRequest,
     ConformanceCaseReport,
     ConformancePyramidReport,
     ConformanceReleaseDecisionReport,
@@ -58,6 +100,7 @@ from prism_sdk import (
     developer_delivery_receipt_report,
     developer_delivery_receipt_verification_report,
     developer_platform_status_report,
+    workbench_verification_report,
     ci_provider_normalization_report,
     BioCapabilityEvidenceAuditReport,
     BioCapabilityEvidenceAuditRequest,
@@ -70,8 +113,15 @@ from prism_sdk import (
     capability_audit_report,
     capability_discover_report,
     capability_route_report,
+    capability_route_plan_report,
+    capability_route_plan_verify_report,
     capability_route_review_report,
     mission_evaluator_discover_report,
+    mission_evaluator_replay_report,
+    mission_evaluator_replay_comparison_report,
+    mission_evaluator_replay_query_report,
+    mission_evidence_bundle_report,
+    mission_evidence_bundle_verification_report,
     adapter_plan_report,
     Client,
     MetricObservation,
@@ -81,6 +131,13 @@ from prism_sdk import (
     MissionStep,
     PairedObservation,
     WorkbenchRequest,
+    WorkbenchRegistryGetReport,
+    WorkbenchRegistryImportReport,
+    WorkbenchRegistryImportRequest,
+    WorkbenchRegistryQueryReport,
+    WorkbenchRegistryQueryRequest,
+    WorkbenchVerificationReport,
+    WorkbenchVerificationRequest,
     Workspace,
     PlanStatus,
     SourceKind,
@@ -148,6 +205,11 @@ def route_report_payload() -> dict:
                 "candidate_groups": ["oncology"],
                 "candidate_domains": ["oncology"],
                 "candidate_tools": ["oncology_search"],
+                "candidate_group_evidence": [{
+                    "id": "oncology",
+                    "artifact_evidence": {"state": "missing", "matching_record_count": 0},
+                    "workflow_reconciliation_evidence": {"state": "missing", "record_count": 0},
+                }],
                 "search": {"matches": [{"group": {"id": "oncology"}}]},
             }
         ],
@@ -164,7 +226,25 @@ def route_report_payload() -> dict:
             "candidate_domain_count": 1,
             "candidate_domains": ["oncology"],
             "candidate_tool_count": 1,
+            "candidate_group_evidence_count": 1,
             "posture": "routing evidence only",
+        },
+        "evidence_digest": "e" * 64,
+        "evidence_scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+        "evidence": {
+            "scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+            "evidence_digest": "e" * 64,
+            "artifact_registry_generation": 0,
+            "artifact_registry_size": 0,
+            "workflow_reconciliation_registry_generation": 0,
+            "workflow_reconciliation_registry_size": 0,
+            "candidate_group_count": 1,
+            "groups_with_artifact_evidence": 0,
+            "artifact_evidence_records": 0,
+            "groups_with_workflow_reconciliation": 0,
+            "workflow_reconciliation_records": 0,
+            "readiness_claimed": False,
+            "execution": "not_started",
         },
         "schema_attachment": {
             "requested": True,
@@ -184,6 +264,20 @@ def route_review_payload() -> dict:
         "review_id": "v" * 64,
         "route_id": "r" * 64,
         "catalog_digest": "c" * 64,
+        "evidence_digest": "e" * 64,
+        "evidence_scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+        "evidence_binding": {
+            "present": True,
+            "evidence_digest": "e" * 64,
+            "scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+            "summary": {
+                "evidence_digest": "e" * 64,
+                "scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
+            },
+            "posture": "carried_forward_not_recomputed",
+            "readiness_claimed": False,
+            "execution": "not_started",
+        },
         "goal": "compose evidence",
         "need_count": 1,
         "selection_count": 1,
@@ -198,6 +292,8 @@ def route_review_payload() -> dict:
             "goal": "compose evidence",
             "steps": [{"id": "oncology", "tool": "oncology_search"}],
             "dependency_waves": [["oncology"]],
+            "route_evidence_digest": "e" * 64,
+            "route_evidence_scope": "candidate_capability_groups_current_digest_verified_artifact_and_workflow_reconciliation_registries",
         },
         "execution": "not_started",
         "route_coverage": {"needs_total": 1, "needs_resolved": 1},
@@ -297,6 +393,16 @@ def mission_evaluator_review_payload() -> dict:
         "review_id": "r" * 64,
         "catalog_digest": "e" * 64,
         "discovery_digest": "d" * 64,
+        "catalogue_snapshot": {
+            "schema": "bioprism-devplat-mission-evaluator-catalogue-snapshot/0.1",
+            "catalog_digest": "e" * 64,
+            "snapshot_digest": "s" * 64,
+            "row_count": 29,
+            "group_count": 29,
+            "rows": [],
+            "retention": {"mode": "full", "rows_retained": True, "bytes": 1024},
+            "execution": "not_started",
+        },
         "selection_count": 1,
         "claim_count": 1,
         "bindings": [{
@@ -320,6 +426,322 @@ def mission_evaluator_review_payload() -> dict:
         "execution": "not_started",
         "guarantees": ["no evaluator or domain tool was executed"],
         "limitations": ["step existence and claim statement validity are checked only by the later agent_mission request"],
+    }
+
+
+def mission_evaluator_replay_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-mission-evaluator/0.1",
+        "workflow": "mission_evaluator_replay",
+        "mission_id": "mission-python",
+        "mission_digest": "m" * 64,
+        "mission_status": "succeeded",
+        "review_provenance": {"present": True, "review_id": "r" * 64},
+        "catalog_digest": "e" * 64,
+        "binding_count": 1,
+        "omitted_bindings": 0,
+        "state_counts": {"retained": 1},
+        "claims": [{
+            "claim_id": "fidelity-claim",
+            "binding_count": 1,
+            "returned_binding_count": 1,
+            "outcome_counts": {"retained": 1},
+            "distinct_output_digests": 1,
+            "disagreement_posture": "single_evaluator_no_disagreement_claimed",
+        }],
+        "bindings": [{
+            "id": "assay-evaluator",
+            "claim_id": "fidelity-claim",
+            "adapter_id": "oncoworlds.assay_fidelity",
+            "domain": "oncology",
+            "outcome_state": "retained",
+            "output_digest": "f" * 64,
+            "catalog_match": True,
+            "domain_supported": True,
+            "replay_state": "replayed_retained",
+        }],
+        "coverage": {
+            "catalogue_adapter_count": 29,
+            "catalogue_group_count": 29,
+            "replayed_adapter_count": 1,
+            "replayed_group_count": 1,
+            "unrepresented_adapters": ["benchmark.portfolio_coverage"],
+            "unrepresented_groups": ["benchmark_pack_portfolio"],
+            "complete": False,
+        },
+        "findings": [],
+        "replay_status": "ready",
+        "execution": "not_started",
+        "omitted_fixtures": 28,
+        "fixtures": [{
+            "fixture_id": "mission-evaluator::oncoworlds.assay_fidelity",
+            "adapter_id": "oncoworlds.assay_fidelity",
+            "group_id": "oncoworlds_models_and_assays",
+            "domains": ["oncology"],
+            "levels": ["evaluation"],
+            "output_pointer": "/fidelity",
+            "retained_output": {"fidelity": {"non_semantic": True}},
+            "retained_output_digest": "f" * 64,
+            "variants": [{"state": "retained"}, {"state": "refused"}, {"state": "omitted"}, {"state": "disagreement"}],
+            "guarantee": "structural fixture coverage only",
+        }],
+        "guarantees": ["no evaluator or domain tool was executed"],
+        "limitations": ["catalogue coverage is structural"],
+    }
+
+
+def mission_evaluator_replay_query_payload(*, summary_only: bool = False) -> dict:
+    replay = mission_evaluator_replay_payload()
+    if summary_only:
+        replay = {
+            "schema": "bioprism-devplat-mission-evaluator-replay-summary/0.1",
+            "workflow": "mission_evaluator_replay_summary",
+            "mission_id": "mission-python",
+            "mission_digest": "m" * 64,
+            "mission_status": "succeeded",
+            "catalog_digest": "e" * 64,
+            "binding_count": 1,
+            "omitted_bindings": 0,
+            "state_counts": {"retained": 1},
+            "claim_count": 1,
+            "claims": [],
+            "coverage": {"catalogue_group_count": 29, "replayed_group_count": 1, "complete": False},
+            "findings": [],
+            "replay_status": "ready",
+            "execution": "not_started",
+            "result_retained": False,
+            "result_bytes": 300_000,
+            "result_digest": "r" * 64,
+            "guarantees": ["summary is structural and non-executing"],
+            "limitations": ["raw mission output was omitted"],
+        }
+    return {
+        "ok": True,
+        "schema": "bioprism-api/mission-evaluator-replay-query/0.1",
+        "workflow": "mission_evaluator_replay_query",
+        "mission_id": "mission-python",
+        "query": {"include_fixtures": False, "max_items": 64},
+        "retention": {
+            "mode": "summary_only" if summary_only else "full",
+            "result_retained": not summary_only,
+            "summary_retained": True,
+            "result_omitted": {"bytes": 300_000, "sha256": "r" * 64} if summary_only else None,
+        },
+        "replay": replay,
+        "execution": "not_started",
+        "guarantees": ["evaluator and domain execution did not occur"],
+        "limitations": ["replay is structural rather than semantic"],
+        "links": {
+            "mission": "/v1/missions/mission-python",
+            "claims": "/v1/missions/mission-python/claims",
+            "replay": "/v1/missions/mission-python/evaluator-replay",
+        },
+    }
+
+
+def mission_evaluator_replay_compare_payload(*, status: str = "unchanged") -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-api/mission-evaluator-replay-compare/0.1",
+        "workflow": "mission_evaluator_replay_compare",
+        "mission_id": "mission-python",
+        "replay": mission_evaluator_replay_payload(),
+        "catalog_drift": {
+            "status": status,
+            "historical_catalog_digest": "e" * 64,
+            "current_catalog_digest": "e" * 64,
+            "digest_match": status == "unchanged",
+            "historical_digest_valid": True,
+            "historical_review_id": "r" * 64,
+            "historical_discovery_digest": "d" * 64,
+            "referenced_adapter_count": 1,
+            "compatible_referenced_adapter_ids": ["oncoworlds.assay_fidelity"],
+            "missing_referenced_adapter_ids": [],
+            "current_catalogue_adapter_count": 29,
+            "current_catalogue_group_count": 29,
+            "comparison_scope": "historical_digest_and_current_binding_compatibility",
+            "historical_catalogue_rows_retained": False,
+            "source": "mission.claim_lineage.evaluator_review",
+        },
+        "execution": "not_started",
+        "guarantees": ["comparison is non-executing"],
+        "limitations": ["historical catalogue rows were not retained"],
+        "links": {
+            "mission": "/v1/missions/mission-python",
+            "replay": "/v1/missions/mission-python/evaluator-replay",
+            "evidence_bundle": "/v1/missions/mission-python/evidence-bundle",
+        },
+    }
+
+
+def mission_evidence_bundle_payload(*, summary_only: bool = True) -> dict:
+    replay = mission_evaluator_replay_query_payload(summary_only=summary_only)["replay"]
+    return {
+        "ok": True,
+        "schema": "bioprism-api/mission-evidence-bundle/0.1",
+        "workflow": "mission_evidence_bundle_export",
+        "mission_id": "mission-python",
+        "retention": {
+            "mode": "summary_only" if summary_only else "full",
+            "result_retained": not summary_only,
+            "summary_retained": True,
+            "result_included": False,
+            "result_omitted": {"bytes": 300_000, "sha256": "r" * 64} if summary_only else None,
+        },
+        "result": None,
+        "result_digest": None,
+        "execution_provenance": {"status": "succeeded", "recovered": False},
+        "evaluator_replay": replay,
+        "catalog_drift": mission_evaluator_replay_compare_payload()["catalog_drift"],
+        "trace": [{"sequence": 1, "event": "mission_succeeded"}],
+        "export": {
+            "include_result": False,
+            "include_trace": True,
+            "include_fixtures": False,
+            "max_items": 64,
+            "execution": "not_started",
+        },
+        "bundle_digest": "b" * 64,
+        "execution": "not_started",
+        "guarantees": ["bundle is content-addressed"],
+        "limitations": ["raw mission output was omitted"],
+        "links": {
+            "mission": "/v1/missions/mission-python",
+            "claims": "/v1/missions/mission-python/claims",
+            "replay": "/v1/missions/mission-python/evaluator-replay",
+        },
+    }
+
+
+def mission_evidence_bundle_verification_payload(*, valid: bool = True) -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-mission-evidence-bundle-verify/0.1",
+        "workflow": "mission_evidence_bundle_verify",
+        "valid": valid,
+        "verification_status": "verified" if valid else "failed",
+        "bundle_digest": "b" * 64,
+        "recomputed_bundle_digest": "b" * 64 if valid else "c" * 64,
+        "result_digest": None,
+        "recomputed_result_digest": None,
+        "checks": {
+            "schema": True,
+            "bundle_digest": valid,
+            "retention": True,
+            "result_digest": None,
+            "trace": True,
+            "export": True,
+        },
+        "failures": [] if valid else ["bundle_digest_mismatch"],
+        "execution": "not_started",
+    }
+
+
+def mission_evidence_bundle_import_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-evidence-bundle-import/0.1",
+        "workflow": "mission_evidence_bundle_import",
+        "bundle_digest": "b" * 64,
+        "created": True,
+        "already_present": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+        "execution": "not_started",
+        "guarantees": ["verified before import"],
+        "limitations": ["bounded local registry"],
+    }
+
+
+def mission_evidence_bundle_query_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-evidence-bundle-query/0.1",
+        "workflow": "mission_evidence_bundle_query",
+        "filters": {"domain": "oncology", "max_items": 10, "include_bundles": False},
+        "registry_generation": 1,
+        "registry_size": 1,
+        "rows": [{"bundle_digest": "b" * 64, "domains": ["oncology"]}],
+        "next_after": None,
+        "has_more": False,
+        "execution": "not_started",
+        "guarantees": ["digest ordered"],
+        "limitations": ["bounded retention"],
+    }
+
+
+def mission_evidence_bundle_get_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-mcp/mission-evidence-bundle-record/0.1",
+        "workflow": "mission_evidence_bundle_get",
+        "bundle_digest": "b" * 64,
+        "bundle": {"bundle_digest": "b" * 64},
+        "execution": "not_started",
+        "guarantees": ["verified before import"],
+        "limitations": ["bounded local registry"],
+    }
+
+
+def domain_workflow_reconciliation_record_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-workflow-reconcile/0.1",
+        "workflow": "domain_workflow_reconcile",
+        "workflow_id": "oncology",
+        "workflow_digest": "w" * 64,
+        "catalog_digest": "c" * 64,
+        "domain_contract_digest": "d" * 64,
+        "mission_id": "mission-python",
+        "mission_plan_digest": "p" * 64,
+        "reconciliation_digest": "r" * 64,
+        "source": "mission_report",
+        "report": {"present": True},
+        "evidence": {"evidence_valid": True},
+        "completion": {"status": "complete", "ready": True},
+        "integrity": {"valid": True},
+        "execution": "not_started",
+    }
+
+
+def domain_workflow_reconciliation_import_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-workflow-reconciliation-import/0.1",
+        "workflow": "domain_workflow_reconciliation_import",
+        "reconciliation_digest": "r" * 64,
+        "created": True,
+        "already_present": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+        "execution": "not_started",
+    }
+
+
+def domain_workflow_reconciliation_query_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-domain-workflow-reconciliation-query/0.1",
+        "workflow": "domain_workflow_reconciliation_query",
+        "filters": {"mission_id": "mission-python", "max_items": 10, "include_records": True},
+        "registry_generation": 1,
+        "registry_size": 1,
+        "rows": [{"reconciliation_digest": "r" * 64, "record": domain_workflow_reconciliation_record_payload()}],
+        "next_after": None,
+        "has_more": False,
+        "execution": "not_started",
+    }
+
+
+def domain_workflow_reconciliation_get_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-api/domain-workflow-reconciliation-record/0.1",
+        "workflow": "domain_workflow_reconciliation_get",
+        "reconciliation_digest": "r" * 64,
+        "record": domain_workflow_reconciliation_record_payload(),
+        "execution": "not_started",
     }
 
 
@@ -594,6 +1016,75 @@ def developer_platform_status_payload(*, include_details: bool = False) -> dict:
             "exit_code_divergences": [{"kind": "class_collision"}],
         }
     return payload
+
+
+def workbench_verification_payload(*, valid: bool = True) -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_workbench_verify",
+        "schema_version": "bioprism-devplat-workbench-verify/0.1",
+        "valid": valid,
+        "status": "verified" if valid else "mismatch",
+        "retained_report_digest": "a" * 64,
+        "expected_report_digest": None,
+        "report_digest_matched": None,
+        "retained_audit_digest": "b" * 64,
+        "observed_audit_digest": "b" * 64,
+        "dashboard_present": True,
+        "dashboard_verified": True,
+        "ci_present": True,
+        "ci_replay_supplied": True,
+        "ci_verified": True,
+        "mismatches": [] if valid else [{"code": "audit_mismatch", "path": "/audit"}],
+        "execution": "not_started",
+        "network_access": "not_started",
+        "verification_digest": "c" * 64,
+        "guarantees": ["retained report was replayed"],
+        "limitations": ["CI was not executed"],
+    }
+
+
+def workbench_registry_import_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_workbench_import",
+        "workbench_report_digest": "d" * 64,
+        "created": True,
+        "already_present": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+        "execution": "not_started",
+        "guarantees": [],
+        "limitations": [],
+    }
+
+
+def workbench_registry_query_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_workbench_query",
+        "rows": [{
+            "workbench_report_digest": "d" * 64,
+            "session_digest": "s" * 64,
+            "domains": ["oncology"],
+            "capabilities": ["evidence"],
+        }],
+        "next_after": None,
+        "has_more": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+    }
+
+
+def workbench_registry_get_payload() -> dict:
+    return {
+        "ok": True,
+        "workflow": "developer_workbench_get",
+        "workbench_report_digest": "d" * 64,
+        "report": {"schema_version": "bioprism-devplat-workbench/0.1"},
+        "registry_generation": 1,
+        "registry_size": 1,
+    }
 
 
 def token_context_plan_payload(*, include_comparison: bool = True) -> dict:
@@ -1273,6 +1764,24 @@ class AnalyticsModelTests(unittest.TestCase):
         with self.assertRaises(ArgumentError):
             WorkbenchRequest({})
 
+    def test_workbench_verification_request_and_report_preserve_replay_boundaries(self) -> None:
+        request = WorkbenchVerificationRequest(
+            {"session_id": "studio-1"},
+            {"workflow": "developer_workbench"},
+            expected_report_digest="a" * 64,
+            ci_replay={"workflow": "ci", "checks": []},
+            policy={"require_ci_replay": True},
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["expected_report_digest"], "a" * 64)
+        self.assertTrue(arguments["policy"]["require_ci_replay"])
+        report = WorkbenchVerificationReport.from_wire(workbench_verification_payload())
+        self.assertTrue(report.verified)
+        self.assertEqual(report.execution, "not_started")
+        self.assertEqual(workbench_verification_report(workbench_verification_payload()).verification_digest, "c" * 64)
+        with self.assertRaises(ArgumentError):
+            WorkbenchVerificationRequest({"session_id": "studio-1"}, {"workflow": "x"}, expected_report_digest="A" * 64)
+
     def test_mission_request_builds_dependency_bound_wire_contract(self) -> None:
         request = MissionRequest(
             "mission-1",
@@ -1333,6 +1842,200 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(report.candidate_domains, ("oncology",))
         self.assertEqual(report.to_dict()["route_id"], "r" * 64)
 
+    def test_domain_workflow_request_and_reports_preserve_scope_and_preflight(self) -> None:
+        request = DomainWorkflowInstantiateRequest(
+            "documentation_and_knowledge",
+            "workflow-python",
+            "discover the repository capabilities",
+            [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+            policy={"execute": False},
+            route_review={"workflow": "capability_route_review", "review_id": "a" * 64},
+        )
+        self.assertEqual(request.to_arguments()["steps"][0]["tool"], "workspace_capabilities")
+        self.assertEqual(request.to_arguments()["route_review"]["review_id"], "a" * 64)
+        catalogue = DomainWorkflowCatalogueReport.from_wire({
+            "ok": True,
+            "workflow": "domain_workflow_catalogue",
+            "catalog_digest": "c" * 64,
+            "workflow_catalog_digest": "w" * 64,
+            "workflow_count": 1,
+            "workflows": [{"workflow_id": "documentation_and_knowledge", "workflow_digest": "d" * 64}],
+            "coverage": {"group_count": 1},
+            "execution": "not_started",
+        })
+        self.assertEqual(catalogue.workflow_count, 1)
+        instantiation = DomainWorkflowInstantiationReport.from_wire({
+            "ok": True,
+            "workflow": "domain_workflow_instantiate",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "d" * 64,
+            "catalog_digest": "c" * 64,
+            "mission": {"mission_id": "workflow-python"},
+            "selection": {"selected_tools": ["workspace_capabilities"]},
+            "domain_contract": {"posture": "advisory_review_gated"},
+            "domain_contract_digest": "d" * 64,
+            "execution_contract": {
+                "provider_boundary": {"container": "unavailable"},
+                "readiness_claimed": False,
+            },
+            "evidence_plan": {"steps": [{"step_id": "catalog"}]},
+            "preflight": {"required": True},
+            "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
+            "execution": "not_started",
+        })
+        self.assertEqual(instantiation.selected_tools, ("workspace_capabilities",))
+        self.assertEqual(instantiation.domain_contract["posture"], "advisory_review_gated")
+        self.assertEqual(instantiation.evidence_plan["steps"][0]["step_id"], "catalog")
+        self.assertEqual(instantiation.preflight_report["dispatch"], "not_started")
+        self.assertEqual(instantiation.execution_contract["readiness_claimed"], False)
+
+        verify_request = DomainWorkflowVerifyRequest(
+            instantiation=instantiation.to_dict(),
+            replay_request=request.to_arguments(),
+        )
+        self.assertEqual(verify_request.to_arguments()["replay_request"]["workflow_id"], "documentation_and_knowledge")
+        verification = DomainWorkflowVerifyReport.from_wire({
+            "ok": True,
+            "schema": "bioprism-devplat-domain-workflow-verify/0.1",
+            "workflow": "domain_workflow_verify",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "d" * 64,
+            "catalog_digest": "c" * 64,
+            "domain_contract_digest": "d" * 64,
+            "mission_id": "workflow-python",
+            "mission_digest": "e" * 64,
+            "structural_valid": True,
+            "valid": True,
+            "verification_status": "verified",
+            "replay": {"requested": True, "status": "matched", "matched": True},
+            "mission_preflight": {"requested": True, "status": "matched", "matched": True, "ok": True},
+            "mismatches": [],
+            "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        })
+        self.assertTrue(verification.verified)
+        self.assertEqual(verification.replay["status"], "matched")
+
+        portfolio_request = DomainWorkflowPortfolioRequest(
+            requests=(request.to_arguments(),),
+            policy={"require_complete_catalogue": False},
+        )
+        self.assertEqual(
+            portfolio_request.to_arguments()["requests"][0]["workflow_id"],
+            "documentation_and_knowledge",
+        )
+        portfolio = DomainWorkflowPortfolioReport.from_wire({
+            "ok": True,
+            "schema": "bioprism-devplat-domain-workflow-portfolio/0.1",
+            "workflow": "domain_workflow_portfolio",
+            "portfolio_digest": "f" * 64,
+            "valid": True,
+            "portfolio_ready": True,
+            "portfolio_status": "ready_for_authoritative_preflight",
+            "policy": {"allow_partial": False, "require_complete_catalogue": False},
+            "coverage": {"catalogue_group_count": 29, "requested_item_count": 1, "complete_catalogue": False},
+            "summary": {"instantiated_count": 1, "blocked_count": 0, "preflight_blocked_count": 0},
+            "items": [{"workflow_id": "documentation_and_knowledge", "status": "instantiated"}],
+            "preflight": {"required": True, "status": "matched", "matched": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        })
+        self.assertTrue(portfolio.complete_catalogue is False)
+        self.assertTrue(portfolio.preflight_ready)
+        self.assertEqual(portfolio.items[0]["status"], "instantiated")
+
+        portfolio_verify_request = DomainWorkflowPortfolioVerifyRequest(
+            portfolio=portfolio.to_dict(),
+            replay_requests=(request.to_arguments(),),
+            policy={"require_replay": True},
+        )
+        self.assertEqual(
+            portfolio_verify_request.to_arguments()["replay_requests"][0]["workflow_id"],
+            "documentation_and_knowledge",
+        )
+        portfolio_verification = DomainWorkflowPortfolioVerifyReport.from_wire({
+            "ok": True,
+            "schema": "bioprism-devplat-domain-workflow-portfolio-verify/0.1",
+            "workflow": "domain_workflow_portfolio_verify",
+            "portfolio_digest": "f" * 64,
+            "observed_portfolio_digest": "f" * 64,
+            "portfolio_digest_matched": True,
+            "portfolio_verify_digest": "a" * 64,
+            "valid": True,
+            "portfolio_ready": True,
+            "verification_status": "verified",
+            "policy": {"allow_partial": False, "require_complete_catalogue": False, "require_replay": True},
+            "coverage": {"complete_catalogue": False, "replay_complete": True},
+            "summary": {"verified_count": 1, "replay_matched_count": 1},
+            "items": [{"status": "verified"}],
+            "mismatches": [],
+            "preflight": {"required": True, "status": "matched", "matched": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        })
+        self.assertTrue(portfolio_verification.verified)
+        self.assertTrue(portfolio_verification.portfolio_digest_matched)
+        self.assertEqual(portfolio_verification.items[0]["status"], "verified")
+
+        scaffold_request = DomainWorkflowScaffoldRequest(
+            "documentation_and_knowledge",
+            "scaffold-python",
+            "discover the repository capabilities",
+            tools=("workspace_capabilities",),
+            arguments={"workspace_capabilities": {}},
+        )
+        self.assertEqual(
+            scaffold_request.to_arguments()["arguments"],
+            {"workspace_capabilities": {}},
+        )
+        scaffold = DomainWorkflowScaffoldReport.from_wire({
+            "ok": True,
+            "workflow": "domain_workflow_scaffold",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "d" * 64,
+            "catalog_digest": "c" * 64,
+            "selection": {"selected_tools": ["workspace_capabilities"]},
+            "mission": {"mission_id": "scaffold-python"},
+            "preflight": {"required": True, "dispatch": "not_started"},
+            "preflight_status": "ready",
+            "preflight_report": {"workflow": "agent_mission", "dispatch": "not_started"},
+            "execution": "not_started",
+            "readiness_claimed": False,
+            "execution_contract": {
+                "provider_boundary": {"subprocess": "unavailable"},
+                "readiness_claimed": False,
+            },
+        })
+        self.assertEqual(scaffold.selected_tools, ("workspace_capabilities",))
+        self.assertFalse(scaffold.readiness_claimed)
+        self.assertEqual(scaffold.preflight_status, "ready")
+        self.assertEqual(scaffold.execution_contract["provider_boundary"]["subprocess"], "unavailable")
+
+        reconcile_request = DomainWorkflowReconcileRequest(
+            {"workflow": "domain_workflow_instantiate", "workflow_id": "documentation_and_knowledge"},
+            mission_report={"workflow": "agent_mission", "mission_status": "succeeded"},
+        )
+        self.assertEqual(reconcile_request.to_arguments()["mission_report"]["mission_status"], "succeeded")
+        reconciliation = DomainWorkflowReconciliationReport.from_wire({
+            "ok": True,
+            "workflow": "domain_workflow_reconcile",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "d" * 64,
+            "catalog_digest": "c" * 64,
+            "domain_contract_digest": "k" * 64,
+            "mission_id": "workflow-python",
+            "mission_plan_digest": "p" * 64,
+            "reconciliation_digest": "r" * 64,
+            "source": "mission_report",
+            "report": {"present": True},
+            "evidence": {"evidence_valid": True},
+            "completion": {"status": "complete", "ready": True},
+            "integrity": {"valid": True},
+        })
+        self.assertTrue(reconciliation.ready)
+        self.assertEqual(reconciliation.completion_status, "complete")
+
     def test_capability_discover_report_preserves_cross_domain_context(self) -> None:
         report = CapabilitySearchReport.from_wire(capability_discover_payload())
         self.assertIsInstance(report.matches[0], CapabilityMatchReport)
@@ -1375,8 +2078,377 @@ class AnalyticsModelTests(unittest.TestCase):
         report = MissionEvaluatorReviewReport.from_wire(mission_evaluator_review_payload())
         self.assertIsInstance(report.bindings[0], MissionEvaluatorBindingReport)
         self.assertTrue(report.ready)
+        self.assertTrue(report.snapshot_retained)
         self.assertEqual(report.proposed_bindings[0]["step_id"], "assay")
         self.assertEqual(report.binding_posture, "ready_for_mission_claim_bindings")
+
+    def test_mission_evaluator_replay_report_preserves_fixture_and_coverage_evidence(self) -> None:
+        report = MissionEvaluatorReplayReport.from_wire(mission_evaluator_replay_payload())
+        self.assertTrue(report.ready)
+        self.assertFalse(report.catalogue_complete)
+        self.assertEqual(report.coverage["catalogue_adapter_count"], 29)
+        self.assertEqual(report.omitted_fixtures, 28)
+        self.assertEqual(report.bindings[0]["replay_state"], "replayed_retained")
+        self.assertEqual(len(report.fixtures[0]["variants"]), 4)
+        self.assertEqual(
+            mission_evaluator_replay_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evaluator_replay_payload()}}}
+            ).mission_id,
+            "mission-python",
+        )
+
+    def test_mission_evaluator_replay_request_enforces_bounds_and_serializes(self) -> None:
+        request = MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, include_fixtures=False, max_items=64)
+        self.assertEqual(request.to_mcp_arguments(), {"mission": {"workflow": "agent_mission"}, "include_fixtures": False, "max_items": 64})
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, max_items=0)
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, include_fixtures=1)  # type: ignore[arg-type]
+
+    def test_mission_evaluator_replay_query_preserves_summary_only_retention(self) -> None:
+        request = MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=False, max_items=64)
+        self.assertEqual(request.to_query_params(), {"include_fixtures": "false", "max_items": "64"})
+        report = MissionEvaluatorReplayQueryReport.from_wire(mission_evaluator_replay_query_payload(summary_only=True))
+        self.assertTrue(report.summary_only)
+        self.assertFalse(report.full_result_retained)
+        self.assertEqual(report.replay["workflow"], "mission_evaluator_replay_summary")
+        self.assertEqual(
+            mission_evaluator_replay_query_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evaluator_replay_query_payload()}}}
+            ).retention["mode"],
+            "full",
+        )
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayQueryRequest("mission-python", max_items=513)
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=1)  # type: ignore[arg-type]
+
+    def test_mission_evaluator_replay_comparison_preserves_drift_and_scope(self) -> None:
+        request = MissionEvaluatorReplayCompareRequest(
+            {"workflow": "agent_mission"}, include_fixtures=False, max_items=64
+        )
+        self.assertEqual(
+            request.to_mcp_arguments(),
+            {"mission": {"workflow": "agent_mission"}, "include_fixtures": False, "max_items": 64},
+        )
+        report = MissionEvaluatorReplayComparisonReport.from_wire(mission_evaluator_replay_compare_payload())
+        self.assertEqual(report.status, "unchanged")
+        self.assertFalse(report.drifted)
+        self.assertFalse(report.catalog_drift["historical_catalogue_rows_retained"])
+        drifted = MissionEvaluatorReplayComparisonReport.from_wire(
+            mission_evaluator_replay_compare_payload(status="drifted")
+        )
+        self.assertTrue(drifted.drifted)
+        self.assertEqual(
+            mission_evaluator_replay_comparison_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evaluator_replay_compare_payload()}}}
+            ).mission_id,
+            "mission-python",
+        )
+        with self.assertRaises(ArgumentError):
+            MissionEvaluatorReplayCompareRequest({"workflow": "agent_mission"}, max_items=513)
+
+    def test_mission_evidence_bundle_preserves_summary_retention_and_digest(self) -> None:
+        request = MissionEvidenceBundleRequest(
+            "mission-python", include_result=False, include_trace=True, include_fixtures=False, max_items=64
+        )
+        self.assertEqual(
+            request.to_query_params(),
+            {
+                "include_result": "false",
+                "include_trace": "true",
+                "include_fixtures": "false",
+                "max_items": "64",
+            },
+        )
+        report = MissionEvidenceBundleReport.from_wire(mission_evidence_bundle_payload())
+        self.assertTrue(report.summary_only)
+        self.assertFalse(report.result_included)
+        self.assertIsNone(report.result)
+        self.assertEqual(len(report.bundle_digest), 64)
+        self.assertEqual(
+            mission_evidence_bundle_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evidence_bundle_payload()}}}
+            ).execution,
+            "not_started",
+        )
+        with self.assertRaises(ArgumentError):
+            MissionEvidenceBundleRequest("mission-python", include_result=1)  # type: ignore[arg-type]
+
+    def test_mission_evidence_bundle_verification_request_and_report_are_fail_closed(self) -> None:
+        request = MissionEvidenceBundleVerifyRequest({"workflow": "mission_evidence_bundle_export", "bundle_digest": "b" * 64})
+        self.assertEqual(request.to_mcp_arguments(), {"bundle": dict(request.bundle)})
+        self.assertEqual(request.to_http_body(), {"bundle": dict(request.bundle)})
+        report = MissionEvidenceBundleVerificationReport.from_wire(
+            mission_evidence_bundle_verification_payload()
+        )
+        self.assertTrue(report.valid)
+        self.assertTrue(report.digest_matches)
+        self.assertEqual(report.failures, ())
+        self.assertTrue(
+            mission_evidence_bundle_verification_report(
+                {"ok": True, "mcp": {"result": {"structuredContent": mission_evidence_bundle_verification_payload()}}}
+            ).valid
+        )
+        failed = MissionEvidenceBundleVerificationReport.from_wire(
+            mission_evidence_bundle_verification_payload(valid=False)
+        )
+        self.assertFalse(failed.valid)
+        self.assertFalse(failed.digest_matches)
+        self.assertEqual(failed.failures, ("bundle_digest_mismatch",))
+        with self.assertRaises(ArgumentError):
+            MissionEvidenceBundleVerifyRequest([])  # type: ignore[arg-type]
+
+    def test_mission_evidence_registry_requests_and_reports_preserve_bounds(self) -> None:
+        bundle = {"bundle_digest": "b" * 64}
+        imported_request = MissionEvidenceBundleImportRequest(bundle)
+        self.assertEqual(imported_request.to_http_body(), {"bundle": bundle})
+        imported = MissionEvidenceBundleImportReport.from_wire(mission_evidence_bundle_import_payload())
+        self.assertTrue(imported.created)
+        query_request = MissionEvidenceBundleQueryRequest(domain="oncology", max_items=10)
+        self.assertEqual(query_request.to_query_params()["domain"], "oncology")
+        queried = MissionEvidenceBundleQueryReport.from_wire(mission_evidence_bundle_query_payload())
+        self.assertEqual(queried.rows[0]["domains"], ["oncology"])
+        fetched_request = MissionEvidenceBundleGetRequest("b" * 64)
+        self.assertEqual(fetched_request.to_mcp_arguments(), {"bundle_digest": "b" * 64})
+        fetched = MissionEvidenceBundleGetReport.from_wire(mission_evidence_bundle_get_payload())
+        self.assertEqual(fetched.bundle_digest, "b" * 64)
+        with self.assertRaises(ArgumentError):
+            MissionEvidenceBundleQueryRequest(max_items=257)
+
+    def test_sync_http_mission_evidence_registry_uses_rest_routes(self) -> None:
+        bundle = {"bundle_digest": "b" * 64}
+        with patch.object(ApiClient, "request", side_effect=[mission_evidence_bundle_import_payload(), mission_evidence_bundle_query_payload(), mission_evidence_bundle_get_payload()]) as request:
+            client = ApiClient("http://127.0.0.1:8787")
+            self.assertTrue(client.mission_evidence_bundle_import_report(MissionEvidenceBundleImportRequest(bundle)).created)
+            self.assertEqual(client.mission_evidence_bundle_query_report({"domain": "oncology"}).rows[0]["domains"], ["oncology"])
+            self.assertEqual(client.mission_evidence_bundle_get_report("b" * 64).bundle_digest, "b" * 64)
+        self.assertEqual(request.call_args_list[0].args[0:2], ("POST", "/v1/evidence-bundles"))
+        self.assertEqual(request.call_args_list[1].args[0:2], ("GET", "/v1/evidence-bundles?max_items=100&include_bundles=false&domain=oncology"))
+        self.assertEqual(request.call_args_list[2].args[0:2], ("GET", f"/v1/evidence-bundles/{'b' * 64}"))
+
+    def test_sync_http_workbench_verification_exposes_rest_and_mcp_routes(self) -> None:
+        request_body = WorkbenchVerificationRequest({"session_id": "studio-1"}, {"workflow": "developer_workbench"})
+        with patch.object(ApiClient, "request", return_value=workbench_verification_payload()) as request:
+            report = ApiClient("http://127.0.0.1:8787").developer_workbench_verify_rest_report(request_body)
+        self.assertTrue(report.verified)
+        request.assert_called_once_with("POST", "/v1/developer-workbench/verify", request_body.to_mcp_arguments())
+        with patch.object(ApiClient, "call_tool", return_value=workbench_verification_payload()) as tool:
+            report = ApiClient("http://127.0.0.1:8787").developer_workbench_verify_report(request_body)
+        self.assertTrue(report.valid)
+        tool.assert_called_once_with("developer_workbench_verify", request_body.to_mcp_arguments())
+
+    def test_sync_http_workbench_registry_exposes_rest_and_mcp_routes(self) -> None:
+        import_request = WorkbenchRegistryImportRequest({"schema_version": "bioprism-devplat-workbench/0.1"})
+        query_request = WorkbenchRegistryQueryRequest(domain="oncology")
+        client = ApiClient("http://127.0.0.1:8787")
+        with patch.object(ApiClient, "request", side_effect=[workbench_registry_import_payload(), workbench_registry_query_payload(), workbench_registry_get_payload()]) as request:
+            self.assertTrue(client.developer_workbench_import_rest_report(import_request).created)
+            self.assertEqual(client.developer_workbench_query_rest_report(query_request).rows[0]["domains"], ["oncology"])
+            self.assertEqual(client.developer_workbench_get_rest_report("d" * 64).workbench_report_digest, "d" * 64)
+        self.assertEqual(request.call_args_list[0].args[0:2], ("POST", "/v1/developer-workbench/reports"))
+        self.assertEqual(request.call_args_list[1].args[0:2], ("GET", "/v1/developer-workbench/reports?max_items=100&include_reports=false&domain=oncology"))
+        self.assertEqual(request.call_args_list[2].args[0:2], ("GET", f"/v1/developer-workbench/reports/{'d' * 64}"))
+        with patch.object(ApiClient, "call_tool", side_effect=[workbench_registry_import_payload(), workbench_registry_query_payload(), workbench_registry_get_payload()]) as tool:
+            self.assertTrue(client.developer_workbench_import_report(import_request).created)
+            self.assertFalse(client.developer_workbench_query_report(query_request).has_more)
+            self.assertEqual(client.developer_workbench_get_report("d" * 64).workbench_report_digest, "d" * 64)
+        self.assertEqual(tool.call_args_list[0].args[0], "developer_workbench_import")
+        self.assertEqual(tool.call_args_list[1].args[0], "developer_workbench_query")
+        self.assertEqual(tool.call_args_list[2].args[0], "developer_workbench_get")
+
+    def test_async_http_workbench_verification_delegates_to_both_routes(self) -> None:
+        async def exercise() -> tuple[WorkbenchVerificationReport, WorkbenchVerificationReport]:
+            request_body = WorkbenchVerificationRequest({"session_id": "studio-1"}, {"workflow": "developer_workbench"})
+            with patch.object(ApiClient, "request", return_value=workbench_verification_payload()) as request:
+                rest = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).developer_workbench_verify_rest_report(request_body)
+                request.assert_called_once_with("POST", "/v1/developer-workbench/verify", request_body.to_mcp_arguments())
+            with patch.object(ApiClient, "call_tool", return_value=workbench_verification_payload()) as tool:
+                mcp = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).developer_workbench_verify_report(request_body)
+                tool.assert_called_once_with("developer_workbench_verify", request_body.to_mcp_arguments())
+            return rest, mcp
+
+        rest, mcp = asyncio.run(exercise())
+        self.assertTrue(rest.valid)
+        self.assertTrue(mcp.verified)
+
+    def test_sync_http_mission_evidence_registry_uses_mcp_bridge(self) -> None:
+        bundle = MissionEvidenceBundleImportRequest({"bundle_digest": "b" * 64})
+        with patch.object(ApiClient, "call_tool", side_effect=[mission_evidence_bundle_import_payload(), mission_evidence_bundle_query_payload(), mission_evidence_bundle_get_payload()]) as tool:
+            client = ApiClient("http://127.0.0.1:8787")
+            self.assertTrue(client.mission_evidence_bundle_import_tool_report(bundle).created)
+            self.assertFalse(client.mission_evidence_bundle_query_tool_report({}).has_more)
+            self.assertEqual(client.mission_evidence_bundle_get_tool_report("b" * 64).bundle_digest, "b" * 64)
+        self.assertEqual(tool.call_args_list[0].args[0], "mission_evidence_bundle_import")
+        self.assertEqual(tool.call_args_list[1].args[0], "mission_evidence_bundle_query")
+        self.assertEqual(tool.call_args_list[2].args[0], "mission_evidence_bundle_get")
+
+    def test_workflow_reconciliation_registry_requests_and_reports_preserve_bounds(self) -> None:
+        record = domain_workflow_reconciliation_record_payload()
+        imported_request = DomainWorkflowReconciliationImportRequest(record)
+        self.assertEqual(imported_request.to_http_body(), {"record": record})
+        imported = DomainWorkflowReconciliationImportReport.from_wire(
+            domain_workflow_reconciliation_import_payload()
+        )
+        self.assertTrue(imported.created)
+        query_request = DomainWorkflowReconciliationQueryRequest(mission_id="mission-python", include_records=True)
+        self.assertEqual(query_request.to_query_params()["mission_id"], "mission-python")
+        self.assertEqual(query_request.to_arguments(), {"max_items": 100, "include_records": True, "mission_id": "mission-python"})
+        queried = DomainWorkflowReconciliationQueryReport.from_wire(
+            domain_workflow_reconciliation_query_payload()
+        )
+        self.assertEqual(queried.rows[0]["reconciliation_digest"], "r" * 64)
+        fetched_request = DomainWorkflowReconciliationGetRequest("r" * 64)
+        self.assertEqual(fetched_request.to_arguments(), {"reconciliation_digest": "r" * 64})
+        fetched = DomainWorkflowReconciliationGetReport.from_wire(
+            domain_workflow_reconciliation_get_payload()
+        )
+        self.assertEqual(fetched.record["mission_id"], "mission-python")
+        with self.assertRaises(ArgumentError):
+            DomainWorkflowReconciliationQueryRequest(max_items=257)
+
+    def test_sync_http_workflow_reconciliation_registry_uses_rest_routes(self) -> None:
+        record = domain_workflow_reconciliation_record_payload()
+        with patch.object(
+            ApiClient,
+            "request",
+            side_effect=[
+                domain_workflow_reconciliation_import_payload(),
+                domain_workflow_reconciliation_query_payload(),
+                domain_workflow_reconciliation_get_payload(),
+            ],
+        ) as request:
+            client = ApiClient("http://127.0.0.1:8787")
+            self.assertTrue(client.domain_workflow_reconciliation_import_report({"record": record}).created)
+            self.assertEqual(
+                client.domain_workflow_reconciliation_query_report(
+                    {"mission_id": "mission-python", "include_records": True}
+                ).rows[0]["reconciliation_digest"],
+                "r" * 64,
+            )
+            self.assertEqual(
+                client.domain_workflow_reconciliation_get_report("r" * 64).reconciliation_digest,
+                "r" * 64,
+            )
+        self.assertEqual(request.call_args_list[0].args[0:2], ("POST", "/v1/domain-workflows/reconciliations"))
+        self.assertEqual(
+            request.call_args_list[1].args[0:2],
+            ("GET", "/v1/domain-workflows/reconciliations?limit=100&include_records=true&mission_id=mission-python"),
+        )
+        self.assertEqual(
+            request.call_args_list[2].args[0:2],
+            ("GET", f"/v1/domain-workflows/reconciliations/{'r' * 64}"),
+        )
+
+    def test_sync_http_workflow_reconciliation_registry_uses_mcp_bridge(self) -> None:
+        record = DomainWorkflowReconciliationImportRequest(domain_workflow_reconciliation_record_payload())
+        with patch.object(
+            ApiClient,
+            "call_tool",
+            side_effect=[
+                domain_workflow_reconciliation_import_payload(),
+                domain_workflow_reconciliation_query_payload(),
+                domain_workflow_reconciliation_get_payload(),
+            ],
+        ) as tool:
+            client = ApiClient("http://127.0.0.1:8787")
+            self.assertTrue(client.domain_workflow_reconciliation_import_tool_report(record).created)
+            self.assertFalse(client.domain_workflow_reconciliation_query_tool_report({}).has_more)
+            self.assertEqual(
+                client.domain_workflow_reconciliation_get_tool_report("r" * 64).reconciliation_digest,
+                "r" * 64,
+            )
+        self.assertEqual(tool.call_args_list[0].args[0], "domain_workflow_reconciliation_import")
+        self.assertEqual(tool.call_args_list[1].args[0], "domain_workflow_reconciliation_query")
+        self.assertEqual(tool.call_args_list[2].args[0], "domain_workflow_reconciliation_get")
+
+    def test_sync_http_mission_evaluator_replay_query_uses_bounded_route(self) -> None:
+        payload = mission_evaluator_replay_query_payload(summary_only=True)
+        with patch.object(ApiClient, "request", return_value=payload) as request:
+            report = ApiClient("http://127.0.0.1:8787").mission_evaluator_replay_query_report(
+                MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=False, max_items=64)
+            )
+        self.assertTrue(report.summary_only)
+        request.assert_called_once_with(
+            "GET",
+            "/v1/missions/mission-python/evaluator-replay?include_fixtures=false&max_items=64",
+        )
+
+    def test_sync_http_mission_evaluator_comparison_and_bundle_use_bounded_routes(self) -> None:
+        with patch.object(ApiClient, "request", return_value=mission_evaluator_replay_compare_payload()) as request:
+            report = ApiClient("http://127.0.0.1:8787").mission_evaluator_replay_compare_query_report(
+                MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=False, max_items=64)
+            )
+        self.assertEqual(report.status, "unchanged")
+        request.assert_called_once_with(
+            "GET",
+            "/v1/missions/mission-python/evaluator-replay/compare?include_fixtures=false&max_items=64",
+        )
+        with patch.object(ApiClient, "request", return_value=mission_evidence_bundle_payload()) as request:
+            bundle = ApiClient("http://127.0.0.1:8787").mission_evidence_bundle_report(
+                MissionEvidenceBundleRequest("mission-python", max_items=64)
+            )
+        self.assertTrue(bundle.summary_only)
+        request.assert_called_once_with(
+            "GET",
+            "/v1/missions/mission-python/evidence-bundle?include_result=false&include_trace=true&include_fixtures=false&max_items=64",
+        )
+
+    def test_async_http_mission_evaluator_replay_query_delegates_to_sync_transport(self) -> None:
+        payload = mission_evaluator_replay_query_payload()
+        async def exercise() -> MissionEvaluatorReplayQueryReport:
+            with patch.object(ApiClient, "request", return_value=payload) as request:
+                report = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).mission_evaluator_replay_query_report(
+                    MissionEvaluatorReplayQueryRequest("mission-python", include_fixtures=False, max_items=64)
+                )
+                request.assert_called_once_with(
+                    "GET",
+                    "/v1/missions/mission-python/evaluator-replay?include_fixtures=false&max_items=64",
+                )
+                return report
+        report = asyncio.run(exercise())
+        self.assertFalse(report.summary_only)
+        self.assertEqual(report.query["max_items"], 64)
+
+    def test_async_http_mission_evidence_bundle_delegates_to_sync_transport(self) -> None:
+        async def exercise() -> MissionEvidenceBundleReport:
+            with patch.object(ApiClient, "request", return_value=mission_evidence_bundle_payload()) as request:
+                report = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).mission_evidence_bundle_report(
+                    MissionEvidenceBundleRequest("mission-python", max_items=64)
+                )
+                request.assert_called_once_with(
+                    "GET",
+                    "/v1/missions/mission-python/evidence-bundle?include_result=false&include_trace=true&include_fixtures=false&max_items=64",
+                )
+                return report
+
+        report = asyncio.run(exercise())
+        self.assertTrue(report.summary_only)
+
+    def test_sync_http_mission_evidence_bundle_verification_uses_portable_route(self) -> None:
+        payload = mission_evidence_bundle_verification_payload()
+        request_body = MissionEvidenceBundleVerifyRequest({"bundle_digest": "b" * 64})
+        with patch.object(ApiClient, "request", return_value=payload) as request:
+            report = ApiClient("http://127.0.0.1:8787").mission_evidence_bundle_verification_report(request_body)
+        self.assertTrue(report.valid)
+        request.assert_called_once_with("POST", "/v1/evidence-bundles/verify", request_body.to_http_body())
+
+    def test_sync_http_mcp_bridge_exposes_distinct_evidence_verifier_method(self) -> None:
+        request_body = MissionEvidenceBundleVerifyRequest({"bundle_digest": "b" * 64})
+        with patch.object(ApiClient, "call_tool", return_value=mission_evidence_bundle_verification_payload()) as tool:
+            report = ApiClient("http://127.0.0.1:8787").mission_evidence_bundle_verification_tool_report(request_body)
+        self.assertTrue(report.valid)
+        tool.assert_called_once_with("mission_evidence_bundle_verify", request_body.to_mcp_arguments())
+
+    def test_async_http_mission_evidence_bundle_verification_delegates_to_sync_transport(self) -> None:
+        async def exercise() -> MissionEvidenceBundleVerificationReport:
+            request_body = MissionEvidenceBundleVerifyRequest({"bundle_digest": "b" * 64})
+            with patch.object(ApiClient, "request", return_value=mission_evidence_bundle_verification_payload()) as request:
+                report = await AsyncApiClient(ApiClient("http://127.0.0.1:8787")).mission_evidence_bundle_verification_report(request_body)
+                request.assert_called_once_with("POST", "/v1/evidence-bundles/verify", request_body.to_http_body())
+                return report
+
+        self.assertTrue(asyncio.run(exercise()).valid)
 
     def test_mission_evaluator_review_request_rejects_duplicate_ids(self) -> None:
         with self.assertRaises(ArgumentError):
@@ -1642,6 +2714,9 @@ class AnalyticsModelTests(unittest.TestCase):
         report = capability_route_report(envelope)
         self.assertEqual(report.goal, "compose evidence")
         self.assertEqual(report.route_coverage.candidate_domain_count, 1)
+        self.assertEqual(report.evidence_digest, "e" * 64)
+        self.assertEqual(report.evidence.candidate_group_count, 1)
+        self.assertEqual(report.needs[0].candidate_group_evidence[0]["id"], "oncology")
 
     def test_capability_route_report_rejects_inconsistent_coverage(self) -> None:
         payload = route_report_payload()
@@ -1672,6 +2747,18 @@ class AnalyticsModelTests(unittest.TestCase):
         self.assertEqual(len(report.review_id), 64)
         self.assertEqual(report.dependency_waves, (("oncology",),))
         self.assertTrue(report.schema_review["valid"])
+        self.assertEqual(report.evidence_digest, "e" * 64)
+        self.assertTrue(report.evidence_binding["present"])
+
+        inconsistent = route_review_payload()
+        inconsistent["mission_draft"]["route_evidence_scope"] = "wrong_scope"
+        with self.assertRaises(ArgumentError):
+            CapabilityRouteReviewReport.from_wire(inconsistent)
+
+        partial = route_review_payload()
+        partial.pop("evidence_scope")
+        with self.assertRaises(ArgumentError):
+            CapabilityRouteReviewReport.from_wire(partial)
 
     def test_capability_route_review_report_extracts_http_structured_projection(self) -> None:
         envelope = {
@@ -1680,6 +2767,117 @@ class AnalyticsModelTests(unittest.TestCase):
         }
         report = capability_route_review_report(envelope)
         self.assertEqual(report.handoff_status, "mission_preflight_required")
+
+    def test_capability_route_plan_request_and_report_compose_non_executing_preflight(self) -> None:
+        request = CapabilityRoutePlanRequest(
+            "mission-route-plan",
+            route_report_payload(),
+            [{
+                "need_id": "oncology",
+                "tool": "oncology_search",
+                "domain": "oncology",
+                "capability": "evidence",
+                "objective": "review evidence",
+                "arguments": {},
+            }],
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["mission_id"], "mission-route-plan")
+        self.assertTrue(arguments["validate_schemas"])
+        payload = {
+            "workflow": "capability_route_plan",
+            "ok": True,
+            "mission_id": "mission-route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": "compose evidence",
+            "plan_status": "ready_for_caller_inspection",
+            "review": route_review_payload(),
+            "mission": {"mission_id": "mission-route-plan", "steps": []},
+            "preflight": {"ok": True, "dispatch": "not_started"},
+            "plan_digest": "a" * 64,
+            "route_review_provenance": {"present": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        report = CapabilityRoutePlanReport.from_wire(payload)
+        self.assertTrue(report.ready_for_inspection)
+        self.assertEqual(report.review.review_id, "v" * 64)
+        self.assertEqual(report.plan_digest, "a" * 64)
+        self.assertEqual(capability_route_plan_report(payload).mission_id, "mission-route-plan")
+        with self.assertRaises(ArgumentError):
+            CapabilityRoutePlanRequest(
+                "mission-route-plan",
+                route_report_payload(),
+                [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+                policy={"execute": True},
+            )
+
+    def test_capability_route_plan_verifier_request_and_report_are_replay_explicit(self) -> None:
+        plan = {
+            "workflow": "capability_route_plan",
+            "ok": True,
+            "mission_id": "mission-route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": "compose evidence",
+            "plan_status": "ready_for_caller_inspection",
+            "review": route_review_payload(),
+            "mission": {"mission_id": "mission-route-plan"},
+            "preflight": {"ok": True},
+            "plan_digest": "a" * 64,
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        selection = {
+            "need_id": "oncology",
+            "tool": "oncology_search",
+            "domain": "oncology",
+            "capability": "evidence",
+            "objective": "review evidence",
+            "arguments": {},
+        }
+        request = CapabilityRoutePlanVerifyRequest(
+            plan=plan,
+            route=route_report_payload(),
+            selections=[selection],
+            validate_schemas=True,
+        )
+        arguments = request.to_mcp_arguments()
+        self.assertEqual(arguments["plan"]["workflow"], "capability_route_plan")
+        self.assertEqual(arguments["selections"][0]["tool"], selection["tool"])
+        self.assertEqual(arguments["selections"][0]["required"], True)
+        payload = {
+            "workflow": "capability_route_plan_verify",
+            "ok": True,
+            "mission_id": "mission-route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "plan_status": "ready_for_caller_inspection",
+            "plan_digest": "a" * 64,
+            "valid": True,
+            "verification_status": "verified",
+            "route_replay": {"requested": True, "status": "matched", "matched": True},
+            "mission_preflight": {"requested": True, "status": "matched", "matched": True, "ok": True},
+            "mismatches": [],
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        report = CapabilityRoutePlanVerifyReport.from_wire(payload)
+        self.assertTrue(report.verified)
+        self.assertEqual(capability_route_plan_verify_report(payload).verification_status, "verified")
+        with self.assertRaises(ArgumentError):
+            CapabilityRoutePlanVerifyRequest(plan=plan, route=route_report_payload())
 
 
 class AnalyticsWorkspaceTests(unittest.TestCase):
@@ -1701,6 +2899,13 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             )
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-1")
         self.assertEqual(result["echo"]["ci"]["offline"], True)
+
+    def test_sync_workspace_exposes_typed_workbench_verification(self) -> None:
+        request = WorkbenchVerificationRequest({"session_id": "studio-1"}, {"workflow": "developer_workbench"})
+        with patch.object(Workspace, "developer_workbench_verify", return_value=workbench_verification_payload()) as verify:
+            report = Workspace(None).developer_workbench_verify_report(request)  # type: ignore[arg-type]
+        self.assertTrue(report.verified)
+        verify.assert_called_once_with(request)
 
     def test_sync_workspace_typed_biocapability_evidence_report(self) -> None:
         request = biocapability_request()
@@ -1971,6 +3176,43 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
         self.assertTrue(report.ready)
         review.assert_called_once()
 
+    def test_sync_workspace_typed_mission_evaluator_replay(self) -> None:
+        with patch.object(
+            Workspace,
+            "mission_evaluator_replay",
+            return_value=mission_evaluator_replay_payload(),
+        ) as replay:
+            report = Workspace(None).mission_evaluator_replay_report(  # type: ignore[arg-type]
+                MissionEvaluatorReplayRequest({"workflow": "agent_mission"}, max_items=64)
+            )
+        self.assertTrue(report.ready)
+        self.assertEqual(report.bindings[0]["adapter_id"], "oncoworlds.assay_fidelity")
+        replay.assert_called_once()
+
+    def test_sync_workspace_typed_mission_evaluator_replay_comparison(self) -> None:
+        with patch.object(
+            Workspace,
+            "mission_evaluator_replay_compare",
+            return_value=mission_evaluator_replay_compare_payload(),
+        ) as compare:
+            report = Workspace(None).mission_evaluator_replay_compare_report(  # type: ignore[arg-type]
+                MissionEvaluatorReplayCompareRequest({"workflow": "agent_mission"}, max_items=64)
+            )
+        self.assertEqual(report.status, "unchanged")
+        compare.assert_called_once()
+
+    def test_sync_workspace_typed_mission_evidence_bundle_verification(self) -> None:
+        with patch.object(
+            Workspace,
+            "mission_evidence_bundle_verify",
+            return_value=mission_evidence_bundle_verification_payload(),
+        ) as verify:
+            report = Workspace(None).mission_evidence_bundle_verification_report(  # type: ignore[arg-type]
+                MissionEvidenceBundleVerifyRequest({"bundle_digest": "b" * 64})
+            )
+        self.assertTrue(report.valid)
+        verify.assert_called_once()
+
     def test_sync_workspace_exposes_capability_audit(self) -> None:
         with Client(command(), timeout=2) as client:
             result = Workspace(client).capability_audit(include_groups=False)
@@ -2003,6 +3245,58 @@ class AnalyticsWorkspaceTests(unittest.TestCase):
             max_tools=128,
             include_tools=False,
         )
+
+    def test_sync_workspace_exposes_capability_route_plan(self) -> None:
+        with Client(command(), timeout=2) as client:
+            result = Workspace(client).capability_route_plan({
+                "mission_id": "route-plan",
+                "route": route_report_payload(),
+                "selections": [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+            })
+            verification = Workspace(client).capability_route_plan_verify({
+                "plan": {"workflow": "capability_route_plan", "mission_id": "route-plan"},
+            })
+        self.assertEqual(result["echo"]["mission_id"], "route-plan")
+        self.assertEqual(verification["echo"]["plan"]["workflow"], "capability_route_plan")
+
+    def test_sync_workspace_typed_capability_route_plan_report_delegates(self) -> None:
+        payload = {
+            "workflow": "capability_route_plan",
+            "ok": True,
+            "mission_id": "route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": "compose evidence",
+            "plan_status": "ready_for_caller_inspection",
+            "review": route_review_payload(),
+            "mission": {"mission_id": "route-plan"},
+            "preflight": {"ok": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        with patch.object(Workspace, "capability_route_plan", return_value=payload) as plan:
+            report = Workspace(None).capability_route_plan_report({
+                "mission_id": "route-plan",
+                "route": route_report_payload(),
+                "selections": [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+            })  # type: ignore[arg-type]
+        self.assertTrue(report.ready_for_inspection)
+        plan.assert_called_once()
 
     def test_sync_workspace_exposes_adapter_planning(self) -> None:
         with Client(command(), timeout=2) as client:
@@ -2060,6 +3354,18 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
                 {"session_id": "studio-async", "artifacts": [], "cells": [], "changes": []}
             )
         self.assertEqual(result["echo"]["session"]["session_id"], "studio-async")
+
+    async def test_async_workspace_exposes_typed_workbench_verification(self) -> None:
+        request = WorkbenchVerificationRequest({"session_id": "studio-async"}, {"workflow": "developer_workbench"})
+        with patch.object(
+            AsyncWorkspace,
+            "developer_workbench_verify",
+            new_callable=AsyncMock,
+            return_value=workbench_verification_payload(),
+        ) as verify:
+            report = await AsyncWorkspace(None).developer_workbench_verify_report(request)  # type: ignore[arg-type]
+        self.assertTrue(report.verified)
+        verify.assert_awaited_once_with(request)
 
     async def test_async_workspace_typed_biocapability_evidence_report(self) -> None:
         request = biocapability_request()
@@ -2246,6 +3552,46 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(report.ready)
         review.assert_awaited_once()
 
+    async def test_async_workspace_typed_mission_evaluator_replay(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "mission_evaluator_replay",
+            new_callable=AsyncMock,
+            return_value=mission_evaluator_replay_payload(),
+        ) as replay:
+            report = await AsyncWorkspace(None).mission_evaluator_replay_report(  # type: ignore[arg-type]
+                {"mission": {"workflow": "agent_mission"}, "include_fixtures": False, "max_items": 64}
+            )
+        self.assertTrue(report.ready)
+        self.assertEqual(report.coverage["catalogue_group_count"], 29)
+        replay.assert_awaited_once()
+
+    async def test_async_workspace_typed_mission_evaluator_replay_comparison(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "mission_evaluator_replay_compare",
+            new_callable=AsyncMock,
+            return_value=mission_evaluator_replay_compare_payload(),
+        ) as compare:
+            report = await AsyncWorkspace(None).mission_evaluator_replay_compare_report(  # type: ignore[arg-type]
+                {"mission": {"workflow": "agent_mission"}, "include_fixtures": False, "max_items": 64}
+            )
+        self.assertEqual(report.status, "unchanged")
+        compare.assert_awaited_once()
+
+    async def test_async_workspace_typed_mission_evidence_bundle_verification(self) -> None:
+        with patch.object(
+            AsyncWorkspace,
+            "mission_evidence_bundle_verify",
+            new_callable=AsyncMock,
+            return_value=mission_evidence_bundle_verification_payload(),
+        ) as verify:
+            report = await AsyncWorkspace(None).mission_evidence_bundle_verification_report(  # type: ignore[arg-type]
+                {"bundle": {"bundle_digest": "b" * 64}}
+            )
+        self.assertTrue(report.valid)
+        verify.assert_awaited_once()
+
     async def test_async_workspace_exposes_capability_audit(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:
             result = await AsyncWorkspace(client).capability_audit()
@@ -2290,6 +3636,63 @@ class AsyncAnalyticsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             max_tools=128,
             include_tools=False,
         )
+
+    async def test_async_workspace_exposes_capability_route_plan(self) -> None:
+        async with AsyncClient(command(), timeout=2) as client:
+            result = await AsyncWorkspace(client).capability_route_plan({
+                "mission_id": "route-plan",
+                "route": route_report_payload(),
+                "selections": [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+            })
+            verification = await AsyncWorkspace(client).capability_route_plan_verify({
+                "plan": {"workflow": "capability_route_plan", "mission_id": "route-plan"},
+            })
+        self.assertEqual(result["echo"]["mission_id"], "route-plan")
+        self.assertEqual(verification["echo"]["plan"]["workflow"], "capability_route_plan")
+
+    async def test_async_workspace_typed_capability_route_plan_report_delegates(self) -> None:
+        payload = {
+            "workflow": "capability_route_plan",
+            "ok": True,
+            "mission_id": "route-plan",
+            "route_id": "r" * 64,
+            "review_id": "v" * 64,
+            "catalog_digest": "c" * 64,
+            "goal": "compose evidence",
+            "plan_status": "ready_for_caller_inspection",
+            "review": route_review_payload(),
+            "mission": {"mission_id": "route-plan"},
+            "preflight": {"ok": True},
+            "dispatch": "not_started",
+            "execution": "not_started",
+        }
+        with patch.object(
+            AsyncWorkspace,
+            "capability_route_plan",
+            new_callable=AsyncMock,
+            return_value=payload,
+        ) as plan:
+            report = await AsyncWorkspace(None).capability_route_plan_report({
+                "mission_id": "route-plan",
+                "route": route_report_payload(),
+                "selections": [{
+                    "need_id": "oncology",
+                    "tool": "oncology_search",
+                    "domain": "oncology",
+                    "capability": "evidence",
+                    "objective": "review evidence",
+                    "arguments": {},
+                }],
+            })  # type: ignore[arg-type]
+        self.assertTrue(report.ready_for_inspection)
+        plan.assert_awaited_once()
 
     async def test_async_workspace_exposes_adapter_planning(self) -> None:
         async with AsyncClient(command(), timeout=2) as client:

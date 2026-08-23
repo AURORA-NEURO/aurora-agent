@@ -27,11 +27,14 @@
 
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeSet;
 use thiserror::Error;
 
 /// Schema version for all workbench objects.
 pub const WORKBENCH_SCHEMA_VERSION: &str = "bioprism-devplat-workbench/0.1";
+/// Schema version for retained workbench verification reports.
+pub const WORKBENCH_VERIFY_SCHEMA_VERSION: &str = "bioprism-devplat-workbench-verify/0.1";
 const MAX_ARTIFACTS: usize = 2_048;
 const MAX_CELLS: usize = 4_096;
 const MAX_CHANGES: usize = 4_096;
@@ -711,6 +714,69 @@ pub struct WorkbenchReport {
     pub limitations: Vec<String>,
 }
 
+/// Policy controlling how much of a retained workbench report must be replayed.
+///
+/// Session audits and dashboard projections can always be recomputed from the retained session.
+/// CI plans need the original caller-owned [`CiRequest`] to be replayed, so the policy keeps that
+/// distinction explicit instead of treating a retained YAML string as executable evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct WorkbenchVerificationPolicy {
+    #[serde(default)]
+    pub require_dashboard: bool,
+    #[serde(default)]
+    pub require_ci: bool,
+    #[serde(default)]
+    pub require_ci_replay: bool,
+}
+
+/// Input for verifying a retained authoring/notebook workbench report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkbenchVerificationRequest {
+    pub session: StudioSession,
+    pub report: WorkbenchReport,
+    #[serde(default)]
+    pub expected_report_digest: Option<String>,
+    #[serde(default)]
+    pub ci_replay: Option<CiRequest>,
+    #[serde(default)]
+    pub policy: WorkbenchVerificationPolicy,
+}
+
+/// One digest or structural mismatch retained for repair and review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkbenchMismatch {
+    pub code: String,
+    pub path: String,
+    pub expected: Option<Value>,
+    pub observed: Option<Value>,
+    pub detail: String,
+}
+
+/// Digest-bound verification of a retained workbench report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkbenchVerificationReport {
+    pub schema_version: String,
+    pub workflow: String,
+    pub valid: bool,
+    pub status: String,
+    pub retained_report_digest: String,
+    pub expected_report_digest: Option<String>,
+    pub report_digest_matched: Option<bool>,
+    pub retained_audit_digest: String,
+    pub observed_audit_digest: String,
+    pub dashboard_present: bool,
+    pub dashboard_verified: bool,
+    pub ci_present: bool,
+    pub ci_replay_supplied: bool,
+    pub ci_verified: bool,
+    pub mismatches: Vec<WorkbenchMismatch>,
+    pub execution: String,
+    pub network_access: String,
+    pub verification_digest: String,
+    pub guarantees: Vec<String>,
+    pub limitations: Vec<String>,
+}
+
 /// Errors returned by workbench validation and projections.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum WorkbenchError {
@@ -801,6 +867,14 @@ fn check_single_line(field: &'static str, value: &str) -> Result<(), WorkbenchEr
 
 fn session_digest(session: &StudioSession) -> Result<String, WorkbenchError> {
     let value = serde_json::to_value(session)
+        .map_err(|error| WorkbenchError::Canonicalisation(error.to_string()))?;
+    ContentHash::of_value(&value)
+        .map(|hash| hash.to_string())
+        .map_err(|error| WorkbenchError::Canonicalisation(error.to_string()))
+}
+
+fn value_digest<T: Serialize>(value: &T) -> Result<String, WorkbenchError> {
+    let value = serde_json::to_value(value)
         .map_err(|error| WorkbenchError::Canonicalisation(error.to_string()))?;
     ContentHash::of_value(&value)
         .map(|hash| hash.to_string())
@@ -1081,6 +1155,249 @@ pub fn run_workbench(request: &WorkbenchRequest) -> Result<WorkbenchReport, Work
     })
 }
 
+/// Verify a retained workbench report against the current session and optional CI request.
+///
+/// This is intentionally a replay/audit operation. It re-runs only deterministic in-process
+/// validation and projection functions; it never executes notebook cells, writes generated YAML,
+/// contacts GitHub, or treats a matching report as release, scientific, clinical, safety, or
+/// production authority.
+pub fn verify_workbench(
+    request: &WorkbenchVerificationRequest,
+) -> Result<WorkbenchVerificationReport, WorkbenchError> {
+    request.session.validate()?;
+    if let Some(digest) = &request.expected_report_digest {
+        validate_digest("expected_report_digest", digest)?;
+    }
+
+    let retained_report_digest = value_digest(&request.report)?;
+    let retained_audit_digest = value_digest(&request.report.audit)?;
+    let dashboard_query = request
+        .report
+        .dashboard
+        .as_ref()
+        .map(|dashboard| dashboard.query.clone());
+    let observed = run_workbench(&WorkbenchRequest {
+        session: request.session.clone(),
+        dashboard: dashboard_query,
+        ci: request.ci_replay.clone(),
+    })?;
+    let observed_audit_digest = value_digest(&observed.audit)?;
+    let mut mismatches = Vec::new();
+
+    if request.report.schema_version != WORKBENCH_SCHEMA_VERSION {
+        mismatches.push(WorkbenchMismatch {
+            code: "schema_mismatch".into(),
+            path: "/report/schema_version".into(),
+            expected: Some(Value::String(WORKBENCH_SCHEMA_VERSION.into())),
+            observed: Some(Value::String(request.report.schema_version.clone())),
+            detail: "retained report uses a different workbench schema version".into(),
+        });
+    }
+
+    let report_digest_matched = request.expected_report_digest.as_ref().map(|expected| {
+        let matched = expected == &retained_report_digest;
+        if !matched {
+            mismatches.push(WorkbenchMismatch {
+                code: "report_digest_mismatch".into(),
+                path: "/report".into(),
+                expected: Some(Value::String(expected.clone())),
+                observed: Some(Value::String(retained_report_digest.clone())),
+                detail: "retained report bytes do not match the caller-supplied report digest"
+                    .into(),
+            });
+        }
+        matched
+    });
+
+    if retained_audit_digest != observed_audit_digest {
+        mismatches.push(WorkbenchMismatch {
+            code: "audit_mismatch".into(),
+            path: "/report/audit".into(),
+            expected: Some(Value::String(observed_audit_digest.clone())),
+            observed: Some(Value::String(retained_audit_digest.clone())),
+            detail: "the retained session audit differs from the current deterministic audit"
+                .into(),
+        });
+    }
+
+    let dashboard_present = request.report.dashboard.is_some();
+    let dashboard_verified = if let Some(retained_dashboard) = &request.report.dashboard {
+        match &observed.dashboard {
+            None => {
+                mismatches.push(WorkbenchMismatch {
+                    code: "dashboard_missing_from_observed_projection".into(),
+                    path: "/report/dashboard".into(),
+                    expected: Some(Value::String("present".into())),
+                    observed: Some(Value::String("missing".into())),
+                    detail: "the retained dashboard could not be regenerated".into(),
+                });
+                false
+            }
+            Some(observed_dashboard) => {
+                let retained_digest = value_digest(retained_dashboard)?;
+                let observed_digest = value_digest(observed_dashboard)?;
+                if retained_digest != observed_digest {
+                    mismatches.push(WorkbenchMismatch {
+                        code: "dashboard_mismatch".into(),
+                        path: "/report/dashboard".into(),
+                        expected: Some(Value::String(observed_digest)),
+                        observed: Some(Value::String(retained_digest)),
+                        detail:
+                            "the retained dashboard differs from the current session projection"
+                                .into(),
+                    });
+                    false
+                } else {
+                    true
+                }
+            }
+        }
+    } else {
+        if request.policy.require_dashboard {
+            mismatches.push(WorkbenchMismatch {
+                code: "dashboard_required".into(),
+                path: "/report/dashboard".into(),
+                expected: Some(Value::String("present".into())),
+                observed: Some(Value::String("missing".into())),
+                detail: "verification policy requires a retained dashboard projection".into(),
+            });
+        }
+        false
+    };
+
+    let ci_present = request.report.ci.is_some();
+    let ci_replay_supplied = request.ci_replay.is_some();
+    let ci_verified = if let Some(retained_ci) = &request.report.ci {
+        if let Some(observed_ci) = &observed.ci {
+            let retained_digest = value_digest(retained_ci)?;
+            let observed_digest = value_digest(observed_ci)?;
+            if retained_digest != observed_digest {
+                mismatches.push(WorkbenchMismatch {
+                    code: "ci_plan_mismatch".into(),
+                    path: "/report/ci".into(),
+                    expected: Some(Value::String(observed_digest)),
+                    observed: Some(Value::String(retained_digest)),
+                    detail: "the retained CI plan differs from the regenerated plan".into(),
+                });
+                false
+            } else {
+                true
+            }
+        } else if ci_replay_supplied {
+            mismatches.push(WorkbenchMismatch {
+                code: "ci_replay_missing_plan".into(),
+                path: "/report/ci".into(),
+                expected: Some(Value::String("present".into())),
+                observed: Some(Value::String("missing".into())),
+                detail: "a CI replay request was supplied but the regenerated plan is absent"
+                    .into(),
+            });
+            false
+        } else {
+            false
+        }
+    } else if request.policy.require_ci {
+        mismatches.push(WorkbenchMismatch {
+            code: "ci_required".into(),
+            path: "/report/ci".into(),
+            expected: Some(Value::String("present".into())),
+            observed: Some(Value::String("missing".into())),
+            detail: "verification policy requires a retained CI plan".into(),
+        });
+        false
+    } else {
+        false
+    };
+
+    if ci_replay_supplied && !ci_present {
+        mismatches.push(WorkbenchMismatch {
+            code: "ci_replay_without_retained_plan".into(),
+            path: "/report/ci".into(),
+            expected: Some(Value::String("present".into())),
+            observed: Some(Value::String("missing".into())),
+            detail: "a CI replay request cannot verify a report that retained no CI plan".into(),
+        });
+    }
+
+    if request.policy.require_ci_replay && ci_present && !ci_replay_supplied {
+        mismatches.push(WorkbenchMismatch {
+            code: "ci_replay_required".into(),
+            path: "/ci_replay".into(),
+            expected: Some(Value::String("present".into())),
+            observed: Some(Value::String("missing".into())),
+            detail: "verification policy requires the original CiRequest for plan replay".into(),
+        });
+    }
+
+    finish_workbench_verification(
+        request,
+        retained_report_digest,
+        report_digest_matched,
+        retained_audit_digest,
+        observed_audit_digest,
+        dashboard_present,
+        dashboard_verified,
+        ci_present,
+        ci_replay_supplied,
+        ci_verified,
+        mismatches,
+    )
+}
+
+fn finish_workbench_verification(
+    request: &WorkbenchVerificationRequest,
+    retained_report_digest: String,
+    report_digest_matched: Option<bool>,
+    retained_audit_digest: String,
+    observed_audit_digest: String,
+    dashboard_present: bool,
+    dashboard_verified: bool,
+    ci_present: bool,
+    ci_replay_supplied: bool,
+    ci_verified: bool,
+    mismatches: Vec<WorkbenchMismatch>,
+) -> Result<WorkbenchVerificationReport, WorkbenchError> {
+    let valid = mismatches.is_empty();
+    let status = if !valid {
+        "mismatch"
+    } else if ci_present && !ci_replay_supplied {
+        "verified_without_replay"
+    } else {
+        "verified"
+    };
+    let mut report = WorkbenchVerificationReport {
+        schema_version: WORKBENCH_VERIFY_SCHEMA_VERSION.into(),
+        workflow: "developer_workbench_verify".into(),
+        valid,
+        status: status.into(),
+        retained_report_digest,
+        expected_report_digest: request.expected_report_digest.clone(),
+        report_digest_matched,
+        retained_audit_digest,
+        observed_audit_digest,
+        dashboard_present,
+        dashboard_verified,
+        ci_present,
+        ci_replay_supplied,
+        ci_verified,
+        mismatches,
+        execution: "not_started".into(),
+        network_access: "not_started".into(),
+        verification_digest: String::new(),
+        guarantees: vec![
+            "retained session, dashboard, and optional CI plan are recomputed through deterministic in-process contracts".into(),
+            "digest and structural mismatches remain visible with expected/observed witnesses".into(),
+            "verification never executes notebook cells, writes YAML, contacts GitHub, or grants authority".into(),
+        ],
+        limitations: vec![
+            "a CI plan cannot be replayed without the original caller-owned CiRequest".into(),
+            "matching structure is not provider authentication, execution evidence, scientific validity, clinical safety, or release approval".into(),
+        ],
+    };
+    report.verification_digest = value_digest(&report)?;
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1304,5 +1621,103 @@ mod tests {
         assert_eq!(wire["schema_version"], WORKBENCH_SCHEMA_VERSION);
         assert_eq!(wire["audit"]["artifact_count"], 1);
         assert!(wire["dashboard"]["rows"].is_array());
+    }
+
+    #[test]
+    fn workbench_verification_replays_dashboard_and_ci_without_execution() {
+        let ci = CiRequest {
+            workflow: "consumer contracts".into(),
+            triggers: vec!["pull_request".into()],
+            rust_toolchain: "stable".into(),
+            checks: vec![CiCheck {
+                name: "unit".into(),
+                run: "cargo test -p bioprism-devplat".into(),
+                working_directory: None,
+                required: true,
+            }],
+            offline: true,
+        };
+        let retained = run_workbench(&WorkbenchRequest {
+            session: session(),
+            dashboard: Some(DashboardQuery::default()),
+            ci: Some(ci.clone()),
+        })
+        .unwrap();
+        let verified = verify_workbench(&WorkbenchVerificationRequest {
+            session: session(),
+            expected_report_digest: Some(value_digest(&retained).unwrap()),
+            report: retained.clone(),
+            ci_replay: Some(ci.clone()),
+            policy: WorkbenchVerificationPolicy {
+                require_dashboard: true,
+                require_ci: true,
+                require_ci_replay: true,
+            },
+        })
+        .unwrap();
+        assert!(verified.valid);
+        assert_eq!(verified.status, "verified");
+        assert!(verified.dashboard_verified);
+        assert!(verified.ci_verified);
+        assert_eq!(verified.execution, "not_started");
+        assert_eq!(verified.network_access, "not_started");
+        assert_eq!(verified.report_digest_matched, Some(true));
+
+        let without_replay = verify_workbench(&WorkbenchVerificationRequest {
+            session: session(),
+            report: retained.clone(),
+            expected_report_digest: None,
+            ci_replay: None,
+            policy: WorkbenchVerificationPolicy::default(),
+        })
+        .unwrap();
+        assert!(without_replay.valid);
+        assert_eq!(without_replay.status, "verified_without_replay");
+        assert!(!without_replay.ci_verified);
+    }
+
+    #[test]
+    fn workbench_verification_retains_audit_and_replay_mismatches() {
+        let ci = CiRequest {
+            workflow: "consumer contracts".into(),
+            triggers: vec!["pull_request".into()],
+            rust_toolchain: "stable".into(),
+            checks: vec![CiCheck {
+                name: "unit".into(),
+                run: "cargo test -p bioprism-devplat".into(),
+                working_directory: None,
+                required: true,
+            }],
+            offline: true,
+        };
+        let retained = run_workbench(&WorkbenchRequest {
+            session: session(),
+            dashboard: None,
+            ci: Some(ci.clone()),
+        })
+        .unwrap();
+        let mut tampered = retained;
+        tampered.audit.ordered_cells.clear();
+        let result = verify_workbench(&WorkbenchVerificationRequest {
+            session: session(),
+            report: tampered,
+            expected_report_digest: None,
+            ci_replay: Some(CiRequest {
+                workflow: "changed workflow".into(),
+                ..ci
+            }),
+            policy: WorkbenchVerificationPolicy::default(),
+        })
+        .unwrap();
+        assert!(!result.valid);
+        assert_eq!(result.status, "mismatch");
+        assert!(result
+            .mismatches
+            .iter()
+            .any(|mismatch| mismatch.code == "audit_mismatch"));
+        assert!(result
+            .mismatches
+            .iter()
+            .any(|mismatch| mismatch.code == "ci_plan_mismatch"));
     }
 }

@@ -10,15 +10,20 @@ an implementation — so read the numbers as *"someone has read this and taken a
 never as *"this is done"*. The stronger criterion would be a conformance test per module. It does
 not exist and is not being claimed.
 
-The MCP integration layer currently exposes 177 callable tools. That count is intentionally
+The MCP integration layer currently exposes 238 callable tools. That count is intentionally
 separate from this citation denominator: `pack_health_assess`, `sdk_registry_check`, and
 `repository_impact` make existing typed contracts agent-callable, while `world_generate`,
 `hub_submission_review`, and `telemetry_project` add bounded in-tree generation, public-hub
-contract, and observability projection workflows. `factory_lifecycle_simulate`,
+contract, and observability projection workflows. `factory_lifecycle_simulate` and
+`factory_authority_verify`, and `artifact_registry_audit`,
 `hub_disclosure_review`, `hub_card_render`, `hub_leaderboard_render`, `release_audit`, and
 `developer_delivery_audit` now
 compose the factory recovery, public-hub publication, and release-evidence contracts while keeping
-durable queues, identity, public-key signing, UI, OTLP export, and network publication explicit as unimplemented;
+multi-node durable queues, external identity/transparency services, UI, OTLP export, and network
+publication explicit as unimplemented; the bundle layer now also carries a bounded caller-supplied
+key-registry policy for signed delegation, rotation, revocation, roles, producer binding, and
+validity, while the factory has a shared-local-file authority envelope with a
+hash-chained transition journal, not a multi-host distributed queue;
 the Python MCP transport foundation is documented separately and does not imply the full SDK.
 `trace_otel_ingest` adds a bounded, dependency-free OTLP JSON span importer with source-preserving
 Event IR mapping and explicit semantic-loss accounting; it does not export to a collector or infer
@@ -36,6 +41,18 @@ facades, and webhook cursor lifecycle helpers; it does not clone every Rust doma
 browser secret store. `registry_lifecycle_simulate` adds a continuation-safe local
 publication log and artifact-integrity projection, while `metrics_profile_audit` adds the
 per-capability coverage and uncontested-lead projection used by honest public cards.
+`adapter_execution_evidence` now gives every declared domain one shared adapter handoff: native
+and Python-delegated adapter id/version, source and input/output digests, explicit execution and
+conformance outcomes, bounded semantic-loss rows, and artifact registration are retained through
+MCP and both SDKs. It is caller-supplied evidence only; the core does not import dependencies,
+execute adapters, or convert `verified`/`lossless` labels into readiness.
+`adapter_execution_evidence_query` adds the complementary bounded read model: deterministic
+cursoring and status filters over retained adapter artifacts, with explicit source-plan/intake/
+external-payload/workflow-reconciliation parent joins plus missing and unclassified parent states.
+It never infers provenance from matching labels, and a complete join remains review evidence rather
+than execution, scientific validity, or readiness.
+Its page summary keeps execution, conformance, semantic-loss, join, output-digest, and
+missing-parent counts separate; there is deliberately no composite adapter score.
 `metrics_analytics_audit` adds a bounded domain-neutral arithmetic kernel for scalar summaries,
 paired robustness/cross-modal/translation/design contrasts, cost and latency, replicate spread,
 and probability calibration while keeping declared and missing evidence out of measured values.
@@ -44,6 +61,20 @@ ordering, stale-input audit, evidence-aware capability dashboard query, and dete
 Actions YAML planning surface. It preserves notebook holes and release refusal predicates rather
 than treating generated YAML or a local audit as executed CI, a hosted authoring UI, or a public
 dashboard. The TypeScript and Python clients expose this contract without cloning the Rust model.
+`developer_workbench_verify` is the retained-report continuation: it recomputes the current audit,
+replays the retained dashboard query, optionally replays the caller-owned `CiRequest`, and compares
+report/audit/plan digests with explicit mismatch witnesses. It is available through MCP, the
+dedicated REST route, the CLI, and typed sync/async Python and TypeScript facades; it never executes
+cells, writes YAML, contacts GitHub, runs CI, or upgrades structural verification into release,
+scientific, clinical, safety, or production authority.
+The workbench registry is the durable continuation of that handoff audit: it imports only
+structurally valid digest-normalized reports, exposes bounded digest-ordered query/get projections,
+normalizes direct, MCP, and REST transport envelopes, and rejects tampered snapshots on restore.
+`developer_workbench_import`, `developer_workbench_query`, and `developer_workbench_get` share one
+registry across MCP and REST; the CLI and typed Python/TypeScript facades expose the same contract.
+`--workbench-state` enables atomic restart-safe persistence, capped at 512 reports and 32 MiB, while
+the registry remains an audit index only and never executes or re-evaluates a notebook, CI plan, or
+release decision.
 The standalone `capability_dashboard` route projects the same catalogue into bounded, digest-bound
 coverage rows: callable, partial, and declared-only readiness are separated; crate, CLI, Python,
 MCP-membership, and authoritative-schema counts remain independent; and missing surfaces are
@@ -61,9 +92,23 @@ and labels those derivations. Invalid supplied digests are refused; unknown and 
 remain downstream audit findings. The route still does not contact providers or authenticate them.
 `ci_provider_evidence_audit` extends that boundary to provider-bound artifact, log, and attestation
 rows. It validates unique identities, content-digest syntax, provider/run/check bindings, URI
-shape, and attestation subjects; preserves every row; emits separate record digests; and reports
-structural `conformance_ready` without fetching remote content, executing checks, authenticating a
-provider, or cryptographically verifying an attestation.
+shape, digest provenance scopes, and attestation subjects; preserves every row; emits separate
+record digests; and reports structural `conformance_ready` without fetching remote content,
+executing checks, authenticating a provider, or cryptographically verifying an attestation. A
+`local_response_bytes` scope and optional attestation subject digest can establish a mismatch-
+detectable content binding, but remain caller/provider declarations to this Rust audit.
+The retained provider-evidence registry is the durable continuation of that handoff: it re-runs the
+canonical audit before accepting a record, retains structurally valid failed and unknown runs as
+explicit evidence, and exposes deterministic digest-ordered import/query/get operations through MCP,
+REST, CLI, Python, and TypeScript. Each retained row carries the provider/run/plan identity plus
+the artifact, log, and attestation record-family digests, so operators can join provider-observed
+lineage while keeping metadata, caller-declared, and locally byte-hashed scopes distinct from a
+verified signature or provider identity.
+`--ci-provider-evidence-state` enables atomic restart-safe persistence, capped at 512 records and
+32 MiB with 256-item queries. Compact rows retain local-byte hash and attestation subject-digest
+binding counts, and query thresholds can require that posture without loading full audits. Snapshot
+and per-record digests are checked on restore; the registry is an audit index and never contacts a
+provider, executes CI, verifies remote content, or approves a release.
 `developer_delivery_audit` can now carry that audit as the independent `ci_provider_evidence` target,
 while `developer_delivery_receipt` and its verifier preserve and recompute a digest over the complete
 provider-evidence projection. This makes the attached-evidence handoff joinable and tamper-diagnosable
@@ -144,11 +189,17 @@ replay/observability contract without inventing domain-specific event semantics.
 The same retained rows are emitted as `mission.trace` events into the gateway's cursor, SSE, and
 signed webhook surfaces, allowing lifecycle monitoring and delivery retry to share one event log
 and one retention-gap contract with ordinary tool calls.
-The gateway also accepts an optional `--mission-state` path for an atomic, 64 MiB-bounded mission
+The gateway also accepts optional `--mission-state` and `--mission-queue-state` paths. The former
+is an atomic, 64 MiB-bounded mission
 checkpoint. Terminal jobs restore their retained progress, traces, and size-limited reports;
 queued/running jobs become explicit `failed` records with `recovered_after_restart` after a
-restart, never falsely claiming that interrupted work resumed. This is restart-aware mission
-inspection, not durable event storage, distributed scheduling, or effect rollback.
+restart, never falsely claiming that interrupted work resumed. The latter checkpoints the typed
+factory lease/idempotency lifecycle and classifies expired work without automatic dispatch. It also
+enforces configured total-job and active-lease backpressure, exposes per-resource-class occupancy,
+and uses lease attempts as local fencing tokens. A shared authority lock serializes cooperating
+processes on one local filesystem, while an attributed release path records orphan-lock recovery.
+This is restart-aware mission inspection plus bounded local queue authority, not multi-host
+consensus, distributed scheduling, provider execution, or effect rollback.
 Mission-state schema 2 now carries a content SHA-256 digest and rejects tampered snapshots before
 restoration; schema 1 remains a migration input and is rewritten with a digest after startup.
 Mission and event persistence status now expose both the digest and an observation-time
@@ -220,10 +271,35 @@ paths; a schema-clean result is still shape evidence, not domain validation or a
 Each result carries a deterministic content-addressed `review_id` derived from route provenance,
 caller selections, and validation mode so operators can correlate handoff evidence without relying
 on timestamps or mutable server state.
+`capability_route_plan` composes that reviewed route with authoritative mission preflight for every
+catalogue group. It preserves the selected mission draft, plan digest, schema and preflight
+diagnostics, optional claim/evaluator/workflow bindings, and explicit `dispatch: "not_started"`;
+blocked route review or blocked preflight remains a structured plan status rather than an inferred
+partial mission. The compiler never chooses tools, invents arguments, dispatches nested tools, or
+turns routing evidence into authorization.
+`capability_route_plan_verify` is the companion offline/replay boundary. It validates a retained plan,
+reruns the authoritative mission preflight, and optionally reruns route review when the original route
+and selections are supplied. It reports identity/digest mismatches explicitly, distinguishes
+`verified_without_route_replay` from full replay verification, and remains permanently
+`dispatch: "not_started"` / `execution: "not_started"`.
 The HTTP event page and bounded SSE snapshot accept the same exact `review_id` filter, and
 `/v1/route-reviews/{review_id}/evidence` provides a typed retained-evidence lookup. Missing
 retained evidence is reported as an empty bounded window, never upgraded into a historical
 non-existence claim.
+`control_plane_readiness_audit` is the cross-domain composition seam over the retained domain
+readiness wrapper plus optional route review/plan, operations acceptance, release audit, and
+workflow evidence. It preserves component-level `present`/`valid`/`satisfied` states and only
+lets explicitly required components block the structural result; `control_plane_readiness_query`
+indexes that projection with digest cursors and snapshot recovery. The join does not execute nested
+tools, widen operator or release authority, or treat `ready_for_human_review` as authorization.
+`control_plane_readiness_compare` adds a digest-verified before/after replay boundary over those
+projections. It reports component changes, policy changes, added and removed blockers, parent and
+domain deltas, directional evidence, and a deterministic next structural action without rerunning
+nested tools or treating improvement as scientific, clinical, deployment, or release authority.
+The retained comparison closes the registry handoff: callers can compare two content-addressed
+readiness artifacts by exact digest without loading or reconstructing wrapper bodies. Registry
+kind, subject identity, artifact integrity, and the same non-executing structural diff remain
+explicit; retention still does not imply freshness, external completeness, or authority.
 The Python SDK now covers the complete FIBER progressive-disclosure lifecycle through typed sync,
 async, and HTTP helpers: bounded world/query compilation at l0--l4, handle-or-source refinement,
 compile-plan explanation, certificate verification, and opt-in graph/hypergraph/timeline/table
@@ -283,6 +359,54 @@ silently falling back or sniffing content.
 Its heterogeneous batch envelope now aggregates status, adapter, failure, validity, publishability,
 scope, and semantic-loss evidence while retaining member digests and explicit omitted-request state;
 stop-on-error batches are never marked accepted as complete.
+Every runtime result can now be projected into the shared `adapter_execution_evidence` request
+with explicit subject/source/input identity, output digest, conformance status, semantic-loss
+entries, refusal code, and parent lineage. Batch conversion requires a source-digest map for every
+member, keeping concrete format execution and durable cross-domain evidence as separate but
+composable planes.
+Source-bound projections can now emit the same evidence contract: explicit parser-input identity
+is checked against retained raw-content digests, source-plan and response lineage are attached as
+parents, partial transport remains partial, and truncated/binary/omitted bodies become typed
+refused observations even when parsing never began. This keeps optional binary readers and
+clinical/provider retrieval boundaries observable without treating non-execution as success.
+The sync and async submission helpers now compose local runtime results with the existing HTTP/MCP
+facades. They validate and materialize the complete batch before submission, keep remote refusal
+reports distinct from transport exceptions, and can retain per-source transport errors when a
+caller explicitly opts into continuing a heterogeneous batch.
+Family-specific adapter conformance profiles now cover all concrete runtime routes and their
+required structural checks. They distinguish a verified bounded parser surface from semantic-loss,
+missing-check, unsupported-dependency, and blocking clinical/provider outcomes; profile report
+digests can be attached as explicit lineage parents without becoming a composite readiness score.
+Provider normalization and receipt-verified external materialization now join that plane as
+caller-owned structural observations: payload/normalization, shape, row-index, intake, catalogue,
+receipt, and materialized-payload digests remain independently visible, and provider/clinical
+authenticity is never inferred from a successful shape audit.
+The same observations can now be projected through typed Python bridges into the canonical
+`DomainReportProjectRequest` for adapter execution, in-line provider normalization, and
+receipt-verified external normalization. Claim posture and non-claims remain adjacent to the
+payload, refused outcomes stay refused, caller parents remain explicit, and external locators are
+never reopened; this is report composition rather than an execution or readiness upgrade.
+The canonical `domain_report_project(operation="from_adapter_execution")` path now performs that
+composition inside the Rust/MCP boundary as well: it validates and indexes the adapter evidence,
+indexes the catalogue-checked domain report, and joins the evidence artifact digest into report
+lineage. Python sync/async HTTP and workspace facades and the TypeScript client expose the same
+typed response, while preserving `execution: "not_started"` and `readiness_claimed: false`.
+Provider normalization now has the same canonical Rust/MCP composition boundary for both
+caller-supplied inline payloads and receipt-verified external materialization. The domain report
+retains shape/index summaries plus payload, intake, normalization, and receipt artifact lineage
+without copying the provider payload a second time; inline and external modes remain distinct and
+external locators remain unopened. Python and TypeScript transport facades cover both operations.
+Cross-domain harmonization now preserves that distinction in its coverage rows: each report is
+classified as ordinary, adapter-execution, inline-provider, external-provider, or another explicit
+bridge kind, with mode and lineage-parent count retained. Aggregate bridge-mode counts and linked /
+unlinked lineage totals make composition auditable across the full capability matrix without
+upgrading adapter/provider observations into authenticity, completeness, validity, or readiness.
+The retained `domain_evidence_harmonization_coverage` query now makes those joins operationally
+auditable after creation: it filters and cursor-pages digest-ordered summaries by subject, domain,
+bridge class/mode, or traceability state, reports pre-pagination matching counts, and optionally
+returns report digests for exact follow-up. Its domain and posture summaries aggregate only retained
+rows; it does not fetch artifacts, reconstruct omitted history, or turn `complete` traceability into
+a truth, execution, clinical, provenance, or release claim.
 Verified optional bindings now execute raw NIfTI headers and H5AD/Zarr metadata when nibabel or
 anndata is installed, while preserving the same bounded auditors and refusing absent dependencies.
 The readers avoid full image-array and matrix-value materialization.

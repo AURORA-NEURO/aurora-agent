@@ -1,0 +1,126 @@
+{
+  "$id": "https://auroraneuro.org/schemas/fiber-query-v0.5.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "fiber-query/0.5 is the bounded adaptive-acquisition planning boundary. It carries the 0.3 decision contract plus a normalized model prior, exact outcome likelihood partitions, a scalarized path budget, and a finite horizon. FIBER enumerates the policy exactly under its caps; it never executes an acquisition or claims an observation receipt.",
+  "properties": {
+    "adaptive_acquisition": {
+      "additionalProperties": false,
+      "description": "Caller-declared tests that have not been performed. Conditional independence given the supplied models is assumed by the exact planner.",
+      "properties": {
+        "acquisitions": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "cost": { "minimum": 0, "type": "number" },
+              "id": { "maxLength": 256, "minLength": 1, "type": "string" },
+              "outcomes": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": { "maxLength": 256, "minLength": 1, "type": "string" },
+                    "likelihood": {
+                      "items": { "minimum": 0, "type": "number" },
+                      "maxItems": 1000,
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "required": ["label", "likelihood"],
+                  "type": "object"
+                },
+                "maxItems": 1000,
+                "minItems": 1,
+                "type": "array"
+              }
+            },
+            "required": ["id", "cost", "outcomes"],
+            "type": "object"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
+        "budget": { "minimum": 0, "type": "number" },
+        "max_steps": { "maximum": 16, "minimum": 0, "type": "integer" },
+        "prior": {
+          "items": { "minimum": 0, "type": "number" },
+          "maxItems": 1000,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": ["acquisitions", "budget", "max_steps", "prior"],
+      "type": "object"
+    },
+    "budgets": {
+      "additionalProperties": false,
+      "properties": {
+        "max_facts": { "minimum": 1, "type": "integer" },
+        "max_tokens": { "minimum": 1, "type": "integer" }
+      },
+      "required": ["max_facts"],
+      "type": "object"
+    },
+    "decision_loss": {
+      "additionalProperties": false,
+      "description": "Action-by-model table. With sense=utility, values are negated once into the compiler's internal loss convention.",
+      "properties": {
+        "actions": {
+          "items": { "maxLength": 256, "minLength": 1, "type": "string" },
+          "maxItems": 1000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "loss": {
+          "items": {
+            "items": { "type": "number" },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "maxItems": 1000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "models": {
+          "items": { "maxLength": 256, "minLength": 1, "type": "string" },
+          "maxItems": 1000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "sense": { "default": "loss", "enum": ["loss", "utility"], "type": "string" }
+      },
+      "required": ["actions", "models", "loss"],
+      "type": "object"
+    },
+    "decision_time": { "type": "string" },
+    "distortion_tolerance": { "minimum": 0, "type": "number" },
+    "goal": { "type": "string" },
+    "permitted_actions": {
+      "items": { "maxLength": 256, "minLength": 1, "type": "string" },
+      "maxItems": 1000,
+      "minItems": 1,
+      "type": "array"
+    },
+    "policy": { "items": { "type": "string" }, "type": "array" },
+    "protected_tags": { "items": { "type": "string" }, "type": "array" },
+    "query_id": { "type": "string" },
+    "role": { "type": "string" },
+    "schema_version": { "const": "fiber-query/0.5" },
+    "targets": { "items": { "type": "string" }, "minItems": 1, "type": "array" }
+  },
+  "required": [
+    "schema_version",
+    "query_id",
+    "targets",
+    "protected_tags",
+    "decision_time",
+    "budgets",
+    "decision_loss",
+    "permitted_actions",
+    "adaptive_acquisition"
+  ],
+  "title": "AURORA FIBER Query 0.5",
+  "type": "object"
+}

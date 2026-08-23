@@ -83,6 +83,1015 @@ export interface ToolCallPlan {
   schemaDigest: string;
 }
 
+export interface BrainModelDescriptor extends JsonObject {
+  provider: string;
+  model: string;
+  capabilities?: string[];
+  context_window_tokens: number;
+  max_output_tokens: number;
+  quality: number;
+  latency_ms: number;
+  cost_per_million_tokens: number;
+  reliability: number;
+  requires_credential?: boolean;
+  enabled?: boolean;
+}
+
+/** Secret-free projection returned by the Python runtime's authenticated model inventory path. */
+export interface ProviderModelDescriptor extends JsonObject {
+  schema: string;
+  provider: string;
+  model: string;
+  capabilities: string[];
+  context_window_tokens: number | null;
+  max_output_tokens: number | null;
+  metadata: JsonObject;
+  credential_posture: "caller_supplied_opaque_handle_not_returned" | string;
+  secret_material: "never_returned" | string;
+}
+
+export interface BrainModelObservation extends JsonObject {
+  arm_id: string;
+  pulls?: number;
+  reward_sum?: number;
+  failures?: number;
+  disabled?: boolean;
+}
+
+/** Runtime provider posture; this contains readiness metadata, never credential material. */
+export interface BrainProviderHealth extends JsonObject {
+  registered?: boolean;
+  circuit?: "closed" | "half_open" | "open" | "unconfigured";
+  consecutive_failures?: number;
+  credential_ready?: boolean;
+  eligible?: boolean;
+  attempts?: number;
+  successes?: number;
+  failures?: number;
+  success_rate?: number;
+  mean_latency_ms?: number | null;
+  last_latency_ms?: number | null;
+}
+
+/** Process-local or durable value-only evidence for one provider/model arm. */
+export interface BrainModelHealthEvidence extends JsonObject {
+  provider?: string;
+  model?: string;
+  attempts?: number;
+  successes?: number;
+  failures?: number;
+  success_rate?: number;
+  mean_latency_ms?: number | null;
+  last_latency_ms?: number | null;
+  last_status?: string | null;
+  last_status_code?: number | null;
+  circuit?: "closed" | "open" | string;
+  opened_until?: number | null;
+  observed_at?: number | null;
+  /** Set by a façade that already blended this evidence into model priors. */
+  prior_adjustment_applied?: boolean;
+  historical?: JsonObject;
+}
+
+export interface BrainModelSelectionArgs extends JsonObject {
+  task: string;
+  required_capabilities?: string[];
+  input_tokens: number;
+  requested_output_tokens: number;
+  max_cost_per_million_tokens?: number | null;
+  max_latency_ms?: number | null;
+  min_quality?: number | null;
+  /** Optional normalized rank-separation floor; below it the kernel abstains. */
+  min_selection_confidence?: number | null;
+  models: BrainModelDescriptor[];
+  observations?: BrainModelObservation[];
+  weights?: JsonObject;
+  provider_health?: Record<string, BrainProviderHealth>;
+  model_health?: Record<string, BrainModelHealthEvidence>;
+}
+
+export interface BrainModelCandidateScore extends JsonObject {
+  model_id: string;
+  eligible: boolean;
+  reasons: string[];
+  base_score: number;
+  exploration_bonus: number;
+  score: number;
+  observed_pulls: number;
+}
+
+export interface BrainModelSelectionResult extends JsonObject {
+  schema: string;
+  task: string;
+  selected_model: BrainModelDescriptor | null;
+  selected_model_id: string | null;
+  ranking: BrainModelCandidateScore[];
+  eligible_model_count?: number;
+  selection_confidence?: number;
+  selection_status: string;
+  decision_digest: string;
+  does_not_claim: string[];
+}
+
+export interface BrainModelSelectionContext extends JsonObject {
+  domain: string;
+  capability: string;
+  risk_class: string;
+  task_family?: string | null;
+}
+
+export interface BrainContextualModelObservation extends JsonObject {
+  context_digest: string;
+  arm_id: string;
+  pulls?: number;
+  reward_sum?: number;
+  failures?: number;
+  disabled?: boolean;
+}
+
+export interface BrainContextualModelSelectionArgs extends JsonObject {
+  context: BrainModelSelectionContext;
+  base: BrainModelSelectionArgs;
+  observations?: BrainContextualModelObservation[];
+}
+
+export interface BrainContextualModelSelectionResult extends JsonObject {
+  schema: "bioprism-brain-contextual-model-selection/0.1";
+  context: BrainModelSelectionContext;
+  context_digest: string;
+  selection: BrainModelSelectionResult;
+  contextual_observations_used: number;
+  global_observation_fallbacks: number;
+  selection_status: string;
+  does_not_claim: string[];
+}
+
+export interface BrainPromptChunk extends JsonObject {
+  id: string;
+  role?: string;
+  content: string;
+  required?: boolean;
+  priority?: number;
+}
+
+export interface BrainPromptArgs extends JsonObject {
+  system?: string | null;
+  developer?: string | null;
+  task: string;
+  context?: BrainPromptChunk[];
+  output_contract?: string | null;
+  max_input_tokens: number;
+}
+
+export interface BrainPromptMessage extends JsonObject {
+  role: string;
+  content: string;
+  source_id: string;
+}
+
+export interface BrainPromptResult extends JsonObject {
+  schema: string;
+  messages: BrainPromptMessage[];
+  included_context_ids: string[];
+  omitted_context_ids: string[];
+  estimated_input_tokens: number;
+  complete: boolean;
+  prompt_digest: string;
+  warnings: string[];
+}
+
+export interface BrainPlanStep extends JsonObject {
+  id: string;
+  objective: string;
+  tool: string;
+  arguments?: JsonValue;
+  depends_on?: string[];
+  effect?: "read_only" | "provider_call" | "external_write" | "irreversible";
+  estimated_cost?: number;
+}
+
+export interface BrainPlanArgs extends JsonObject {
+  objective: string;
+  steps: BrainPlanStep[];
+  allowed_tools: string[];
+  max_cost: number;
+  require_approval_for_effects?: boolean;
+}
+
+export interface BrainPlan extends JsonObject {
+  schema: string;
+  objective: string;
+  ordered_step_ids: string[];
+  steps: BrainPlanStep[];
+  estimated_cost: number;
+  requires_approval: boolean;
+  execution: "not_started";
+  plan_digest: string;
+  does_not_claim: string[];
+}
+
+export interface BrainPlanResult extends JsonObject {
+  ok: boolean;
+  status: string;
+  plan: BrainPlan | null;
+  errors: string[];
+}
+
+/** Provider-free automatic domain intake shared with the Python autonomous façade. */
+export interface AutonomousRouteCandidate extends JsonObject {
+  domain: string;
+  score: number;
+  matched_terms: string[];
+  capability: string;
+  risk_class: string;
+  workflow_id: string;
+  evidence: "fixed_catalogue_term_matches_only" | string;
+}
+
+export type AutonomousRouteReason =
+  | "routed"
+  | "cross_domain"
+  | "no_matching_evidence"
+  | "insufficient_confidence"
+  | "insufficient_margin"
+  | string;
+
+export interface AutonomousRouteProposal extends JsonObject {
+  schema: "bioprism-python-autonomous-route/0.1" | string;
+  task_digest: string;
+  candidates: AutonomousRouteCandidate[];
+  selected_domains: string[];
+  primary_domain: string | null;
+  confidence: number;
+  abstained: boolean;
+  reason: AutonomousRouteReason;
+  cross_domain: boolean;
+  source: "deterministic_vocabulary" | "provider_semantic_hybrid" | string;
+  route_digest: string;
+  retention: string;
+  does_not_claim: string[];
+}
+
+export interface AutonomousRouteCatalogueEntry extends JsonObject {
+  schema: "bioprism-python-autonomous-route/0.1" | string;
+  domain: string;
+  term_count: number;
+  terms: string[];
+  evidence: "reviewed_catalogue_vocabulary" | string;
+}
+
+export interface AutonomousSemanticRouteCandidate extends JsonObject {
+  domain: string;
+  semantic_score: number;
+  deterministic_score: number;
+  combined_score: number;
+}
+
+export interface AutonomousSemanticRouteResult extends JsonObject {
+  schema: "bioprism-python-autonomous-semantic-route/0.1" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_abstained" | "provider_invalid" | "provider_disagreement" | string;
+  route: AutonomousRouteProposal;
+  deterministic_route: AutonomousRouteProposal;
+  semantic_candidates: AutonomousSemanticRouteCandidate[];
+  semantic_selected_domains: string[];
+  semantic_confidence: number;
+  selected_model: { provider: string; model: string } | null;
+  selection_digest: string | null;
+  prompt_digest: string | null;
+  plan_digest: string | null;
+  outcome_digest: string | null;
+  cost_budget?: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
+  retention: string;
+  authorization: string;
+}
+
+export interface AutonomousPlanRefinementResult extends JsonObject {
+  schema: "bioprism-python-autonomous-plan-refinement/0.1" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  task_digest: string;
+  base_plan_digest: string;
+  workflow_digest: string;
+  priority_stage_ids: string[];
+  focus_stage_ids: string[];
+  review_required: boolean;
+  confidence: number;
+  selected_model: { provider: string; model: string } | null;
+  selection_digest: string | null;
+  planner_prompt_digest: string | null;
+  planner_plan_digest: string | null;
+  outcome_digest: string | null;
+  /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
+  cost_budget?: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
+  retention: string;
+  authorization: string;
+}
+
+/** Provider-assisted ordering proposal for an existing cross-domain fan-out. */
+export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
+  schema: "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  task_digest: string;
+  base_plan_digest: string;
+  priority_child_ids: string[];
+  focus_child_ids: string[];
+  review_required: boolean;
+  confidence: number;
+  selected_model: { provider: string; model: string } | null;
+  selection_digest: string | null;
+  planner_prompt_digest: string | null;
+  planner_plan_digest: string | null;
+  outcome_digest: string | null;
+  /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
+  cost_budget?: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
+  retention: string;
+  authorization: string;
+}
+
+/**
+ * Value-only provider proposal for an existing ordered-step graph.
+ *
+ * This is intentionally more general than workflow stages: mission executors, portfolio
+ * schedulers, and future domain runtimes can share the same planner contract while keeping
+ * tools, arguments, dependencies, permissions, claims, and effects outside the proposal.
+ */
+export interface AutonomousOrderedStepPlanRefinementResult extends JsonObject {
+  schema: "bioprism-typescript-autonomous-ordered-step-plan-refinement/0.1" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  task_digest: string;
+  base_plan_digest: string;
+  protected_contract_digest: string | null;
+  priority_step_ids: string[];
+  focus_step_ids: string[];
+  review_required: boolean;
+  confidence: number;
+  selected_model: { provider: string; model: string } | null;
+  selection_digest: string | null;
+  planner_prompt_digest: string | null;
+  planner_plan_digest: string | null;
+  outcome_digest: string | null;
+  /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
+  cost_budget?: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
+  retention: string;
+  authorization: string;
+}
+
+export interface AutonomousRoutingHoldoutReport extends JsonObject {
+  schema: "bioprism-python-autonomous-holdout-evaluation/0.1" | string;
+  evaluator_id: string;
+  evaluator_version: string;
+  split: "holdout";
+  case_count: number;
+  routed_count: number;
+  abstained_count: number;
+  exact_match_count: number;
+  exact_accuracy: number;
+  coverage: number;
+  selective_accuracy: number;
+  case_statuses: JsonObject[];
+  confusion_digest: string;
+  retention: string;
+  authorization: string;
+}
+
+export interface AutonomousPlanHoldoutReport extends JsonObject {
+  schema: "bioprism-python-autonomous-holdout-evaluation/0.1" | string;
+  evaluator_id: string;
+  evaluator_version: string;
+  split: "holdout";
+  case_count: number;
+  completed_count: number;
+  exact_order_count: number;
+  review_count: number;
+  exact_order_accuracy: number;
+  case_statuses: JsonObject[];
+  order_digest: string;
+  retention: string;
+  authorization: string;
+}
+
+/** Versioned planning/evidence contract shared with the Python autonomous façade. */
+export interface AutonomousDomainPack extends JsonObject {
+  schema: "bioprism-python-autonomous-domain-pack/0.1" | string;
+  domain: string;
+  pack_id: string;
+  pack_version: string;
+  workflow_id: string;
+  evaluator_domain: string;
+  evaluator_id: string;
+  model_capabilities: string[];
+  tool_capabilities: string[];
+  evidence_requirements: string[];
+  planning_principles: string[];
+  review_triggers: string[];
+  pack_digest: string;
+  execution: string;
+  credential_posture: string;
+}
+
+/** Reviewed exact adapter/evidence contract for one autonomous domain capability. */
+export interface AutonomousCapabilityContract extends JsonObject {
+  schema: "bioprism-python-autonomous-capability-contract/0.1" | string;
+  domain: string;
+  capability: string;
+  stage_ids: string[];
+  tool_capabilities: string[];
+  required_model_capabilities: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  read_only: boolean;
+  approval_required: boolean;
+  review_triggers: string[];
+  fallback_policy: string;
+  contract_digest: string;
+  adapter_posture: string;
+  credential_posture: string;
+  authority_posture: string;
+}
+
+/** Dynamic capability row after activation, model, and tool readiness are projected. */
+export interface AutonomousCapabilityExecutionRow extends AutonomousCapabilityContract {
+  contract: AutonomousCapabilityContract;
+  active_tool_names: string[];
+  withheld_tool_names: string[];
+  matched_active_tool_capabilities: string[];
+  matched_withheld_tool_capabilities: string[];
+  tool_posture: "tool_backed" | "provider_only_or_blocked" | string;
+  execution_posture: "provider_or_tool" | "approval_gated" | string;
+}
+
+/** Focused, non-executing capability dispatch plan. */
+export interface AutonomousCapabilityPlan extends JsonObject {
+  schema: "bioprism-python-autonomous-capability-plan/0.1" | string;
+  domain: string;
+  capability: string;
+  status: "ready" | "provider_only" | "approval_gated" | "provider_pending" | "activation_review_required" | "stale" | "revoked" | "model_gap" | string;
+  domain_plan_digest: string;
+  contract_digest: string;
+  contract: AutonomousCapabilityContract;
+  stage_ids: string[];
+  active_tool_names: string[];
+  withheld_tool_names: string[];
+  matched_active_tool_capabilities: string[];
+  tool_posture: string;
+  execution_posture: string;
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  review_gates: JsonObject;
+  learning_context_digest: string | null;
+  execution: string;
+  credential_posture: string;
+  authority_posture: string;
+}
+
+/** Aggregate capability plans suitable for readiness dashboards. */
+export interface AutonomousCapabilityPlans extends JsonObject {
+  schema: "bioprism-python-autonomous-capability-plan/0.1" | string;
+  status: string;
+  domains: string[];
+  capability_count: number;
+  plans: AutonomousCapabilityPlan[];
+  plan_digest: string;
+  execution: string;
+  authority_posture: string;
+  secret_material: string;
+}
+
+/** Exact, digest-bound runtime handoff for one workflow stage. */
+export interface AutonomousWorkflowStageExecutionPlan extends JsonObject {
+  schema: "bioprism-python-autonomous-workflow-stage-plan/0.1" | string;
+  domain: string;
+  workflow_id: string;
+  workflow_digest: string;
+  stage_id: string;
+  stage_objective: string;
+  required_capabilities: string[];
+  tool_capabilities: string[];
+  capability_contracts: AutonomousCapabilityContract[];
+  required_model_capabilities: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  active_tool_names: string[];
+  selected_tool_names: string[];
+  withheld_tool_names: string[];
+  approval_required: boolean;
+  read_only: boolean;
+  execution_posture: string;
+  source_plan_digest: string | null;
+  stage_plan_digest: string;
+  capability_contract_digests: string[];
+  credential_posture: string;
+  authority_posture: string;
+}
+
+/** Exact-domain held-out evaluator contract shared with the Python replay registry. */
+export interface AutonomousDomainEvaluatorProfile extends JsonObject {
+  schema: "bioprism-brain-domain-evaluator/0.1" | string;
+  domain: string;
+  evaluator_id: string;
+  evaluator_version: string;
+  required_signals: string[];
+  signal_weights: Record<string, number>;
+  pass_threshold: number;
+  accepted_evidence_domains: string[];
+  execution: "caller_declared_signal_scoring_only" | string;
+}
+
+/** Redacted BYOK readiness projected to an application UI; never contains key material. */
+export interface AutonomousCredentialStatus extends JsonObject {
+  provider: string;
+  provider_registered: boolean;
+  credential: {
+    provider: string;
+    configured: boolean;
+    credential_count: number;
+    credentials: JsonObject[];
+    secret_persistence: "in_memory_only" | string;
+    secret_material: "never_returned" | string;
+  };
+  ready: boolean;
+  next_action: "register_provider" | "collect_user_credential" | "ready" | string;
+  secret_material: "never_returned" | string;
+}
+
+/** Redacted status for one request-scoped key collection session. */
+export interface AutonomousCredentialSessionStatus extends JsonObject {
+  session_id: string;
+  active: boolean;
+  created_at: number;
+  expires_at: number | null;
+  providers: string[];
+  secret_persistence: "in_memory_only" | string;
+  secret_material: "never_returned" | string;
+}
+
+export interface AutonomousTaskBlueprint extends JsonObject {
+  schema: "bioprism-python-autonomous-task/0.1" | string;
+  task: JsonObject;
+  route_digest?: string;
+  domain_profile: JsonObject;
+  domain_pack: AutonomousDomainPack;
+  workflow: JsonObject;
+  selection_context: JsonObject;
+  required_capabilities: string[];
+  prompt: JsonObject;
+  plan: JsonObject;
+  execution: "not_started" | string;
+  credential_posture: string;
+}
+
+export interface AutonomousAutoBlueprint extends JsonObject {
+  schema: "bioprism-python-autonomous-auto-blueprint/0.1" | string;
+  route: AutonomousRouteProposal;
+  blueprint: AutonomousTaskBlueprint | null;
+  cross_domain_blueprint: JsonObject | null;
+  semantic_route: AutonomousSemanticRouteResult | null;
+  execution: "not_started" | string;
+  authorization: string;
+}
+
+export interface AutonomousAutoResult extends JsonObject {
+  schema: "bioprism-python-autonomous-auto-result/0.1" | string;
+  status: "completed" | "route_review_required" | string;
+  route: AutonomousRouteProposal;
+  result: JsonObject | null;
+  learning_mode: "off" | "online" | "trajectory" | string;
+  retention: string;
+}
+
+export interface BrainBanditPolicy extends JsonObject {
+  strategy?: "ucb1" | "epsilon_greedy" | "thompson_sampling" | string;
+  exploration?: number;
+  epsilon?: number;
+  min_reward?: number;
+  max_reward?: number;
+  failure_penalty?: number;
+  seed?: number;
+}
+
+export interface BrainBanditArm extends JsonObject {
+  arm_id: string;
+  pulls?: number;
+  reward_sum?: number;
+  failures?: number;
+  disabled?: boolean;
+}
+
+/** Stable non-secret identity used to isolate evaluator feedback by execution context. */
+export interface BrainBanditContext extends JsonObject {
+  domain: string;
+  capability: string;
+  risk_class: string;
+  task_family?: string | null;
+}
+
+/** Persisted local contextual bandit projection; provider/model arm IDs remain unchanged. */
+export interface BrainBanditContextState extends JsonObject {
+  context_digest: string;
+  context: BrainBanditContext;
+  generation?: number;
+  arms: BrainBanditArm[];
+  observed?: boolean;
+}
+
+export interface BrainCreditedOutcome extends JsonObject {
+  outcome_digest: string;
+  arm_id: string;
+  reward: number;
+  failed?: boolean;
+  contract_digest?: string | null;
+  context_digest?: string | null;
+}
+
+export interface BrainBanditState extends JsonObject {
+  schema: string;
+  generation?: number;
+  policy?: BrainBanditPolicy;
+  arms: BrainBanditArm[];
+  credited_outcomes?: BrainCreditedOutcome[];
+  contextual_states?: BrainBanditContextState[];
+}
+
+export interface BrainBanditSelectionResult extends JsonObject {
+  schema: string;
+  selected_arm_id: string | null;
+  ranking: JsonObject[];
+  selection_status: string;
+  state_generation: number;
+  strategy?: string;
+  exploration_draw?: number | null;
+  exploration_taken?: boolean;
+}
+
+export interface BrainBanditUpdate extends JsonObject {
+  arm_id: string;
+  reward: number;
+  failed?: boolean;
+  outcome_digest?: string | null;
+  contract_digest?: string | null;
+  context_digest?: string | null;
+  context?: BrainBanditContext;
+}
+
+export interface BrainRunIdentity extends JsonObject {
+  run_id: string;
+  selection_digest: string;
+  prompt_digest: string;
+  plan_digest: string;
+  provider: string;
+  model: string;
+  outcome_digest: string;
+  request_id?: string | null;
+}
+
+export interface BrainEvaluatorAssessment extends JsonObject {
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number;
+  passed: boolean;
+  failed?: boolean;
+  feedback_digest?: string | null;
+  failure_class?: string | null;
+  evidence_digest?: string | null;
+}
+
+export interface BrainOutcomeRecordArgs extends JsonObject {
+  run: BrainRunIdentity;
+  assessment: BrainEvaluatorAssessment;
+  bandit_state: BrainBanditState;
+  arm_id: string;
+  context_digest?: string | null;
+  context?: BrainBanditContext;
+  idempotency_key?: string;
+}
+
+export interface BrainLearningEvidence extends JsonObject {
+  schema: string;
+  run: BrainRunIdentity;
+  assessment: BrainEvaluatorAssessment;
+  arm_id: string;
+  context_digest?: string | null;
+  bandit_update: BrainBanditUpdate;
+  previous_generation: number;
+  next_generation: number;
+  next_state_digest: string;
+  evidence_digest: string;
+  idempotency_key?: string | null;
+  does_not_claim: string[];
+}
+
+export interface BrainOutcomeRecordResult extends JsonObject {
+  ok: boolean;
+  status: string;
+  idempotent?: boolean;
+  idempotency_key_digest?: string | null;
+  next_state: BrainBanditState;
+  learning_evidence: BrainLearningEvidence;
+}
+
+export interface BrainControlDurability extends JsonObject {
+  scope: "mcp_process" | string;
+  restart: "caller_must_rehydrate_from_durable_job_store" | string;
+  secrets: "never_retained" | string;
+}
+
+export interface BrainJobSubmitArgs extends JsonObject {
+  job_id?: string;
+  idempotency_key: string;
+  spec_digest: string;
+  domain: string;
+  capability: string;
+  risk_class: string;
+  priority?: number;
+  max_attempts?: number;
+  checkpoint_digest?: string | null;
+}
+
+export interface BrainJobRecord extends JsonObject {
+  schema: string;
+  job_id: string;
+  idempotency_key_digest: string;
+  spec_digest: string;
+  domain: string;
+  capability: string;
+  risk_class: string;
+  priority: number;
+  max_attempts: number;
+  state: "queued" | "waiting_approval" | "cancelled" | string;
+  attempts: number;
+  lease_owner?: string | null;
+  lease_expires_ns?: number | null;
+  checkpoint_digest?: string | null;
+  side_effect_boundary: string;
+  recovered_after_restart: boolean;
+  reason_digest?: string | null;
+  result_digest?: string | null;
+  reconciliation_outcome?: BrainJobReconcileOutcome | null;
+  reconciliation_digest?: string | null;
+  created_sequence: number;
+  updated_sequence: number;
+  record_digest: string;
+  spec: "not_returned; caller resolver owns rehydration" | string;
+  retention: string;
+}
+
+export interface BrainControlEvent extends JsonObject {
+  schema: string;
+  sequence: number;
+  event_type: string;
+  job_id: string;
+  payload: JsonObject;
+  previous_digest: string;
+  event_digest: string;
+  head_digest: string;
+  created_ns: number;
+  retention: string;
+}
+
+export interface BrainJobSubmitResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  created: boolean;
+  idempotent: boolean;
+  job: BrainJobRecord;
+  event: BrainControlEvent;
+  retention: string;
+  durability: BrainControlDurability;
+}
+
+export interface BrainJobStatusArgs extends JsonObject {
+  job_id: string;
+}
+
+export interface BrainJobStatusResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  job: BrainJobRecord;
+  head_digest: string;
+  durability: BrainControlDurability;
+}
+
+export interface BrainJobEventsArgs extends JsonObject {
+  job_id?: string;
+  after?: number;
+  limit?: number;
+}
+
+export interface BrainJobEventsResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  events: BrainControlEvent[];
+  after: number;
+  next_after: number;
+  head_digest: string;
+  chain: "sha256_prev_digest" | string;
+  retention: string;
+  durability: BrainControlDurability;
+}
+
+export interface BrainJobLifecycleResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  operation: "claim" | "claim_next" | "renew" | "checkpoint" | "complete" | "fail" | "reconcile" | "cancel" | "cancel_quarantine" | string;
+  idempotent: boolean;
+  job: BrainJobRecord;
+  event: BrainControlEvent | null;
+  retention: string;
+  durability: BrainControlDurability;
+}
+
+export interface BrainJobClaimArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  lease_ms?: number;
+}
+
+export interface BrainJobClaimNextArgs extends JsonObject {
+  worker_id: string;
+  lease_ms?: number;
+}
+
+export interface BrainJobClaimNextResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  operation: "claim_next" | string;
+  claimed: boolean;
+  idempotent: boolean;
+  job: BrainJobRecord | null;
+  event: BrainControlEvent | null;
+  retention: string;
+  durability: BrainControlDurability;
+}
+
+export interface BrainJobRenewArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  lease_ms?: number;
+}
+
+export type BrainJobSideEffectBoundary = "not_started" | "preflight" | "dispatched" | "unknown";
+
+export interface BrainJobCheckpointArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  phase: string;
+  checkpoint_digest: string;
+  side_effect_boundary?: BrainJobSideEffectBoundary;
+  waiting_for_approval?: boolean;
+}
+
+export interface BrainJobCompleteArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  result_digest: string;
+}
+
+export interface BrainJobFailArgs extends JsonObject {
+  job_id: string;
+  worker_id: string;
+  reason: string;
+  retryable?: boolean;
+}
+
+export type BrainJobReconcileOutcome = "succeeded" | "failed" | "not_executed" | "unknown";
+
+export interface BrainJobReconcileArgs extends JsonObject {
+  job_id: string;
+  outcome: BrainJobReconcileOutcome;
+  evidence_digest: string;
+  evidence_kind?: string;
+  operator?: string;
+  reason?: string;
+  effect_absent?: boolean;
+}
+
+export interface BrainJobCancelArgs extends JsonObject {
+  job_id: string;
+  reason?: string;
+}
+
+export interface BrainJobCancelResult extends BrainJobLifecycleResult {
+  operation: "cancel" | "cancel_quarantine" | string;
+  cancelled: boolean;
+  reconciliation_required: boolean;
+}
+
+export type BrainJobApprovalAction = "request" | "approve" | "deny";
+
+export interface BrainJobApprovalArgs extends JsonObject {
+  job_id: string;
+  action: BrainJobApprovalAction;
+  reason?: string;
+  authorization_digest?: string;
+}
+
+export interface BrainJobApprovalResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  job: BrainJobRecord;
+  event: BrainControlEvent;
+  authorization: {
+    posture: string;
+    verified_by_server: false;
+    execution: "not_started" | string;
+    [key: string]: JsonValue | undefined;
+  };
+  durability: BrainControlDurability;
+}
+
+export type BrainHealthOperation = "snapshot" | "record";
+export type BrainHealthStatus = "success" | "failure" | "timeout" | "rate_limited" | "circuit_open" | "unknown";
+
+export interface BrainModelHealthArgs extends JsonObject {
+  operation?: BrainHealthOperation;
+  provider?: string;
+  model?: string;
+  status?: BrainHealthStatus;
+  latency_ms?: number;
+  quality?: number;
+  tokens?: number;
+  registered?: boolean;
+  credential_ready?: boolean;
+  eligible?: boolean;
+}
+
+export interface BrainModelHealthRow extends JsonObject {
+  provider: string;
+  model: string;
+  observations: number;
+  successes: number;
+  failures: number;
+  consecutive_failures: number;
+  average_latency_ms: number;
+  average_quality?: number | null;
+  quality_observations?: number;
+  last_status: BrainHealthStatus;
+  last_sequence: number;
+  registered: boolean;
+  credential_ready: boolean;
+  eligible: boolean;
+}
+
+export interface BrainModelHealthResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  operation: BrainHealthOperation;
+  provider_health: Record<string, BrainProviderHealth>;
+  models: BrainModelHealthRow[];
+  retention: string;
+  durability: BrainControlDurability;
+  observed_tokens?: number;
+}
+
+export interface BrainReplayEvaluateArgs extends JsonObject {
+  case_id: string;
+  domain: string;
+  capability: string;
+  risk_class: string;
+  evidence_digest: string;
+  signals: Record<string, boolean | number>;
+  references?: string[];
+  limitations?: string[];
+  required_signals?: string[];
+  signal_weights?: Record<string, number>;
+  pass_threshold?: number;
+}
+
+export interface BrainReplayEvaluateResult extends JsonObject {
+  schema: string;
+  ok: boolean;
+  case_id: string;
+  domain: string;
+  evaluator_id: string;
+  evaluator_version: string;
+  evidence_digest: string;
+  reward: number;
+  passed: boolean;
+  failed: boolean;
+  failure_class?: string | null;
+  feedback_digest: string;
+  replan_requested: boolean;
+  replan_instruction?: string | null;
+  execution: "offline_value_only_replay" | string;
+  truth_authority: string;
+  retention: string;
+}
+
 export interface ToolsResponse extends JsonObject {
   api_version: string;
   tools: ToolDefinition[];
@@ -2444,6 +3453,399 @@ export interface EpistemicVoiResult extends JsonObject {
   guarantees: string[];
 }
 
+export interface EpistemicAdaptiveArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisitions: EpistemicAcquisitionArgs[];
+  budget: number;
+  max_steps: number;
+}
+
+export interface EpistemicAdaptiveOutcomeResult extends JsonObject {
+  label: string;
+  probability: number;
+  posterior: number[];
+  next: EpistemicAdaptiveNodeResult;
+}
+
+export interface EpistemicAdaptiveNodeResult extends JsonObject {
+  kind: "stop" | "acquire";
+  action_index?: number;
+  action?: string;
+  risk?: number;
+  acquisition_index?: number;
+  id?: string;
+  cost?: number;
+  expected_total?: number;
+  expected_terminal_risk?: number;
+  expected_acquisition_cost?: number;
+  outcomes?: EpistemicAdaptiveOutcomeResult[];
+}
+
+export interface EpistemicAdaptivePolicyResult extends JsonObject {
+  expected_total: number;
+  expected_terminal_risk: number;
+  expected_acquisition_cost: number;
+  nodes_evaluated: number;
+  selected_depth: number;
+  root: EpistemicAdaptiveNodeResult;
+}
+
+export interface EpistemicAdaptiveResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/epistemic-adaptive-acquisition/0.1";
+  budget?: number;
+  max_steps?: number;
+  problem?: { actions: string[]; models: string[]; action_count: number; model_count: number };
+  acquisitions?: Array<{ id: string; cost: number; outcomes: Array<{ label: string }> }>;
+  policy?: EpistemicAdaptivePolicyResult;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
+export interface AdaptiveExecutionArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisitions: EpistemicAcquisitionArgs[];
+  budget: number;
+  max_steps: number;
+  mode?: "simulate" | "replay";
+  provider?: string;
+  authorization?: { grant_id: string; provider: string; [key: string]: JsonValue };
+  observations?: Array<{ acquisition_id: string; outcome_label: string; [key: string]: JsonValue }>;
+  receipt?: JsonObject;
+}
+
+export interface AdaptiveExecutionObservation extends JsonObject {
+  provider: string;
+  acquisition_id: string;
+  outcome_label: string;
+  evidence_digest: string;
+  provenance: "observed" | "simulated" | "replayed";
+}
+
+export interface AdaptiveExecutionObservationReceipt extends JsonObject {
+  sequence: number;
+  request: {
+    plan_digest: string;
+    sequence: number;
+    acquisition_id: string;
+    declared_cost: number;
+    [key: string]: JsonValue;
+  };
+  observation: AdaptiveExecutionObservation;
+}
+
+export interface AdaptiveExecutionReceipt extends JsonObject {
+  schema: "bioprism-epistemic/adaptive-execution/0.1";
+  plan_digest: string;
+  provider: string;
+  status: "completed" | "partial" | "refused";
+  authorization: { granted: boolean; grant_id: string | null; provider: string | null; [key: string]: JsonValue };
+  observations: AdaptiveExecutionObservationReceipt[];
+  actual_acquisition_cost: number;
+  terminal_action: number | null;
+  terminal_risk: number | null;
+  refusal: string | null;
+  refusal_detail: string | null;
+}
+
+export interface AdaptiveExecutionResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-epistemic/adaptive-execution/0.1";
+  mode: "simulate" | "replay";
+  plan_digest: string;
+  completed: boolean;
+  receipt: AdaptiveExecutionReceipt;
+  provenance_counts: { observed: number; simulated: number; replayed: number; [key: string]: JsonValue };
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface AdaptiveCostVector extends JsonObject {
+  tokens: number;
+  compute_ms: number;
+  latency_ms: number;
+  money_usd: number;
+  privacy_loss: number;
+  specimen_units: number;
+  expert_minutes: number;
+}
+
+export interface AdaptiveCostedAcquisitionArgs extends JsonObject {
+  acquisition: EpistemicAcquisitionArgs;
+  cost: AdaptiveCostVector;
+}
+
+export interface AdaptiveCostedArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisitions: AdaptiveCostedAcquisitionArgs[];
+  budget: AdaptiveCostVector;
+  weights: AdaptiveCostVector;
+  max_steps: number;
+}
+
+export interface AdaptiveCostedResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mcp/epistemic-adaptive-costed/0.1";
+  cost_dimensions: string[];
+  budget?: AdaptiveCostVector;
+  weights?: AdaptiveCostVector;
+  max_steps?: number;
+  problem?: { actions: string[]; models: string[]; action_count: number; model_count: number };
+  acquisitions?: AdaptiveCostedAcquisitionArgs[];
+  policy?: JsonObject;
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
+export type InterweaveWorkflowId =
+  | "reliable_software_repair"
+  | "scientific_claim_reproduction"
+  | "biomedical_research_data_audit"
+  | "incident_response"
+  | "evidence_grounded_policy_comparison"
+  | "dataset_transformation_molecule";
+
+export interface WorkflowExecutionArgs extends JsonObject {
+  workflow: InterweaveWorkflowId;
+  problem: EpistemicDecisionProblemArgs;
+  belief: EpistemicBeliefArgs;
+  acquisitions: EpistemicAcquisitionArgs[];
+  budget: number;
+  max_steps: number;
+  mode?: "simulate" | "replay";
+  provider?: string;
+  capabilities?: string[];
+  authorization?: { grant_id: string; provider: string; [key: string]: JsonValue };
+  observations?: Array<{ acquisition_id: string; outcome_label: string; [key: string]: JsonValue }>;
+  receipt?: JsonObject;
+  evidence?: WorkflowExecutionEvidenceConfig;
+}
+
+export interface WorkflowExecutionEvidenceConfig extends JsonObject {
+  subject_id: string;
+  domains: string[];
+  parent_digests?: string[];
+}
+
+export interface WorkflowExecutionResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-interweave/workflow-execution/0.1";
+  mode: "simulate" | "replay";
+  workflow: InterweaveWorkflowId;
+  plan_digest: string;
+  binding_digest: string;
+  binding: JsonObject;
+  completed: boolean;
+  release_posture: string;
+  receipt: JsonObject;
+  provenance_counts: { observed: number; simulated: number; replayed: number; [key: string]: JsonValue };
+  guarantees: string[];
+  limitations: string[];
+  workflow_execution_evidence?: WorkflowExecutionEvidenceResult;
+}
+
+export interface WorkflowExecutionEvidenceArgs extends JsonObject {
+  binding: JsonObject;
+  receipt: JsonObject;
+  subject_id: string;
+  domains: string[];
+  parent_digests?: string[];
+}
+
+export interface WorkflowExecutionEvidenceImportArgs extends JsonObject {
+  evidence: JsonObject;
+}
+
+export interface WorkflowExecutionEvidenceQueryOptions extends JsonObject {
+  workflow_id?: InterweaveWorkflowId;
+  subject_id?: string;
+  domain?: string;
+  plan_digest?: string;
+  binding_digest?: string;
+  receipt_status?: "completed" | "partial" | "refused";
+  provenance_mode?: "none" | "observed_declared" | "simulated" | "replayed" | "mixed";
+  after?: string;
+  max_items?: number;
+  include_records?: boolean;
+}
+
+export interface WorkflowExecutionEvidenceResult extends JsonObject {
+  ok: true;
+  schema: string;
+  workflow: string;
+  evidence_digest: string;
+  evidence?: JsonObject;
+  registry?: JsonObject;
+  artifact_registry?: JsonObject;
+  rows?: JsonObject[];
+  next_after?: string | null;
+  has_more?: boolean;
+  guarantees?: string[];
+  does_not_claim?: string[];
+}
+
+export interface EpistemicDecisionQuotientArgs extends JsonObject {
+  problem: EpistemicDecisionProblemArgs;
+  permitted_actions: string[];
+}
+
+export interface EpistemicDecisionQuotientClass extends JsonObject {
+  class_index: number;
+  representative_model: string;
+  members: string[];
+  loss_differences: Record<string, number>;
+  preferred_actions: string[];
+}
+
+export interface EpistemicDecisionQuotientProjection extends JsonObject {
+  schema_version: "bioprism-epistemic-decision-quotient/0.1";
+  basis: "permitted_loss_difference_profile";
+  permitted_actions: string[];
+  original_model_count: number;
+  quotient_model_count: number;
+  merged_model_count: number;
+  model_to_class: Record<string, number>;
+  classes: EpistemicDecisionQuotientClass[];
+}
+
+export interface EpistemicDecisionQuotientResult extends JsonObject {
+  ok: boolean;
+  schema?: "bioprism-mcp/epistemic-decision-quotient/0.1";
+  quotient?: EpistemicDecisionQuotientProjection;
+  summary?: {
+    original_model_count: number;
+    quotient_model_count: number;
+    merged_model_count: number;
+    compressed: boolean;
+    compression_fraction: number;
+  };
+  stage?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees: string[];
+  limitations?: string[];
+}
+
+/** Paths into a FIBER world/query pair accepted by the progressive compiler. */
+export interface FiberCompileArgs extends JsonObject {
+  world: string;
+  query: string;
+  layer?: "l0" | "l1" | "l2" | "l3" | "l4";
+}
+
+export interface FiberDecisionQuotientSummary extends JsonObject {
+  schema: "bioprism-mcp/epistemic-decision-quotient/0.1";
+  basis: "permitted_loss_difference_profile";
+  permitted_actions: string[];
+  original_model_count: number;
+  quotient_model_count: number;
+  merged_model_count: number;
+  compressed: boolean;
+  compression_fraction: number;
+  certificate_binding: {
+    query_sha256: string;
+    certificate_sha256: string;
+    [key: string]: JsonValue;
+  };
+  limitations: string[];
+}
+
+export interface FiberRateDistortionSummary extends JsonObject {
+  schema: "bioprism-mcp/epistemic-context-audit/0.2";
+  criterion: "bayes_regret" | "minimax_regret";
+  tolerance: number;
+  compatibility_floor: number;
+  evidence_count: number;
+  full_rate: number;
+  identification: JsonObject;
+  sufficiency: JsonObject;
+  frontier: JsonObject;
+  certificate_binding: {
+    query_sha256: string;
+    certificate_sha256: string;
+    [key: string]: JsonValue;
+  };
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface FiberAdaptiveAcquisitionOutcome extends JsonObject {
+  label: string;
+  probability: number;
+  posterior: number[];
+  next: FiberAdaptiveAcquisitionNode;
+}
+
+export interface FiberAdaptiveAcquisitionNode extends JsonObject {
+  kind: "stop" | "acquire";
+  action_index?: number;
+  action?: string;
+  risk?: number;
+  acquisition_index?: number;
+  id?: string;
+  cost?: number;
+  expected_total?: number;
+  expected_terminal_risk?: number;
+  expected_acquisition_cost?: number;
+  outcomes?: FiberAdaptiveAcquisitionOutcome[];
+}
+
+export interface FiberAdaptiveAcquisitionSummary extends JsonObject {
+  schema: "bioprism-mcp/fiber-adaptive-acquisition/0.1";
+  budget: number;
+  max_steps: number;
+  prior: number[];
+  problem: {
+    actions: string[];
+    models: string[];
+    action_count: number;
+    model_count: number;
+    [key: string]: JsonValue;
+  };
+  acquisitions: Array<{
+    id: string;
+    cost: number;
+    outcomes: Array<{ label: string; likelihood: number[]; [key: string]: JsonValue }>;
+    [key: string]: JsonValue;
+  }>;
+  policy: {
+    expected_total: number;
+    expected_terminal_risk: number;
+    expected_acquisition_cost: number;
+    nodes_evaluated: number;
+    selected_depth: number;
+    root: FiberAdaptiveAcquisitionNode;
+    [key: string]: JsonValue;
+  };
+  certificate_binding: {
+    query_sha256: string;
+    certificate_sha256: string;
+    [key: string]: JsonValue;
+  };
+  execution: "not_started";
+  authorization: "not_granted";
+  provenance: JsonObject;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface FiberCompileResult extends JsonObject {
+  layer?: "l0" | "l1" | "l2" | "l3" | "l4";
+  decision_quotient?: FiberDecisionQuotientSummary;
+  rate_distortion?: FiberRateDistortionSummary;
+  adaptive_acquisition?: FiberAdaptiveAcquisitionSummary;
+  certificate_sha256?: string;
+}
+
 export interface EpistemicEvidenceItemArgs extends JsonObject {
   id: string;
   cost: number;
@@ -3946,6 +5348,112 @@ export interface DeveloperWorkbenchArgs extends JsonObject {
   ci?: JsonObject;
 }
 
+export interface DeveloperWorkbenchVerificationArgs extends JsonObject {
+  session: JsonObject;
+  report: JsonObject;
+  expected_report_digest?: string;
+  ci_replay?: JsonObject;
+  policy?: JsonObject;
+}
+
+export interface DeveloperWorkbenchVerificationResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_workbench_verify";
+  valid: boolean;
+  status: "verified" | "verified_without_replay" | "mismatch";
+  retained_report_digest: string;
+  expected_report_digest?: string | null;
+  report_digest_matched?: boolean | null;
+  retained_audit_digest: string;
+  observed_audit_digest: string;
+  dashboard_present: boolean;
+  dashboard_verified: boolean;
+  ci_present: boolean;
+  ci_replay_supplied: boolean;
+  ci_verified: boolean;
+  mismatches: Array<JsonObject>;
+  execution: "not_started";
+  network_access: "not_started";
+  verification_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DeveloperWorkbenchRegistryImportArgs extends JsonObject {
+  report: JsonObject;
+}
+
+export interface DeveloperWorkbenchRegistryQueryArgs extends JsonObject {
+  session_digest?: string;
+  domain?: string;
+  capability?: string;
+  state?: "draft" | "validated" | "released" | "withdrawn";
+  release_ready?: boolean;
+  after?: string;
+  max_items?: number;
+  include_reports?: boolean;
+}
+
+export interface DeveloperWorkbenchRegistryImportResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_workbench_import";
+  workbench_report_digest: string;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DeveloperWorkbenchRegistryQueryRow extends JsonObject {
+  workbench_report_digest: string;
+  schema_version: string;
+  session_digest: string;
+  audit_valid: boolean;
+  release_ready: boolean;
+  artifact_count: number;
+  cell_count: number;
+  change_count: number;
+  executed_cell_count: number;
+  dashboard_present: boolean;
+  dashboard_matched: number;
+  dashboard_holes: number;
+  dashboard_stale: number;
+  ci_present: boolean;
+  ci_digest?: string | null;
+  domains: string[];
+  capabilities: string[];
+  states: string[];
+  report?: JsonObject;
+}
+
+export interface DeveloperWorkbenchRegistryQueryResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_workbench_query";
+  rows: DeveloperWorkbenchRegistryQueryRow[];
+  next_after: string | null;
+  has_more: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DeveloperWorkbenchRegistryGetResult extends JsonObject {
+  ok: boolean;
+  workflow: "developer_workbench_get";
+  workbench_report_digest: string;
+  report: JsonObject;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface CiExecutionEvidenceArgs extends JsonObject {
   ci: JsonObject;
   evidence: JsonObject;
@@ -3962,6 +5470,7 @@ export interface CiProviderArtifactArgs extends JsonObject {
   id: string;
   kind: string;
   digest: string;
+  digest_scope?: "provider_metadata" | "caller_declared" | "local_response_bytes";
   check?: string;
   run_id?: string;
   provider?: string;
@@ -3971,6 +5480,7 @@ export interface CiProviderArtifactArgs extends JsonObject {
 export interface CiProviderLogArgs extends JsonObject {
   id: string;
   digest: string;
+  digest_scope?: "provider_metadata" | "caller_declared" | "local_response_bytes";
   check?: string;
   run_id?: string;
   provider?: string;
@@ -3984,6 +5494,7 @@ export interface CiProviderAttestationArgs extends JsonObject {
   issuer: string;
   statement_digest: string;
   method: string;
+  subject_digest?: string;
 }
 
 export interface CiProviderEvidenceArgs extends JsonObject {
@@ -4092,6 +5603,9 @@ export interface CiProviderEvidenceAuditResult extends JsonObject {
   linked_artifact_count: number;
   linked_log_count: number;
   attestation_subject_count: number;
+  local_byte_hash_artifact_count: number;
+  local_byte_hash_log_count: number;
+  attestation_subject_digest_binding_count: number;
   ci_evidence: JsonObject;
   artifacts: CiProviderArtifactArgs[];
   logs: CiProviderLogArgs[];
@@ -4122,6 +5636,109 @@ export interface CiProviderEvidenceResult extends JsonObject {
   attestation_record_digest: string;
   evidence: JsonObject;
   audit: CiProviderEvidenceAuditResult;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiProviderEvidenceRegistryImportArgs extends CiProviderEvidenceArgs {}
+
+export interface CiProviderEvidenceRegistryQueryArgs extends JsonObject {
+  provider?: "github_actions" | "gitlab_ci" | "generic";
+  run_id?: string;
+  plan_digest?: string;
+  structurally_valid?: boolean;
+  conformance_ready?: boolean;
+  min_local_byte_hash_artifacts?: number;
+  min_local_byte_hash_logs?: number;
+  min_attestation_subject_digest_bindings?: number;
+  after?: string;
+  max_items?: number;
+  include_records?: boolean;
+}
+
+export interface CiProviderEvidenceRegistryImportResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_provider_evidence_import";
+  provider_evidence_digest: string;
+  provider: string;
+  run_id: string;
+  plan_digest: string;
+  evidence_digest: string;
+  artifact_record_digest: string;
+  log_record_digest: string;
+  attestation_record_digest: string;
+  structurally_valid: boolean;
+  conformance_ready: boolean;
+  local_byte_hash_artifact_count: number;
+  local_byte_hash_log_count: number;
+  attestation_subject_digest_binding_count: number;
+  artifact_count: number;
+  log_count: number;
+  attestation_count: number;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiProviderEvidenceRegistryQueryRow extends JsonObject {
+  provider_evidence_digest: string;
+  provider: string;
+  run_id: string;
+  payload_digest: string;
+  plan_digest: string;
+  evidence_digest: string;
+  structurally_valid: boolean;
+  conformance_ready: boolean;
+  artifact_count: number;
+  log_count: number;
+  attestation_count: number;
+  linked_artifact_count: number;
+  linked_log_count: number;
+  attestation_subject_count: number;
+  local_byte_hash_artifact_count: number;
+  local_byte_hash_log_count: number;
+  attestation_subject_digest_binding_count: number;
+  artifact_record_digest: string;
+  log_record_digest: string;
+  attestation_record_digest: string;
+  audit?: CiProviderEvidenceAuditResult;
+}
+
+export interface CiProviderEvidenceRegistryQueryResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_provider_evidence_query";
+  rows: CiProviderEvidenceRegistryQueryRow[];
+  next_after: string | null;
+  has_more: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CiProviderEvidenceRegistryGetResult extends JsonObject {
+  ok: boolean;
+  workflow: "ci_provider_evidence_get";
+  provider_evidence_digest: string;
+  provider: string;
+  run_id: string;
+  payload_digest: string;
+  plan_digest: string;
+  evidence_digest: string;
+  local_byte_hash_artifact_count: number;
+  local_byte_hash_log_count: number;
+  attestation_subject_digest_binding_count: number;
+  structurally_valid: boolean;
+  conformance_ready: boolean;
+  audit: CiProviderEvidenceAuditResult;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
   guarantees: string[];
   limitations: string[];
 }
@@ -4325,6 +5942,17 @@ export interface MissionEvaluatorReviewFinding extends JsonObject {
   message: string;
 }
 
+export interface MissionEvaluatorCatalogueSnapshot extends JsonObject {
+  schema: "bioprism-devplat-mission-evaluator-catalogue-snapshot/0.1" | string;
+  catalog_digest: string;
+  snapshot_digest: string;
+  row_count: number;
+  group_count: number;
+  rows: JsonObject[];
+  retention: JsonObject;
+  execution: "not_started";
+}
+
 export interface MissionEvaluatorReviewResult extends JsonObject {
   ok: boolean;
   schema: string;
@@ -4332,12 +5960,108 @@ export interface MissionEvaluatorReviewResult extends JsonObject {
   review_id: string;
   catalog_digest: string;
   discovery_digest: string;
+  catalogue_snapshot?: MissionEvaluatorCatalogueSnapshot;
   selection_count: number;
   claim_count: number;
   bindings: MissionEvaluatorBindingReviewResult[];
   findings: MissionEvaluatorReviewFinding[];
   review_status: "ready" | "blocked";
   binding_posture: "ready_for_mission_claim_bindings" | "requires_caller_correction" | string;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface MissionEvaluatorReplayArgs extends JsonObject {
+  mission: JsonObject;
+  include_fixtures?: boolean;
+  max_items?: number;
+}
+
+export interface MissionEvaluatorReplayBindingResult extends JsonObject {
+  id?: string;
+  claim_id: string;
+  adapter_id: string;
+  domain: string;
+  outcome_state?: string;
+  output_digest?: string;
+  catalog_match: boolean;
+  domain_supported: boolean;
+  replay_state: string;
+}
+
+export interface MissionEvaluatorReplayClaimResult extends JsonObject {
+  claim_id: string;
+  binding_count: number;
+  returned_binding_count: number;
+  outcome_counts: JsonObject;
+  distinct_output_digests: number;
+  disagreement_posture: JsonValue;
+}
+
+export interface MissionEvaluatorReplayCoverageResult extends JsonObject {
+  catalogue_adapter_count: number;
+  catalogue_group_count: number;
+  replayed_adapter_count: number;
+  replayed_group_count: number;
+  unrepresented_adapters: string[];
+  unrepresented_groups: string[];
+  complete: boolean;
+}
+
+export interface MissionEvaluatorReplayFixtureResult extends JsonObject {
+  fixture_id: string;
+  adapter_id: string;
+  group_id: string;
+  domains: string[];
+  levels: string[];
+  output_pointer: string;
+  retained_output: JsonValue;
+  retained_output_digest: string;
+  variants: JsonValue[];
+  guarantee: string;
+}
+
+export interface MissionEvaluatorReplayResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evaluator_replay";
+  mission_id: string;
+  mission_digest: string;
+  mission_status: JsonValue;
+  review_provenance: JsonValue;
+  route_review_provenance?: JsonObject | null;
+  route_review_status?: "absent" | "valid" | "invalid" | string;
+  catalog_digest: string;
+  binding_count: number;
+  omitted_bindings: number;
+  state_counts: JsonObject;
+  claims: MissionEvaluatorReplayClaimResult[];
+  bindings: MissionEvaluatorReplayBindingResult[];
+  coverage: MissionEvaluatorReplayCoverageResult;
+  findings: JsonObject[];
+  replay_status: "ready" | "blocked";
+  execution: "not_started";
+  fixtures: MissionEvaluatorReplayFixtureResult[];
+  omitted_fixtures: number;
+  guarantees: string[];
+  limitations: string[];
+  artifact_registry?: JsonObject;
+}
+
+export interface MissionEvaluatorReplayCompareArgs extends JsonObject {
+  mission: JsonObject;
+  include_fixtures?: boolean;
+  max_items?: number;
+}
+
+export interface MissionEvaluatorReplayCompareResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-mission-evaluator-replay-compare/0.1" | string;
+  workflow: "mission_evaluator_replay_compare";
+  mission_id: string;
+  replay: JsonObject;
+  catalog_drift: JsonObject;
   execution: "not_started";
   guarantees: string[];
   limitations: string[];
@@ -4393,6 +6117,25 @@ export interface CapabilityDashboardGroupResult extends JsonObject {
   invalid_transport_schemas: string[];
   tools?: string[];
   gaps?: string[];
+  artifact_evidence?: OperationsArtifactEvidencePosture;
+  workflow_reconciliation_evidence?: OperationsReconciliationPosture;
+}
+
+export interface CapabilityDashboardEvidenceResult extends JsonObject {
+  scope: string;
+  evidence_digest: string;
+  artifact_registry_generation: number;
+  artifact_registry_size: number;
+  workflow_reconciliation_registry_generation: number;
+  workflow_reconciliation_registry_size: number;
+  groups_with_artifact_evidence: number;
+  artifact_evidence_records: number;
+  groups_with_workflow_reconciliation: number;
+  workflow_reconciliation_records: number;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
 }
 
 export interface CapabilityDashboardAuditResult extends JsonObject {
@@ -4412,6 +6155,7 @@ export interface CapabilityDashboardAuditResult extends JsonObject {
   readiness_counts: Record<string, number>;
   gap_counts: Record<string, number>;
   groups: CapabilityDashboardGroupResult[];
+  evidence?: CapabilityDashboardEvidenceResult;
   warnings: string[];
   guarantees: string[];
   limitations: string[];
@@ -4424,6 +6168,8 @@ export interface CapabilityDashboardResult extends JsonObject {
   schema: "bioprism-devplat-capability-dashboard/0.1";
   catalog_digest: string;
   dashboard_digest: string;
+  evidence_digest?: string;
+  evidence_scope?: string;
   capability_dashboard_ready: boolean;
   audit: CapabilityDashboardAuditResult;
   duplicate_schema_names?: string[];
@@ -4454,7 +6200,14 @@ export interface CapabilityRouteNeedResult extends JsonObject {
   candidate_groups: string[];
   candidate_domains: string[];
   candidate_tools: string[];
+  candidate_group_evidence?: CapabilityRouteGroupEvidenceResult[];
   search: JsonObject;
+}
+
+export interface CapabilityRouteGroupEvidenceResult extends JsonObject {
+  id: string;
+  artifact_evidence: JsonObject;
+  workflow_reconciliation_evidence: JsonObject;
 }
 
 export interface CapabilityRouteCoverage extends JsonObject {
@@ -4466,7 +6219,26 @@ export interface CapabilityRouteCoverage extends JsonObject {
   candidate_domain_count: number;
   candidate_domains: string[];
   candidate_tool_count: number;
+  candidate_group_evidence_count?: number;
   posture: string;
+}
+
+export interface CapabilityRouteEvidenceResult extends JsonObject {
+  scope: string;
+  evidence_digest: string;
+  artifact_registry_generation: number;
+  artifact_registry_size: number;
+  workflow_reconciliation_registry_generation: number;
+  workflow_reconciliation_registry_size: number;
+  candidate_group_count: number;
+  groups_with_artifact_evidence: number;
+  artifact_evidence_records: number;
+  groups_with_workflow_reconciliation: number;
+  workflow_reconciliation_records: number;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
 }
 
 export interface CapabilityRouteResult extends JsonObject {
@@ -4481,6 +6253,9 @@ export interface CapabilityRouteResult extends JsonObject {
   recommended_tool_count: number;
   recommended_tool_overflow: number;
   route_coverage: CapabilityRouteCoverage;
+  evidence_digest?: string;
+  evidence_scope?: string;
+  evidence?: CapabilityRouteEvidenceResult;
   schema_attachment: JsonObject;
   execution: "not_started";
 }
@@ -4504,6 +6279,9 @@ export interface CapabilityRouteReviewResult extends JsonObject {
   review_id: string;
   route_id: string;
   catalog_digest: string;
+  evidence_digest?: string;
+  evidence_scope?: string;
+  evidence_binding?: JsonObject;
   goal: string;
   need_count: number;
   selection_count: number;
@@ -4518,6 +6296,1659 @@ export interface CapabilityRouteReviewResult extends JsonObject {
   route_coverage: JsonObject;
   schema_review: JsonObject;
   execution: "not_started";
+}
+
+export interface CapabilityRoutePlanArgs extends JsonObject {
+  mission_id: string;
+  route: JsonObject;
+  selections: MissionRouteSelection[];
+  validate_schemas?: boolean;
+  policy?: JsonObject;
+  claim_requests?: JsonValue[];
+  evaluator_review?: JsonObject;
+  workflow_binding?: JsonObject;
+}
+
+export interface CapabilityRoutePlanResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_route_plan";
+  mission_id: string;
+  route_id: string;
+  review_id: string;
+  catalog_digest: string;
+  goal: string;
+  plan_status: "preflight_pending" | "blocked_by_route_review" | "ready_for_caller_inspection" | "blocked_by_mission_preflight";
+  review: CapabilityRouteReviewResult;
+  mission: JsonObject | null;
+  preflight: JsonObject | null;
+  plan_digest?: string | null;
+  route_input_digest?: string | null;
+  selection_digest?: string | null;
+  selection_count?: number;
+  route_review_provenance?: JsonObject | null;
+  dispatch: "not_started";
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface CapabilityRoutePlanVerifyArgs extends JsonObject {
+  plan: JsonObject;
+  route?: JsonObject;
+  selections?: MissionRouteSelection[];
+  validate_schemas?: boolean;
+}
+
+export interface CapabilityRoutePlanVerifyResult extends JsonObject {
+  ok: boolean;
+  workflow: "capability_route_plan_verify";
+  mission_id: string;
+  route_id: string;
+  review_id: string;
+  catalog_digest: string;
+  plan_status: string;
+  plan_digest?: string | null;
+  valid: boolean;
+  verification_status: "verified" | "verified_without_route_replay" | "mismatch" | "blocked_by_route_replay" | "blocked_by_mission_preflight";
+  route_replay: JsonObject;
+  mission_preflight: JsonObject;
+  mismatches: JsonObject[];
+  dispatch: "not_started";
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowInstantiateArgs extends JsonObject {
+  workflow_id: string;
+  mission_id: string;
+  goal: string;
+  steps: JsonValue[];
+  policy?: JsonObject;
+  claim_requests?: JsonValue[];
+  evaluator_review?: JsonObject;
+  route_review?: JsonObject;
+}
+
+export interface DomainWorkflowVerifyArgs extends JsonObject {
+  instantiation: JsonObject;
+  replay_request?: DomainWorkflowInstantiateArgs;
+}
+
+export interface DomainWorkflowPortfolioArgs extends JsonObject {
+  requests: DomainWorkflowInstantiateArgs[];
+  policy?: JsonObject;
+  readiness_audit?: JsonObject;
+}
+
+export interface DomainWorkflowPortfolioVerifyArgs extends JsonObject {
+  portfolio: JsonObject;
+  replay_requests?: Array<DomainWorkflowInstantiateArgs | null>;
+  policy?: JsonObject;
+  readiness_audit?: JsonObject;
+}
+
+export interface DomainWorkflowScaffoldArgs extends JsonObject {
+  workflow_id: string;
+  mission_id: string;
+  goal: string;
+  tools?: string[];
+  arguments?: Record<string, JsonObject>;
+}
+
+export interface DomainWorkflowReconcileArgs extends JsonObject {
+  instantiation: JsonObject;
+  mission_report?: JsonObject;
+  evidence_bundle?: JsonObject;
+  policy?: JsonObject;
+  readiness_audit?: JsonObject;
+}
+
+export interface DomainWorkflowToolContract extends JsonObject {
+  name: string;
+  role: string;
+  declared: boolean;
+  available: boolean;
+  schema_state: "present" | "missing" | "unavailable";
+  schema_digest?: string | null;
+  argument_validation: "authoritative_mcp_preflight_required";
+  argument_contract?: JsonObject;
+  execution_contract?: DomainWorkflowExecutionContract;
+  evidence: JsonObject;
+}
+
+export interface DomainWorkflowExecutionContract extends JsonObject {
+  resource_class?: "compile" | "ingest" | "sandbox" | "evaluate" | "mutate" | "index" | string;
+  idempotency?: string;
+  side_effects?: string;
+  dispatch?: string;
+  providers?: JsonObject;
+  provider_boundary?: JsonObject;
+  queue_resource_class?: string;
+  readiness_claimed?: false;
+}
+
+export interface DomainWorkflowContract extends JsonObject {
+  schema: string;
+  posture: "advisory_review_gated";
+  scope: JsonObject;
+  readiness: JsonObject;
+  pre_dispatch_gates: JsonValue[];
+  evidence_contract: JsonObject;
+  completion_contract: JsonObject;
+  execution_boundary?: DomainWorkflowExecutionContract;
+}
+
+export interface DomainWorkflowTemplate extends JsonObject {
+  workflow_id: string;
+  workflow_digest: string;
+  domain_contract: DomainWorkflowContract;
+  domain_contract_digest: string;
+  tool_contracts: DomainWorkflowToolContract[];
+  tools: JsonObject;
+  recommended_stages: JsonValue[];
+  execution_contract?: DomainWorkflowExecutionContract;
+}
+
+export interface DomainWorkflowEvidencePlan extends JsonObject {
+  schema: string;
+  steps: JsonValue[];
+  completion: JsonObject;
+}
+
+export interface DomainWorkflowBinding extends JsonObject {
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  domain_contract_digest: string;
+  domain_contract: DomainWorkflowContract;
+  evidence_plan: DomainWorkflowEvidencePlan;
+  evidence_plan_digest: string;
+}
+
+export interface DomainWorkflowCatalogueResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_catalogue";
+  catalog_digest: string;
+  workflow_catalog_digest: string;
+  workflow_count: number;
+  workflows: DomainWorkflowTemplate[];
+  coverage: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowInstantiateResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_instantiate";
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  mission: JsonObject & { workflow_binding?: DomainWorkflowBinding };
+  selection: JsonObject;
+  domain_contract: DomainWorkflowContract;
+  domain_contract_digest: string;
+  evidence_plan: DomainWorkflowEvidencePlan;
+  preflight: JsonObject;
+  preflight_report?: JsonObject;
+  execution: "not_started";
+  execution_contract?: DomainWorkflowExecutionContract;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_verify";
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  domain_contract_digest: string;
+  mission_id: string;
+  mission_digest: string;
+  structural_valid: boolean;
+  valid: boolean;
+  verification_status: "verified" | "verified_without_replay" | "mismatch" | "blocked_by_replay" | "blocked_by_mission_preflight";
+  replay: JsonObject;
+  mission_preflight: JsonObject;
+  mismatches: JsonObject[];
+  preflight_report: JsonObject;
+  dispatch: "not_started";
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowPortfolioResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_portfolio";
+  portfolio_digest: string;
+  valid: boolean;
+  portfolio_ready: boolean;
+  portfolio_status: "ready_for_authoritative_preflight" | "partial" | "blocked" | "blocked_by_decision_readiness" | "incomplete_scope";
+  policy: JsonObject;
+  decision_readiness: JsonObject;
+  coverage: JsonObject;
+  summary: JsonObject;
+  items: JsonObject[];
+  preflight: JsonObject;
+  dispatch: "not_started";
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowPortfolioVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_portfolio_verify";
+  portfolio_digest: string;
+  observed_portfolio_digest: string;
+  portfolio_digest_matched: boolean;
+  portfolio_verify_digest: string;
+  valid: boolean;
+  portfolio_ready: boolean;
+  verification_status: "verified" | "verified_without_replay" | "partial" | "blocked" | "blocked_by_mission_preflight" | "blocked_by_decision_readiness" | "replay_incomplete" | "incomplete_scope" | "mismatch";
+  policy: JsonObject;
+  decision_readiness: JsonObject;
+  coverage: JsonObject;
+  summary: JsonObject;
+  items: JsonObject[];
+  mismatches: JsonObject[];
+  preflight: JsonObject;
+  dispatch: "not_started";
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowScaffoldResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_scaffold";
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  selection: JsonObject;
+  instantiation: DomainWorkflowInstantiateResult;
+  mission: JsonObject & { workflow_binding?: DomainWorkflowBinding };
+  domain_contract: DomainWorkflowContract;
+  domain_contract_digest: string;
+  evidence_plan: DomainWorkflowEvidencePlan;
+  execution: "not_started";
+  execution_contract?: DomainWorkflowExecutionContract;
+  readiness_claimed: false;
+  preflight: JsonObject;
+  preflight_status: "ready" | "blocked";
+  preflight_report: JsonObject;
+  guarantees: string[];
+  limitations: string[];
+  next_actions: string[];
+}
+
+export interface DomainWorkflowReconcileResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconcile";
+  workflow_id: string;
+  workflow_digest: string;
+  catalog_digest: string;
+  domain_contract_digest: string;
+  mission_id: string;
+  mission_plan_digest: string;
+  reconciliation_digest: string;
+  source: string;
+  report: JsonObject;
+  retention: JsonObject;
+  bundle_verification: JsonObject;
+  evidence: JsonObject;
+  completion: JsonObject;
+  integrity: JsonObject;
+  decision_readiness: JsonObject;
+  decision_review_gate_satisfied: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+  artifact_registry?: JsonObject;
+}
+
+/** Import a digest-bound reconciliation report into the bounded audit registry. */
+export interface DomainWorkflowReconciliationImportArgs extends JsonObject {
+  record: JsonObject;
+}
+
+export interface DomainWorkflowReconciliationImportResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconciliation_import";
+  reconciliation_digest: string;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+  artifact_registry?: JsonObject;
+}
+
+/** Bounded indexed lookup over retained domain-workflow reconciliation reports. */
+export interface DomainWorkflowReconciliationQueryOptions extends JsonObject {
+  mission_id?: string;
+  workflow_id?: string;
+  mission_plan_digest?: string;
+  completion_status?: string;
+  decision_readiness_state?: DomainDecisionReadinessState;
+  decision_readiness_gate_satisfied?: boolean;
+  after?: string;
+  max_items?: number;
+  include_records?: boolean;
+}
+
+export interface DomainWorkflowReconciliationQueryResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconciliation_query";
+  filters: DomainWorkflowReconciliationQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainWorkflowReconciliationGetResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconciliation_get";
+  reconciliation_digest: string;
+  record: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export type DomainReportClaimStatus =
+  | "observed"
+  | "derived"
+  | "review_required"
+  | "refused"
+  | "not_applicable";
+
+export interface DomainReportClaimPosture extends JsonObject {
+  status: DomainReportClaimStatus;
+  does_not_claim: string[];
+  limitations?: string[];
+}
+
+export interface DomainReportProjectArgs extends JsonObject {
+  operation?: "project" | "from_adapter_execution" | "from_provider_normalization" | "from_external_provider_normalization";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  report: JsonObject;
+  claim_posture: DomainReportClaimPosture;
+  source_plan_digest?: string | null;
+  parent_digests?: string[];
+  evidence?: AdapterExecutionEvidenceArgs;
+  conformance?: JsonObject;
+  normalization?: DomainEvidenceProviderNormalizationArgs | DomainEvidenceProviderExternalPayloadNormalizationArgs;
+}
+
+export interface AdapterDomainReportArgs extends JsonObject {
+  operation: "from_adapter_execution";
+  evidence: AdapterExecutionEvidenceArgs;
+  conformance?: JsonObject;
+}
+
+export interface AdapterDomainReportResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-devplat-adapter-domain-report/0.1";
+  workflow: "adapter_domain_report";
+  evidence: AdapterExecutionEvidenceResult;
+  domain_report: DomainReportProjectResult;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ProviderDomainReportArgs extends JsonObject {
+  operation: "from_provider_normalization" | "from_external_provider_normalization";
+  normalization: DomainEvidenceProviderNormalizationArgs | DomainEvidenceProviderExternalPayloadNormalizationArgs;
+  parent_digests?: string[];
+}
+
+export interface ProviderDomainReportResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-devplat-provider-domain-report/0.1";
+  workflow: "provider_domain_report";
+  mode: "inline" | "external_payload";
+  normalization: DomainEvidenceProviderNormalizationResult | DomainEvidenceProviderExternalPayloadNormalizationResult;
+  domain_report: DomainReportProjectResult;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainReportArtifactRegistryProjection extends JsonObject {
+  indexed: boolean;
+  kind: "domain_report";
+  subject_id: string;
+  content_digest: string;
+  created?: boolean;
+  already_present?: boolean;
+  verification?: JsonObject;
+  lookup?: string;
+}
+
+export interface DomainReportProjectResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-report-project/0.1";
+  workflow: "domain_report_project";
+  report: JsonObject;
+  artifact_registry: DomainReportArtifactRegistryProjection;
+  coverage: JsonObject;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainReportCoverageOptions extends JsonObject {
+  operation?: "coverage";
+  group_id?: string;
+  domain?: string;
+  report_class?: string;
+  bridge_mode?: string;
+  max_groups?: number;
+  include_report_digests?: boolean;
+}
+
+export interface DomainReportCoverageGroup extends JsonObject {
+  id: string;
+  domains: string[];
+  status: string;
+  declared_tool_count: number;
+  report_count: number;
+  subject_ids: string[];
+  source_tools: string[];
+  claim_statuses: DomainReportClaimStatus[];
+  report_classes?: JsonObject;
+  bridge_modes?: string[];
+  lineage_parent_count?: number;
+  reports_with_lineage_parents?: number;
+  report_digests?: string[];
+  coverage_state: "reported" | "missing";
+}
+
+export interface DomainReportCoverageResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-report-coverage/0.1";
+  workflow: "domain_report_coverage";
+  catalogue_digest: string;
+  coverage_digest: string;
+  filters: DomainReportCoverageOptions;
+  group_count: number;
+  reported_group_count: number;
+  missing_group_count: number;
+  missing_group_ids: string[];
+  complete: boolean;
+  groups: DomainReportCoverageGroup[];
+  domain_summary: JsonObject;
+  bridge_summary?: JsonObject;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export type DomainEvidenceLinkRole = "supports" | "qualifies" | "contradicts" | "context";
+
+export interface DomainEvidenceLinkArgs extends JsonObject {
+  report_index: number;
+  role: DomainEvidenceLinkRole;
+  note?: string;
+  report_digest?: string;
+}
+
+export interface DomainEvidenceHarmonizeArgs extends JsonObject {
+  subject_id: string;
+  claim: JsonObject;
+  reports: JsonObject[];
+  links: DomainEvidenceLinkArgs[];
+  required_group_ids?: string[];
+  required_domains?: string[];
+}
+
+export interface DomainEvidenceHarmonizationReportRow extends JsonObject {
+  index: number;
+  digest: string;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  claim_status: DomainReportClaimStatus | null;
+  parent_digests: string[];
+  report_class: string;
+  bridge_mode: string | null;
+  lineage_parent_count: number;
+  link_roles: DomainEvidenceLinkRole[];
+  link_count: number;
+}
+
+export interface DomainEvidenceHarmonizationBridgeSummary extends JsonObject {
+  report_classes: Record<string, number>;
+  modes: Record<string, number>;
+  lineage: {
+    parent_digest_count: number;
+    reports_with_lineage_parents: number;
+    reports_without_lineage_parents: number;
+  };
+}
+
+export interface DomainEvidenceHarmonizationCoverage extends JsonObject {
+  all_reports_linked: boolean;
+  requirements_complete: boolean;
+  traceability_state: "complete" | "requirements_missing" | "links_missing";
+  observed_group_count: number;
+  observed_domain_count: number;
+  bridge_summary: DomainEvidenceHarmonizationBridgeSummary;
+}
+
+export interface DomainEvidenceHarmonizationResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-harmonization/0.1";
+  workflow: "domain_evidence_harmonize";
+  harmonization: JsonObject & {
+    reports?: DomainEvidenceHarmonizationReportRow[];
+    coverage?: DomainEvidenceHarmonizationCoverage;
+  };
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export type DomainDecisionReadinessState =
+  | "ready_for_human_review"
+  | "review_required"
+  | "incomplete"
+  | "blocked";
+
+export interface DomainDecisionReadinessPolicy extends JsonObject {
+  required_group_ids?: string[];
+  required_domains?: string[];
+  minimum_supporting_reports?: number;
+  minimum_qualifying_reports?: number;
+  require_all_reports_linked?: boolean;
+  reject_contradictions?: boolean;
+  reject_refused_reports?: boolean;
+  allow_review_required?: boolean;
+  require_lineage_parents?: boolean;
+}
+
+export interface DomainDecisionReadinessArgs extends JsonObject {
+  subject_id: string;
+  claim: JsonObject;
+  reports: JsonObject[];
+  links: DomainEvidenceLinkArgs[];
+  policy: DomainDecisionReadinessPolicy;
+}
+
+export interface DomainDecisionReadinessResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-decision-readiness/0.1";
+  workflow: "domain_decision_readiness_audit";
+  audit: JsonObject & {
+    decision_state: DomainDecisionReadinessState;
+    policy_satisfied: boolean;
+    counts: JsonObject;
+    blockers: JsonObject[];
+    digest: string;
+  };
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainDecisionReadinessQueryOptions extends JsonObject {
+  subject_id?: string;
+  decision_state?: DomainDecisionReadinessState;
+  policy_satisfied?: boolean;
+  after?: string;
+  max_items?: number;
+  include_audits?: boolean;
+}
+
+export interface DomainDecisionReadinessQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-artifact-domain-decision-readiness-query/0.1";
+  workflow: "artifact_registry_domain_decision_readiness_query";
+  filters: DomainDecisionReadinessQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ControlPlaneReadinessPolicy extends JsonObject {
+  require_domain_readiness?: boolean;
+  require_route_review?: boolean;
+  require_route_plan?: boolean;
+  require_operations_acceptance?: boolean;
+  require_release_ready?: boolean;
+  require_workflow_evidence?: boolean;
+}
+
+export interface ControlPlaneReadinessArgs extends JsonObject {
+  subject_id: string;
+  policy?: ControlPlaneReadinessPolicy;
+  readiness_audit?: JsonObject;
+  route_review?: JsonObject;
+  route_plan?: JsonObject;
+  operations_gate_projection?: JsonObject;
+  operations_gate_review?: JsonObject;
+  release_audit?: JsonObject;
+  workflow_evidence?: JsonObject;
+}
+
+export interface ControlPlaneReadinessResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-control-plane-readiness/0.1";
+  workflow: "control_plane_readiness_audit";
+  audit: JsonObject & {
+    subject_id: string;
+    control_plane_state: "ready_for_human_review" | "review_required" | "incomplete" | "blocked";
+    policy_satisfied: boolean;
+    components: Record<string, JsonObject>;
+    component_states: Record<string, JsonObject>;
+    blockers: JsonObject[];
+    digest: string;
+  };
+  artifact_registry: JsonObject;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ControlPlaneReadinessQueryOptions extends JsonObject {
+  subject_id?: string;
+  control_plane_state?: "ready_for_human_review" | "review_required" | "incomplete" | "blocked";
+  policy_satisfied?: boolean;
+  after?: string;
+  max_items?: number;
+  include_audits?: boolean;
+}
+
+export interface ControlPlaneReadinessQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-artifact-control-plane-readiness-query/0.1";
+  workflow: "artifact_registry_control_plane_readiness_query";
+  filters: ControlPlaneReadinessQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ControlPlaneReadinessCompareArgs extends JsonObject {
+  subject_id?: string;
+  before: ControlPlaneReadinessResult;
+  after: ControlPlaneReadinessResult;
+}
+
+export interface ControlPlaneReadinessCompareResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-control-plane-readiness-compare/0.1";
+  workflow: "control_plane_readiness_compare";
+  comparison: JsonObject & {
+    subject_id: string;
+    state_direction: "improved" | "regressed" | "unchanged";
+    evidence_direction: "improved" | "regressed" | "mixed" | "unchanged";
+    component_changes: JsonObject[];
+    blockers_added: JsonObject[];
+    blockers_removed: JsonObject[];
+    improvements: JsonObject[];
+    regressions: JsonObject[];
+    comparison_digest: string;
+  };
+  readiness_claimed: false;
+  execution: "not_started";
+}
+
+export interface ControlPlaneReadinessCompareRetainedArgs extends JsonObject {
+  before_content_digest: string;
+  after_content_digest: string;
+  subject_id?: string;
+}
+
+export interface ControlPlaneReadinessCompareRetainedResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-control-plane-readiness-compare-retained/0.1";
+  workflow: "control_plane_readiness_compare_retained";
+  subject_id: string;
+  before_content_digest: string;
+  after_content_digest: string;
+  source: "content_addressed_artifact_registry";
+  comparison: ControlPlaneReadinessCompareResult["comparison"];
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceHarmonizationCoverageOptions extends JsonObject {
+  subject_id?: string;
+  domain?: string;
+  report_class?: string;
+  bridge_mode?: string;
+  traceability_state?: "complete" | "requirements_missing" | "links_missing";
+  after?: string;
+  max_items?: number;
+  include_report_digests?: boolean;
+}
+
+export interface DomainEvidenceHarmonizationCoverageRow extends JsonObject {
+  content_digest: string;
+  subject_id: string;
+  domains: string[];
+  claim_id: string | null;
+  report_count: number;
+  link_count: number;
+  traceability_state: "complete" | "requirements_missing" | "links_missing";
+  requirements_complete: boolean | null;
+  all_reports_linked: boolean | null;
+  contradiction_declared: boolean;
+  qualification_declared: boolean;
+  report_classes: Record<string, number>;
+  bridge_modes: Record<string, number>;
+  lineage: JsonObject;
+  missing_group_ids: string[] | null;
+  missing_domains: string[] | null;
+  report_digests?: string[];
+}
+
+export interface DomainEvidenceHarmonizationCoverageResult extends JsonObject {
+  ok: true;
+  schema: "bioprism-devplat-domain-evidence-harmonization-coverage/0.1";
+  workflow: "domain_evidence_harmonization_coverage";
+  filters: DomainEvidenceHarmonizationCoverageOptions;
+  registry_size: number;
+  matching_count: number;
+  returned_count: number;
+  has_more: boolean;
+  next_after: string | null;
+  rows: DomainEvidenceHarmonizationCoverageRow[];
+  summary: JsonObject;
+  coverage_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export type DomainEvidenceIntakeOutcome = "observed" | "partial" | "refused" | "error" | "unknown";
+
+export interface DomainEvidenceIntakeArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  request?: JsonValue;
+  response: JsonValue;
+  outcome: DomainEvidenceIntakeOutcome;
+  source_plan_digest: string | null;
+  claim_posture: DomainReportClaimPosture;
+  parent_digests?: string[];
+}
+
+export interface DomainEvidenceIntakeResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-intake/0.1";
+  workflow: "domain_evidence_intake";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  request_supplied: boolean;
+  request_digest: string;
+  response_digest: string;
+  intake_digest: string;
+  outcome: DomainEvidenceIntakeOutcome;
+  report: JsonObject;
+  intake: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceIntakeCoverageOptions extends JsonObject {
+  group_id?: string;
+  domain?: string;
+  max_groups?: number;
+  include_intake_digests?: boolean;
+}
+
+export interface DomainEvidenceIntakeCoverageGroup extends JsonObject {
+  id: string;
+  domains: string[];
+  status: string;
+  declared_tool_count: number;
+  declared_tools: string[];
+  intake_count: number;
+  subject_ids: string[];
+  source_tools: string[];
+  outcomes: DomainEvidenceIntakeOutcome[];
+  reported_domains: string[];
+  missing_source_tools: string[];
+  source_tool_coverage: {
+    tool: string;
+    intake_count: number;
+    outcomes: DomainEvidenceIntakeOutcome[];
+    coverage_state: "reported" | "missing";
+  }[];
+  missing_domains: string[];
+  tool_coverage_state: "complete" | "partial" | "missing";
+  domain_coverage_state: "complete" | "partial" | "missing";
+  artifact_evidence: OperationsArtifactEvidencePosture;
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches";
+  intake_digests?: string[];
+  coverage_state: "reported" | "missing";
+}
+
+export interface DomainEvidenceIntakeCoverageResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-intake-coverage/0.1";
+  workflow: "domain_evidence_intake_coverage";
+  catalogue_digest: string;
+  coverage_digest: string;
+  filters: DomainEvidenceIntakeCoverageOptions;
+  group_count: number;
+  reported_group_count: number;
+  missing_group_count: number;
+  missing_group_ids: string[];
+  complete: boolean;
+  tool_coverage_complete: boolean;
+  missing_tool_group_ids: string[];
+  domain_coverage_complete: boolean;
+  missing_domain_group_ids: string[];
+  groups_with_artifact_evidence: number;
+  artifact_evidence_records: number;
+  artifact_registry_generation: number;
+  artifact_registry_size: number;
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches";
+  groups: DomainEvidenceIntakeCoverageGroup[];
+  domain_summary: JsonObject;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export type DomainEvidenceSourceConnectorKind = "literature" | "clinical_trial" | "fhir" | "object_store" | "file" | "provider_api" | "generic_http";
+export type DomainEvidenceSourceLocatorKind = "uri" | "path" | "opaque";
+export type DomainEvidenceSourceRetrievalMode = "reference_only" | "metadata_only" | "content";
+
+export type DomainEvidenceProviderConnectorKind = "literature" | "clinical_trial" | "fhir" | "object_store" | "provider_api";
+export type DomainEvidenceProviderShapeStatus = "structured" | "partial" | "unclassified" | "refused";
+export type DomainEvidenceProviderHandoffStatus = "prepared" | "submitted" | "observed" | "partial" | "refused" | "error" | "unknown";
+export type DomainEvidenceProviderAuthStatus = "none" | "caller_asserted" | "delegated" | "unknown";
+
+export interface DomainEvidenceProviderAuthPosture extends JsonObject {
+  status: DomainEvidenceProviderAuthStatus;
+  secret_refs?: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceProviderConnectorManifest extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1";
+  connector_id: string;
+  version: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  domains: string[];
+  capabilities: string[];
+  transport: "caller_managed";
+  auth_posture: DomainEvidenceProviderAuthPosture;
+}
+
+export interface DomainEvidenceProviderHandoffArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  manifest: DomainEvidenceProviderConnectorManifest;
+  status?: DomainEvidenceProviderHandoffStatus;
+  request_digest?: string;
+  payload_digest?: string;
+  source_plan_digest?: string;
+  parent_digests?: string[];
+  attempt_id?: string;
+}
+
+export interface DomainEvidenceProviderHandoff extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-connector-handoff/0.1";
+  workflow: "domain_evidence_provider_connector_handoff";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  status: DomainEvidenceProviderHandoffStatus;
+  manifest: DomainEvidenceProviderConnectorManifest;
+  manifest_digest: string;
+  request_digest: string | null;
+  payload_digest: string | null;
+  source_plan_digest: string | null;
+  parent_digests: string[];
+  attempt_id: string | null;
+  handoff_digest: string;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderHandoffResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-connector-handoff/0.1";
+  workflow: "domain_evidence_provider_connector_handoff";
+  handoff: DomainEvidenceProviderHandoff;
+  manifest_digest: string;
+  handoff_digest: string;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export type DomainEvidenceProviderExternalPayloadStorageBackend = "object_store" | "file" | "database" | "caller_managed";
+export type DomainEvidenceProviderExternalPayloadLocatorKind = "opaque" | "uri" | "path";
+export type DomainEvidenceProviderExternalPayloadAvailability = "available" | "partial" | "missing" | "unknown";
+export type DomainEvidenceProviderExternalPayloadRetention = "ephemeral" | "durable" | "unknown";
+
+export interface DomainEvidenceProviderExternalPayloadReceiptArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  handoff_digest: string;
+  transfer_id: string;
+  payload_digest: string;
+  byte_length: number;
+  storage_backend: DomainEvidenceProviderExternalPayloadStorageBackend;
+  locator_kind: DomainEvidenceProviderExternalPayloadLocatorKind;
+  locator: string;
+  content_type?: string | null;
+  content_encoding?: string | null;
+  request_digest?: string | null;
+  parent_digests?: string[];
+  availability?: DomainEvidenceProviderExternalPayloadAvailability;
+  retention?: DomainEvidenceProviderExternalPayloadRetention;
+  attempt_id?: string | null;
+}
+
+export interface DomainEvidenceProviderExternalPayloadReceipt extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-receipt/0.1";
+  workflow: "domain_evidence_provider_external_payload_receipt";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  handoff_digest: string;
+  transfer_id: string;
+  payload_digest: string;
+  byte_length: number;
+  storage_backend: DomainEvidenceProviderExternalPayloadStorageBackend;
+  locator_kind: DomainEvidenceProviderExternalPayloadLocatorKind;
+  locator: string;
+  content_type: string | null;
+  content_encoding: string | null;
+  request_digest: string | null;
+  parent_digests: string[];
+  availability: DomainEvidenceProviderExternalPayloadAvailability;
+  retention: DomainEvidenceProviderExternalPayloadRetention;
+  attempt_id: string | null;
+  receipt_digest: string;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadReceiptResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-receipt/0.1";
+  workflow: "domain_evidence_provider_external_payload_receipt";
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  handoff_digest: string;
+  payload_digest: string;
+  receipt_digest: string;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadReplayVerifyArgs extends DomainEvidenceProviderExternalPayloadReceiptArgs {
+  expected_receipt_digest: string;
+  expected_handoff_digest: string;
+  expected_payload_digest: string;
+  expected_byte_length: number;
+}
+
+export interface DomainEvidenceProviderExternalPayloadReplayVerification extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-replay/0.1";
+  workflow: "domain_evidence_provider_external_payload_replay_verify";
+  replay_status: "matched" | "mismatch";
+  matched: boolean;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  expected_receipt_digest: string;
+  observed_receipt_digest: string;
+  expected_handoff_digest: string;
+  observed_handoff_digest: string;
+  expected_payload_digest: string;
+  observed_payload_digest: string;
+  expected_byte_length: number;
+  observed_byte_length: number;
+  matches: Record<string, boolean>;
+  differences: string[];
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  replay_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadReplayVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-replay/0.1";
+  workflow: "domain_evidence_provider_external_payload_replay_verify";
+  replay: DomainEvidenceProviderExternalPayloadReplayVerification;
+  matched: boolean;
+  replay_status: "matched" | "mismatch";
+  replay_digest: string;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadNormalizationArgs extends DomainEvidenceProviderExternalPayloadReceiptArgs {
+  payload: JsonObject | JsonValue[];
+  request?: JsonValue;
+  outcome?: DomainEvidenceIntakeOutcome;
+  claim_posture?: DomainReportClaimPosture;
+  parent_digests?: string[];
+  source_plan_digest?: string | null;
+}
+
+export interface DomainEvidenceProviderExternalPayloadNormalizationResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-normalization/0.1";
+  workflow: "domain_evidence_provider_external_payload_normalize";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  provider: string;
+  outcome: DomainEvidenceIntakeOutcome;
+  payload_digest: string;
+  request_digest: string | null;
+  response: JsonObject;
+  shape_audit: DomainEvidenceProviderShapeAudit;
+  record_index: DomainEvidenceProviderRecordIndex;
+  normalization: JsonObject;
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  receipt_digest: string;
+  materialization: JsonObject;
+  intake: JsonObject;
+  artifact_registry: JsonObject;
+  receipt_artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadLineageAuditArgs extends DomainEvidenceProviderExternalPayloadReceiptArgs {}
+
+export interface DomainEvidenceProviderExternalPayloadLineageAudit extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-lineage/0.1";
+  workflow: "domain_evidence_provider_external_payload_lineage_audit";
+  lineage_status: "matched" | "partial" | "mismatch" | "orphaned";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  handoff: JsonObject | null;
+  matches: Record<string, boolean>;
+  differences: string[];
+  payload_binding_status: "matched" | "mismatch" | "not_declared" | "not_available";
+  lineage_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadLineageAuditResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-lineage/0.1";
+  workflow: "domain_evidence_provider_external_payload_lineage_audit";
+  audit: DomainEvidenceProviderExternalPayloadLineageAudit;
+  lineage_status: DomainEvidenceProviderExternalPayloadLineageAudit["lineage_status"];
+  payload_binding_status: DomainEvidenceProviderExternalPayloadLineageAudit["payload_binding_status"];
+  lineage_digest: string;
+  receipt_registry: JsonObject;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export type DomainEvidenceProviderExternalPayloadExecutionStatus = "submitted" | "transferred" | "partial" | "refused" | "error" | "unknown";
+
+export interface DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs extends DomainEvidenceProviderExternalPayloadReceiptArgs {
+  expected_receipt_digest: string;
+  execution_status: DomainEvidenceProviderExternalPayloadExecutionStatus;
+  executor_id: string;
+  observed_payload_digest?: string | null;
+  observed_byte_length?: number | null;
+  locator_opened?: boolean;
+  observation_digest?: string | null;
+}
+
+export interface DomainEvidenceProviderExternalPayloadExecutionEvidence extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-execution-evidence/0.1";
+  workflow: "domain_evidence_provider_external_payload_execution_evidence";
+  evidence_status: "matched" | "partial" | "mismatch" | "orphaned";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  provider: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  expected_receipt_digest: string;
+  retained_receipt_digest: string | null;
+  observed_receipt_digest: string;
+  execution_status: DomainEvidenceProviderExternalPayloadExecutionStatus;
+  executor_id: string;
+  observed_payload_digest: string | null;
+  observed_byte_length: number | null;
+  locator_opened: boolean;
+  observation_digest: string | null;
+  receipt: DomainEvidenceProviderExternalPayloadReceipt;
+  matches: Record<string, boolean>;
+  differences: string[];
+  evidence_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadExecutionEvidenceResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-execution-evidence/0.1";
+  workflow: "domain_evidence_provider_external_payload_execution_evidence";
+  evidence: DomainEvidenceProviderExternalPayloadExecutionEvidence;
+  evidence_status: DomainEvidenceProviderExternalPayloadExecutionEvidence["evidence_status"];
+  evidence_digest: string;
+  receipt_registry: JsonObject;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceProviderExternalPayloadEvidenceQueryArgs extends JsonObject {
+  group_id?: string | null;
+  domain?: string | null;
+  subject_id?: string | null;
+  after?: string | null;
+  max_items?: number;
+  include_artifacts?: boolean;
+}
+
+export type DomainEvidenceProviderExternalPayloadEvidenceQueryJoinStatus = "missing_receipt" | "receipt_only" | "receipt_and_lineage" | "receipt_and_execution" | "complete";
+
+export interface DomainEvidenceProviderExternalPayloadEvidenceQueryRow extends JsonObject {
+  row_digest: string;
+  receipt_digest: string;
+  subject_id: string;
+  group_id: string;
+  domains: string[];
+  receipt_present: boolean;
+  lineage_status: string | null;
+  lineage_digest: string | null;
+  execution_evidence_status: string | null;
+  execution_status: DomainEvidenceProviderExternalPayloadExecutionStatus | null;
+  evidence_digest: string | null;
+  join_status: DomainEvidenceProviderExternalPayloadEvidenceQueryJoinStatus;
+  parent_digests: string[];
+  receipt_artifact?: JsonObject | null;
+  lineage_artifact?: JsonObject | null;
+  execution_artifact?: JsonObject | null;
+}
+
+export interface DomainEvidenceProviderExternalPayloadEvidenceQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-external-payload-query/0.1";
+  workflow: "domain_evidence_provider_external_payload_evidence_query";
+  filters: DomainEvidenceProviderExternalPayloadEvidenceQueryArgs;
+  registry_generation: number;
+  registry_size: number;
+  rows: DomainEvidenceProviderExternalPayloadEvidenceQueryRow[];
+  next_after: string | null;
+  has_more: boolean;
+  query_digest: string;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderShapeCoverage extends JsonObject {
+  candidate_fields: string[];
+  present_record_count: number;
+  missing_record_count: number;
+}
+
+export interface DomainEvidenceProviderShapeAudit extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-shape-audit/0.1";
+  status: DomainEvidenceProviderShapeStatus;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  root_kind: "object" | "array";
+  recognized_container: string | null;
+  record_count: number;
+  valid_record_count: number;
+  invalid_record_count: number;
+  identifier_coverage: DomainEvidenceProviderShapeCoverage;
+  content_digest_coverage: DomainEvidenceProviderShapeCoverage | null;
+  missing_fields: string[];
+  warnings: string[];
+  limitations: string[];
+  shape_digest: string;
+}
+
+export interface DomainEvidenceProviderRecordIndex extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-record-index/0.1";
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  recognized_container: string | null;
+  record_count: number;
+  indexed_record_count: number;
+  omitted_record_count: number;
+  row_digests: string[];
+  index_digest: string;
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderNormalizationArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  provider: string;
+  payload: JsonObject | JsonValue[];
+  request?: JsonValue;
+  outcome?: DomainEvidenceIntakeOutcome;
+  claim_posture?: DomainReportClaimPosture;
+  parent_digests?: string[];
+  source_plan_digest?: string | null;
+}
+
+export interface DomainEvidenceProviderNormalizationResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-normalization/0.1";
+  workflow: "domain_evidence_provider_normalize";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  provider: string;
+  outcome: DomainEvidenceIntakeOutcome;
+  payload_digest: string;
+  request_digest: string | null;
+  response: JsonObject;
+  shape_audit: DomainEvidenceProviderShapeAudit;
+  record_index: DomainEvidenceProviderRecordIndex;
+  normalization: JsonObject;
+  intake: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceProviderReplayVerifyArgs extends DomainEvidenceProviderNormalizationArgs {
+  expected_payload_digest: string;
+  expected_request_digest?: string | null;
+  expected_shape_digest: string;
+  expected_normalization_digest: string;
+  expected_intake_digest: string;
+}
+
+export type DomainEvidenceProviderReplayStatus = "matched" | "mismatch";
+
+export interface DomainEvidenceProviderReplayVerification extends JsonObject {
+  schema: "bioprism-devplat-domain-evidence-provider-replay/0.1";
+  workflow: "domain_evidence_provider_replay_verify";
+  replay_status: DomainEvidenceProviderReplayStatus;
+  matched: boolean;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  connector_kind: DomainEvidenceProviderConnectorKind;
+  provider: string;
+  expected_payload_digest: string;
+  observed_payload_digest: string;
+  expected_request_digest: string | null;
+  observed_request_digest: string | null;
+  expected_shape_digest: string;
+  observed_shape_digest: string;
+  expected_normalization_digest: string;
+  observed_normalization_digest: string;
+  expected_intake_digest: string;
+  observed_intake_digest: string;
+  matches: JsonObject;
+  differences: string[];
+  shape_audit: DomainEvidenceProviderShapeAudit;
+  record_index: DomainEvidenceProviderRecordIndex;
+  replay_digest: string;
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainEvidenceProviderReplayVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-provider-replay/0.1";
+  workflow: "domain_evidence_provider_replay_verify";
+  replay: DomainEvidenceProviderReplayVerification;
+  matched: boolean;
+  replay_status: DomainEvidenceProviderReplayStatus;
+  replay_digest: string;
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceSourcePlanArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool?: string | null;
+  connector_kind: DomainEvidenceSourceConnectorKind;
+  locator_kind: DomainEvidenceSourceLocatorKind;
+  locator: string;
+  retrieval_mode: DomainEvidenceSourceRetrievalMode;
+  expected_content_digest?: string | null;
+  parent_digests?: string[];
+  retrieval_policy?: JsonObject;
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceSourcePlanResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-source-plan/0.1";
+  workflow: "domain_evidence_source_plan";
+  plan_digest: string;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string | null;
+  connector_kind: DomainEvidenceSourceConnectorKind;
+  locator_kind: DomainEvidenceSourceLocatorKind;
+  locator: string;
+  retrieval_mode: DomainEvidenceSourceRetrievalMode;
+  expected_content_digest: string | null;
+  parent_digests: string[];
+  retrieval_policy: JsonObject;
+  plan: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  retrieval_status: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface DomainEvidenceSourceExecutionArgs extends JsonObject {
+  source_plan_digest: string;
+  source_tool?: string | null;
+  request?: JsonValue;
+  claim_posture?: JsonObject;
+  parent_digests?: string[];
+}
+
+export interface DomainEvidenceSourceExecutionResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-evidence-source-execution/0.1";
+  workflow: "domain_evidence_source_execute";
+  source_plan_digest: string;
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  source_tool: string;
+  outcome: "observed" | "partial" | "refused" | "error" | "unknown";
+  retrieval_status: string;
+  execution: "completed" | "refused";
+  raw_content_digest: string | null;
+  response_digest: string;
+  byte_length: number | null;
+  content_type: string | null;
+  execution_result: JsonObject;
+  intake: JsonObject;
+  artifact_registry: JsonObject;
+  catalogue_digest: string;
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export type AdapterExecutionEvidenceExecutionStatus = "planned" | "started" | "succeeded" | "partial" | "refused" | "failed" | "unknown";
+export type AdapterExecutionEvidenceConformanceStatus = "verified" | "partial" | "refused" | "not_run" | "unknown";
+export type AdapterExecutionEvidenceSemanticLossStatus = "lossless" | "lossy" | "unknown" | "not_applicable";
+
+export interface AdapterExecutionLossArgs extends JsonObject {
+  kind: string;
+  severity: "info" | "warning" | "blocking";
+  detail: string;
+  source_path?: string | null;
+  target_path?: string | null;
+}
+
+export interface AdapterExecutionEvidenceArgs extends JsonObject {
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  adapter_id: string;
+  adapter_version: string;
+  source_id: string;
+  input_digest: string;
+  output_digest?: string | null;
+  execution_status: AdapterExecutionEvidenceExecutionStatus;
+  conformance_status: AdapterExecutionEvidenceConformanceStatus;
+  semantic_loss_status: AdapterExecutionEvidenceSemanticLossStatus;
+  losses?: AdapterExecutionLossArgs[];
+  item_count?: number | null;
+  byte_length?: number | null;
+  error_code?: string | null;
+  parent_digests?: string[];
+  attempt_id?: string | null;
+}
+
+export interface AdapterExecutionEvidence extends JsonObject {
+  schema: "bioprism-devplat-adapter-execution-evidence/0.1";
+  workflow: "adapter_execution_evidence";
+  group_id: string;
+  domains: string[];
+  subject_id: string;
+  adapter_id: string;
+  adapter_version: string;
+  source_id: string;
+  input_digest: string;
+  output_digest: string | null;
+  execution_status: AdapterExecutionEvidenceExecutionStatus;
+  conformance_status: AdapterExecutionEvidenceConformanceStatus;
+  semantic_loss_status: AdapterExecutionEvidenceSemanticLossStatus;
+  losses: AdapterExecutionLossArgs[];
+  item_count: number | null;
+  byte_length: number | null;
+  error_code: string | null;
+  parent_digests: string[];
+  attempt_id: string | null;
+  attestation_posture: "caller_asserted";
+  evidence_digest: string;
+}
+
+export interface AdapterExecutionEvidenceResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-adapter-execution-evidence/0.1";
+  workflow: "adapter_execution_evidence";
+  evidence: AdapterExecutionEvidence;
+  adapter: AdapterDescriptorResult;
+  evidence_digest: string;
+  attestation_posture: "caller_asserted";
+  artifact_registry: JsonObject;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface AdapterExecutionEvidenceQueryArgs extends JsonObject {
+  group_id?: string | null;
+  domain?: string | null;
+  subject_id?: string | null;
+  adapter_id?: string | null;
+  source_id?: string | null;
+  execution_status?: AdapterExecutionEvidenceExecutionStatus | null;
+  conformance_status?: AdapterExecutionEvidenceConformanceStatus | null;
+  semantic_loss_status?: AdapterExecutionEvidenceSemanticLossStatus | null;
+  after?: string | null;
+  max_items?: number;
+  include_artifacts?: boolean;
+}
+
+export type AdapterExecutionEvidenceJoinStatus = "unbound" | "source_bound" | "workflow_bound" | "source_and_workflow_bound" | "bound_with_missing_parents" | "parents_present_unclassified";
+
+export interface AdapterExecutionEvidenceJoinProjection extends JsonObject {
+  source_plan_digests: string[];
+  intake_digests: string[];
+  external_payload_digests: string[];
+  workflow_reconciliation_digests: string[];
+  missing_parent_digests: string[];
+  unclassified_parent_digests: string[];
+  source_bound: boolean;
+  workflow_bound: boolean;
+}
+
+export interface AdapterExecutionEvidenceQueryRow extends JsonObject {
+  row_digest: string;
+  content_digest: string;
+  evidence_digest: string;
+  subject_id: string;
+  group_id: string;
+  domains: string[];
+  adapter_id: string;
+  adapter_version: string;
+  source_id: string;
+  input_digest: string;
+  output_digest: string | null;
+  execution_status: AdapterExecutionEvidenceExecutionStatus;
+  conformance_status: AdapterExecutionEvidenceConformanceStatus;
+  semantic_loss_status: AdapterExecutionEvidenceSemanticLossStatus;
+  loss_count: number;
+  parent_digests: string[];
+  attestation_posture: "caller_asserted";
+  join_status: AdapterExecutionEvidenceJoinStatus;
+  joins: AdapterExecutionEvidenceJoinProjection;
+  evidence_artifact?: JsonObject | null;
+}
+
+export interface AdapterExecutionEvidenceQuerySummary extends JsonObject {
+  page_row_count: number;
+  execution_status_counts: Record<string, number>;
+  conformance_status_counts: Record<string, number>;
+  semantic_loss_status_counts: Record<string, number>;
+  join_status_counts: Record<string, number>;
+  source_bound_rows: number;
+  workflow_bound_rows: number;
+  rows_with_missing_parents: number;
+  output_digest_present_rows: number;
+  total_loss_entries: number;
+}
+
+export interface AdapterExecutionEvidenceQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-adapter-execution-evidence-query/0.1";
+  workflow: "adapter_execution_evidence_query";
+  filters: AdapterExecutionEvidenceQueryArgs;
+  registry_generation: number;
+  registry_size: number;
+  rows: AdapterExecutionEvidenceQueryRow[];
+  page_summary: AdapterExecutionEvidenceQuerySummary;
+  next_after: string | null;
+  has_more: boolean;
+  query_digest: string;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
 }
 
 export interface AdapterPlanArgs extends JsonObject {
@@ -4572,6 +8003,96 @@ export interface AdapterPlanResult extends JsonObject {
   execution: "not_started";
   guarantees: string[];
   limitations: string[];
+}
+
+export interface DomainAcquisitionArgs extends JsonObject {
+  group_id?: string;
+  domain?: string;
+  include_adapters?: boolean;
+  max_groups?: number;
+  max_domains?: number;
+}
+
+export interface DomainAcquisitionTransportResult extends JsonObject {
+  status: "bounded_file_http" | "caller_managed_plan" | "none";
+  tools: string[];
+  caller_managed_tools: string[];
+  bounded_connector_kinds: string[];
+  caller_managed_connector_kinds: string[];
+  limitations: string[];
+}
+
+export interface DomainAcquisitionInterpretationResult extends JsonObject {
+  status: "native" | "python_delegated" | "mixed" | "domain_tools_only" | "unmapped";
+  adapter_ids: string[];
+  match_basis: string[];
+  declared_conformance: Array<"parse" | "normalize" | "execute" | "stream" | "replay">;
+  limitations: string[];
+}
+
+export interface DomainAcquisitionAdapterResult extends JsonObject {
+  id: string;
+  execution: "native" | "python_delegated";
+  version: string;
+  accepted_formats: string[];
+  source_kinds: Array<"bytes" | "directory">;
+  conformance_level: "parse" | "normalize" | "execute" | "stream" | "replay";
+  optional_dependency: string | null;
+  scope_dimensions: string[];
+  match_basis: string[];
+}
+
+export interface DomainAcquisitionRouteResult extends JsonObject {
+  group_id: string;
+  domain: string;
+  declared_tool_count: number;
+  transport: DomainAcquisitionTransportResult;
+  interpretation: DomainAcquisitionInterpretationResult;
+  adapters?: DomainAcquisitionAdapterResult[];
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface DomainAcquisitionGroupResult extends JsonObject {
+  id: string;
+  status: string;
+  declared_domain_count: number;
+  selected_domain_count: number;
+  declared_tool_count: number;
+  transport_status: "bounded_file_http" | "caller_managed_plan" | "none";
+  interpretation_statuses: string[];
+}
+
+export interface DomainAcquisitionCatalogueResult extends JsonObject {
+  schema: "bioprism-devplat-domain-acquisition/0.1";
+  workflow: "domain_acquisition_catalogue";
+  catalogue_digest: string;
+  adapter_registry: string;
+  adapter_registry_digest: string;
+  query: DomainAcquisitionArgs;
+  total_group_count: number;
+  selected_group_count: number;
+  total_domain_count: number;
+  selected_domain_count: number;
+  complete: boolean;
+  truncated: boolean;
+  groups: DomainAcquisitionGroupResult[];
+  routes: DomainAcquisitionRouteResult[];
+  warnings: string[];
+  guarantees: string[];
+  limitations: string[];
+  digest: string;
+}
+
+export interface DomainAcquisitionResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-domain-acquisition/0.1";
+  workflow: "domain_acquisition_catalogue";
+  catalogue: DomainAcquisitionCatalogueResult;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  does_not_claim: string[];
 }
 
 export interface TabularIngestArgs extends JsonObject {
@@ -4718,6 +8239,65 @@ export type ReleaseAuditCheckKind =
   | "pack_health_assess"
   | "repository_impact"
   | "developer_platform_status";
+
+export interface BundleVerificationKeyValidity extends JsonObject {
+  not_before?: number;
+  not_after?: number;
+}
+
+export interface BundleVerificationKey extends JsonObject {
+  key_identity: string;
+  public_key: string;
+  validity: BundleVerificationKeyValidity;
+}
+
+export interface BundleTrustPolicy extends JsonObject {
+  purpose: string;
+  required_role?: string | null;
+  expected_producer?: string | null;
+  require_producer_binding?: boolean;
+  require_signed_at?: boolean;
+  require_delegated?: boolean;
+  allow_root?: boolean;
+  as_of?: number | null;
+  max_delegation_depth?: number;
+}
+
+export interface BundleTrustRegistry extends JsonObject {
+  schema_version: string;
+  keys: JsonObject;
+  delegations: JsonObject;
+  rotations: JsonObject;
+  revocations: JsonObject;
+}
+
+export interface BundleVerifyArgs extends JsonObject {
+  bundle?: JsonObject;
+  document?: string;
+  publicly_attested_bundle?: JsonObject;
+  verification_key?: BundleVerificationKey;
+  trust_registry?: BundleTrustRegistry;
+  trust_policy?: BundleTrustPolicy;
+}
+
+export interface BundleVerifyResult extends JsonObject {
+  ok: boolean;
+  verification_mode?: "ed25519_public_key" | "ed25519_registry_policy";
+  schema_version?: string;
+  bundle_id?: string;
+  manifest_digest?: string;
+  entry_checks?: JsonObject;
+  not_recomputed?: string[];
+  certificate?: string;
+  supply_chain_posture?: JsonObject;
+  authentication?: JsonObject;
+  trust_report?: JsonObject;
+  honest_label?: string;
+  refusal?: string;
+  fail_closed?: boolean;
+  guarantees?: string[];
+  limitations?: string[];
+}
 
 export interface ReleaseAuditCheckArgs extends JsonObject {
   kind: ReleaseAuditCheckKind;
@@ -7104,6 +10684,10 @@ export interface AgentMissionArgs extends JsonObject {
   operations_gate_acceptance?: OperationsGateAcceptance;
   claim_requests?: MissionClaimRequest[];
   evaluator_review?: JsonObject;
+  /** Digest-bound domain workflow instantiation contract carried through dispatch. */
+  workflow_binding?: DomainWorkflowBinding;
+  /** Ready, non-executing capability route review bound to this mission's exact steps. */
+  route_review?: JsonObject;
 }
 
 export type MissionTraceEventName =
@@ -7148,6 +10732,8 @@ export interface AgentMissionReport extends JsonObject {
   claim_lineage?: JsonObject;
   preflight?: boolean;
   dispatch?: "not_started";
+  workflow_reconciliation?: JsonObject;
+  artifact_registry?: JsonObject;
   plan: JsonObject;
   results: JsonObject[];
   [key: string]: JsonValue | undefined;
@@ -7282,6 +10868,281 @@ export interface MissionClaimLineageResponse extends JsonObject {
   claim_lineage: MissionClaimLineageProjection;
 }
 
+export interface MissionEvaluatorReplayQueryOptions extends JsonObject {
+  include_fixtures?: boolean;
+  max_items?: number;
+}
+
+export interface MissionEvaluatorReplayRetention extends JsonObject {
+  mode: "full" | "summary_only" | string;
+  result_retained: boolean;
+  summary_retained: boolean;
+  result_omitted: JsonValue;
+}
+
+export interface MissionEvaluatorReplayQueryResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-api/mission-evaluator-replay-query/0.1";
+  workflow: "mission_evaluator_replay_query";
+  mission_id: string;
+  query: MissionEvaluatorReplayQueryOptions;
+  retention: MissionEvaluatorReplayRetention;
+  replay: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+  links: JsonObject;
+}
+
+export interface MissionEvidenceBundleOptions extends JsonObject {
+  include_result?: boolean;
+  include_trace?: boolean;
+  include_fixtures?: boolean;
+  max_items?: number;
+}
+
+export interface MissionEvidenceBundleResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-api/mission-evidence-bundle/0.1";
+  workflow: "mission_evidence_bundle_export";
+  mission_id: string;
+  retention: JsonObject;
+  result: JsonObject | null;
+  result_digest: string | null;
+  evaluator_replay: JsonObject;
+  catalog_drift: JsonObject;
+  trace: JsonValue;
+  export: JsonObject;
+  bundle_digest: string;
+  guarantees: string[];
+  limitations: string[];
+  links: JsonObject;
+}
+
+export interface MissionEvidenceBundleVerifyArgs extends JsonObject {
+  bundle: JsonObject;
+}
+
+export interface MissionEvidenceBundleVerifyResult extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-devplat-mission-evidence-bundle-verify/0.1" | string;
+  workflow: "mission_evidence_bundle_verify";
+  valid: boolean;
+  verification_status: "verified" | "failed" | string;
+  bundle_digest: string;
+  recomputed_bundle_digest: string;
+  result_digest: string | null;
+  recomputed_result_digest: string | null;
+  checks: JsonObject;
+  failures: string[];
+  execution: "not_started";
+}
+
+export interface MissionEvidenceBundleImportArgs extends JsonObject {
+  bundle: JsonObject;
+}
+
+export interface MissionEvidenceBundleImportResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evidence_bundle_import";
+  bundle_digest: string;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+  artifact_registry?: JsonObject;
+}
+
+export interface MissionEvidenceBundleQueryOptions extends JsonObject {
+  mission_id?: string;
+  domain?: string;
+  after?: string;
+  max_items?: number;
+  include_bundles?: boolean;
+}
+
+export interface MissionEvidenceBundleQueryResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evidence_bundle_query";
+  filters: MissionEvidenceBundleQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export interface MissionEvidenceBundleGetResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "mission_evidence_bundle_get";
+  bundle_digest: string;
+  bundle: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export type ArtifactKind =
+  | "mission_evidence_bundle"
+  | "workflow_reconciliation"
+  | "mission_report"
+  | "evaluator_replay"
+  | "domain_report"
+  | "domain_evidence_harmonization"
+  | "domain_evidence_intake"
+  | "domain_evidence_source_plan"
+  | "domain_decision_readiness"
+  | "adapter_execution_evidence"
+  | "external_reference";
+
+export interface ArtifactRegistrationArgs extends JsonObject {
+  kind: ArtifactKind;
+  subject_id: string;
+  domains?: string[];
+  parent_digests?: string[];
+  declared_digest?: string;
+  artifact: JsonValue;
+}
+
+export interface ArtifactRegistrationResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_register";
+  content_digest: string;
+  kind: ArtifactKind;
+  subject_id: string;
+  declared_digest: string | null;
+  verification: JsonObject;
+  created: boolean;
+  already_present: boolean;
+  registry_generation: number;
+  registry_size: number;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactQueryOptions extends JsonObject {
+  kind?: ArtifactKind;
+  domain?: string;
+  subject_id?: string;
+  after?: string;
+  max_items?: number;
+  include_artifacts?: boolean;
+}
+
+export interface ArtifactQueryResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_query";
+  filters: ArtifactQueryOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactGetResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_get";
+  record: JsonObject;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactLineageResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_lineage";
+  root: string;
+  nodes: JsonObject[];
+  missing_parent_digests: string[];
+  cycles: string[];
+  bounded: true;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactDomainEvidenceLineageOptions extends JsonObject {
+  content_digest?: string;
+  group_id?: string;
+  domain?: string;
+  subject_id?: string;
+  source_tool?: string;
+  outcome?: "observed" | "partial" | "refused" | "error" | "unknown";
+  request_digest?: string;
+  response_digest?: string;
+  intake_digest?: string;
+  source_plan_digest?: string;
+  after?: string;
+  max_items?: number;
+  include_children?: boolean;
+}
+
+export interface ArtifactDomainEvidenceLineageResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_domain_evidence_lineage";
+  filters: ArtifactDomainEvidenceLineageOptions;
+  registry_generation: number;
+  registry_size: number;
+  rows: JsonObject[];
+  next_after: string | null;
+  has_more: boolean;
+  trace_scope: string;
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactCrossStoreAuditResult extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "artifact_registry_cross_store_audit";
+  consistent: boolean;
+  bounded: true;
+  truncated: boolean;
+  stores: JsonObject;
+  coverage: JsonObject;
+  artifact_kind_counts: JsonObject;
+  findings: JsonObject[];
+  execution: "not_started";
+  guarantees: string[];
+  does_not_claim: string[];
+}
+
+export interface ArtifactRegistryPersistenceStatus extends JsonObject {
+  ok: boolean;
+  enabled: boolean;
+  file_present: boolean;
+  file_bytes: number | null;
+  schema: string;
+  state_digest: string | null;
+  integrity_verified: boolean | null;
+  registry_size: number;
+  registry_generation: number;
+  max_records: number;
+  max_file_bytes: number;
+  recovery_policy: string;
+  flush: string;
+}
+
 export interface MissionJob extends JsonObject {
   ok: boolean;
   mission_id: string;
@@ -7293,6 +11154,7 @@ export interface MissionJob extends JsonObject {
   result_omitted?: MissionResultOmission | null;
   error?: string | null;
   progress?: MissionProgress;
+  route_review_provenance?: JsonObject | null;
   poll?: string;
   cancel?: string;
   trace?: string;
@@ -7340,6 +11202,7 @@ export interface MissionInventoryItem extends JsonObject {
   poll: string;
   cancel: string;
   trace: string;
+  route_review_provenance?: JsonObject | null;
   execution_provenance?: JsonObject | null;
 }
 
@@ -7371,6 +11234,90 @@ export interface MissionPersistenceStatus extends JsonObject {
   flush: string;
 }
 
+export type MissionQueueResourceClass = "compile" | "ingest" | "sandbox" | "evaluate" | "mutate" | "index";
+
+export type MissionQueueIdempotency = "idempotent" | "non_idempotent" | "compensable";
+
+export type MissionQueueJobState =
+  | "queued"
+  | "leased"
+  | "staged"
+  | "succeeded"
+  | "failed"
+  | "quarantined"
+  | "dead_lettered"
+  | "cancelled";
+
+export interface MissionQueueJob extends JsonObject {
+  mission_id: string;
+  resource_class: MissionQueueResourceClass;
+  idempotency: MissionQueueIdempotency;
+  idempotency_key: string;
+  priority: number;
+  max_attempts: number;
+  state: MissionQueueJobState;
+  attempts: number;
+  attempts_remaining: number;
+  reason?: string | null;
+  spec_digest: string;
+  route_review_provenance?: JsonObject | null;
+  spec_returned: false;
+}
+
+export interface MissionQueueStatus extends JsonObject {
+  ok: boolean;
+  enabled: boolean;
+  file_present: boolean;
+  file_bytes: number | null;
+  schema_version: number;
+  state_digest: string;
+  authority_digest: string;
+  authority: JsonObject;
+  integrity_verified: boolean | null;
+  max_file_bytes: number;
+  admission_policy: JsonObject;
+  registry_size: number;
+  jobs: MissionQueueJob[];
+  startup_recoveries: JsonObject[];
+  automatic_resume: false;
+  execution_scope: string;
+  recovery_policy: string;
+  does_not_claim: string[];
+  flush: string;
+}
+
+export interface MissionQueueInventoryResponse extends JsonObject {
+  ok: boolean;
+  schema: "bioprism-mission-queue/0.1";
+  queue: MissionQueueStatus;
+  guarantees: string[];
+  links: {
+    persistence: string;
+    flush: string;
+    mission_inventory: string;
+  };
+}
+
+export interface MissionQueueFlushResponse extends JsonObject {
+  ok: boolean;
+  bytes: number;
+  queue: MissionQueueStatus;
+  request_id: string;
+  guarantees: string[];
+}
+
+export interface MissionQueueLockReleaseResponse extends JsonObject {
+  ok: true;
+  receipt: {
+    operator: string;
+    reason: string;
+    previous_owner: JsonObject;
+    recorded_revision: number;
+  };
+  request_id: string;
+  warning: string;
+}
+
 export interface EventPersistenceStatus extends JsonObject {
   ok: boolean;
   enabled: boolean;
@@ -7395,11 +11342,46 @@ export interface EventPersistenceStatus extends JsonObject {
   flush: string;
 }
 
+export interface DomainWorkflowReconciliationPersistenceStatus extends JsonObject {
+  ok: boolean;
+  enabled: boolean;
+  file_present: boolean;
+  file_bytes: number | null;
+  schema: string;
+  state_digest: string | null;
+  integrity_verified: boolean | null;
+  registry_size: number;
+  registry_generation: number;
+  max_reconciliations: number;
+  max_file_bytes: number;
+  recovery_policy: string;
+  flush: string;
+}
+
+export interface DomainWorkflowReconciliationSummary extends JsonObject {
+  ok: boolean;
+  schema: string;
+  workflow: "domain_workflow_reconciliation_summary";
+  registry_generation: number;
+  registry_size: number;
+  completion_status_counts: Record<string, number>;
+  workflow_count: number;
+  workflow_status_counts: Record<string, Record<string, number>>;
+  ready_count: number;
+  review_required_count: number;
+  integrity_invalid_count: number;
+  evidence_invalid_count: number;
+  execution: "not_started";
+  readiness_claimed: false;
+  guarantees: string[];
+  limitations: string[];
+}
+
 export interface RecoveryBoundary extends JsonObject {
   id: string;
   configured: boolean;
   checkpoint_present: boolean;
-  schema_version: number | null;
+  schema_version: string | number | null;
   state_digest: string | null;
   integrity_verified: boolean | null;
   restores: string[];
@@ -7436,6 +11418,8 @@ export interface OperationsSnapshotCapabilities extends JsonObject {
   event_cursor: boolean;
   async_missions: boolean;
   mission_inventory: boolean;
+  workflow_reconciliation_registry: boolean;
+  workflow_reconciliation_persistence: boolean;
   operations_snapshot: boolean;
   domain_coverage: boolean;
   delivery_attempt_provenance: boolean;
@@ -7569,8 +11553,57 @@ export interface OperationsDomainGateGroup extends OperationsDomainGroup {
   gate_state: "catalogue_blocked" | "insufficient_evidence" | "review_required";
   readiness_claimed: false;
   gates: Record<string, JsonObject>;
+  reconciliation_evidence: OperationsReconciliationPosture;
+  artifact_evidence: OperationsArtifactEvidencePosture;
   last_event_id: number | null;
   evidence_scope: "requested_event_page_only";
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches";
+}
+
+export interface OperationsArtifactEvidencePosture extends JsonObject {
+  ok: boolean;
+  workflow: "artifact_registry_domain_evidence_posture";
+  schema: "bioprism-devplat-artifact-domain-evidence-posture/0.1";
+  group_id: string;
+  requested_domains: string[];
+  registry_generation: number;
+  registry_size: number;
+  state: "missing" | "observed";
+  matching_record_count: number;
+  integrity_verified_record_count: number;
+  kind_counts: Record<string, number>;
+  family_counts: Record<string, number>;
+  verification_state_counts: Record<string, number>;
+  match_basis_counts: Record<string, number>;
+  subject_count: number;
+  parent_linked_record_count: number;
+  matched_domain_labels: string[];
+  scope: string;
+  readiness_claimed: false;
+  execution: "not_started";
+  guarantees: string[];
+  limitations: string[];
+}
+
+export type OperationsReconciliationPostureState =
+  | "missing"
+  | "invalid"
+  | "incomplete"
+  | "structurally_ready";
+
+export interface OperationsReconciliationPosture extends JsonObject {
+  workflow_id: string;
+  state: OperationsReconciliationPostureState;
+  record_count: number;
+  completion_status_counts: Record<string, number>;
+  ready_count: number;
+  review_required_count: number;
+  integrity_invalid_count: number;
+  evidence_invalid_count: number;
+  readiness_claimed: false;
+  scope: "bounded_digest_valid_reconciliation_registry";
+  guarantees: string[];
+  limitations: string[];
 }
 
 export interface OperationsDomainGates extends JsonObject {
@@ -7578,7 +11611,8 @@ export interface OperationsDomainGates extends JsonObject {
   workflow: "operations_domain_gates";
   schema: "bioprism-operations-domain-gates/0.1";
   gate_digest: string;
-  gate_digest_scope: "tool_evidence_projection_without_gate_digest";
+  gate_digest_scope: "operations_evidence_and_reconciliation_projection_without_gate_digest";
+  artifact_evidence_scope: "current_digest_verified_artifact_registry_exact_declared_matches";
   event_cursor: {
     after: number;
     next_after: number;
@@ -7604,6 +11638,11 @@ export interface OperationsDomainGates extends JsonObject {
     groups_blocked_catalogue: number;
     groups_insufficient_evidence: number;
     groups_review_required: number;
+    groups_reconciliation_blocked: number;
+    groups_with_artifact_evidence: number;
+    artifact_evidence_records: number;
+    artifact_registry_generation: number;
+    artifact_registry_size: number;
     readiness_claimed: false;
   };
   gate_policy: JsonObject;
@@ -7660,7 +11699,10 @@ export interface OperationsSnapshot extends JsonObject {
   persistence: {
     missions: MissionPersistenceStatus;
     events: EventPersistenceStatus;
+    workflow_reconciliations: DomainWorkflowReconciliationPersistenceStatus;
+    artifacts: ArtifactRegistryPersistenceStatus;
   };
+  reconciliation_summary: DomainWorkflowReconciliationSummary;
   recovery: RecoveryMatrix;
   domain_coverage: OperationsDomainCoverage;
   consistency: OperationsSnapshotConsistency;
@@ -7697,6 +11739,7 @@ export interface MissionPreflightResult extends JsonObject {
   waves: string[][];
   issues: string[];
   warnings: string[];
+  route_review_provenance?: JsonObject | null;
   steps: MissionStepPreflight[];
   limitations: string[];
 }
@@ -7719,6 +11762,7 @@ export interface MissionAssembly extends JsonObject {
   catalog_digest: string;
   mission: AgentMissionArgs;
   selected_tools: string[];
+  route_review_provenance?: JsonObject | null;
   limitations: string[];
 }
 

@@ -22,19 +22,37 @@
 //!
 //! ## Not implemented
 //!
-//! In-memory, single-process, and time is passed in rather than read from a clock so the lifecycle
-//! is deterministically testable. A durable multi-node store needs the append-only event ledger of
-//! 40.09 and a transactional backend; this crate is the lifecycle logic those would wrap, not a
-//! substitute for them. There is no backpressure model, no fair-share scheduling across tenants,
-//! and no distributed lease fencing — 35's million-scale concerns beyond enqueue and recovery are
-//! absent rather than stubbed.
+//! The in-memory controller is single-process and time is passed in rather than read from a clock
+//! so the lifecycle is deterministically testable. [`authority::SharedExecutionAuthority`] wraps
+//! it in a bounded, content-addressed JSON envelope with an atomic queue-plus-journal write,
+//! hash-chained transitions, startup recovery, and a cooperative local-filesystem lock for
+//! cooperating processes. A durable multi-host deployment still needs the append-only event ledger
+//! of 40.09 behind a transactional backend, cross-host fencing/consensus, and authenticated worker
+//! identity. Tenant fairness, provider effects, and network-partition tolerance remain absent
+//! rather than stubbed.
 
+pub mod admission;
+pub mod authority;
 pub mod error;
 pub mod job;
 pub mod lease;
+pub mod snapshot;
 pub mod store;
 
+pub use admission::QueueAdmissionPolicy;
+pub use authority::{
+    AuthorityLockInfo, AuthorityLockRelease, AuthorityMutation, ExecutionAuthoritySnapshot,
+    ExecutionAuthorityStatus, ExecutionOperation, ExecutionTransition, SharedExecutionAuthority,
+    EXECUTION_AUTHORITY_SCHEMA_VERSION, MAX_EXECUTION_AUTHORITY_BYTES,
+    MAX_EXECUTION_AUTHORITY_EVENTS,
+};
 pub use error::FactoryError;
 pub use job::{Idempotency, Job, JobState, ResourceClass};
 pub use lease::{Lease, WorkerCapability};
+pub use snapshot::{
+    CompensationRecord, IdempotencyIndexEntry, JobStoreSnapshot, OutputRecord,
+    JOB_STORE_SNAPSHOT_SCHEMA_VERSION, MAX_JOB_STORE_SNAPSHOT_BYTES,
+    MAX_JOB_STORE_SNAPSHOT_ID_BYTES, MAX_JOB_STORE_SNAPSHOT_JOBS,
+    MAX_JOB_STORE_SNAPSHOT_VALUE_BYTES, MAX_JOB_STORE_SNAPSHOT_WORKER_ID_BYTES,
+};
 pub use store::{JobStore, Recovery};

@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from .alignment import audit_alignments
+from .adapter_execution_evidence import AdapterExecutionLoss, AdapterExecutionEvidenceRequest
 from .anndata import audit_anndata
 from .authoring import content_digest
 from .bed import parse_bed
@@ -90,15 +91,146 @@ def _text(name: str, value: str, maximum: int) -> None:
         raise ArgumentError(f"{name} must not contain control characters")
 
 
+def _runtime_conformance_status(status: RuntimeStatus, document: Mapping[str, Any] | None) -> str:
+    if isinstance(document, Mapping):
+        conformance = document.get("conformance")
+        if isinstance(conformance, Mapping):
+            if conformance.get("passed") is True or conformance.get("verified") is True:
+                return "verified"
+            if conformance.get("passed") is False:
+                return "partial"
+    if status is RuntimeStatus.REJECTED:
+        return "refused"
+    if status is RuntimeStatus.UNSUPPORTED:
+        return "not_run"
+    return "unknown"
+
+
+def _runtime_semantic_loss_status(document: Mapping[str, Any] | None) -> str:
+    if not isinstance(document, Mapping):
+        return "unknown"
+    semantic_loss = document.get("semantic_loss")
+    if not isinstance(semantic_loss, Mapping):
+        return "unknown"
+    lost_count = semantic_loss.get("lost_count", 0)
+    omitted_count = semantic_loss.get("lost_omitted", 0)
+    if isinstance(lost_count, int) and lost_count < 0:
+        return "unknown"
+    if isinstance(omitted_count, int) and omitted_count < 0:
+        return "unknown"
+    return "lossy" if (isinstance(lost_count, int) and lost_count > 0) or (isinstance(omitted_count, int) and omitted_count > 0) else "lossless"
+
+
+def _runtime_loss_severity(value: Any) -> str:
+    if value == "blocking":
+        return "blocking"
+    if value in {"major", "degrading", "warning"}:
+        return "warning"
+    return "info"
+
+
+def _runtime_loss_path(location: Any, keys: tuple[str, ...]) -> str | None:
+    if not isinstance(location, Mapping):
+        return None
+    for key in keys:
+        value = location.get(key)
+        if isinstance(value, (str, int)):
+            return str(value)
+    return None
+
+
+def _runtime_loss_entries(document: Mapping[str, Any] | None) -> tuple[AdapterExecutionLoss, ...]:
+    if not isinstance(document, Mapping):
+        return ()
+    semantic_loss = document.get("semantic_loss")
+    if not isinstance(semantic_loss, Mapping):
+        return ()
+    raw_losses = semantic_loss.get("lost")
+    entries: list[AdapterExecutionLoss] = []
+    if isinstance(raw_losses, Sequence) and not isinstance(raw_losses, (str, bytes)):
+        for raw_loss in raw_losses[:127]:
+            if not isinstance(raw_loss, Mapping):
+                continue
+            kind = raw_loss.get("kind")
+            detail = raw_loss.get("detail")
+            if not isinstance(kind, str) or not kind.strip():
+                kind = "semantic_loss"
+            if not isinstance(detail, str) or not detail.strip():
+                detail = f"runtime reported semantic loss {kind}"
+            location = raw_loss.get("location")
+            entries.append(
+                AdapterExecutionLoss(
+                    kind=kind,
+                    severity=_runtime_loss_severity(raw_loss.get("severity")),
+                    detail=detail,
+                    source_path=_runtime_loss_path(location, ("source", "path", "field", "record")),
+                    target_path=_runtime_loss_path(location, ("target", "target_path")),
+                )
+            )
+    omitted = semantic_loss.get("lost_omitted", 0)
+    if isinstance(omitted, int) and omitted > 0 and len(entries) < 128:
+        entries.append(
+            AdapterExecutionLoss(
+                kind="loss_entries_omitted",
+                severity="warning",
+                detail=f"{omitted} semantic-loss entries were omitted by the runtime preview bound",
+            )
+        )
+    lost_count = semantic_loss.get("lost_count", 0)
+    if isinstance(lost_count, int) and lost_count > 0 and not entries:
+        entries.append(
+            AdapterExecutionLoss(
+                kind="semantic_loss_present",
+                severity="warning",
+                detail=f"runtime reported {lost_count} semantic-loss entries without retaining their details",
+            )
+        )
+    return tuple(entries)
+
+
+def _runtime_item_count(document: Mapping[str, Any] | None) -> int | None:
+    if not isinstance(document, Mapping):
+        return None
+    for key in (
+        "variant_count", "record_count", "feature_count", "molecule_count", "spectrum_count",
+        "read_count", "resource_count", "interval_count", "atom_count", "image_count",
+        "instance_count", "file_count",
+    ):
+        value = document.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
+
+
+def _runtime_byte_length(
+    document: Mapping[str, Any] | None,
+    source_context: Mapping[str, Any] | None,
+) -> int | None:
+    for candidate in (
+        document.get("byte_length") if isinstance(document, Mapping) else None,
+        source_context.get("byte_length") if isinstance(source_context, Mapping) else None,
+    ):
+        if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate >= 0:
+            return candidate
+    return None
+
+
 @dataclass(frozen=True)
 class ProjectionRequest:
-    """A bounded request whose payload shape is owned by the selected adapter route."""
+    """A bounded request whose payload shape is owned by the selected adapter route.
+
+    ``provenance`` is passed to the selected format audit and follows that adapter's accepted
+    provenance schema. ``source_context`` is a separate transport-bound envelope for connector
+    identity and digests; it is retained in the request identity but never passed to a parser as
+    if it were scientific provenance.
+    """
 
     adapter_id: str
     source_id: str
     payload: Mapping[str, Any]
     provenance: Mapping[str, Any] | None = None
     max_items: int = MAX_RUNTIME_ITEMS
+    source_context: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _text("adapter_id", self.adapter_id, MAX_RUNTIME_ADAPTER_ID_BYTES)
@@ -107,17 +239,30 @@ class ProjectionRequest:
             raise ArgumentError("payload must be a mapping; its schema is selected by adapter_id")
         if self.provenance is not None and not isinstance(self.provenance, Mapping):
             raise ArgumentError("provenance must be a mapping when supplied")
+        if self.source_context is not None:
+            if not isinstance(self.source_context, Mapping):
+                raise ArgumentError("source_context must be a mapping when supplied")
+            try:
+                content_digest(dict(self.source_context))
+            except Exception as error:
+                raise ArgumentError(f"source_context must be canonical JSON-safe: {error}") from error
         if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= MAX_RUNTIME_ITEMS:
             raise ArgumentError(f"max_items must be between 1 and {MAX_RUNTIME_ITEMS}")
 
     def to_wire(self) -> dict[str, Any]:
-        return {
+        result = {
             "adapter_id": self.adapter_id,
             "source_id": self.source_id,
             "payload_keys": sorted(str(key) for key in self.payload.keys()),
             "provenance_present": self.provenance is not None,
             "max_items": self.max_items,
         }
+        if self.source_context is not None:
+            result["source_context_present"] = True
+            result["source_context_digest"] = content_digest(dict(self.source_context))
+        else:
+            result["source_context_present"] = False
+        return result
 
 
 @dataclass(frozen=True)
@@ -157,6 +302,64 @@ class AdapterExecutionResult:
         if self.error is not None:
             result["error"] = dict(self.error)
         return result
+
+    def to_adapter_execution_evidence_request(
+        self,
+        group_id: str,
+        domains: Sequence[str],
+        *,
+        subject_id: str,
+        input_digest: str,
+        parent_digests: Sequence[str] = (),
+        attempt_id: str | None = None,
+    ) -> AdapterExecutionEvidenceRequest:
+        """Convert one concrete runtime result into the shared caller-evidence contract.
+
+        ``input_digest`` is intentionally required: a runtime request may contain inline text,
+        a confined path, or a caller-owned opaque handle, and the runtime must not guess whether
+        a payload digest represents source bytes, a locator, or only request metadata. Callers
+        may then submit the returned request through ``adapter_execution_evidence`` over MCP or
+        HTTP. This method performs no transport and never claims that the MCP core executed the
+        adapter.
+        """
+
+        if self.adapter is None:
+            raise ArgumentError("adapter execution evidence requires a declared adapter descriptor")
+        execution_status = {
+            RuntimeStatus.SUCCEEDED: "succeeded",
+            RuntimeStatus.LOSSY: "partial",
+            RuntimeStatus.INVALID: "failed",
+            RuntimeStatus.BLOCKED: "failed",
+            RuntimeStatus.REJECTED: "refused",
+            RuntimeStatus.UNSUPPORTED: "refused",
+        }[self.status]
+        document = self.document if isinstance(self.document, Mapping) else None
+        conformance_status = _runtime_conformance_status(self.status, document)
+        semantic_loss_status = _runtime_semantic_loss_status(document)
+        losses = _runtime_loss_entries(document)
+        output_digest = self.document_digest if execution_status in {"succeeded", "partial"} else None
+        error_code = None
+        if execution_status in {"refused", "failed"}:
+            error_code = str(self.error.get("kind", self.status.value)) if self.error else self.status.value
+        return AdapterExecutionEvidenceRequest(
+            group_id=group_id,
+            domains=tuple(domains),
+            subject_id=subject_id,
+            adapter_id=self.adapter.id,
+            adapter_version=self.adapter.version,
+            source_id=self.request.source_id,
+            input_digest=input_digest,
+            output_digest=output_digest,
+            execution_status=execution_status,
+            conformance_status=conformance_status,
+            semantic_loss_status=semantic_loss_status,
+            losses=losses,
+            item_count=_runtime_item_count(document),
+            byte_length=_runtime_byte_length(document, self.request.source_context),
+            error_code=error_code,
+            parent_digests=tuple(parent_digests),
+            attempt_id=attempt_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -344,6 +547,45 @@ class ProjectionBatchResult:
             "batch_digest": self.batch_digest,
             "results": [result.to_wire() for result in self.results],
         }
+
+    def to_adapter_execution_evidence_requests(
+        self,
+        group_id: str,
+        domains: Sequence[str],
+        *,
+        subject_id: str,
+        input_digests: Mapping[str, str],
+        parent_digests_by_source: Mapping[str, Sequence[str]] | None = None,
+        attempt_ids_by_source: Mapping[str, str] | None = None,
+    ) -> tuple[AdapterExecutionEvidenceRequest, ...]:
+        """Convert every batch member into an explicit adapter-evidence handoff.
+
+        Source digests are keyed by the caller-owned ``source_id`` instead of being inferred from
+        request payloads. A missing digest or an unknown adapter raises, so a batch cannot appear
+        completely evidenced merely because some members produced documents.
+        """
+
+        if not isinstance(input_digests, Mapping):
+            raise ArgumentError("input_digests must map source_id to source digest")
+        parent_digests_by_source = parent_digests_by_source or {}
+        attempt_ids_by_source = attempt_ids_by_source or {}
+        requests: list[AdapterExecutionEvidenceRequest] = []
+        for result in self.results:
+            source_id = result.request.source_id
+            input_digest = input_digests.get(source_id)
+            if input_digest is None:
+                raise ArgumentError(f"input_digests is missing source_id {source_id!r}")
+            requests.append(
+                result.to_adapter_execution_evidence_request(
+                    group_id,
+                    domains,
+                    subject_id=subject_id,
+                    input_digest=input_digest,
+                    parent_digests=parent_digests_by_source.get(source_id, ()),
+                    attempt_id=attempt_ids_by_source.get(source_id),
+                )
+            )
+        return tuple(requests)
 
 
 class AdapterRuntime:

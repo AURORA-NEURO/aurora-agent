@@ -1,7 +1,7 @@
 import { ApiError, ArgumentError, MissionWaitTimeoutError, ProtocolError, ResponseTooLargeError, ToolRefusalError, TransportError, isObject } from "./errors.js";
 import { missionFromRoute as assembleMissionFromRoute, preflightMission } from "./mission.js";
 import { parseSse } from "./sse.js";
-import { ToolCatalogue } from "./tooling.js";
+import { ToolCatalogue, digestCanonicalJsonTextSync } from "./tooling.js";
 import type {
   ApiClientOptions,
   ApiErrorBody,
@@ -15,15 +15,95 @@ import type {
   CapabilityDashboardArgs,
   CapabilityDashboardResult,
   CapabilityRouteArgs,
+  CapabilityRoutePlanArgs,
+  CapabilityRoutePlanResult,
+  CapabilityRoutePlanVerifyArgs,
+  CapabilityRoutePlanVerifyResult,
   CapabilityRouteReviewArgs,
   CapabilityRouteReviewResult,
   CapabilityRouteResult,
+  DomainWorkflowCatalogueResult,
+  DomainWorkflowInstantiateArgs,
+  DomainWorkflowInstantiateResult,
+  DomainWorkflowPortfolioArgs,
+  DomainWorkflowPortfolioResult,
+  DomainWorkflowPortfolioVerifyArgs,
+  DomainWorkflowPortfolioVerifyResult,
+  DomainWorkflowVerifyArgs,
+  DomainWorkflowVerifyResult,
+  DomainWorkflowScaffoldArgs,
+  DomainWorkflowScaffoldResult,
+  DomainWorkflowReconcileArgs,
+  DomainWorkflowReconcileResult,
+  DomainWorkflowReconciliationImportArgs,
+  DomainWorkflowReconciliationImportResult,
+  DomainWorkflowReconciliationQueryOptions,
+  DomainWorkflowReconciliationQueryResult,
+  DomainWorkflowReconciliationGetResult,
+  DomainReportProjectArgs,
+  DomainReportProjectResult,
+  AdapterDomainReportArgs,
+  AdapterDomainReportResult,
+  ProviderDomainReportArgs,
+  ProviderDomainReportResult,
+  DomainReportCoverageOptions,
+  DomainReportCoverageResult,
+  DomainEvidenceHarmonizeArgs,
+  DomainEvidenceHarmonizationResult,
+  DomainDecisionReadinessArgs,
+  DomainDecisionReadinessResult,
+  DomainDecisionReadinessQueryOptions,
+  DomainDecisionReadinessQueryResult,
+  ControlPlaneReadinessArgs,
+  ControlPlaneReadinessResult,
+  ControlPlaneReadinessCompareArgs,
+  ControlPlaneReadinessCompareResult,
+  ControlPlaneReadinessCompareRetainedArgs,
+  ControlPlaneReadinessCompareRetainedResult,
+  ControlPlaneReadinessQueryOptions,
+  ControlPlaneReadinessQueryResult,
+  DomainEvidenceHarmonizationCoverageOptions,
+  DomainEvidenceHarmonizationCoverageResult,
+  DomainEvidenceIntakeArgs,
+  DomainEvidenceIntakeResult,
+  DomainEvidenceIntakeCoverageOptions,
+  DomainEvidenceIntakeCoverageResult,
+  DomainEvidenceSourcePlanArgs,
+  DomainEvidenceSourcePlanResult,
+  DomainEvidenceSourceExecutionArgs,
+  DomainEvidenceSourceExecutionResult,
+  DomainEvidenceProviderNormalizationArgs,
+  DomainEvidenceProviderNormalizationResult,
+  DomainEvidenceProviderHandoffArgs,
+  DomainEvidenceProviderHandoffResult,
+  DomainEvidenceProviderExternalPayloadReceiptArgs,
+  DomainEvidenceProviderExternalPayloadReceiptResult,
+  DomainEvidenceProviderExternalPayloadReplayVerifyArgs,
+  DomainEvidenceProviderExternalPayloadReplayVerifyResult,
+  DomainEvidenceProviderExternalPayloadNormalizationArgs,
+  DomainEvidenceProviderExternalPayloadNormalizationResult,
+  DomainEvidenceProviderExternalPayloadLineageAuditArgs,
+  DomainEvidenceProviderExternalPayloadLineageAuditResult,
+  DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs,
+  DomainEvidenceProviderExternalPayloadExecutionEvidenceResult,
+  DomainEvidenceProviderExternalPayloadEvidenceQueryArgs,
+  DomainEvidenceProviderExternalPayloadEvidenceQueryResult,
+  DomainEvidenceProviderReplayVerifyArgs,
+  DomainEvidenceProviderReplayVerifyResult,
   AdapterPlanArgs,
   AdapterPlanResult,
+  AdapterExecutionEvidenceArgs,
+  AdapterExecutionEvidenceResult,
+  AdapterExecutionEvidenceQueryArgs,
+  AdapterExecutionEvidenceQueryResult,
+  DomainAcquisitionArgs,
+  DomainAcquisitionResult,
   TabularIngestArgs,
   TabularIngestResult,
   ConformanceRunArgs,
   ConformanceRunResult,
+  BundleVerifyArgs,
+  BundleVerifyResult,
   ReleaseAuditArgs,
   ReleaseAuditResult,
   OperationsCatalogArgs,
@@ -187,6 +267,22 @@ import type {
   DeveloperPlatformStatusResult,
   EpistemicVoiArgs,
   EpistemicVoiResult,
+  EpistemicAdaptiveArgs,
+  EpistemicAdaptiveResult,
+  AdaptiveExecutionArgs,
+  AdaptiveExecutionResult,
+  AdaptiveCostedArgs,
+  AdaptiveCostedResult,
+  WorkflowExecutionArgs,
+  WorkflowExecutionResult,
+  WorkflowExecutionEvidenceArgs,
+  WorkflowExecutionEvidenceImportArgs,
+  WorkflowExecutionEvidenceQueryOptions,
+  WorkflowExecutionEvidenceResult,
+  EpistemicDecisionQuotientArgs,
+  EpistemicDecisionQuotientResult,
+  FiberCompileArgs,
+  FiberCompileResult,
   EpistemicContextAuditArgs,
   EpistemicContextAuditResult,
   EpistemicSelectionAuditArgs,
@@ -240,10 +336,22 @@ import type {
   WeaveLangCompileArgs,
   WeaveLangCompileResult,
   DeveloperWorkbenchArgs,
+  DeveloperWorkbenchRegistryGetResult,
+  DeveloperWorkbenchRegistryImportArgs,
+  DeveloperWorkbenchRegistryImportResult,
+  DeveloperWorkbenchRegistryQueryArgs,
+  DeveloperWorkbenchRegistryQueryResult,
+  DeveloperWorkbenchVerificationArgs,
+  DeveloperWorkbenchVerificationResult,
   CiProviderNormalizationArgs,
   CiProviderNormalizationResult,
   CiProviderEvidenceArgs,
   CiProviderEvidenceResult,
+  CiProviderEvidenceRegistryGetResult,
+  CiProviderEvidenceRegistryImportArgs,
+  CiProviderEvidenceRegistryImportResult,
+  CiProviderEvidenceRegistryQueryArgs,
+  CiProviderEvidenceRegistryQueryResult,
   CiExecutionEvidenceArgs,
   CiExecutionEvidenceResult,
   ExecutionProvenanceArgs,
@@ -262,12 +370,41 @@ import type {
   MissionClaimLineageResponse,
   MissionEvaluatorDiscoverArgs,
   MissionEvaluatorDiscoverResult,
+  MissionEvaluatorReplayArgs,
+  MissionEvaluatorReplayCompareArgs,
+  MissionEvaluatorReplayCompareResult,
+  MissionEvaluatorReplayResult,
+  MissionEvaluatorReplayQueryOptions,
+  MissionEvaluatorReplayQueryResult,
   MissionEvaluatorReviewArgs,
   MissionEvaluatorReviewResult,
   MissionExecutionProvenanceResponse,
+  MissionEvidenceBundleOptions,
+  MissionEvidenceBundleResult,
+  MissionEvidenceBundleImportArgs,
+  MissionEvidenceBundleImportResult,
+  MissionEvidenceBundleQueryOptions,
+  MissionEvidenceBundleQueryResult,
+  MissionEvidenceBundleGetResult,
+  MissionEvidenceBundleVerifyArgs,
+  MissionEvidenceBundleVerifyResult,
+  ArtifactRegistrationArgs,
+  ArtifactRegistrationResult,
+  ArtifactDomainEvidenceLineageOptions,
+  ArtifactDomainEvidenceLineageResult,
+  ArtifactCrossStoreAuditResult,
+  ArtifactQueryOptions,
+  ArtifactQueryResult,
+  ArtifactGetResult,
+  ArtifactLineageResult,
+  ArtifactRegistryPersistenceStatus,
   MissionJob,
   MissionJobStatus,
   MissionInventoryResponse,
+  MissionQueueFlushResponse,
+  MissionQueueInventoryResponse,
+  MissionQueueLockReleaseResponse,
+  MissionQueueStatus,
   MissionPersistenceStatus,
   MissionPreflightResult,
   MissionRouteSelection,
@@ -337,6 +474,45 @@ import type {
   TraceOtelIngestArgs,
   TraceOtelIngestResult,
 } from "./types.js";
+import type {
+  BrainBanditContext,
+  BrainBanditSelectionResult,
+  BrainBanditState,
+  BrainBanditUpdate,
+  BrainJobApprovalArgs,
+  BrainJobApprovalResult,
+  BrainJobCancelArgs,
+  BrainJobCancelResult,
+  BrainJobClaimArgs,
+  BrainJobClaimNextArgs,
+  BrainJobClaimNextResult,
+  BrainJobCheckpointArgs,
+  BrainJobCompleteArgs,
+  BrainJobEventsArgs,
+  BrainJobEventsResult,
+  BrainJobFailArgs,
+  BrainJobLifecycleResult,
+  BrainJobReconcileArgs,
+  BrainJobRenewArgs,
+  BrainJobStatusArgs,
+  BrainJobStatusResult,
+  BrainJobSubmitArgs,
+  BrainJobSubmitResult,
+  BrainModelHealthArgs,
+  BrainModelHealthResult,
+  BrainOutcomeRecordArgs,
+  BrainOutcomeRecordResult,
+  BrainModelSelectionArgs,
+  BrainModelSelectionResult,
+  BrainContextualModelSelectionArgs,
+  BrainContextualModelSelectionResult,
+  BrainPlanArgs,
+  BrainPlanResult,
+  BrainPromptArgs,
+  BrainPromptResult,
+  BrainReplayEvaluateArgs,
+  BrainReplayEvaluateResult,
+} from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 20_000_000;
@@ -345,6 +521,70 @@ const MAX_EVENT_PAGE = 1_000;
 const MAX_REQUEST_ID_BYTES = 256;
 const MAX_MISSION_WAIT_MS = 86_400_000;
 const MAX_MISSION_POLL_INTERVAL_MS = 60_000;
+
+const BRAIN_SECRET_FIELDS = new Set([
+  "api_key",
+  "access_token",
+  "credential",
+  "credential_material",
+  "credentials",
+  "password",
+  "prompt",
+  "task_payload",
+  "provider_response",
+  "response_text",
+]);
+
+function rejectBrainSecretFields(value: JsonObject, label: string): void {
+  const forbidden = Object.keys(value).filter((key) => BRAIN_SECRET_FIELDS.has(key));
+  if (forbidden.length > 0) throw new ArgumentError(`${label} cannot contain secret or private-work fields: ${forbidden.join(", ")}`);
+}
+
+function validateBrainContextIdentity(contextDigest: string, context: BrainBanditContext, label: string): void {
+  const normalized = {
+    domain: context.domain,
+    capability: context.capability,
+    risk_class: context.risk_class,
+    task_family: context.task_family ?? null,
+  };
+  if (digestCanonicalJsonTextSync(JSON.stringify(normalized)) !== contextDigest) throw new ArgumentError(`${label} context_digest does not match its context identity`);
+}
+
+function validateOptionalBoundedInteger(value: number | undefined, minimum: number, maximum: number, label: string): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value < minimum || value > maximum)) throw new ArgumentError(`${label} must be a safe integer within [${minimum}, ${maximum}]`);
+}
+
+function validateDigestList(value: string[] | undefined, maximum: number, label: string): void {
+  if (value !== undefined && (!Array.isArray(value) || value.length > maximum || value.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError(`${label} must contain at most ${maximum} lowercase SHA-256 digests`);
+}
+
+function validateAdapterExecutionEvidenceArgs(args: AdapterExecutionEvidenceArgs): AdapterExecutionEvidenceArgs {
+  if (!isObject(args)) throw new ArgumentError("adapter execution evidence arguments must be an object");
+  for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["adapter_id", args.adapter_id], ["adapter_version", args.adapter_version], ["source_id", args.source_id], ["execution_status", args.execution_status], ["conformance_status", args.conformance_status], ["semantic_loss_status", args.semantic_loss_status]] as const) {
+    if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+  }
+  if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+  if (typeof args.input_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.input_digest)) throw new ArgumentError("input_digest must be a lowercase SHA-256 digest");
+  if (args.output_digest !== undefined && args.output_digest !== null && (typeof args.output_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.output_digest))) throw new ArgumentError("output_digest must be a lowercase SHA-256 digest or null");
+  const executionStatuses = ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown"];
+  const conformanceStatuses = ["verified", "partial", "refused", "not_run", "unknown"];
+  const lossStatuses = ["lossless", "lossy", "unknown", "not_applicable"];
+  if (!executionStatuses.includes(args.execution_status)) throw new ArgumentError("execution_status is invalid");
+  if (!conformanceStatuses.includes(args.conformance_status)) throw new ArgumentError("conformance_status is invalid");
+  if (!lossStatuses.includes(args.semantic_loss_status)) throw new ArgumentError("semantic_loss_status is invalid");
+  const losses = args.losses ?? [];
+  if (!Array.isArray(losses) || losses.length > 128 || losses.some((loss) => !isObject(loss) || typeof loss.kind !== "string" || loss.kind.trim().length === 0 || !["info", "warning", "blocking"].includes(String(loss.severity)) || typeof loss.detail !== "string" || loss.detail.trim().length === 0)) throw new ArgumentError("losses must contain at most 128 valid loss entries");
+  if ((args.semantic_loss_status === "lossless" || args.semantic_loss_status === "not_applicable") && losses.length > 0) throw new ArgumentError("lossless or not_applicable evidence cannot contain losses");
+  if (args.semantic_loss_status === "lossy" && losses.length === 0) throw new ArgumentError("lossy evidence must contain at least one loss");
+  if (args.execution_status === "succeeded" && (typeof args.output_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.output_digest))) throw new ArgumentError("succeeded execution requires output_digest");
+  if ((args.execution_status === "refused" || args.execution_status === "failed") && (typeof args.error_code !== "string" || args.error_code.trim().length === 0)) throw new ArgumentError("refused or failed execution requires error_code");
+  for (const [name, value, maximum] of [["item_count", args.item_count, 2_000_000], ["byte_length", args.byte_length, 68_719_476_736]] as const) {
+    if (value !== undefined && value !== null && (!Number.isSafeInteger(value) || value < 0 || value > maximum)) throw new ArgumentError(`${name} is outside its bound`);
+  }
+  if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+  if ("credential_material" in args || "credentials" in args) throw new ArgumentError("credential material is not accepted by the adapter evidence boundary");
+  return { ...args, losses };
+}
 
 /**
  * Fetch-based client for the bounded Prism API.
@@ -421,6 +661,876 @@ export class ApiClient {
 
   async capabilities(options?: ClientRequestOptions): Promise<CapabilitiesResponse> {
     return this.request<CapabilitiesResponse>("GET", "/v1/capabilities", undefined, options);
+  }
+
+  /** Read one deterministic, digest-bound workflow template for every capability group. */
+  async domainWorkflowCatalogueQuery(options?: ClientRequestOptions): Promise<DomainWorkflowCatalogueResult> {
+    return this.request<DomainWorkflowCatalogueResult>("GET", "/v1/domain-workflows", undefined, options);
+  }
+
+  /** Build and preflight an execution-disabled scaffold for one capability group. */
+  async domainWorkflowScaffoldQuery(
+    args: DomainWorkflowScaffoldArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowScaffoldResult> {
+    if (!isObject(args)) throw new ArgumentError("domain workflow scaffold arguments must be an object");
+    if (typeof args.workflow_id !== "string" || args.workflow_id.trim().length === 0) throw new ArgumentError("workflow_id must be a non-empty string");
+    if (typeof args.mission_id !== "string" || args.mission_id.trim().length === 0) throw new ArgumentError("mission_id must be a non-empty string");
+    if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
+    if (args.tools !== undefined && (!Array.isArray(args.tools) || args.tools.length > 128 || args.tools.some((tool) => typeof tool !== "string" || tool.trim().length === 0))) {
+      throw new ArgumentError("tools must contain at most 128 non-empty strings");
+    }
+    if (args.arguments !== undefined && !isObject(args.arguments)) throw new ArgumentError("arguments must be an object");
+    return this.request<DomainWorkflowScaffoldResult>("POST", "/v1/domain-workflows/scaffold", args, options);
+  }
+
+  /** Instantiate and authoritative-preflight a group-scoped mission without dispatch. */
+  async domainWorkflowInstantiateQuery(
+    args: DomainWorkflowInstantiateArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowInstantiateResult> {
+    if (!isObject(args)) throw new ArgumentError("domain workflow arguments must be an object");
+    if (typeof args.workflow_id !== "string" || args.workflow_id.trim().length === 0) throw new ArgumentError("workflow_id must be a non-empty string");
+    if (typeof args.mission_id !== "string" || args.mission_id.trim().length === 0) throw new ArgumentError("mission_id must be a non-empty string");
+    if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
+    if (!Array.isArray(args.steps) || args.steps.length < 1 || args.steps.length > 128) throw new ArgumentError("steps must contain 1..=128 items");
+    return this.request<DomainWorkflowInstantiateResult>("POST", "/v1/domain-workflows/instantiate", args, options);
+  }
+
+  /** Plan multiple explicit domain workflows with per-item authoritative no-dispatch preflight. */
+  async domainWorkflowPortfolioQuery(
+    args: DomainWorkflowPortfolioArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowPortfolioResult> {
+    if (!isObject(args) || !Array.isArray(args.requests) || args.requests.length < 1 || args.requests.length > 64 || args.requests.some((request) => !isObject(request))) {
+      throw new ArgumentError("workflow portfolio requires 1..=64 request objects");
+    }
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio policy must be an object");
+    return this.request<DomainWorkflowPortfolioResult>("POST", "/v1/domain-workflows/portfolio", args, options);
+  }
+
+  /** Verify a retained multi-domain portfolio, including optional aligned replay. */
+  async domainWorkflowPortfolioVerifyQuery(
+    args: DomainWorkflowPortfolioVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowPortfolioVerifyResult> {
+    if (!isObject(args) || !isObject(args.portfolio)) throw new ArgumentError("workflow portfolio verification requires a portfolio object");
+    if (args.replay_requests !== undefined && (!Array.isArray(args.replay_requests) || args.replay_requests.length < 1 || args.replay_requests.length > 64 || args.replay_requests.some((request) => request !== null && !isObject(request)))) {
+      throw new ArgumentError("workflow portfolio verification replay_requests must contain 1..=64 objects or nulls");
+    }
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio verification policy must be an object");
+    const portfolio = { ...args.portfolio };
+    delete portfolio.request_id;
+    delete portfolio.__isError;
+    return this.request<DomainWorkflowPortfolioVerifyResult>("POST", "/v1/domain-workflows/portfolio/verify", { ...args, portfolio }, options);
+  }
+
+  /** Verify a retained workflow contract and optionally replay its original request. */
+  async domainWorkflowVerifyQuery(
+    args: DomainWorkflowVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowVerifyResult> {
+    if (!isObject(args) || !isObject(args.instantiation)) throw new ArgumentError("workflow verification requires an instantiation object");
+    if (args.replay_request !== undefined && !isObject(args.replay_request)) throw new ArgumentError("workflow verification replay_request must be an object");
+    return this.request<DomainWorkflowVerifyResult>("POST", "/v1/domain-workflows/verify", args, options);
+  }
+
+  /** Reconcile retained mission evidence against an instantiated workflow without dispatch. */
+  async domainWorkflowReconcileQuery(
+    args: DomainWorkflowReconcileArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowReconcileResult> {
+    if (!isObject(args) || !isObject(args.instantiation)) {
+      throw new ArgumentError("workflow reconciliation requires an instantiation object");
+    }
+    if (!isObject(args.mission_report) && !isObject(args.evidence_bundle)) {
+      throw new ArgumentError("workflow reconciliation requires mission_report or evidence_bundle");
+    }
+    return this.request<DomainWorkflowReconcileResult>("POST", "/v1/domain-workflows/reconcile", args, options);
+  }
+
+  /** Import one digest-bound reconciliation report into the durable audit surface. */
+  async domainWorkflowReconciliationImport(
+    args: DomainWorkflowReconciliationImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowReconciliationImportResult> {
+    if (!isObject(args) || !isObject(args.record)) throw new ArgumentError("workflow reconciliation record must be a JSON object");
+    return this.request<DomainWorkflowReconciliationImportResult>("POST", "/v1/domain-workflows/reconciliations", args, options);
+  }
+
+  /** Query retained reconciliation index rows without re-executing or re-evaluating a mission. */
+  async domainWorkflowReconciliationQuery(
+    args: DomainWorkflowReconciliationQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowReconciliationQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("workflow reconciliation query arguments must be a JSON object");
+    for (const [name, value] of [["mission_id", args.mission_id], ["workflow_id", args.workflow_id], ["mission_plan_digest", args.mission_plan_digest], ["completion_status", args.completion_status], ["decision_readiness_state", args.decision_readiness_state], ["after", args.after]] as const) {
+      if (value !== undefined && typeof value !== "string") throw new ArgumentError(`${name} must be a string`);
+    }
+    if (args.decision_readiness_gate_satisfied !== undefined && typeof args.decision_readiness_gate_satisfied !== "boolean") throw new ArgumentError("decision_readiness_gate_satisfied must be a boolean");
+    if (args.include_records !== undefined && typeof args.include_records !== "boolean") throw new ArgumentError("include_records must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    const query = new URLSearchParams({ limit: String(maxItems), include_records: String(args.include_records ?? false) });
+    for (const [name, value] of [["mission_id", args.mission_id], ["workflow_id", args.workflow_id], ["mission_plan_digest", args.mission_plan_digest], ["completion_status", args.completion_status], ["decision_readiness_state", args.decision_readiness_state], ["after", args.after]] as const) {
+      if (value !== undefined) query.set(name, value);
+    }
+    if (args.decision_readiness_gate_satisfied !== undefined) query.set("decision_readiness_gate_satisfied", String(args.decision_readiness_gate_satisfied));
+    return this.request<DomainWorkflowReconciliationQueryResult>("GET", `/v1/domain-workflows/reconciliations?${query.toString()}`, undefined, options);
+  }
+
+  /** Fetch one retained reconciliation report by its SHA-256 content digest. */
+  async domainWorkflowReconciliationGet(
+    reconciliationDigest: string,
+    options?: ClientRequestOptions,
+  ): Promise<DomainWorkflowReconciliationGetResult> {
+    const digest = pathSegment(reconciliationDigest, "reconciliation digest");
+    return this.request<DomainWorkflowReconciliationGetResult>("GET", `/v1/domain-workflows/reconciliations/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  /** Project and index one caller-supplied report after checking catalogue membership. */
+  async domainReportProject(
+    args: DomainReportProjectArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainReportProjectResult> {
+    if (!isObject(args)) throw new ArgumentError("domain report arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) {
+      throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    }
+    if (!isObject(args.report) || !isObject(args.claim_posture)) throw new ArgumentError("report and claim_posture must be objects");
+    if (args.claim_posture.status === undefined || !["observed", "derived", "review_required", "refused", "not_applicable"].includes(args.claim_posture.status)) throw new ArgumentError("claim_posture.status is invalid");
+    if (!Array.isArray(args.claim_posture.does_not_claim) || args.claim_posture.does_not_claim.length < 1 || args.claim_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("claim_posture.does_not_claim must be non-empty");
+    if (args.source_plan_digest !== undefined && args.source_plan_digest !== null && (typeof args.source_plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.source_plan_digest))) throw new ArgumentError("source_plan_digest must be a lowercase SHA-256 digest or null");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    return this.request<DomainReportProjectResult>("POST", "/v1/domain-reports", args, options);
+  }
+
+  /** Audit retained structured report projections by capability group. */
+  async domainReportCoverage(
+    args: DomainReportCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainReportCoverageResult> {
+    if (!isObject(args)) throw new ArgumentError("domain report coverage arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain], ["report_class", args.report_class], ["bridge_mode", args.bridge_mode]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const maxGroups = args.max_groups ?? 64;
+    if (!Number.isSafeInteger(maxGroups) || maxGroups < 1 || maxGroups > 128) throw new ArgumentError("max_groups must be 1..=128");
+    if (args.include_report_digests !== undefined && typeof args.include_report_digests !== "boolean") throw new ArgumentError("include_report_digests must be a boolean");
+    const query = new URLSearchParams({ max_groups: String(maxGroups), include_report_digests: String(args.include_report_digests ?? false) });
+    if (args.group_id !== undefined) query.set("group_id", args.group_id);
+    if (args.domain !== undefined) query.set("domain", args.domain);
+    if (args.report_class !== undefined) query.set("report_class", args.report_class);
+    if (args.bridge_mode !== undefined) query.set("bridge_mode", args.bridge_mode);
+    return this.request<DomainReportCoverageResult>("GET", `/v1/domain-reports/coverage?${query.toString()}`, undefined, options);
+  }
+
+  /** Invoke the same domain-report contract through the REST tool dispatcher. */
+  async domainReportProjectTool(
+    args: DomainReportProjectArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainReportProjectResult>> {
+    return this.callTool<DomainReportProjectResult>("domain_report_project", args, options);
+  }
+
+  /** Invoke the coverage diagnostic through the REST tool dispatcher. */
+  async domainReportCoverageTool(
+    args: DomainReportCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainReportCoverageResult>> {
+    return this.callTool<DomainReportCoverageResult>("domain_report_project", { ...args, operation: "coverage" }, options);
+  }
+
+  /** Join exact domain reports into a digest-addressed, review-required traceability artifact. */
+  async domainEvidenceHarmonize(
+    args: DomainEvidenceHarmonizeArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceHarmonizationResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence arguments must be an object");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    if (!isObject(args.claim) || typeof args.claim.id !== "string" || args.claim.id.trim().length === 0) throw new ArgumentError("claim.id must be a non-empty string");
+    if (!Array.isArray(args.reports) || args.reports.length < 1 || args.reports.length > 64 || args.reports.some((report) => !isObject(report))) throw new ArgumentError("reports must contain 1..=64 objects");
+    if (!Array.isArray(args.links) || args.links.length < 1 || args.links.length > 256 || args.links.some((link) => !isObject(link))) throw new ArgumentError("links must contain 1..=256 objects");
+    for (const [index, link] of args.links.entries()) {
+      if (!Number.isSafeInteger(link.report_index) || link.report_index < 0 || link.report_index >= args.reports.length) throw new ArgumentError(`links[${index}].report_index is out of range`);
+      if (!["supports", "qualifies", "contradicts", "context"].includes(link.role)) throw new ArgumentError(`links[${index}].role is invalid`);
+      if (link.note !== undefined && typeof link.note !== "string") throw new ArgumentError(`links[${index}].note must be a string`);
+      if ((link.role === "qualifies" || link.role === "contradicts") && (!link.note || link.note.trim().length === 0)) throw new ArgumentError(`links[${index}].note is required for ${link.role}`);
+      if (link.report_digest !== undefined && !/^[0-9a-fA-F]{64}$/.test(link.report_digest)) throw new ArgumentError(`links[${index}].report_digest must be a SHA-256 digest`);
+    }
+    for (const [name, value] of [["required_group_ids", args.required_group_ids], ["required_domains", args.required_domains]] as const) {
+      if (value !== undefined && (!Array.isArray(value) || value.length > 64 || value.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError(`${name} must contain at most 64 non-empty strings`);
+    }
+    return this.request<DomainEvidenceHarmonizationResult>("POST", "/v1/domain-evidence/harmonize", args, options);
+  }
+
+  /** Invoke the harmonizer through the REST tool dispatcher. */
+  async domainEvidenceHarmonizeTool(
+    args: DomainEvidenceHarmonizeArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceHarmonizationResult>> {
+    return this.callTool<DomainEvidenceHarmonizationResult>("domain_evidence_harmonize", args, options);
+  }
+
+  /** Apply an explicit fail-closed structural policy across any selected domain reports. */
+  async domainDecisionReadinessAudit(
+    args: DomainDecisionReadinessArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainDecisionReadinessResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain decision-readiness arguments must be an object");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    if (!isObject(args.claim) || typeof args.claim.id !== "string" || args.claim.id.trim().length === 0) throw new ArgumentError("claim.id must be a non-empty string");
+    if (!Array.isArray(args.reports) || args.reports.length < 1 || args.reports.length > 64 || args.reports.some((report) => !isObject(report))) throw new ArgumentError("reports must contain 1..=64 objects");
+    if (!Array.isArray(args.links) || args.links.length < 1 || args.links.length > 256 || args.links.some((link) => !isObject(link))) throw new ArgumentError("links must contain 1..=256 objects");
+    for (const [index, link] of args.links.entries()) {
+      if (!Number.isSafeInteger(link.report_index) || link.report_index < 0 || link.report_index >= args.reports.length) throw new ArgumentError(`links[${index}].report_index is out of range`);
+      if (!(["supports", "qualifies", "contradicts", "context"] as const).includes(link.role)) throw new ArgumentError(`links[${index}].role is invalid`);
+      if (link.note !== undefined && typeof link.note !== "string") throw new ArgumentError(`links[${index}].note must be a string`);
+      if ((link.role === "qualifies" || link.role === "contradicts") && (!link.note || link.note.trim().length === 0)) throw new ArgumentError(`links[${index}].note is required for ${link.role}`);
+      if (link.report_digest !== undefined && !/^[0-9a-f]{64}$/.test(link.report_digest)) throw new ArgumentError(`links[${index}].report_digest must be a lowercase SHA-256 digest`);
+    }
+    if (!isObject(args.policy)) throw new ArgumentError("policy must be an object");
+    for (const [name, value] of [["required_group_ids", args.policy.required_group_ids], ["required_domains", args.policy.required_domains]] as const) {
+      if (value !== undefined && (!Array.isArray(value) || value.length > 64 || value.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError(`${name} must contain at most 64 non-empty strings`);
+    }
+    for (const [name, value, minimum] of [["minimum_supporting_reports", args.policy.minimum_supporting_reports, 1], ["minimum_qualifying_reports", args.policy.minimum_qualifying_reports, 0]] as const) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < minimum || value > 64)) throw new ArgumentError(`${name} must be ${minimum}..=64`);
+    }
+    for (const [name, value] of [["require_all_reports_linked", args.policy.require_all_reports_linked], ["reject_contradictions", args.policy.reject_contradictions], ["reject_refused_reports", args.policy.reject_refused_reports], ["allow_review_required", args.policy.allow_review_required], ["require_lineage_parents", args.policy.require_lineage_parents]] as const) {
+      if (value !== undefined && typeof value !== "boolean") throw new ArgumentError(`${name} must be a boolean`);
+    }
+    return this.callTool<DomainDecisionReadinessResult>("domain_decision_readiness_audit", args, options);
+  }
+
+  /** Query retained decision-readiness audits through the dedicated cursor-based REST route. */
+  async domainDecisionReadinessQuery(
+    args: DomainDecisionReadinessQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainDecisionReadinessQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("domain decision-readiness query arguments must be an object");
+    for (const [name, value] of [["subject_id", args.subject_id], ["decision_state", args.decision_state], ["after", args.after]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (args.decision_state !== undefined && !["ready_for_human_review", "review_required", "incomplete", "blocked"].includes(args.decision_state)) throw new ArgumentError("decision_state is invalid");
+    if (args.policy_satisfied !== undefined && typeof args.policy_satisfied !== "boolean") throw new ArgumentError("policy_satisfied must be a boolean");
+    if (args.include_audits !== undefined && typeof args.include_audits !== "boolean") throw new ArgumentError("include_audits must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    const query = new URLSearchParams({ limit: String(maxItems), include_audits: String(args.include_audits ?? false) });
+    for (const [name, value] of [["subject_id", args.subject_id], ["decision_state", args.decision_state], ["after", args.after]] as const) {
+      if (value !== undefined) query.set(name, value);
+    }
+    if (args.policy_satisfied !== undefined) query.set("policy_satisfied", String(args.policy_satisfied));
+    return this.request<DomainDecisionReadinessQueryResult>("GET", `/v1/domain-decision-readiness?${query.toString()}`, undefined, options);
+  }
+
+  /** Query retained decision-readiness audits through the MCP tool dispatcher. */
+  async domainDecisionReadinessQueryTool(
+    args: DomainDecisionReadinessQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainDecisionReadinessQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain decision-readiness query arguments must be an object");
+    for (const [name, value] of [["subject_id", args.subject_id], ["decision_state", args.decision_state], ["after", args.after]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (args.decision_state !== undefined && !["ready_for_human_review", "review_required", "incomplete", "blocked"].includes(args.decision_state)) throw new ArgumentError("decision_state is invalid");
+    if (args.policy_satisfied !== undefined && typeof args.policy_satisfied !== "boolean") throw new ArgumentError("policy_satisfied must be a boolean");
+    if (args.include_audits !== undefined && typeof args.include_audits !== "boolean") throw new ArgumentError("include_audits must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    return this.callTool<DomainDecisionReadinessQueryResult>("domain_decision_readiness_query", args, options);
+  }
+
+  /** Compose explicitly supplied cross-domain control-plane evidence through MCP. */
+  async controlPlaneReadinessAudit(
+    args: ControlPlaneReadinessArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ControlPlaneReadinessResult>> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness arguments must be an object");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    for (const [name, value] of [["readiness_audit", args.readiness_audit], ["route_review", args.route_review], ["route_plan", args.route_plan], ["operations_gate_projection", args.operations_gate_projection], ["operations_gate_review", args.operations_gate_review], ["release_audit", args.release_audit], ["workflow_evidence", args.workflow_evidence]] as const) {
+      if (value !== undefined && !isObject(value)) throw new ArgumentError(`${name} must be an object`);
+    }
+    if (args.policy !== undefined) {
+      if (!isObject(args.policy)) throw new ArgumentError("policy must be an object");
+      for (const [name, value] of [["require_domain_readiness", args.policy.require_domain_readiness], ["require_route_review", args.policy.require_route_review], ["require_route_plan", args.policy.require_route_plan], ["require_operations_acceptance", args.policy.require_operations_acceptance], ["require_release_ready", args.policy.require_release_ready], ["require_workflow_evidence", args.policy.require_workflow_evidence]] as const) {
+        if (value !== undefined && typeof value !== "boolean") throw new ArgumentError(`${name} must be a boolean`);
+      }
+    }
+    return this.callTool<ControlPlaneReadinessResult>("control_plane_readiness_audit", args, options);
+  }
+
+  /** Compare two retained structural control-plane snapshots through MCP. */
+  async controlPlaneReadinessCompare(
+    args: ControlPlaneReadinessCompareArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ControlPlaneReadinessCompareResult>> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness comparison arguments must be an object");
+    for (const [name, value] of [["before", args.before], ["after", args.after]] as const) {
+      if (!isObject(value)) throw new ArgumentError(name + " must be a control-plane readiness response object");
+    }
+    if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.callTool<ControlPlaneReadinessCompareResult>("control_plane_readiness_compare", args, options);
+  }
+
+  /** Compare two digest-verified structural control-plane snapshots through REST. */
+  async controlPlaneReadinessCompareRest(
+    args: ControlPlaneReadinessCompareArgs,
+    options?: ClientRequestOptions,
+  ): Promise<ControlPlaneReadinessCompareResult> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness comparison arguments must be an object");
+    for (const [name, value] of [["before", args.before], ["after", args.after]] as const) {
+      if (!isObject(value)) throw new ArgumentError(name + " must be a control-plane readiness response object");
+    }
+    if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.request<ControlPlaneReadinessCompareResult>("POST", "/v1/control-plane-readiness/compare", args, options);
+  }
+
+  /** Compare two retained readiness artifacts resolved by exact content digest through MCP. */
+  async controlPlaneReadinessCompareRetained(
+    args: ControlPlaneReadinessCompareRetainedArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ControlPlaneReadinessCompareRetainedResult>> {
+    if (!isObject(args)) throw new ArgumentError("retained control-plane comparison arguments must be an object");
+    for (const [name, value] of [["before_content_digest", args.before_content_digest], ["after_content_digest", args.after_content_digest]] as const) {
+      if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(name + " must be a lowercase SHA-256 digest");
+    }
+    if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.callTool<ControlPlaneReadinessCompareRetainedResult>("control_plane_readiness_compare_retained", args, options);
+  }
+
+  /** Compare two retained readiness artifacts resolved by exact content digest through REST. */
+  async controlPlaneReadinessCompareRetainedRest(
+    args: ControlPlaneReadinessCompareRetainedArgs,
+    options?: ClientRequestOptions,
+  ): Promise<ControlPlaneReadinessCompareRetainedResult> {
+    if (!isObject(args)) throw new ArgumentError("retained control-plane comparison arguments must be an object");
+    for (const [name, value] of [["before_content_digest", args.before_content_digest], ["after_content_digest", args.after_content_digest]] as const) {
+      if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(name + " must be a lowercase SHA-256 digest");
+    }
+    if (args.subject_id !== undefined && (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0)) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.request<ControlPlaneReadinessCompareRetainedResult>("POST", "/v1/control-plane-readiness/compare-retained", args, options);
+  }
+
+  /** Compose the same control-plane projection through its dedicated REST endpoint. */
+  async controlPlaneReadinessAuditRest(
+    args: ControlPlaneReadinessArgs,
+    options?: ClientRequestOptions,
+  ): Promise<ControlPlaneReadinessResult> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness arguments must be an object");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    return this.request<ControlPlaneReadinessResult>("POST", "/v1/control-plane-readiness", args, options);
+  }
+
+  /** Query retained control-plane projections through the dedicated REST route. */
+  async controlPlaneReadinessQuery(
+    args: ControlPlaneReadinessQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<ControlPlaneReadinessQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness query arguments must be an object");
+    for (const [name, value] of [["subject_id", args.subject_id], ["control_plane_state", args.control_plane_state], ["after", args.after]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (args.control_plane_state !== undefined && !["ready_for_human_review", "review_required", "incomplete", "blocked"].includes(args.control_plane_state)) throw new ArgumentError("control_plane_state is invalid");
+    if (args.policy_satisfied !== undefined && typeof args.policy_satisfied !== "boolean") throw new ArgumentError("policy_satisfied must be a boolean");
+    if (args.include_audits !== undefined && typeof args.include_audits !== "boolean") throw new ArgumentError("include_audits must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    const query = new URLSearchParams({ limit: String(maxItems), include_audits: String(args.include_audits ?? false) });
+    for (const [name, value] of [["subject_id", args.subject_id], ["control_plane_state", args.control_plane_state], ["after", args.after]] as const) {
+      if (value !== undefined) query.set(name, value);
+    }
+    if (args.policy_satisfied !== undefined) query.set("policy_satisfied", String(args.policy_satisfied));
+    return this.request<ControlPlaneReadinessQueryResult>("GET", `/v1/control-plane-readiness?${query.toString()}`, undefined, options);
+  }
+
+  /** Query retained control-plane projections through the MCP dispatcher. */
+  async controlPlaneReadinessQueryTool(
+    args: ControlPlaneReadinessQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ControlPlaneReadinessQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("control-plane readiness query arguments must be an object");
+    if (args.control_plane_state !== undefined && !["ready_for_human_review", "review_required", "incomplete", "blocked"].includes(args.control_plane_state)) throw new ArgumentError("control_plane_state is invalid");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    return this.callTool<ControlPlaneReadinessQueryResult>("control_plane_readiness_query", args, options);
+  }
+
+  /** Query retained harmonization artifacts without returning their full bodies. */
+  async domainEvidenceHarmonizationCoverage(
+    args: DomainEvidenceHarmonizationCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceHarmonizationCoverageResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence harmonization coverage arguments must be an object");
+    for (const [name, value] of [["subject_id", args.subject_id], ["domain", args.domain], ["report_class", args.report_class], ["bridge_mode", args.bridge_mode]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (args.traceability_state !== undefined && !["complete", "requirements_missing", "links_missing"].includes(args.traceability_state)) throw new ArgumentError("traceability_state is invalid");
+    if (args.after !== undefined && (typeof args.after !== "string" || !/^[0-9a-f]{64}$/.test(args.after))) throw new ArgumentError("after must be a lowercase SHA-256 digest");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    if (args.include_report_digests !== undefined && typeof args.include_report_digests !== "boolean") throw new ArgumentError("include_report_digests must be a boolean");
+    const query = new URLSearchParams({ max_items: String(maxItems), include_report_digests: String(args.include_report_digests ?? false) });
+    for (const name of ["subject_id", "domain", "report_class", "bridge_mode", "traceability_state", "after"] as const) {
+      const value = args[name];
+      if (value !== undefined) query.set(name, value);
+    }
+    return this.request<DomainEvidenceHarmonizationCoverageResult>("GET", `/v1/domain-evidence/harmonization/coverage?${query.toString()}`, undefined, options);
+  }
+
+  /** Invoke retained harmonization coverage through the REST tool dispatcher. */
+  async domainEvidenceHarmonizationCoverageTool(
+    args: DomainEvidenceHarmonizationCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceHarmonizationCoverageResult>> {
+    return this.callTool<DomainEvidenceHarmonizationCoverageResult>("domain_evidence_harmonization_coverage", args, options);
+  }
+
+  /** Normalize one supplied raw source-tool envelope into an exact-digest intake artifact. */
+  async domainEvidenceIntake(
+    args: DomainEvidenceIntakeArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceIntakeResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence intake arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!Object.prototype.hasOwnProperty.call(args, "response")) throw new ArgumentError("response is required");
+    if (!("observed" === args.outcome || "partial" === args.outcome || "refused" === args.outcome || "error" === args.outcome || "unknown" === args.outcome)) throw new ArgumentError("outcome is invalid");
+    if (!isObject(args.claim_posture)) throw new ArgumentError("claim_posture must be an object");
+    if (!(["observed", "derived", "review_required", "refused", "not_applicable"] as const).includes(args.claim_posture.status)) throw new ArgumentError("claim_posture.status is invalid");
+    if (!Array.isArray(args.claim_posture.does_not_claim) || args.claim_posture.does_not_claim.length < 1 || args.claim_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("claim_posture.does_not_claim must be non-empty");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    return this.request<DomainEvidenceIntakeResult>("POST", "/v1/domain-evidence/intake", args, options);
+  }
+
+  /** Invoke raw envelope intake through the REST tool dispatcher. */
+  async domainEvidenceIntakeTool(
+    args: DomainEvidenceIntakeArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceIntakeResult>> {
+    return this.callTool<DomainEvidenceIntakeResult>("domain_evidence_intake", args, options);
+  }
+
+  /** Audit retained raw-intake envelopes by authoritative capability group. */
+  async domainEvidenceCoverage(
+    args: DomainEvidenceIntakeCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceIntakeCoverageResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence intake coverage arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const maxGroups = args.max_groups ?? 64;
+    if (!Number.isSafeInteger(maxGroups) || maxGroups < 1 || maxGroups > 128) throw new ArgumentError("max_groups must be 1..=128");
+    if (args.include_intake_digests !== undefined && typeof args.include_intake_digests !== "boolean") throw new ArgumentError("include_intake_digests must be a boolean");
+    const query = new URLSearchParams({ max_groups: String(maxGroups), include_intake_digests: String(args.include_intake_digests ?? false) });
+    if (args.group_id !== undefined) query.set("group_id", args.group_id);
+    if (args.domain !== undefined) query.set("domain", args.domain);
+    return this.request<DomainEvidenceIntakeCoverageResult>("GET", `/v1/domain-evidence/coverage?${query.toString()}`, undefined, options);
+  }
+
+  /** Invoke intake coverage through the REST tool dispatcher. */
+  async domainEvidenceCoverageTool(
+    args: DomainEvidenceIntakeCoverageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceIntakeCoverageResult>> {
+    return this.callTool<DomainEvidenceIntakeCoverageResult>("domain_evidence_coverage", args, options);
+  }
+
+  /** Plan and index a non-fetching external evidence connector boundary. */
+  async domainEvidenceSourcePlan(
+    args: DomainEvidenceSourcePlanArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceSourcePlanResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence source plan arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["locator", args.locator]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!("literature" === args.connector_kind || "clinical_trial" === args.connector_kind || "fhir" === args.connector_kind || "object_store" === args.connector_kind || "file" === args.connector_kind || "provider_api" === args.connector_kind || "generic_http" === args.connector_kind)) throw new ArgumentError("connector_kind is invalid");
+    if (!("uri" === args.locator_kind || "path" === args.locator_kind || "opaque" === args.locator_kind)) throw new ArgumentError("locator_kind is invalid");
+    if (!("reference_only" === args.retrieval_mode || "metadata_only" === args.retrieval_mode || "content" === args.retrieval_mode)) throw new ArgumentError("retrieval_mode is invalid");
+    if (args.source_tool !== undefined && args.source_tool !== null && (typeof args.source_tool !== "string" || args.source_tool.trim().length === 0)) throw new ArgumentError("source_tool must be a non-empty string or null");
+    if (args.expected_content_digest !== undefined && args.expected_content_digest !== null && (typeof args.expected_content_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.expected_content_digest))) throw new ArgumentError("expected_content_digest must be a lowercase SHA-256 digest or null");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (!Array.isArray(args.does_not_claim) || args.does_not_claim.length < 1 || args.does_not_claim.length > 64 || args.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("does_not_claim must contain 1..=64 non-empty strings");
+    if (args.retrieval_policy !== undefined) {
+      if (!isObject(args.retrieval_policy)) throw new ArgumentError("retrieval_policy must be an object");
+      const policy = args.retrieval_policy;
+      const network = policy.network ?? "caller_managed";
+      if (!(network === "disabled" || network === "caller_managed" || network === "enabled")) throw new ArgumentError("retrieval_policy.network is invalid");
+      const maxBytes = policy.max_bytes ?? 2 * 1024 * 1024;
+      if (typeof maxBytes !== "number" || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 64 * 1024 * 1024) throw new ArgumentError("retrieval_policy.max_bytes is invalid");
+      const timeoutMs = policy.timeout_ms ?? 5_000;
+      if (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new ArgumentError("retrieval_policy.timeout_ms is invalid");
+      const cache = policy.cache ?? "content_addressed";
+      if (!(cache === "no_cache" || cache === "content_addressed")) throw new ArgumentError("retrieval_policy.cache is invalid");
+      const allowedHosts = policy.allowed_hosts ?? [];
+      if (!Array.isArray(allowedHosts) || allowedHosts.length > 32 || allowedHosts.some((host) => typeof host !== "string" || host.trim().length === 0 || /[\r\n\/?#@:\s]/.test(host))) throw new ArgumentError("retrieval_policy.allowed_hosts is invalid");
+      if (network === "enabled" && allowedHosts.length === 0) throw new ArgumentError("retrieval_policy.allowed_hosts is required when network is enabled");
+    }
+    return this.request<DomainEvidenceSourcePlanResult>("POST", "/v1/domain-evidence/sources", args, options);
+  }
+
+  /** Invoke external source planning through the REST tool dispatcher. */
+  async domainEvidenceSourcePlanTool(
+    args: DomainEvidenceSourcePlanArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceSourcePlanResult>> {
+    return this.callTool<DomainEvidenceSourcePlanResult>("domain_evidence_source_plan", args, options);
+  }
+
+  /** Execute a retained source plan and retain its bounded response as domain evidence. */
+  async domainEvidenceSourceExecute(
+    args: DomainEvidenceSourceExecutionArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DomainEvidenceSourceExecutionResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence source execution arguments must be an object");
+    if (typeof args.source_plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.source_plan_digest)) throw new ArgumentError("source_plan_digest must be a lowercase SHA-256 digest");
+    if (args.source_tool !== undefined && args.source_tool !== null && (typeof args.source_tool !== "string" || args.source_tool.trim().length === 0)) throw new ArgumentError("source_tool must be a non-empty string or null");
+    if (args.claim_posture !== undefined && !isObject(args.claim_posture)) throw new ArgumentError("claim_posture must be an object");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    return this.request<DomainEvidenceSourceExecutionResult>("POST", "/v1/domain-evidence/sources/execute", args, options);
+  }
+
+  /** Invoke retained source execution through the REST tool dispatcher. */
+  async domainEvidenceSourceExecuteTool(
+    args: DomainEvidenceSourceExecutionArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceSourceExecutionResult>> {
+    return this.callTool<DomainEvidenceSourceExecutionResult>("domain_evidence_source_execute", args, options);
+  }
+
+  /** Normalize caller-managed provider evidence through the catalogue-bound intake path. */
+  async domainEvidenceProviderNormalize(
+    args: DomainEvidenceProviderNormalizationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderNormalizationResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence provider arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!(args.connector_kind === "literature" || args.connector_kind === "clinical_trial" || args.connector_kind === "fhir" || args.connector_kind === "object_store" || args.connector_kind === "provider_api")) throw new ArgumentError("connector_kind is invalid");
+    if (!isObject(args.payload) && !Array.isArray(args.payload)) throw new ArgumentError("payload must be an object or array");
+    if (args.outcome !== undefined && !(args.outcome === "observed" || args.outcome === "partial" || args.outcome === "refused" || args.outcome === "error" || args.outcome === "unknown")) throw new ArgumentError("outcome is invalid");
+    if (args.claim_posture !== undefined) {
+      if (!isObject(args.claim_posture)) throw new ArgumentError("claim_posture must be an object");
+      if (!(args.claim_posture.status === "observed" || args.claim_posture.status === "derived" || args.claim_posture.status === "review_required" || args.claim_posture.status === "refused" || args.claim_posture.status === "not_applicable")) throw new ArgumentError("claim_posture.status is invalid");
+      if (!Array.isArray(args.claim_posture.does_not_claim) || args.claim_posture.does_not_claim.length < 1 || args.claim_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("claim_posture.does_not_claim must be non-empty");
+    }
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.source_plan_digest !== undefined && args.source_plan_digest !== null && (typeof args.source_plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.source_plan_digest))) throw new ArgumentError("source_plan_digest must be a lowercase SHA-256 digest or null");
+    return this.callTool<DomainEvidenceProviderNormalizationResult>("domain_evidence_provider_normalize", { ...args, outcome: args.outcome ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the provider-normalization MCP tool. */
+  async domainEvidenceProviderNormalizeTool(
+    args: DomainEvidenceProviderNormalizationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderNormalizationResult>> {
+    return this.domainEvidenceProviderNormalize(args, options);
+  }
+
+  /** Verify a caller-managed provider payload against retained value-free digest identities. */
+  async domainEvidenceProviderReplayVerify(
+    args: DomainEvidenceProviderReplayVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderReplayVerifyResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence provider replay arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!(args.connector_kind === "literature" || args.connector_kind === "clinical_trial" || args.connector_kind === "fhir" || args.connector_kind === "object_store" || args.connector_kind === "provider_api")) throw new ArgumentError("connector_kind is invalid");
+    if (!isObject(args.payload) && !Array.isArray(args.payload)) throw new ArgumentError("payload must be an object or array");
+    const expectedDigests = [
+      ["expected_payload_digest", args.expected_payload_digest],
+      ["expected_shape_digest", args.expected_shape_digest],
+      ["expected_normalization_digest", args.expected_normalization_digest],
+      ["expected_intake_digest", args.expected_intake_digest],
+    ] as const;
+    for (const [name, value] of expectedDigests) {
+      if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+    }
+    if (args.expected_request_digest !== undefined && args.expected_request_digest !== null && (typeof args.expected_request_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.expected_request_digest))) throw new ArgumentError("expected_request_digest must be a lowercase SHA-256 digest or null");
+    if (args.outcome !== undefined && !(args.outcome === "observed" || args.outcome === "partial" || args.outcome === "refused" || args.outcome === "error" || args.outcome === "unknown")) throw new ArgumentError("outcome is invalid");
+    if (args.claim_posture !== undefined) {
+      if (!isObject(args.claim_posture)) throw new ArgumentError("claim_posture must be an object");
+      if (!(args.claim_posture.status === "observed" || args.claim_posture.status === "derived" || args.claim_posture.status === "review_required" || args.claim_posture.status === "refused" || args.claim_posture.status === "not_applicable")) throw new ArgumentError("claim_posture.status is invalid");
+      if (!Array.isArray(args.claim_posture.does_not_claim) || args.claim_posture.does_not_claim.length < 1 || args.claim_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("claim_posture.does_not_claim must be non-empty");
+    }
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.source_plan_digest !== undefined && args.source_plan_digest !== null && (typeof args.source_plan_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.source_plan_digest))) throw new ArgumentError("source_plan_digest must be a lowercase SHA-256 digest or null");
+    return this.callTool<DomainEvidenceProviderReplayVerifyResult>("domain_evidence_provider_replay_verify", { ...args, outcome: args.outcome ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the provider-replay verification MCP tool. */
+  async domainEvidenceProviderReplayVerifyTool(
+    args: DomainEvidenceProviderReplayVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderReplayVerifyResult>> {
+    return this.domainEvidenceProviderReplayVerify(args, options);
+  }
+
+  /** Declare and retain a caller-managed provider connector boundary before payload intake. */
+  async domainEvidenceProviderConnectorHandoff(
+    args: DomainEvidenceProviderHandoffArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderHandoffResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence provider handoff arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const connectors = ["literature", "clinical_trial", "fhir", "object_store", "provider_api"];
+    if (!connectors.includes(args.connector_kind)) throw new ArgumentError("connector_kind is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!isObject(args.manifest)) throw new ArgumentError("manifest must be an object");
+    const manifest = args.manifest;
+    if (manifest.schema !== "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1") throw new ArgumentError("manifest.schema is invalid");
+    if (manifest.transport !== "caller_managed") throw new ArgumentError("manifest.transport must be caller_managed");
+    if (manifest.provider !== args.provider || manifest.connector_kind !== args.connector_kind) throw new ArgumentError("manifest provider scope does not match handoff");
+    if (!Array.isArray(manifest.domains) || manifest.domains.length < 1 || manifest.domains.length > 64 || args.domains.some((domain) => !manifest.domains.includes(domain))) throw new ArgumentError("handoff domains must be covered by manifest.domains");
+    if (!Array.isArray(manifest.capabilities) || manifest.capabilities.length < 1 || manifest.capabilities.length > 64 || manifest.capabilities.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("manifest.capabilities must contain 1..=64 strings");
+    if (!isObject(manifest.auth_posture)) throw new ArgumentError("manifest.auth_posture must be an object");
+    if (!(manifest.auth_posture.status === "none" || manifest.auth_posture.status === "caller_asserted" || manifest.auth_posture.status === "delegated" || manifest.auth_posture.status === "unknown")) throw new ArgumentError("manifest.auth_posture.status is invalid");
+    if (manifest.auth_posture.secret_refs !== undefined && (!Array.isArray(manifest.auth_posture.secret_refs) || manifest.auth_posture.secret_refs.length > 32 || manifest.auth_posture.secret_refs.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError("manifest.auth_posture.secret_refs is invalid");
+    if (!Array.isArray(manifest.auth_posture.does_not_claim) || manifest.auth_posture.does_not_claim.length < 1 || manifest.auth_posture.does_not_claim.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("manifest.auth_posture.does_not_claim must be non-empty");
+    const statuses = ["prepared", "submitted", "observed", "partial", "refused", "error", "unknown"];
+    if (args.status !== undefined && !statuses.includes(args.status)) throw new ArgumentError("status is invalid");
+    for (const [name, value] of [["request_digest", args.request_digest], ["payload_digest", args.payload_digest], ["source_plan_digest", args.source_plan_digest]] as const) {
+      if (value !== undefined && !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+    }
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.attempt_id !== undefined && (typeof args.attempt_id !== "string" || args.attempt_id.trim().length === 0)) throw new ArgumentError("attempt_id must be a non-empty string");
+    if ("credential_material" in args || "credentials" in args) throw new ArgumentError("credential material is not accepted by the handoff boundary");
+    return this.callTool<DomainEvidenceProviderHandoffResult>("domain_evidence_provider_connector_handoff", { ...args, status: args.status ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the connector-handoff MCP tool. */
+  async domainEvidenceProviderConnectorHandoffTool(
+    args: DomainEvidenceProviderHandoffArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderHandoffResult>> {
+    return this.domainEvidenceProviderConnectorHandoff(args, options);
+  }
+
+  /** Retain exact metadata for a large provider payload stored outside the MCP core. */
+  async domainEvidenceProviderExternalPayloadReceipt(
+    args: DomainEvidenceProviderExternalPayloadReceiptArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadReceiptResult>> {
+    if (!isObject(args)) throw new ArgumentError("external provider payload receipt arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider], ["handoff_digest", args.handoff_digest], ["transfer_id", args.transfer_id], ["payload_digest", args.payload_digest], ["locator", args.locator]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const connectors = ["literature", "clinical_trial", "fhir", "object_store", "provider_api"];
+    if (!connectors.includes(args.connector_kind)) throw new ArgumentError("connector_kind is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    for (const [name, value] of [["handoff_digest", args.handoff_digest], ["payload_digest", args.payload_digest], ["request_digest", args.request_digest]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
+    }
+    if (!Number.isSafeInteger(args.byte_length) || args.byte_length < 1 || args.byte_length > 68719476736) throw new ArgumentError("byte_length must be 1..=68719476736");
+    if (!(args.storage_backend === "object_store" || args.storage_backend === "file" || args.storage_backend === "database" || args.storage_backend === "caller_managed")) throw new ArgumentError("storage_backend is invalid");
+    if (!(args.locator_kind === "opaque" || args.locator_kind === "uri" || args.locator_kind === "path")) throw new ArgumentError("locator_kind is invalid");
+    if (args.locator.includes("\r") || args.locator.includes("\n")) throw new ArgumentError("locator must not contain control line breaks");
+    const authority = args.locator.split("://")[1]?.split(/[/?#]/, 1)[0];
+    if (authority?.includes("@")) throw new ArgumentError("locator must not contain embedded credentials");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.availability !== undefined && !(args.availability === "available" || args.availability === "partial" || args.availability === "missing" || args.availability === "unknown")) throw new ArgumentError("availability is invalid");
+    if (args.retention !== undefined && !(args.retention === "ephemeral" || args.retention === "durable" || args.retention === "unknown")) throw new ArgumentError("retention is invalid");
+    if (args.attempt_id !== undefined && args.attempt_id !== null && (typeof args.attempt_id !== "string" || args.attempt_id.trim().length === 0)) throw new ArgumentError("attempt_id must be a non-empty string or null");
+    if ("payload" in args || "credential_material" in args || "credentials" in args) throw new ArgumentError("payload and credential material are not accepted by the external receipt boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadReceiptResult>("domain_evidence_provider_external_payload_receipt", { ...args, availability: args.availability ?? "unknown", retention: args.retention ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the external payload receipt MCP tool. */
+  async domainEvidenceProviderExternalPayloadReceiptTool(
+    args: DomainEvidenceProviderExternalPayloadReceiptArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadReceiptResult>> {
+    return this.domainEvidenceProviderExternalPayloadReceipt(args, options);
+  }
+
+  /** Verify retained external payload identities without opening the caller-owned locator. */
+  async domainEvidenceProviderExternalPayloadReplayVerify(
+    args: DomainEvidenceProviderExternalPayloadReplayVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadReplayVerifyResult>> {
+    if (!isObject(args)) throw new ArgumentError("external provider payload replay arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider], ["handoff_digest", args.handoff_digest], ["transfer_id", args.transfer_id], ["payload_digest", args.payload_digest], ["locator", args.locator], ["expected_receipt_digest", args.expected_receipt_digest], ["expected_handoff_digest", args.expected_handoff_digest], ["expected_payload_digest", args.expected_payload_digest]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const connectors = ["literature", "clinical_trial", "fhir", "object_store", "provider_api"];
+    if (!connectors.includes(args.connector_kind)) throw new ArgumentError("connector_kind is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    for (const [name, value] of [["handoff_digest", args.handoff_digest], ["payload_digest", args.payload_digest], ["request_digest", args.request_digest], ["expected_receipt_digest", args.expected_receipt_digest], ["expected_handoff_digest", args.expected_handoff_digest], ["expected_payload_digest", args.expected_payload_digest]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
+    }
+    if (!Number.isSafeInteger(args.byte_length) || args.byte_length < 1 || args.byte_length > 68719476736) throw new ArgumentError("byte_length must be 1..=68719476736");
+    if (!Number.isSafeInteger(args.expected_byte_length) || args.expected_byte_length < 1 || args.expected_byte_length > 68719476736) throw new ArgumentError("expected_byte_length must be 1..=68719476736");
+    if (!(args.storage_backend === "object_store" || args.storage_backend === "file" || args.storage_backend === "database" || args.storage_backend === "caller_managed")) throw new ArgumentError("storage_backend is invalid");
+    if (!(args.locator_kind === "opaque" || args.locator_kind === "uri" || args.locator_kind === "path")) throw new ArgumentError("locator_kind is invalid");
+    if (args.locator.includes("\r") || args.locator.includes("\n")) throw new ArgumentError("locator must not contain control line breaks");
+    const authority = args.locator.split("://")[1]?.split(/[/?#]/, 1)[0];
+    if (authority?.includes("@")) throw new ArgumentError("locator must not contain embedded credentials");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.availability !== undefined && !(args.availability === "available" || args.availability === "partial" || args.availability === "missing" || args.availability === "unknown")) throw new ArgumentError("availability is invalid");
+    if (args.retention !== undefined && !(args.retention === "ephemeral" || args.retention === "durable" || args.retention === "unknown")) throw new ArgumentError("retention is invalid");
+    if (args.attempt_id !== undefined && args.attempt_id !== null && (typeof args.attempt_id !== "string" || args.attempt_id.trim().length === 0)) throw new ArgumentError("attempt_id must be a non-empty string or null");
+    if ("payload" in args || "credential_material" in args || "credentials" in args) throw new ArgumentError("payload and credential material are not accepted by the external replay boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadReplayVerifyResult>("domain_evidence_provider_external_payload_replay_verify", { ...args, availability: args.availability ?? "unknown", retention: args.retention ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the external payload replay MCP tool. */
+  async domainEvidenceProviderExternalPayloadReplayVerifyTool(
+    args: DomainEvidenceProviderExternalPayloadReplayVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadReplayVerifyResult>> {
+    return this.domainEvidenceProviderExternalPayloadReplayVerify(args, options);
+  }
+
+  /** Verify a bounded caller materialization against an external receipt, then normalize it. */
+  async domainEvidenceProviderExternalPayloadNormalize(
+    args: DomainEvidenceProviderExternalPayloadNormalizationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadNormalizationResult>> {
+    if (!isObject(args)) throw new ArgumentError("external provider payload normalization arguments must be an object");
+    if (!isObject(args.payload) && !Array.isArray(args.payload)) throw new ArgumentError("payload must be an object or array");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider], ["handoff_digest", args.handoff_digest], ["transfer_id", args.transfer_id], ["payload_digest", args.payload_digest], ["locator", args.locator]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const connectors = ["literature", "clinical_trial", "fhir", "object_store", "provider_api"];
+    if (!connectors.includes(args.connector_kind)) throw new ArgumentError("connector_kind is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    for (const [name, value] of [["handoff_digest", args.handoff_digest], ["payload_digest", args.payload_digest], ["request_digest", args.request_digest], ["source_plan_digest", args.source_plan_digest]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
+    }
+    if (!Number.isSafeInteger(args.byte_length) || args.byte_length < 1 || args.byte_length > 68719476736) throw new ArgumentError("byte_length must be 1..=68719476736");
+    if (!(args.storage_backend === "object_store" || args.storage_backend === "file" || args.storage_backend === "database" || args.storage_backend === "caller_managed")) throw new ArgumentError("storage_backend is invalid");
+    if (!(args.locator_kind === "opaque" || args.locator_kind === "uri" || args.locator_kind === "path")) throw new ArgumentError("locator_kind is invalid");
+    if (args.locator.includes("\r") || args.locator.includes("\n")) throw new ArgumentError("locator must not contain control line breaks");
+    const authority = args.locator.split("://")[1]?.split(/[/?#]/, 1)[0];
+    if (authority?.includes("@")) throw new ArgumentError("locator must not contain embedded credentials");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.outcome !== undefined && !(args.outcome === "observed" || args.outcome === "partial" || args.outcome === "refused" || args.outcome === "error" || args.outcome === "unknown")) throw new ArgumentError("outcome is invalid");
+    if (args.availability !== undefined && !(args.availability === "available" || args.availability === "partial" || args.availability === "missing" || args.availability === "unknown")) throw new ArgumentError("availability is invalid");
+    if (args.retention !== undefined && !(args.retention === "ephemeral" || args.retention === "durable" || args.retention === "unknown")) throw new ArgumentError("retention is invalid");
+    if (args.attempt_id !== undefined && args.attempt_id !== null && (typeof args.attempt_id !== "string" || args.attempt_id.trim().length === 0)) throw new ArgumentError("attempt_id must be a non-empty string or null");
+    if ("credential_material" in args || "credentials" in args) throw new ArgumentError("credential material is not accepted by the external normalization boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadNormalizationResult>("domain_evidence_provider_external_payload_normalize", { ...args, availability: args.availability ?? "unknown", retention: args.retention ?? "unknown", outcome: args.outcome ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the external payload normalization MCP tool. */
+  async domainEvidenceProviderExternalPayloadNormalizeTool(
+    args: DomainEvidenceProviderExternalPayloadNormalizationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadNormalizationResult>> {
+    return this.domainEvidenceProviderExternalPayloadNormalize(args, options);
+  }
+
+  /** Audit an external receipt against a retained connector handoff without external I/O. */
+  async domainEvidenceProviderExternalPayloadLineageAudit(
+    args: DomainEvidenceProviderExternalPayloadLineageAuditArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadLineageAuditResult>> {
+    if (!isObject(args)) throw new ArgumentError("external provider payload lineage arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider], ["handoff_digest", args.handoff_digest], ["transfer_id", args.transfer_id], ["payload_digest", args.payload_digest], ["locator", args.locator]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!(args.connector_kind === "literature" || args.connector_kind === "clinical_trial" || args.connector_kind === "fhir" || args.connector_kind === "object_store" || args.connector_kind === "provider_api")) throw new ArgumentError("connector_kind is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    for (const [name, value] of [["handoff_digest", args.handoff_digest], ["payload_digest", args.payload_digest], ["request_digest", args.request_digest]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
+    }
+    if (!Number.isSafeInteger(args.byte_length) || args.byte_length < 1 || args.byte_length > 68719476736) throw new ArgumentError("byte_length must be 1..=68719476736");
+    if (!(args.storage_backend === "object_store" || args.storage_backend === "file" || args.storage_backend === "database" || args.storage_backend === "caller_managed")) throw new ArgumentError("storage_backend is invalid");
+    if (!(args.locator_kind === "opaque" || args.locator_kind === "uri" || args.locator_kind === "path")) throw new ArgumentError("locator_kind is invalid");
+    if (args.locator.includes("\r") || args.locator.includes("\n")) throw new ArgumentError("locator must not contain control line breaks");
+    const authority = args.locator.split("://")[1]?.split(/[/?#]/, 1)[0];
+    if (authority?.includes("@")) throw new ArgumentError("locator must not contain embedded credentials");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.availability !== undefined && !(args.availability === "available" || args.availability === "partial" || args.availability === "missing" || args.availability === "unknown")) throw new ArgumentError("availability is invalid");
+    if (args.retention !== undefined && !(args.retention === "ephemeral" || args.retention === "durable" || args.retention === "unknown")) throw new ArgumentError("retention is invalid");
+    if (args.attempt_id !== undefined && args.attempt_id !== null && (typeof args.attempt_id !== "string" || args.attempt_id.trim().length === 0)) throw new ArgumentError("attempt_id must be a non-empty string or null");
+    if ("payload" in args || "credential_material" in args || "credentials" in args) throw new ArgumentError("payload and credential material are not accepted by the external lineage boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadLineageAuditResult>("domain_evidence_provider_external_payload_lineage_audit", { ...args, availability: args.availability ?? "unknown", retention: args.retention ?? "unknown" }, options);
+  }
+
+  /** Explicit alias for the external payload lineage audit MCP tool. */
+  async domainEvidenceProviderExternalPayloadLineageAuditTool(
+    args: DomainEvidenceProviderExternalPayloadLineageAuditArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadLineageAuditResult>> {
+    return this.domainEvidenceProviderExternalPayloadLineageAudit(args, options);
+  }
+
+  /** Retain caller-reported transfer observations without executing external I/O. */
+  async domainEvidenceProviderExternalPayloadExecutionEvidence(
+    args: DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadExecutionEvidenceResult>> {
+    if (!isObject(args)) throw new ArgumentError("external payload execution evidence arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["subject_id", args.subject_id], ["source_tool", args.source_tool], ["provider", args.provider], ["handoff_digest", args.handoff_digest], ["transfer_id", args.transfer_id], ["payload_digest", args.payload_digest], ["locator", args.locator], ["expected_receipt_digest", args.expected_receipt_digest], ["execution_status", args.execution_status], ["executor_id", args.executor_id]] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    if (!(args.connector_kind === "literature" || args.connector_kind === "clinical_trial" || args.connector_kind === "fhir" || args.connector_kind === "object_store" || args.connector_kind === "provider_api")) throw new ArgumentError("connector_kind is invalid");
+    if (!(args.execution_status === "submitted" || args.execution_status === "transferred" || args.execution_status === "partial" || args.execution_status === "refused" || args.execution_status === "error" || args.execution_status === "unknown")) throw new ArgumentError("execution_status is invalid");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    for (const [name, value] of [["handoff_digest", args.handoff_digest], ["payload_digest", args.payload_digest], ["request_digest", args.request_digest], ["expected_receipt_digest", args.expected_receipt_digest], ["observed_payload_digest", args.observed_payload_digest], ["observation_digest", args.observation_digest]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest or null`);
+    }
+    if (!Number.isSafeInteger(args.byte_length) || args.byte_length < 1 || args.byte_length > 68719476736) throw new ArgumentError("byte_length must be 1..=68719476736");
+    if (args.observed_byte_length !== undefined && args.observed_byte_length !== null && (!Number.isSafeInteger(args.observed_byte_length) || args.observed_byte_length < 1 || args.observed_byte_length > 68719476736)) throw new ArgumentError("observed_byte_length must be 1..=68719476736 or null");
+    if (args.locator_opened !== undefined && typeof args.locator_opened !== "boolean") throw new ArgumentError("locator_opened must be boolean");
+    if (!(args.storage_backend === "object_store" || args.storage_backend === "file" || args.storage_backend === "database" || args.storage_backend === "caller_managed")) throw new ArgumentError("storage_backend is invalid");
+    if (!(args.locator_kind === "opaque" || args.locator_kind === "uri" || args.locator_kind === "path")) throw new ArgumentError("locator_kind is invalid");
+    if (args.locator.includes("\r") || args.locator.includes("\n")) throw new ArgumentError("locator must not contain control line breaks");
+    const authority = args.locator.split("://")[1]?.split(/[/?#]/, 1)[0];
+    if (authority?.includes("@")) throw new ArgumentError("locator must not contain embedded credentials");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if (args.availability !== undefined && !(args.availability === "available" || args.availability === "partial" || args.availability === "missing" || args.availability === "unknown")) throw new ArgumentError("availability is invalid");
+    if (args.retention !== undefined && !(args.retention === "ephemeral" || args.retention === "durable" || args.retention === "unknown")) throw new ArgumentError("retention is invalid");
+    if ("payload" in args || "credential_material" in args || "credentials" in args) throw new ArgumentError("payload and credential material are not accepted by the external execution evidence boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadExecutionEvidenceResult>("domain_evidence_provider_external_payload_execution_evidence", { ...args, availability: args.availability ?? "unknown", retention: args.retention ?? "unknown", locator_opened: args.locator_opened ?? false }, options);
+  }
+
+  /** Explicit alias for the external payload execution-evidence MCP tool. */
+  async domainEvidenceProviderExternalPayloadExecutionEvidenceTool(
+    args: DomainEvidenceProviderExternalPayloadExecutionEvidenceArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadExecutionEvidenceResult>> {
+    return this.domainEvidenceProviderExternalPayloadExecutionEvidence(args, options);
+  }
+
+  /** Join retained external payload receipts, lineage audits, and execution evidence without external I/O. */
+  async domainEvidenceProviderExternalPayloadEvidenceQuery(
+    args: DomainEvidenceProviderExternalPayloadEvidenceQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadEvidenceQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("external payload evidence query arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain], ["subject_id", args.subject_id]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string or null`);
+    }
+    if (args.after !== undefined && args.after !== null && (typeof args.after !== "string" || !/^[0-9a-f]{64}$/.test(args.after))) throw new ArgumentError("after must be a lowercase SHA-256 digest or null");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 128) throw new ArgumentError("max_items must be 1..=128");
+    if (args.include_artifacts !== undefined && typeof args.include_artifacts !== "boolean") throw new ArgumentError("include_artifacts must be a boolean");
+    if ("credential_material" in args || "credentials" in args) throw new ArgumentError("credential material is not accepted by the external evidence query boundary");
+    return this.callTool<DomainEvidenceProviderExternalPayloadEvidenceQueryResult>("domain_evidence_provider_external_payload_evidence_query", { ...args, max_items: maxItems, include_artifacts: args.include_artifacts ?? false }, options);
+  }
+
+  /** Explicit alias for the joined external payload evidence query MCP tool. */
+  async domainEvidenceProviderExternalPayloadEvidenceQueryTool(
+    args: DomainEvidenceProviderExternalPayloadEvidenceQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainEvidenceProviderExternalPayloadEvidenceQueryResult>> {
+    return this.domainEvidenceProviderExternalPayloadEvidenceQuery(args, options);
   }
 
   /** Inspect all restart, secret, and external-effect boundaries in one operator matrix. */
@@ -579,6 +1689,338 @@ export class ApiClient {
     return this.request<RestToolResponse<T>>("POST", `/v1/tools/${encodeURIComponent(tool)}`, arguments_, options);
   }
 
+  /** Select a model through the value-only autonomous brain kernel; credentials never cross this call. */
+  async brainModelSelect(
+    args: BrainModelSelectionArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainModelSelectionResult>> {
+    if (!isObject(args) || typeof args.task !== "string" || !args.task.trim()) throw new ArgumentError("brain model-selection task must be a non-empty string");
+    if (!Array.isArray(args.models) || args.models.length === 0) throw new ArgumentError("brain model-selection models must be non-empty");
+    if (args.provider_health !== undefined) {
+      if (!isObject(args.provider_health)) throw new ArgumentError("brain provider_health must be an object");
+      for (const [provider, health] of Object.entries(args.provider_health)) {
+        if (!provider.trim() || !isObject(health)) throw new ArgumentError("brain provider_health entries must be named objects");
+        if (health.registered !== undefined && typeof health.registered !== "boolean") throw new ArgumentError("provider_health.registered must be boolean");
+        if (health.credential_ready !== undefined && typeof health.credential_ready !== "boolean") throw new ArgumentError("provider_health.credential_ready must be boolean");
+        if (health.eligible !== undefined && typeof health.eligible !== "boolean") throw new ArgumentError("provider_health.eligible must be boolean");
+        if (health.circuit !== undefined && (typeof health.circuit !== "string" || !["closed", "half_open", "open", "unconfigured"].includes(health.circuit))) throw new ArgumentError("provider_health.circuit must be closed, half_open, open, or unconfigured");
+        if (health.consecutive_failures !== undefined && (!Number.isSafeInteger(health.consecutive_failures) || health.consecutive_failures < 0)) throw new ArgumentError("provider_health.consecutive_failures must be a non-negative safe integer");
+      }
+    }
+    if (args.model_health !== undefined) {
+      if (!isObject(args.model_health)) throw new ArgumentError("brain model_health must be an object");
+      for (const [armId, health] of Object.entries(args.model_health)) {
+        const armParts = armId.split("/", 2);
+        if (!armId.includes("/") || !armParts[0]?.trim() || !armParts[1]?.trim() || !isObject(health)) {
+          throw new ArgumentError("brain model_health entries must be named provider/model objects");
+        }
+        for (const field of ["attempts", "successes", "failures"] as const) {
+          const value = health[field];
+          if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) throw new ArgumentError(`model_health.${field} must be a non-negative safe integer`);
+        }
+        if (health.success_rate !== undefined && (typeof health.success_rate !== "number" || !Number.isFinite(health.success_rate) || health.success_rate < 0 || health.success_rate > 1)) throw new ArgumentError("model_health.success_rate must be within [0, 1]");
+        for (const field of ["mean_latency_ms", "last_latency_ms", "opened_until", "observed_at"] as const) {
+          const value = health[field];
+          if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new ArgumentError(`model_health.${field} must be a finite non-negative number or null`);
+        }
+        if (health.prior_adjustment_applied !== undefined && typeof health.prior_adjustment_applied !== "boolean") throw new ArgumentError("model_health.prior_adjustment_applied must be boolean");
+      }
+    }
+    return this.callTool<BrainModelSelectionResult>("brain_model_select", args, options);
+  }
+
+  /** Select a model using caller-owned domain/capability/risk-scoped online-learning history. */
+  async brainModelSelectContextual(
+    args: BrainContextualModelSelectionArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainContextualModelSelectionResult>> {
+    if (!isObject(args) || !isObject(args.context) || !isObject(args.base)) {
+      throw new ArgumentError("contextual brain selection requires context and base objects");
+    }
+    for (const field of ["domain", "capability", "risk_class"]) {
+      if (typeof args.context[field] !== "string" || !args.context[field].trim()) {
+        throw new ArgumentError(`context.${field} must be a non-empty string`);
+      }
+    }
+    if (!Array.isArray(args.base.models) || args.base.models.length === 0) {
+      throw new ArgumentError("contextual brain base selection models must be non-empty");
+    }
+    if (args.observations !== undefined && (!Array.isArray(args.observations) || args.observations.length > 256 || args.observations.some((observation) => !isObject(observation)))) {
+      throw new ArgumentError("contextual brain observations must contain at most 256 objects");
+    }
+    return this.callTool<BrainContextualModelSelectionResult>("brain_model_select_contextual", args, options);
+  }
+
+  /** Assemble a digest-bound prompt under a hard input budget. */
+  async brainPromptAssemble(
+    args: BrainPromptArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainPromptResult>> {
+    if (!isObject(args) || typeof args.task !== "string" || !args.task.trim()) throw new ArgumentError("brain prompt task must be a non-empty string");
+    if (!Number.isSafeInteger(args.max_input_tokens) || args.max_input_tokens <= 0) throw new ArgumentError("brain prompt max_input_tokens must be a positive safe integer");
+    return this.callTool<BrainPromptResult>("brain_prompt_assemble", args, options);
+  }
+
+  /** Validate and order a bounded autonomous plan; this does not execute any step. */
+  async brainPlan(
+    args: BrainPlanArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainPlanResult>> {
+    if (!isObject(args) || typeof args.objective !== "string" || !args.objective.trim()) throw new ArgumentError("brain plan objective must be a non-empty string");
+    if (!Array.isArray(args.steps) || args.steps.length === 0) throw new ArgumentError("brain plan steps must be non-empty");
+    if (!Array.isArray(args.allowed_tools)) throw new ArgumentError("brain plan allowed_tools must be an array");
+    return this.callTool<BrainPlanResult>("brain_plan", args, options);
+  }
+
+  /** Select a caller-persisted UCB-style learning arm without hidden server state. */
+  async brainBanditSelect(
+    state: BrainBanditState,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainBanditSelectionResult>> {
+    if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
+    return this.callTool<BrainBanditSelectionResult>("brain_bandit_select", { state }, options);
+  }
+
+  /** Select from a context-scoped bandit ledger with global history as a cold-start fallback. */
+  async brainBanditSelectContextual(
+    state: BrainBanditState,
+    contextDigest: string,
+    context: BrainBanditContext,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainBanditSelectionResult>> {
+    if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
+    if (typeof contextDigest !== "string" || !/^[0-9a-f]{64}$/.test(contextDigest)) throw new ArgumentError("brain bandit contextDigest must be a lowercase SHA-256 digest");
+    if (!isObject(context) || typeof context.domain !== "string" || typeof context.capability !== "string" || typeof context.risk_class !== "string") throw new ArgumentError("brain bandit context must contain domain, capability, and risk_class");
+    validateBrainContextIdentity(contextDigest, context, "brain bandit contextual selection");
+    return this.callTool<BrainBanditSelectionResult>("brain_bandit_select", { state, context_digest: contextDigest, context }, options);
+  }
+
+  /** Apply one explicit evaluator reward to caller-owned learning state. */
+  async brainBanditUpdate(
+    state: BrainBanditState,
+    update: BrainBanditUpdate,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainBanditState>> {
+    if (!isObject(state) || !Array.isArray(state.arms)) throw new ArgumentError("brain bandit state must contain arms");
+    if (!isObject(update) || typeof update.arm_id !== "string" || typeof update.reward !== "number") throw new ArgumentError("brain bandit update must contain arm_id and reward");
+    const hasContextDigest = update.context_digest !== undefined && update.context_digest !== null;
+    const hasContext = update.context !== undefined;
+    if (hasContextDigest !== hasContext) throw new ArgumentError("brain bandit contextual update requires context_digest and context together");
+    if (hasContextDigest && (typeof update.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(update.context_digest) || !isObject(update.context) || typeof update.context.domain !== "string" || typeof update.context.capability !== "string" || typeof update.context.risk_class !== "string")) throw new ArgumentError("brain bandit contextual update identity is malformed");
+    if (hasContextDigest) validateBrainContextIdentity(update.context_digest as string, update.context as BrainBanditContext, "brain bandit contextual update");
+    return this.callTool<BrainBanditState>("brain_bandit_update", { state, update }, options);
+  }
+
+  /** Bind an explicit evaluator judgment to a run and return digest-bound learning evidence. */
+  async brainOutcomeRecord(
+    args: BrainOutcomeRecordArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainOutcomeRecordResult>> {
+    if (!isObject(args) || !isObject(args.run) || !isObject(args.assessment) || !isObject(args.bandit_state) || !Array.isArray(args.bandit_state.arms)) throw new ArgumentError("brain outcome record must contain run, assessment, and bandit_state.arms");
+    if (typeof args.arm_id !== "string" || !args.arm_id.trim()) throw new ArgumentError("brain outcome record arm_id must be a non-empty string");
+    const hasContextDigest = args.context_digest !== undefined && args.context_digest !== null;
+    const hasContext = args.context !== undefined;
+    if (hasContextDigest !== hasContext) throw new ArgumentError("brain outcome record contextual identity requires context_digest and context together");
+    if (hasContextDigest && (typeof args.context_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.context_digest) || !isObject(args.context) || typeof args.context.domain !== "string" || typeof args.context.capability !== "string" || typeof args.context.risk_class !== "string")) throw new ArgumentError("brain outcome record contextual identity is malformed");
+    if (hasContextDigest) validateBrainContextIdentity(args.context_digest as string, args.context as BrainBanditContext, "brain outcome record contextual identity");
+    if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== "string" || !args.idempotency_key.trim() || args.idempotency_key.length > 256)) throw new ArgumentError("brain outcome record idempotency_key must be a bounded non-empty string");
+    if (typeof args.assessment.reward !== "number" || typeof args.assessment.passed !== "boolean") throw new ArgumentError("brain outcome assessment must contain reward and passed");
+    return this.callTool<BrainOutcomeRecordResult>("brain_outcome_record", args, options);
+  }
+
+  /** Admit a metadata-only, rehydratable job; prompts, tasks, responses, and credentials are refused. */
+  async brainJobSubmit(
+    args: BrainJobSubmitArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobSubmitResult>> {
+    if (!isObject(args)) throw new ArgumentError("brain job submission must be an object");
+    rejectBrainSecretFields(args, "brain job submission");
+    for (const field of ["idempotency_key", "spec_digest", "domain", "capability", "risk_class"] as const) {
+      if (typeof args[field] !== "string" || !args[field].trim()) throw new ArgumentError(`${field} must be a non-empty string`);
+    }
+    if (!/^[0-9a-f]{64}$/.test(args.spec_digest)) throw new ArgumentError("spec_digest must be a lowercase SHA-256 digest");
+    if (args.job_id !== undefined && (typeof args.job_id !== "string" || !args.job_id.trim())) throw new ArgumentError("job_id must be a non-empty string when supplied");
+    validateOptionalBoundedInteger(args.priority, 0, 255, "priority");
+    validateOptionalBoundedInteger(args.max_attempts, 1, 8, "max_attempts");
+    if (args.checkpoint_digest !== undefined && args.checkpoint_digest !== null && !/^[0-9a-f]{64}$/.test(args.checkpoint_digest)) throw new ArgumentError("checkpoint_digest must be a lowercase SHA-256 digest or null");
+    return this.callTool<BrainJobSubmitResult>("brain_job_submit", args, options);
+  }
+
+  /** Read a value-only job projection; the caller rehydrates the private work specification. */
+  async brainJobStatus(
+    args: BrainJobStatusArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobStatusResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job status job_id must be a non-empty string");
+    return this.callTool<BrainJobStatusResult>("brain_job_status", args, options);
+  }
+
+  /** Read the bounded metadata-only hash chain using a monotonic sequence cursor. */
+  async brainJobEvents(
+    args: BrainJobEventsArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobEventsResult>> {
+    if (!isObject(args)) throw new ArgumentError("brain job events arguments must be an object");
+    if (args.job_id !== undefined && (typeof args.job_id !== "string" || !args.job_id.trim())) throw new ArgumentError("job_id must be a non-empty string when supplied");
+    validateOptionalBoundedInteger(args.after, 0, Number.MAX_SAFE_INTEGER, "after");
+    validateOptionalBoundedInteger(args.limit, 1, 256, "limit");
+    return this.callTool<BrainJobEventsResult>("brain_job_events", args, options);
+  }
+
+  /** Request, approve, or deny a job checkpoint using a caller-authenticated proof digest. */
+  async brainJobApproval(
+    args: BrainJobApprovalArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobApprovalResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job approval job_id must be a non-empty string");
+    rejectBrainSecretFields(args, "brain job approval");
+    if (!["request", "approve", "deny"].includes(args.action)) throw new ArgumentError("brain job approval action must be request, approve, or deny");
+    if ((args.action === "approve" || args.action === "deny") && (typeof args.authorization_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.authorization_digest))) throw new ArgumentError("approve and deny require a lowercase authorization_digest");
+    if (args.reason !== undefined && (typeof args.reason !== "string" || args.reason.length > 2048)) throw new ArgumentError("reason must be at most 2048 characters");
+    return this.callTool<BrainJobApprovalResult>("brain_job_approval", args, options);
+  }
+
+  /** Claim a queued metadata-only job for a bounded worker lease. */
+  async brainJobClaim(
+    args: BrainJobClaimArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job claim job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job claim worker_id must be a bounded non-empty string");
+    rejectBrainSecretFields(args, "brain job claim");
+    validateOptionalBoundedInteger(args.lease_ms, 100, 86_400_000, "lease_ms");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_claim", args, options);
+  }
+
+  /** Atomically claim the next priority-ordered queued job for a bounded worker lease. */
+  async brainJobClaimNext(
+    args: BrainJobClaimNextArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobClaimNextResult>> {
+    if (!isObject(args) || typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job claim-next worker_id must be a bounded non-empty string");
+    rejectBrainSecretFields(args, "brain job claim-next");
+    validateOptionalBoundedInteger(args.lease_ms, 100, 86_400_000, "lease_ms");
+    return this.callTool<BrainJobClaimNextResult>("brain_job_claim_next", args, options);
+  }
+
+  /** Renew an active lease only for its current worker owner. */
+  async brainJobRenew(
+    args: BrainJobRenewArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job renew job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job renew worker_id must be a bounded non-empty string");
+    rejectBrainSecretFields(args, "brain job renew");
+    validateOptionalBoundedInteger(args.lease_ms, 100, 86_400_000, "lease_ms");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_renew", args, options);
+  }
+
+  /** Persist a digest-bound phase and monotonic side-effect boundary without sending checkpoint payloads. */
+  async brainJobCheckpoint(
+    args: BrainJobCheckpointArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job checkpoint job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job checkpoint worker_id must be a bounded non-empty string");
+    if (typeof args.phase !== "string" || !args.phase.trim() || args.phase.length > 128) throw new ArgumentError("brain job checkpoint phase must be a bounded non-empty string");
+    if (typeof args.checkpoint_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.checkpoint_digest)) throw new ArgumentError("checkpoint_digest must be a lowercase SHA-256 digest");
+    if (args.side_effect_boundary !== undefined && !["not_started", "preflight", "dispatched", "unknown"].includes(args.side_effect_boundary)) throw new ArgumentError("side_effect_boundary is invalid");
+    if (args.waiting_for_approval !== undefined && typeof args.waiting_for_approval !== "boolean") throw new ArgumentError("waiting_for_approval must be boolean");
+    rejectBrainSecretFields(args, "brain job checkpoint");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_checkpoint", args, options);
+  }
+
+  /** Complete an active job with a digest for the caller-owned result. */
+  async brainJobComplete(
+    args: BrainJobCompleteArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job complete job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job complete worker_id must be a bounded non-empty string");
+    if (typeof args.result_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.result_digest)) throw new ArgumentError("result_digest must be a lowercase SHA-256 digest");
+    rejectBrainSecretFields(args, "brain job complete");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_complete", args, options);
+  }
+
+  /** Fail an active job with bounded reason metadata; the server decides retry versus quarantine. */
+  async brainJobFail(
+    args: BrainJobFailArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job fail job_id must be a non-empty string");
+    if (typeof args.worker_id !== "string" || !args.worker_id.trim() || args.worker_id.length > 256) throw new ArgumentError("brain job fail worker_id must be a bounded non-empty string");
+    if (typeof args.reason !== "string" || !args.reason.trim() || args.reason.length > 2048) throw new ArgumentError("reason must be a bounded non-empty string");
+    if (args.retryable !== undefined && typeof args.retryable !== "boolean") throw new ArgumentError("retryable must be boolean");
+    rejectBrainSecretFields(args, "brain job fail");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_fail", args, options);
+  }
+
+  /** Resolve uncertain external effects using a digest-bound caller/operator decision. */
+  async brainJobReconcile(
+    args: BrainJobReconcileArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobLifecycleResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job reconcile job_id must be a non-empty string");
+    if (!["succeeded", "failed", "not_executed", "unknown"].includes(args.outcome)) throw new ArgumentError("outcome must be succeeded, failed, not_executed, or unknown");
+    if (typeof args.evidence_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.evidence_digest)) throw new ArgumentError("evidence_digest must be a lowercase SHA-256 digest");
+    if (args.evidence_kind !== undefined && (typeof args.evidence_kind !== "string" || !args.evidence_kind.trim() || args.evidence_kind.length > 128)) throw new ArgumentError("evidence_kind must be a bounded non-empty string");
+    if (args.operator !== undefined && (typeof args.operator !== "string" || !args.operator.trim() || args.operator.length > 256)) throw new ArgumentError("operator must be a bounded non-empty string");
+    if (args.reason !== undefined && (typeof args.reason !== "string" || !args.reason.trim() || args.reason.length > 2048)) throw new ArgumentError("reason must be a bounded non-empty string");
+    if (args.effect_absent !== undefined && typeof args.effect_absent !== "boolean") throw new ArgumentError("effect_absent must be boolean");
+    if (args.outcome === "not_executed" && args.effect_absent !== true) throw new ArgumentError("not_executed reconciliation requires effect_absent=true");
+    rejectBrainSecretFields(args, "brain job reconcile");
+    return this.callTool<BrainJobLifecycleResult>("brain_job_reconcile", args, options);
+  }
+
+  /** Cancel before external dispatch, or retain a reconciliation quarantine after dispatch. */
+  async brainJobCancel(
+    args: BrainJobCancelArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainJobCancelResult>> {
+    if (!isObject(args) || typeof args.job_id !== "string" || !args.job_id.trim()) throw new ArgumentError("brain job cancel job_id must be a non-empty string");
+    if (args.reason !== undefined && (typeof args.reason !== "string" || !args.reason.trim() || args.reason.length > 2048)) throw new ArgumentError("reason must be a bounded non-empty string");
+    rejectBrainSecretFields(args, "brain job cancel");
+    return this.callTool<BrainJobCancelResult>("brain_job_cancel", args, options);
+  }
+
+  /** Record or inspect provider/model posture without accepting credential material or payloads. */
+  async brainModelHealth(
+    args: BrainModelHealthArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainModelHealthResult>> {
+    if (!isObject(args)) throw new ArgumentError("brain model health arguments must be an object");
+    rejectBrainSecretFields(args, "brain model health");
+    if (args.operation !== undefined && !["snapshot", "record"].includes(args.operation)) throw new ArgumentError("brain model health operation must be snapshot or record");
+    if (args.provider !== undefined && (typeof args.provider !== "string" || !args.provider.trim())) throw new ArgumentError("provider must be a non-empty string when supplied");
+    if (args.model !== undefined && (typeof args.model !== "string" || !args.model.trim())) throw new ArgumentError("model must be a non-empty string when supplied");
+    if (args.status !== undefined && !["success", "failure", "timeout", "rate_limited", "circuit_open", "unknown"].includes(args.status)) throw new ArgumentError("brain model health status is invalid");
+    validateOptionalBoundedInteger(args.latency_ms, 0, 600_000, "latency_ms");
+    validateOptionalBoundedInteger(args.tokens, 0, 1_000_000_000, "tokens");
+    if (args.quality !== undefined && (typeof args.quality !== "number" || !Number.isFinite(args.quality) || args.quality < 0 || args.quality > 1)) throw new ArgumentError("quality must be within [0, 1]");
+    for (const field of ["registered", "credential_ready", "eligible"] as const) if (args[field] !== undefined && typeof args[field] !== "boolean") throw new ArgumentError(`${field} must be boolean`);
+    return this.callTool<BrainModelHealthResult>("brain_model_health", args, options);
+  }
+
+  /** Re-evaluate caller-normalized evidence offline; this never invokes a provider or domain tool. */
+  async brainReplayEvaluate(
+    args: BrainReplayEvaluateArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<BrainReplayEvaluateResult>> {
+    if (!isObject(args)) throw new ArgumentError("brain replay arguments must be an object");
+    rejectBrainSecretFields(args, "brain replay");
+    for (const field of ["case_id", "domain", "capability", "risk_class"] as const) if (typeof args[field] !== "string" || !args[field].trim()) throw new ArgumentError(`${field} must be a non-empty string`);
+    if (typeof args.evidence_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.evidence_digest)) throw new ArgumentError("evidence_digest must be a lowercase SHA-256 digest");
+    if (!isObject(args.signals)) throw new ArgumentError("signals must be an object");
+    const signalEntries = Object.entries(args.signals);
+    if (signalEntries.length > 64 || signalEntries.some(([name, value]) => !name.trim() || (typeof value !== "boolean" && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)))) throw new ArgumentError("signals must contain at most 64 finite booleans or numbers within [0, 1]");
+    validateDigestList(args.references, 64, "references");
+    if (args.limitations !== undefined && (!Array.isArray(args.limitations) || args.limitations.length > 32 || args.limitations.some((value) => typeof value !== "string" || value.length > 2048))) throw new ArgumentError("limitations must contain at most 32 bounded strings");
+    if (args.required_signals !== undefined && (!Array.isArray(args.required_signals) || args.required_signals.length > 64 || args.required_signals.some((value) => typeof value !== "string" || !value.trim()))) throw new ArgumentError("required_signals must contain at most 64 non-empty strings");
+    if (args.signal_weights !== undefined && (!isObject(args.signal_weights) || Object.entries(args.signal_weights).length > 64 || Object.values(args.signal_weights).some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0))) throw new ArgumentError("signal_weights must contain at most 64 non-negative finite numbers");
+    if (args.pass_threshold !== undefined && (typeof args.pass_threshold !== "number" || !Number.isFinite(args.pass_threshold) || args.pass_threshold < 0 || args.pass_threshold > 1)) throw new ArgumentError("pass_threshold must be within [0, 1]");
+    return this.callTool<BrainReplayEvaluateResult>("brain_replay_evaluate", args, options);
+  }
+
   /** Snapshot the authoritative live tool catalogue and bind it to a SHA-256 digest. */
   async toolCatalogue(options?: ClientRequestOptions): Promise<ToolCatalogue> {
     return ToolCatalogue.fromDefinitions(await this.tools(options));
@@ -733,6 +2175,97 @@ export class ApiClient {
     return this.callTool<EpistemicVoiResult>("epistemic_voi", args, options);
   }
 
+  async epistemicAdaptiveAcquisition(args: EpistemicAdaptiveArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicAdaptiveResult>> {
+    return this.callTool<EpistemicAdaptiveResult>("epistemic_adaptive_acquisition", args, options);
+  }
+
+  async epistemicAdaptiveExecute(args: AdaptiveExecutionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptiveExecutionResult>> {
+    if (!isObject(args)) throw new ArgumentError("adaptive execution arguments must be an object");
+    if (!Number.isFinite(args.budget) || args.budget < 0) throw new ArgumentError("budget must be a finite non-negative number");
+    if (!Number.isSafeInteger(args.max_steps) || args.max_steps < 0 || args.max_steps > 16) throw new ArgumentError("max_steps must be 0..=16");
+    if (!Array.isArray(args.acquisitions) || args.acquisitions.length < 1 || args.acquisitions.length > 16) throw new ArgumentError("acquisitions must contain 1..=16 items");
+    if (args.mode !== undefined && args.mode !== "simulate" && args.mode !== "replay") throw new ArgumentError("mode must be simulate or replay");
+    return this.callTool<AdaptiveExecutionResult>("epistemic_adaptive_execute", args, options);
+  }
+
+  async epistemicAdaptiveCosted(args: AdaptiveCostedArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdaptiveCostedResult>> {
+    if (!isObject(args)) throw new ArgumentError("adaptive costed arguments must be an object");
+    if (!Number.isSafeInteger(args.max_steps) || args.max_steps < 0 || args.max_steps > 16) throw new ArgumentError("max_steps must be 0..=16");
+    if (!Array.isArray(args.acquisitions) || args.acquisitions.length < 1 || args.acquisitions.length > 16) throw new ArgumentError("acquisitions must contain 1..=16 items");
+    for (const [name, vector] of [["budget", args.budget], ["weights", args.weights]] as const) {
+      if (!isObject(vector)) throw new ArgumentError(`${name} must be a seven-dimensional object`);
+      const values = [vector.tokens, vector.compute_ms, vector.latency_ms, vector.money_usd, vector.privacy_loss, vector.specimen_units, vector.expert_minutes];
+      if (values.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new ArgumentError(`${name} dimensions must be finite and non-negative`);
+    }
+    if ([args.weights.tokens, args.weights.compute_ms, args.weights.latency_ms, args.weights.money_usd, args.weights.privacy_loss, args.weights.specimen_units, args.weights.expert_minutes].every((value) => value === 0)) throw new ArgumentError("weights must contain at least one positive dimension");
+    return this.callTool<AdaptiveCostedResult>("epistemic_adaptive_costed", args, options);
+  }
+
+  async interweaveWorkflowExecute(args: WorkflowExecutionArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionResult>> {
+    if (!isObject(args)) throw new ArgumentError("workflow execution arguments must be an object");
+    const workflows = ["reliable_software_repair", "scientific_claim_reproduction", "biomedical_research_data_audit", "incident_response", "evidence_grounded_policy_comparison", "dataset_transformation_molecule"];
+    if (!workflows.includes(args.workflow)) throw new ArgumentError("workflow must be one of the six reference workflow ids");
+    if (!isObject(args.problem) || !isObject(args.belief)) throw new ArgumentError("problem and belief must be objects");
+    if (!Number.isFinite(args.budget) || args.budget < 0) throw new ArgumentError("budget must be a finite non-negative number");
+    if (!Number.isSafeInteger(args.max_steps) || args.max_steps < 0 || args.max_steps > 16) throw new ArgumentError("max_steps must be 0..=16");
+    if (!Array.isArray(args.acquisitions) || args.acquisitions.length < 1 || args.acquisitions.length > 16) throw new ArgumentError("acquisitions must contain 1..=16 items");
+    if (args.mode !== undefined && args.mode !== "simulate" && args.mode !== "replay") throw new ArgumentError("mode must be simulate or replay");
+    if (args.provider !== undefined && (typeof args.provider !== "string" || args.provider.trim().length === 0)) throw new ArgumentError("provider must be a non-empty string");
+    if (args.capabilities !== undefined && (!Array.isArray(args.capabilities) || args.capabilities.length > 32 || args.capabilities.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError("capabilities must contain at most 32 non-empty strings");
+    if (args.observations !== undefined && (!Array.isArray(args.observations) || args.observations.length > 16 || args.observations.some((item) => !isObject(item) || typeof item.acquisition_id !== "string" || typeof item.outcome_label !== "string"))) throw new ArgumentError("observations must contain at most 16 typed rows");
+    if (args.authorization !== undefined && (!isObject(args.authorization) || typeof args.authorization.grant_id !== "string" || typeof args.authorization.provider !== "string")) throw new ArgumentError("authorization must contain grant_id and provider");
+    if (args.mode === "replay" && !isObject(args.receipt)) throw new ArgumentError("receipt is required in replay mode");
+    if (args.evidence !== undefined && (!isObject(args.evidence) || typeof args.evidence.subject_id !== "string" || args.evidence.subject_id.trim().length === 0 || !Array.isArray(args.evidence.domains) || args.evidence.domains.length < 1 || args.evidence.domains.length > 64 || args.evidence.domains.some((item) => typeof item !== "string" || item.trim().length === 0))) throw new ArgumentError("evidence must contain subject_id and 1..=64 non-empty domains");
+    return this.callTool<WorkflowExecutionResult>("interweave_workflow_execute", args, options);
+  }
+
+  async interweaveWorkflowExecutionEvidence(args: WorkflowExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionEvidenceResult>> {
+    if (!isObject(args)) throw new ArgumentError("workflow execution evidence arguments must be an object");
+    if (!isObject(args.binding) || !isObject(args.receipt)) throw new ArgumentError("binding and receipt must be objects");
+    if (typeof args.subject_id !== "string" || args.subject_id.trim().length === 0) throw new ArgumentError("subject_id must be a non-empty string");
+    if (!Array.isArray(args.domains) || args.domains.length < 1 || args.domains.length > 64 || args.domains.some((item) => typeof item !== "string" || item.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (args.parent_digests !== undefined && (!Array.isArray(args.parent_digests) || args.parent_digests.length > 128 || args.parent_digests.some((item) => typeof item !== "string" || !/^[0-9a-f]{64}$/.test(item)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    return this.callTool<WorkflowExecutionEvidenceResult>("interweave_workflow_execution_evidence", args, options);
+  }
+
+  async interweaveWorkflowExecutionEvidenceImport(args: WorkflowExecutionEvidenceImportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionEvidenceResult>> {
+    if (!isObject(args) || !isObject(args.evidence)) throw new ArgumentError("evidence import arguments must contain an evidence object");
+    return this.callTool<WorkflowExecutionEvidenceResult>("interweave_workflow_execution_evidence_import", args, options);
+  }
+
+  async interweaveWorkflowExecutionEvidenceQuery(args: WorkflowExecutionEvidenceQueryOptions = {}, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionEvidenceResult>> {
+    if (!isObject(args)) throw new ArgumentError("workflow execution evidence query arguments must be an object");
+    if (args.max_items !== undefined && (!Number.isSafeInteger(args.max_items) || args.max_items < 1 || args.max_items > 256)) throw new ArgumentError("max_items must be 1..=256");
+    for (const [name, value] of [["plan_digest", args.plan_digest], ["binding_digest", args.binding_digest], ["after", args.after]] as const) {
+      if (value !== undefined && !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+    }
+    return this.callTool<WorkflowExecutionEvidenceResult>("interweave_workflow_execution_evidence_query", args, options);
+  }
+
+  async interweaveWorkflowExecutionEvidenceGet(evidenceDigest: string, options?: ClientRequestOptions): Promise<RestToolResponse<WorkflowExecutionEvidenceResult>> {
+    if (typeof evidenceDigest !== "string" || !/^[0-9a-f]{64}$/.test(evidenceDigest)) throw new ArgumentError("evidenceDigest must be a lowercase SHA-256 digest");
+    return this.callTool<WorkflowExecutionEvidenceResult>("interweave_workflow_execution_evidence_get", { evidence_digest: evidenceDigest }, options);
+  }
+
+  async epistemicDecisionQuotient(args: EpistemicDecisionQuotientArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicDecisionQuotientResult>> {
+    return this.callTool<EpistemicDecisionQuotientResult>("epistemic_decision_quotient", args, options);
+  }
+
+  /** Compile a FIBER query; 0.3/0.4 responses carry typed decision projections at L0. */
+  async fiberCompile(args: FiberCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FiberCompileResult>> {
+    return this.callTool<FiberCompileResult>("fiber_compile", args, options);
+  }
+
+  /** Compile a FIBER query whose 0.4 contract carries observed rate-distortion inputs. */
+  async fiberCompileRateDistortion(args: FiberCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FiberCompileResult>> {
+    return this.callTool<FiberCompileResult>("fiber_compile", args, options);
+  }
+
+  /** Compile a FIBER 0.5 query and expose its certificate-bound adaptive policy projection. */
+  async fiberCompileAdaptiveAcquisition(args: FiberCompileArgs, options?: ClientRequestOptions): Promise<RestToolResponse<FiberCompileResult>> {
+    return this.callTool<FiberCompileResult>("fiber_compile", args, options);
+  }
+
   async epistemicContextAudit(args: EpistemicContextAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<EpistemicContextAuditResult>> {
     return this.callTool<EpistemicContextAuditResult>("epistemic_context_audit", args, options);
   }
@@ -837,6 +2370,84 @@ export class ApiClient {
     return this.callTool("developer_workbench", args, options);
   }
 
+  /** Verify a retained authoring/notebook report, with optional deterministic CI-plan replay. */
+  async developerWorkbenchVerifyQuery(
+    args: DeveloperWorkbenchVerificationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DeveloperWorkbenchVerificationResult> {
+    if (!isObject(args) || !isObject(args.session) || !Object.keys(args.session).length || !isObject(args.report) || !Object.keys(args.report).length) {
+      throw new ArgumentError("developer workbench verification requires session and report objects");
+    }
+    if (args.expected_report_digest !== undefined && (typeof args.expected_report_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.expected_report_digest))) {
+      throw new ArgumentError("expected_report_digest must be a lowercase SHA-256 digest");
+    }
+    if (args.ci_replay !== undefined && !isObject(args.ci_replay)) throw new ArgumentError("ci_replay must be an object");
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workbench verification policy must be an object");
+    return this.request<DeveloperWorkbenchVerificationResult>("POST", "/v1/developer-workbench/verify", args, options);
+  }
+
+  /** MCP envelope form of developerWorkbenchVerifyQuery. */
+  async developerWorkbenchVerify(
+    args: DeveloperWorkbenchVerificationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DeveloperWorkbenchVerificationResult>> {
+    return this.callTool<DeveloperWorkbenchVerificationResult>("developer_workbench_verify", args, options);
+  }
+
+  async developerWorkbenchImportRest(
+    args: DeveloperWorkbenchRegistryImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<DeveloperWorkbenchRegistryImportResult> {
+    if (!isObject(args) || !isObject(args.report) || !Object.keys(args.report).length) {
+      throw new ArgumentError("developer workbench registry import requires a non-empty report object");
+    }
+    return this.request<DeveloperWorkbenchRegistryImportResult>("POST", "/v1/developer-workbench/reports", args, options);
+  }
+
+  async developerWorkbenchImport(
+    args: DeveloperWorkbenchRegistryImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DeveloperWorkbenchRegistryImportResult>> {
+    return this.callTool<DeveloperWorkbenchRegistryImportResult>("developer_workbench_import", args, options);
+  }
+
+  async developerWorkbenchQueryRest(
+    args: DeveloperWorkbenchRegistryQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<DeveloperWorkbenchRegistryQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("developer workbench registry query arguments must be an object");
+    if (args.session_digest !== undefined && (typeof args.session_digest !== "string" || !/^[0-9a-f]{64}$/.test(args.session_digest))) throw new ArgumentError("session_digest must be a lowercase SHA-256 digest");
+    if (args.after !== undefined && (typeof args.after !== "string" || !/^[0-9a-f]{64}$/.test(args.after))) throw new ArgumentError("after must be a lowercase SHA-256 digest");
+    if (args.max_items !== undefined && (!Number.isInteger(args.max_items) || args.max_items < 1 || args.max_items > 256)) throw new ArgumentError("max_items must be between 1 and 256");
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ ...args, max_items: args.max_items ?? 100, include_reports: args.include_reports ?? false })) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    return this.request<DeveloperWorkbenchRegistryQueryResult>("GET", `/v1/developer-workbench/reports?${params.toString()}`, undefined, options);
+  }
+
+  async developerWorkbenchQuery(
+    args: DeveloperWorkbenchRegistryQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DeveloperWorkbenchRegistryQueryResult>> {
+    return this.callTool<DeveloperWorkbenchRegistryQueryResult>("developer_workbench_query", args, options);
+  }
+
+  async developerWorkbenchGetRest(
+    digest: string,
+    options?: ClientRequestOptions,
+  ): Promise<DeveloperWorkbenchRegistryGetResult> {
+    if (!/^[0-9a-f]{64}$/.test(digest)) throw new ArgumentError("workbench_report_digest must be a lowercase SHA-256 digest");
+    return this.request<DeveloperWorkbenchRegistryGetResult>("GET", `/v1/developer-workbench/reports/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  async developerWorkbenchGet(
+    digest: string,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DeveloperWorkbenchRegistryGetResult>> {
+    return this.callTool<DeveloperWorkbenchRegistryGetResult>("developer_workbench_get", { workbench_report_digest: digest }, options);
+  }
+
   async ciExecutionEvidenceAudit(args: CiExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CiExecutionEvidenceResult>> {
     return this.callTool<CiExecutionEvidenceResult>("ci_execution_evidence_audit", args, options);
   }
@@ -849,12 +2460,185 @@ export class ApiClient {
     return this.callTool<CiProviderEvidenceResult>("ci_provider_evidence_audit", args, options);
   }
 
+  async ciProviderEvidenceImportRest(
+    args: CiProviderEvidenceRegistryImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<CiProviderEvidenceRegistryImportResult> {
+    if (!isObject(args) || !isObject(args.ci) || !isObject(args.payload)) {
+      throw new ArgumentError("CI provider evidence import requires ci and payload objects");
+    }
+    return this.request<CiProviderEvidenceRegistryImportResult>("POST", "/v1/ci/provider-evidence", args, options);
+  }
+
+  async ciProviderEvidenceImport(
+    args: CiProviderEvidenceRegistryImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<CiProviderEvidenceRegistryImportResult>> {
+    return this.callTool<CiProviderEvidenceRegistryImportResult>("ci_provider_evidence_import", args, options);
+  }
+
+  async ciProviderEvidenceQueryRest(
+    args: CiProviderEvidenceRegistryQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<CiProviderEvidenceRegistryQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("CI provider evidence query arguments must be an object");
+    for (const field of ["plan_digest", "after"]) {
+      const value = args[field];
+      if (value !== undefined && (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) {
+        throw new ArgumentError(`${field} must be a lowercase SHA-256 digest`);
+      }
+    }
+    if (args.max_items !== undefined && (!Number.isInteger(args.max_items) || args.max_items < 1 || args.max_items > 256)) {
+      throw new ArgumentError("max_items must be between 1 and 256");
+    }
+    for (const field of ["min_local_byte_hash_artifacts", "min_local_byte_hash_logs", "min_attestation_subject_digest_bindings"] as const) {
+      const value = args[field];
+      if (value !== undefined && (!Number.isInteger(value) || value < 0 || value > 128)) {
+        throw new ArgumentError(`${field} must be an integer between 0 and 128`);
+      }
+    }
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ ...args, max_items: args.max_items ?? 100, include_records: args.include_records ?? false })) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    return this.request<CiProviderEvidenceRegistryQueryResult>("GET", `/v1/ci/provider-evidence?${params.toString()}`, undefined, options);
+  }
+
+  async ciProviderEvidenceQuery(
+    args: CiProviderEvidenceRegistryQueryArgs = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<CiProviderEvidenceRegistryQueryResult>> {
+    return this.callTool<CiProviderEvidenceRegistryQueryResult>("ci_provider_evidence_query", args, options);
+  }
+
+  async ciProviderEvidenceGetRest(
+    digest: string,
+    options?: ClientRequestOptions,
+  ): Promise<CiProviderEvidenceRegistryGetResult> {
+    if (!/^[0-9a-f]{64}$/.test(digest)) throw new ArgumentError("provider_evidence_digest must be a lowercase SHA-256 digest");
+    return this.request<CiProviderEvidenceRegistryGetResult>("GET", `/v1/ci/provider-evidence/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  async ciProviderEvidenceGet(
+    digest: string,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<CiProviderEvidenceRegistryGetResult>> {
+    if (!/^[0-9a-f]{64}$/.test(digest)) throw new ArgumentError("provider_evidence_digest must be a lowercase SHA-256 digest");
+    return this.callTool<CiProviderEvidenceRegistryGetResult>("ci_provider_evidence_get", { provider_evidence_digest: digest }, options);
+  }
+
   async executionProvenanceAudit(args: ExecutionProvenanceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ExecutionProvenanceResult>> {
     return this.callTool<ExecutionProvenanceResult>("execution_provenance_audit", args, options);
   }
 
   async capabilityDiscover(args: CapabilityDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityDiscoverResult>> {
     return this.callTool<CapabilityDiscoverResult>("capability_discover", args, options);
+  }
+
+  async domainWorkflowCatalogue(options?: ClientRequestOptions): Promise<RestToolResponse<DomainWorkflowCatalogueResult>> {
+    return this.callTool<DomainWorkflowCatalogueResult>("domain_workflow_catalogue", {}, options);
+  }
+
+  async domainWorkflowScaffold(
+    args: DomainWorkflowScaffoldArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowScaffoldResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain workflow scaffold arguments must be an object");
+    if (typeof args.workflow_id !== "string" || args.workflow_id.trim().length === 0) throw new ArgumentError("workflow_id must be a non-empty string");
+    if (typeof args.mission_id !== "string" || args.mission_id.trim().length === 0) throw new ArgumentError("mission_id must be a non-empty string");
+    if (typeof args.goal !== "string" || args.goal.trim().length === 0) throw new ArgumentError("goal must be a non-empty string");
+    if (args.tools !== undefined && (!Array.isArray(args.tools) || args.tools.length > 128 || args.tools.some((tool) => typeof tool !== "string" || tool.trim().length === 0))) {
+      throw new ArgumentError("tools must contain at most 128 non-empty strings");
+    }
+    if (args.arguments !== undefined && !isObject(args.arguments)) throw new ArgumentError("arguments must be an object");
+    return this.callTool<DomainWorkflowScaffoldResult>("domain_workflow_scaffold", args, options);
+  }
+
+  async domainWorkflowInstantiate(
+    args: DomainWorkflowInstantiateArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowInstantiateResult>> {
+    if (!isObject(args) || !Array.isArray(args.steps) || args.steps.length < 1 || args.steps.length > 128) {
+      throw new ArgumentError("domain workflow instantiate requires 1..=128 step objects");
+    }
+    return this.callTool<DomainWorkflowInstantiateResult>("domain_workflow_instantiate", args, options);
+  }
+
+  /** Plan multiple explicit domain workflows through the MCP tool boundary. */
+  async domainWorkflowPortfolio(
+    args: DomainWorkflowPortfolioArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowPortfolioResult>> {
+    if (!isObject(args) || !Array.isArray(args.requests) || args.requests.length < 1 || args.requests.length > 64 || args.requests.some((request) => !isObject(request))) {
+      throw new ArgumentError("workflow portfolio requires 1..=64 request objects");
+    }
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio policy must be an object");
+    return this.callTool<DomainWorkflowPortfolioResult>("domain_workflow_portfolio", args, options);
+  }
+
+  /** Verify a retained multi-domain portfolio through the MCP tool boundary. */
+  async domainWorkflowPortfolioVerify(
+    args: DomainWorkflowPortfolioVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowPortfolioVerifyResult>> {
+    if (!isObject(args) || !isObject(args.portfolio)) throw new ArgumentError("workflow portfolio verification requires a portfolio object");
+    if (args.replay_requests !== undefined && (!Array.isArray(args.replay_requests) || args.replay_requests.length < 1 || args.replay_requests.length > 64 || args.replay_requests.some((request) => request !== null && !isObject(request)))) {
+      throw new ArgumentError("workflow portfolio verification replay_requests must contain 1..=64 objects or nulls");
+    }
+    if (args.policy !== undefined && !isObject(args.policy)) throw new ArgumentError("workflow portfolio verification policy must be an object");
+    const portfolio = { ...args.portfolio };
+    delete portfolio.request_id;
+    delete portfolio.__isError;
+    return this.callTool<DomainWorkflowPortfolioVerifyResult>("domain_workflow_portfolio_verify", { ...args, portfolio }, options);
+  }
+
+  /** Verify a retained workflow contract through the MCP tool boundary. */
+  async domainWorkflowVerify(
+    args: DomainWorkflowVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowVerifyResult>> {
+    if (!isObject(args) || !isObject(args.instantiation)) throw new ArgumentError("workflow verification requires an instantiation object");
+    if (args.replay_request !== undefined && !isObject(args.replay_request)) throw new ArgumentError("workflow verification replay_request must be an object");
+    return this.callTool<DomainWorkflowVerifyResult>("domain_workflow_verify", args, options);
+  }
+
+  async domainWorkflowReconcile(
+    args: DomainWorkflowReconcileArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowReconcileResult>> {
+    if (!isObject(args) || !isObject(args.instantiation)) {
+      throw new ArgumentError("workflow reconciliation requires an instantiation object");
+    }
+    if (!isObject(args.mission_report) && !isObject(args.evidence_bundle)) {
+      throw new ArgumentError("workflow reconciliation requires mission_report or evidence_bundle");
+    }
+    return this.callTool<DomainWorkflowReconcileResult>("domain_workflow_reconcile", args, options);
+  }
+
+  async domainWorkflowReconciliationImportTool(
+    args: DomainWorkflowReconciliationImportArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowReconciliationImportResult>> {
+    if (!isObject(args) || !isObject(args.record)) throw new ArgumentError("workflow reconciliation record must be a JSON object");
+    return this.callTool<DomainWorkflowReconciliationImportResult>("domain_workflow_reconciliation_import", args, options);
+  }
+
+  async domainWorkflowReconciliationQueryTool(
+    args: DomainWorkflowReconciliationQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowReconciliationQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("workflow reconciliation query arguments must be a JSON object");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    return this.callTool<DomainWorkflowReconciliationQueryResult>("domain_workflow_reconciliation_query", { ...args, max_items: maxItems }, options);
+  }
+
+  async domainWorkflowReconciliationGetTool(
+    reconciliationDigest: string,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<DomainWorkflowReconciliationGetResult>> {
+    const digest = pathSegment(reconciliationDigest, "reconciliation digest");
+    return this.callTool<DomainWorkflowReconciliationGetResult>("domain_workflow_reconciliation_get", { reconciliation_digest: digest }, options);
   }
 
   async missionEvaluatorDiscover(args: MissionEvaluatorDiscoverArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvaluatorDiscoverResult>> {
@@ -865,6 +2649,146 @@ export class ApiClient {
     return this.callTool<MissionEvaluatorReviewResult>("mission_evaluator_review", args, options);
   }
 
+  async missionEvaluatorReplay(args: MissionEvaluatorReplayArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvaluatorReplayResult>> {
+    return this.callTool<MissionEvaluatorReplayResult>("mission_evaluator_replay", args, options);
+  }
+
+  async missionEvaluatorReplayCompare(args: MissionEvaluatorReplayCompareArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvaluatorReplayCompareResult>> {
+    return this.callTool<MissionEvaluatorReplayCompareResult>("mission_evaluator_replay_compare", args, options);
+  }
+
+  async missionEvidenceBundleVerify(args: MissionEvidenceBundleVerifyArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleVerifyResult>> {
+    return this.callTool<MissionEvidenceBundleVerifyResult>("mission_evidence_bundle_verify", args, options);
+  }
+
+  async missionEvidenceBundleImport(args: MissionEvidenceBundleImportArgs, options?: ClientRequestOptions): Promise<MissionEvidenceBundleImportResult> {
+    if (!isObject(args) || !isObject(args.bundle)) throw new ArgumentError("bundle must be a JSON object");
+    return this.request<MissionEvidenceBundleImportResult>("POST", "/v1/evidence-bundles", args, options);
+  }
+
+  async missionEvidenceBundleQuery(args: MissionEvidenceBundleQueryOptions = {}, options?: ClientRequestOptions): Promise<MissionEvidenceBundleQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("evidence bundle query arguments must be a JSON object");
+    for (const [name, value] of [["mission_id", args.mission_id], ["domain", args.domain], ["after", args.after]] as const) {
+      if (value !== undefined && typeof value !== "string") throw new ArgumentError(`${name} must be a string`);
+    }
+    if (args.include_bundles !== undefined && typeof args.include_bundles !== "boolean") throw new ArgumentError("include_bundles must be a boolean");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    const query = new URLSearchParams({ max_items: String(maxItems), include_bundles: String(args.include_bundles ?? false) });
+    if (args.mission_id !== undefined) query.set("mission_id", args.mission_id);
+    if (args.domain !== undefined) query.set("domain", args.domain);
+    if (args.after !== undefined) query.set("after", args.after);
+    return this.request<MissionEvidenceBundleQueryResult>("GET", `/v1/evidence-bundles?${query.toString()}`, undefined, options);
+  }
+
+  async missionEvidenceBundleGet(bundleDigest: string, options?: ClientRequestOptions): Promise<MissionEvidenceBundleGetResult> {
+    const digest = pathSegment(bundleDigest, "bundle digest");
+    return this.request<MissionEvidenceBundleGetResult>("GET", `/v1/evidence-bundles/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  async missionEvidenceBundleImportTool(args: MissionEvidenceBundleImportArgs, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleImportResult>> {
+    if (!isObject(args) || !isObject(args.bundle)) throw new ArgumentError("bundle must be a JSON object");
+    return this.callTool<MissionEvidenceBundleImportResult>("mission_evidence_bundle_import", args, options);
+  }
+
+  async missionEvidenceBundleQueryTool(args: MissionEvidenceBundleQueryOptions = {}, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleQueryResult>> {
+    return this.callTool<MissionEvidenceBundleQueryResult>("mission_evidence_bundle_query", args, options);
+  }
+
+  async missionEvidenceBundleGetTool(bundleDigest: string, options?: ClientRequestOptions): Promise<RestToolResponse<MissionEvidenceBundleGetResult>> {
+    const digest = pathSegment(bundleDigest, "bundle digest");
+    return this.callTool<MissionEvidenceBundleGetResult>("mission_evidence_bundle_get", { bundle_digest: digest }, options);
+  }
+
+  async artifactRegistryAudit(
+    args: JsonObject = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<JsonObject>> {
+    if (!isObject(args)) throw new ArgumentError("artifact registry arguments must be an object");
+    return this.callTool<JsonObject>("artifact_registry_audit", args, options);
+  }
+
+  async artifactRegister(
+    args: ArtifactRegistrationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<ArtifactRegistrationResult> {
+    if (!isObject(args) || typeof args.kind !== "string" || typeof args.subject_id !== "string" || !("artifact" in args)) {
+      throw new ArgumentError("artifact registration requires kind, subject_id, and artifact");
+    }
+    return this.request<ArtifactRegistrationResult>("POST", "/v1/artifacts", args, options);
+  }
+
+  async artifactQuery(
+    args: ArtifactQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<ArtifactQueryResult> {
+    if (!isObject(args)) throw new ArgumentError("artifact query arguments must be an object");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    if (args.include_artifacts !== undefined && typeof args.include_artifacts !== "boolean") throw new ArgumentError("include_artifacts must be a boolean");
+    const query = new URLSearchParams({ limit: String(maxItems), include_artifacts: String(args.include_artifacts ?? false) });
+    for (const [name, value] of [["kind", args.kind], ["domain", args.domain], ["subject_id", args.subject_id], ["after", args.after]] as const) {
+      if (value !== undefined) {
+        if (typeof value !== "string" || value.trim().length === 0) throw new ArgumentError(`${name} must be a non-empty string`);
+        query.set(name, value);
+      }
+    }
+    return this.request<ArtifactQueryResult>("GET", `/v1/artifacts?${query.toString()}`, undefined, options);
+  }
+
+  async artifactGet(contentDigest: string, options?: ClientRequestOptions): Promise<ArtifactGetResult> {
+    const digest = pathSegment(contentDigest, "artifact content digest");
+    return this.request<ArtifactGetResult>("GET", `/v1/artifacts/${encodeURIComponent(digest)}`, undefined, options);
+  }
+
+  async artifactLineage(contentDigest: string, options?: ClientRequestOptions): Promise<ArtifactLineageResult> {
+    const digest = pathSegment(contentDigest, "artifact content digest");
+    return this.request<ArtifactLineageResult>("GET", `/v1/artifacts/${encodeURIComponent(digest)}/lineage`, undefined, options);
+  }
+
+  async domainEvidenceLineage(
+    args: ArtifactDomainEvidenceLineageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<ArtifactDomainEvidenceLineageResult> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence lineage arguments must be an object");
+    const stringFields = ["content_digest", "group_id", "domain", "subject_id", "source_tool", "outcome", "request_digest", "response_digest", "intake_digest", "source_plan_digest", "after"] as const;
+    for (const name of stringFields) {
+      const value = args[name];
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    if (args.include_children !== undefined && typeof args.include_children !== "boolean") throw new ArgumentError("include_children must be a boolean");
+    const query = new URLSearchParams({ max_items: String(maxItems), include_children: String(args.include_children ?? true) });
+    for (const name of stringFields) {
+      const value = args[name];
+      if (value !== undefined) query.set(name, value);
+    }
+    return this.request<ArtifactDomainEvidenceLineageResult>("GET", `/v1/domain-evidence/lineage?${query.toString()}`, undefined, options);
+  }
+
+  async artifactDomainEvidenceLineageTool(
+    args: ArtifactDomainEvidenceLineageOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ArtifactDomainEvidenceLineageResult>> {
+    if (!isObject(args)) throw new ArgumentError("domain evidence lineage arguments must be an object");
+    const maxItems = args.max_items ?? 100;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 256) throw new ArgumentError("max_items must be 1..=256");
+    return this.callTool<ArtifactDomainEvidenceLineageResult>("artifact_registry_audit", { operation: "domain_evidence_lineage", ...args, max_items: maxItems }, options);
+  }
+
+  async artifactRegistryPersistence(options?: ClientRequestOptions): Promise<ArtifactRegistryPersistenceStatus> {
+    return this.request<ArtifactRegistryPersistenceStatus>("GET", "/v1/artifacts/persistence", undefined, options);
+  }
+
+  async artifactCrossStoreAudit(options?: ClientRequestOptions): Promise<ArtifactCrossStoreAuditResult> {
+    return this.request<ArtifactCrossStoreAuditResult>("GET", "/v1/artifacts/cross-store", undefined, options);
+  }
+
+  async flushArtifactRegistryPersistence(options?: ClientRequestOptions): Promise<ArtifactRegistryPersistenceStatus> {
+    return this.request<ArtifactRegistryPersistenceStatus>("POST", "/v1/artifacts/persistence/flush", {}, options);
+  }
+
   async capabilityAudit(args: CapabilityAuditArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityAuditResult>> {
     return this.callTool<CapabilityAuditResult>("capability_audit", args, options);
   }
@@ -873,16 +2797,173 @@ export class ApiClient {
     return this.callTool<CapabilityDashboardResult>("capability_dashboard", args, options);
   }
 
+  /** Query the capability dashboard through its cache-friendly direct REST route. */
+  async capabilityDashboardQuery(args: CapabilityDashboardArgs = {}, options?: ClientRequestOptions): Promise<CapabilityDashboardResult> {
+    if (!isObject(args)) throw new ArgumentError("capability dashboard arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain], ["status", args.status]] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string`);
+    }
+    const maxGroups = args.max_groups ?? 128;
+    if (!Number.isSafeInteger(maxGroups) || maxGroups < 1 || maxGroups > 512) throw new ArgumentError("max_groups must be 1..=512");
+    if (args.include_tools !== undefined && typeof args.include_tools !== "boolean") throw new ArgumentError("include_tools must be a boolean");
+    if (args.include_gaps !== undefined && typeof args.include_gaps !== "boolean") throw new ArgumentError("include_gaps must be a boolean");
+    const query = new URLSearchParams({ max_groups: String(maxGroups), include_tools: String(args.include_tools ?? false), include_gaps: String(args.include_gaps ?? true) });
+    for (const name of ["group_id", "domain", "status"] as const) {
+      const value = args[name];
+      if (value !== undefined) query.set(name, value);
+    }
+    return this.request<CapabilityDashboardResult>("GET", `/v1/capabilities/dashboard?${query.toString()}`, undefined, options);
+  }
+
   async capabilityRoute(args: CapabilityRouteArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRouteResult>> {
     return this.callTool<CapabilityRouteResult>("capability_route", args, options);
+  }
+
+  /** Submit a non-executing capability route through the raw REST handoff. */
+  async capabilityRouteRest(args: CapabilityRouteArgs, options?: ClientRequestOptions): Promise<CapabilityRouteResult> {
+    if (!isObject(args)) throw new ArgumentError("capability route arguments must be an object");
+    return this.request<CapabilityRouteResult>("POST", "/v1/capabilities/route", args, options);
   }
 
   async capabilityRouteReview(args: CapabilityRouteReviewArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRouteReviewResult>> {
     return this.callTool<CapabilityRouteReviewResult>("capability_route_review", args, options);
   }
 
+  /** Review explicit route selections through the raw REST handoff. */
+  async capabilityRouteReviewRest(args: CapabilityRouteReviewArgs, options?: ClientRequestOptions): Promise<CapabilityRouteReviewResult> {
+    if (!isObject(args)) throw new ArgumentError("capability route review arguments must be an object");
+    return this.request<CapabilityRouteReviewResult>("POST", "/v1/capabilities/route/review", args, options);
+  }
+
+  async capabilityRoutePlan(args: CapabilityRoutePlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<CapabilityRoutePlanResult>> {
+    return this.callTool<CapabilityRoutePlanResult>("capability_route_plan", args, options);
+  }
+
+  /** Compose an explicit route review with authoritative non-executing mission preflight. */
+  async capabilityRoutePlanRest(args: CapabilityRoutePlanArgs, options?: ClientRequestOptions): Promise<CapabilityRoutePlanResult> {
+    if (!isObject(args)) throw new ArgumentError("capability route plan arguments must be an object");
+    return this.request<CapabilityRoutePlanResult>("POST", "/v1/capabilities/route/plan", args, options);
+  }
+
+  /** Verify a retained route plan through MCP without dispatch or execution. */
+  async capabilityRoutePlanVerify(
+    args: CapabilityRoutePlanVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<CapabilityRoutePlanVerifyResult>> {
+    if (!isObject(args)) throw new ArgumentError("capability route plan verification arguments must be an object");
+    if (!isObject(args.plan)) throw new ArgumentError("capability route plan verification plan must be an object");
+    if ((args.route === undefined) !== (args.selections === undefined)) throw new ArgumentError("route and selections must be supplied together");
+    if (args.route !== undefined && !isObject(args.route)) throw new ArgumentError("capability route plan verification route must be an object");
+    if (args.selections !== undefined && (!Array.isArray(args.selections) || args.selections.length < 1 || args.selections.length > 128)) throw new ArgumentError("capability route plan verification selections must contain 1..=128 choices");
+    if (args.validate_schemas !== undefined && typeof args.validate_schemas !== "boolean") throw new ArgumentError("validate_schemas must be a boolean");
+    return this.callTool<CapabilityRoutePlanVerifyResult>("capability_route_plan_verify", args, options);
+  }
+
+  /** Verify a retained route plan through the dedicated REST endpoint. */
+  async capabilityRoutePlanVerifyRest(
+    args: CapabilityRoutePlanVerifyArgs,
+    options?: ClientRequestOptions,
+  ): Promise<CapabilityRoutePlanVerifyResult> {
+    if (!isObject(args)) throw new ArgumentError("capability route plan verification arguments must be an object");
+    if (!isObject(args.plan)) throw new ArgumentError("capability route plan verification plan must be an object");
+    if ((args.route === undefined) !== (args.selections === undefined)) throw new ArgumentError("route and selections must be supplied together");
+    if (args.route !== undefined && !isObject(args.route)) throw new ArgumentError("capability route plan verification route must be an object");
+    if (args.selections !== undefined && (!Array.isArray(args.selections) || args.selections.length < 1 || args.selections.length > 128)) throw new ArgumentError("capability route plan verification selections must contain 1..=128 choices");
+    if (args.validate_schemas !== undefined && typeof args.validate_schemas !== "boolean") throw new ArgumentError("validate_schemas must be a boolean");
+    return this.request<CapabilityRoutePlanVerifyResult>("POST", "/v1/capabilities/route/plan/verify", args, options);
+  }
+
   async adapterPlan(args: AdapterPlanArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterPlanResult>> {
     return this.callTool<AdapterPlanResult>("adapter_plan", args, options);
+  }
+
+  async adapterExecutionEvidence(args: AdapterExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceResult>> {
+    return this.callTool<AdapterExecutionEvidenceResult>("adapter_execution_evidence", validateAdapterExecutionEvidenceArgs(args), options);
+  }
+
+  async adapterExecutionEvidenceTool(args: AdapterExecutionEvidenceArgs, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceResult>> {
+    return this.adapterExecutionEvidence(args, options);
+  }
+
+  /** Validate and compose caller-owned adapter evidence into a canonical domain report. */
+  async domainReportFromAdapterExecution(
+    evidence: AdapterExecutionEvidenceArgs,
+    conformance?: JsonObject,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<AdapterDomainReportResult>> {
+    const normalized = validateAdapterExecutionEvidenceArgs(evidence);
+    if (conformance !== undefined && !isObject(conformance)) throw new ArgumentError("conformance must be an object");
+    const args: AdapterDomainReportArgs = {
+      operation: "from_adapter_execution",
+      evidence: normalized,
+    };
+    if (conformance !== undefined) args.conformance = conformance;
+    return this.callTool<AdapterDomainReportResult>("domain_report_project", args, options);
+  }
+
+  /** Validate and compose inline provider normalization into a canonical domain report. */
+  async domainReportFromProviderNormalization(
+    normalization: DomainEvidenceProviderNormalizationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ProviderDomainReportResult>> {
+    if (!isObject(normalization)) throw new ArgumentError("provider normalization arguments must be an object");
+    if (typeof normalization.group_id !== "string" || normalization.group_id.trim().length === 0) throw new ArgumentError("group_id must be a non-empty string");
+    if (!Array.isArray(normalization.domains) || normalization.domains.length < 1 || normalization.domains.length > 64 || normalization.domains.some((domain) => typeof domain !== "string" || domain.trim().length === 0)) throw new ArgumentError("domains must contain 1..=64 non-empty strings");
+    if (!isObject(normalization.payload) && !Array.isArray(normalization.payload)) throw new ArgumentError("payload must be an object or array");
+    if (normalization.parent_digests !== undefined && (!Array.isArray(normalization.parent_digests) || normalization.parent_digests.length > 128 || normalization.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    const args: ProviderDomainReportArgs = {
+      operation: "from_provider_normalization",
+      normalization: { ...normalization, outcome: normalization.outcome ?? "unknown" },
+    };
+    if (normalization.parent_digests !== undefined) args.parent_digests = normalization.parent_digests;
+    return this.callTool<ProviderDomainReportResult>("domain_report_project", args, options);
+  }
+
+  /** Validate and compose receipt-verified external provider normalization into a report. */
+  async domainReportFromExternalProviderNormalization(
+    normalization: DomainEvidenceProviderExternalPayloadNormalizationArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ProviderDomainReportResult>> {
+    if (!isObject(normalization)) throw new ArgumentError("external provider normalization arguments must be an object");
+    if (!isObject(normalization.payload) && !Array.isArray(normalization.payload)) throw new ArgumentError("payload must be an object or array");
+    if (normalization.parent_digests !== undefined && (!Array.isArray(normalization.parent_digests) || normalization.parent_digests.length > 128 || normalization.parent_digests.some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)))) throw new ArgumentError("parent_digests must contain at most 128 lowercase SHA-256 digests");
+    if ("credential_material" in normalization || "credentials" in normalization) throw new ArgumentError("credential material is not accepted by the external normalization boundary");
+    const args: ProviderDomainReportArgs = {
+      operation: "from_external_provider_normalization",
+      normalization: {
+        ...normalization,
+        availability: normalization.availability ?? "unknown",
+        retention: normalization.retention ?? "unknown",
+        outcome: normalization.outcome ?? "unknown",
+      },
+    };
+    if (normalization.parent_digests !== undefined) args.parent_digests = normalization.parent_digests;
+    return this.callTool<ProviderDomainReportResult>("domain_report_project", args, options);
+  }
+
+  async adapterExecutionEvidenceQuery(args: AdapterExecutionEvidenceQueryArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceQueryResult>> {
+    if (!isObject(args)) throw new ArgumentError("adapter execution evidence query arguments must be an object");
+    for (const [name, value] of [["group_id", args.group_id], ["domain", args.domain], ["subject_id", args.subject_id], ["adapter_id", args.adapter_id], ["source_id", args.source_id]] as const) {
+      if (value !== undefined && value !== null && (typeof value !== "string" || value.trim().length === 0)) throw new ArgumentError(`${name} must be a non-empty string or null`);
+    }
+    const executionStatuses = ["planned", "started", "succeeded", "partial", "refused", "failed", "unknown"];
+    const conformanceStatuses = ["verified", "partial", "refused", "not_run", "unknown"];
+    const lossStatuses = ["lossless", "lossy", "unknown", "not_applicable"];
+    if (args.execution_status !== undefined && args.execution_status !== null && !executionStatuses.includes(args.execution_status)) throw new ArgumentError("execution_status is invalid");
+    if (args.conformance_status !== undefined && args.conformance_status !== null && !conformanceStatuses.includes(args.conformance_status)) throw new ArgumentError("conformance_status is invalid");
+    if (args.semantic_loss_status !== undefined && args.semantic_loss_status !== null && !lossStatuses.includes(args.semantic_loss_status)) throw new ArgumentError("semantic_loss_status is invalid");
+    if (args.after !== undefined && args.after !== null && (typeof args.after !== "string" || !/^[0-9a-f]{64}$/.test(args.after))) throw new ArgumentError("after must be a lowercase SHA-256 digest or null");
+    if (args.max_items !== undefined && (!Number.isSafeInteger(args.max_items) || args.max_items < 1 || args.max_items > 128)) throw new ArgumentError("max_items must be between 1 and 128");
+    if (args.include_artifacts !== undefined && typeof args.include_artifacts !== "boolean") throw new ArgumentError("include_artifacts must be boolean");
+    return this.callTool<AdapterExecutionEvidenceQueryResult>("adapter_execution_evidence_query", args, options);
+  }
+
+  async adapterExecutionEvidenceQueryTool(args: AdapterExecutionEvidenceQueryArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<AdapterExecutionEvidenceQueryResult>> {
+    return this.adapterExecutionEvidenceQuery(args, options);
+  }
+
+  async domainAcquisitionCatalogue(args: DomainAcquisitionArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<DomainAcquisitionResult>> {
+    return this.callTool<DomainAcquisitionResult>("domain_acquisition_catalogue", args, options);
   }
 
   async tabularIngest(args: TabularIngestArgs, options?: ClientRequestOptions): Promise<RestToolResponse<TabularIngestResult>> {
@@ -895,6 +2976,31 @@ export class ApiClient {
 
   async releaseAudit(args: ReleaseAuditArgs, options?: ClientRequestOptions): Promise<RestToolResponse<ReleaseAuditResult>> {
     return this.callTool<ReleaseAuditResult>("release_audit", args, options);
+  }
+
+  async bundleVerify(args: BundleVerifyArgs, options?: ClientRequestOptions): Promise<RestToolResponse<BundleVerifyResult>> {
+    if (!isObject(args)) throw new ArgumentError("bundle verification arguments must be an object");
+    const sources = [args.bundle !== undefined, args.document !== undefined, args.publicly_attested_bundle !== undefined].filter(Boolean).length;
+    if (sources !== 1) throw new ArgumentError("bundle verification requires exactly one of bundle, document, or publicly_attested_bundle");
+    if (args.bundle !== undefined && !isObject(args.bundle)) throw new ArgumentError("bundle must be an object");
+    if (args.publicly_attested_bundle !== undefined && !isObject(args.publicly_attested_bundle)) throw new ArgumentError("publicly_attested_bundle must be an object");
+    if (args.document !== undefined && (typeof args.document !== "string" || args.document.trim().length === 0)) throw new ArgumentError("document must be a non-empty path");
+    if (args.trust_registry !== undefined && !isObject(args.trust_registry)) throw new ArgumentError("trust_registry must be an object");
+    if (args.trust_policy !== undefined && !isObject(args.trust_policy)) throw new ArgumentError("trust_policy must be an object");
+    if (args.trust_registry !== undefined && args.bundle !== undefined) throw new ArgumentError("trust_registry requires publicly attested bundle input, not a legacy bundle");
+    if ((args.trust_registry === undefined) !== (args.trust_policy === undefined)) throw new ArgumentError("trust_registry and trust_policy must be supplied together");
+    if (args.verification_key !== undefined && args.trust_registry !== undefined) throw new ArgumentError("verification_key and trust_registry are mutually exclusive");
+    if (args.publicly_attested_bundle !== undefined && args.verification_key === undefined && args.trust_registry === undefined) throw new ArgumentError("publicly_attested_bundle requires verification_key or trust_registry");
+    if (args.verification_key !== undefined) {
+      if (!isObject(args.verification_key) || typeof args.verification_key.key_identity !== "string" || !/^ed25519:[0-9a-f]{64}$/.test(args.verification_key.public_key) || !isObject(args.verification_key.validity)) {
+        throw new ArgumentError("verification_key must contain key_identity, an ed25519 public_key, and validity");
+      }
+      for (const field of ["not_before", "not_after"] as const) {
+        const value = args.verification_key.validity[field];
+        if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) throw new ArgumentError(`verification_key.validity.${field} must be a non-negative integer`);
+      }
+    }
+    return this.callTool<BundleVerifyResult>("bundle_verify", args, options);
   }
 
   async operationsCatalog(args: OperationsCatalogArgs = {}, options?: ClientRequestOptions): Promise<RestToolResponse<OperationsCatalogResult>> {
@@ -1200,6 +3306,41 @@ export class ApiClient {
     return this.request<MissionPersistenceStatus>("POST", "/v1/missions/persistence/flush", {}, options);
   }
 
+  /** Read queue lifecycle projections without returning checkpointed job specifications. */
+  async missionQueue(options?: ClientRequestOptions): Promise<MissionQueueInventoryResponse> {
+    return this.request<MissionQueueInventoryResponse>("GET", "/v1/missions/queue", undefined, options);
+  }
+
+  /** Inspect queue checkpoint integrity, startup recovery rows, and the explicit no-resume boundary. */
+  async missionQueuePersistence(options?: ClientRequestOptions): Promise<MissionQueueStatus> {
+    return this.request<MissionQueueStatus>("GET", "/v1/missions/queue/persistence", undefined, options);
+  }
+
+  /** Atomically flush the queue checkpoint and return its resulting status and byte count. */
+  async flushMissionQueuePersistence(options?: ClientRequestOptions): Promise<MissionQueueFlushResponse> {
+    return this.request<MissionQueueFlushResponse>("POST", "/v1/missions/queue/persistence/flush", {}, options);
+  }
+
+  /** Explicitly release an orphaned shared-authority lock with an auditable operator reason. */
+  async releaseMissionQueueLock(
+    operator: string,
+    reason: string,
+    options?: ClientRequestOptions,
+  ): Promise<MissionQueueLockReleaseResponse> {
+    if (typeof operator !== "string" || operator.trim().length === 0) {
+      throw new ArgumentError("operator must be a non-empty string");
+    }
+    if (typeof reason !== "string" || reason.trim().length === 0) {
+      throw new ArgumentError("reason must be a non-empty string");
+    }
+    return this.request<MissionQueueLockReleaseResponse>(
+      "POST",
+      "/v1/missions/queue/authority/release-lock",
+      { operator, reason },
+      options,
+    );
+  }
+
   /** Read the current asynchronous mission status and, once terminal, its authoritative report. */
   async missionStatus(missionId: string, options?: ClientRequestOptions): Promise<MissionJob> {
     const id = pathSegment(missionId, "mission id");
@@ -1230,6 +3371,104 @@ export class ApiClient {
       "GET",
       `/v1/missions/${encodeURIComponent(id)}/claims`,
       undefined,
+      options,
+    );
+  }
+
+  /** Read durable full or summary-only evaluator replay evidence for one mission. */
+  async missionEvaluatorReplayQuery(
+    missionId: string,
+    queryOptions: MissionEvaluatorReplayQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<MissionEvaluatorReplayQueryResult> {
+    const id = pathSegment(missionId, "mission id");
+    if (queryOptions.include_fixtures !== undefined && typeof queryOptions.include_fixtures !== "boolean") {
+      throw new ArgumentError("include_fixtures must be a boolean");
+    }
+    const maxItems = queryOptions.max_items ?? 128;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 512) {
+      throw new ArgumentError("max_items must be 1..=512");
+    }
+    const query = new URLSearchParams({
+      include_fixtures: String(queryOptions.include_fixtures ?? false),
+      max_items: String(maxItems),
+    });
+    return this.request<MissionEvaluatorReplayQueryResult>(
+      "GET",
+      `/v1/missions/${encodeURIComponent(id)}/evaluator-replay?${query.toString()}`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Compare durable replay evidence with the current evaluator catalogue. */
+  async missionEvaluatorReplayCompareQuery(
+    missionId: string,
+    queryOptions: MissionEvaluatorReplayQueryOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<MissionEvaluatorReplayCompareResult> {
+    const id = pathSegment(missionId, "mission id");
+    if (queryOptions.include_fixtures !== undefined && typeof queryOptions.include_fixtures !== "boolean") {
+      throw new ArgumentError("include_fixtures must be a boolean");
+    }
+    const maxItems = queryOptions.max_items ?? 128;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 512) {
+      throw new ArgumentError("max_items must be 1..=512");
+    }
+    const query = new URLSearchParams({
+      include_fixtures: String(queryOptions.include_fixtures ?? false),
+      max_items: String(maxItems),
+    });
+    return this.request<MissionEvaluatorReplayCompareResult>(
+      "GET",
+      `/v1/missions/${encodeURIComponent(id)}/evaluator-replay/compare?${query.toString()}`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Export a bounded, content-addressed mission evidence bundle. */
+  async missionEvidenceBundle(
+    missionId: string,
+    bundleOptions: MissionEvidenceBundleOptions = {},
+    options?: ClientRequestOptions,
+  ): Promise<MissionEvidenceBundleResult> {
+    const id = pathSegment(missionId, "mission id");
+    for (const [name, value] of [
+      ["include_result", bundleOptions.include_result],
+      ["include_trace", bundleOptions.include_trace],
+      ["include_fixtures", bundleOptions.include_fixtures],
+    ] as const) {
+      if (value !== undefined && typeof value !== "boolean") throw new ArgumentError(`${name} must be a boolean`);
+    }
+    const maxItems = bundleOptions.max_items ?? 128;
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 512) {
+      throw new ArgumentError("max_items must be 1..=512");
+    }
+    const query = new URLSearchParams({
+      include_result: String(bundleOptions.include_result ?? false),
+      include_trace: String(bundleOptions.include_trace ?? true),
+      include_fixtures: String(bundleOptions.include_fixtures ?? false),
+      max_items: String(maxItems),
+    });
+    return this.request<MissionEvidenceBundleResult>(
+      "GET",
+      `/v1/missions/${encodeURIComponent(id)}/evidence-bundle?${query.toString()}`,
+      undefined,
+      options,
+    );
+  }
+
+  /** Verify a portable mission evidence bundle's canonical and retained-result digests. */
+  async missionEvidenceBundleVerifyQuery(
+    bundle: JsonObject,
+    options?: ClientRequestOptions,
+  ): Promise<MissionEvidenceBundleVerifyResult> {
+    if (!isObject(bundle)) throw new ArgumentError("bundle must be a JSON object");
+    return this.request<MissionEvidenceBundleVerifyResult>(
+      "POST",
+      "/v1/evidence-bundles/verify",
+      { bundle },
       options,
     );
   }
@@ -1293,8 +3532,9 @@ export class ApiClient {
     missionId: string,
     selections: readonly MissionRouteSelection[],
     policy?: AgentMissionPolicy,
+    routeReview?: JsonObject,
   ): MissionAssembly {
-    return assembleMissionFromRoute(route, missionId, selections, policy);
+    return assembleMissionFromRoute(route, missionId, selections, policy, routeReview);
   }
 
   async runtimeEffectCheck(

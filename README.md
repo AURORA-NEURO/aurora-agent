@@ -1,5 +1,25 @@
 # bioprism
 
+## Autonomous agent process boundary
+
+The Python SDK includes a secret-safe operator entry point for the autonomous brain:
+
+```bash
+cd python
+python -m prism_sdk catalogue
+python -m prism_sdk evidence-plan --domain science
+python -m prism_sdk provider-status --provider openai
+```
+
+For keyless local development, the same boundary supports an explicit credentialless fixture:
+`python -m prism_sdk provider-status --provider local` and `run --provider local --model local-model`
+use the runtime's bounded in-memory transport; no key or network provider is contacted.
+
+Use `run` with a caller-owned MCP server when you are ready to invoke a provider. Keys are accepted
+only through a hidden prompt or an explicitly named environment variable; they are never command
+line arguments, MCP arguments, plans, or persisted state. See [the autonomous brain guide](docs/AUTONOMOUS_BRAIN.md#operator-process-boundary)
+for model discovery, durable inventory refresh, model-selection, approval, and credential-lifecycle details.
+
 **Query-compiled inference for executable biology.**
 
 Implementation of the AURORA BioPRISM / OncoWorld / FIBER blueprint (v0.6, 935 registered spec
@@ -105,7 +125,7 @@ carries a typed verdict in [`crates/residue`](crates/residue) explaining why not
 | [`bioprism-devplat`](crates/devplat) | 11,19 | Developer platform contracts: evidence-aware authoring workbench, cross-domain mission DAGs, digest-bound capability discovery, notebook/session audit, capability dashboard queries, CI planning, and reference-example predicates |
 | [`bioprism-devx`](crates/devx) | 11,23,38,39,40,41,43 | Developer platform: machine-actionable diagnostics, compile introspection, the local-loop invalidation contract and the 23.32 debugger surface model |
 | [`bioprism-docgraph`](crates/docgraph) | 39,41,43 | Documentation graph: module registry, edge vocabulary, context cards, task routes, bundle compiler, change impact |
-| [`bioprism-epistemic`](crates/epistemic) | 43 | The remaining FIBER calculus: coverage-aware selection, separator protocol, rate-distortion and value of information |
+| [`bioprism-epistemic`](crates/epistemic) | 43 | The remaining FIBER calculus: decision-equivalence quotient, coverage-aware selection, separator protocol, rate-distortion and value of information |
 | [`bioprism-evalengine`](crates/evalengine) | 06,07,43 | Evaluation engine: the deterministic-first scoring ladder and causal component attribution |
 | [`bioprism-examples`](crates/examples) | 19,38,39,40,43 | Reference BioWorlds and runnable vertical slices |
 | [`bioprism-fabric`](crates/fabric) | 23,43 | Interweave fabric above the microkernel: composition algebra, effect and information flow, contextual reputation, common ground, semantic lifecycle |
@@ -261,7 +281,7 @@ resources, so a client can build valid documents and route work without reading 
 The repository also ships a dependency-free Python client in [`python/`](python/README.md). It
 supports synchronous and asyncio MCP sessions, enforces the initialize/initialized lifecycle,
 keeps transport/protocol/remote-refusal errors distinct, bounds JSON-RPC frames, and provides thin
-helpers for `developer_delivery_audit`, `developer_workbench`, `ci_provider_normalize`, `ci_execution_evidence_audit`, `agent_mission`, `capability_discover`, `mission_evaluator_discover`, `capability_audit`, `capability_dashboard`, `capability_route`, `adapter_plan`, `tabular_ingest`, `conformance_run`, `release_audit`, `operations_catalog`, `ops_acceptance`, `safety_release_gate`, `medical_boundary_check`, `biocapability_evidence_audit`, `bioql_compile`, `world_claim_check`, `observed_world_declare`, `lineage_audit`, `preanalytic_apply`, `contradiction_review`, `lab_plan`, `onco_boundary_check`, `onco_response_assess`, `onco_worldline_view`, `onco_classification_check`, `oncoworlds_identity_join`, `onco_outcome_analyze`, `oracle_combine`, `oracle_reference_panel`, `oracle_missingness`, `bioeval_reference_audit`, `evaluation_worldline_audit`, `evaluation_reproduction_check`, `evaluation_trajectory_check`, `routing_decide`, `repository_catalog`, `repository_bundle`, `repository_impact`, `telemetry_project`, `bioatlas_publication_audit`, and the full `fiber_compile` → `fiber_refine`/`fiber_explain`/`fiber_verify` → `projection_bundle` lifecycle. Typed evaluator-candidate discovery, audit, dashboard, delivery, evidence, publication, adapter-plan, tabular-ingest, conformance, release-audit, operations, safety, lineage, pre-analytic, contradiction, inference-lab, oracle/evaluation, and oncology-boundary projections retain cross-domain metadata, schema-quality evidence, parity gaps, readiness gates, explicit blockers, claim prerequisites, omission accounting, publication gates, candidate refusal reasons, semantic-loss boundaries, conformance checks, fixture drift, delegated refusal state, advisory-only observations, storage promise parity, service-contract divergence, metric debt, three-way acceptance verdicts, risk-gate decision drivers, unrated dimensions, structured clinical refusal, partial aggregate release, privacy exclusions, tiered evidence ledgers, temporal leakage witnesses, reproducibility divergence, and strict release-conjunction evidence for operators and SDK callers. It is an
+helpers for `developer_delivery_audit`, `developer_workbench`, `developer_workbench_verify`, `developer_workbench_import`, `developer_workbench_query`, `developer_workbench_get`, `ci_provider_normalize`, `ci_execution_evidence_audit`, `agent_mission`, `capability_discover`, `mission_evaluator_discover`, `mission_evaluator_review`, `mission_evaluator_replay`, `capability_audit`, `capability_dashboard`, `capability_route`, `adapter_plan`, `tabular_ingest`, `conformance_run`, `release_audit`, `operations_catalog`, `ops_acceptance`, `safety_release_gate`, `medical_boundary_check`, `biocapability_evidence_audit`, `bioql_compile`, `world_claim_check`, `observed_world_declare`, `lineage_audit`, `preanalytic_apply`, `contradiction_review`, `lab_plan`, `onco_boundary_check`, `onco_response_assess`, `onco_worldline_view`, `onco_classification_check`, `oncoworlds_identity_join`, `onco_outcome_analyze`, `oracle_combine`, `oracle_reference_panel`, `oracle_missingness`, `bioeval_reference_audit`, `evaluation_worldline_audit`, `evaluation_reproduction_check`, `evaluation_trajectory_check`, `routing_decide`, `repository_catalog`, `repository_bundle`, `repository_impact`, `telemetry_project`, `bioatlas_publication_audit`, and the full `fiber_compile` → `fiber_refine`/`fiber_explain`/`fiber_verify` → `projection_bundle` lifecycle. Typed evaluator-candidate discovery, reviewed binding, replay, audit, dashboard, delivery, evidence, publication, adapter-plan, tabular-ingest, conformance, release-audit, operations, safety, lineage, pre-analytic, contradiction, inference-lab, oracle/evaluation, and oncology-boundary projections retain cross-domain metadata, schema-quality evidence, parity gaps, readiness gates, explicit blockers, claim prerequisites, omission accounting, publication gates, candidate refusal reasons, semantic-loss boundaries, conformance checks, fixture drift, delegated refusal state, advisory-only observations, storage promise parity, service-contract divergence, metric debt, three-way acceptance verdicts, risk-gate decision drivers, unrated dimensions, structured clinical refusal, partial aggregate release, privacy exclusions, tiered evidence ledgers, temporal leakage witnesses, reproducibility divergence, and strict release-conjunction evidence for operators and SDK callers. It is an
 integration foundation above the Rust kernel, not a claim that the full Python data-adapter,
 benchmark-statistics, or biological-format ecosystem is complete. Its authoring layer now builds
 digest-bound packs, decision cells, deterministic mutation plans, versioned oracle judgements,
@@ -269,6 +289,14 @@ reference-panel requests, evaluation requests, and bounded FHIR JSON/NDJSON, FAS
 projection audits, plus bounded heterogeneous projection batches, while leaving final health and
 oracle decisions to Rust. `prism_sdk.ApiClient` and
 `AsyncApiClient` also speak the bounded HTTP gateway described in [`docs/HTTP_API.md`](docs/HTTP_API.md).
+
+The Python clients also expose `capability_route_plan`, which composes caller-selected route
+candidates with authoritative mission preflight across MCP and REST. It returns a digest-bound
+mission and `plan_digest` with explicit `dispatch: "not_started"`; route-review and preflight
+blockers remain structured, and no nested domain tool is dispatched.
+They also expose `capability_route_plan_verify`, which rechecks a retained plan without dispatch;
+supplying the original route and selections enables full route-review replay, while a shape-only
+check is reported explicitly as `verified_without_route_replay`.
 
 For every current or future MCP domain, the Python layer also exposes a schema-aware fallback:
 `tool_catalogue()` snapshots the live definitions, `plan_tool()` performs bounded transport-shape
@@ -324,7 +352,9 @@ The repository ships `bioprism-api` for deployments that need a network boundary
 
 ```bash
 cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <visible-token> \
-  --mission-state .local/mission-state.json --event-state .local/event-state.json
+  --mission-state .local/mission-state.json --mission-queue-state .local/mission-queue.json \
+  --event-state .local/event-state.json \
+  --reconciliation-state .local/reconciliation-state.json
 ```
 
 It exposes the exact MCP tool catalogue through REST and JSON-RPC, bounded health/capability
@@ -335,6 +365,24 @@ are marked failed after restart instead of being falsely resumed. Mission checkp
 2 with a content SHA-256 `state_digest`; schema-1 snapshots are
 accepted for migration and rewritten after startup, while tampered schema-2 state is rejected.
 Persistence status reports both the digest and observation-time `integrity_verified` state.
+`--mission-queue-state` adds a separate content-addressed factory checkpoint for mission leases,
+idempotency class, attempts, staged/committed output boundaries, and explicit startup recovery.
+`--mission-queue-max-jobs` and `--mission-queue-max-active-leases` add explicit local queue
+backpressure; the queue status reports per-resource-class fair-share limits and observed lease
+occupancy. Each lease attempt is also a fencing token, preventing stale attempts from committing
+after recovery. The queue checkpoint is now an execution-authority envelope: queue state and a
+bounded hash-chained transition journal are atomically replaced together, and cooperating API
+processes sharing the same local filesystem serialize mutations through a bounded lock. Status
+reports both the queue digest and authority digest, revision, event count, lock state, and
+integrity result. `POST /v1/missions/queue/authority/release-lock` is an attributed, audited
+operator override for a lock whose owner is known to be gone. This is local shared-file
+coordination; it does not provide tenant isolation, multi-host consensus, or network-partition
+tolerance.
+`GET /v1/missions/queue` exposes that queue projection without returning the original mission
+specification. Expired idempotent work is requeued and ambiguous non-idempotent work is quarantined,
+but no recovered job is automatically dispatched; the authority is a local recovery and audit
+boundary, not multi-host scheduling, provider authentication, or proof of external effect
+completion.
 `--event-state` checkpoints retained events, subscription metadata, and signed pending outbox rows while never persisting
 webhook secrets; the current schema-5 checkpoint is content-addressed with a SHA-256
 `state_digest`, and startup rejects tampering before restoring rows. It also retains a bounded,
@@ -351,6 +399,13 @@ outbox evidence, delivery-attempt provenance, secrets, and external effects sepa
 `GET /v1/operations/snapshot?after=N&limit=M` route and matching typed SDK helpers compose that
 matrix with one bounded event page, event metrics, mission status counts, persistence digests,
 capability transport flags, exact domain-group/tool coverage, and actionable operator follow-ups.
+The same snapshot includes `reconciliation_summary` plus reconciliation checkpoint status:
+stored report counts are split into completion statuses, structural-ready rows, explicit review
+requirements, integrity-invalid rows, and evidence-invalid rows. These are derived audit counters
+only; they do not authorize execution or upgrade a domain, scientific, clinical, safety, or release
+claim.
+The summary also carries a per-workflow status matrix and distinct workflow count, so the
+cross-domain view cannot hide an unobserved or failed capability group inside one aggregate.
 The domain projection compares the authoritative workspace capability groups with the advertised
 tool catalogue, preserving missing names and omission counts without inferring semantic readiness.
 It is designed as a dashboard
@@ -372,6 +427,21 @@ gates for every capability group. Domain-evaluator evidence is bound to a comple
 tool by exact name or the workspace catalogue; it does not assert scientific validity, evaluator
 calibration, or independence. A completed local call is never promoted into a readiness verdict: groups remain
 `catalogue_blocked`, `insufficient_evidence`, or `review_required`, with `readiness_claimed: false`.
+Each group also carries `gates.reconciliation_evidence`, joined only by the exact capability-group
+`workflow_id` against the bounded digest-valid reconciliation registry. `missing` means no retained
+matching report and never passes by inference; `incomplete` or `invalid` retained posture forces
+`insufficient_evidence`; `structurally_ready` remains review-required evidence and is never a release,
+safety, clinical, or scientific authorization. The summary exposes `groups_reconciliation_blocked`,
+and the same posture is typed by the Python and TypeScript SDKs, so all currently advertised workspace
+groups receive the same fail-closed join contract.
+The same gate response now carries an advisory `gates.artifact_evidence` posture for every group.
+It counts only records already admitted to the digest-verified artifact registry, matching explicit
+registration domains after case normalization or an artifact body's explicit `group_id`; it never
+infers membership from subjects, kind names, or free text. The posture reports artifact families,
+verification states, parent-linked records, match basis, and registry generation/size. Missing
+artifact evidence remains visible but is not a required gate and cannot change `gate_state` or
+create readiness. Python exposes a typed `OperationsArtifactEvidencePosture` with an explicit
+legacy-response fallback, and TypeScript exposes the corresponding group/summary posture fields.
 Handoffs now carry an `operations_gate_acceptance` execution prerequisite; preflight binds the
 mission’s exact tools to matching capability groups and the current `gate_digest`, while executable
 HTTP missions are refused until an operator acceptance covers every required gate for every group.
@@ -516,6 +586,37 @@ availability.
 reduction, declared cost, net value, action changes, complementarity, and exhaustive limits visible;
 the Python and TypeScript SDKs expose the same boundary with typed problem, belief, acquisition,
 value, bundle, action-identity, and fail-closed refusal projections;
+`epistemic_adaptive_acquisition` extends that boundary with an exact finite-horizon policy tree:
+each outcome can stop or choose a different unused acquisition, while expected terminal risk,
+expected scalarized cost, posterior branches, state caps, conditional-independence assumptions,
+and fail-closed refusals remain visible; it plans only and never executes an acquisition or claims
+causal, clinical, biological, or predictive truth. See
+[`docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md`](docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md);
+`epistemic_adaptive_execute` is the explicit next boundary: it requires a plan-scoped provider
+grant, validates one provider outcome against the selected branch at a time, preserves partial and
+refused prefixes, and replays through a receipt-only executor with no live fallback. The built-in
+MCP adapter is simulation-only and labels its rows `simulated`; Python and TypeScript expose typed
+receipt/provenance projections. See
+[`docs/EPISTEMIC_ADAPTIVE_EXECUTION.md`](docs/EPISTEMIC_ADAPTIVE_EXECUTION.md);
+`epistemic_adaptive_costed` exposes the same exact finite-horizon planner with component-wise
+tokens/compute/latency/money/privacy/specimen/expert budgets and explicit scalar weights; Python
+and TypeScript preserve the canonical seven-dimension request/result contract. See
+[`docs/EPISTEMIC_COST_VECTORS.md`](docs/EPISTEMIC_COST_VECTORS.md);
+the versioned `fiber-query/0.5` contract carries the same unperformed-acquisition semantics into
+the FIBER compiler and returns a certificate-bound named policy tree with `execution:
+"not_started"` and `authorization: "not_granted"`; the Python and TypeScript SDKs expose a
+typed replay-safe projection of that boundary.
+The interweave catalogue now has a typed workflow execution binding that carries workflow identity,
+capabilities, effect prohibitions, plan digests, explicit grants, and receipt-only replay across
+all six reference workflow identities without claiming generic release authority. The
+`interweave_workflow_execute` MCP route and the Python/TypeScript facades expose deterministic
+simulation, structured no-grant refusal, and same-binding receipt replay. See
+[`docs/WORKFLOW_EXECUTION_BINDING.md`](docs/WORKFLOW_EXECUTION_BINDING.md).
+Workflow receipts can also be converted into portable, digest-checked evidence with
+`interweave_workflow_execution_evidence`, then imported, queried, and fetched without re-running
+the workflow. Evidence retains caller-owned domain/subject labels and separates observed,
+simulated, and replayed provenance; registry presence remains review evidence rather than release
+authority.
 `benchmark_trace_analyze` adds the deeper benchmark compiler's causal, episode, boundary, and
 repetition analysis; the Python and TypeScript SDKs expose typed trace events, causal score
 components, divergence/verdict variants, boundaries, episodes, repetitions, and fail-closed
@@ -540,13 +641,51 @@ semantic-loss report and optionally evaluates observed-versus-asserted operation
 three surfaces are local contract workflows only: they do not publish to a network, authenticate
 identities, persist a hub ledger, export OTLP, execute models, or make clinical claims.
 `factory_lifecycle_simulate` adds deterministic lease, expiry, idempotency, compensation, quarantine,
-and atomic-commit replay; `hub_disclosure_review`, `hub_card_render`, and `hub_leaderboard_render`
+and atomic-commit replay; `factory_authority_verify` audits the durable queue envelope and bounded
+transition chain without dispatching work; `hub_disclosure_review`, `hub_card_render`, and `hub_leaderboard_render`
+`artifact_registry_audit` indexes exact-content mission, evaluator, reconciliation, and domain
+artifacts across the capability surface. It preserves verification posture, declared parent edges,
+missing parents, and bounded lineage traversal while explicitly refusing to infer causal provenance,
+scientific validity, clinical safety, publication authority, or external-effect completion from a
+digest or registry presence.
+Trusted boundaries also project mission reports, evaluator replays, verified evidence-bundle
+imports, and digest-valid workflow reconciliations into this shared index automatically. Each
+response carries an `artifact_registry` projection with the exact registry digest or an explicit
+indexing failure; generic domain-tool outputs remain unindexed unless the caller registers them
+deliberately.
+`artifact_registry_audit` with `operation: "domain_evidence_lineage"` is the intake-specific read
+model over that same index. It filters any of the 29 capability groups by exact content, request,
+response, intake, source-plan, subject, source-tool, outcome, or domain identity; each returned row
+keeps the recoverable request/response digests, direct declared parent states, source-plan
+`plan_digest` versus indexed content-digest binding, and reverse direct child links. The MCP
+operation, `GET /v1/domain-evidence/lineage`, `bioprism evidence domain-lineage`, and the sync/
+async Python and TypeScript facades all preserve cursor bounds and the distinction between a
+missing parent, a retained parent, and a digest that is merely declared. It is a structural
+lineage view only: no digest, parent edge, child edge, or intake outcome becomes execution,
+causal provenance, scientific, clinical, provider, release, or readiness authority.
+`domain_decision_readiness_audit` is the next cross-domain policy gate. It accepts the caller's
+same-subject canonical reports and explicit link roles, then evaluates required groups/domains,
+support and qualification floors, contradiction/refusal policy, review posture, report linkage,
+and optional lineage-parent requirements. Its `blocked`, `incomplete`, `review_required`, and
+`ready_for_human_review` states are structural dispositions, not scientific, clinical, release,
+execution, or truth claims; `readiness_claimed` remains false and execution remains `not_started`.
+The MCP tool is available to every current domain group, and the generic REST dispatcher plus
+sync/async Python and TypeScript clients preserve the same digest-bound audit and indexed artifact.
+`domain_decision_readiness_query` and `GET /v1/domain-decision-readiness` provide a bounded,
+digest-ordered retained read model with exact subject/state/policy filters, cursor pagination, and
+opt-in audit bodies; `readiness query` exposes the same query against a local artifact checkpoint.
+Workflow portfolios and reconciliations can carry a validated `readiness_audit` summary and opt
+into `policy.require_readiness`. That gate remains separate from mission preflight and completion:
+it records structural decision posture, never execution authorization or domain truth.
 carry disclosure ratchets, fail-closed score publication, comparability conditions, and typed
 unranked entries into agent-callable public-hub projections. `release_audit` composes required
 registry, bundle, quality, conformance, research-CI, operations, and pack-health gates while
 retaining repository impact and developer-platform diagnostics as advisory evidence. These
 surfaces remain bounded and local: they do not create durable queues, identity providers, web UI,
-public-key signing, CI execution, deployment, or network publication.
+CI execution, deployment, or network publication. The bundle layer now has deterministic offline
+Ed25519 verification plus an explicit caller-supplied key-registry policy layer for roles,
+delegation, rotation, revocation, producer binding, and validity. The registry is a bounded local
+snapshot, not an external identity, transparency, timestamp, or release-authorization service.
 The Python and TypeScript SDKs expose the factory result as an ordered, typed trace: successful
 leases, recovery variants, staged-output invisibility, committed-result snapshots, quarantined and
 dead-lettered jobs, and fail-closed action refusals remain independently inspectable across sync,
@@ -615,7 +754,11 @@ declaration soundness. The SDKs preserve the same layers and fail-closed policy 
 `ops_acceptance` reports typed operational acceptance findings without turning unverifiable criteria
 into passes. `ops_capacity` projects qualified work and demand, refusing unbounded work or silent
 degradation. `bundle_verify` recomputes carried result-bundle content and keeps referenced,
-unrecomputed, and provenance-limited entries explicit; it does not claim public-key authentication.
+unrecomputed, and provenance-limited entries explicit; it also accepts an explicit Ed25519
+PubliclyAttestedBundle plus verification key, checking purpose, key identity, signed instant, and
+caller-declared key validity without claiming registry-backed identity or external closure fetching.
+The complete wire format, threat-model boundary, and SDK/MCP mapping are documented in
+[`docs/BUNDLE_SIGNATURES.md`](docs/BUNDLE_SIGNATURES.md).
 `oracle_reference_panel` preserves independent reader calls, minority evidence, adjudication
 blinding, and unresolved splits. `oracle_missingness` checks missingness informativeness,
 complete-case admissibility, and small-cell egress under an explicit caller policy.
@@ -756,6 +899,132 @@ diagnostics, and keeps mission preflight and execution explicitly separate. Its 
 turning schema conformance into domain readiness. Every review also carries a deterministic,
 content-addressed `review_id` derived from the route provenance, caller selections, and validation
 mode, making the same handoff correlate cleanly across transports and event records.
+Modern route responses also attach a separate `evidence_digest` over the selected candidate-group
+artifact and workflow-reconciliation postures, registry generations, and bounded counts. Each need
+retains its `candidate_group_evidence` rows so discovery can show missing or observed retained
+evidence before review; this is an advisory point-in-time observation, not an execution, readiness,
+authorization, scientific-validity, or release claim, and it is intentionally not folded into the
+catalogue-bound `route_id`.
+`capability_route_review` now validates and carries that digest/scope through `evidence_binding`,
+the review identity, and the generated mission draft. Its explicit `carried_forward_not_recomputed`
+posture prevents retained discovery observations from being silently dropped or promoted into
+execution/readiness claims; legacy routes report `present: false`.
+`capability_route_plan` closes the public handoff seam by composing a complete route review with
+the authoritative mission preflight boundary. It accepts only caller-selected candidates and
+explicit arguments, carries optional claim/evaluator/workflow bindings, returns the generated
+mission and `plan_digest`, and fails closed with `dispatch: "not_started"` when route review or
+preflight is blocked. It never dispatches a nested tool or turns routing evidence into
+authorization; callers must inspect the preflight before invoking `agent_mission`.
+`capability_route_plan_verify` provides the matching non-executing replay boundary: it reruns mission
+preflight, optionally recomputes route review from caller-supplied inputs, and exposes digest and
+identity mismatches without treating missing replay inputs as proof of current membership.
+The reviewed handoff can now be supplied directly as `route_review` on `agent_mission` or
+`/v1/missions/preflight`. The mission boundary requires the ready review to match the submitted
+goal and exact serialized steps, binds its review/route/catalogue identities into the plan digest,
+and retains compact evidence posture without granting permission or readiness. A changed draft,
+stale finding, or tampered evidence binding is refused before dispatch; legacy no-evidence reviews
+remain structurally supported with an explicit absent binding.
+The same reviewed handoff may cross the workflow-template boundary through
+`domain_workflow_instantiate`. After normalized steps are constructed, the generated mission
+retains the exact route review; the durable queue exposes only its `spec_digest` and compact
+provenance, mission checkpoints preserve that projection across restart, evaluator replay marks it
+`absent`, `valid`, or `invalid`, and workflow reconciliation compares it against the instantiated
+workflow. These joins add integrity evidence without turning route review into authorization,
+execution, or a domain conclusion.
+`domain_workflow_catalogue` closes the next gap between discovery and planning: it materializes
+one deterministic, digest-bound workflow template for each of the 29 capability groups, including
+available versus missing tool definitions, per-tool schema/evidence contracts, and advisory lexical
+stages. Every template also carries a domain contract that makes scope review, tool availability,
+argument preflight, execution policy, evidence retention, refusal/omission accounting, and
+completion review explicit without inventing domain semantics. `domain_workflow_instantiate`
+requires an explicit workflow, mission, goal, and step list; it refuses tools outside that group's
+declared scope or absent from authoritative `tools/list`, rejects out-of-scope policy allow-lists,
+validates the mission DAG, derives a least-scope allow-list for requested execution, emits a
+step-level evidence plan, and attaches authoritative no-dispatch MCP schema preflight. MCP, REST,
+CLI, Python, and TypeScript all expose the same kernel. A valid workflow remains a plan, not
+permission, scientific evidence, clinical guidance, deployment readiness, or execution.
+`domain_workflow_scaffold` is the bounded planning shortcut across the same 29 groups: it selects
+one live available tool per advisory stage by default, or accepts an explicit tool list and
+per-tool argument map, then materializes a deterministic `domain_workflow_instantiate` payload.
+Each catalogue tool contract carries bounded argument-schema facts, and the scaffold runs the
+authoritative MCP preflight before returning. Missing required arguments are an explicit blocked
+preflight result; they are never replaced with benign defaults. The response always preserves
+`execution: "not_started"`, `dispatch: "not_started"`, and `readiness_claimed: false`, so this
+convenience surface cannot silently become an executor or readiness credential. MCP, REST, Python,
+and TypeScript expose the same scaffold contract.
+The instantiated mission also carries a bounded `workflow_binding` containing the workflow,
+catalogue, domain-contract, and evidence-plan digests plus the contract snapshots needed to
+reconstruct that exact scope after dispatch. The binding is validated as structure and provenance;
+it is not an authorization token, readiness claim, or domain conclusion.
+`domain_workflow_portfolio` composes up to 64 explicit workflow instantiations for multi-domain
+planning. It runs each group independently, adds authoritative no-dispatch preflight, retains
+per-item refusal diagnostics, and makes complete-catalogue versus partial scope explicit. A
+portfolio can be inspected as a whole without hiding the domain-specific arguments that still
+need caller completion; `portfolio_ready` never grants execution or domain validity.
+The CLI exposes the same boundary as `bioprism workflow portfolio --requests <path>`, accepting
+either a JSON request array or an object with `requests` and optional `policy`; `--allow-partial`
+and `--require-complete-catalogue` make the two most important scope decisions visible in shell
+automation. A blocked portfolio returns its full per-item diagnostics in `--json` mode and uses
+the assertion-failed verdict when it is not ready, while preserving `dispatch` and `execution` as
+`not_started`.
+`domain_workflow_portfolio_verify` is the retained multi-domain audit continuation: it recomputes
+the portfolio digest and coverage, verifies every retained item independently, optionally replays
+an index-aligned array of original requests, and retains digest, identity, replay, and mission
+preflight mismatches per item. The CLI exposes this as `workflow portfolio-verify --portfolio
+<path> [--replay-requests <path>] [--require-replay]`; REST, MCP, Python, and TypeScript expose
+the same bounded contract. Verification remains review evidence only: it never dispatches,
+retries, resumes, grants readiness, or establishes domain validity.
+`domain_workflow_verify` is the retained-handoff gate before re-review: it validates the current
+catalogue and contract identities, checks the workflow binding and mission projection, reruns
+authoritative mission preflight, and optionally replays the original bounded instantiation request.
+It reports exact mismatch codes with compact digest witnesses, distinguishes full replay from
+`verified_without_replay`, and remains strictly non-executing with `dispatch` and `execution` both
+`not_started`.
+`developer_workbench_verify` provides the analogous authoring/notebook handoff audit: it recomputes
+the current session audit, replays a retained dashboard query, and optionally replays the original
+CI request while comparing report and audit digests. MCP, `POST /v1/developer-workbench/verify`, the
+CLI (`bioprism workbench verify`), Python, and TypeScript expose the same mismatch witnesses and
+policy controls. It never executes cells, writes YAML, contacts GitHub, runs CI, or grants release
+or domain authority.
+The retained workbench registry makes that audit durable without pretending to be a workbench
+database: `developer_workbench_import`, `developer_workbench_query`, and `developer_workbench_get`
+accept only structurally valid, digest-normalized reports, provide deterministic digest-ordered
+filters/cursors, and return full reports only when explicitly requested. The same contract is
+available at `POST/GET /v1/developer-workbench/reports` and
+`GET /v1/developer-workbench/reports/{workbench_report_digest}`, with atomic restart-safe
+checkpointing via `--workbench-state` and explicit persistence status/flush routes. The CLI
+provides `workbench import`, `workbench query`, and `workbench get`; Python and TypeScript expose
+typed MCP and REST facades. The registry is bounded to 512 reports and a 32 MiB snapshot, verifies
+every report and snapshot digest on import/restore, and never executes, re-evaluates, or authorizes
+the retained workbench output.
+`domain_workflow_reconcile` is the corresponding post-execution audit: it binds a retained
+`agent_mission` report or verified evidence bundle back to the instantiation, checks plan/result/
+trace consistency, preserves refusals and omissions, and makes structural completion readiness
+explicit without retrying or dispatching tools. Its `complete` status is evidence posture only and
+still requires review before any domain claim.
+The reconciliation registry continuation makes that audit durable and searchable: import a
+digest-valid report through `POST /v1/domain-workflows/reconciliations`, query compact
+mission/workflow/plan/status index rows with bounded cursors, and fetch one record by its
+`reconciliation_digest`. `--reconciliation-state <file>` enables an atomic restart-safe
+checkpoint; startup verifies the snapshot and every report digest, while the explicit persistence
+status/flush routes expose the checkpoint posture. MCP exposes the same import/query/get tools,
+the CLI provides `workflow reconciliation-import` and `workflow reconciliation-query`, and the
+Python/TypeScript SDKs expose typed REST and MCP helpers. Registry presence is an audit lookup only:
+it never resumes, retries, or re-evaluates a mission and never authenticates provenance or a
+scientific, clinical, safety, or release claim.
+When an executable mission includes a valid `workflow_binding`, the authoritative MCP executor
+automatically runs this structural reconciliation after terminal execution and imports the full
+digest-valid record into the shared REST/MCP registry. The mission response exposes only a compact
+`workflow_reconciliation` link, completion/evidence/integrity posture, and idempotent import result;
+the full record remains available through the reconciliation lookup route. A reconciliation failure
+is retained as an explicit `fail_closed` response and never upgrades mission success into readiness.
+API synchronous calls checkpoint this shared registry before returning when reconciliation
+persistence is configured; asynchronous mission workers checkpoint it before publishing terminal
+job state. This makes the same post-dispatch audit visible to operations gates and restart recovery
+without making a gate pass automatic.
+The same artifact index is checkpointed by synchronous REST/MCP dispatch and asynchronous mission
+workers when `--artifact-state` is configured. Automatic indexing is an audit projection only: it
+does not add provenance, scientific validity, authorization, or release readiness.
 `mission_evaluator_discover` complements tool routing with a digest-bound catalogue of explicit
 evaluator candidates for every workspace capability group. It filters by intent, group, domain,
 mission level, or adapter ID and returns purpose, candidate evidence tools, and RFC 6901 pointer
@@ -768,6 +1037,33 @@ claim IDs to digest-fresh candidate adapters, validates candidate membership, do
 selection IDs, per-claim limits, and RFC 6901 output pointers, then returns either a ready binding
 scaffold or bounded correction findings. A ready review still requires `agent_mission` validation;
 the checkpoint never executes an evaluator or a domain tool.
+`mission_evaluator_replay` is the non-executing audit after mission completion: it rechecks retained
+adapter/domain rows, output-digest shape, outcome counts, disagreement posture, refusal/omission
+states, and structural coverage against all 29 evaluator groups. It can emit four non-semantic fixture
+variants for every adapter, while preserving `execution: "not_started"`; replay is an audit and
+coverage instrument, not evaluator execution or a scientific/clinical/release verdict.
+The durable HTTP route `/v1/missions/{mission_id}/evaluator-replay` adds bounded restart-aware
+querying: `retention.mode: "full"` exposes the retained replay, while `"summary_only"` exposes
+digest, count, coverage, finding, and omission evidence after a large report body is trimmed.
+Python and TypeScript clients preserve this distinction in typed query helpers; neither mode
+reconstructs raw output or dispatches an evaluator.
+The adjacent `/evaluator-replay/compare` route detects catalogue-digest drift and checks whether
+referenced adapters remain bound in the current catalogue. It deliberately reports the boundary
+between digest-level comparison and exact historical row diffs. Reviews now retain a bounded,
+content-addressed snapshot of all 29 adapter rows, so valid snapshots produce exact added/removed/
+changed/unchanged IDs and changed-field lists; legacy digest-only checkpoints remain explicit about
+their row-diff limitation. The durable `/evidence-bundle` route then exports mission status,
+retention and omission proofs, optional raw result/trace, replay, catalogue drift, execution
+provenance, navigable links, and a deterministic bundle digest in one bounded artifact.
+`POST /v1/evidence-bundles/verify` and the MCP `mission_evidence_bundle_verify` tool recompute that
+artifact's canonical and retained-result digests without executing any domain or evaluator tool.
+Both routes remain structural and non-executing, and the Python/TypeScript SDKs expose the same
+comparison, export, and verification contracts.
+The registry continuation adds `POST /v1/evidence-bundles` for independently verified, idempotent
+import; digest-ordered mission/domain queries; content-hash lookup; and an atomic restart-safe
+checkpoint enabled with `--evidence-state <file>`. MCP exposes the same import/query/get kernel and
+the CLI provides `evidence import` and `evidence query`. Restored bundles are reverified but never
+resume execution or become provenance, scientific, clinical, or release claims.
 `capability_dashboard` provides the bounded operator view beneath those routes: it binds the live
 catalogue to authoritative MCP schemas, reports callable/partial/declared-only groups, keeps
 crate/CLI/Python/MCP surface counts separate, and labels missing transports without pretending a
@@ -787,11 +1083,42 @@ projects it into the exact `CiRunEvidence` envelope consumed by that audit. Miss
 digests are derived from the supplied check object and labeled, while unknown and non-passing states
 remain visible; normalization never contacts a provider, verifies signatures, fetches logs, or turns
 caller-supplied data into authenticated execution truth.
+For GitHub consumers, the repository also provides the dependency-free composite action
+[`github-actions-evidence`](.github/actions/github-actions-evidence/action.yml). It supports both a
+manual bounded checks file and an authenticated discovery mode that retrieves one run and its jobs
+through the GitHub API. With `collect-evidence: true`, discovery also retrieves at most 128 artifact
+metadata rows and derives bounded job-log locators from the job response; neither locator is
+followed by default. An explicit `download-evidence: true` switch follows those HTTPS locators (or
+manual artifact/log URIs) under 16 MiB per response and 256 MiB per collection, then replaces the
+row digest with SHA-256 over the locally retrieved response bytes. Rows retain an explicit digest
+scope (`provider_metadata`, `caller_declared`, or `local_response_bytes`), and optional attestation
+`subject_digest` values are checked against the named row or run digest. Redirects remain HTTPS-only
+and never receive the GitHub token. Archives are not extracted, logs are not interpreted, and
+attestations are not signature-verified. Both modes produce the same canonical provider payload and
+digest, while collection mode emits a separate envelope/digest, row counts, and stable download
+mode/count/byte outputs. Oversized or partial job, artifact, or locator lists are refused, and the
+token is never copied into any output. When a caller also supplies an explicit `ci` plan and
+`evidence-output`, the action emits the exact `CiProviderEvidenceRequest` accepted by the Rust
+provider-evidence audit/registry. This remains an ingestion handoff: metadata or local-byte digests
+are not authenticated provider truth, checks are not executed, and no release is approved; see
+[`docs/CI_EVIDENCE.md`](docs/CI_EVIDENCE.md).
 `ci_provider_evidence_audit` extends the same handoff with bounded artifact, log, and attestation rows:
 it validates unique ids, content-digest syntax, provider/run/check bindings, and attestation subjects,
 preserves the original rows, and emits separate deterministic record digests. Its `conformance_ready`
 signal is structural only; the route does not fetch remote bytes, execute checks, authenticate providers,
 or cryptographically verify attestation statements.
+The retained provider-evidence registry makes this handoff durable and joinable: imports re-run the
+canonical audit, retain failed and unknown provider runs as explicit evidence, and expose deterministic
+provider/run/plan queries plus exact digest lookup through MCP, REST, CLI, Python, and TypeScript. The
+response carries separate artifact/log/attestation counts and record-family digests, while preserving
+the boundary that provider locators are not fetched bytes and supplied digests are not verified
+signatures. `--ci-provider-evidence-state` enables atomic restart-safe persistence with 512-record,
+32 MiB snapshot, and 256-row query bounds; snapshot and per-record digests are checked on restore.
+Import summaries and compact query rows also retain local-byte hash and attestation subject-digest
+binding counts, and queries can require minimum thresholds for those counts without loading full
+audits. This makes provenance posture queryable while keeping it distinct from provider authentication.
+The registry remains an audit index: it never contacts GitHub/GitLab, executes CI, or grants release
+authority.
 `developer_delivery_audit` can compose that normalization directly through an explicit `ci_provider`
 argument; it returns both the normalized provider projection and the downstream `ci_evidence` audit,
 while rejecting simultaneous `ci_provider` and canonical `ci_evidence` inputs.
@@ -925,8 +1252,9 @@ prints them:
 |---|---|
 | Gluing and obstruction tests (43.06) | Requires a declared cover; `fiber-world/0.1` carries none |
 | Abstract interpretation (43.11) | Requires an abstract-domain registry absent from the wire schema |
-| Decision-equivalence quotient (43.10) | Defined relative to permitted actions and decision loss, neither of which `fiber-query/0.2` carries |
-| Rate-distortion optimisation (43.12) | Optimises against a decision loss the query does not declare |
+| FIBER wire integration of decision-equivalence quotient (43.10) | `fiber-query/0.3` now carries a bounded explicit loss/utility matrix and permitted-action boundary, and FIBER executes the exact quotient; 0.1/0.2 remain deferred |
+| FIBER wire integration of rate-distortion optimisation (43.12) | `fiber-query/0.4` now binds a normalized prior, ordered observed evidence pool, compatibility floor and tolerance; FIBER executes identification, exhaustive frontier and minimal sufficiency. The 16-item bound and caller-declared model inputs remain explicit |
+| FIBER wire integration of adaptive acquisition (43.15) | `fiber-query/0.5` now binds a normalized prior, complete outcome likelihood partitions, scalarized path budget, and finite horizon; FIBER executes the exact policy under 16/16/65,536 caps and returns certificate-bound planning provenance. It does not schedule, authorize, execute, or receipt an acquisition |
 
 The backend portfolio of 43.19–43.24 (FAQ/InsideOut, worst-case-optimal joins, tensor networks,
 decision diagrams, incremental view maintenance) is **not built**. `Backend` enumerates them so

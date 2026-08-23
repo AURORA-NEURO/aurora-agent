@@ -2,8 +2,9 @@
 //!
 //! `bioprism-examples` records `rate_distortion_optimisation` as a blocked claim, and names the
 //! obstacle: *"the same missing decision_loss field: there is no loss to trade distortion against"*.
-//! This module supplies the calculus with the loss supplied by the caller. [`crate::gap`] states
-//! what `fiber-query/0.1` would have to carry for the compiler to reach it without one.
+//! This module supplies the calculus with the loss supplied by the caller. Legacy FIBER wire
+//! forms cannot supply one; `fiber-query/0.3` supplies the 43.10 loss table, while the additional
+//! posterior and evidence-pool bindings required for this module remain a future wire contract.
 //!
 //! ## The two numbers
 //!
@@ -230,8 +231,8 @@ pub fn frontier(
             !candidates.iter().any(|q| {
                 let cheaper_or_equal = q.rate <= p.rate + LOSS_EPSILON;
                 let better_or_equal = q.distortion <= p.distortion + LOSS_EPSILON;
-                let strictly_better = q.rate < p.rate - LOSS_EPSILON
-                    || q.distortion < p.distortion - LOSS_EPSILON;
+                let strictly_better =
+                    q.rate < p.rate - LOSS_EPSILON || q.distortion < p.distortion - LOSS_EPSILON;
                 cheaper_or_equal && better_or_equal && strictly_better
             })
         })
@@ -264,7 +265,10 @@ pub fn frontier(
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum Identification {
     /// Every compatible model prefers the same action, so the residual uncertainty is decision-irrelevant.
-    PointIdentified { action: usize, compatible: Vec<usize> },
+    PointIdentified {
+        action: usize,
+        compatible: Vec<usize>,
+    },
     /// Compatible models disagree, but the minimax action's worst regret is within tolerance.
     SetIdentifiedWithinTolerance {
         action: usize,

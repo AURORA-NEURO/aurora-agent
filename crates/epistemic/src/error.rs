@@ -85,6 +85,9 @@ pub enum EpistemicError {
     #[error("no member of {collection} is named {id:?}")]
     UnknownIdentifier { collection: String, id: String },
 
+    #[error("the decision quotient needs at least one permitted action; an empty decision boundary would make every model vacuously equivalent")]
+    EmptyPermittedActionSet,
+
     #[error("element {element} is outside a ground set of size {ground}")]
     ElementOutOfRange { element: usize, ground: usize },
 
@@ -127,7 +130,9 @@ pub enum EpistemicError {
     #[error("factor {factor:?} repeats variable {variable:?} in its scope")]
     RepeatedVariableInScope { factor: String, variable: String },
 
-    #[error("factor {factor:?} entry {index} is {value}, which is not a finite non-negative potential")]
+    #[error(
+        "factor {factor:?} entry {index} is {value}, which is not a finite non-negative potential"
+    )]
     InadmissiblePotential {
         factor: String,
         index: usize,
@@ -161,4 +166,20 @@ pub enum EpistemicError {
 
     #[error("distortion tolerance {value} is negative or non-finite")]
     InadmissibleTolerance { value: f64 },
+
+    #[error("adaptive acquisition budget {value} is negative or non-finite")]
+    InadmissibleAdaptiveBudget { value: f64 },
+
+    #[error("adaptive policy requests {steps} steps, above the exact horizon cap of {cap}")]
+    AdaptiveStepLimit { steps: usize, cap: usize },
+
+    #[error(
+        "adaptive policy supplies {acquisitions} acquisitions, above the exact mask cap of {cap}"
+    )]
+    AdaptiveAcquisitionCapExceeded { acquisitions: usize, cap: usize },
+
+    #[error(
+        "adaptive policy evaluates {nodes} state nodes, above the exact enumeration cap of {cap}"
+    )]
+    AdaptivePolicyCapExceeded { nodes: usize, cap: usize },
 }

@@ -78,6 +78,7 @@ members = [
     "crates/megafactory",
     "crates/interweave",
     "crates/residue",
+    "crates/brain",
     "crates/cli",
 ]
 
@@ -92,6 +93,7 @@ repository = "https://github.com/AURORA-NEURO/aurora-agent"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["preserve_order", "float_roundtrip"] }
 sha2 = "=0.10.9"
+ed25519-dalek = "=2.1.1"
 thiserror = "=2.0.19"
 
 bioprism-ids = { path = "crates/ids" }
@@ -171,6 +173,7 @@ bioprism-foundation = { path = "crates/foundation" }
 bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }
 bioprism-evalengine = { path = "crates/evalengine" }
+bioprism-brain = { path = "crates/brain" }
 
 [profile.release]
 lto = "thin"

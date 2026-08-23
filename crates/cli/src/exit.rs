@@ -273,6 +273,9 @@ impl CliError {
             | FiberError::WrongQueryFieldType { .. }
             | FiberError::InvalidIdentifier(_)
             | FiberError::InvalidDecisionTime(_)
+            | FiberError::InvalidDecisionContract(_)
+            | FiberError::InvalidRateDistortionContract(_)
+            | FiberError::InvalidAdaptiveAcquisitionContract(_)
             | FiberError::World(_) => ExitCode::InvalidInput,
             FiberError::BudgetExceeded { .. } => ExitCode::CompileFailed,
             FiberError::UnorderableSplitGroups { .. } => ExitCode::Indeterminate,

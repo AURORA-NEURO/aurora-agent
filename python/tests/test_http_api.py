@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
+from prism_sdk import AdapterPlanReport, ApiClient, ApiError, ArgumentError, ArtifactCrossStoreAuditReport, ArtifactDomainEvidenceLineageReport, ArtifactDomainEvidenceLineageRequest, ArtifactGetReport, ArtifactLineageReport, ArtifactQueryRequest, ArtifactRegistrationRequest, AsyncApiClient, BioAtlasPublicationAuditReport, BioCapabilityEvidenceAuditReport, BioCapabilityEvidenceAuditRequest, BioQlCompileRequest, CapabilityAuditReport, CiExecutionEvidenceRequest, CiProviderNormalizationRequest, ClaimRequest, ConformanceRunReport, DeliveryAttemptPage, DeliveryPage, DeliveryReceiptAttempts, DeliveryReceiptEvents, DeveloperDeliveryAuditReport, DeveloperDeliveryReceiptRequest, DeveloperDeliveryReceiptVerificationRequest, DeveloperPlatformStatusReport, EventPage, EventPersistenceStatus, EvidenceItem, ExecutionProvenanceRequest, HubLockArgs, HubResolveArgs, HubSearchArgs, InfluenceAnalyzeArgs, LabPlanRequest, MedicalBoundaryRequest, MeasurementCompareArgs, MissionClaimLineage, MissionInventoryPage, MissionPersistenceStatus, MissionQueueFlushResult, MissionQueueInventory, MissionQueueLockReleaseResult, MissionQueueStatus, MissionRequest, MissionStep, MissionWaitTimeout, ObservedWorldDeclareArgs, OperationsCatalogReport, OperationsDomainActivity, OperationsDomainGates, OperationsGateReviewRequest, OperationsHandoff, OperationsSnapshot, OperationsGateReviews, OpsAcceptanceReport, ProviderCapabilityGateArgs, RecoveryMatrix, ReleaseAuditArgs, ReleaseAuditReport, ReleaseAuditCheckRequest, RiskAssessmentRequest, RouteReviewEvidence, RoutingDecisionRequest, SdkRegistryCheckArgs, SseSnapshot, StressProfileArgs, StressReportArgs, TabularIngestReport, TabularIngestRequest, TokenContextPlanArgs, TokenContextPlanningReport, WeaveLangCompileArgs, WeaveLangCompileReport, WorldClaimCheckRequest
 
 
 def adapter_plan_payload() -> dict:
@@ -68,6 +68,62 @@ def developer_platform_status_payload() -> dict:
         "diagnostic_catalogue": {"clean": True, "checked": 0, "errors": 0, "warnings": 0, "finding_count": 0, "findings_returned": [], "omitted_findings": 0},
         "exit_code_audit": {"clean": True, "retry_decision_recoverable_from_code_alone": True, "divergence_count": 0, "divergences_returned": [], "omitted_divergences": 0},
         "limitations": ["foreign artifacts remain explicit"],
+    }
+
+
+def mission_queue_status_payload() -> dict:
+    return {
+        "ok": True,
+        "enabled": True,
+        "file_present": True,
+        "file_bytes": 128,
+        "schema_version": 1,
+        "state_digest": "a" * 64,
+        "authority_digest": "b" * 64,
+        "authority": {"configured": True, "revision": 3, "event_count": 3, "queue_state_digest": "a" * 64, "integrity_verified": True, "lock_present": False, "execution_scope": "cooperating processes sharing one local filesystem"},
+        "integrity_verified": True,
+        "max_file_bytes": 64 * 1024 * 1024,
+        "admission_policy": {"max_jobs": 4096, "max_active_leases": 64, "observed_active_leases": 0, "max_jobs_by_class": {"evaluate": 4096}, "max_active_leases_by_class": {"evaluate": 64}, "backpressure": "refuse_before_checkpoint_mutation"},
+        "registry_size": 1,
+        "jobs": [{
+            "mission_id": "async-1",
+            "resource_class": "evaluate",
+            "idempotency": "idempotent",
+            "idempotency_key": "k" * 64,
+            "priority": 8,
+            "max_attempts": 3,
+            "state": "succeeded",
+            "attempts": 1,
+            "attempts_remaining": 2,
+            "reason": None,
+            "spec_returned": False,
+        }],
+        "startup_recoveries": [],
+        "automatic_resume": False,
+        "execution_scope": "cooperating processes sharing one local filesystem",
+        "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
+        "does_not_claim": ["multi-host consensus or network-partition tolerance", "external effect completion", "provider authentication or tenant isolation"],
+        "flush": "/v1/missions/queue/persistence/flush",
+    }
+
+
+def artifact_registration_payload() -> dict:
+    return {
+        "ok": True,
+        "schema": "bioprism-devplat-artifact-register/0.1",
+        "workflow": "artifact_registry_register",
+        "content_digest": "a" * 64,
+        "kind": "domain_report",
+        "subject_id": "subject-1",
+        "declared_digest": None,
+        "verification": {"content_digest_verified": True, "semantic_verification": "not_run"},
+        "created": True,
+        "already_present": False,
+        "registry_generation": 1,
+        "registry_size": 1,
+        "execution": "not_started",
+        "guarantees": ["exact content address"],
+        "does_not_claim": ["scientific validity"],
     }
 
 
@@ -312,6 +368,18 @@ class FakeApiHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/healthz":
             self._send(200, {"ok": True, "ready": True})
+        elif self.path.startswith("/v1/artifacts?"):
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-query/0.1", "workflow": "artifact_registry_query", "filters": {}, "registry_generation": 1, "registry_size": 1, "rows": [{"content_digest": "a" * 64, "kind": "domain_report", "subject_id": "subject-1", "domains": ["oncology"], "parent_digests": [], "declared_digest": None, "verification": {}}], "next_after": None, "has_more": False, "execution": "not_started", "guarantees": [], "does_not_claim": []})
+        elif self.path.startswith("/v1/domain-evidence/lineage?"):
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-domain-evidence-lineage/0.1", "workflow": "artifact_registry_domain_evidence_lineage", "filters": {}, "registry_generation": 1, "registry_size": 1, "rows": [{"content_digest": "a" * 64, "request_digest": "b" * 64, "response_digest": "c" * 64, "intake_digest": "d" * 64, "source_plan": {"binding_state": "retained_and_content_parented"}, "parents": [], "children": []}], "next_after": None, "has_more": False, "execution": "not_started", "guarantees": [], "does_not_claim": []})
+        elif self.path == "/v1/artifacts/cross-store":
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-cross-domain-artifact-audit/0.1", "workflow": "artifact_registry_cross_store_audit", "consistent": True, "bounded": True, "truncated": False, "stores": {}, "coverage": {}, "artifact_kind_counts": {"domain_report": 1}, "findings": [], "execution": "not_started", "guarantees": [], "does_not_claim": ["the four stores were read in one atomic transaction"]})
+        elif self.path.endswith("/lineage") and self.path.startswith("/v1/artifacts/"):
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-lineage/0.1", "workflow": "artifact_registry_lineage", "root": "a" * 64, "nodes": [], "missing_parent_digests": ["b" * 64], "cycles": [], "bounded": True, "execution": "not_started", "guarantees": [], "does_not_claim": ["parent presence proves causal provenance or scientific validity"]})
+        elif self.path == "/v1/artifacts/persistence":
+            self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema": "bioprism-devplat-artifact-registry/0.1", "state_digest": "c" * 64, "integrity_verified": True, "registry_size": 1, "registry_generation": 1, "max_records": 512, "max_file_bytes": 64 * 1024 * 1024, "recovery_policy": "digest-valid records restore", "flush": "/v1/artifacts/persistence/flush"})
+        elif self.path.startswith("/v1/artifacts/"):
+            self._send(200, {"ok": True, "schema": "bioprism-devplat-artifact-get/0.1", "workflow": "artifact_registry_get", "record": {"content_digest": "a" * 64, "kind": "domain_report", "subject_id": "subject-1", "domains": [], "parent_digests": [], "verification": {}, "artifact": {}}, "execution": "not_started", "guarantees": [], "does_not_claim": []})
         elif self.path == "/v1/tools":
             self._send(
                 200,
@@ -360,11 +428,13 @@ class FakeApiHandler(BaseHTTPRequestHandler):
                 "persistence": {
                     "missions": {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 2, "state_digest": None, "integrity_verified": None, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "event_log_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "terminal snapshots restore"},
                     "events": {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 5, "state_digest": None, "integrity_verified": None, "max_file_bytes": 64 * 1024 * 1024, "retained_events": 1, "next_event_id": 2, "dropped_events": 0, "subscriptions_durable": True, "webhook_deliveries_durable": True, "delivery_attempts_durable": True, "delivery_receipt_metadata_durable": True, "secrets_persisted": False, "retained_delivery_attempts": 1, "dropped_delivery_attempts": 0, "next_attempt_id": 2, "recovery_policy": "events restore"},
+                    "workflow_reconciliations": {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema": "bioprism-devplat-domain-workflow-reconciliation-registry/0.1", "state_digest": None, "integrity_verified": None, "registry_size": 1, "registry_generation": 1, "max_reconciliations": 512, "max_file_bytes": 32 * 1024 * 1024, "recovery_policy": "digest-valid reports restore"},
                 },
+                "reconciliation_summary": {"ok": True, "schema": "bioprism-devplat-domain-workflow-reconciliation-summary/0.1", "workflow": "domain_workflow_reconciliation_summary", "registry_generation": 1, "registry_size": 1, "completion_status_counts": {"complete": 1}, "workflow_count": 1, "workflow_status_counts": {"oncology": {"complete": 1}}, "ready_count": 1, "review_required_count": 1, "integrity_invalid_count": 0, "evidence_invalid_count": 0, "execution": "not_started", "readiness_claimed": False, "guarantees": ["bounded"], "limitations": ["audit only"]},
                 "recovery": {"ok": True, "schema": "bioprism-recovery-matrix/0.1", "scope": "single-process-api-instance", "automatic_resume": False, "automatic_external_delivery": False, "boundaries": [{"id": "webhook_signing_secrets", "configured": True, "checkpoint_present": False, "schema_version": None, "state_digest": None, "restores": [], "does_not_restore": ["all signing secrets"], "operator_action": "rebind"}], "observed": {"subscriptions": 1, "pending_deliveries": 1}, "guarantees": ["boundaries are explicit"], "non_claims": ["secret recovery"], "links": {}},
                 "domain_coverage": {"schema": "bioprism-domain-coverage/0.1", "group_count": 1, "returned_groups": 1, "truncated": False, "max_groups": 64, "groups": [{"id": "operations", "status": "available", "domains": ["operations"], "declared_tool_count": 1, "advertised_tool_count": 1, "missing_tool_count": 0, "missing_tools": [], "fully_advertised": True}], "domain_label_count": 1, "declared_tool_memberships": 1, "unique_declared_tools": 1, "advertised_tool_count": 10, "fully_advertised_group_count": 1, "groups_with_gaps": 0, "declared_tools_not_advertised": [], "omitted_declared_tools_not_advertised": 0, "advertised_tools_without_group": ["echo"], "omitted_advertised_tools_without_group": 0, "guarantees": ["exact"], "non_claims": ["runtime health"]},
                 "consistency": {"read_model": "bounded composition of process-local stores", "cross_store_atomic": False, "event_cursor_authoritative": True, "clock_free": True, "underlying_routes_remain_authoritative": True},
-                "capabilities": {"tool_count": 10, "resource_count": 2, "rest_tools": True, "json_rpc": True, "event_cursor": True, "async_missions": True, "mission_inventory": True, "operations_snapshot": True, "domain_coverage": True, "delivery_attempt_provenance": True, "external_delivery_worker": False},
+                "capabilities": {"tool_count": 10, "resource_count": 2, "rest_tools": True, "json_rpc": True, "event_cursor": True, "async_missions": True, "mission_inventory": True, "workflow_reconciliation_registry": True, "workflow_reconciliation_persistence": True, "operations_snapshot": True, "domain_coverage": True, "delivery_attempt_provenance": True, "external_delivery_worker": False},
                 "operator_actions": ["inspect"],
                 "guarantees": ["bounded"],
                 "non_claims": ["external effects"],
@@ -388,6 +458,10 @@ class FakeApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "missions": [{"mission_id": "async-1", "status": "succeeded", "cancel_requested": False, "progress": {"phase": "succeeded", "current_wave": 0, "total_steps": 1, "completed_steps": 1, "active_steps": 0, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "trace_sequence": 4, "last_event": "mission.completed"}, "summary": {"total_steps": 1, "completed_steps": 1, "succeeded": 1, "refused": 0, "blocked": 0, "cancelled": 0, "required_failures": 0, "returned_bytes": 14, "result_available": True}, "poll": "/v1/missions/async-1", "cancel": "/v1/missions/async-1/cancel", "trace": "/v1/missions/async-1/trace"}], "returned": 1, "total_matching": 1, "limit": 5, "truncated": False, "status_filter": "succeeded"})
         elif self.path == "/v1/missions/persistence":
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "event_log_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "terminal snapshots restore; queued and running jobs fail explicitly after restart", "flush": "/v1/missions/persistence/flush"})
+        elif self.path == "/v1/missions/queue":
+            self._send(200, {"ok": True, "schema": "bioprism-mission-queue/0.1", "queue": mission_queue_status_payload(), "guarantees": ["queue state is projected from the typed factory lifecycle", "a queued recovery record is not evidence that a worker has resumed"], "links": {"persistence": "/v1/missions/queue/persistence", "flush": "/v1/missions/queue/persistence/flush", "mission_inventory": "/v1/missions"}})
+        elif self.path == "/v1/missions/queue/persistence":
+            self._send(200, mission_queue_status_payload())
         elif self.path == "/v1/missions/async-1/claims":
             self._send(200, {"ok": True, "schema": "bioprism-mission-claim-lineage-response/0.1", "mission_id": "async-1", "claim_lineage": {"claims": [{"id": "observed", "claimable": True}], "readiness_claimed": False}})
         elif self.path.startswith("/v1/missions/async-1/trace"):
@@ -404,10 +478,18 @@ class FakeApiHandler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(size) or b"{}")
         if self.path == "/v1/missions/preflight":
             self._send(200, {"ok": True, "workflow": "agent_mission", "execution": "planned", "mission_status": "planned", "preflight": True, "dispatch": "not_started", "results": []})
+        elif self.path == "/v1/artifacts":
+            self._send(201, artifact_registration_payload())
+        elif self.path == "/v1/artifacts/persistence/flush":
+            self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema": "bioprism-devplat-artifact-registry/0.1", "state_digest": "c" * 64, "integrity_verified": True, "registry_size": 1, "registry_generation": 1, "max_records": 512, "max_file_bytes": 64 * 1024 * 1024, "recovery_policy": "digest-valid records restore", "flush": "/v1/artifacts/persistence/flush"})
         elif self.path == "/v1/missions":
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "queued", "cancel_requested": False})
         elif self.path == "/v1/missions/async-1/cancel":
             self._send(202, {"ok": True, "mission_id": "async-1", "status": "running", "cancel_requested": True, "cancel_reason": body.get("reason")})
+        elif self.path == "/v1/missions/queue/persistence/flush":
+            self._send(200, {"ok": True, "bytes": 128, "queue": mission_queue_status_payload(), "request_id": "queue-flush-1", "guarantees": ["the checkpoint is content-addressed and atomically replaced", "a successful flush does not claim external effect completion"]})
+        elif self.path == "/v1/missions/queue/authority/release-lock":
+            self._send(200, {"ok": True, "receipt": {"operator": body.get("operator"), "reason": body.get("reason"), "previous_owner": {"owner_id": "dead-api-process", "acquired_unix_nanos": 7}, "recorded_revision": 4}, "request_id": "queue-unlock-1", "warning": "release is an explicit operator override"})
         elif self.path in {"/v1/missions/persistence/flush", "/v1/events/persistence/flush"}:
             self._send(200, {"ok": True, "enabled": True, "file_present": True, "file_bytes": 128, "schema_version": 1, "max_file_bytes": 64 * 1024 * 1024, "max_result_bytes": 256 * 1024, "registry_size": 1, "retained_events": 2, "next_event_id": 3, "dropped_events": 0, "event_log_durable": False, "subscriptions_durable": False, "webhook_deliveries_durable": False, "recovery_policy": "events restore with cursor continuity; subscriptions and deliveries must be re-established", "flush": self.path})
         elif self.path == "/v1/operations/gate-reviews":
@@ -473,6 +555,38 @@ class HttpApiClientTests(unittest.TestCase):
         replayed = ApiClient(self.base_url).replay("sub", [1])
         self.assertEqual(replayed["replayed"][0]["state"], "pending")
 
+    def test_artifact_registry_http_surface_is_typed_and_lineage_explicit(self) -> None:
+        client = ApiClient(self.base_url)
+        registration = client.register_artifact(
+            ArtifactRegistrationRequest(
+                kind="domain_report",
+                subject_id="subject-1",
+                domains=("oncology",),
+                artifact={"status": "review_required"},
+            )
+        )
+        self.assertTrue(registration.created)
+        self.assertEqual(registration.content_digest, "a" * 64)
+        query = client.query_artifacts(ArtifactQueryRequest(domain="oncology"))
+        self.assertEqual(query.rows[0]["content_digest"], "a" * 64)
+        fetched = client.get_artifact("a" * 64)
+        self.assertIsInstance(fetched, ArtifactGetReport)
+        lineage = client.artifact_lineage("a" * 64)
+        self.assertIsInstance(lineage, ArtifactLineageReport)
+        self.assertEqual(lineage.missing_parent_digests, ("b" * 64,))
+        intake_lineage = client.domain_evidence_lineage(
+            ArtifactDomainEvidenceLineageRequest(
+                content_digest="a" * 64,
+                group_id="biological_domains",
+                domain="modalities",
+                outcome="observed",
+            )
+        )
+        self.assertIsInstance(intake_lineage, ArtifactDomainEvidenceLineageReport)
+        self.assertEqual(intake_lineage.rows[0]["source_plan"]["binding_state"], "retained_and_content_parented")
+        self.assertIsInstance(client.artifact_cross_store_audit(), ArtifactCrossStoreAuditReport)
+        self.assertTrue(client.artifact_registry_persistence()["integrity_verified"])
+
     def test_http_health_tools_events_and_structured_errors(self) -> None:
         client = ApiClient(self.base_url, bearer_token="0123456789abcdef")
         self.assertTrue(client.health()["ready"])
@@ -528,6 +642,21 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(typed_inventory.missions[0].progress.completed_steps, 1)
         self.assertIsInstance(client.mission_persistence(), MissionPersistenceStatus)
         self.assertIsInstance(client.flush_mission_persistence(), MissionPersistenceStatus)
+        queue_inventory = client.mission_queue()
+        self.assertIsInstance(queue_inventory, MissionQueueInventory)
+        self.assertEqual(queue_inventory.queue.jobs[0].state, "succeeded")
+        self.assertTrue(queue_inventory.queue.jobs[0].terminal)
+        queue_status = client.mission_queue_persistence()
+        self.assertIsInstance(queue_status, MissionQueueStatus)
+        self.assertFalse(queue_status.automatic_resume)
+        self.assertTrue(queue_status.integrity_verified)
+        self.assertEqual(queue_status.admission_policy["max_active_leases"], 64)
+        self.assertEqual(queue_status.authority["queue_state_digest"], queue_status.state_digest)
+        self.assertIsInstance(
+            client.release_mission_queue_lock("on-call", "confirmed previous process exited"),
+            MissionQueueLockReleaseResult,
+        )
+        self.assertIsInstance(client.flush_mission_queue_persistence(), MissionQueueFlushResult)
         with self.assertRaises(ArgumentError):
             client.wait_mission("async-1", timeout=0)
         with self.assertRaises(MissionWaitTimeout) as wait_error:
@@ -947,6 +1076,9 @@ class HttpApiClientTests(unittest.TestCase):
         self.assertEqual(snapshot.mission_summary["status_counts"]["succeeded"], 1)
         self.assertFalse(snapshot.recovery.automatic_external_delivery)
         self.assertFalse(snapshot.consistency["cross_store_atomic"])
+        self.assertEqual(snapshot.reconciliation_summary.ready_count, 1)
+        self.assertEqual(snapshot.reconciliation_summary.workflow_status_counts["oncology"]["complete"], 1)
+        self.assertEqual(snapshot.reconciliation_persistence.registry_size, 1)
         self.assertEqual(snapshot.domain_coverage.groups[0].id, "operations")
         self.assertEqual(snapshot.domain_coverage.groups_with_gaps, 0)
         activity = client.operations_domain_activity(limit=2)
@@ -957,6 +1089,8 @@ class HttpApiClientTests(unittest.TestCase):
         gates = client.operations_domain_gates(limit=2)
         self.assertIsInstance(gates, OperationsDomainGates)
         self.assertEqual(gates.groups[0].gate_state, "insufficient_evidence")
+        self.assertEqual(gates.groups[0].artifact_evidence.state, "missing")
+        self.assertEqual(gates.summary["groups_with_artifact_evidence"], 0)
         self.assertEqual(len(gates.gate_digest), 64)
         self.assertFalse(gates.gate_policy["readiness_claimed"])
         review = client.create_operations_gate_review(
@@ -1249,6 +1383,18 @@ class HttpApiClientTests(unittest.TestCase):
             typed_inventory = await client.mission_inventory(status="succeeded", limit=5)
             self.assertIsInstance(typed_inventory, MissionInventoryPage)
             self.assertTrue(typed_inventory.missions[0].terminal)
+            queue_inventory = await client.mission_queue()
+            self.assertIsInstance(queue_inventory, MissionQueueInventory)
+            self.assertFalse(queue_inventory.queue.automatic_resume)
+            queue_status = await client.mission_queue_persistence()
+            self.assertIsInstance(queue_status, MissionQueueStatus)
+            self.assertTrue(queue_status.integrity_verified)
+            self.assertEqual(queue_status.authority["queue_state_digest"], queue_status.state_digest)
+            self.assertIsInstance(
+                await client.release_mission_queue_lock("on-call", "confirmed previous process exited"),
+                MissionQueueLockReleaseResult,
+            )
+            self.assertIsInstance(await client.flush_mission_queue_persistence(), MissionQueueFlushResult)
             snapshot = await client.operations_snapshot(limit=2)
             self.assertIsInstance(snapshot, OperationsSnapshot)
             self.assertEqual(snapshot.limit, 2)

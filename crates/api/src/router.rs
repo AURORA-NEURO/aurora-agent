@@ -10,7 +10,24 @@ use crate::events::{
     MAX_EVENT_STATE_FILE_BYTES, MAX_FILTERS,
 };
 use crate::http::{HttpRequest, HttpResponse};
+use bioprism_devplat::{
+    build_cross_domain_audit, plan_mission, verify_mission_evidence_bundle, ArtifactRegistry,
+    ArtifactRegistryError, CiProviderEvidenceRegistry, DomainWorkflowReconciliationRegistry,
+    EvidenceBundleError, EvidenceBundleRegistry, EvidenceRegistryError, MissionEvaluatorCatalogue,
+    MissionEvaluatorReplayCompareRequest, MissionEvaluatorReplayRequest, MissionRequest,
+    WorkbenchReportRegistry, WorkflowExecutionEvidenceRegistry, MAX_ARTIFACT_REGISTRY_BYTES,
+    MAX_CI_PROVIDER_EVIDENCE_REGISTRY_BYTES, MAX_EVIDENCE_REGISTRY_BYTES,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
+};
+use bioprism_factory::{
+    AuthorityMutation, ExecutionOperation, Idempotency as FactoryIdempotency, Job as FactoryJob,
+    JobStore, Lease as FactoryLease, QueueAdmissionPolicy, Recovery as FactoryRecovery,
+    ResourceClass, SharedExecutionAuthority, WorkerCapability, EXECUTION_AUTHORITY_SCHEMA_VERSION,
+    JOB_STORE_SNAPSHOT_SCHEMA_VERSION, MAX_EXECUTION_AUTHORITY_BYTES,
+};
+use bioprism_ids::ContentHash;
 use bioprism_mcp::{Request, Response, PROTOCOL_VERSION, SERVER_NAME};
+use bioprism_scope::Timestamp;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const API_VERSION: &str = "v1";
 pub const DEFAULT_MAX_HEADER_BYTES: usize = 32 * 1024;
@@ -35,6 +53,16 @@ pub const MAX_MISSION_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PERSISTED_MISSION_RESULT_BYTES: usize = 256 * 1024;
 pub const MAX_PERSISTED_MISSION_TRACE_EVENT_BYTES: usize = 64 * 1024;
 pub const MAX_PERSISTED_MISSION_PROVENANCE_BYTES: usize = 128 * 1024;
+pub const MAX_MISSION_EVIDENCE_BUNDLE_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_WORKFLOW_RECONCILIATION_STATE_BYTES: usize =
+    bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES;
+pub const MAX_WORKBENCH_REGISTRY_STATE_BYTES: usize =
+    bioprism_devplat::MAX_WORKBENCH_REGISTRY_BYTES;
+pub const MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES: usize =
+    MAX_CI_PROVIDER_EVIDENCE_REGISTRY_BYTES;
+pub const MISSION_QUEUE_LEASE_DURATION_NANOS: i128 = 24 * 60 * 60 * 1_000_000_000;
+const MISSION_QUEUE_WORKER_ID: &str = "bioprism-api-mission-worker";
+static NEXT_CHECKPOINT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -47,9 +75,31 @@ pub struct ApiConfig {
     /// Event cursors remain process-local; this path only restores mission status, bounded
     /// trace rows, progress, and size-bounded result metadata after an API restart.
     pub mission_state_path: Option<PathBuf>,
+    /// Optional atomic checkpoint for the typed factory lifecycle behind mission execution.
+    ///
+    /// This is separate from `mission_state_path`: the mission projection answers what the API
+    /// observed, while the queue checkpoint answers which lease/idempotency branch is recoverable.
+    /// It never enables automatic resumption of an in-process worker.
+    pub mission_queue_state_path: Option<PathBuf>,
+    /// Maximum total checkpointed queue jobs admitted before backpressure is returned.
+    pub mission_queue_max_jobs: usize,
+    /// Maximum concurrent leased mission jobs in this API process.
+    pub mission_queue_max_active_leases: usize,
     /// Optional atomic JSON checkpoint for the bounded event cursor, subscription metadata, and
     /// signed pending webhook outbox.
     pub event_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for imported, independently verified evidence bundles.
+    pub evidence_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for imported domain-workflow reconciliation reports.
+    pub reconciliation_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for the bounded cross-domain artifact and lineage index.
+    pub artifact_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for independently validated workflow execution evidence.
+    pub workflow_execution_evidence_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for retained, structurally valid workbench reports.
+    pub workbench_state_path: Option<PathBuf>,
+    /// Optional atomic JSON checkpoint for retained, re-audited provider-shaped CI evidence.
+    pub ci_provider_evidence_state_path: Option<PathBuf>,
 }
 
 impl Default for ApiConfig {
@@ -60,7 +110,16 @@ impl Default for ApiConfig {
             event_capacity: DEFAULT_EVENT_CAPACITY,
             bearer_token: None,
             mission_state_path: None,
+            mission_queue_state_path: None,
+            mission_queue_max_jobs: MAX_MISSION_JOBS,
+            mission_queue_max_active_leases: 64,
             event_state_path: None,
+            evidence_state_path: None,
+            reconciliation_state_path: None,
+            artifact_state_path: None,
+            workflow_execution_evidence_state_path: None,
+            workbench_state_path: None,
+            ci_provider_evidence_state_path: None,
         }
     }
 }
@@ -89,11 +148,73 @@ impl ApiConfig {
             return Err("mission_state_path must not be empty".into());
         }
         if self
+            .mission_queue_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("mission_queue_state_path must not be empty".into());
+        }
+        if self.mission_queue_max_jobs == 0 || self.mission_queue_max_jobs > MAX_MISSION_JOBS {
+            return Err(format!(
+                "mission_queue_max_jobs must be between 1 and {MAX_MISSION_JOBS}"
+            ));
+        }
+        if self.mission_queue_max_active_leases == 0
+            || self.mission_queue_max_active_leases > self.mission_queue_max_jobs
+        {
+            return Err(
+                "mission_queue_max_active_leases must be between 1 and mission_queue_max_jobs"
+                    .into(),
+            );
+        }
+        if self
             .event_state_path
             .as_ref()
             .is_some_and(|path| path.as_os_str().is_empty())
         {
             return Err("event_state_path must not be empty".into());
+        }
+        if self
+            .evidence_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("evidence_state_path must not be empty".into());
+        }
+        if self
+            .reconciliation_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("reconciliation_state_path must not be empty".into());
+        }
+        if self
+            .artifact_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("artifact_state_path must not be empty".into());
+        }
+        if self
+            .workflow_execution_evidence_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("workflow_execution_evidence_state_path must not be empty".into());
+        }
+        if self
+            .workbench_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("workbench_state_path must not be empty".into());
+        }
+        if self
+            .ci_provider_evidence_state_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("ci_provider_evidence_state_path must not be empty".into());
         }
         Ok(())
     }
@@ -107,7 +228,20 @@ pub struct ApiRouter {
     next_request_id: AtomicU64,
     mission_jobs: Arc<Mutex<BTreeMap<String, Arc<MissionJob>>>>,
     mission_persistence: Arc<MissionPersistence>,
+    mission_queue_persistence: Arc<MissionQueuePersistence>,
     event_persistence: Arc<EventPersistence>,
+    evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
+    evidence_persistence: Arc<EvidencePersistence>,
+    reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    reconciliation_persistence: Arc<ReconciliationPersistence>,
+    artifact_registry: Arc<Mutex<ArtifactRegistry>>,
+    artifact_persistence: Arc<ArtifactPersistence>,
+    workflow_execution_evidence_registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+    workflow_execution_evidence_persistence: Arc<WorkflowExecutionEvidencePersistence>,
+    workbench_registry: Arc<Mutex<WorkbenchReportRegistry>>,
+    workbench_persistence: Arc<WorkbenchPersistence>,
+    ci_provider_evidence_registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
+    ci_provider_evidence_persistence: Arc<CiProviderEvidencePersistence>,
 }
 
 struct MissionJob {
@@ -121,10 +255,366 @@ struct MissionPersistence {
     lock: Mutex<()>,
 }
 
+struct MissionQueuePersistence {
+    path: Option<PathBuf>,
+    authority: Arc<SharedExecutionAuthority>,
+    startup_recoveries: Vec<FactoryRecovery>,
+    admission_policy: QueueAdmissionPolicy,
+}
+
 struct EventPersistence {
     path: Option<PathBuf>,
     events: Arc<Mutex<EventLog>>,
     lock: Mutex<()>,
+}
+
+struct EvidencePersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<EvidenceBundleRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct ReconciliationPersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct ArtifactPersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<ArtifactRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct WorkflowExecutionEvidencePersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<WorkflowExecutionEvidenceRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct WorkbenchPersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<WorkbenchReportRegistry>>,
+    lock: Mutex<()>,
+}
+
+struct CiProviderEvidencePersistence {
+    path: Option<PathBuf>,
+    registry: Arc<Mutex<CiProviderEvidenceRegistry>>,
+    lock: Mutex<()>,
+}
+
+impl MissionQueuePersistence {
+    fn new(path: Option<PathBuf>, admission_policy: QueueAdmissionPolicy) -> Result<Self, String> {
+        admission_policy
+            .validate()
+            .map_err(|error| format!("invalid mission queue admission policy: {error}"))?;
+        let authority = SharedExecutionAuthority::open(path.clone())
+            .map_err(|error| format!("mission execution authority could not be opened: {error}"))?;
+        let startup_recoveries = if path.is_some() {
+            let now = current_timestamp()?;
+            authority
+                .mutate(
+                    AuthorityMutation::new(
+                        ExecutionOperation::LeaseRecovered,
+                        format!("startup-recovery-sweep:{}", now.as_nanos_utc()),
+                        None,
+                        Some(MISSION_QUEUE_WORKER_ID.into()),
+                        None,
+                        now,
+                        json!({ "source": "api_startup" }),
+                    ),
+                    |queue| Ok(queue.recover_expired(now)),
+                )
+                .map_err(|error| format!("mission queue startup recovery failed: {error}"))?
+        } else {
+            Vec::new()
+        };
+        authority.flush().map_err(|error| {
+            format!("mission queue authority checkpoint failed during startup: {error}")
+        })?;
+        Ok(Self {
+            path,
+            authority,
+            startup_recoveries,
+            admission_policy,
+        })
+    }
+
+    fn persist(&self) -> Result<usize, String> {
+        self.authority
+            .flush()
+            .map_err(|error| format!("mission queue authority checkpoint failed: {error}"))
+    }
+
+    /// Apply a queue transition through the shared authority. The queue image and journal row are
+    /// committed together, and a second process reloads the latest image while holding the file
+    /// lock instead of mutating a stale in-memory copy.
+    fn mutate<T, F>(&self, mutation: AuthorityMutation, transition: F) -> Result<T, String>
+    where
+        F: FnOnce(&mut JobStore) -> Result<T, String>,
+    {
+        self.authority
+            .mutate(mutation.clone(), |queue| {
+                transition(queue).map_err(|error| {
+                    bioprism_factory::FactoryError::InvalidAuthoritySnapshot { reason: error }
+                })
+            })
+            .map_err(|error| {
+                format!(
+                    "mission queue {:?} was refused: {error}",
+                    mutation.operation
+                )
+            })
+    }
+
+    fn enqueue_and_lease(&self, job: FactoryJob, now: Timestamp) -> Result<FactoryLease, String> {
+        let mission_id = job.id.clone();
+        let work_digest = job.idempotency_key().to_string();
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::EnqueueAndLease,
+            format!("queue-enqueue-lease:{mission_id}"),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            Some(job.attempts.saturating_add(1).max(1)),
+            now,
+            json!({
+                "resource_class": job.resource_class,
+                "work_digest": work_digest,
+            }),
+        );
+        self.mutate(mutation, move |queue| {
+            let accepted = queue
+                .enqueue_with_policy(job, &self.admission_policy)
+                .map_err(|error| error.to_string())?;
+            if accepted != mission_id {
+                return Err(format!(
+                    "duplicate work is already represented by {accepted}"
+                ));
+            }
+            if let Some(lease) = queue.active_lease(&mission_id) {
+                return Ok(lease.clone());
+            }
+            let worker =
+                WorkerCapability::new(MISSION_QUEUE_WORKER_ID, vec![ResourceClass::Evaluate])
+                    .with_lease_duration_nanos(MISSION_QUEUE_LEASE_DURATION_NANOS);
+            queue
+                .lease_with_policy(&worker, now, &self.admission_policy)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "no compatible mission worker capacity is available".to_string())
+        })
+    }
+
+    fn heartbeat(&self, mission_id: &str, attempt: u32, now: Timestamp) -> Result<(), String> {
+        let mission_id = mission_id.to_string();
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::Heartbeat,
+            format!(
+                "queue-heartbeat:{mission_id}:{attempt}:{}",
+                now.as_nanos_utc()
+            ),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            Some(attempt),
+            now,
+            json!({ "lease_duration_nanos": MISSION_QUEUE_LEASE_DURATION_NANOS }),
+        );
+        self.mutate(mutation, move |queue| {
+            queue
+                .heartbeat(
+                    &mission_id,
+                    MISSION_QUEUE_WORKER_ID,
+                    attempt,
+                    now,
+                    MISSION_QUEUE_LEASE_DURATION_NANOS,
+                )
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn commit_success(
+        &self,
+        mission_id: &str,
+        attempt: u32,
+        result: Value,
+        now: Timestamp,
+    ) -> Result<(), String> {
+        let mission_id = mission_id.to_string();
+        let result_digest = ContentHash::of_value(&result)
+            .map_err(|error| format!("mission result could not be digested: {error}"))?
+            .to_string();
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::Committed,
+            format!("queue-commit:{mission_id}:{attempt}:{result_digest}"),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            Some(attempt),
+            now,
+            json!({ "result_digest": result_digest }),
+        );
+        self.mutate(mutation, move |queue| {
+            if let Some(job) = queue.job(&mission_id) {
+                if job.state == bioprism_factory::JobState::Succeeded
+                    && queue.result(&mission_id) == Some(&result)
+                {
+                    return Ok(());
+                }
+            }
+            queue
+                .stage(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now, result)
+                .and_then(|_| queue.commit(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now))
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn record_failure(
+        &self,
+        mission_id: &str,
+        attempt: u32,
+        reason: String,
+        now: Timestamp,
+    ) -> Result<(), String> {
+        let mission_id = mission_id.to_string();
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::Failed,
+            format!("queue-failure:{mission_id}:{attempt}:{reason}"),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            Some(attempt),
+            now,
+            json!({ "reason": reason }),
+        );
+        let retry_reason = reason.clone();
+        self.mutate(mutation, move |queue| {
+            if let Some(job) = queue.job(&mission_id) {
+                if queue.active_lease(&mission_id).is_none()
+                    && job.reason.as_deref() == Some(retry_reason.as_str())
+                    && matches!(
+                        job.state,
+                        bioprism_factory::JobState::Queued
+                            | bioprism_factory::JobState::DeadLettered
+                    )
+                {
+                    return Ok(());
+                }
+            }
+            queue
+                .fail(&mission_id, MISSION_QUEUE_WORKER_ID, attempt, now, reason)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn cancel(&self, mission_id: &str, reason: &str) -> Result<(), String> {
+        let mission_id = mission_id.to_string();
+        let reason = reason.to_string();
+        let mutation = AuthorityMutation::new(
+            ExecutionOperation::Cancelled,
+            format!("queue-cancel:{mission_id}:{reason}"),
+            Some(mission_id.clone()),
+            Some(MISSION_QUEUE_WORKER_ID.into()),
+            None,
+            current_timestamp().map_err(|error| error.to_string())?,
+            json!({ "reason": reason }),
+        );
+        let retry_reason = reason.clone();
+        self.mutate(mutation, move |queue| {
+            if let Some(job) = queue.job(&mission_id) {
+                if job.state == bioprism_factory::JobState::Cancelled
+                    && job.reason.as_deref() == Some(retry_reason.as_str())
+                {
+                    return Ok(());
+                }
+            }
+            queue
+                .cancel(&mission_id, reason)
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn status(&self) -> Result<Value, String> {
+        let path = self.path.as_deref();
+        let authority_snapshot = self
+            .authority
+            .snapshot()
+            .map_err(|error| format!("mission authority snapshot failed: {error}"))?;
+        let queue = JobStore::from_snapshot(authority_snapshot.queue.clone())
+            .map_err(|error| format!("mission queue projection failed: {error}"))?;
+        let authority_status = self
+            .authority
+            .status()
+            .map_err(|error| format!("mission authority status failed: {error}"))?;
+        let jobs = authority_snapshot
+            .queue
+            .jobs
+            .iter()
+            .map(mission_queue_job_json)
+            .collect::<Vec<_>>();
+        let file_bytes = path
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|m| m.len());
+        let authority_json = serde_json::to_value(&authority_status)
+            .map_err(|error| format!("mission authority status serialization failed: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "enabled": path.is_some(),
+            "file_present": file_bytes.is_some(),
+            "file_bytes": file_bytes,
+            "schema_version": EXECUTION_AUTHORITY_SCHEMA_VERSION,
+            "queue_schema_version": JOB_STORE_SNAPSHOT_SCHEMA_VERSION,
+            "state_digest": authority_snapshot.queue.state_digest,
+            "authority_digest": authority_snapshot.state_digest,
+            "integrity_verified": authority_status.integrity_verified,
+            "max_file_bytes": MAX_EXECUTION_AUTHORITY_BYTES,
+            "registry_size": jobs.len(),
+            "jobs": jobs,
+            "authority": authority_json,
+            "admission_policy": {
+                "max_jobs": self.admission_policy.max_jobs,
+                "max_active_leases": self.admission_policy.max_active_leases,
+                "max_jobs_by_class": self.admission_policy.max_jobs_by_class,
+                "max_active_leases_by_class": self.admission_policy.max_active_leases_by_class,
+                "observed_active_leases": queue.active_lease_count(),
+                "observed_active_leases_by_class": queue.active_lease_counts_by_class(),
+                "backpressure": "refuse_before_checkpoint_mutation"
+            },
+            "startup_recoveries": self.startup_recoveries,
+            "automatic_resume": false,
+            "execution_scope": authority_status.execution_scope,
+            "recovery_policy": "expired leases are classified by idempotency at startup; no recovered job is automatically dispatched",
+            "does_not_claim": [
+                "multi-host consensus or network-partition tolerance",
+                "external effect completion",
+                "automatic resume of an interrupted mission",
+                "provider authentication or tenant isolation"
+            ],
+            "flush": "/v1/missions/queue/persistence/flush"
+        }))
+    }
+
+    fn projection(&self, mission_id: &str) -> Result<Value, String> {
+        Ok(self
+            .authority
+            .job(mission_id)
+            .map_err(|error| format!("mission authority projection failed: {error}"))?
+            .as_ref()
+            .map(mission_queue_job_json)
+            .unwrap_or(Value::Null))
+    }
+
+    fn release_orphaned_lock(
+        &self,
+        operator: &str,
+        reason: &str,
+        at: Timestamp,
+    ) -> Result<Value, String> {
+        let release = self
+            .authority
+            .release_orphaned_lock(operator, reason, at)
+            .map_err(|error| format!("mission authority lock release refused: {error}"))?;
+        serde_json::to_value(release)
+            .map_err(|error| format!("mission authority lock receipt failed: {error}"))
+    }
 }
 
 impl EventPersistence {
@@ -141,6 +631,454 @@ impl EventPersistence {
             .lock()
             .map_err(|_| "event log is unavailable".to_string())?;
         events.checkpoint_to_path(path)
+    }
+}
+
+impl EvidencePersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "evidence registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "evidence persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, &document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "evidence persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, document)
+    }
+
+    fn write_snapshot(path: &Path, document: &Value) -> Result<usize, String> {
+        let bytes = serde_json::to_vec_pretty(&document)
+            .map_err(|error| format!("evidence state could not be serialized: {error}"))?;
+        if bytes.len() > MAX_EVIDENCE_REGISTRY_BYTES {
+            return Err(format!(
+                "evidence state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_EVIDENCE_REGISTRY_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("evidence state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "evidence_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("evidence state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "evidence state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "evidence state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
+impl ReconciliationPersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "workflow reconciliation registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "workflow reconciliation persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, &document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "workflow reconciliation persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, document)
+    }
+
+    fn write_snapshot(path: &Path, document: &Value) -> Result<usize, String> {
+        let bytes = serde_json::to_vec_pretty(document).map_err(|error| {
+            format!("workflow reconciliation state could not be serialized: {error}")
+        })?;
+        if bytes.len() > MAX_WORKFLOW_RECONCILIATION_STATE_BYTES {
+            return Err(format!(
+                "workflow reconciliation state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_WORKFLOW_RECONCILIATION_STATE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("workflow reconciliation state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "reconciliation_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("workflow reconciliation state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "workflow reconciliation state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "workflow reconciliation state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
+impl ArtifactPersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "artifact registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "artifact registry persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, &document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "artifact registry persistence lock is unavailable".to_string())?;
+        Self::write_snapshot(path, document)
+    }
+
+    fn write_snapshot(path: &Path, document: &Value) -> Result<usize, String> {
+        let bytes = serde_json::to_vec_pretty(document)
+            .map_err(|error| format!("artifact state could not be serialized: {error}"))?;
+        if bytes.len() > MAX_ARTIFACT_REGISTRY_BYTES {
+            return Err(format!(
+                "artifact state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_ARTIFACT_REGISTRY_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("artifact state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "artifact_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("artifact state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "artifact state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "artifact state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
+impl WorkflowExecutionEvidencePersistence {
+    fn persist(&self) -> Result<usize, String> {
+        if self.path.is_none() {
+            return Ok(0);
+        }
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "workflow execution evidence registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        self.persist_snapshot(&document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self.lock.lock().map_err(|_| {
+            "workflow execution evidence persistence lock is unavailable".to_string()
+        })?;
+        let bytes = serde_json::to_vec_pretty(document).map_err(|error| {
+            format!("workflow execution evidence state could not be serialized: {error}")
+        })?;
+        if bytes.len() > MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES {
+            return Err(format!(
+                "workflow execution evidence state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("workflow execution evidence state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "workflow_execution_evidence_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!(
+                "workflow execution evidence state temporary file could not be written: {error}"
+            )
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "workflow execution evidence state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "workflow execution evidence state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
+impl WorkbenchPersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(_) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "workbench registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        self.persist_snapshot(&document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "workbench persistence lock is unavailable".to_string())?;
+        let bytes = serde_json::to_vec_pretty(document)
+            .map_err(|error| format!("workbench state could not be serialized: {error}"))?;
+        if bytes.len() > MAX_WORKBENCH_REGISTRY_STATE_BYTES {
+            return Err(format!(
+                "workbench state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_WORKBENCH_REGISTRY_STATE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("workbench state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "workbench_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("workbench state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "workbench state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "workbench state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
+    }
+}
+
+impl CiProviderEvidencePersistence {
+    fn persist(&self) -> Result<usize, String> {
+        let Some(_) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "CI provider evidence registry is unavailable".to_string())?;
+        let document = registry.snapshot().map_err(|error| error.to_string())?;
+        self.persist_snapshot(&document)
+    }
+
+    fn persist_snapshot(&self, document: &Value) -> Result<usize, String> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(0);
+        };
+        let _write_guard = self
+            .lock
+            .lock()
+            .map_err(|_| "CI provider evidence persistence lock is unavailable".to_string())?;
+        let bytes = serde_json::to_vec_pretty(document).map_err(|error| {
+            format!("CI provider evidence state could not be serialized: {error}")
+        })?;
+        if bytes.len() > MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES {
+            return Err(format!(
+                "CI provider evidence state snapshot is {} bytes, above the {}-byte bound",
+                bytes.len(),
+                MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES
+            ));
+        }
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("CI provider evidence state directory could not be created: {error}")
+            })?;
+        }
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "ci_provider_evidence_state_path must name a file".to_string())?
+            .to_string_lossy();
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&temporary, &bytes).map_err(|error| {
+            format!("CI provider evidence state temporary file could not be written: {error}")
+        })?;
+        if let Err(first_error) = std::fs::rename(&temporary, path) {
+            #[cfg(windows)]
+            {
+                let _ = std::fs::remove_file(path);
+                std::fs::rename(&temporary, path).map_err(|second_error| {
+                    format!(
+                        "CI provider evidence state could not replace the previous snapshot ({first_error}; retry: {second_error})"
+                    )
+                })?;
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(format!(
+                    "CI provider evidence state snapshot could not be installed: {first_error}"
+                ));
+            }
+        }
+        Ok(bytes.len())
     }
 }
 
@@ -204,7 +1142,10 @@ impl MissionPersistence {
             .file_name()
             .ok_or_else(|| "mission_state_path must name a file".to_string())?
             .to_string_lossy();
-        let temporary = path.with_file_name(format!(".{filename}.tmp"));
+        let temporary = path.with_file_name(format!(
+            ".{filename}.tmp-{}",
+            NEXT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(&temporary, &bytes).map_err(|error| {
             format!("mission state temporary file could not be written: {error}")
         })?;
@@ -239,6 +1180,8 @@ struct MissionJobState {
     cancel_reason: Option<String>,
     result: Option<Value>,
     result_omitted: Option<Value>,
+    evaluator_replay_summary: Option<Value>,
+    route_review_provenance: Option<Value>,
     error: Option<String>,
     recovered_after_restart: bool,
     execution_provenance: Option<Value>,
@@ -383,12 +1326,50 @@ impl MissionJobState {
 impl ApiRouter {
     pub fn new(root: PathBuf, config: ApiConfig) -> Result<Self, String> {
         config.validate()?;
+        let mission_queue_policy = QueueAdmissionPolicy::new(
+            config.mission_queue_max_jobs,
+            config.mission_queue_max_active_leases,
+        )
+        .with_resource_class_limit(
+            ResourceClass::Evaluate,
+            config.mission_queue_max_jobs,
+            config.mission_queue_max_active_leases,
+        );
+        let mission_queue_persistence = Arc::new(MissionQueuePersistence::new(
+            config.mission_queue_state_path.clone(),
+            mission_queue_policy,
+        )?);
         let events = Arc::new(Mutex::new(EventLog::from_checkpoint_path(
             config.event_capacity,
             config.event_state_path.as_deref(),
         )?));
         let restored_jobs = load_mission_jobs(config.mission_state_path.as_deref())?;
-        let mut server = bioprism_mcp::Server::new(root);
+        let restored_evidence = load_evidence_registry(config.evidence_state_path.as_deref())?;
+        let restored_reconciliations =
+            load_workflow_reconciliation_registry(config.reconciliation_state_path.as_deref())?;
+        let restored_artifacts = load_artifact_registry(config.artifact_state_path.as_deref())?;
+        let restored_workflow_execution_evidence = load_workflow_execution_evidence_registry(
+            config.workflow_execution_evidence_state_path.as_deref(),
+        )?;
+        let restored_workbench = load_workbench_registry(config.workbench_state_path.as_deref())?;
+        let restored_ci_provider_evidence =
+            load_ci_provider_evidence_registry(config.ci_provider_evidence_state_path.as_deref())?;
+        let evidence_registry = Arc::new(Mutex::new(restored_evidence));
+        let reconciliation_registry = Arc::new(Mutex::new(restored_reconciliations));
+        let artifact_registry = Arc::new(Mutex::new(restored_artifacts));
+        let workflow_execution_evidence_registry =
+            Arc::new(Mutex::new(restored_workflow_execution_evidence));
+        let workbench_registry = Arc::new(Mutex::new(restored_workbench));
+        let ci_provider_evidence_registry = Arc::new(Mutex::new(restored_ci_provider_evidence));
+        let mut server = bioprism_mcp::Server::with_all_registries_and_ci_provider_evidence(
+            root,
+            Arc::clone(&evidence_registry),
+            Arc::clone(&reconciliation_registry),
+            Arc::clone(&workflow_execution_evidence_registry),
+            Arc::clone(&workbench_registry),
+            Arc::clone(&ci_provider_evidence_registry),
+            Arc::clone(&artifact_registry),
+        );
         let initialize = Request {
             id: Some(json!(0)),
             method: "initialize".into(),
@@ -419,6 +1400,37 @@ impl ApiRouter {
             events: Arc::clone(&events),
             lock: Mutex::new(()),
         });
+        let evidence_persistence = Arc::new(EvidencePersistence {
+            path: config.evidence_state_path.clone(),
+            registry: Arc::clone(&evidence_registry),
+            lock: Mutex::new(()),
+        });
+        let reconciliation_persistence = Arc::new(ReconciliationPersistence {
+            path: config.reconciliation_state_path.clone(),
+            registry: Arc::clone(&reconciliation_registry),
+            lock: Mutex::new(()),
+        });
+        let artifact_persistence = Arc::new(ArtifactPersistence {
+            path: config.artifact_state_path.clone(),
+            registry: Arc::clone(&artifact_registry),
+            lock: Mutex::new(()),
+        });
+        let workflow_execution_evidence_persistence =
+            Arc::new(WorkflowExecutionEvidencePersistence {
+                path: config.workflow_execution_evidence_state_path.clone(),
+                registry: Arc::clone(&workflow_execution_evidence_registry),
+                lock: Mutex::new(()),
+            });
+        let workbench_persistence = Arc::new(WorkbenchPersistence {
+            path: config.workbench_state_path.clone(),
+            registry: Arc::clone(&workbench_registry),
+            lock: Mutex::new(()),
+        });
+        let ci_provider_evidence_persistence = Arc::new(CiProviderEvidencePersistence {
+            path: config.ci_provider_evidence_state_path.clone(),
+            registry: Arc::clone(&ci_provider_evidence_registry),
+            lock: Mutex::new(()),
+        });
         let router = Self {
             server,
             mission_executor,
@@ -427,7 +1439,20 @@ impl ApiRouter {
             next_request_id: AtomicU64::new(1),
             mission_jobs,
             mission_persistence,
+            mission_queue_persistence,
             event_persistence,
+            evidence_registry,
+            evidence_persistence,
+            reconciliation_registry,
+            reconciliation_persistence,
+            artifact_registry,
+            artifact_persistence,
+            workflow_execution_evidence_registry,
+            workflow_execution_evidence_persistence,
+            workbench_registry,
+            workbench_persistence,
+            ci_provider_evidence_registry,
+            ci_provider_evidence_persistence,
         };
         if router.config.mission_state_path.is_some() {
             router.persist_mission_registry()?;
@@ -437,11 +1462,83 @@ impl ApiRouter {
                 format!("event state checkpoint failed during startup: {error}")
             })?;
         }
+        if router.config.evidence_state_path.is_some() {
+            router.evidence_persistence.persist().map_err(|error| {
+                format!("evidence state checkpoint failed during startup: {error}")
+            })?;
+        }
+        if router.config.reconciliation_state_path.is_some() {
+            router
+                .reconciliation_persistence
+                .persist()
+                .map_err(|error| {
+                    format!(
+                        "workflow reconciliation state checkpoint failed during startup: {error}"
+                    )
+                })?;
+        }
+        if router.config.artifact_state_path.is_some() {
+            router.artifact_persistence.persist().map_err(|error| {
+                format!("artifact registry state checkpoint failed during startup: {error}")
+            })?;
+        }
+        if router
+            .config
+            .workflow_execution_evidence_state_path
+            .is_some()
+        {
+            router.persist_workflow_execution_evidence_registry().map_err(|error| {
+                    format!(
+                        "workflow execution evidence state checkpoint failed during startup: {error}"
+                    )
+            })?;
+        }
+        if router.config.workbench_state_path.is_some() {
+            router.workbench_persistence.persist().map_err(|error| {
+                format!("workbench state checkpoint failed during startup: {error}")
+            })?;
+        }
+        if router.config.ci_provider_evidence_state_path.is_some() {
+            router
+                .ci_provider_evidence_persistence
+                .persist()
+                .map_err(|error| {
+                    format!("CI provider evidence state checkpoint failed during startup: {error}")
+                })?;
+        }
         Ok(router)
     }
 
     fn persist_mission_registry(&self) -> Result<(), String> {
         self.mission_persistence.persist()
+    }
+
+    fn persist_mission_queue(&self) -> Result<usize, String> {
+        self.mission_queue_persistence.persist()
+    }
+
+    fn persist_evidence_registry(&self) -> Result<usize, String> {
+        self.evidence_persistence.persist()
+    }
+
+    fn persist_reconciliation_registry(&self) -> Result<usize, String> {
+        self.reconciliation_persistence.persist()
+    }
+
+    fn persist_artifact_registry(&self) -> Result<usize, String> {
+        self.artifact_persistence.persist()
+    }
+
+    fn persist_workflow_execution_evidence_registry(&self) -> Result<usize, String> {
+        self.workflow_execution_evidence_persistence.persist()
+    }
+
+    fn persist_workbench_registry(&self) -> Result<usize, String> {
+        self.workbench_persistence.persist()
+    }
+
+    fn persist_ci_provider_evidence_registry(&self) -> Result<usize, String> {
+        self.ci_provider_evidence_persistence.persist()
     }
 
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
@@ -491,6 +1588,19 @@ impl ApiRouter {
             ("GET", "/openapi.json") | ("GET", "/v1/openapi.json") => self.openapi(),
             ("GET", "/v1") => self.index(),
             ("GET", "/v1/capabilities") => self.capabilities(),
+            ("GET", "/v1/capabilities/dashboard") => {
+                self.capability_dashboard(&request, &request_id)
+            }
+            ("POST", "/v1/capabilities/route") => self.capability_route(&request, &request_id),
+            ("POST", "/v1/capabilities/route/review") => {
+                self.capability_route_review(&request, &request_id)
+            }
+            ("POST", "/v1/capabilities/route/plan") => {
+                self.capability_route_plan(&request, &request_id)
+            }
+            ("POST", "/v1/capabilities/route/plan/verify") => {
+                self.capability_route_plan_verify(&request, &request_id)
+            }
             ("GET", "/v1/recovery") => self.recovery_matrix(),
             ("GET", "/v1/operations/snapshot") => self.operations_snapshot(&request, &request_id),
             ("GET", "/v1/operations/domains") => {
@@ -504,6 +1614,138 @@ impl ApiRouter {
                 self.create_operations_gate_review(&request, &request_id)
             }
             ("POST", "/v1/operations/handoff") => self.operations_handoff(&request, &request_id),
+            ("GET", "/v1/domain-workflows") => self.domain_workflow_catalogue(&request_id),
+            ("POST", "/v1/domain-workflows/reconcile") => {
+                self.domain_workflow_reconcile(&request, &request_id)
+            }
+            ("GET", "/v1/domain-workflows/reconciliations") => {
+                self.query_workflow_reconciliations(&request, &request_id)
+            }
+            ("POST", "/v1/domain-workflows/reconciliations") => {
+                self.import_workflow_reconciliation(&request, &request_id)
+            }
+            ("GET", "/v1/domain-workflows/reconciliations/persistence") => {
+                self.reconciliation_persistence_status()
+            }
+            ("POST", "/v1/domain-workflows/reconciliations/persistence/flush") => {
+                self.flush_reconciliation_persistence(&request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/domain-workflows/reconciliations/") => {
+                self.get_workflow_reconciliation(&request, &request_id)
+            }
+            ("POST", "/v1/domain-workflows/instantiate") => {
+                self.domain_workflow_instantiate(&request, &request_id)
+            }
+            ("POST", "/v1/domain-workflows/portfolio") => {
+                self.domain_workflow_portfolio(&request, &request_id)
+            }
+            ("POST", "/v1/domain-workflows/portfolio/verify") => {
+                self.domain_workflow_portfolio_verify(&request, &request_id)
+            }
+            ("POST", "/v1/developer-workbench/verify") => {
+                self.developer_workbench_verify(&request, &request_id)
+            }
+            ("POST", "/v1/developer-workbench/reports") => {
+                self.import_workbench_report(&request, &request_id)
+            }
+            ("GET", "/v1/developer-workbench/reports") => {
+                self.query_workbench_reports(&request, &request_id)
+            }
+            ("GET", "/v1/developer-workbench/reports/persistence") => {
+                self.workbench_persistence_status()
+            }
+            ("POST", "/v1/developer-workbench/reports/persistence/flush") => {
+                self.flush_workbench_persistence(&request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/developer-workbench/reports/") => {
+                self.get_workbench_report(&request, &request_id)
+            }
+            ("POST", "/v1/ci/provider-evidence") => {
+                self.import_ci_provider_evidence(&request, &request_id)
+            }
+            ("GET", "/v1/ci/provider-evidence") => {
+                self.query_ci_provider_evidence(&request, &request_id)
+            }
+            ("GET", "/v1/ci/provider-evidence/persistence") => {
+                self.ci_provider_evidence_persistence_status()
+            }
+            ("POST", "/v1/ci/provider-evidence/persistence/flush") => {
+                self.flush_ci_provider_evidence_persistence(&request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/ci/provider-evidence/") => {
+                self.get_ci_provider_evidence(&request, &request_id)
+            }
+            ("POST", "/v1/domain-workflows/verify") => {
+                self.domain_workflow_verify(&request, &request_id)
+            }
+            ("POST", "/v1/domain-workflows/scaffold") => {
+                self.domain_workflow_scaffold(&request, &request_id)
+            }
+            ("POST", "/v1/evidence-bundles/verify") => {
+                self.verify_evidence_bundle(&request, &request_id)
+            }
+            ("GET", "/v1/evidence-bundles") => self.query_evidence_bundles(&request, &request_id),
+            ("POST", "/v1/evidence-bundles") => self.import_evidence_bundle(&request, &request_id),
+            ("GET", "/v1/evidence-bundles/persistence") => self.evidence_persistence_status(),
+            ("POST", "/v1/evidence-bundles/persistence/flush") => {
+                self.flush_evidence_persistence(&request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/evidence-bundles/") => {
+                self.get_evidence_bundle(&request, &request_id)
+            }
+            ("GET", "/v1/artifacts/cross-store") => self.cross_store_artifact_audit(&request_id),
+            ("GET", "/v1/domain-reports/coverage") => {
+                self.domain_report_coverage(&request, &request_id)
+            }
+            ("POST", "/v1/domain-reports") => self.domain_report_project(&request, &request_id),
+            ("POST", "/v1/domain-evidence/harmonize") => {
+                self.domain_evidence_harmonize(&request, &request_id)
+            }
+            ("GET", "/v1/domain-evidence/harmonization/coverage") => {
+                self.domain_evidence_harmonization_coverage(&request, &request_id)
+            }
+            ("GET", "/v1/domain-evidence/lineage") => {
+                self.domain_evidence_lineage(&request, &request_id)
+            }
+            ("POST", "/v1/domain-evidence/intake") => {
+                self.domain_evidence_intake(&request, &request_id)
+            }
+            ("POST", "/v1/domain-evidence/sources") => {
+                self.domain_evidence_source_plan(&request, &request_id)
+            }
+            ("POST", "/v1/domain-evidence/sources/execute") => {
+                self.domain_evidence_source_execute(&request, &request_id)
+            }
+            ("GET", "/v1/domain-evidence/coverage") => {
+                self.domain_evidence_coverage(&request, &request_id)
+            }
+            ("GET", "/v1/artifacts") => self.query_artifacts(&request, &request_id),
+            ("POST", "/v1/artifacts") => self.register_artifact(&request, &request_id),
+            ("GET", "/v1/domain-decision-readiness") => {
+                self.query_domain_decision_readiness(&request, &request_id)
+            }
+            ("POST", "/v1/control-plane-readiness") => {
+                self.control_plane_readiness_audit(&request, &request_id)
+            }
+            ("POST", "/v1/control-plane-readiness/compare") => {
+                self.control_plane_readiness_compare(&request, &request_id)
+            }
+            ("POST", "/v1/control-plane-readiness/compare-retained") => {
+                self.control_plane_readiness_compare_retained(&request, &request_id)
+            }
+            ("GET", "/v1/control-plane-readiness") => {
+                self.query_control_plane_readiness(&request, &request_id)
+            }
+            ("GET", "/v1/artifacts/persistence") => self.artifact_persistence_status(),
+            ("POST", "/v1/artifacts/persistence/flush") => {
+                self.flush_artifact_persistence(&request_id)
+            }
+            ("GET", path) if path.ends_with("/lineage") && path.starts_with("/v1/artifacts/") => {
+                self.artifact_lineage(&request, &request_id)
+            }
+            ("GET", path) if path.starts_with("/v1/artifacts/") => {
+                self.get_artifact(&request, &request_id)
+            }
             ("GET", "/v1/tools") => self.tools(),
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
@@ -526,10 +1768,34 @@ impl ApiRouter {
             ("POST", "/v1/missions/persistence/flush") => {
                 self.flush_mission_persistence(&request_id)
             }
+            ("GET", "/v1/missions/queue") => self.mission_queue_inventory(&request_id),
+            ("GET", "/v1/missions/queue/persistence") => self.mission_queue_persistence_status(),
+            ("POST", "/v1/missions/queue/persistence/flush") => {
+                self.flush_mission_queue_persistence(&request_id)
+            }
+            ("POST", "/v1/missions/queue/authority/release-lock") => {
+                self.release_mission_queue_lock(&request, &request_id)
+            }
             ("POST", "/v1/missions/preflight") => self.preflight_mission(&request, &request_id),
             ("POST", "/v1/missions") => self.submit_mission(&request, &request_id),
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/provenance") => {
                 self.mission_provenance(&request, &request_id)
+            }
+            ("GET", path)
+                if path.starts_with("/v1/missions/") && path.ends_with("/evidence-bundle") =>
+            {
+                self.mission_evidence_bundle(&request, &request_id)
+            }
+            ("GET", path)
+                if path.starts_with("/v1/missions/")
+                    && path.ends_with("/evaluator-replay/compare") =>
+            {
+                self.mission_evaluator_replay_compare(&request, &request_id)
+            }
+            ("GET", path)
+                if path.starts_with("/v1/missions/") && path.ends_with("/evaluator-replay") =>
+            {
+                self.mission_evaluator_replay(&request, &request_id)
             }
             ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/claims") => {
                 self.mission_claims(&request, &request_id)
@@ -641,6 +1907,125 @@ impl ApiRouter {
         )
     }
 
+    fn mission_queue_persistence_status(&self) -> HttpResponse {
+        match self.mission_queue_persistence.status() {
+            Ok(status) => HttpResponse::json(200, &status),
+            Err(error) => HttpResponse::json(
+                500,
+                &json!({
+                    "ok": false,
+                    "error": "mission_queue_unavailable",
+                    "detail": error
+                }),
+            ),
+        }
+    }
+
+    fn mission_queue_inventory(&self, request_id: &str) -> HttpResponse {
+        match self.mission_queue_persistence.status() {
+            Ok(status) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "schema": "bioprism-mission-queue/0.1",
+                    "queue": status,
+                    "guarantees": [
+                        "queue state is projected from the typed factory lifecycle",
+                        "job specifications remain checkpointed but are not returned in this inventory",
+                        "expired leases are classified explicitly rather than silently dropped",
+                        "a queued recovery record is not evidence that a worker has resumed"
+                    ],
+                    "links": {
+                        "persistence": "/v1/missions/queue/persistence",
+                        "flush": "/v1/missions/queue/persistence/flush",
+                        "release_lock": "/v1/missions/queue/authority/release-lock",
+                        "mission_inventory": "/v1/missions"
+                    }
+                }),
+            ),
+            Err(error) => self.error(500, "mission_queue_unavailable", &error, request_id),
+        }
+    }
+
+    fn flush_mission_queue_persistence(&self, request_id: &str) -> HttpResponse {
+        match self.persist_mission_queue() {
+            Ok(bytes) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "bytes": bytes,
+                    "queue": self.mission_queue_persistence.status().unwrap_or_else(|error| json!({"ok": false, "error": error})),
+                    "request_id": request_id,
+                    "guarantees": [
+                        "the checkpoint is content-addressed and atomically replaced",
+                        "a successful flush does not claim external effect completion"
+                    ]
+                }),
+            ),
+            Err(error) => self.error(
+                503,
+                "mission_queue_persistence_unavailable",
+                &error,
+                request_id,
+            ),
+        }
+    }
+
+    fn release_mission_queue_lock(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let operator = match arguments.get("operator").and_then(Value::as_str) {
+            Some(operator) if !operator.trim().is_empty() => operator,
+            _ => {
+                return self.error(
+                    422,
+                    "invalid_authority_operator",
+                    "operator must be a non-empty string",
+                    request_id,
+                )
+            }
+        };
+        let reason = match arguments.get("reason").and_then(Value::as_str) {
+            Some(reason) if !reason.trim().is_empty() => reason,
+            _ => {
+                return self.error(
+                    422,
+                    "invalid_authority_release_reason",
+                    "reason must be a non-empty string",
+                    request_id,
+                )
+            }
+        };
+        let at = match current_timestamp() {
+            Ok(at) => at,
+            Err(error) => {
+                return self.error(500, "authority_clock_unavailable", &error, request_id)
+            }
+        };
+        match self
+            .mission_queue_persistence
+            .release_orphaned_lock(operator, reason, at)
+        {
+            Ok(receipt) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "receipt": receipt,
+                    "request_id": request_id,
+                    "warning": "release is an explicit operator override; confirm the previous process cannot still mutate the shared authority"
+                }),
+            ),
+            Err(error) => self.error(
+                409,
+                "mission_queue_authority_lock_release_refused",
+                &error,
+                request_id,
+            ),
+        }
+    }
+
     fn event_persistence_status(&self) -> HttpResponse {
         let enabled = self.config.event_state_path.is_some();
         let file_bytes = self
@@ -704,12 +2089,58 @@ impl ApiRouter {
             self.config.mission_state_path.as_deref(),
             MISSION_STATE_SCHEMA_VERSION,
         );
+        let mission_queue_persistence = response_value(self.mission_queue_persistence_status());
+        let mission_queue_enabled = mission_queue_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mission_queue_checkpoint_present = mission_queue_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let metrics = self.event_metrics();
         let state_digest = checkpoint_digest_from_path(self.config.event_state_path.as_deref());
         let event_integrity_verified = checkpoint_integrity_from_path(
             self.config.event_state_path.as_deref(),
             EVENT_STATE_SCHEMA_VERSION,
         );
+        let evidence_persistence = response_value(self.evidence_persistence_status());
+        let evidence_enabled = evidence_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let evidence_checkpoint_present = evidence_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let reconciliation_persistence = response_value(self.reconciliation_persistence_status());
+        let reconciliation_enabled = reconciliation_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let reconciliation_checkpoint_present = reconciliation_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let artifact_persistence = response_value(self.artifact_persistence_status());
+        let artifact_enabled = artifact_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let artifact_checkpoint_present = artifact_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let ci_provider_evidence_persistence =
+            response_value(self.ci_provider_evidence_persistence_status());
+        let ci_provider_evidence_enabled = ci_provider_evidence_persistence
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let ci_provider_evidence_checkpoint_present = ci_provider_evidence_persistence
+            .get("file_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         HttpResponse::json(
             200,
             &json!({
@@ -751,6 +2182,23 @@ impl ApiRouter {
                             "distributed consensus or cross-instance ordering"
                         ],
                         "operator_action": "verify the state_digest and treat retention gaps as explicit evidence"
+                    },
+                    {
+                        "id": "mission_execution_queue",
+                        "configured": mission_queue_enabled,
+                        "checkpoint_present": mission_queue_checkpoint_present,
+                        "schema_version": mission_queue_persistence.get("schema_version").cloned().unwrap_or(Value::Null),
+                        "state_digest": mission_queue_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": mission_queue_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "restores": [
+                            "typed mission job state, idempotency class, attempt count, lease ownership, staged/committed output boundary, and recovery posture"
+                        ],
+                        "does_not_restore": [
+                            "an in-process worker thread",
+                            "external effect completion or rollback",
+                            "cross-node lease fencing, tenant/fair-share scheduling, provider authentication, or automatic dispatch"
+                        ],
+                        "operator_action": "inspect /v1/missions/queue and explicitly resubmit interrupted work after reviewing quarantine or requeue evidence"
                     },
                     {
                         "id": "subscription_metadata",
@@ -801,6 +2249,75 @@ impl ApiRouter {
                         "operator_action": "query /v1/webhooks/subscriptions/{id}/attempts and correlate attempt_id with delivery_id"
                     },
                     {
+                        "id": "evidence_bundle_registry",
+                        "configured": evidence_enabled,
+                        "checkpoint_present": evidence_checkpoint_present,
+                        "schema_version": evidence_persistence.get("schema").cloned().unwrap_or(Value::Null),
+                        "state_digest": evidence_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": evidence_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "registry_size": evidence_persistence.get("registry_size").cloned().unwrap_or(json!(0)),
+                        "restores": [
+                            "independently verified, content-addressed mission evidence bundles and deterministic mission/domain index rows"
+                        ],
+                        "does_not_restore": [
+                            "queued or running execution",
+                            "external effects, evaluator reruns, provenance beyond the supplied bundle",
+                            "scientific validity, clinical safety, release approval, or distributed registry consensus"
+                        ],
+                        "operator_action": "inspect the state_digest and re-submit interrupted execution explicitly; use evidence bundles as audit artifacts only"
+                    },
+                    {
+                        "id": "workflow_reconciliation_registry",
+                        "configured": reconciliation_enabled,
+                        "checkpoint_present": reconciliation_checkpoint_present,
+                        "schema_version": reconciliation_persistence.get("schema").cloned().unwrap_or(Value::Null),
+                        "state_digest": reconciliation_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": reconciliation_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "registry_size": reconciliation_persistence.get("registry_size").cloned().unwrap_or(json!(0)),
+                        "restores": [
+                            "digest-valid workflow reconciliation reports and deterministic mission/workflow/plan/completion index rows"
+                        ],
+                        "does_not_restore": [
+                            "mission execution, raw outputs omitted from the report, external effects, or evaluator reruns",
+                            "scientific, clinical, operational, regulatory, or release truth"
+                        ],
+                        "operator_action": "inspect the reconciliation_digest and review_required posture; import or reconcile new evidence explicitly after a restart"
+                    },
+                    {
+                        "id": "cross_domain_artifact_registry",
+                        "configured": artifact_enabled,
+                        "checkpoint_present": artifact_checkpoint_present,
+                        "schema_version": artifact_persistence.get("schema").cloned().unwrap_or(Value::Null),
+                        "state_digest": artifact_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": artifact_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "registry_size": artifact_persistence.get("registry_size").cloned().unwrap_or(json!(0)),
+                        "restores": [
+                            "bounded exact-content artifact records, declared parent edges, and explicit verification posture"
+                        ],
+                        "does_not_restore": [
+                            "causal provenance, scientific validity, clinical safety, publication authority, or external effect completion",
+                            "execution or missing parent artifacts"
+                        ],
+                        "operator_action": "inspect /v1/artifacts/{content_digest}/lineage and treat missing parents as unresolved evidence"
+                    },
+                    {
+                        "id": "ci_provider_evidence_registry",
+                        "configured": ci_provider_evidence_enabled,
+                        "checkpoint_present": ci_provider_evidence_checkpoint_present,
+                        "schema_version": ci_provider_evidence_persistence.get("schema").cloned().unwrap_or(Value::Null),
+                        "state_digest": ci_provider_evidence_persistence.get("state_digest").cloned().unwrap_or(Value::Null),
+                        "integrity_verified": ci_provider_evidence_persistence.get("integrity_verified").cloned().unwrap_or(Value::Null),
+                        "registry_size": ci_provider_evidence_persistence.get("registry_size").cloned().unwrap_or(json!(0)),
+                        "restores": [
+                            "re-audited provider/run/check evidence with deterministic artifact, log, and attestation record-digest joins",
+                            "failed and unknown provider runs as explicit non-conformant evidence records"
+                        ],
+                        "does_not_restore": [
+                            "provider authentication, remote artifact/log bytes, signature verification, execution, or release authority"
+                        ],
+                        "operator_action": "inspect provider_evidence_digest, then correlate artifact_record_digest, log_record_digest, and attestation_record_digest before making a separate release decision"
+                    },
+                    {
                         "id": "webhook_signing_secrets",
                         "configured": event_enabled,
                         "checkpoint_present": false,
@@ -829,7 +2346,9 @@ impl ApiRouter {
                 ],
                 "observed": {
                     "mission_checkpoint_present": mission_checkpoint_present,
+                    "mission_queue_checkpoint_present": mission_queue_checkpoint_present,
                     "event_checkpoint_present": event_checkpoint_present,
+                    "artifact_checkpoint_present": artifact_checkpoint_present,
                     "retained_events": metrics.retained_events,
                     "active_subscriptions": metrics.active_subscriptions,
                     "subscriptions": metrics.subscriptions,
@@ -842,18 +2361,32 @@ impl ApiRouter {
                 },
                 "guarantees": [
                     "restart boundaries are reported separately for missions, events, subscriptions, outbox rows, delivery provenance, secrets, and external effects",
+                    "mission execution queue recovery is reported separately from the mission status projection",
                     "absence of a checkpoint is visible and never presented as recovered state",
                     "a successful HTTP response does not claim receiver acceptance or effect completion"
                 ],
                 "non_claims": [
                     "distributed event storage",
+                    "distributed mission scheduling",
                     "automatic job resumption",
                     "secret recovery",
                     "network delivery or receiver acknowledgement"
                 ],
                 "links": {
                     "mission_persistence": "/v1/missions/persistence",
+                    "mission_queue": "/v1/missions/queue",
+                    "mission_queue_persistence": "/v1/missions/queue/persistence",
+                    "mission_queue_flush": "/v1/missions/queue/persistence/flush",
                     "event_persistence": "/v1/events/persistence",
+                    "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
+                    "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
+                    "workflow_reconciliation_persistence": "/v1/domain-workflows/reconciliations/persistence",
+                    "workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
+                    "artifact_persistence": "/v1/artifacts/persistence",
+                    "artifact_persistence_flush": "/v1/artifacts/persistence/flush",
+                    "ci_provider_evidence": "/v1/ci/provider-evidence",
+                    "ci_provider_evidence_persistence": "/v1/ci/provider-evidence/persistence",
+                    "ci_provider_evidence_persistence_flush": "/v1/ci/provider-evidence/persistence/flush",
                     "event_flush": "/v1/events/persistence/flush",
                     "mission_flush": "/v1/missions/persistence/flush",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts",
@@ -917,7 +2450,24 @@ impl ApiRouter {
             }
         };
         let mission_persistence = response_value(self.mission_persistence_status());
+        let mission_queue_persistence = response_value(self.mission_queue_persistence_status());
         let event_persistence = response_value(self.event_persistence_status());
+        let evidence_persistence = response_value(self.evidence_persistence_status());
+        let reconciliation_persistence = response_value(self.reconciliation_persistence_status());
+        let artifact_persistence = response_value(self.artifact_persistence_status());
+        let ci_provider_evidence_persistence =
+            response_value(self.ci_provider_evidence_persistence_status());
+        let reconciliation_summary = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry.operator_summary(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
         let recovery = response_value(self.recovery_matrix());
         let mut operator_actions = vec![
             "advance the event cursor with recent_events.next_after and inspect gap before claiming continuity".to_string(),
@@ -940,6 +2490,33 @@ impl ApiRouter {
                     .to_string(),
             );
         }
+        if self.config.mission_queue_state_path.is_none() {
+            operator_actions.push(
+                "configure mission_queue_state_path if mission lease, idempotency, and restart recovery state must survive an API restart".to_string(),
+            );
+        }
+        if self.config.evidence_state_path.is_none() {
+            operator_actions.push(
+                "configure evidence_state_path if independently verified evidence bundles must survive an API restart"
+                    .to_string(),
+            );
+        }
+        if self.config.reconciliation_state_path.is_none() {
+            operator_actions.push(
+                "configure reconciliation_state_path if digest-valid workflow reconciliation audit records must survive an API restart"
+                    .to_string(),
+            );
+        }
+        if self.config.artifact_state_path.is_none() {
+            operator_actions.push(
+                "configure artifact_state_path if cross-domain artifact records and parent-lineage inspection must survive an API restart".to_string(),
+            );
+        }
+        if self.config.ci_provider_evidence_state_path.is_none() {
+            operator_actions.push(
+                "configure ci_provider_evidence_state_path if re-audited provider CI evidence and its artifact/log/attestation joins must survive an API restart".to_string(),
+            );
+        }
 
         HttpResponse::json(
             200,
@@ -956,8 +2533,14 @@ impl ApiRouter {
                 "mission_summary": mission_summary,
                 "persistence": {
                     "missions": mission_persistence,
-                    "events": event_persistence
+                    "mission_queue": mission_queue_persistence,
+                    "events": event_persistence,
+                    "evidence_bundles": evidence_persistence,
+                    "workflow_reconciliations": reconciliation_persistence,
+                    "artifacts": artifact_persistence,
+                    "ci_provider_evidence": ci_provider_evidence_persistence
                 },
+                "reconciliation_summary": reconciliation_summary,
                 "recovery": recovery,
                 "domain_coverage": operations_domain_coverage(),
                 "consistency": {
@@ -975,8 +2558,22 @@ impl ApiRouter {
                     "event_cursor": true,
                     "async_missions": true,
                     "mission_inventory": true,
+                    "mission_execution_queue": true,
+                    "mission_queue_persistence": self.config.mission_queue_state_path.is_some(),
                     "mission_execution_provenance": true,
                     "mission_claim_lineage": true,
+                    "mission_evaluator_replay_query": true,
+                    "mission_evaluator_replay_compare": true,
+                    "mission_evidence_bundle_export": true,
+                    "mission_evidence_bundle_verify": true,
+                    "mission_evidence_bundle_registry": true,
+                    "mission_evidence_bundle_import": true,
+                    "mission_evidence_bundle_query": true,
+                    "mission_evidence_bundle_persistence": self.config.evidence_state_path.is_some(),
+                    "workflow_reconciliation_registry": true,
+                    "workflow_reconciliation_persistence": self.config.reconciliation_state_path.is_some(),
+                    "ci_provider_evidence_registry": true,
+                    "ci_provider_evidence_persistence": self.config.ci_provider_evidence_state_path.is_some(),
                     "operations_snapshot": true,
                     "domain_coverage": true,
                     "operations_domains": true,
@@ -991,6 +2588,7 @@ impl ApiRouter {
                     "the event page is bounded by the caller-supplied cursor and the server limit",
                     "mission counts come from the process-local authoritative registry without returning terminal reports",
                     "persistence and recovery views retain their existing digest, integrity, and non-claim semantics",
+                    "reconciliation_summary counts only stored digest-valid reports and keeps completion, integrity, and evidence posture separate",
                     "the snapshot reports local evidence and capability boundaries; it does not execute tools or external effects"
                 ],
                 "non_claims": [
@@ -1007,6 +2605,19 @@ impl ApiRouter {
                     "event_persistence": "/v1/events/persistence",
                     "mission_provenance": "/v1/missions/{mission_id}/provenance",
                     "mission_claims": "/v1/missions/{mission_id}/claims",
+                    "mission_evaluator_replay": "/v1/missions/{mission_id}/evaluator-replay",
+                    "mission_evaluator_replay_compare": "/v1/missions/{mission_id}/evaluator-replay/compare",
+                    "mission_evidence_bundle": "/v1/missions/{mission_id}/evidence-bundle",
+                    "mission_evidence_bundle_verify": "/v1/evidence-bundles/verify",
+                    "evidence_bundles": "/v1/evidence-bundles",
+                    "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
+                    "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
+                    "workflow_reconciliations": "/v1/domain-workflows/reconciliations",
+                    "workflow_reconciliation_persistence": "/v1/domain-workflows/reconciliations/persistence",
+                    "workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
+                    "ci_provider_evidence": "/v1/ci/provider-evidence",
+                    "ci_provider_evidence_persistence": "/v1/ci/provider-evidence/persistence",
+                    "ci_provider_evidence_persistence_flush": "/v1/ci/provider-evidence/persistence/flush",
                     "capabilities": "/v1/capabilities",
                     "delivery_attempts": "/v1/webhooks/subscriptions/{id}/attempts"
                 }
@@ -1287,6 +2898,30 @@ impl ApiRouter {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        let reconciliation_registry = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let artifact_registry = match self.artifact_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let artifact_registry_generation = artifact_registry.generation();
+        let artifact_registry_size = artifact_registry.len();
         let capability_groups = bioprism_mcp::workspace_capabilities();
         let mut tools_by_group = BTreeMap::<String, BTreeSet<String>>::new();
         if let Some(capability_groups) = capability_groups.as_array() {
@@ -1374,9 +3009,42 @@ impl ApiRouter {
         let mut groups_blocked_catalogue = 0usize;
         let mut groups_insufficient_evidence = 0usize;
         let mut groups_review_required = 0usize;
+        let mut groups_reconciliation_blocked = 0usize;
+        let mut groups_with_artifact_evidence = 0usize;
+        let mut artifact_evidence_records = 0usize;
         let mut rows = Vec::new();
         for group in groups {
             let id = group.get("id").and_then(Value::as_str).unwrap_or("unknown");
+            let group_domains = group
+                .get("domains")
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let artifact_evidence = artifact_registry.domain_evidence_posture(id, &group_domains);
+            let matching_artifact_records = artifact_evidence
+                .get("matching_record_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            if matching_artifact_records > 0 {
+                groups_with_artifact_evidence += 1;
+                artifact_evidence_records =
+                    artifact_evidence_records.saturating_add(matching_artifact_records);
+            }
+            let reconciliation_posture = reconciliation_registry.workflow_posture(id);
+            let reconciliation_state = reconciliation_posture
+                .get("state")
+                .and_then(Value::as_str)
+                .unwrap_or("missing");
+            let reconciliation_blocks = matches!(reconciliation_state, "incomplete" | "invalid");
+            if reconciliation_blocks {
+                groups_reconciliation_blocked += 1;
+            }
             let declared_tools = tools_by_group.get(id).cloned().unwrap_or_default();
             let missing_tool_count = group
                 .get("missing_tool_count")
@@ -1462,6 +3130,7 @@ impl ApiRouter {
                 || evaluator_bindings.is_empty()
                 || channel_events.get("safety").copied().unwrap_or(0) == 0
                 || channel_events.get("release").copied().unwrap_or(0) == 0
+                || reconciliation_blocks
             {
                 groups_insufficient_evidence += 1;
                 "insufficient_evidence"
@@ -1494,10 +3163,13 @@ impl ApiRouter {
                         "readiness_claimed": false
                     },
                     "safety_evidence": channel_gate("safety"),
-                    "release_evidence": channel_gate("release")
+                    "release_evidence": channel_gate("release"),
+                    "reconciliation_evidence": reconciliation_posture,
+                    "artifact_evidence": artifact_evidence
                 },
                 "last_event_id": last_event_id,
-                "evidence_scope": "requested_event_page_only"
+                "evidence_scope": "requested_event_page_only",
+                "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches"
             }));
         }
         let unmatched_tool_events = tool_events_scanned.saturating_sub(attributed_event_ids.len());
@@ -1514,6 +3186,7 @@ impl ApiRouter {
                 "dropped_events": page.dropped_events,
                 "returned_events": page.events.len()
             },
+            "artifact_evidence_scope": "current_digest_verified_artifact_registry_exact_declared_matches",
             "groups": rows,
             "summary": {
                 "group_count": coverage.get("group_count").and_then(Value::as_u64).unwrap_or(0),
@@ -1530,22 +3203,34 @@ impl ApiRouter {
                 "groups_blocked_catalogue": groups_blocked_catalogue,
                 "groups_insufficient_evidence": groups_insufficient_evidence,
                 "groups_review_required": groups_review_required,
+                "groups_reconciliation_blocked": groups_reconciliation_blocked,
+                "groups_with_artifact_evidence": groups_with_artifact_evidence,
+                "artifact_evidence_records": artifact_evidence_records,
+                "artifact_registry_generation": artifact_registry_generation,
+                "artifact_registry_size": artifact_registry_size,
                 "readiness_claimed": false
             },
             "gate_policy": {
                 "required_gates": operations_required_gates(),
+                "optional_evidence_gates": ["artifact_evidence"],
                 "decision_rule": "all gates need observed evidence; domain evaluator evidence must bind a completed evaluator tool to the selected capability group; a complete evidence set still requires human or domain authority review",
                 "event_matching": "exact advertised tool name from event payload or subject",
                 "scope": "only the bounded event page requested by the caller",
+                "artifact_evidence_scope": "exact declared artifact registration domain intersection or explicit artifact.group_id for the selected capability group",
+                "artifact_evidence_policy": "advisory; missing artifact evidence is visible and never promoted to readiness or used to pass a required gate",
                 "control_plane_evidence_scope": "completed evaluation, safety, and release tools are pooled across the page and applied to each matched domain group",
                 "domain_evaluator_binding_scope": "only completed evaluation-channel tools with an exact or catalogue-declared capability-group binding",
+                "reconciliation_evidence_scope": "matching workflow_id rows from the bounded digest-valid reconciliation registry",
+                "reconciliation_evidence_policy": "missing is explicit and does not pass; incomplete or invalid retained posture blocks review; structurally_ready remains review-required evidence",
                 "cross_group_membership": "one tool event may contribute to multiple groups",
                 "readiness_claimed": false
             },
             "guarantees": [
                 "catalogue, activity, transport, pooled evaluation, domain evaluator, safety, and release evidence remain separate",
+                "reconciliation evidence is joined by exact capability-group workflow_id and cannot be inferred from a different domain",
                 "domain evaluator evidence is a bounded catalogue binding and does not assert scientific validity or evaluator adequacy",
                 "missing evidence is represented as a gate state instead of inferred readiness",
+                "artifact evidence is joined from the current digest-verified registry for every returned capability group",
                 "no tool is invoked by this projection"
             ],
             "non_claims": [
@@ -1595,7 +3280,8 @@ impl ApiRouter {
             .map(|bytes| hex_digest(&Sha256::digest(&bytes)))
             .unwrap_or_default();
         body["gate_digest"] = json!(gate_digest);
-        body["gate_digest_scope"] = json!("tool_evidence_projection_without_gate_digest");
+        body["gate_digest_scope"] =
+            json!("operations_evidence_and_reconciliation_projection_without_gate_digest");
         HttpResponse::json(200, &body)
     }
 
@@ -1829,20 +3515,12 @@ impl ApiRouter {
         arguments: &Value,
         gate_digest: &Value,
     ) -> Option<u64> {
-        let Some(acceptance) = arguments
+        let acceptance = arguments
             .get("operations_gate_acceptance")
-            .and_then(Value::as_object)
-        else {
-            return None;
-        };
-        let Some(review_id) = acceptance.get("review_id").and_then(Value::as_str) else {
-            return None;
-        };
-        let Some(current_fingerprint) =
-            operations_gate_acceptance_canonical(&Value::Object(acceptance.clone()))
-        else {
-            return None;
-        };
+            .and_then(Value::as_object)?;
+        let review_id = acceptance.get("review_id").and_then(Value::as_str)?;
+        let current_fingerprint =
+            operations_gate_acceptance_canonical(&Value::Object(acceptance.clone()))?;
         let events = match self.events.lock() {
             Ok(events) => events,
             Err(_) => return None,
@@ -1960,7 +3638,7 @@ impl ApiRouter {
         json!({
             "schema": "bioprism-operations-preflight-evidence/0.1",
             "gate_digest": gate_digest,
-            "gate_digest_scope": "tool_evidence_projection_without_gate_digest",
+            "gate_digest_scope": "operations_evidence_and_reconciliation_projection_without_gate_digest",
             "group_ids": group_ids,
             "groups": rows,
             "unresolved_steps": unresolved_steps,
@@ -2106,17 +3784,69 @@ impl ApiRouter {
                     "ready": "/readyz",
                     "openapi": "/v1/openapi.json",
                     "capabilities": "/v1/capabilities",
+                    "capability_dashboard": "/v1/capabilities/dashboard",
+                    "capability_route": "/v1/capabilities/route",
+                    "capability_route_review": "/v1/capabilities/route/review",
+                    "capability_route_plan": "/v1/capabilities/route/plan",
+                    "capability_route_plan_verify": "/v1/capabilities/route/plan/verify",
                     "recovery": "/v1/recovery",
                     "operations_snapshot": "/v1/operations/snapshot",
                     "operations_domains": "/v1/operations/domains",
                     "operations_gates": "/v1/operations/gates",
                     "operations_gate_reviews": "/v1/operations/gate-reviews",
                     "operations_handoff": "/v1/operations/handoff",
+                    "domain_workflows": "/v1/domain-workflows",
+                    "domain_reports": "/v1/domain-reports",
+                    "domain_report_coverage": "/v1/domain-reports/coverage",
+                    "domain_evidence_harmonize": "/v1/domain-evidence/harmonize",
+                    "domain_evidence_harmonization_coverage": "/v1/domain-evidence/harmonization/coverage",
+                    "domain_evidence_lineage": "/v1/domain-evidence/lineage",
+                    "domain_evidence_intake": "/v1/domain-evidence/intake",
+                    "domain_evidence_source_plan": "/v1/domain-evidence/sources",
+                    "domain_evidence_source_execute": "/v1/domain-evidence/sources/execute",
+                    "domain_evidence_coverage": "/v1/domain-evidence/coverage",
+                    "domain_decision_readiness": "/v1/domain-decision-readiness",
+                    "control_plane_readiness": "/v1/control-plane-readiness",
+                    "control_plane_readiness_compare": "/v1/control-plane-readiness/compare",
+                    "control_plane_readiness_compare_retained": "/v1/control-plane-readiness/compare-retained",
+                    "domain_workflow_scaffold": "/v1/domain-workflows/scaffold",
+                    "domain_workflow_instantiate": "/v1/domain-workflows/instantiate",
+                    "domain_workflow_portfolio": "/v1/domain-workflows/portfolio",
+                    "domain_workflow_portfolio_verify": "/v1/domain-workflows/portfolio/verify",
+                    "developer_workbench_verify": "/v1/developer-workbench/verify",
+                    "developer_workbench_reports": "/v1/developer-workbench/reports",
+                    "developer_workbench_report_persistence": "/v1/developer-workbench/reports/persistence",
+                    "developer_workbench_report_persistence_flush": "/v1/developer-workbench/reports/persistence/flush",
+                    "ci_provider_evidence": "/v1/ci/provider-evidence",
+                    "ci_provider_evidence_persistence": "/v1/ci/provider-evidence/persistence",
+                    "ci_provider_evidence_persistence_flush": "/v1/ci/provider-evidence/persistence/flush",
+                    "domain_workflow_verify": "/v1/domain-workflows/verify",
+                    "domain_workflow_reconcile": "/v1/domain-workflows/reconcile",
+                    "domain_workflow_reconciliations": "/v1/domain-workflows/reconciliations",
+                    "domain_workflow_reconciliation_persistence": "/v1/domain-workflows/reconciliations/persistence",
+                    "domain_workflow_reconciliation_persistence_flush": "/v1/domain-workflows/reconciliations/persistence/flush",
                     "tools": "/v1/tools",
                     "missions": "/v1/missions",
-                    "mission_provenance": "/v1/missions/{mission_id}/provenance",
-                    "mission_claims": "/v1/missions/{mission_id}/claims",
+                     "mission_provenance": "/v1/missions/{mission_id}/provenance",
+                     "mission_claims": "/v1/missions/{mission_id}/claims",
+                     "mission_evaluator_replay": "/v1/missions/{mission_id}/evaluator-replay",
+                     "mission_evaluator_replay_compare": "/v1/missions/{mission_id}/evaluator-replay/compare",
+                     "mission_evidence_bundle": "/v1/missions/{mission_id}/evidence-bundle",
+                     "mission_evidence_bundle_verify": "/v1/evidence-bundles/verify",
+                     "evidence_bundles": "/v1/evidence-bundles",
+                     "evidence_bundle_persistence": "/v1/evidence-bundles/persistence",
+                     "evidence_bundle_persistence_flush": "/v1/evidence-bundles/persistence/flush",
+                    "artifacts": "/v1/artifacts",
+                    "domain_decision_readiness_query": "/v1/domain-decision-readiness",
+                    "control_plane_readiness_query": "/v1/control-plane-readiness",
+                    "control_plane_readiness_compare_retained": "/v1/control-plane-readiness/compare-retained",
+                     "artifact_persistence": "/v1/artifacts/persistence",
+                     "artifact_persistence_flush": "/v1/artifacts/persistence/flush",
                     "mission_persistence": "/v1/missions/persistence",
+                    "mission_queue": "/v1/missions/queue",
+                     "mission_queue_persistence": "/v1/missions/queue/persistence",
+                     "mission_queue_persistence_flush": "/v1/missions/queue/persistence/flush",
+                     "mission_queue_authority_release_lock": "/v1/missions/queue/authority/release-lock",
                     "mission_preflight": "/v1/missions/preflight",
                     "events": "/v1/events",
                     "delivery_receipt_events": "/v1/delivery-receipts/{receipt_id}/events",
@@ -2153,6 +3883,35 @@ impl ApiRouter {
                     "delivery_receipt_events": true,
                     "delivery_receipt_attempt_provenance": true,
                     "route_review_evidence": true,
+                    "mission_evidence_bundle_registry": true,
+                    "mission_evidence_bundle_import": true,
+                    "mission_evidence_bundle_query": true,
+                    "mission_evidence_bundle_persistence": self.config.evidence_state_path.is_some(),
+                    "artifact_registry": true,
+                    "artifact_registry_lineage": true,
+                    "artifact_registry_persistence": self.config.artifact_state_path.is_some(),
+                    "ci_provider_evidence_registry": true,
+                    "ci_provider_evidence_lineage": true,
+                    "ci_provider_evidence_persistence": self.config.ci_provider_evidence_state_path.is_some(),
+                    "domain_report_projection": true,
+                    "domain_report_coverage": true,
+                    "domain_evidence_harmonization": true,
+                    "domain_evidence_harmonization_coverage": true,
+                    "domain_evidence_lineage": true,
+                    "domain_evidence_intake": true,
+                    "domain_evidence_source_plan": true,
+                    "domain_evidence_source_execute": true,
+                    "domain_evidence_coverage": true,
+                    "domain_decision_readiness_query": true,
+                    "control_plane_readiness_audit": true,
+                    "control_plane_readiness_compare": true,
+                    "control_plane_readiness_compare_retained": true,
+                    "control_plane_readiness_query": true,
+                    "capability_dashboard": true,
+                    "capability_route": true,
+                    "capability_route_review": true,
+                    "capability_route_plan": true,
+                    "capability_route_plan_verify": true,
                     "recovery_matrix": true,
                     "operations_snapshot": true,
                     "domain_coverage": true,
@@ -2160,9 +3919,22 @@ impl ApiRouter {
                     "operations_gates": true,
                     "operations_gate_reviews": true,
                     "operations_handoff": true,
+                    "domain_workflow_catalogue": true,
+                    "domain_workflow_scaffold": true,
+                    "domain_workflow_instantiate": true,
+                    "domain_workflow_portfolio": true,
+                    "domain_workflow_portfolio_verify": true,
+                    "developer_workbench_verify": true,
+                    "developer_workbench_report_registry": true,
+                    "developer_workbench_report_persistence": self.config.workbench_state_path.is_some(),
+                    "domain_workflow_verify": true,
+                    "domain_workflow_reconcile": true,
+                    "domain_workflow_reconciliation_registry": true,
+                    "domain_workflow_reconciliation_persistence": self.config.reconciliation_state_path.is_some(),
                     "max_mission_trace_events": MAX_MISSION_TRACE_EVENTS,
                     "cooperative_mission_cancellation": true,
                     "durable_mission_snapshots": self.config.mission_state_path.is_some(),
+                    "durable_mission_queue_snapshots": self.config.mission_queue_state_path.is_some(),
                     "durable_event_snapshots": self.config.event_state_path.is_some(),
                     "signed_webhook_outbox": true,
                     "delivery_failure_inspection": true,
@@ -2182,6 +3954,18 @@ impl ApiRouter {
                     "persisted_mission_result_bytes": MAX_PERSISTED_MISSION_RESULT_BYTES,
                     "persisted_mission_provenance_bytes": MAX_PERSISTED_MISSION_PROVENANCE_BYTES,
                     "event_state_file_bytes": MAX_EVENT_STATE_FILE_BYTES,
+                    "evidence_registry_file_bytes": MAX_EVIDENCE_REGISTRY_BYTES,
+                    "evidence_registry_max_bundles": bioprism_devplat::MAX_EVIDENCE_REGISTRY_BUNDLES,
+                    "evidence_registry_max_query_items": bioprism_devplat::MAX_EVIDENCE_REGISTRY_QUERY_ITEMS,
+                    "workflow_reconciliation_file_bytes": MAX_WORKFLOW_RECONCILIATION_STATE_BYTES,
+                    "workflow_reconciliation_max_records": bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+                    "workflow_reconciliation_max_query_items": bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
+                    "artifact_registry_file_bytes": MAX_ARTIFACT_REGISTRY_BYTES,
+                    "artifact_registry_max_records": bioprism_devplat::MAX_ARTIFACT_REGISTRY_RECORDS,
+                    "artifact_registry_max_query_items": bioprism_devplat::MAX_ARTIFACT_REGISTRY_QUERY_ITEMS,
+                    "ci_provider_evidence_registry_file_bytes": MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES,
+                    "ci_provider_evidence_max_records": bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_RECORDS,
+                    "ci_provider_evidence_max_query_items": bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS,
                     "delivery_error_bytes": crate::events::MAX_DELIVERY_ERROR_BYTES,
                     "webhook_filters": MAX_FILTERS
                 }
@@ -2502,6 +4286,13 @@ impl ApiRouter {
             if let Some(tool) = tool {
                 self.record_tool_event(request_id, &tool, &wire);
             }
+            // A synchronous MCP call may execute a workflow-bound mission directly rather than
+            // through the asynchronous mission worker. The server writes the shared registry;
+            // checkpoint it before returning the transport response when durability is enabled.
+            let _ = self.reconciliation_persistence.persist();
+            let _ = self.artifact_persistence.persist();
+            let _ = self.workflow_execution_evidence_persistence.persist();
+            let _ = self.ci_provider_evidence_persistence.persist();
         }
         HttpResponse::json(response_status(&wire), &wire)
     }
@@ -2535,6 +4326,10 @@ impl ApiRouter {
         };
         let wire = response.to_json();
         self.record_tool_event(request_id, tool, &wire);
+        let _ = self.reconciliation_persistence.persist();
+        let _ = self.artifact_persistence.persist();
+        let _ = self.workflow_execution_evidence_persistence.persist();
+        let _ = self.ci_provider_evidence_persistence.persist();
         let transport_ok = wire.get("error").is_none();
         HttpResponse::json(
             if transport_ok {
@@ -2550,6 +4345,1332 @@ impl ApiRouter {
                 "guarantee": "REST and MCP calls share the same in-process tool dispatcher"
             }),
         )
+    }
+
+    fn domain_workflow_catalogue(&self, request_id: &str) -> HttpResponse {
+        self.domain_workflow_tool(request_id, "domain_workflow_catalogue", json!({}))
+    }
+
+    fn domain_workflow_instantiate(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_instantiate",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_workflow_portfolio(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_portfolio",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_workflow_portfolio_verify(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let mut arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        // REST adds request_id to every response envelope. It is transport metadata, not part of
+        // the retained content-addressed portfolio, so accept a directly round-tripped report.
+        if let Some(portfolio) = arguments
+            .get_mut("portfolio")
+            .and_then(Value::as_object_mut)
+        {
+            portfolio.remove("request_id");
+        }
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_portfolio_verify",
+            Value::Object(arguments),
+        )
+    }
+
+    fn developer_workbench_verify(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "developer_workbench_verify",
+            Value::Object(arguments),
+        )
+    }
+
+    fn import_workbench_report(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let report = match arguments.get("report") {
+            Some(report) => report,
+            None => return self.error(400, "invalid_json", "report is required", request_id),
+        };
+        let mut registry = match self.workbench_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "workbench_registry_unavailable",
+                    "workbench registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let result = match registry.import(report) {
+            Ok(result) => result,
+            Err(error) => return self.error(422, "invalid_report", &error.to_string(), request_id),
+        };
+        if self.config.workbench_state_path.is_some() && result["created"] == true {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(
+                        503,
+                        "workbench_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
+                }
+            };
+            if let Err(error) = self.workbench_persistence.persist_snapshot(&snapshot) {
+                *registry = before;
+                return self.error(503, "workbench_persistence_unavailable", &error, request_id);
+            }
+        }
+        HttpResponse::json(
+            if result["created"].as_bool().unwrap_or(false) {
+                201
+            } else {
+                200
+            },
+            &result,
+        )
+    }
+
+    fn query_workbench_reports(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "session_digest"
+                    | "domain"
+                    | "capability"
+                    | "state"
+                    | "release_ready"
+                    | "after"
+                    | "limit"
+                    | "include_reports"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "workbench query accepts only session_digest, domain, capability, state, release_ready, after, limit, and include_reports",
+                    request_id,
+                );
+            }
+        }
+        let session_digest = query.get("session_digest").map(String::as_str);
+        let domain = query.get("domain").map(String::as_str);
+        let capability = query.get("capability").map(String::as_str);
+        let state = query.get("state").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value) if (1..=bioprism_devplat::MAX_WORKBENCH_QUERY_ITEMS).contains(&value) => {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let release_ready = match query_bool(&query, "release_ready", false) {
+            Ok(value) if query.contains_key("release_ready") => Some(value),
+            Ok(_) => None,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_reports = match query_bool(&query, "include_reports", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.workbench_registry.lock() {
+            Ok(registry) => registry.query(
+                session_digest,
+                domain,
+                capability,
+                state,
+                release_ready,
+                after,
+                max_items,
+                include_reports,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "workbench_registry_unavailable",
+                    "workbench registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_workbench_report(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 4
+            || segments[0] != "v1"
+            || segments[1] != "developer-workbench"
+            || segments[2] != "reports"
+        {
+            return self.error(
+                404,
+                "not_found",
+                "workbench report route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[3];
+        if ContentHash::parse(digest.clone()).is_err() {
+            return self.error(
+                422,
+                "invalid_digest",
+                "workbench_report_digest must be a 64-character SHA-256 digest",
+                request_id,
+            );
+        }
+        let result = match self.workbench_registry.lock() {
+            Ok(registry) => registry.get_response(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "workbench_registry_unavailable",
+                    "workbench registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(_) => self.error(
+                404,
+                "not_found",
+                "workbench report does not exist",
+                request_id,
+            ),
+        }
+    }
+
+    fn workbench_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.workbench_state_path.is_some();
+        let file_bytes = self
+            .config
+            .workbench_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry = self.workbench_registry.lock();
+        let (registry_size, generation) = registry
+            .as_ref()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .workbench_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = WorkbenchReportRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::WORKBENCH_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_reports": bioprism_devplat::MAX_WORKBENCH_REPORTS,
+                "max_file_bytes": MAX_WORKBENCH_REGISTRY_STATE_BYTES,
+                "recovery_policy": "only structurally valid digest-bound reports restore; retained reports never resume execution",
+                "flush": "/v1/developer-workbench/reports/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_workbench_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.workbench_state_path.is_none() {
+            return self.error(
+                409,
+                "workbench_persistence_disabled",
+                "configure workbench_state_path before flushing a workbench report snapshot",
+                request_id,
+            );
+        }
+        match self.persist_workbench_registry() {
+            Ok(_) => self.workbench_persistence_status(),
+            Err(error) => self.error(503, "workbench_persistence_unavailable", &error, request_id),
+        }
+    }
+
+    fn import_ci_provider_evidence(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let mut registry = match self.ci_provider_evidence_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "ci_provider_evidence_registry_unavailable",
+                    "CI provider evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let result = match registry.import(&Value::Object(arguments)) {
+            Ok(result) => result,
+            Err(error) => {
+                return self.error(
+                    422,
+                    "invalid_ci_provider_evidence",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        if self.config.ci_provider_evidence_state_path.is_some() && result["created"] == true {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(
+                        503,
+                        "ci_provider_evidence_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
+                }
+            };
+            if let Err(error) = self
+                .ci_provider_evidence_persistence
+                .persist_snapshot(&snapshot)
+            {
+                *registry = before;
+                return self.error(
+                    503,
+                    "ci_provider_evidence_persistence_unavailable",
+                    &error,
+                    request_id,
+                );
+            }
+        }
+        HttpResponse::json(
+            if result["created"].as_bool().unwrap_or(false) {
+                201
+            } else {
+                200
+            },
+            &result,
+        )
+    }
+
+    fn query_ci_provider_evidence(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "provider"
+                    | "run_id"
+                    | "plan_digest"
+                    | "structurally_valid"
+                    | "conformance_ready"
+                    | "min_local_byte_hash_artifacts"
+                    | "min_local_byte_hash_logs"
+                    | "min_attestation_subject_digest_bindings"
+                    | "after"
+                    | "limit"
+                    | "max_items"
+                    | "include_records"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "CI provider evidence query accepts only provider, run_id, plan_digest, structurally_valid, conformance_ready, minimum digest-binding thresholds, after, limit or max_items, and include_records",
+                    request_id,
+                );
+            }
+        }
+        let structurally_valid = match query_bool(&query, "structurally_valid", false) {
+            Ok(value) if query.contains_key("structurally_valid") => Some(value),
+            Ok(_) => None,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let conformance_ready = match query_bool(&query, "conformance_ready", false) {
+            Ok(value) if query.contains_key("conformance_ready") => Some(value),
+            Ok(_) => None,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let optional_minimum = |name: &str| -> Result<Option<usize>, String> {
+            match query_usize(&query, name, 0) {
+                Ok(_) if !query.contains_key(name) => Ok(None),
+                Ok(value) if value <= 128 => Ok(Some(value)),
+                Ok(_) => Err(format!("{name} must be between 0 and 128")),
+                Err(error) => Err(error),
+            }
+        };
+        let min_local_byte_hash_artifacts = match optional_minimum("min_local_byte_hash_artifacts")
+        {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let min_local_byte_hash_logs = match optional_minimum("min_local_byte_hash_logs") {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let min_attestation_subject_digest_bindings =
+            match optional_minimum("min_attestation_subject_digest_bindings") {
+                Ok(value) => value,
+                Err(error) => return self.error(422, "invalid_query", &error, request_id),
+            };
+        if query.contains_key("limit") && query.contains_key("max_items") {
+            return self.error(
+                400,
+                "invalid_query",
+                "CI provider evidence query accepts either limit or max_items, not both",
+                request_id,
+            );
+        }
+        let item_limit_key = if query.contains_key("max_items") {
+            "max_items"
+        } else {
+            "limit"
+        };
+        let include_records = match query_bool(&query, "include_records", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let max_items = match query_usize(&query, item_limit_key, 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS)
+                    .contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.ci_provider_evidence_registry.lock() {
+            Ok(registry) => registry.query(
+                query.get("provider").map(String::as_str),
+                query.get("run_id").map(String::as_str),
+                query.get("plan_digest").map(String::as_str),
+                structurally_valid,
+                conformance_ready,
+                min_local_byte_hash_artifacts,
+                min_local_byte_hash_logs,
+                min_attestation_subject_digest_bindings,
+                query.get("after").map(String::as_str),
+                max_items,
+                include_records,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "ci_provider_evidence_registry_unavailable",
+                    "CI provider evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_ci_provider_evidence(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 4
+            || segments[0] != "v1"
+            || segments[1] != "ci"
+            || segments[2] != "provider-evidence"
+        {
+            return self.error(
+                404,
+                "not_found",
+                "CI provider evidence route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[3];
+        if ContentHash::parse(digest.clone()).is_err() {
+            return self.error(
+                422,
+                "invalid_digest",
+                "provider_evidence_digest must be a 64-character SHA-256 digest",
+                request_id,
+            );
+        }
+        let result = match self.ci_provider_evidence_registry.lock() {
+            Ok(registry) => registry.get(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "ci_provider_evidence_registry_unavailable",
+                    "CI provider evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(_) => self.error(
+                404,
+                "not_found",
+                "CI provider evidence record does not exist",
+                request_id,
+            ),
+        }
+    }
+
+    fn ci_provider_evidence_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.ci_provider_evidence_state_path.is_some();
+        let file_bytes = self
+            .config
+            .ci_provider_evidence_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let (registry_size, generation) = self
+            .ci_provider_evidence_registry
+            .lock()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .ci_provider_evidence_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = CiProviderEvidenceRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::CI_PROVIDER_EVIDENCE_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_records": bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_RECORDS,
+                "max_query_items": bioprism_devplat::MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS,
+                "max_file_bytes": MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES,
+                "recovery_policy": "only re-audited provider evidence records restore; failed and unknown provider runs remain explicit and never resume execution",
+                "lineage_policy": "artifact, log, and attestation record digests are retained as provider-observed joins; remote bytes and signatures are not verified",
+                "flush": "/v1/ci/provider-evidence/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_ci_provider_evidence_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.ci_provider_evidence_state_path.is_none() {
+            return self.error(
+                409,
+                "ci_provider_evidence_persistence_disabled",
+                "configure ci_provider_evidence_state_path before flushing a CI provider evidence snapshot",
+                request_id,
+            );
+        }
+        match self.persist_ci_provider_evidence_registry() {
+            Ok(_) => self.ci_provider_evidence_persistence_status(),
+            Err(error) => self.error(
+                503,
+                "ci_provider_evidence_persistence_unavailable",
+                &error,
+                request_id,
+            ),
+        }
+    }
+
+    fn domain_workflow_verify(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_verify",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_workflow_scaffold(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_scaffold",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_workflow_reconcile(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_workflow_reconcile",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_report_project(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_report_project",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_report_coverage(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let max_groups = match query_usize(&query, "max_groups", 64) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_report_digests = match query_bool(&query, "include_report_digests", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("operation".into(), json!("coverage"));
+        arguments.insert("max_groups".into(), json!(max_groups));
+        arguments.insert(
+            "include_report_digests".into(),
+            json!(include_report_digests),
+        );
+        if let Some(group_id) = query.get("group_id") {
+            arguments.insert("group_id".into(), json!(group_id));
+        }
+        if let Some(domain) = query.get("domain") {
+            arguments.insert("domain".into(), json!(domain));
+        }
+        if let Some(report_class) = query.get("report_class") {
+            arguments.insert("report_class".into(), json!(report_class));
+        }
+        if let Some(bridge_mode) = query.get("bridge_mode") {
+            arguments.insert("bridge_mode".into(), json!(bridge_mode));
+        }
+        self.domain_workflow_tool(
+            request_id,
+            "domain_report_project",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_harmonize(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_harmonize",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_harmonization_coverage(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let max_items = match query_usize(&query, "max_items", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_report_digests = match query_bool(&query, "include_report_digests", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("max_items".into(), json!(max_items));
+        arguments.insert(
+            "include_report_digests".into(),
+            json!(include_report_digests),
+        );
+        for name in [
+            "subject_id",
+            "domain",
+            "report_class",
+            "bridge_mode",
+            "traceability_state",
+            "after",
+        ] {
+            if let Some(value) = query.get(name) {
+                arguments.insert(name.into(), json!(value));
+            }
+        }
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_harmonization_coverage",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_intake(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_intake",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_lineage(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        const ALLOWED: &[&str] = &[
+            "content_digest",
+            "group_id",
+            "domain",
+            "subject_id",
+            "source_tool",
+            "outcome",
+            "request_digest",
+            "response_digest",
+            "intake_digest",
+            "source_plan_digest",
+            "after",
+            "max_items",
+            "include_children",
+        ];
+        if let Some(unknown) = query.keys().find(|key| !ALLOWED.contains(&key.as_str())) {
+            return self.error(
+                400,
+                "invalid_query",
+                &format!("unknown domain evidence lineage query parameter {unknown:?}"),
+                request_id,
+            );
+        }
+        let max_items = match query_usize(&query, "max_items", 100) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_children = match query_bool(&query, "include_children", true) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("max_items".into(), json!(max_items));
+        arguments.insert("include_children".into(), json!(include_children));
+        for name in [
+            "content_digest",
+            "group_id",
+            "domain",
+            "subject_id",
+            "source_tool",
+            "outcome",
+            "request_digest",
+            "response_digest",
+            "intake_digest",
+            "source_plan_digest",
+            "after",
+        ] {
+            if let Some(value) = query.get(name) {
+                arguments.insert(name.into(), json!(value));
+            }
+        }
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.domain_evidence_lineage(&Value::Object(arguments)),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(ArtifactRegistryError::NotFound { .. }) => self.error(
+                404,
+                "not_found",
+                "domain evidence intake does not exist",
+                request_id,
+            ),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn domain_evidence_source_plan(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_source_plan",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_source_execute(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_source_execute",
+            Value::Object(arguments),
+        )
+    }
+
+    fn domain_evidence_coverage(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let max_groups = match query_usize(&query, "max_groups", 64) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_intake_digests = match query_bool(&query, "include_intake_digests", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("max_groups".into(), json!(max_groups));
+        arguments.insert(
+            "include_intake_digests".into(),
+            json!(include_intake_digests),
+        );
+        if let Some(group_id) = query.get("group_id") {
+            arguments.insert("group_id".into(), json!(group_id));
+        }
+        if let Some(domain) = query.get("domain") {
+            arguments.insert("domain".into(), json!(domain));
+        }
+        self.domain_workflow_tool(
+            request_id,
+            "domain_evidence_coverage",
+            Value::Object(arguments),
+        )
+    }
+
+    fn capability_dashboard(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        let max_groups = match query_usize(&query, "max_groups", 128) {
+            Ok(value) if (1..=512).contains(&value) => value,
+            Ok(_) => {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "max_groups must be between 1 and 512",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_tools = match query_bool(&query, "include_tools", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let include_gaps = match query_bool(&query, "include_gaps", true) {
+            Ok(value) => value,
+            Err(error) => return self.error(400, "invalid_query", &error, request_id),
+        };
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("max_groups".into(), json!(max_groups));
+        arguments.insert("include_tools".into(), json!(include_tools));
+        arguments.insert("include_gaps".into(), json!(include_gaps));
+        for name in ["group_id", "domain", "status"] {
+            if let Some(value) = query.get(name) {
+                if value.trim().is_empty() {
+                    return self.error(
+                        400,
+                        "invalid_query",
+                        &format!("{name} must be non-empty when supplied"),
+                        request_id,
+                    );
+                }
+                arguments.insert(name.into(), json!(value));
+            }
+        }
+        self.domain_workflow_tool(request_id, "capability_dashboard", Value::Object(arguments))
+    }
+
+    fn capability_route(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(request_id, "capability_route", Value::Object(arguments))
+    }
+
+    fn capability_route_review(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "capability_route_review",
+            Value::Object(arguments),
+        )
+    }
+
+    fn capability_route_plan(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "capability_route_plan",
+            Value::Object(arguments),
+        )
+    }
+
+    fn capability_route_plan_verify(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "capability_route_plan_verify",
+            Value::Object(arguments),
+        )
+    }
+
+    fn import_workflow_reconciliation(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let record = match arguments.get("record") {
+            Some(record) => record,
+            None => return self.error(422, "invalid_record", "record is required", request_id),
+        };
+        let mut registry = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let report = match registry.import(record) {
+            Ok(report) => report,
+            Err(error) => return self.error(422, "invalid_record", &error.to_string(), request_id),
+        };
+        if self.config.reconciliation_state_path.is_some() {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(
+                        503,
+                        "reconciliation_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
+                }
+            };
+            if let Err(error) = self.reconciliation_persistence.persist_snapshot(&snapshot) {
+                *registry = before;
+                return self.error(
+                    503,
+                    "reconciliation_persistence_unavailable",
+                    &error,
+                    request_id,
+                );
+            }
+        }
+        let artifact_projection = self.automatic_artifact_projection(
+            "workflow_reconciliation",
+            record
+                .get("mission_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown-mission"),
+            Vec::new(),
+            strip_artifact_transport_fields(record),
+        );
+        let mut report = report;
+        report["artifact_registry"] = artifact_projection;
+        HttpResponse::json(
+            if report["created"].as_bool().unwrap_or(false) {
+                201
+            } else {
+                200
+            },
+            &report,
+        )
+    }
+
+    fn query_workflow_reconciliations(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "mission_id"
+                    | "workflow_id"
+                    | "mission_plan_digest"
+                    | "completion_status"
+                    | "decision_readiness_state"
+                    | "decision_readiness_gate_satisfied"
+                    | "after"
+                    | "limit"
+                    | "include_records"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "workflow reconciliation query accepts only mission_id, workflow_id, mission_plan_digest, completion_status, decision_readiness_state, decision_readiness_gate_satisfied, after, limit, and include_records",
+                    request_id,
+                );
+            }
+        }
+        let mission_id = query.get("mission_id").map(String::as_str);
+        let workflow_id = query.get("workflow_id").map(String::as_str);
+        let mission_plan_digest = query.get("mission_plan_digest").map(String::as_str);
+        let completion_status = query.get("completion_status").map(String::as_str);
+        let decision_readiness_state = query.get("decision_readiness_state").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS)
+                    .contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_records = match query_bool(&query, "include_records", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let decision_readiness_gate_satisfied = match query
+            .get("decision_readiness_gate_satisfied")
+            .map(|_| query_bool(&query, "decision_readiness_gate_satisfied", false))
+        {
+            Some(Ok(value)) => Some(value),
+            Some(Err(error)) => return self.error(422, "invalid_query", &error, request_id),
+            None => None,
+        };
+        let result = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry.query(
+                mission_id,
+                workflow_id,
+                mission_plan_digest,
+                completion_status,
+                decision_readiness_state,
+                decision_readiness_gate_satisfied,
+                after,
+                max_items,
+                include_records,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_workflow_reconciliation(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 4
+            || segments[0] != "v1"
+            || segments[1] != "domain-workflows"
+            || segments[2] != "reconciliations"
+        {
+            return self.error(
+                404,
+                "not_found",
+                "workflow reconciliation route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[3];
+        if ContentHash::parse(digest.clone()).is_err() {
+            return self.error(
+                422,
+                "invalid_digest",
+                "reconciliation_digest must be a 64-character SHA-256 digest",
+                request_id,
+            );
+        }
+        let record = match self.reconciliation_registry.lock() {
+            Ok(registry) => registry.get(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "reconciliation_registry_unavailable",
+                    "workflow reconciliation registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match record {
+            Some(record) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "schema": "bioprism-api/domain-workflow-reconciliation-record/0.1",
+                    "workflow": "domain_workflow_reconciliation_get",
+                    "reconciliation_digest": digest,
+                    "record": record,
+                    "execution": "not_started"
+                }),
+            ),
+            None => self.error(
+                404,
+                "not_found",
+                "workflow reconciliation does not exist",
+                request_id,
+            ),
+        }
+    }
+
+    fn reconciliation_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.reconciliation_state_path.is_some();
+        let file_bytes = self
+            .config
+            .reconciliation_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry = self.reconciliation_registry.lock();
+        let (registry_size, generation) = registry
+            .as_ref()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .reconciliation_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = DomainWorkflowReconciliationRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::DOMAIN_WORKFLOW_RECONCILIATION_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_reconciliations": bioprism_devplat::MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+                "max_file_bytes": MAX_WORKFLOW_RECONCILIATION_STATE_BYTES,
+                "recovery_policy": "only digest-valid reconciliation reports restore; imported audit records never resume execution",
+                "flush": "/v1/domain-workflows/reconciliations/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_reconciliation_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.reconciliation_state_path.is_none() {
+            return self.error(
+                409,
+                "reconciliation_persistence_disabled",
+                "configure --reconciliation-state before flushing a workflow reconciliation snapshot",
+                request_id,
+            );
+        }
+        match self.persist_reconciliation_registry() {
+            Ok(_) => self.reconciliation_persistence_status(),
+            Err(error) => self.error(
+                503,
+                "reconciliation_persistence_unavailable",
+                &error,
+                request_id,
+            ),
+        }
+    }
+
+    fn domain_workflow_tool(&self, request_id: &str, tool: &str, arguments: Value) -> HttpResponse {
+        let call = Request {
+            id: Some(Value::String(request_id.to_string())),
+            method: "tools/call".into(),
+            params: json!({ "name": tool, "arguments": arguments }),
+        };
+        let mut server = self.server.clone();
+        let Some(response) = server.handle(&call) else {
+            return self.error(
+                500,
+                "dispatch_failed",
+                "domain workflow call produced no response",
+                request_id,
+            );
+        };
+        let wire = response.to_json();
+        self.record_tool_event(request_id, tool, &wire);
+        let _ = self.reconciliation_persistence.persist();
+        let _ = self.artifact_persistence.persist();
+        let _ = self.workflow_execution_evidence_persistence.persist();
+        let is_error = wire
+            .pointer("/result/isError")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let payload = wire
+            .pointer("/result/content/0/text")
+            .and_then(Value::as_str)
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+            .unwrap_or_else(|| {
+                json!({
+                    "ok": false,
+                    "error": "domain workflow dispatcher returned no structured payload"
+                })
+            });
+        if is_error {
+            let message = payload
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("domain workflow request was refused");
+            return self.error(422, "invalid_domain_workflow", message, request_id);
+        }
+        let mut payload = payload;
+        payload["request_id"] = json!(request_id);
+        HttpResponse::json(200, &payload)
     }
 
     fn preflight_mission(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
@@ -2636,6 +5757,60 @@ impl ApiRouter {
             .and_then(Value::as_array)
             .map_or(0, Vec::len);
 
+        let mission_already_exists = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.contains_key(&mission_id),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        if mission_already_exists {
+            return self.error(
+                409,
+                "mission_exists",
+                "a mission with this mission_id already exists",
+                request_id,
+            );
+        }
+
+        let queue_now = match current_timestamp() {
+            Ok(now) => now,
+            Err(error) => {
+                return self.error(500, "mission_queue_clock_unavailable", &error, request_id)
+            }
+        };
+        let queue_idempotency = if mission_execution_requested(&arguments) {
+            FactoryIdempotency::NonIdempotent
+        } else {
+            FactoryIdempotency::Idempotent
+        };
+        let queue_job = FactoryJob::new(
+            mission_id.clone(),
+            ResourceClass::Evaluate,
+            queue_idempotency,
+            arguments.clone(),
+        )
+        .with_priority(8);
+        let queue_lease = match self
+            .mission_queue_persistence
+            .enqueue_and_lease(queue_job, queue_now)
+        {
+            Ok(lease) => lease,
+            Err(error) if error.contains("duplicate work") || error.contains("already present") => {
+                return self.error(409, "mission_duplicate_work", &error, request_id)
+            }
+            Err(error) if error.contains("admission limit") => {
+                return self.error(429, "mission_queue_backpressure", &error, request_id)
+            }
+            Err(error) => return self.error(503, "mission_queue_unavailable", &error, request_id),
+        };
+
+        let queue_attempt = queue_lease.attempt;
+        let route_review_provenance = mission_route_review_provenance(&arguments);
         let cancellation = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(MissionJobState {
             total_steps,
@@ -2646,6 +5821,8 @@ impl ApiRouter {
             cancel_reason: None,
             result: None,
             result_omitted: None,
+            evaluator_replay_summary: None,
+            route_review_provenance: route_review_provenance.clone(),
             error: None,
             recovered_after_restart: false,
             execution_provenance: execution_provenance.clone(),
@@ -2667,6 +5844,9 @@ impl ApiRouter {
                 }
             };
             if jobs.contains_key(&mission_id) {
+                let _ = self
+                    .mission_queue_persistence
+                    .cancel(&mission_id, "mission id already exists");
                 return self.error(
                     409,
                     "mission_exists",
@@ -2675,6 +5855,9 @@ impl ApiRouter {
                 );
             }
             if jobs.len() >= MAX_MISSION_JOBS {
+                let _ = self
+                    .mission_queue_persistence
+                    .cancel(&mission_id, "mission registry capacity exhausted");
                 return self.error(
                     429,
                     "mission_capacity_exhausted",
@@ -2688,6 +5871,9 @@ impl ApiRouter {
             if let Ok(mut jobs) = self.mission_jobs.lock() {
                 jobs.remove(&mission_id);
             }
+            let _ = self
+                .mission_queue_persistence
+                .cancel(&mission_id, "mission checkpoint unavailable");
             return self.error(503, "mission_persistence_unavailable", &error, request_id);
         }
 
@@ -2700,6 +5886,9 @@ impl ApiRouter {
                             jobs.remove(&mission_id);
                         }
                         let _ = self.persist_mission_registry();
+                        let _ = self
+                            .mission_queue_persistence
+                            .cancel(&mission_id, "event log unavailable");
                         return self.error(
                             500,
                             "event_log_unavailable",
@@ -2726,6 +5915,9 @@ impl ApiRouter {
                             jobs.remove(&mission_id);
                         }
                         let _ = self.persist_mission_registry();
+                        let _ = self
+                            .mission_queue_persistence
+                            .cancel(&mission_id, "mission acceptance event failed");
                         return self.error(500, "event_emit_failed", &error, request_id);
                     }
                 }
@@ -2735,6 +5927,9 @@ impl ApiRouter {
                     jobs.remove(&mission_id);
                 }
                 let _ = self.persist_mission_registry();
+                let _ = self
+                    .mission_queue_persistence
+                    .cancel(&mission_id, "event checkpoint unavailable");
                 return self.error(503, "event_persistence_unavailable", &error, request_id);
             }
             provenance["accepted_event_id"] = json!(event.id);
@@ -2746,6 +5941,9 @@ impl ApiRouter {
                     jobs.remove(&mission_id);
                 }
                 let _ = self.persist_mission_registry();
+                let _ = self
+                    .mission_queue_persistence
+                    .cancel(&mission_id, "mission checkpoint unavailable");
                 return self.error(503, "mission_persistence_unavailable", &error, request_id);
             }
         }
@@ -2754,11 +5952,15 @@ impl ApiRouter {
         let mission_events = Arc::clone(&self.events);
         let persistence = Arc::clone(&self.mission_persistence);
         let event_persistence = Arc::clone(&self.event_persistence);
+        let mission_queue_persistence = Arc::clone(&self.mission_queue_persistence);
         let mission_subject = mission_id.clone();
         let mission_request_id = request_id.to_string();
         let observer = Arc::new(move |event: Value| {
             if let Ok(mut current) = progress_state.lock() {
                 current.record_trace(event.clone());
+            }
+            if let Ok(now) = current_timestamp() {
+                let _ = mission_queue_persistence.heartbeat(&mission_subject, queue_attempt, now);
             }
             let _ = persistence.persist();
             if let Ok(mut events) = mission_events.lock() {
@@ -2773,7 +5975,13 @@ impl ApiRouter {
         });
         let executor = Arc::new(self.mission_executor.with_mission_trace_observer(observer));
         let worker_persistence = Arc::clone(&self.mission_persistence);
+        let worker_reconciliation_persistence = Arc::clone(&self.reconciliation_persistence);
+        let worker_artifact_persistence = Arc::clone(&self.artifact_persistence);
+        let worker_workflow_execution_evidence_persistence =
+            Arc::clone(&self.workflow_execution_evidence_persistence);
+        let worker_queue_persistence = Arc::clone(&self.mission_queue_persistence);
         let worker_id = mission_id.clone();
+        let worker_mission_id = mission_id.clone();
         let worker_arguments = arguments;
         let spawn = thread::Builder::new()
             .name(format!("mission-{worker_id}"))
@@ -2785,23 +5993,63 @@ impl ApiRouter {
                 let _ = worker_persistence.persist();
                 let outcome = executor
                     .execute_agent_mission_with_cancellation(&worker_arguments, &cancellation);
+                // The MCP executor has already imported any workflow reconciliation. Checkpoint
+                // it before publishing the terminal mission state to the in-memory job registry.
+                let _ = worker_reconciliation_persistence.persist();
+                let _ = worker_artifact_persistence.persist();
+                let _ = worker_workflow_execution_evidence_persistence.persist();
                 if let Ok(mut current) = job.state.lock() {
                     match outcome {
                         Ok(result) => {
-                            current.progress.reconcile(&result);
-                            current.status = result
-                                .get("mission_status")
-                                .and_then(Value::as_str)
-                                .unwrap_or("succeeded")
-                                .into();
-                            current.result = Some(result);
-                            current.result_omitted = None;
+                            let queue_commit = current_timestamp().and_then(|now| {
+                                worker_queue_persistence
+                                    .commit_success(
+                                        &worker_mission_id,
+                                        queue_attempt,
+                                        result.clone(),
+                                        now,
+                                    )
+                            });
+                            if let Err(queue_error) = queue_commit {
+                                current.status = "failed".into();
+                                current.progress.phase = "failed".into();
+                                current.progress.active_steps = 0;
+                                current.error = Some(format!(
+                                    "mission produced a report but the durable execution lease could not commit: {queue_error}"
+                                ));
+                                current.result = Some(result);
+                                current.result_omitted = None;
+                            } else {
+                                current.progress.reconcile(&result);
+                                current.status = result
+                                    .get("mission_status")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("succeeded")
+                                    .into();
+                                current.evaluator_replay_summary =
+                                    evaluator_replay_summary(&result, &worker_mission_id);
+                                current.result = Some(result);
+                                current.result_omitted = None;
+                            }
                         }
                         Err(error) => {
+                            let queue_error = current_timestamp()
+                                .and_then(|now| {
+                                    worker_queue_persistence.record_failure(
+                                        &worker_mission_id,
+                                        queue_attempt,
+                                        error.clone(),
+                                        now,
+                                    )
+                                })
+                                .err();
                             current.status = "failed".into();
                             current.progress.phase = "failed".into();
                             current.progress.active_steps = 0;
-                            current.error = Some(error);
+                            current.error = Some(match queue_error {
+                                Some(queue_error) => format!("{error}; queue transition failed: {queue_error}"),
+                                None => error,
+                            });
                         }
                     }
                 }
@@ -2812,6 +6060,9 @@ impl ApiRouter {
                 jobs.remove(&mission_id);
             }
             let _ = self.persist_mission_registry();
+            let _ = self
+                .mission_queue_persistence
+                .cancel(&mission_id, "mission worker could not be started");
             return self.error(
                 503,
                 "mission_worker_unavailable",
@@ -2826,8 +6077,16 @@ impl ApiRouter {
                 "ok": true,
                 "mission_id": mission_id,
                 "status": "queued",
+                "queue": {
+                    "state": "leased",
+                    "attempt": queue_lease.attempt,
+                    "worker_id": queue_lease.worker_id,
+                    "expires_at": queue_lease.expires_at,
+                    "automatic_resume": false
+                },
                 "cancel_requested": false,
                 "progress": mission_progress_json(&MissionProgressState::new(total_steps)),
+                "route_review_provenance": route_review_provenance,
                 "execution_provenance": execution_provenance,
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
@@ -2909,13 +6168,26 @@ impl ApiRouter {
             if status_filter.is_some_and(|status| status != state.status) {
                 continue;
             }
+            let queue = match self.mission_queue_persistence.projection(mission_id) {
+                Ok(queue) => queue,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "mission_queue_unavailable",
+                        "mission queue is unavailable",
+                        request_id,
+                    )
+                }
+            };
             entries.push(json!({
                 "mission_id": mission_id,
                 "status": state.status,
                 "cancel_requested": state.cancel_requested,
                 "cancel_reason": state.cancel_reason,
                 "recovered_after_restart": state.recovered_after_restart,
+                "route_review_provenance": state.route_review_provenance,
                 "execution_provenance": state.execution_provenance,
+                "queue": queue,
                 "progress": mission_progress_json(&state.progress),
                 "summary": mission_summary(&state),
                 "poll": format!("/v1/missions/{mission_id}"),
@@ -2973,6 +6245,10 @@ impl ApiRouter {
                 )
             }
         };
+        let queue = match self.mission_queue_persistence.projection(&mission_id) {
+            Ok(queue) => queue,
+            Err(error) => return self.error(500, "mission_queue_unavailable", &error, request_id),
+        };
         HttpResponse::json(
             200,
             &json!({
@@ -2983,13 +6259,18 @@ impl ApiRouter {
                 "cancel_reason": current.cancel_reason,
                 "recovered_after_restart": current.recovered_after_restart,
                 "execution_provenance": current.execution_provenance,
+                "queue": queue,
                 "progress": mission_progress_json(&current.progress),
+                "route_review_provenance": current.route_review_provenance,
                 "result": current.result,
                 "result_omitted": current.result_omitted,
                 "error": current.error,
                 "poll": format!("/v1/missions/{mission_id}"),
                 "cancel": format!("/v1/missions/{mission_id}/cancel"),
                 "trace": format!("/v1/missions/{mission_id}/trace"),
+                "evaluator_replay": format!("/v1/missions/{mission_id}/evaluator-replay"),
+                "evaluator_replay_compare": format!("/v1/missions/{mission_id}/evaluator-replay/compare"),
+                "evidence_bundle": format!("/v1/missions/{mission_id}/evidence-bundle"),
             }),
         )
     }
@@ -3070,6 +6351,1544 @@ impl ApiRouter {
                     "mission_trace": format!("/v1/missions/{mission_id}/trace"),
                     "operations_gates": "/v1/operations/gates?after=0&limit=256",
                     "events": "/v1/events?after=0&limit=256"
+                }
+            }),
+        )
+    }
+
+    fn mission_evaluator_replay_compare(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let Some(mission_id) =
+            mission_id_nested(&request.path_segments(), "evaluator-replay", "compare")
+        else {
+            return self.error(
+                404,
+                "not_found",
+                "mission evaluator replay comparison route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if key != "include_fixtures" && key != "max_items" {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "mission evaluator replay comparison accepts only include_fixtures and max_items",
+                    request_id,
+                );
+            }
+        }
+        let include_fixtures = match query_bool(&query, "include_fixtures", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let max_items = match query_usize(&query, "max_items", 128) {
+            Ok(value) if (1..=512).contains(&value) => value,
+            Ok(_) | Err(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "max_items must be between 1 and 512",
+                    request_id,
+                )
+            }
+        };
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let query_value = json!({
+            "include_fixtures": include_fixtures,
+            "max_items": max_items
+        });
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let comparison = if let Some(result) = state.result.clone() {
+            catalogue.compare(&MissionEvaluatorReplayCompareRequest {
+                mission: result,
+                include_fixtures,
+                max_items,
+            })
+        } else if let Some(summary) = state.evaluator_replay_summary.clone() {
+            catalogue.compare_summary(&summary)
+        } else if let Some(omitted) = state.result_omitted.clone() {
+            return self.error(
+                410,
+                "mission_evaluator_replay_omitted",
+                &format!(
+                    "mission result and evaluator replay summary were omitted from the bounded registry snapshot ({} bytes, sha256 {})",
+                    omitted["bytes"], omitted["sha256"]
+                ),
+                request_id,
+            );
+        } else {
+            return self.error(
+                409,
+                "evaluator_replay_unavailable",
+                "mission evaluator replay comparison is available after a terminal mission report is retained",
+                request_id,
+            );
+        };
+        let comparison = match comparison {
+            Ok(comparison) => comparison,
+            Err(error) => {
+                return self.error(
+                    422,
+                    "evaluator_replay_comparison_invalid",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        let result_retained = state.result.is_some();
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "schema": "bioprism-api/mission-evaluator-replay-compare/0.1",
+                "workflow": "mission_evaluator_replay_compare",
+                "mission_id": mission_id,
+                "query": query_value,
+                "retention": {
+                    "mode": if result_retained { "full" } else { "summary_only" },
+                    "result_retained": result_retained,
+                    "summary_retained": state.evaluator_replay_summary.is_some(),
+                    "result_omitted": state.result_omitted.clone()
+                },
+                "replay": comparison["replay"].clone(),
+                "catalog_drift": comparison["catalog_drift"].clone(),
+                "execution": "not_started",
+                "guarantees": comparison["guarantees"].clone(),
+                "limitations": comparison["limitations"].clone(),
+                "links": {
+                    "mission": format!("/v1/missions/{mission_id}"),
+                    "replay": format!("/v1/missions/{mission_id}/evaluator-replay"),
+                    "compare": format!("/v1/missions/{mission_id}/evaluator-replay/compare"),
+                    "evidence_bundle": format!("/v1/missions/{mission_id}/evidence-bundle")
+                }
+            }),
+        )
+    }
+
+    fn verify_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let Some(bundle) = arguments.get("bundle") else {
+            return self.error(
+                422,
+                "invalid_evidence_bundle",
+                "request body must contain a bundle object",
+                request_id,
+            );
+        };
+        match verify_mission_evidence_bundle(bundle) {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(EvidenceBundleError::TooLarge { actual, maximum }) => self.error(
+                413,
+                "evidence_bundle_too_large",
+                &format!("bundle is {actual} bytes; maximum is {maximum} bytes"),
+                request_id,
+            ),
+            Err(error) => self.error(
+                422,
+                "invalid_evidence_bundle",
+                &error.to_string(),
+                request_id,
+            ),
+        }
+    }
+
+    fn import_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let Some(bundle) = arguments.get("bundle") else {
+            return self.error(
+                422,
+                "invalid_evidence_bundle",
+                "request body must contain a bundle object",
+                request_id,
+            );
+        };
+        let mut registry = match self.evidence_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "evidence_registry_unavailable",
+                    "evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let report = registry.import(bundle);
+        let report = match report {
+            Ok(report) => report,
+            Err(EvidenceRegistryError::Full { maximum }) => {
+                return self.error(
+                    413,
+                    "evidence_registry_full",
+                    &format!("evidence registry has reached its {maximum}-bundle limit"),
+                    request_id,
+                )
+            }
+            Err(EvidenceRegistryError::Verification(reason)) => {
+                return self.error(422, "evidence_bundle_not_verified", &reason, request_id)
+            }
+            Err(error) => {
+                return self.error(
+                    422,
+                    "invalid_evidence_bundle",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        let created = report
+            .get("created")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if created {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(
+                        503,
+                        "evidence_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
+                }
+            };
+            if let Err(error) = self.evidence_persistence.persist_snapshot(&snapshot) {
+                *registry = before;
+                return self.error(503, "evidence_persistence_unavailable", &error, request_id);
+            }
+        }
+        let artifact_projection = self.automatic_artifact_projection(
+            "mission_evidence_bundle",
+            bundle
+                .get("mission_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown-mission"),
+            evaluator_domains_for_artifact(bundle),
+            bundle.clone(),
+        );
+        let mut report = report;
+        report["artifact_registry"] = artifact_projection;
+        let status = if created { 201 } else { 200 };
+        HttpResponse::json(status, &report)
+    }
+
+    fn query_evidence_bundles(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "mission_id" | "domain" | "after" | "limit" | "include_bundles"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "evidence bundle query accepts only mission_id, domain, after, limit, and include_bundles",
+                    request_id,
+                );
+            }
+        }
+        let mission_id = query.get("mission_id").map(String::as_str);
+        let domain = query.get("domain").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_EVIDENCE_REGISTRY_QUERY_ITEMS).contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_bundles = match query_bool(&query, "include_bundles", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.evidence_registry.lock() {
+            Ok(registry) => registry.query(mission_id, domain, after, max_items, include_bundles),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "evidence_registry_unavailable",
+                    "evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 3 || segments[0] != "v1" || segments[1] != "evidence-bundles" {
+            return self.error(
+                404,
+                "not_found",
+                "evidence bundle route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[2];
+        if ContentHash::parse(digest.clone()).is_err() {
+            return self.error(
+                422,
+                "invalid_digest",
+                "bundle digest must be a 64-character SHA-256 digest",
+                request_id,
+            );
+        }
+        let bundle = match self.evidence_registry.lock() {
+            Ok(registry) => registry.get(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "evidence_registry_unavailable",
+                    "evidence registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match bundle {
+            Some(bundle) => HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "schema": "bioprism-api/evidence-bundle-record/0.1",
+                    "workflow": "mission_evidence_bundle_get",
+                    "bundle_digest": digest,
+                    "bundle": bundle,
+                    "execution": "not_started"
+                }),
+            ),
+            None => self.error(
+                404,
+                "not_found",
+                "verified evidence bundle does not exist",
+                request_id,
+            ),
+        }
+    }
+
+    fn evidence_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.evidence_state_path.is_some();
+        let file_bytes = self
+            .config
+            .evidence_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry = self.evidence_registry.lock();
+        let (registry_size, generation) = registry
+            .as_ref()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .evidence_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = EvidenceBundleRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::EVIDENCE_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_bundles": bioprism_devplat::MAX_EVIDENCE_REGISTRY_BUNDLES,
+                "max_file_bytes": MAX_EVIDENCE_REGISTRY_BYTES,
+                "recovery_policy": "only independently verified bundles restore; imported evidence never resumes execution",
+                "flush": "/v1/evidence-bundles/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_evidence_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.evidence_state_path.is_none() {
+            return self.error(
+                409,
+                "evidence_persistence_disabled",
+                "configure --evidence-state before flushing an evidence registry snapshot",
+                request_id,
+            );
+        }
+        match self.persist_evidence_registry() {
+            Ok(_) => self.evidence_persistence_status(),
+            Err(error) => self.error(503, "evidence_persistence_unavailable", &error, request_id),
+        }
+    }
+
+    /// Register a projection produced by an explicit verification boundary and report checkpoint
+    /// health separately from in-memory registration. The source registry operation remains
+    /// successful when this auxiliary projection is unavailable; the response makes that gap
+    /// visible instead of presenting the cross-domain index as complete.
+    fn automatic_artifact_projection(
+        &self,
+        kind: &str,
+        subject_id: &str,
+        domains: Vec<String>,
+        artifact: Value,
+    ) -> Value {
+        let registration = json!({
+            "kind": kind,
+            "subject_id": subject_id,
+            "domains": domains,
+            "parent_digests": [],
+            "artifact": artifact,
+        });
+        let result = self
+            .artifact_registry
+            .lock()
+            .map_err(|_| "artifact registry is unavailable".to_string())
+            .and_then(|mut registry| {
+                registry
+                    .register(&registration)
+                    .map_err(|error| error.to_string())
+            });
+        match result {
+            Ok(report) => {
+                let checkpoint = self.artifact_persistence.persist();
+                let digest = report.get("content_digest").cloned().unwrap_or(Value::Null);
+                json!({
+                    "indexed": true,
+                    "kind": kind,
+                    "subject_id": subject_id,
+                    "content_digest": digest,
+                    "created": report.get("created").cloned().unwrap_or(Value::Null),
+                    "already_present": report.get("already_present").cloned().unwrap_or(Value::Null),
+                    "verification": report.get("verification").cloned().unwrap_or(Value::Null),
+                    "lookup": digest.as_str().map(|value| format!("/v1/artifacts/{value}")).unwrap_or_default(),
+                    "persistence": {
+                        "enabled": self.config.artifact_state_path.is_some(),
+                        "checkpointed": checkpoint.is_ok(),
+                        "error": checkpoint.err()
+                    },
+                    "execution": "not_started",
+                    "does_not_claim": [
+                        "artifact integrity establishes scientific, clinical, regulatory, publication, or external-effect validity",
+                        "automatic indexing establishes causal provenance or external storage authority"
+                    ]
+                })
+            }
+            Err(error) => json!({
+                "indexed": false,
+                "kind": kind,
+                "subject_id": subject_id,
+                "error": error,
+                "persistence": {
+                    "enabled": self.config.artifact_state_path.is_some(),
+                    "checkpointed": false
+                },
+                "execution": "not_started",
+                "does_not_claim": [
+                    "the failed projection means the source record was invalid",
+                    "absence from the artifact registry means the source record never existed"
+                ]
+            }),
+        }
+    }
+
+    fn register_artifact(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let registration = match self.json_object(request) {
+            Ok(arguments) => Value::Object(arguments),
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let mut registry = match self.artifact_registry.lock() {
+            Ok(registry) => registry,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let before = registry.clone();
+        let report = match registry.register(&registration) {
+            Ok(report) => report,
+            Err(ArtifactRegistryError::Full { maximum }) => {
+                return self.error(
+                    413,
+                    "artifact_registry_full",
+                    &format!("artifact registry has reached its {maximum}-record limit"),
+                    request_id,
+                )
+            }
+            Err(error @ ArtifactRegistryError::ArtifactTooLarge { .. }) => {
+                return self.error(413, "artifact_too_large", &error.to_string(), request_id)
+            }
+            Err(error) => {
+                return self.error(
+                    422,
+                    "invalid_artifact_registration",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        let created = report
+            .get("created")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if created {
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    *registry = before;
+                    return self.error(
+                        503,
+                        "artifact_persistence_unavailable",
+                        &error.to_string(),
+                        request_id,
+                    );
+                }
+            };
+            if let Err(error) = self.artifact_persistence.persist_snapshot(&snapshot) {
+                *registry = before;
+                return self.error(503, "artifact_persistence_unavailable", &error, request_id);
+            }
+        }
+        HttpResponse::json(if created { 201 } else { 200 }, &report)
+    }
+
+    /// Compare the three bounded local registries by exact digest identity.
+    ///
+    /// The stores are sampled independently, so the response includes each generation and
+    /// checkpoint digest rather than implying a cross-store transaction.
+    fn cross_store_artifact_audit(&self, request_id: &str) -> HttpResponse {
+        let (artifact_records, artifact_generation, artifact_state_digest) = {
+            let registry = match self.artifact_registry.lock() {
+                Ok(registry) => registry,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "artifact_registry_unavailable",
+                        "artifact registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return self.error(
+                        500,
+                        "cross_domain_audit_unavailable",
+                        &format!("artifact registry snapshot failed: {error}"),
+                        request_id,
+                    )
+                }
+            };
+            (
+                registry.records_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (evidence_digests, evidence_generation, evidence_state_digest) = {
+            let registry = match self.evidence_registry.lock() {
+                Ok(registry) => registry,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "evidence_registry_unavailable",
+                        "evidence registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return self.error(
+                        500,
+                        "cross_domain_audit_unavailable",
+                        &format!("evidence registry snapshot failed: {error}"),
+                        request_id,
+                    )
+                }
+            };
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (reconciliation_digests, reconciliation_generation, reconciliation_state_digest) = {
+            let registry = match self.reconciliation_registry.lock() {
+                Ok(registry) => registry,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "reconciliation_registry_unavailable",
+                        "workflow reconciliation registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return self.error(
+                        500,
+                        "cross_domain_audit_unavailable",
+                        &format!("workflow reconciliation registry snapshot failed: {error}"),
+                        request_id,
+                    )
+                }
+            };
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        let (
+            workflow_execution_evidence_digests,
+            workflow_execution_evidence_generation,
+            workflow_execution_evidence_state_digest,
+        ) = {
+            let registry = match self.workflow_execution_evidence_registry.lock() {
+                Ok(registry) => registry,
+                Err(_) => {
+                    return self.error(
+                        500,
+                        "workflow_execution_evidence_registry_unavailable",
+                        "workflow execution evidence registry is unavailable",
+                        request_id,
+                    )
+                }
+            };
+            let snapshot = match registry.snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return self.error(
+                        500,
+                        "cross_domain_audit_unavailable",
+                        &format!("workflow execution evidence registry snapshot failed: {error}"),
+                        request_id,
+                    )
+                }
+            };
+            (
+                registry.digests_for_audit(),
+                registry.generation(),
+                snapshot
+                    .get("state_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        };
+        HttpResponse::json(
+            200,
+            &build_cross_domain_audit(
+                &artifact_records,
+                &evidence_digests,
+                &reconciliation_digests,
+                &workflow_execution_evidence_digests,
+                artifact_generation,
+                evidence_generation,
+                reconciliation_generation,
+                workflow_execution_evidence_generation,
+                artifact_state_digest,
+                evidence_state_digest,
+                reconciliation_state_digest,
+                workflow_execution_evidence_state_digest,
+            ),
+        )
+    }
+
+    fn query_domain_decision_readiness(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "subject_id"
+                    | "decision_state"
+                    | "policy_satisfied"
+                    | "after"
+                    | "limit"
+                    | "include_audits"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "decision-readiness query accepts only subject_id, decision_state, policy_satisfied, after, limit, and include_audits",
+                    request_id,
+                );
+            }
+        }
+        let subject_id = query.get("subject_id").map(String::as_str);
+        let decision_state = query.get("decision_state").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let policy_satisfied = match query
+            .get("policy_satisfied")
+            .map(|_| query_bool(&query, "policy_satisfied", false))
+        {
+            Some(Ok(value)) => Some(value),
+            Some(Err(error)) => return self.error(422, "invalid_query", &error, request_id),
+            None => None,
+        };
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_ARTIFACT_REGISTRY_QUERY_ITEMS).contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_audits = match query_bool(&query, "include_audits", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.domain_decision_readiness_query(
+                subject_id,
+                decision_state,
+                policy_satisfied,
+                after,
+                max_items,
+                include_audits,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn control_plane_readiness_audit(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "control_plane_readiness_audit",
+            Value::Object(arguments),
+        )
+    }
+
+    fn control_plane_readiness_compare(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "control_plane_readiness_compare",
+            Value::Object(arguments),
+        )
+    }
+
+    fn control_plane_readiness_compare_retained(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        self.domain_workflow_tool(
+            request_id,
+            "control_plane_readiness_compare_retained",
+            Value::Object(arguments),
+        )
+    }
+
+    fn query_control_plane_readiness(
+        &self,
+        request: &HttpRequest,
+        request_id: &str,
+    ) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "subject_id"
+                    | "control_plane_state"
+                    | "policy_satisfied"
+                    | "after"
+                    | "limit"
+                    | "include_audits"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "control-plane readiness query accepts only subject_id, control_plane_state, policy_satisfied, after, limit, and include_audits",
+                    request_id,
+                );
+            }
+        }
+        let subject_id = query.get("subject_id").map(String::as_str);
+        let control_plane_state = query.get("control_plane_state").map(String::as_str);
+        let after = query.get("after").map(String::as_str);
+        let policy_satisfied = match query
+            .get("policy_satisfied")
+            .map(|_| query_bool(&query, "policy_satisfied", false))
+        {
+            Some(Ok(value)) => Some(value),
+            Some(Err(error)) => return self.error(422, "invalid_query", &error, request_id),
+            None => None,
+        };
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_ARTIFACT_REGISTRY_QUERY_ITEMS).contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_audits = match query_bool(&query, "include_audits", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.control_plane_readiness_query(
+                subject_id,
+                control_plane_state,
+                policy_satisfied,
+                after,
+                max_items,
+                include_audits,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn query_artifacts(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "kind" | "domain" | "subject_id" | "after" | "limit" | "include_artifacts"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "artifact query accepts only kind, domain, subject_id, after, limit, and include_artifacts",
+                    request_id,
+                );
+            }
+        }
+        let max_items = match query_usize(&query, "limit", 100) {
+            Ok(value)
+                if (1..=bioprism_devplat::MAX_ARTIFACT_REGISTRY_QUERY_ITEMS).contains(&value) =>
+            {
+                value
+            }
+            Ok(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "limit must be between 1 and 256",
+                    request_id,
+                )
+            }
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_artifacts = match query_bool(&query, "include_artifacts", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.query(
+                query.get("kind").map(String::as_str),
+                query.get("domain").map(String::as_str),
+                query.get("subject_id").map(String::as_str),
+                query.get("after").map(String::as_str),
+                max_items,
+                include_artifacts,
+            ),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(error) => self.error(422, "invalid_query", &error.to_string(), request_id),
+        }
+    }
+
+    fn get_artifact(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 3 || segments[0] != "v1" || segments[1] != "artifacts" {
+            return self.error(
+                404,
+                "not_found",
+                "artifact route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[2];
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.get(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(ArtifactRegistryError::NotFound { .. }) => {
+                self.error(404, "not_found", "artifact does not exist", request_id)
+            }
+            Err(error) => self.error(422, "invalid_digest", &error.to_string(), request_id),
+        }
+    }
+
+    fn artifact_lineage(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let segments = match request.path_segments() {
+            Ok(segments) => segments,
+            Err(error) => return self.error(400, "invalid_path", &error.to_string(), request_id),
+        };
+        if segments.len() != 4
+            || segments[0] != "v1"
+            || segments[1] != "artifacts"
+            || segments[3] != "lineage"
+        {
+            return self.error(
+                404,
+                "not_found",
+                "artifact lineage route does not exist",
+                request_id,
+            );
+        }
+        let digest = &segments[2];
+        let result = match self.artifact_registry.lock() {
+            Ok(registry) => registry.lineage(digest),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "artifact_registry_unavailable",
+                    "artifact registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        match result {
+            Ok(value) => HttpResponse::json(200, &value),
+            Err(ArtifactRegistryError::NotFound { .. }) => {
+                self.error(404, "not_found", "artifact does not exist", request_id)
+            }
+            Err(error) => self.error(422, "invalid_digest", &error.to_string(), request_id),
+        }
+    }
+
+    fn artifact_persistence_status(&self) -> HttpResponse {
+        let enabled = self.config.artifact_state_path.is_some();
+        let file_bytes = self
+            .config
+            .artifact_state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        let registry = self.artifact_registry.lock();
+        let (registry_size, generation) = registry
+            .as_ref()
+            .map(|registry| (registry.len(), registry.generation()))
+            .unwrap_or((0, 0));
+        let (state_digest, integrity_verified) = self
+            .config
+            .artifact_state_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .map(|document| {
+                let digest = document.get("state_digest").cloned().unwrap_or(Value::Null);
+                let valid = ArtifactRegistry::from_snapshot(&document).is_ok();
+                (digest, Value::Bool(valid))
+            })
+            .unwrap_or((Value::Null, Value::Null));
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "enabled": enabled,
+                "file_present": file_bytes.is_some(),
+                "file_bytes": file_bytes,
+                "schema": bioprism_devplat::ARTIFACT_REGISTRY_SCHEMA_VERSION,
+                "state_digest": state_digest,
+                "integrity_verified": integrity_verified,
+                "registry_size": registry_size,
+                "registry_generation": generation,
+                "max_records": bioprism_devplat::MAX_ARTIFACT_REGISTRY_RECORDS,
+                "max_file_bytes": MAX_ARTIFACT_REGISTRY_BYTES,
+                "recovery_policy": "only digest-valid artifact records restore; indexed artifacts never resume execution",
+                "flush": "/v1/artifacts/persistence/flush"
+            }),
+        )
+    }
+
+    fn flush_artifact_persistence(&self, request_id: &str) -> HttpResponse {
+        if self.config.artifact_state_path.is_none() {
+            return self.error(
+                409,
+                "artifact_persistence_disabled",
+                "configure --artifact-state before flushing an artifact registry snapshot",
+                request_id,
+            );
+        }
+        match self.persist_artifact_registry() {
+            Ok(_) => self.artifact_persistence_status(),
+            Err(error) => self.error(503, "artifact_persistence_unavailable", &error, request_id),
+        }
+    }
+
+    fn mission_evidence_bundle(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), Some("evidence-bundle")) else {
+            return self.error(
+                404,
+                "not_found",
+                "mission evidence bundle route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if !matches!(
+                key.as_str(),
+                "include_result" | "include_trace" | "include_fixtures" | "max_items"
+            ) {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "mission evidence bundle accepts only include_result, include_trace, include_fixtures, and max_items",
+                    request_id,
+                );
+            }
+        }
+        let include_result = match query_bool(&query, "include_result", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_trace = match query_bool(&query, "include_trace", true) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let include_fixtures = match query_bool(&query, "include_fixtures", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let max_items = match query_usize(&query, "max_items", 128) {
+            Ok(value) if (1..=512).contains(&value) => value,
+            Ok(_) | Err(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "max_items must be between 1 and 512",
+                    request_id,
+                )
+            }
+        };
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        if !is_terminal_mission_status(&state.status)
+            && state.result.is_none()
+            && state.evaluator_replay_summary.is_none()
+        {
+            return self.error(
+                409,
+                "evidence_bundle_unavailable",
+                "mission evidence bundle is available after a terminal mission report is retained",
+                request_id,
+            );
+        }
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let (replay, comparison) = if let Some(result) = state.result.clone() {
+            let replay = catalogue
+                .replay(&MissionEvaluatorReplayRequest {
+                    mission: result.clone(),
+                    include_fixtures,
+                    max_items,
+                })
+                .map_err(|error| error.to_string());
+            let comparison = catalogue
+                .compare(&MissionEvaluatorReplayCompareRequest {
+                    mission: result,
+                    include_fixtures: false,
+                    max_items,
+                })
+                .map_err(|error| error.to_string());
+            (replay, comparison)
+        } else if let Some(summary) = state.evaluator_replay_summary.clone() {
+            let comparison = catalogue
+                .compare_summary(&summary)
+                .map_err(|error| error.to_string());
+            (Ok(summary), comparison)
+        } else {
+            (Ok(Value::Null), Ok(Value::Null))
+        };
+        let replay = match replay {
+            Ok(replay) => replay,
+            Err(error) => {
+                return self.error(422, "evidence_bundle_replay_invalid", &error, request_id)
+            }
+        };
+        let comparison = match comparison {
+            Ok(comparison) => comparison,
+            Err(error) => {
+                return self.error(
+                    422,
+                    "evidence_bundle_comparison_invalid",
+                    &error,
+                    request_id,
+                )
+            }
+        };
+        let result_digest = state
+            .result
+            .as_ref()
+            .and_then(|result| ContentHash::of_value(result).ok())
+            .map(|digest| digest.to_string());
+        let mut bundle = json!({
+            "schema": "bioprism-api/mission-evidence-bundle/0.1",
+            "workflow": "mission_evidence_bundle_export",
+            "mission_id": mission_id,
+            "retention": {
+                "mode": if state.result.is_some() { "full" } else { "summary_only" },
+                "result_retained": state.result.is_some(),
+                "result_included": include_result && state.result.is_some(),
+                "summary_retained": state.evaluator_replay_summary.is_some(),
+                "result_omitted": state.result_omitted.clone()
+            },
+            "mission": {
+                "status": state.status,
+                "cancel_requested": state.cancel_requested,
+                "cancel_reason": state.cancel_reason,
+                "recovered_after_restart": state.recovered_after_restart,
+                "error": state.error,
+                "progress": mission_progress_json(&state.progress)
+            },
+            "result": if include_result {
+                state.result.clone().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            },
+            "result_digest": result_digest,
+            "execution_provenance": state.execution_provenance,
+            "claim_lineage": state
+                .result
+                .as_ref()
+                .and_then(|result| result.get("claim_lineage"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "evaluator_replay": replay,
+            "catalog_drift": comparison.get("catalog_drift").cloned().unwrap_or(Value::Null),
+            "trace": if include_trace {
+                json!(state.trace)
+            } else {
+                json!([])
+            },
+            "export": {
+                "format": "json",
+                "include_result": include_result,
+                "include_trace": include_trace,
+                "trace_included": include_trace,
+                "include_fixtures": include_fixtures,
+                "max_items": max_items,
+                "execution": "not_started",
+                "digest_algorithm": "sha256"
+            },
+            "guarantees": [
+                "the bundle is assembled from the bounded local mission registry and does not execute a tool",
+                "every included result, replay, trace, provenance, and omission field remains separately inspectable",
+                "bundle_digest covers the canonical bundle object before the digest field is added"
+            ],
+            "limitations": [
+                "the bundle is a local evidence export, not a signature or proof of external storage",
+                "summary-only bundles cannot include omitted raw mission output or reconstruct historical catalogue rows",
+                "included evidence does not establish scientific, clinical, causal, operational, regulatory, or release truth"
+            ],
+            "links": {
+                "mission": format!("/v1/missions/{mission_id}"),
+                "claims": format!("/v1/missions/{mission_id}/claims"),
+                "replay": format!("/v1/missions/{mission_id}/evaluator-replay"),
+                "compare": format!("/v1/missions/{mission_id}/evaluator-replay/compare"),
+                "bundle": format!("/v1/missions/{mission_id}/evidence-bundle")
+            }
+        });
+        let bundle_digest = match ContentHash::of_value(&bundle) {
+            Ok(digest) => digest.to_string(),
+            Err(error) => {
+                return self.error(
+                    500,
+                    "evidence_bundle_digest_failed",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        bundle["bundle_digest"] = Value::String(bundle_digest);
+        let bundle_bytes = match serde_json::to_vec(&bundle) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return self.error(
+                    500,
+                    "evidence_bundle_serialize_failed",
+                    &error.to_string(),
+                    request_id,
+                )
+            }
+        };
+        if bundle_bytes.len() > MAX_MISSION_EVIDENCE_BUNDLE_BYTES {
+            return self.error(
+                413,
+                "evidence_bundle_too_large",
+                &format!(
+                    "evidence bundle is {} bytes; disable include_result or narrow the export below the {}-byte bound",
+                    bundle_bytes.len(),
+                    MAX_MISSION_EVIDENCE_BUNDLE_BYTES
+                ),
+                request_id,
+            );
+        }
+        HttpResponse::json(200, &bundle)
+    }
+
+    fn mission_evaluator_replay(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let Some(mission_id) = mission_id(&request.path_segments(), Some("evaluator-replay"))
+        else {
+            return self.error(
+                404,
+                "not_found",
+                "mission evaluator replay route does not exist",
+                request_id,
+            );
+        };
+        let query = match request.query() {
+            Ok(query) => query,
+            Err(error) => return self.error(400, "invalid_query", &error.to_string(), request_id),
+        };
+        for key in query.keys() {
+            if key != "include_fixtures" && key != "max_items" {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "mission evaluator replay accepts only include_fixtures and max_items",
+                    request_id,
+                );
+            }
+        }
+        let include_fixtures = match query_bool(&query, "include_fixtures", false) {
+            Ok(value) => value,
+            Err(error) => return self.error(422, "invalid_query", &error, request_id),
+        };
+        let max_items = match query_usize(&query, "max_items", 128) {
+            Ok(value) if (1..=512).contains(&value) => value,
+            Ok(_) | Err(_) => {
+                return self.error(
+                    422,
+                    "invalid_query",
+                    "max_items must be between 1 and 512",
+                    request_id,
+                )
+            }
+        };
+        let job = match self.mission_jobs.lock() {
+            Ok(jobs) => jobs.get(&mission_id).cloned(),
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_registry_unavailable",
+                    "mission job registry is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let Some(job) = job else {
+            return self.error(404, "not_found", "mission does not exist", request_id);
+        };
+        let state = match job_state(&job) {
+            Ok(state) => state,
+            Err(_) => {
+                return self.error(
+                    500,
+                    "mission_state_unavailable",
+                    "mission state is unavailable",
+                    request_id,
+                )
+            }
+        };
+        let query_value = json!({
+            "include_fixtures": include_fixtures,
+            "max_items": max_items
+        });
+        let retention = json!({
+            "mode": "full",
+            "result_retained": state.result.is_some(),
+            "summary_retained": state.evaluator_replay_summary.is_some(),
+            "result_omitted": state.result_omitted.clone()
+        });
+        let replay = if let Some(result) = state.result.clone() {
+            let replay_request = MissionEvaluatorReplayRequest {
+                mission: result,
+                include_fixtures,
+                max_items,
+            };
+            match MissionEvaluatorCatalogue::standard().replay(&replay_request) {
+                Ok(mut replay) => {
+                    if let Some(object) = replay.as_object_mut() {
+                        object.insert("source".into(), json!("durable_mission_result"));
+                        object.insert("query".into(), query_value.clone());
+                    }
+                    replay
+                }
+                Err(error) => {
+                    return self.error(
+                        422,
+                        "evaluator_replay_invalid",
+                        &error.to_string(),
+                        request_id,
+                    )
+                }
+            }
+        } else if let Some(summary) = state.evaluator_replay_summary.clone() {
+            return HttpResponse::json(
+                200,
+                &json!({
+                    "ok": true,
+                    "schema": "bioprism-api/mission-evaluator-replay-query/0.1",
+                    "workflow": "mission_evaluator_replay_query",
+                    "mission_id": mission_id,
+                    "query": query_value,
+                    "retention": {
+                        "mode": "summary_only",
+                        "result_retained": false,
+                        "summary_retained": true,
+                        "result_omitted": state.result_omitted.clone()
+                    },
+                    "replay": summary,
+                    "execution": "not_started",
+                    "guarantees": [
+                        "the compact evaluator summary is restored from the mission checkpoint",
+                        "result omission remains explicit and is never represented as replay success",
+                        "no evaluator or domain tool is executed by this query"
+                    ],
+                    "limitations": [
+                        "full bindings, retained outputs, and fixture rows require the original mission result",
+                        "summary-only replay cannot revalidate omitted raw output against a changed catalogue"
+                    ],
+                    "links": {
+                        "mission": format!("/v1/missions/{mission_id}"),
+                        "claims": format!("/v1/missions/{mission_id}/claims"),
+                        "replay": format!("/v1/missions/{mission_id}/evaluator-replay")
+                    }
+                }),
+            );
+        } else if let Some(omitted) = state.result_omitted.clone() {
+            return self.error(
+                410,
+                "mission_evaluator_replay_omitted",
+                &format!(
+                    "mission result and evaluator replay summary were omitted from the bounded registry snapshot ({} bytes, sha256 {})",
+                    omitted["bytes"], omitted["sha256"]
+                ),
+                request_id,
+            );
+        } else {
+            return self.error(
+                409,
+                "evaluator_replay_unavailable",
+                "mission evaluator replay is available after a terminal mission report is retained",
+                request_id,
+            );
+        };
+        HttpResponse::json(
+            200,
+            &json!({
+                "ok": true,
+                "schema": "bioprism-api/mission-evaluator-replay-query/0.1",
+                "workflow": "mission_evaluator_replay_query",
+                "mission_id": mission_id,
+                "query": query_value,
+                "retention": retention,
+                "replay": replay,
+                "execution": "not_started",
+                "guarantees": [
+                    "the replay input is read from the bounded durable mission registry",
+                    "full replay rechecks the current evaluator catalogue without dispatch",
+                    "the retention mode and omitted-result metadata remain explicit"
+                ],
+                "limitations": [
+                    "replay does not rerun an evaluator or validate domain semantics",
+                    "a summary-only response cannot expose omitted raw evaluator output"
+                ],
+                "links": {
+                    "mission": format!("/v1/missions/{mission_id}"),
+                    "claims": format!("/v1/missions/{mission_id}/claims"),
+                    "replay": format!("/v1/missions/{mission_id}/evaluator-replay")
                 }
             }),
         )
@@ -3384,6 +8203,11 @@ impl ApiRouter {
         state.cancel_reason = current.cancel_reason.clone();
         state.progress.request_cancel();
         drop(state);
+        if let Err(error) = self.mission_queue_persistence.cancel(&mission_id, &reason) {
+            if !error.contains("already terminal") {
+                return self.error(503, "mission_queue_unavailable", &error, request_id);
+            }
+        }
         let _ = self.persist_mission_registry();
         HttpResponse::json(
             202,
@@ -3441,6 +8265,28 @@ impl ApiRouter {
             );
         }
         drop(jobs);
+        let queue_projection = match self.mission_queue_persistence.projection(&mission_id) {
+            Ok(projection) => projection,
+            Err(error) => {
+                if let Ok(mut jobs) = self.mission_jobs.lock() {
+                    jobs.insert(mission_id.clone(), job);
+                }
+                return self.error(503, "mission_queue_unavailable", &error, request_id);
+            }
+        };
+        if !queue_projection.is_null() {
+            if let Err(error) = self
+                .mission_queue_persistence
+                .cancel(&mission_id, "mission deleted by operator")
+            {
+                if !error.contains("already terminal") {
+                    if let Ok(mut jobs) = self.mission_jobs.lock() {
+                        jobs.insert(mission_id.clone(), job);
+                    }
+                    return self.error(503, "mission_queue_unavailable", &error, request_id);
+                }
+            }
+        }
         if let Err(error) = self.persist_mission_registry() {
             if let Ok(mut jobs) = self.mission_jobs.lock() {
                 jobs.insert(mission_id.clone(), job);
@@ -3956,21 +8802,73 @@ impl ApiRouter {
                     "/healthz": { "get": { "responses": { "200": { "description": "liveness" } } } },
                     "/readyz": { "get": { "responses": { "200": { "description": "readiness" } } } },
                     "/v1/capabilities": { "get": { "responses": { "200": { "description": "capability and limit catalog" } } } },
+                    "/v1/capabilities/dashboard": { "get": { "parameters": [{ "name": "group_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "status", "in": "query" }, { "name": "max_groups", "in": "query" }, { "name": "include_tools", "in": "query" }, { "name": "include_gaps", "in": "query" }], "responses": { "200": { "description": "bounded digest-bound cross-domain capability dashboard" }, "400": { "description": "dashboard query was invalid" } } } },
+                    "/v1/capabilities/route": { "post": { "responses": { "200": { "description": "bounded non-executing cross-domain capability route proposal" }, "400": { "description": "route request JSON was invalid" }, "422": { "description": "route request was refused" } } } },
+                    "/v1/capabilities/route/review": { "post": { "responses": { "200": { "description": "bounded non-executing route review and mission handoff" }, "400": { "description": "route review JSON was invalid" }, "422": { "description": "route review was refused" } } } },
+                    "/v1/capabilities/route/plan": { "post": { "responses": { "200": { "description": "bounded route review composed with authoritative non-executing mission preflight" }, "400": { "description": "route plan JSON was invalid" }, "422": { "description": "route plan was refused" } } } },
+                    "/v1/capabilities/route/plan/verify": { "post": { "responses": { "200": { "description": "bounded route-plan replay and authoritative mission-preflight verification" }, "400": { "description": "route-plan verification JSON was invalid" }, "422": { "description": "route-plan verification was refused" } } } },
                     "/v1/recovery": { "get": { "responses": { "200": { "description": "operator-visible restart recovery matrix" } } } },
                     "/v1/operations/snapshot": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded operator control-plane snapshot" } } } },
                     "/v1/operations/domains": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain observed activity projection" } } } },
                     "/v1/operations/gates": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded per-domain evidence gate projection without readiness claims" } } } },
                     "/v1/operations/gate-reviews": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "review_id", "in": "query" }], "responses": { "200": { "description": "durable cursor page of replayable operations gate reviews" } } }, "post": { "responses": { "201": { "description": "content-addressed operations gate review record" } } } },
                     "/v1/operations/handoff": { "post": { "responses": { "200": { "description": "content-addressed, non-executing domain routing handoff" } } } },
+                    "/v1/evidence-bundles/verify": { "post": { "responses": { "200": { "description": "content-addressed mission evidence bundle verification report" }, "413": { "description": "bundle exceeds verification bound" }, "422": { "description": "bundle is malformed" } } } },
+                    "/v1/domain-workflows": { "get": { "responses": { "200": { "description": "deterministic workflow template for every capability group" } } } },
+                    "/v1/domain-workflows/scaffold": { "post": { "responses": { "200": { "description": "deterministic execution-disabled workflow scaffold with authoritative preflight" }, "422": { "description": "workflow selection or scaffold request was refused" } } } },
+                    "/v1/domain-workflows/instantiate": { "post": { "responses": { "200": { "description": "group-scoped, authoritative-preflighted, no-dispatch workflow mission" }, "422": { "description": "workflow selection or mission preflight was refused" } } } },
+                    "/v1/domain-workflows/portfolio": { "post": { "responses": { "200": { "description": "bounded multi-domain workflow portfolio with per-item authoritative no-dispatch preflight" }, "400": { "description": "workflow portfolio JSON was invalid" }, "422": { "description": "workflow portfolio was refused" } } } },
+                    "/v1/domain-workflows/portfolio/verify": { "post": { "responses": { "200": { "description": "retained multi-domain workflow portfolio digest, replay, coverage, and authoritative mission-preflight verification" }, "400": { "description": "workflow portfolio verification JSON was invalid" }, "422": { "description": "workflow portfolio verification was refused" } } } },
+                    "/v1/developer-workbench/verify": { "post": { "responses": { "200": { "description": "retained authoring/notebook workbench digest, dashboard, and optional CI-plan replay verification" }, "400": { "description": "developer workbench verification JSON was invalid" }, "422": { "description": "developer workbench verification was refused" } } } },
+                    "/v1/ci/provider-evidence": { "get": { "parameters": [{ "name": "provider", "in": "query" }, { "name": "run_id", "in": "query" }, { "name": "plan_digest", "in": "query" }, { "name": "structurally_valid", "in": "query" }, { "name": "conformance_ready", "in": "query" }, { "name": "after", "in": "query" }, { "name": "max_items", "in": "query" }, { "name": "include_records", "in": "query" }], "responses": { "200": { "description": "bounded deterministic provider-observed CI evidence registry query" }, "400": { "description": "provider-evidence query was invalid" } } }, "post": { "responses": { "201": { "description": "provider-evidence audit imported" }, "200": { "description": "idempotent re-import" }, "413": { "description": "registry capacity or snapshot bound exceeded" }, "422": { "description": "provider-evidence audit failed" } } } },
+                    "/v1/ci/provider-evidence/{provider_evidence_digest}": { "get": { "parameters": [{ "name": "provider_evidence_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one retained provider-observed CI evidence audit with lineage joins" }, "404": { "description": "provider-evidence digest is not present" } } } },
+                    "/v1/ci/provider-evidence/persistence": { "get": { "responses": { "200": { "description": "restart-aware provider-evidence registry checkpoint status" } } } },
+                    "/v1/ci/provider-evidence/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded provider-evidence registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
+                    "/v1/domain-workflows/verify": { "post": { "responses": { "200": { "description": "retained domain-workflow replay and authoritative mission-preflight verification" }, "400": { "description": "workflow verification JSON was invalid" }, "422": { "description": "workflow verification was refused" } } } },
+                    "/v1/domain-workflows/reconcile": { "post": { "responses": { "200": { "description": "digest-bound workflow execution and evidence reconciliation" }, "422": { "description": "workflow evidence source or contract was refused" } } } },
+                    "/v1/domain-workflows/reconciliations": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "workflow_id", "in": "query" }, { "name": "mission_plan_digest", "in": "query" }, { "name": "completion_status", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_records", "in": "query" }], "responses": { "200": { "description": "bounded deterministic workflow reconciliation registry index" } } }, "post": { "responses": { "201": { "description": "digest-valid workflow reconciliation imported" }, "200": { "description": "idempotent re-import" }, "422": { "description": "reconciliation record failed digest validation" } } } },
+                    "/v1/domain-workflows/reconciliations/{reconciliation_digest}": { "get": { "parameters": [{ "name": "reconciliation_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one imported workflow reconciliation report" }, "404": { "description": "reconciliation digest is not present" } } } },
+                    "/v1/domain-workflows/reconciliations/persistence": { "get": { "responses": { "200": { "description": "restart-aware workflow reconciliation registry checkpoint status" } } } },
+                    "/v1/domain-workflows/reconciliations/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded workflow reconciliation registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
+                    "/v1/evidence-bundles": { "get": { "parameters": [{ "name": "mission_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_bundles", "in": "query" }], "responses": { "200": { "description": "bounded deterministic evidence registry index" } } }, "post": { "responses": { "201": { "description": "verified evidence bundle imported into the registry" }, "200": { "description": "idempotent re-import" }, "413": { "description": "registry capacity or snapshot bound exceeded" }, "422": { "description": "bundle verification failed" } } } },
+                    "/v1/evidence-bundles/{bundle_digest}": { "get": { "parameters": [{ "name": "bundle_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one verified evidence bundle" }, "404": { "description": "bundle digest is not present" } } } },
+                    "/v1/evidence-bundles/persistence": { "get": { "responses": { "200": { "description": "restart-aware evidence registry checkpoint status" } } } },
+                    "/v1/evidence-bundles/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded evidence registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
+                    "/v1/domain-decision-readiness": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "decision_state", "in": "query" }, { "name": "policy_satisfied", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_audits", "in": "query" }], "responses": { "200": { "description": "bounded digest-ordered retained decision-readiness posture query" } } } },
+                    "/v1/control-plane-readiness": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "control_plane_state", "in": "query" }, { "name": "policy_satisfied", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_audits", "in": "query" }], "responses": { "200": { "description": "bounded digest-ordered retained control-plane readiness query" } } }, "post": { "responses": { "200": { "description": "digest-bound structural control-plane readiness projection" }, "422": { "description": "invalid component evidence or policy" } } } },
+                    "/v1/control-plane-readiness/compare": { "post": { "responses": { "200": { "description": "digest-verified structural comparison of two control-plane readiness projections" }, "422": { "description": "invalid or mismatched readiness projections" } } } },
+                    "/v1/control-plane-readiness/compare-retained": { "post": { "responses": { "200": { "description": "registry-resolved structural comparison of two retained control-plane readiness artifacts" }, "404": { "description": "one retained content digest is absent" }, "422": { "description": "retained artifacts are invalid, mismatched, or not control-plane readiness records" } } } },
+                    "/v1/artifacts": { "get": { "parameters": [{ "name": "kind", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "subject_id", "in": "query" }, { "name": "after", "in": "query" }, { "name": "limit", "in": "query" }, { "name": "include_artifacts", "in": "query" }], "responses": { "200": { "description": "bounded cross-domain artifact index query" } } }, "post": { "responses": { "201": { "description": "registered content-addressed artifact" }, "200": { "description": "idempotent artifact registration" } } } },
+                    "/v1/artifacts/cross-store": { "get": { "responses": { "200": { "description": "digest-only consistency audit across artifact, evidence, and workflow-reconciliation registries" } } } },
+                    "/v1/artifacts/{content_digest}": { "get": { "parameters": [{ "name": "content_digest", "in": "path", "required": true }], "responses": { "200": { "description": "one artifact record with verification posture" }, "404": { "description": "artifact digest is not present" } } } },
+                    "/v1/artifacts/{content_digest}/lineage": { "get": { "parameters": [{ "name": "content_digest", "in": "path", "required": true }], "responses": { "200": { "description": "bounded parent lineage with explicit missing nodes and cycles" } } } },
+                    "/v1/artifacts/persistence": { "get": { "responses": { "200": { "description": "restart-aware artifact registry checkpoint status" } } } },
+                    "/v1/artifacts/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded artifact registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
+                    "/v1/domain-reports": { "post": { "responses": { "200": { "description": "bounded domain-report projection" } } } },
+                    "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
+                    "/v1/domain-evidence/harmonize": { "post": { "responses": { "200": { "description": "digest-addressed domain evidence harmonization" }, "422": { "description": "report identity, catalogue, or traceability input was refused" } } } },
+                    "/v1/domain-evidence/harmonization/coverage": { "get": { "parameters": [{ "name": "subject_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "report_class", "in": "query" }, { "name": "bridge_mode", "in": "query" }, { "name": "traceability_state", "in": "query" }, { "name": "after", "in": "query" }, { "name": "max_items", "in": "query" }, { "name": "include_report_digests", "in": "query" }], "responses": { "200": { "description": "bounded retained harmonization coverage" }, "422": { "description": "coverage filter was invalid" } } } },
+                    "/v1/domain-evidence/lineage": { "get": { "parameters": [{ "name": "content_digest", "in": "query" }, { "name": "group_id", "in": "query" }, { "name": "domain", "in": "query" }, { "name": "subject_id", "in": "query" }, { "name": "source_tool", "in": "query" }, { "name": "outcome", "in": "query" }, { "name": "request_digest", "in": "query" }, { "name": "response_digest", "in": "query" }, { "name": "intake_digest", "in": "query" }, { "name": "source_plan_digest", "in": "query" }, { "name": "after", "in": "query" }, { "name": "max_items", "in": "query" }, { "name": "include_children", "in": "query" }], "responses": { "200": { "description": "digest-bound retained intake request/response lineage and reverse child links" }, "404": { "description": "requested intake digest is not present" }, "422": { "description": "lineage filter was invalid" } } } },
+                    "/v1/domain-evidence/intake": { "post": { "responses": { "200": { "description": "exact-digest raw domain evidence intake" }, "422": { "description": "envelope, outcome, or catalogue input was refused" } } } },
+                    "/v1/domain-evidence/sources": { "post": { "responses": { "200": { "description": "digest-addressed, non-fetching external evidence source plan" }, "422": { "description": "source locator, policy, or catalogue input was refused" } } } },
+                    "/v1/domain-evidence/sources/execute": { "post": { "responses": { "200": { "description": "bounded source execution with raw-byte and canonical-response digests plus retained intake" }, "422": { "description": "retained plan, connector policy, root confinement, or intake binding was refused" } } } },
+                    "/v1/domain-evidence/coverage": { "get": { "responses": { "200": { "description": "catalogue-wide retained domain evidence intake coverage" }, "400": { "description": "coverage filter was invalid" } } } },
                     "/v1/missions/preflight": { "post": { "responses": { "200": { "description": "authoritative no-dispatch mission plan" } } } },
                     "/v1/missions": { "get": { "responses": { "200": { "description": "bounded mission inventory" } } }, "post": { "responses": { "202": { "description": "accepted asynchronous mission" } } } },
                     "/v1/missions/persistence": { "get": { "responses": { "200": { "description": "restart-aware mission snapshot status" } } } },
                     "/v1/missions/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded mission snapshot checkpoint" } } } },
+                    "/v1/missions/queue": { "get": { "responses": { "200": { "description": "typed factory mission queue projection and recovery posture" } } } },
+                    "/v1/missions/queue/persistence": { "get": { "responses": { "200": { "description": "content-addressed mission queue checkpoint status" } } } },
+                    "/v1/missions/queue/persistence/flush": { "post": { "responses": { "200": { "description": "force an atomic mission queue checkpoint" }, "503": { "description": "queue checkpoint unavailable" } } } },
+                    "/v1/missions/queue/authority/release-lock": { "post": { "responses": { "200": { "description": "explicitly release and audit an orphaned shared-authority lock" }, "409": { "description": "lock release refused or no orphaned lock exists" } } } },
                     "/v1/missions/{mission_id}": { "get": { "responses": { "200": { "description": "mission status and result" } } }, "delete": { "responses": { "200": { "description": "terminal mission removed" } } } },
                     "/v1/missions/{mission_id}/provenance": { "get": { "responses": { "200": { "description": "retained execution gate, review, evaluator, and dispatch provenance" } } } },
-                    "/v1/missions/{mission_id}/claims": { "get": { "responses": { "200": { "description": "bounded claim-to-step evidence lineage projection" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "terminal report was omitted from the bounded registry" } } } },
+                     "/v1/missions/{mission_id}/claims": { "get": { "responses": { "200": { "description": "bounded claim-to-step evidence lineage projection" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "terminal report was omitted from the bounded registry" } } } },
+                     "/v1/missions/{mission_id}/evaluator-replay": { "get": { "parameters": [{ "name": "include_fixtures", "in": "query" }, { "name": "max_items", "in": "query" }], "responses": { "200": { "description": "durable full or summary-only evaluator replay query" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "mission result and replay summary were omitted" } } } },
+                     "/v1/missions/{mission_id}/evaluator-replay/compare": { "get": { "parameters": [{ "name": "include_fixtures", "in": "query" }, { "name": "max_items", "in": "query" }], "responses": { "200": { "description": "catalog-drift-aware replay comparison" }, "409": { "description": "mission is not yet terminal" }, "410": { "description": "mission result and replay summary were omitted" } } } },
+                     "/v1/missions/{mission_id}/evidence-bundle": { "get": { "parameters": [{ "name": "include_result", "in": "query" }, { "name": "include_trace", "in": "query" }, { "name": "include_fixtures", "in": "query" }, { "name": "max_items", "in": "query" }], "responses": { "200": { "description": "bounded content-addressed mission evidence bundle" }, "409": { "description": "mission is not yet terminal" } } } },
                     "/v1/missions/{mission_id}/trace": { "get": { "parameters": [{ "name": "after", "in": "query" }, { "name": "limit", "in": "query" }], "responses": { "200": { "description": "bounded clock-free mission trace page" } } } },
                     "/v1/missions/{mission_id}/cancel": { "post": { "responses": { "202": { "description": "cooperative cancellation requested" } } } },
                     "/v1/rpc": { "post": { "responses": { "200": { "description": "JSON-RPC response" } } } },
@@ -4001,6 +8899,42 @@ impl ApiRouter {
 
 fn job_state(job: &MissionJob) -> Result<MissionJobState, ()> {
     job.state.lock().map(|state| state.clone()).map_err(|_| ())
+}
+
+fn current_timestamp() -> Result<Timestamp, String> {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock is before the Unix epoch: {error}"))?;
+    let nanos = i128::try_from(elapsed.as_nanos())
+        .map_err(|_| "system clock timestamp exceeds the supported range".to_string())?;
+    Ok(Timestamp::from_nanos_utc(nanos))
+}
+
+/// Recover only the bounded route-review identity from a validated mission specification. The
+/// queue checkpoint keeps the complete spec private; this projection lets operators verify that
+/// a reviewed route stayed attached to the queued work without exposing domain arguments.
+fn mission_route_review_provenance(arguments: &Value) -> Option<Value> {
+    let request: MissionRequest = serde_json::from_value(arguments.clone()).ok()?;
+    let plan = plan_mission(&request).ok()?;
+    plan.route_review_provenance
+}
+
+fn mission_queue_job_json(job: &FactoryJob) -> Value {
+    json!({
+        "mission_id": job.id,
+        "resource_class": job.resource_class,
+        "idempotency": job.idempotency,
+        "idempotency_key": job.idempotency_key().to_string(),
+        "priority": job.priority,
+        "max_attempts": job.max_attempts,
+        "state": job.state,
+        "attempts": job.attempts,
+        "attempts_remaining": job.attempts_remaining(),
+        "reason": job.reason,
+        "spec_digest": job.idempotency_key().to_string(),
+        "route_review_provenance": mission_route_review_provenance(&job.spec),
+        "spec_returned": false
+    })
 }
 
 fn response_value(response: HttpResponse) -> Value {
@@ -5009,10 +9943,7 @@ fn checkpoint_digest_from_path(path: Option<&Path>) -> Option<String> {
 }
 
 fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> Option<bool> {
-    let bytes = match path.and_then(|path| std::fs::read(path).ok()) {
-        Some(bytes) => bytes,
-        None => return None,
-    };
+    let bytes = path.and_then(|path| std::fs::read(path).ok())?;
     let document: Value = match serde_json::from_slice(&bytes) {
         Ok(document) => document,
         Err(_) => return Some(false),
@@ -5040,6 +9971,182 @@ fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> 
         return Some(false);
     };
     Some(computed == stored)
+}
+
+fn load_evidence_registry(path: Option<&Path>) -> Result<EvidenceBundleRegistry, String> {
+    let Some(path) = path else {
+        return Ok(EvidenceBundleRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(EvidenceBundleRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "evidence state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_EVIDENCE_REGISTRY_BYTES {
+        return Err(format!(
+            "evidence state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_EVIDENCE_REGISTRY_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("evidence state snapshot is invalid JSON: {error}"))?;
+    EvidenceBundleRegistry::from_snapshot(&document)
+        .map_err(|error| format!("evidence state snapshot is invalid: {error}"))
+}
+
+fn load_workflow_reconciliation_registry(
+    path: Option<&Path>,
+) -> Result<DomainWorkflowReconciliationRegistry, String> {
+    let Some(path) = path else {
+        return Ok(DomainWorkflowReconciliationRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DomainWorkflowReconciliationRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "workflow reconciliation state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_WORKFLOW_RECONCILIATION_STATE_BYTES {
+        return Err(format!(
+            "workflow reconciliation state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_WORKFLOW_RECONCILIATION_STATE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        format!("workflow reconciliation state snapshot is invalid JSON: {error}")
+    })?;
+    DomainWorkflowReconciliationRegistry::from_snapshot(&document)
+        .map_err(|error| format!("workflow reconciliation state snapshot is invalid: {error}"))
+}
+
+fn load_artifact_registry(path: Option<&Path>) -> Result<ArtifactRegistry, String> {
+    let Some(path) = path else {
+        return Ok(ArtifactRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ArtifactRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "artifact state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_ARTIFACT_REGISTRY_BYTES {
+        return Err(format!(
+            "artifact state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_ARTIFACT_REGISTRY_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("artifact state snapshot is invalid JSON: {error}"))?;
+    ArtifactRegistry::from_snapshot(&document)
+        .map_err(|error| format!("artifact state snapshot is invalid: {error}"))
+}
+
+fn load_workflow_execution_evidence_registry(
+    path: Option<&Path>,
+) -> Result<WorkflowExecutionEvidenceRegistry, String> {
+    let Some(path) = path else {
+        return Ok(WorkflowExecutionEvidenceRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(WorkflowExecutionEvidenceRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "workflow execution evidence state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES {
+        return Err(format!(
+            "workflow execution evidence state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        format!("workflow execution evidence state snapshot is invalid JSON: {error}")
+    })?;
+    WorkflowExecutionEvidenceRegistry::from_snapshot(&document)
+        .map_err(|error| format!("workflow execution evidence state snapshot is invalid: {error}"))
+}
+
+fn load_workbench_registry(path: Option<&Path>) -> Result<WorkbenchReportRegistry, String> {
+    let Some(path) = path else {
+        return Ok(WorkbenchReportRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(WorkbenchReportRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "workbench state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_WORKBENCH_REGISTRY_STATE_BYTES {
+        return Err(format!(
+            "workbench state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_WORKBENCH_REGISTRY_STATE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("workbench state snapshot is invalid JSON: {error}"))?;
+    WorkbenchReportRegistry::from_snapshot(&document)
+        .map_err(|error| format!("workbench state snapshot is invalid: {error}"))
+}
+
+fn load_ci_provider_evidence_registry(
+    path: Option<&Path>,
+) -> Result<CiProviderEvidenceRegistry, String> {
+    let Some(path) = path else {
+        return Ok(CiProviderEvidenceRegistry::new());
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(CiProviderEvidenceRegistry::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "CI provider evidence state snapshot could not be read: {error}"
+            ))
+        }
+    };
+    if bytes.len() > MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES {
+        return Err(format!(
+            "CI provider evidence state snapshot is {} bytes, above the {}-byte bound",
+            bytes.len(),
+            MAX_CI_PROVIDER_EVIDENCE_REGISTRY_STATE_BYTES
+        ));
+    }
+    let document: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("CI provider evidence state snapshot is invalid JSON: {error}"))?;
+    CiProviderEvidenceRegistry::from_snapshot(&document)
+        .map_err(|error| format!("CI provider evidence state snapshot is invalid: {error}"))
 }
 
 fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<MissionJob>>, String> {
@@ -5138,6 +10245,14 @@ fn load_mission_jobs(path: Option<&Path>) -> Result<BTreeMap<String, Arc<Mission
                 .filter(|value| !value.is_null())
                 .cloned(),
             result_omitted: object.get("result_omitted").cloned(),
+            evaluator_replay_summary: object
+                .get("evaluator_replay_summary")
+                .filter(|value| value.is_object())
+                .cloned(),
+            route_review_provenance: object
+                .get("route_review_provenance")
+                .filter(|value| value.is_object())
+                .cloned(),
             error: object
                 .get("error")
                 .and_then(Value::as_str)
@@ -5209,6 +10324,8 @@ fn durable_mission_state_json(mission_id: &str, state: &MissionJobState) -> Valu
         "trace": persisted_trace,
         "result": result,
         "result_omitted": state.result_omitted.clone().or(generated_omission),
+        "evaluator_replay_summary": state.evaluator_replay_summary.clone(),
+        "route_review_provenance": state.route_review_provenance.clone(),
         "execution_provenance": execution_provenance,
         "execution_provenance_omitted": generated_provenance_omission,
         "error": state.error,
@@ -5235,6 +10352,103 @@ fn durable_trace_event(event: &Value) -> Value {
         "detail": Value::Null,
         "detail_omitted": value_omission(&bytes),
     })
+}
+
+/// Retain a compact evaluator replay index independently of the full terminal report. The index is
+/// intentionally non-executing and non-semantic: it preserves enough accounting to explain what
+/// remains queryable after the bounded mission result itself has been omitted from a checkpoint.
+fn evaluator_replay_summary(report: &Value, mission_id: &str) -> Option<Value> {
+    if report.get("workflow").and_then(Value::as_str) != Some("agent_mission") {
+        return None;
+    }
+    let result_bytes = serde_json::to_vec(report).ok()?;
+    let result_digest = hex_digest(&Sha256::digest(&result_bytes));
+    let request = MissionEvaluatorReplayRequest {
+        mission: report.clone(),
+        include_fixtures: false,
+        max_items: 512,
+    };
+    let replay = MissionEvaluatorCatalogue::standard()
+        .replay(&request)
+        .ok()?;
+    let claims = replay
+        .get("claims")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    Some(json!({
+                        "claim_id": row.get("claim_id")?,
+                        "binding_count": row.get("binding_count")?,
+                        "returned_binding_count": row.get("returned_binding_count")?,
+                        "outcome_counts": row.get("outcome_counts")?,
+                        "distinct_output_digests": row.get("distinct_output_digests")?,
+                        "disagreement_posture": row.get("disagreement_posture")?,
+                        "replayed_disagreement_posture": row.get("replayed_disagreement_posture")?
+                    }))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let referenced_adapter_ids = mission_evaluator_binding_adapter_ids(report);
+    let review_provenance = replay
+        .get("review_provenance")
+        .cloned()
+        .unwrap_or(Value::Null);
+    Some(json!({
+        "schema": "bioprism-devplat-mission-evaluator-replay-summary/0.1",
+        "workflow": "mission_evaluator_replay_summary",
+        "mission_id": mission_id,
+        "mission_digest": replay.get("mission_digest")?,
+        "mission_status": replay.get("mission_status").cloned().unwrap_or(Value::Null),
+        "catalog_digest": replay.get("catalog_digest")?,
+        "historical_catalog_digest": review_provenance.get("catalog_digest").cloned().unwrap_or(Value::Null),
+        "historical_review_id": review_provenance.get("review_id").cloned().unwrap_or(Value::Null),
+        "historical_discovery_digest": review_provenance.get("discovery_digest").cloned().unwrap_or(Value::Null),
+        "historical_catalogue_snapshot": review_provenance.get("catalogue_snapshot").cloned().unwrap_or(Value::Null),
+        "route_review_provenance": replay.get("route_review_provenance").cloned().unwrap_or(Value::Null),
+        "route_review_status": replay.get("route_review_status").cloned().unwrap_or(json!("absent")),
+        "referenced_adapter_ids": referenced_adapter_ids,
+        "binding_count": replay.get("binding_count")?,
+        "omitted_bindings": replay.get("omitted_bindings")?,
+        "state_counts": replay.get("state_counts")?,
+        "claim_count": claims.len(),
+        "claims": claims,
+        "coverage": replay.get("coverage")?,
+        "findings": replay.get("findings")?,
+        "replay_status": replay.get("replay_status")?,
+        "execution": "not_started",
+        "result_retained": true,
+        "result_bytes": result_bytes.len(),
+        "result_digest": result_digest,
+        "guarantees": [
+            "the summary is derived from the retained terminal mission report",
+            "the summary remains persisted when the full report exceeds the result retention bound",
+            "no evaluator or domain tool is executed while building the summary"
+        ],
+        "limitations": [
+            "summary-only recovery cannot expose omitted raw evaluator output or rerun replay against it",
+            "the summary is structural evidence and not scientific, clinical, causal, or release truth"
+        ]
+    }))
+}
+
+fn mission_evaluator_binding_adapter_ids(report: &Value) -> Vec<String> {
+    report
+        .get("claim_lineage")
+        .and_then(|lineage| lineage.get("claims"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|claim| claim.get("evaluator_bindings"))
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|binding| binding.get("adapter_id"))
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn value_omission(bytes: &[u8]) -> Value {
@@ -5460,6 +10674,26 @@ fn mission_id(
     Some(segments[2].clone())
 }
 
+fn mission_id_nested(
+    segments: &Result<Vec<String>, crate::http::HttpError>,
+    first_suffix: &str,
+    second_suffix: &str,
+) -> Option<String> {
+    let segments = segments.as_ref().ok()?;
+    if segments.len() != 5
+        || segments[0] != "v1"
+        || segments[1] != "missions"
+        || segments[3] != first_suffix
+        || segments[4] != second_suffix
+    {
+        return None;
+    }
+    if segments[2].is_empty() {
+        return None;
+    }
+    Some(segments[2].clone())
+}
+
 fn route_review_id(segments: &Result<Vec<String>, crate::http::HttpError>) -> Option<String> {
     let segments = segments.as_ref().ok()?;
     if segments.len() != 4
@@ -5528,6 +10762,64 @@ fn query_usize(
         .unwrap_or(Ok(default))
 }
 
+fn query_bool(
+    query: &std::collections::BTreeMap<String, String>,
+    name: &str,
+    default: bool,
+) -> Result<bool, String> {
+    query
+        .get(name)
+        .map(|value| match value.as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(format!("{name} must be true or false")),
+        })
+        .unwrap_or(Ok(default))
+}
+
+fn strip_artifact_transport_fields(value: &Value) -> Value {
+    let Some(object) = value.as_object() else {
+        return value.clone();
+    };
+    let mut object = object.clone();
+    object.remove("artifact_registry");
+    object.remove("__isError");
+    object.remove("request_id");
+    Value::Object(object)
+}
+
+fn evaluator_domains_for_artifact(value: &Value) -> Vec<String> {
+    let mut domains = BTreeSet::new();
+    let mut add_binding = |binding: &Value| {
+        if let Some(domain) = binding.get("domain").and_then(Value::as_str) {
+            if !domain.trim().is_empty() {
+                domains.insert(domain.to_string());
+            }
+        }
+    };
+    if let Some(bindings) = value
+        .pointer("/evaluator_replay/bindings")
+        .and_then(Value::as_array)
+    {
+        for binding in bindings {
+            add_binding(binding);
+        }
+    }
+    if let Some(claims) = value
+        .pointer("/evaluator_replay/claims")
+        .and_then(Value::as_array)
+    {
+        for claim in claims {
+            if let Some(bindings) = claim.get("bindings").and_then(Value::as_array) {
+                for binding in bindings {
+                    add_binding(binding);
+                }
+            }
+        }
+    }
+    domains.into_iter().collect()
+}
+
 fn response_status(wire: &Value) -> u16 {
     wire.get("error")
         .and_then(|error| error.get("code"))
@@ -5560,6 +10852,7 @@ mod tests {
     use super::*;
     use crate::http::HttpRequest;
     use std::collections::{BTreeMap, BTreeSet};
+    use std::time::{Duration, Instant};
 
     fn request(method: &str, target: &str, body: Value) -> HttpRequest {
         HttpRequest {
@@ -5750,6 +11043,92 @@ mod tests {
     }
 
     #[test]
+    fn durable_evaluator_replay_summary_survives_result_omission() {
+        let path = test_state_path("evaluator-replay-summary");
+        let config = ApiConfig {
+            mission_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let report = json!({
+            "workflow": "agent_mission",
+            "plan": {"mission_id": "summary-only"},
+            "mission_status": "succeeded",
+            "claim_lineage": {"claims": []}
+        });
+        let summary = evaluator_replay_summary(&report, "summary-only").expect("replay summary");
+        router.mission_jobs.lock().unwrap().insert(
+            "summary-only".into(),
+            Arc::new(MissionJob {
+                cancellation: Arc::new(AtomicBool::new(false)),
+                state: Arc::new(Mutex::new(MissionJobState {
+                    total_steps: 0,
+                    trace: Vec::new(),
+                    progress: MissionProgressState::new(0),
+                    status: "succeeded".into(),
+                    cancel_requested: false,
+                    cancel_reason: None,
+                    result: None,
+                    result_omitted: Some(json!({"bytes": 300_000, "sha256": "a".repeat(64)})),
+                    evaluator_replay_summary: Some(summary),
+                    route_review_provenance: None,
+                    error: None,
+                    recovered_after_restart: false,
+                    execution_provenance: None,
+                })),
+            }),
+        );
+        router.persist_mission_registry().unwrap();
+
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let response = restored.handle(request(
+            "GET",
+            "/v1/missions/summary-only/evaluator-replay?include_fixtures=false&max_items=32",
+            json!({}),
+        ));
+        assert_eq!(response.status, 200);
+        let value: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(value["workflow"], "mission_evaluator_replay_query");
+        assert_eq!(value["retention"]["mode"], "summary_only");
+        assert_eq!(value["retention"]["result_retained"], false);
+        assert_eq!(value["retention"]["summary_retained"], true);
+        assert_eq!(
+            value["replay"]["workflow"],
+            "mission_evaluator_replay_summary"
+        );
+        assert_eq!(value["replay"]["coverage"]["catalogue_group_count"], 29);
+        let comparison = restored.handle(request(
+            "GET",
+            "/v1/missions/summary-only/evaluator-replay/compare?max_items=32",
+            json!({}),
+        ));
+        assert_eq!(comparison.status, 200);
+        let comparison: Value = serde_json::from_slice(&comparison.body).unwrap();
+        assert_eq!(comparison["catalog_drift"]["status"], "not_recorded");
+        let bundle = restored.handle(request(
+            "GET",
+            "/v1/missions/summary-only/evidence-bundle?include_result=false&include_trace=false",
+            json!({}),
+        ));
+        assert_eq!(bundle.status, 200);
+        let bundle: Value = serde_json::from_slice(&bundle.body).unwrap();
+        assert_eq!(bundle["retention"]["mode"], "summary_only");
+        assert_eq!(bundle["result"], Value::Null);
+        assert_eq!(
+            bundle["evaluator_replay"]["workflow"],
+            "mission_evaluator_replay_summary"
+        );
+        assert_eq!(bundle["bundle_digest"].as_str().unwrap().len(), 64);
+        let invalid = restored.handle(request(
+            "GET",
+            "/v1/missions/summary-only/evaluator-replay?max_items=513",
+            json!({}),
+        ));
+        assert_eq!(invalid.status, 422);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn durable_mission_state_omits_large_results_with_digest_metadata() {
         let state = MissionJobState {
             total_steps: 0,
@@ -5762,6 +11141,8 @@ mod tests {
                 "x".repeat(MAX_PERSISTED_MISSION_RESULT_BYTES + 1),
             )),
             result_omitted: None,
+            evaluator_replay_summary: None,
+            route_review_provenance: None,
             error: None,
             recovered_after_restart: false,
             execution_provenance: None,
@@ -5862,6 +11243,16 @@ mod tests {
         assert_eq!(snapshot["event_metrics"]["retained_events"], 1);
         assert_eq!(snapshot["mission_summary"]["total"], 0);
         assert_eq!(snapshot["persistence"]["events"]["enabled"], false);
+        assert_eq!(
+            snapshot["persistence"]["workflow_reconciliations"]["enabled"],
+            false
+        );
+        assert_eq!(snapshot["reconciliation_summary"]["registry_size"], 0);
+        assert_eq!(snapshot["reconciliation_summary"]["ready_count"], 0);
+        assert_eq!(
+            snapshot["reconciliation_summary"]["readiness_claimed"],
+            false
+        );
         assert_eq!(snapshot["recovery"]["automatic_resume"], false);
         assert_eq!(
             snapshot["domain_coverage"]["schema"],
@@ -5872,6 +11263,10 @@ mod tests {
         assert_eq!(snapshot["consistency"]["cross_store_atomic"], false);
         assert_eq!(snapshot["consistency"]["clock_free"], true);
         assert_eq!(snapshot["capabilities"]["operations_snapshot"], true);
+        assert_eq!(
+            snapshot["capabilities"]["workflow_reconciliation_registry"],
+            true
+        );
         assert!(snapshot["operator_actions"].as_array().unwrap().len() >= 3);
         assert!(snapshot["non_claims"]
             .as_array()
@@ -6019,6 +11414,7 @@ mod tests {
         let gates: Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(gates["workflow"], "operations_domain_gates");
         assert_eq!(gates["schema"], "bioprism-operations-domain-gates/0.1");
+        let initial_gate_digest = gates["gate_digest"].as_str().unwrap().to_owned();
         assert_eq!(gates["summary"]["tool_events_scanned"], 3);
         assert_eq!(gates["summary"]["completed_tool_events"], 3);
         assert_eq!(gates["summary"]["readiness_claimed"], false);
@@ -6026,7 +11422,7 @@ mod tests {
         assert_eq!(gates["gate_digest"].as_str().unwrap().len(), 64);
         assert_eq!(
             gates["gate_digest_scope"],
-            "tool_evidence_projection_without_gate_digest"
+            "operations_evidence_and_reconciliation_projection_without_gate_digest"
         );
         let biological = gates["groups"]
             .as_array()
@@ -6048,6 +11444,10 @@ mod tests {
         );
         assert_eq!(biological["gates"]["safety_evidence"]["state"], "observed");
         assert_eq!(biological["gates"]["release_evidence"]["state"], "observed");
+        assert_eq!(
+            biological["gates"]["reconciliation_evidence"]["state"],
+            "missing"
+        );
         assert_eq!(biological["gate_state"], "review_required");
         assert_eq!(
             biological["gates"]["evaluation_evidence"]["scope"],
@@ -6061,9 +11461,200 @@ mod tests {
             biological["gates"]["domain_evaluator_evidence"]["scope"],
             "completed_evaluator_tool_exact_or_catalogue_group_binding"
         );
+        assert_eq!(biological["gates"]["artifact_evidence"]["state"], "missing");
+        assert_eq!(gates["summary"]["groups_with_artifact_evidence"], 0);
+        assert_eq!(
+            gates["gate_policy"]["optional_evidence_gates"],
+            json!(["artifact_evidence"])
+        );
+
+        let artifact = router.handle(request(
+            "POST",
+            "/v1/artifacts",
+            json!({
+                "kind": "domain_report",
+                "subject_id": "gate-artifact",
+                "domains": ["oncology"],
+                "parent_digests": [],
+                "artifact": {"status": "review"}
+            }),
+        ));
+        assert_eq!(artifact.status, 201);
+        let with_artifact = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=10",
+            json!({}),
+        ));
+        assert_eq!(with_artifact.status, 200);
+        let with_artifact: Value = serde_json::from_slice(&with_artifact.body).unwrap();
+        let biological = with_artifact["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap();
+        assert_eq!(
+            biological["gates"]["artifact_evidence"]["state"],
+            "observed"
+        );
+        assert_eq!(
+            biological["gates"]["artifact_evidence"]["matching_record_count"],
+            1
+        );
+        assert_eq!(biological["gate_state"], "review_required");
+        assert!(
+            with_artifact["summary"]["groups_with_artifact_evidence"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+
+        let mut incomplete_reconciliation = json!({
+            "ok": true,
+            "schema": "bioprism-devplat-domain-workflow-reconcile/0.1",
+            "workflow": "domain_workflow_reconcile",
+            "workflow_id": "biological_domains",
+            "workflow_digest": "a".repeat(64),
+            "catalog_digest": "b".repeat(64),
+            "domain_contract_digest": "c".repeat(64),
+            "mission_id": "gate-reconciliation-mission",
+            "mission_plan_digest": "d".repeat(64),
+            "source": "mission_report",
+            "completion": {"status": "partial", "ready": false, "review_required": true},
+            "evidence": {"evidence_valid": true},
+            "integrity": {"valid": true, "finding_count": 1},
+            "execution": "not_started"
+        });
+        incomplete_reconciliation["reconciliation_digest"] =
+            json!(ContentHash::of_value(&incomplete_reconciliation)
+                .unwrap()
+                .to_string());
+        let imported = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/reconciliations",
+            json!({"record": incomplete_reconciliation}),
+        ));
+        assert_eq!(imported.status, 201);
+        let blocked = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=10",
+            json!({}),
+        ));
+        assert_eq!(blocked.status, 200);
+        let blocked: Value = serde_json::from_slice(&blocked.body).unwrap();
+        let biological = blocked["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap();
+        assert_eq!(
+            biological["gates"]["reconciliation_evidence"]["state"],
+            "incomplete"
+        );
+        assert_eq!(biological["gate_state"], "insufficient_evidence");
+        assert_eq!(blocked["summary"]["groups_reconciliation_blocked"], 1);
+        assert_ne!(
+            blocked["gate_digest"].as_str(),
+            Some(initial_gate_digest.as_str())
+        );
 
         let invalid = router.handle(request("GET", "/v1/operations/gates?limit=257", json!({})));
         assert_eq!(invalid.status, 422);
+    }
+
+    #[test]
+    fn operations_gate_reconciliation_matrix_binds_every_workspace_group() {
+        let reconciliation_path = test_state_path("gate-reconciliation-matrix");
+        let config = ApiConfig {
+            reconciliation_state_path: Some(reconciliation_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let group_ids = operations_domain_coverage()["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|group| group["id"].as_str())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        assert!(!group_ids.is_empty());
+
+        for group_id in &group_ids {
+            let mut record = json!({
+                "ok": true,
+                "schema": "bioprism-devplat-domain-workflow-reconcile/0.1",
+                "workflow": "domain_workflow_reconcile",
+                "workflow_id": group_id,
+                "workflow_digest": "a".repeat(64),
+                "catalog_digest": "b".repeat(64),
+                "domain_contract_digest": "c".repeat(64),
+                "mission_id": format!("gate-reconciliation-matrix-{group_id}"),
+                "mission_plan_digest": "d".repeat(64),
+                "source": "mission_report",
+                "completion": {"status": "partial", "ready": false, "review_required": true},
+                "evidence": {"evidence_valid": true},
+                "integrity": {"valid": true, "finding_count": 1},
+                "execution": "not_started"
+            });
+            record["reconciliation_digest"] =
+                json!(ContentHash::of_value(&record).unwrap().to_string());
+            let imported = router.handle(request(
+                "POST",
+                "/v1/domain-workflows/reconciliations",
+                json!({"record": record}),
+            ));
+            assert_eq!(imported.status, 201, "failed to import {group_id}");
+        }
+
+        let response = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=256",
+            json!({}),
+        ));
+        assert_eq!(response.status, 200);
+        let gates: Value = serde_json::from_slice(&response.body).unwrap();
+        let rows = gates["groups"].as_array().unwrap();
+        assert_eq!(rows.len(), group_ids.len());
+        assert_eq!(
+            gates["summary"]["groups_reconciliation_blocked"],
+            group_ids.len()
+        );
+        for group_id in &group_ids {
+            let group = rows
+                .iter()
+                .find(|group| group["id"] == *group_id)
+                .unwrap_or_else(|| panic!("missing gate row for {group_id}"));
+            assert_eq!(
+                group["gates"]["reconciliation_evidence"]["workflow_id"],
+                *group_id
+            );
+            assert_eq!(
+                group["gates"]["reconciliation_evidence"]["state"],
+                "incomplete"
+            );
+            assert_eq!(
+                group["gates"]["reconciliation_evidence"]["readiness_claimed"],
+                false
+            );
+            assert_eq!(group["gate_state"], "insufficient_evidence");
+        }
+
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?limit=256",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        let restored_rows = restored_query["rows"].as_array().unwrap();
+        assert_eq!(restored_rows.len(), group_ids.len());
+        assert!(restored_rows.iter().all(|row| {
+            row["completion_status"] == "partial" && row["workflow_id"].is_string()
+        }));
+        let _ = std::fs::remove_file(reconciliation_path);
     }
 
     #[test]
@@ -6736,6 +12327,70 @@ mod tests {
             "bioprism-mission-claim-lineage-response/0.1"
         );
         assert_eq!(claims["claim_lineage"]["claims"][0]["claimable"], false);
+        let replay = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evaluator-replay?include_fixtures=false&max_items=64",
+            json!({}),
+        ));
+        assert_eq!(replay.status, 200);
+        let replay: Value = serde_json::from_slice(&replay.body).unwrap();
+        assert_eq!(replay["workflow"], "mission_evaluator_replay_query");
+        assert_eq!(replay["retention"]["mode"], "full");
+        assert_eq!(replay["replay"]["workflow"], "mission_evaluator_replay");
+        assert_eq!(replay["replay"]["fixtures"], json!([]));
+        assert_eq!(replay["replay"]["omitted_fixtures"], 29);
+        let invalid_replay_query = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evaluator-replay?include_fixtures=maybe",
+            json!({}),
+        ));
+        assert_eq!(invalid_replay_query.status, 422);
+        let comparison = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evaluator-replay/compare?include_fixtures=false&max_items=32",
+            json!({}),
+        ));
+        assert_eq!(comparison.status, 200);
+        let comparison: Value = serde_json::from_slice(&comparison.body).unwrap();
+        assert_eq!(comparison["workflow"], "mission_evaluator_replay_compare");
+        assert_eq!(comparison["catalog_drift"]["status"], "not_recorded");
+        let bundle = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evidence-bundle?include_result=false&include_trace=false&max_items=32",
+            json!({}),
+        ));
+        assert_eq!(bundle.status, 200);
+        let bundle: Value = serde_json::from_slice(&bundle.body).unwrap();
+        assert_eq!(bundle["workflow"], "mission_evidence_bundle_export");
+        assert_eq!(bundle["retention"]["mode"], "full");
+        assert_eq!(bundle["result"], Value::Null);
+        assert_eq!(bundle["trace"], json!([]));
+        assert_eq!(bundle["bundle_digest"].as_str().unwrap().len(), 64);
+        let verification = router.handle(request(
+            "POST",
+            "/v1/evidence-bundles/verify",
+            json!({"bundle": bundle.clone()}),
+        ));
+        assert_eq!(verification.status, 200);
+        let verification: Value = serde_json::from_slice(&verification.body).unwrap();
+        assert_eq!(verification["workflow"], "mission_evidence_bundle_verify");
+        assert_eq!(verification["valid"], true);
+        let mut tampered = bundle;
+        tampered["catalog_drift"]["status"] = json!("drifted");
+        let tampered_response = router.handle(request(
+            "POST",
+            "/v1/evidence-bundles/verify",
+            json!({"bundle": tampered}),
+        ));
+        assert_eq!(tampered_response.status, 200);
+        let tampered: Value = serde_json::from_slice(&tampered_response.body).unwrap();
+        assert_eq!(tampered["valid"], false);
+        let invalid_bundle = router.handle(request(
+            "GET",
+            "/v1/missions/api-async-1/evidence-bundle?include_result=maybe",
+            json!({}),
+        ));
+        assert_eq!(invalid_bundle.status, 422);
         let trace = router.handle(request(
             "GET",
             "/v1/missions/api-async-1/trace?after=0&limit=64",
@@ -6823,6 +12478,1968 @@ mod tests {
     }
 
     #[test]
+    fn durable_mission_queue_checkpoint_tracks_commit_and_survives_restart() {
+        let queue_path = test_state_path("mission-queue");
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_queue_state_path: Some(queue_path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let submitted = router.handle(request(
+            "POST",
+            "/v1/missions",
+            json!({
+                "mission_id": "durable-queue-1",
+                "goal": "exercise the durable mission queue",
+                "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities", "arguments": {}, "depends_on": [], "bindings": [], "required": true}],
+                "route_review": {
+                    "ok": true,
+                    "workflow": "capability_route_review",
+                    "review_id": "a".repeat(64),
+                    "route_id": "b".repeat(64),
+                    "catalog_digest": "c".repeat(64),
+                    "goal": "exercise the durable mission queue",
+                    "findings": [],
+                    "review_status": "ready",
+                    "handoff_status": "mission_preflight_required",
+                    "mission_draft": {
+                        "goal": "exercise the durable mission queue",
+                        "steps": [{"id": "catalog", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities", "arguments": {}, "depends_on": [], "bindings": [], "required": true}],
+                        "dependency_waves": [["catalog"]]
+                    },
+                    "execution": "not_started"
+                }
+            }),
+        ));
+        assert_eq!(submitted.status, 202);
+        let mut mission = Value::Null;
+        for _ in 0..100 {
+            let response = router.handle(request("GET", "/v1/missions/durable-queue-1", json!({})));
+            mission = serde_json::from_slice(&response.body).unwrap();
+            if mission["status"] == "planned" {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(mission["status"], "planned");
+        assert_eq!(mission["queue"]["state"], "succeeded");
+        assert_eq!(mission["queue"]["attempts"], 1);
+        assert_eq!(
+            mission["route_review_provenance"]["route_id"],
+            "b".repeat(64)
+        );
+
+        let queue = router.handle(request("GET", "/v1/missions/queue", json!({})));
+        assert_eq!(queue.status, 200);
+        let queue: Value = serde_json::from_slice(&queue.body).unwrap();
+        assert_eq!(queue["queue"]["enabled"], true);
+        assert_eq!(queue["queue"]["file_present"], true);
+        assert_eq!(queue["queue"]["integrity_verified"], true);
+        assert_eq!(queue["queue"]["jobs"][0]["spec_returned"], false);
+        assert_eq!(queue["queue"]["jobs"][0]["state"], "succeeded");
+        assert_eq!(
+            queue["queue"]["jobs"][0]["route_review_provenance"]["review_id"],
+            "a".repeat(64)
+        );
+        assert_eq!(queue["queue"]["state_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(queue["queue"]["authority"]["configured"], true);
+        assert_eq!(queue["queue"]["authority"]["integrity_verified"], true);
+        assert!(queue["queue"]["authority"]["revision"].as_u64().unwrap() >= 1);
+        assert_eq!(
+            queue["queue"]["authority"]["event_count"],
+            queue["queue"]["authority"]["revision"]
+        );
+        drop(router);
+
+        let restored = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_queue_state_path: Some(queue_path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let restored_queue =
+            restored.handle(request("GET", "/v1/missions/queue/persistence", json!({})));
+        assert_eq!(restored_queue.status, 200);
+        let restored_queue: Value = serde_json::from_slice(&restored_queue.body).unwrap();
+        assert_eq!(restored_queue["integrity_verified"], true);
+        assert_eq!(restored_queue["jobs"][0]["state"], "succeeded");
+        assert_eq!(
+            restored_queue["jobs"][0]["route_review_provenance"]["catalog_digest"],
+            "c".repeat(64)
+        );
+        assert_eq!(
+            restored_queue["authority"]["queue_state_digest"],
+            restored_queue["state_digest"]
+        );
+        let _ = std::fs::remove_file(queue_path);
+    }
+
+    #[test]
+    fn mission_queue_authority_reports_and_audits_explicit_orphan_lock_release() {
+        let queue_path = test_state_path("mission-queue-lock-release");
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_queue_state_path: Some(queue_path.clone()),
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let lock_path = queue_path.with_file_name(format!(
+            ".{}.authority-lock",
+            queue_path.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::create_dir_all(&lock_path).unwrap();
+        std::fs::write(
+            lock_path.join("owner.json"),
+            serde_json::to_vec(&json!({
+                "owner_id": "dead-api-process",
+                "acquired_unix_nanos": 7
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let before = router.handle(request("GET", "/v1/missions/queue/persistence", json!({})));
+        let before: Value = serde_json::from_slice(&before.body).unwrap();
+        assert_eq!(before["authority"]["lock_present"], true);
+        let release = router.handle(request(
+            "POST",
+            "/v1/missions/queue/authority/release-lock",
+            json!({
+                "operator": "on-call",
+                "reason": "confirmed the previous API process exited"
+            }),
+        ));
+        assert_eq!(release.status, 200);
+        let release: Value = serde_json::from_slice(&release.body).unwrap();
+        assert_eq!(
+            release["receipt"]["previous_owner"]["owner_id"],
+            "dead-api-process"
+        );
+        let after = router.handle(request("GET", "/v1/missions/queue/persistence", json!({})));
+        let after: Value = serde_json::from_slice(&after.body).unwrap();
+        assert_eq!(after["authority"]["lock_present"], false);
+        assert!(
+            after["authority"]["revision"].as_u64().unwrap()
+                > before["authority"]["revision"].as_u64().unwrap()
+        );
+        drop(router);
+        let _ = std::fs::remove_file(queue_path);
+        let _ = std::fs::remove_dir_all(lock_path);
+    }
+
+    #[test]
+    fn mission_queue_returns_backpressure_before_accepting_over_capacity_work() {
+        let router = ApiRouter::new(
+            std::env::current_dir().unwrap(),
+            ApiConfig {
+                mission_queue_max_jobs: 1,
+                mission_queue_max_active_leases: 1,
+                ..ApiConfig::default()
+            },
+        )
+        .unwrap();
+        let first = router.handle(request(
+            "POST",
+            "/v1/missions",
+            json!({
+                "mission_id": "backpressure-1",
+                "goal": "fill the bounded queue",
+                "steps": [{"id": "step-1", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}]
+            }),
+        ));
+        assert_eq!(first.status, 202);
+        let second = router.handle(request(
+            "POST",
+            "/v1/missions",
+            json!({
+                "mission_id": "backpressure-2",
+                "goal": "must be refused before queue mutation",
+                "steps": [{"id": "step-1", "domain": "workspace", "capability": "discovery", "objective": "discover routes", "tool": "workspace_capabilities"}]
+            }),
+        ));
+        assert_eq!(second.status, 429);
+        let second: Value = serde_json::from_slice(&second.body).unwrap();
+        assert_eq!(second["error"]["code"], "mission_queue_backpressure");
+        let status = router.handle(request("GET", "/v1/missions/queue/persistence", json!({})));
+        let status: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status["admission_policy"]["max_jobs"], 1);
+        assert_eq!(status["registry_size"], 1);
+    }
+
+    #[test]
+    fn asynchronous_workflow_missions_checkpoint_reconciliation_before_terminal_state() {
+        let event_path = test_state_path("async-workflow-events");
+        let mission_path = test_state_path("async-workflow-missions");
+        let reconciliation_path = test_state_path("async-workflow-reconciliation");
+        let artifact_path = test_state_path("async-workflow-artifacts");
+        let config = ApiConfig {
+            event_state_path: Some(event_path.clone()),
+            mission_state_path: Some(mission_path.clone()),
+            reconciliation_state_path: Some(reconciliation_path.clone()),
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let instantiated = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/instantiate",
+            json!({
+                "workflow_id": "biological_domains",
+                "mission_id": "async-workflow-reconcile",
+                "goal": "execute a reviewed biological workflow asynchronously",
+                "steps": [{
+                    "id": "catalog",
+                    "domain": "biological",
+                    "capability": "catalogue",
+                    "objective": "inspect modality support",
+                    "tool": "modality_catalog",
+                    "arguments": {}
+                }],
+                "policy": {"execute": true}
+            }),
+        ));
+        assert_eq!(instantiated.status, 200);
+        let instantiated: Value = serde_json::from_slice(&instantiated.body).unwrap();
+        let completed = json!({
+            "result": {
+                "isError": false,
+                "content": [{"type": "text", "text": "{}"}]
+            }
+        });
+        router.record_tool_event("async-workflow-gate-1", "modality_catalog", &completed);
+        router.record_tool_event(
+            "async-workflow-gate-2",
+            "bioeval_reference_audit",
+            &completed,
+        );
+        router.record_tool_event("async-workflow-gate-3", "safety_release_gate", &completed);
+        let gates = router.handle(request(
+            "GET",
+            "/v1/operations/gates?after=0&limit=256",
+            json!({}),
+        ));
+        assert_eq!(gates.status, 200);
+        let gates: Value = serde_json::from_slice(&gates.body).unwrap();
+        let review = router.handle(request(
+            "POST",
+            "/v1/operations/gate-reviews",
+            json!({
+                "gate_digest": gates["gate_digest"],
+                "reviewer": "operator-async-workflow",
+                "rationale": "reviewed the bounded asynchronous workflow dispatch",
+                "group_ids": ["biological_domains"],
+                "accepted_gates": {"biological_domains": operations_required_gates()}
+            }),
+        ));
+        assert_eq!(review.status, 201);
+        let review: Value = serde_json::from_slice(&review.body).unwrap();
+
+        let mut mission = instantiated["mission"].clone();
+        mission["operations_gate_acceptance"] = review["acceptance"].clone();
+        let submitted = router.handle(request("POST", "/v1/missions", mission));
+        assert_eq!(
+            submitted.status,
+            202,
+            "{}",
+            String::from_utf8_lossy(&submitted.body)
+        );
+
+        let mut terminal = Value::Null;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            let response = router.handle(request(
+                "GET",
+                "/v1/missions/async-workflow-reconcile",
+                json!({}),
+            ));
+            assert_eq!(response.status, 200);
+            terminal = serde_json::from_slice(&response.body).unwrap();
+            if ["succeeded", "failed", "cancelled"]
+                .iter()
+                .any(|status| terminal["status"] == *status)
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(terminal["status"], "succeeded");
+        assert_eq!(terminal["result"]["mission_status"], "succeeded");
+        assert_eq!(
+            terminal["result"]["workflow_reconciliation"]["present"],
+            true
+        );
+        assert_eq!(
+            terminal["result"]["workflow_reconciliation"]["automatic"],
+            true
+        );
+        assert_eq!(terminal["result"]["artifact_registry"]["indexed"], true);
+        let mission_artifact_digest = terminal["result"]["artifact_registry"]["content_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let reconciliation_digest = terminal["result"]["workflow_reconciliation"]
+            ["reconciliation_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let persisted = std::fs::read_to_string(&reconciliation_path).unwrap();
+        assert!(persisted.contains("async-workflow-reconcile"));
+        let persisted_artifacts = std::fs::read_to_string(&artifact_path).unwrap();
+        assert!(persisted_artifacts.contains(&mission_artifact_digest));
+        let artifact_query = router.handle(request(
+            "GET",
+            "/v1/artifacts?kind=mission_report&subject_id=async-workflow-reconcile",
+            json!({}),
+        ));
+        assert_eq!(artifact_query.status, 200);
+        let artifact_query: Value = serde_json::from_slice(&artifact_query.body).unwrap();
+        assert_eq!(artifact_query["rows"].as_array().unwrap().len(), 1);
+        let query = router.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=async-workflow-reconcile&completion_status=complete",
+            json!({}),
+        ));
+        assert_eq!(query.status, 200);
+        let query: Value = serde_json::from_slice(&query.body).unwrap();
+        assert_eq!(query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            query["rows"][0]["reconciliation_digest"],
+            reconciliation_digest
+        );
+
+        let flush = router.handle(request("POST", "/v1/missions/persistence/flush", json!({})));
+        assert_eq!(flush.status, 200);
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_status = restored.handle(request(
+            "GET",
+            "/v1/missions/async-workflow-reconcile",
+            json!({}),
+        ));
+        assert_eq!(restored_status.status, 200);
+        let restored_status: Value = serde_json::from_slice(&restored_status.body).unwrap();
+        assert_eq!(restored_status["status"], "succeeded");
+        assert_eq!(
+            restored_status["result"]["workflow_reconciliation"]["reconciliation_digest"],
+            reconciliation_digest
+        );
+        let restored_artifact = restored.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{mission_artifact_digest}"),
+            json!({}),
+        ));
+        assert_eq!(restored_artifact.status, 200);
+        let restored_artifact: Value = serde_json::from_slice(&restored_artifact.body).unwrap();
+        assert_eq!(
+            restored_artifact["record"]["content_digest"],
+            mission_artifact_digest
+        );
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=async-workflow-reconcile",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            restored_query["rows"][0]["reconciliation_digest"],
+            reconciliation_digest
+        );
+        let _ = std::fs::remove_file(event_path);
+        let _ = std::fs::remove_file(mission_path);
+        let _ = std::fs::remove_file(reconciliation_path);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn evidence_registry_import_is_idempotent_indexed_and_restart_safe() {
+        let path = test_state_path("evidence-registry");
+        let artifact_path = test_state_path("evidence-registry-artifacts");
+        let config = ApiConfig {
+            evidence_state_path: Some(path.clone()),
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let mut bundle = json!({
+            "schema": "bioprism-api/mission-evidence-bundle/0.1",
+            "workflow": "mission_evidence_bundle_export",
+            "mission_id": "registry-mission",
+            "retention": {"mode": "summary_only", "result_retained": false, "result_included": false},
+            "result": null,
+            "result_digest": null,
+            "evaluator_replay": {"workflow": "mission_evaluator_replay_summary", "bindings": [{"domain": "oncology", "adapter_id": "oncoworlds.assay_fidelity"}]},
+            "catalog_drift": {"status": "unchanged"},
+            "trace": [],
+            "export": {"format": "json", "include_result": false, "include_trace": true, "trace_included": true, "include_fixtures": false, "max_items": 16, "digest_algorithm": "sha256", "execution": "not_started"},
+            "execution": "not_started"
+        });
+        bundle["bundle_digest"] = json!(ContentHash::of_value(&bundle).unwrap().to_string());
+        let imported = router.handle(request(
+            "POST",
+            "/v1/evidence-bundles",
+            json!({"bundle": bundle.clone()}),
+        ));
+        assert_eq!(imported.status, 201);
+        let imported: Value = serde_json::from_slice(&imported.body).unwrap();
+        assert_eq!(imported["workflow"], "mission_evidence_bundle_import");
+        assert_eq!(imported["created"], true);
+        assert_eq!(imported["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            imported["artifact_registry"]["kind"],
+            "mission_evidence_bundle"
+        );
+        let artifact_digest = imported["artifact_registry"]["content_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let digest = imported["bundle_digest"].as_str().unwrap().to_string();
+        let duplicate = router.handle(request(
+            "POST",
+            "/v1/evidence-bundles",
+            json!({"bundle": bundle}),
+        ));
+        assert_eq!(duplicate.status, 200);
+        let duplicate: Value = serde_json::from_slice(&duplicate.body).unwrap();
+        assert_eq!(duplicate["already_present"], true);
+        assert_eq!(duplicate["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            duplicate["artifact_registry"]["content_digest"],
+            artifact_digest
+        );
+        let queried = router.handle(request(
+            "GET",
+            "/v1/evidence-bundles?mission_id=registry-mission&domain=oncology&limit=10",
+            json!({}),
+        ));
+        assert_eq!(queried.status, 200);
+        let queried: Value = serde_json::from_slice(&queried.body).unwrap();
+        assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(queried["rows"][0]["bundle_digest"], digest);
+        assert_eq!(queried["rows"][0]["domains"], json!(["oncology"]));
+        let fetched = router.handle(request(
+            "GET",
+            &format!("/v1/evidence-bundles/{digest}"),
+            json!({}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert_eq!(fetched["bundle"]["bundle_digest"], digest);
+        assert_eq!(
+            router
+                .handle(request(
+                    "POST",
+                    "/v1/evidence-bundles/persistence/flush",
+                    json!({})
+                ))
+                .status,
+            200
+        );
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let status = restored.handle(request(
+            "GET",
+            "/v1/evidence-bundles/persistence",
+            json!({}),
+        ));
+        let status: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status["integrity_verified"], true);
+        assert_eq!(status["registry_size"], 1);
+        let artifact = restored.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{artifact_digest}"),
+            json!({}),
+        ));
+        assert_eq!(artifact.status, 200);
+        let artifact: Value = serde_json::from_slice(&artifact.body).unwrap();
+        assert_eq!(artifact["record"]["content_digest"], artifact_digest);
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/evidence-bundles?mission_id=registry-mission&limit=10",
+            json!({}),
+        ));
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn workflow_reconciliation_registry_is_idempotent_indexed_and_restart_safe() {
+        let path = test_state_path("workflow-reconciliation-registry");
+        let artifact_path = test_state_path("workflow-reconciliation-artifacts");
+        let config = ApiConfig {
+            reconciliation_state_path: Some(path.clone()),
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let mut record = json!({
+            "ok": true,
+            "schema": "bioprism-devplat-domain-workflow-reconcile/0.1",
+            "workflow": "domain_workflow_reconcile",
+            "workflow_id": "documentation_and_knowledge",
+            "workflow_digest": "a".repeat(64),
+            "catalog_digest": "b".repeat(64),
+            "domain_contract_digest": "c".repeat(64),
+            "mission_id": "reconciliation-api-mission",
+            "mission_plan_digest": "d".repeat(64),
+            "source": "mission_report",
+            "completion": {"status": "complete", "ready": true, "review_required": true},
+            "evidence": {"evidence_valid": true},
+            "integrity": {"valid": true, "finding_count": 0},
+            "execution": "not_started"
+        });
+        record["reconciliation_digest"] =
+            json!(ContentHash::of_value(&record).unwrap().to_string());
+        let imported = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/reconciliations",
+            json!({"record": record.clone()}),
+        ));
+        assert_eq!(imported.status, 201);
+        let imported: Value = serde_json::from_slice(&imported.body).unwrap();
+        assert_eq!(imported["created"], true);
+        assert_eq!(imported["artifact_registry"]["indexed"], true);
+        let artifact_digest = imported["artifact_registry"]["content_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let digest = imported["reconciliation_digest"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let duplicate = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/reconciliations",
+            json!({"record": record}),
+        ));
+        assert_eq!(duplicate.status, 200);
+        let duplicate: Value = serde_json::from_slice(&duplicate.body).unwrap();
+        assert_eq!(duplicate["already_present"], true);
+        assert_eq!(duplicate["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            duplicate["artifact_registry"]["content_digest"],
+            artifact_digest
+        );
+        let queried = router.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=reconciliation-api-mission&completion_status=complete&limit=10",
+            json!({}),
+        ));
+        assert_eq!(queried.status, 200);
+        let queried: Value = serde_json::from_slice(&queried.body).unwrap();
+        assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(queried["rows"][0]["reconciliation_digest"], digest);
+        let fetched = router.handle(request(
+            "GET",
+            &format!("/v1/domain-workflows/reconciliations/{digest}"),
+            json!({}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert_eq!(fetched["record"]["reconciliation_digest"], digest);
+        let persistence = router.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations/persistence",
+            json!({}),
+        ));
+        let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
+        assert_eq!(persistence["enabled"], true);
+        assert_eq!(persistence["integrity_verified"], true);
+        let artifact = router.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{artifact_digest}"),
+            json!({}),
+        ));
+        assert_eq!(artifact.status, 200);
+
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=reconciliation-api-mission",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(restored_query["registry_generation"], 1);
+        let restored_artifact = restored.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{artifact_digest}"),
+            json!({}),
+        ));
+        assert_eq!(restored_artifact.status, 200);
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn artifact_registry_routes_join_lineage_and_restore_only_digest_valid_records() {
+        let path = test_state_path("artifact-registry");
+        let config = ApiConfig {
+            artifact_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let leaf = router.handle(request(
+            "POST",
+            "/v1/artifacts",
+            json!({
+                "kind": "domain_report",
+                "subject_id": "leaf",
+                "domains": ["oncology", "genomics"],
+                "parent_digests": [],
+                "artifact": {"status": "review_required"}
+            }),
+        ));
+        assert_eq!(leaf.status, 201);
+        let leaf: Value = serde_json::from_slice(&leaf.body).unwrap();
+        let leaf_digest = leaf["content_digest"].as_str().unwrap().to_string();
+        let root = router.handle(request(
+            "POST",
+            "/v1/artifacts",
+            json!({
+                "kind": "mission_report",
+                "subject_id": "root",
+                "domains": ["oncology"],
+                "parent_digests": [leaf_digest, "f".repeat(64)],
+                "artifact": {"status": "partial"}
+            }),
+        ));
+        assert_eq!(root.status, 201);
+        let root: Value = serde_json::from_slice(&root.body).unwrap();
+        let root_digest = root["content_digest"].as_str().unwrap().to_string();
+        let lineage = router.handle(request(
+            "GET",
+            &format!("/v1/artifacts/{root_digest}/lineage"),
+            json!({}),
+        ));
+        assert_eq!(lineage.status, 200);
+        let lineage: Value = serde_json::from_slice(&lineage.body).unwrap();
+        assert_eq!(lineage["nodes"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            lineage["missing_parent_digests"].as_array().unwrap().len(),
+            1
+        );
+        assert!(lineage["does_not_claim"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|claim| claim
+                .as_str()
+                .unwrap()
+                .contains("causal provenance or scientific validity")));
+        let query = router.handle(request(
+            "GET",
+            "/v1/artifacts?domain=oncology&limit=10",
+            json!({}),
+        ));
+        assert_eq!(query.status, 200);
+        let query: Value = serde_json::from_slice(&query.body).unwrap();
+        assert_eq!(query["rows"].as_array().unwrap().len(), 2);
+        let persistence = router.handle(request("GET", "/v1/artifacts/persistence", json!({})));
+        let persistence: Value = serde_json::from_slice(&persistence.body).unwrap();
+        assert_eq!(persistence["integrity_verified"], true);
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/artifacts?domain=oncology&limit=10",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 2);
+        assert_eq!(restored_query["registry_generation"], 2);
+        let cross_store = restored.handle(request("GET", "/v1/artifacts/cross-store", json!({})));
+        assert_eq!(cross_store.status, 200);
+        let cross_store: Value = serde_json::from_slice(&cross_store.body).unwrap();
+        assert_eq!(
+            cross_store["workflow"],
+            "artifact_registry_cross_store_audit"
+        );
+        assert_eq!(cross_store["consistent"], true);
+        assert_eq!(
+            cross_store["stores"]["artifact_registry"]["record_count"],
+            2
+        );
+        assert_eq!(
+            cross_store["stores"]["workflow_execution_evidence_registry"]["record_count"],
+            0
+        );
+        assert_eq!(cross_store["findings"], json!([]));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn workflow_execution_evidence_api_shares_and_restores_registry() {
+        let evidence_path = test_state_path("workflow-execution-evidence-registry");
+        let artifact_path = test_state_path("workflow-execution-evidence-artifacts");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            workflow_execution_evidence_state_path: Some(evidence_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let executed = router.handle(request(
+            "POST",
+            "/v1/tools/interweave_workflow_execute",
+            json!({
+                "workflow": "biomedical_research_data_audit",
+                "problem": {
+                    "actions": ["hold", "release"],
+                    "models": ["safe", "unsafe"],
+                    "loss": [0.0, 2.0, 2.0, 0.0]
+                },
+                "belief": {"mass": [0.6, 0.4]},
+                "acquisitions": [{
+                    "id": "screen",
+                    "cost": 0.01,
+                    "outcomes": [
+                        {"label": "negative", "likelihood": [0.9, 0.2]},
+                        {"label": "positive", "likelihood": [0.1, 0.8]}
+                    ]
+                }],
+                "budget": 0.1,
+                "max_steps": 1,
+                "provider": "mcp-simulated",
+                "capabilities": ["data.read", "analysis.sandbox"],
+                "authorization": {"grant_id": "grant-1", "provider": "mcp-simulated"},
+                "observations": [{"acquisition_id": "screen", "outcome_label": "negative"}],
+                "evidence": {
+                    "subject_id": "api-workflow-evidence-subject",
+                    "domains": ["biomedical_research", "privacy"],
+                    "parent_digests": ["a".repeat(64)]
+                }
+            }),
+        ));
+        assert_eq!(
+            executed.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&executed.body)
+        );
+        let envelope: Value = serde_json::from_slice(&executed.body).unwrap();
+        let text = envelope["mcp"]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        let result: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            result["workflow_execution_evidence"]["ok"], true,
+            "{result}"
+        );
+        let evidence_digest = result["workflow_execution_evidence"]["evidence_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let cross_store = router.handle(request("GET", "/v1/artifacts/cross-store", json!({})));
+        let cross_store: Value = serde_json::from_slice(&cross_store.body).unwrap();
+        assert_eq!(
+            cross_store["stores"]["workflow_execution_evidence_registry"]["record_count"],
+            1
+        );
+        drop(router);
+
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_cross_store =
+            restored.handle(request("GET", "/v1/artifacts/cross-store", json!({})));
+        let restored_cross_store: Value =
+            serde_json::from_slice(&restored_cross_store.body).unwrap();
+        assert_eq!(
+            restored_cross_store["stores"]["workflow_execution_evidence_registry"]["record_count"],
+            1
+        );
+        let fetched = restored.handle(request(
+            "POST",
+            "/v1/tools/interweave_workflow_execution_evidence_get",
+            json!({"evidence_digest": evidence_digest}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert!(fetched["mcp"]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("review_required"));
+        let _ = std::fs::remove_file(evidence_path);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn domain_report_routes_project_validate_index_and_cover_catalogue() {
+        let artifact_path = test_state_path("domain-report-routes");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let root: std::path::PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect();
+        let router = ApiRouter::new(root.clone(), config.clone()).unwrap();
+        let projected = router.handle(request(
+            "POST",
+            "/v1/domain-reports",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-domain-report",
+                "source_tool": "modality_catalog",
+                "report": {"observations": ["caller supplied"]},
+                "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+            }),
+        ));
+        assert_eq!(projected.status, 200);
+        let projected: Value = serde_json::from_slice(&projected.body).unwrap();
+        assert_eq!(projected["workflow"], "domain_report_project");
+        assert_eq!(projected["artifact_registry"]["indexed"], true);
+        let digest = projected["artifact_registry"]["content_digest"].clone();
+        let coverage = router.handle(request(
+            "GET",
+            "/v1/domain-reports/coverage?include_report_digests=true",
+            json!({}),
+        ));
+        assert_eq!(coverage.status, 200);
+        let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
+        assert_eq!(coverage["workflow"], "domain_report_coverage");
+        assert_eq!(coverage["group_count"], 30);
+        assert_eq!(coverage["reported_group_count"], 1);
+        assert!(coverage["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap()["report_digests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == &digest));
+        let filtered = router.handle(request(
+            "GET",
+            "/v1/domain-reports/coverage?report_class=ordinary&bridge_mode=inline",
+            json!({}),
+        ));
+        assert_eq!(filtered.status, 200);
+        let filtered: Value = serde_json::from_slice(&filtered.body).unwrap();
+        assert_eq!(filtered["filters"]["report_class"], "ordinary");
+        assert_eq!(filtered["filters"]["bridge_mode"], "inline");
+        assert_eq!(filtered["reported_group_count"], 0);
+        let refused = router.handle(request(
+            "POST",
+            "/v1/domain-reports",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["not_declared"],
+                "subject_id": "api-domain-report-refused",
+                "source_tool": "modality_catalog",
+                "report": {},
+                "claim_posture": {"status": "refused", "does_not_claim": ["truth"]}
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn developer_workbench_verification_route_replays_retained_report() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let digest = "a".repeat(64);
+        let session = json!({
+            "session_id": "api-workbench-verify",
+            "owner": "agent-a",
+            "goal": "verify a retained authoring handoff",
+            "artifacts": [{
+                "id": "artifact-1", "title": "card", "path": "card.json", "domain": "oncology",
+                "capability": "verification", "state": "validated", "evidence": "reproduced", "digest": digest
+            }],
+            "cells": [],
+            "changes": []
+        });
+        let ci = json!({
+            "workflow": "consumer contracts", "triggers": ["pull_request"], "rust_toolchain": "stable",
+            "offline": true, "checks": [{"name": "unit", "run": "cargo test -p bioprism-devplat", "required": true}]
+        });
+        let planned = router.handle(request(
+            "POST",
+            "/v1/tools/developer_workbench",
+            json!({"session": session.clone(), "ci": ci.clone()}),
+        ));
+        assert_eq!(planned.status, 200);
+        let planned: Value = serde_json::from_slice(&planned.body).unwrap();
+        let retained: Value = serde_json::from_str(
+            planned["mcp"]["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let verified = router.handle(request(
+            "POST",
+            "/v1/developer-workbench/verify",
+            json!({
+                "session": session,
+                "report": retained,
+                "ci_replay": ci,
+                "policy": {"require_ci": true, "require_ci_replay": true}
+            }),
+        ));
+        assert_eq!(verified.status, 200);
+        let verified: Value = serde_json::from_slice(&verified.body).unwrap();
+        assert_eq!(verified["workflow"], "developer_workbench_verify");
+        assert_eq!(verified["valid"], true);
+        assert_eq!(verified["status"], "verified");
+        assert_eq!(verified["ci_verified"], true);
+        assert_eq!(verified["execution"], "not_started");
+    }
+
+    #[test]
+    fn developer_workbench_report_registry_is_queryable_and_restart_safe() {
+        let path = test_state_path("workbench-registry");
+        let config = ApiConfig {
+            workbench_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let planned = router.handle(request(
+            "POST",
+            "/v1/tools/developer_workbench",
+            json!({
+                "session": {
+                    "session_id": "api-workbench-registry",
+                    "owner": "agent-a",
+                    "goal": "retain a report",
+                    "artifacts": [{
+                        "id": "artifact-1", "title": "card", "path": "card.json",
+                        "domain": "oncology", "capability": "evidence", "state": "validated",
+                        "evidence": "observed", "digest": "a".repeat(64)
+                    }],
+                    "cells": [], "changes": []
+                },
+                "dashboard": {"domains": ["oncology"], "limit": 10}
+            }),
+        ));
+        let planned: Value = serde_json::from_slice(&planned.body).unwrap();
+        let retained: Value = serde_json::from_str(
+            planned["mcp"]["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let imported = router.handle(request(
+            "POST",
+            "/v1/developer-workbench/reports",
+            json!({"report": retained}),
+        ));
+        assert_eq!(imported.status, 201);
+        let imported: Value = serde_json::from_slice(&imported.body).unwrap();
+        let digest = imported["workbench_report_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let queried = router.handle(request(
+            "GET",
+            "/v1/developer-workbench/reports?domain=oncology&capability=evidence&limit=10",
+            json!({}),
+        ));
+        let queried: Value = serde_json::from_slice(&queried.body).unwrap();
+        assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(queried["rows"][0]["workbench_report_digest"], digest);
+        let fetched = router.handle(request(
+            "GET",
+            &format!("/v1/developer-workbench/reports/{digest}"),
+            json!({}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert_eq!(
+            fetched["report"]["schema_version"],
+            "bioprism-devplat-workbench/0.1"
+        );
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let status = restored.handle(request(
+            "GET",
+            "/v1/developer-workbench/reports/persistence",
+            json!({}),
+        ));
+        let status: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status["integrity_verified"], true);
+        assert_eq!(status["registry_size"], 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn ci_provider_evidence_registry_reaudits_joins_and_restores() {
+        let path = test_state_path("ci-provider-evidence-registry");
+        let config = ApiConfig {
+            ci_provider_evidence_state_path: Some(path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let imported = router.handle(request(
+            "POST",
+            "/v1/ci/provider-evidence",
+            json!({
+                "ci": {
+                    "workflow": "api-ci",
+                    "triggers": ["push"],
+                    "rust_toolchain": "stable",
+                    "checks": [{"name": "unit", "run": "cargo test -p bioprism-devplat", "required": true}],
+                    "offline": true
+                },
+                "provider": "generic",
+                "payload": {
+                    "run_id": "api-provider-run-1",
+                    "conclusion": "success",
+                    "checks": [{"name": "unit", "status": "success"}]
+                },
+                "artifacts": [{
+                    "id": "artifact-1", "kind": "test-report", "digest": "a".repeat(64),
+                    "check": "unit", "run_id": "api-provider-run-1", "provider": "generic",
+                    "uri": "https://example.test/artifact-1", "digest_scope": "local_response_bytes"
+                }],
+                "logs": [{
+                    "id": "log-1", "digest": "b".repeat(64), "check": "unit",
+                    "run_id": "api-provider-run-1", "provider": "generic", "truncated": false
+                }],
+                "attestations": [{
+                    "id": "attestation-1", "subject": "artifact-1", "issuer": "test",
+                    "statement_digest": "c".repeat(64), "method": "detached", "subject_digest": "a".repeat(64)
+                }]
+            }),
+        ));
+        assert_eq!(
+            imported.status,
+            201,
+            "{}",
+            String::from_utf8_lossy(&imported.body)
+        );
+        let imported: Value = serde_json::from_slice(&imported.body).unwrap();
+        assert_eq!(imported["conformance_ready"], true);
+        assert_eq!(imported["local_byte_hash_artifact_count"], 1);
+        assert_eq!(imported["attestation_subject_digest_binding_count"], 1);
+        assert_eq!(
+            imported["artifact_record_digest"].as_str().unwrap().len(),
+            64
+        );
+        let digest = imported["provider_evidence_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let queried = router.handle(request(
+            "GET",
+            "/v1/ci/provider-evidence?provider=generic&conformance_ready=true&include_records=true&min_local_byte_hash_artifacts=1&min_attestation_subject_digest_bindings=1&max_items=10",
+            json!({}),
+        ));
+        assert_eq!(queried.status, 200);
+        let queried: Value = serde_json::from_slice(&queried.body).unwrap();
+        assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(queried["rows"][0]["provider_evidence_digest"], digest);
+        assert_eq!(queried["rows"][0]["audit"]["artifact_count"], 1);
+        assert_eq!(queried["rows"][0]["local_byte_hash_artifact_count"], 1);
+        let ambiguous = router.handle(request(
+            "GET",
+            "/v1/ci/provider-evidence?limit=10&max_items=10",
+            json!({}),
+        ));
+        assert_eq!(ambiguous.status, 400);
+        let fetched = router.handle(request(
+            "GET",
+            &format!("/v1/ci/provider-evidence/{digest}"),
+            json!({}),
+        ));
+        assert_eq!(fetched.status, 200);
+        let fetched: Value = serde_json::from_slice(&fetched.body).unwrap();
+        assert_eq!(fetched["audit"]["run_id"], "api-provider-run-1");
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let status = restored.handle(request(
+            "GET",
+            "/v1/ci/provider-evidence/persistence",
+            json!({}),
+        ));
+        let status: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status["integrity_verified"], true);
+        assert_eq!(status["registry_size"], 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn capability_dashboard_route_preserves_filters_and_refuses_unbounded_queries() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let response = router.handle(request(
+            "GET",
+            "/v1/capabilities/dashboard?domain=verification&max_groups=4&include_tools=true&include_gaps=false",
+            json!({}),
+        ));
+        assert_eq!(response.status, 200);
+        let payload: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(payload["workflow"], "capability_dashboard");
+        assert_eq!(payload["audit"]["query"]["domain"], "verification");
+        assert_eq!(payload["audit"]["query"]["max_groups"], 4);
+        assert_eq!(payload["audit"]["query"]["include_tools"], true);
+        assert_eq!(payload["audit"]["query"]["include_gaps"], false);
+        assert_eq!(
+            payload["audit"]["selected_group_count"],
+            payload["audit"]["groups"].as_array().unwrap().len()
+        );
+        assert!(payload["audit"]["selected_group_count"].as_u64().unwrap() >= 1);
+        assert_eq!(payload["audit"]["groups"][0]["readiness"], "callable");
+        assert_eq!(
+            payload["audit"]["groups"][0]["artifact_evidence"]["state"],
+            "missing"
+        );
+        assert_eq!(
+            payload["audit"]["groups"][0]["workflow_reconciliation_evidence"]["state"],
+            "missing"
+        );
+        assert_eq!(
+            payload["audit"]["evidence"]["groups_with_artifact_evidence"],
+            0
+        );
+        assert_eq!(payload["evidence_digest"].as_str().unwrap().len(), 64);
+
+        let invalid = router.handle(request(
+            "GET",
+            "/v1/capabilities/dashboard?max_groups=513",
+            json!({}),
+        ));
+        assert_eq!(invalid.status, 400);
+        let invalid: Value = serde_json::from_slice(&invalid.body).unwrap();
+        assert_eq!(invalid["error"]["code"], "invalid_query");
+    }
+
+    #[test]
+    fn capability_route_rest_endpoints_return_raw_planning_reports() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let route = router.handle(request(
+            "POST",
+            "/v1/capabilities/route",
+            json!({
+                "goal": "audit a cross-domain evidence workflow",
+                "needs": [{"id": "audit", "tool": "capability_audit"}],
+                "max_candidates_per_need": 4,
+                "max_tools": 8,
+                "include_tools": true
+            }),
+        ));
+        assert_eq!(route.status, 200);
+        let route: Value = serde_json::from_slice(&route.body).unwrap();
+        assert_eq!(route["workflow"], "capability_route");
+        assert_eq!(route["needs"][0]["resolution"], "explicit");
+        assert_eq!(route["execution"], "not_started");
+        assert_eq!(route["evidence"]["readiness_claimed"], false);
+        assert_eq!(route["evidence_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            route["evidence_digest"],
+            route["evidence"]["evidence_digest"]
+        );
+        assert_eq!(
+            route["needs"][0]["candidate_group_evidence"][0]["workflow_reconciliation_evidence"]
+                ["state"],
+            "missing"
+        );
+        assert!(route["tool_schemas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|schema| { schema["name"] == "capability_audit" }));
+
+        let review = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/review",
+            json!({
+                "route": route.clone(),
+                "selections": [{
+                    "need_id": "audit",
+                    "tool": "capability_audit",
+                    "domain": "developer_platform",
+                    "capability": "capability_audit",
+                    "objective": "audit the capability catalogue",
+                    "arguments": {}
+                }],
+                "validate_schemas": true
+            }),
+        ));
+        assert_eq!(review.status, 200);
+        let review: Value = serde_json::from_slice(&review.body).unwrap();
+        assert_eq!(review["workflow"], "capability_route_review");
+        assert_eq!(review["review_status"], "ready");
+        assert_eq!(review["execution"], "not_started");
+        assert_eq!(review["evidence_binding"]["present"], true);
+        assert_eq!(review["evidence_digest"], route["evidence_digest"]);
+        assert_eq!(
+            review["mission_draft"]["route_evidence_digest"],
+            route["evidence_digest"]
+        );
+
+        let planned = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/plan",
+            json!({
+                "mission_id": "route-plan-api-test",
+                "route": route,
+                "selections": [{
+                    "need_id": "audit",
+                    "tool": "capability_audit",
+                    "domain": "developer_platform",
+                    "capability": "capability_audit",
+                    "objective": "audit the capability catalogue",
+                    "arguments": {}
+                }],
+                "validate_schemas": true
+            }),
+        ));
+        assert_eq!(
+            planned.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&planned.body)
+        );
+        let planned: Value = serde_json::from_slice(&planned.body).unwrap();
+        assert_eq!(planned["workflow"], "capability_route_plan");
+        assert_eq!(planned["plan_status"], "ready_for_caller_inspection");
+        assert_eq!(planned["dispatch"], "not_started");
+        assert_eq!(planned["preflight"]["ok"], true);
+        assert_eq!(planned["preflight"]["dispatch"], "not_started");
+        assert_eq!(planned["mission"]["mission_id"], "route-plan-api-test");
+        assert_eq!(planned["plan_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            planned["mission"]["route_review"]["review_id"],
+            review["review_id"]
+        );
+        assert_eq!(planned["route_id"], review["route_id"]);
+
+        let verified = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/plan/verify",
+            json!({
+                "plan": planned,
+                "route": route,
+                "selections": [{
+                    "need_id": "audit",
+                    "tool": "capability_audit",
+                    "domain": "developer_platform",
+                    "capability": "capability_audit",
+                    "objective": "audit the capability catalogue",
+                    "arguments": {}
+                }]
+            }),
+        ));
+        assert_eq!(verified.status, 200);
+        let verified: Value = serde_json::from_slice(&verified.body).unwrap();
+        assert_eq!(verified["workflow"], "capability_route_plan_verify");
+        assert_eq!(verified["valid"], true);
+        assert_eq!(verified["verification_status"], "verified");
+        assert_eq!(verified["route_replay"]["status"], "matched");
+        assert_eq!(verified["mission_preflight"]["status"], "matched");
+        assert_eq!(verified["dispatch"], "not_started");
+
+        let shape_only = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/plan/verify",
+            json!({"plan": planned}),
+        ));
+        assert_eq!(shape_only.status, 200);
+        let shape_only: Value = serde_json::from_slice(&shape_only.body).unwrap();
+        assert_eq!(shape_only["valid"], true);
+        assert_eq!(
+            shape_only["verification_status"],
+            "verified_without_route_replay"
+        );
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/capabilities/route/plan",
+            json!({
+                "mission_id": "route-plan-policy-refusal",
+                "route": route,
+                "selections": [{
+                    "need_id": "audit",
+                    "tool": "capability_audit",
+                    "domain": "developer_platform",
+                    "capability": "capability_audit",
+                    "objective": "audit the capability catalogue",
+                    "arguments": {}
+                }],
+                "policy": {"execute": true}
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+    }
+
+    #[test]
+    fn capability_route_plan_returns_a_bounded_outcome_for_every_catalogue_group() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let catalogue = bioprism_mcp::workspace_capabilities();
+        let groups = catalogue.as_array().unwrap();
+        assert!(
+            !groups.is_empty(),
+            "the cross-domain catalogue must not be empty"
+        );
+        for group in groups {
+            let group_id = group["id"].as_str().unwrap();
+            let route_response = router.handle(request(
+                "POST",
+                "/v1/capabilities/route",
+                json!({
+                    "goal": format!("prepare a bounded plan for {group_id}"),
+                    "needs": [{"id": group_id, "group_id": group_id, "max_items": 1}],
+                    "max_candidates_per_need": 1,
+                    "max_tools": 1
+                }),
+            ));
+            assert_eq!(route_response.status, 200, "route failed for {group_id}");
+            let route: Value = serde_json::from_slice(&route_response.body).unwrap();
+            let candidates = route["needs"][0]["candidate_tools"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if candidates.is_empty() {
+                assert_eq!(route["unresolved_needs"][0], group_id);
+                continue;
+            }
+            let tool = candidates[0].as_str().unwrap();
+            let domain = route["needs"][0]["candidate_domains"]
+                .as_array()
+                .and_then(|domains| domains.first())
+                .and_then(Value::as_str)
+                .unwrap_or(group_id);
+            let plan_response = router.handle(request(
+                "POST",
+                "/v1/capabilities/route/plan",
+                json!({
+                    "mission_id": format!("catalogue-plan-{group_id}"),
+                    "route": route,
+                    "selections": [{
+                        "need_id": group_id,
+                        "tool": tool,
+                        "domain": domain,
+                        "capability": group_id,
+                        "objective": format!("inspect {group_id}"),
+                        "arguments": {}
+                    }]
+                }),
+            ));
+            assert_eq!(plan_response.status, 200, "plan failed for {group_id}");
+            let plan: Value = serde_json::from_slice(&plan_response.body).unwrap();
+            assert_eq!(plan["workflow"], "capability_route_plan");
+            assert_eq!(plan["dispatch"], "not_started");
+            assert!(matches!(
+                plan["plan_status"].as_str(),
+                Some("ready_for_caller_inspection")
+                    | Some("blocked_by_mission_preflight")
+                    | Some("blocked_by_route_review")
+            ));
+        }
+    }
+
+    #[test]
+    fn domain_evidence_route_harmonizes_reports_and_preserves_artifact_lineage() {
+        let artifact_path = test_state_path("domain-evidence-route");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let first = router.handle(request(
+            "POST",
+            "/v1/domain-reports",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-harmonization-subject",
+                "source_tool": "modality_catalog",
+                "report": {"observations": ["modality contract retained"]},
+                "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+            }),
+        ));
+        let second = router.handle(request(
+            "POST",
+            "/v1/domain-reports",
+            json!({
+                "group_id": "biological_ir_and_query",
+                "domains": ["BioQL syntax"],
+                "subject_id": "api-harmonization-subject",
+                "source_tool": "bioql_compile",
+                "report": {"observations": ["query syntax contract retained"]},
+                "claim_posture": {"status": "review_required", "does_not_claim": ["execution"]}
+            }),
+        ));
+        assert_eq!(first.status, 200);
+        assert_eq!(second.status, 200);
+        let first: Value = serde_json::from_slice(&first.body).unwrap();
+        let second: Value = serde_json::from_slice(&second.body).unwrap();
+        let harmonized = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/harmonize",
+            json!({
+                "subject_id": "api-harmonization-subject",
+                "claim": {"id": "api-claim-1", "statement": "opaque"},
+                "reports": [first["report"].clone(), second["report"].clone()],
+                "links": [
+                    {"report_index": 0, "role": "supports"},
+                    {"report_index": 1, "role": "qualifies", "note": "syntax is not execution"}
+                ],
+                "required_group_ids": ["biological_domains", "biological_ir_and_query"],
+                "required_domains": ["modalities", "BioQL syntax"]
+            }),
+        ));
+        assert_eq!(
+            harmonized.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&harmonized.body)
+        );
+        let harmonized: Value = serde_json::from_slice(&harmonized.body).unwrap();
+        assert_eq!(harmonized["workflow"], "domain_evidence_harmonize");
+        assert_eq!(
+            harmonized["harmonization"]["coverage"]["traceability_state"],
+            "complete"
+        );
+        assert_eq!(harmonized["harmonization"]["readiness_claimed"], false);
+        assert_eq!(harmonized["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            harmonized["artifact_registry"]["verification"]["method"],
+            "domain_evidence_harmonization"
+        );
+        let artifacts = router.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_harmonization&subject_id=api-harmonization-subject",
+            json!({}),
+        ));
+        assert_eq!(artifacts.status, 200);
+        let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
+        assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
+
+        let coverage = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/harmonization/coverage?subject_id=api-harmonization-subject&traceability_state=complete&include_report_digests=true",
+            json!({}),
+        ));
+        assert_eq!(
+            coverage.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&coverage.body)
+        );
+        let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
+        assert_eq!(
+            coverage["workflow"],
+            "domain_evidence_harmonization_coverage"
+        );
+        assert_eq!(coverage["matching_count"], 1);
+        assert_eq!(
+            coverage["rows"][0]["report_digests"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(coverage["rows"][0]["traceability_state"], "complete");
+
+        let invalid_coverage = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/harmonization/coverage?after=invalid",
+            json!({}),
+        ));
+        assert_eq!(invalid_coverage.status, 422);
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/harmonize",
+            json!({
+                "subject_id": "api-other-subject",
+                "claim": {"id": "api-claim-refused"},
+                "reports": [first["report"].clone()],
+                "links": [{"report_index": 0, "role": "context"}]
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn domain_evidence_intake_route_retains_raw_envelope_and_indexes_exact_digests() {
+        let artifact_path = test_state_path("domain-evidence-intake-route");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let source = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/sources",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-intake-subject",
+                "source_tool": "modality_catalog",
+                "connector_kind": "literature",
+                "locator_kind": "uri",
+                "locator": "https://example.org/article/1",
+                "retrieval_mode": "metadata_only",
+                "retrieval_policy": {"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed"},
+                "does_not_claim": ["retrieval occurred"]
+            }),
+        ));
+        assert_eq!(source.status, 200);
+        let source: Value = serde_json::from_slice(&source.body).unwrap();
+        assert_eq!(source["workflow"], "domain_evidence_source_plan");
+        assert_eq!(source["retrieval_status"], "not_started");
+        assert_eq!(source["artifact_registry"]["indexed"], true);
+        let source_artifacts = router.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_source_plan&subject_id=api-intake-subject",
+            json!({}),
+        ));
+        assert_eq!(source_artifacts.status, 200);
+        let source_artifacts: Value = serde_json::from_slice(&source_artifacts.body).unwrap();
+        assert_eq!(source_artifacts["rows"].as_array().unwrap().len(), 1);
+        let response = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/intake",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-intake-subject",
+                "source_tool": "modality_catalog",
+                "request": {"modality": "single_cell"},
+                "response": {"status": "bounded", "modalities": ["single_cell"]},
+                "outcome": "observed",
+                "source_plan_digest": source["plan_digest"].clone(),
+                "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+            }),
+        ));
+        assert_eq!(response.status, 200);
+        let response: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(response["workflow"], "domain_evidence_intake");
+        assert_eq!(response["request_supplied"], true);
+        assert_eq!(response["source_plan_digest"], source["plan_digest"]);
+        assert_eq!(response["request_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(response["response_digest"].as_str().unwrap().len(), 64);
+        assert_eq!(response["artifact_registry"]["indexed"], true);
+        assert_eq!(
+            response["artifact_registry"]["verification"]["method"],
+            "domain_evidence_intake"
+        );
+        assert_eq!(
+            response["report"]["report"]["intake"]["response"]["status"],
+            "bounded"
+        );
+        let artifacts = router.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_intake&subject_id=api-intake-subject",
+            json!({}),
+        ));
+        assert_eq!(artifacts.status, 200);
+        let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
+        assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
+        let lineage = router.handle(request(
+            "GET",
+            &format!(
+                "/v1/domain-evidence/lineage?content_digest={}",
+                response["artifact_registry"]["content_digest"]
+                    .as_str()
+                    .unwrap()
+            ),
+            json!({}),
+        ));
+        assert_eq!(lineage.status, 200);
+        let lineage: Value = serde_json::from_slice(&lineage.body).unwrap();
+        assert_eq!(
+            lineage["workflow"],
+            "artifact_registry_domain_evidence_lineage"
+        );
+        assert_eq!(lineage["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            lineage["rows"][0]["source_plan"]["binding_state"],
+            "retained_and_content_parented"
+        );
+        assert_eq!(
+            lineage["rows"][0]["source_plan"]["content_parent_linked"],
+            true
+        );
+        assert_eq!(lineage["rows"][0]["missing_parent_count"], 1);
+        let filtered_lineage = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/lineage?group_id=biological_domains&domain=MODALITIES&outcome=observed&max_items=1",
+            json!({}),
+        ));
+        assert_eq!(filtered_lineage.status, 200);
+        let filtered_lineage: Value = serde_json::from_slice(&filtered_lineage.body).unwrap();
+        assert_eq!(filtered_lineage["rows"].as_array().unwrap().len(), 1);
+        let coverage = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/coverage?include_intake_digests=true",
+            json!({}),
+        ));
+        assert_eq!(coverage.status, 200);
+        let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
+        assert_eq!(coverage["workflow"], "domain_evidence_intake_coverage");
+        assert_eq!(coverage["group_count"], 30);
+        assert_eq!(coverage["reported_group_count"], 1);
+        assert_eq!(coverage["missing_group_count"], 29);
+        assert_eq!(coverage["complete"], false);
+        assert_eq!(coverage["groups_with_artifact_evidence"], 1);
+        assert_eq!(coverage["artifact_evidence_records"], 2);
+        let reported_group = coverage["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap();
+        assert_eq!(
+            reported_group["intake_digests"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(reported_group["artifact_evidence"]["state"], "observed");
+        assert_eq!(
+            reported_group["artifact_evidence"]["matching_record_count"],
+            2
+        );
+        let filtered = router.handle(request(
+            "GET",
+            "/v1/domain-evidence/coverage?group_id=biological_domains&domain=MODALITIES",
+            json!({}),
+        ));
+        assert_eq!(filtered.status, 200);
+        let filtered: Value = serde_json::from_slice(&filtered.body).unwrap();
+        assert_eq!(filtered["group_count"], 1);
+        assert_eq!(filtered["reported_group_count"], 1);
+        assert_eq!(filtered["complete"], true);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_artifacts = restored.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_intake&subject_id=api-intake-subject",
+            json!({}),
+        ));
+        assert_eq!(restored_artifacts.status, 200);
+        let restored_artifacts: Value = serde_json::from_slice(&restored_artifacts.body).unwrap();
+        assert_eq!(restored_artifacts["rows"].as_array().unwrap().len(), 1);
+        let restored_lineage = restored.handle(request(
+            "GET",
+            &format!(
+                "/v1/domain-evidence/lineage?content_digest={}",
+                response["artifact_registry"]["content_digest"]
+                    .as_str()
+                    .unwrap()
+            ),
+            json!({}),
+        ));
+        assert_eq!(restored_lineage.status, 200);
+        let restored_lineage: Value = serde_json::from_slice(&restored_lineage.body).unwrap();
+        assert_eq!(restored_lineage["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            restored_lineage["rows"][0]["intake_digest"],
+            response["intake_digest"]
+        );
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/intake",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["not-declared"],
+                "subject_id": "api-intake-refused",
+                "source_tool": "modality_catalog",
+                "response": {},
+                "outcome": "unknown",
+                "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn domain_evidence_source_execute_route_reads_file_and_restores_intake() {
+        let artifact_path = test_state_path("domain-evidence-source-execute-route");
+        let config = ApiConfig {
+            artifact_state_path: Some(artifact_path.clone()),
+            ..ApiConfig::default()
+        };
+        let root: std::path::PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect();
+        let router = ApiRouter::new(root.clone(), config.clone()).unwrap();
+        let source = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/sources",
+            json!({
+                "group_id": "biological_domains",
+                "domains": ["modalities"],
+                "subject_id": "api-source-execute-subject",
+                "source_tool": "modality_catalog",
+                "connector_kind": "file",
+                "locator_kind": "path",
+                "locator": "fixtures/fiber-v0.1/leakage_query.json",
+                "retrieval_mode": "content",
+                "retrieval_policy": {"network": "disabled", "max_bytes": 65536},
+                "does_not_claim": ["source truth"]
+            }),
+        ));
+        assert_eq!(source.status, 200);
+        let source: Value = serde_json::from_slice(&source.body).unwrap();
+        let executed = router.handle(request(
+            "POST",
+            "/v1/domain-evidence/sources/execute",
+            json!({"source_plan_digest": source["plan_digest"].clone()}),
+        ));
+        assert_eq!(
+            executed.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&executed.body)
+        );
+        let executed: Value = serde_json::from_slice(&executed.body).unwrap();
+        assert_eq!(executed["workflow"], "domain_evidence_source_execute");
+        assert_eq!(executed["outcome"], "observed");
+        assert_eq!(executed["intake"]["artifact_registry"]["indexed"], true);
+        assert_eq!(executed["raw_content_digest"].as_str().unwrap().len(), 64);
+        let restored = ApiRouter::new(root, config).unwrap();
+        let artifacts = restored.handle(request(
+            "GET",
+            "/v1/artifacts?kind=domain_evidence_intake&subject_id=api-source-execute-subject",
+            json!({}),
+        ));
+        assert_eq!(artifacts.status, 200);
+        let artifacts: Value = serde_json::from_slice(&artifacts.body).unwrap();
+        assert_eq!(artifacts["rows"].as_array().unwrap().len(), 1);
+        let _ = std::fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn domain_workflow_routes_expose_catalogue_and_scoped_preflight() {
+        let reconciliation_path = test_state_path("domain-workflow-auto-reconciliation");
+        let config = ApiConfig {
+            reconciliation_state_path: Some(reconciliation_path.clone()),
+            ..ApiConfig::default()
+        };
+        let router = ApiRouter::new(std::env::current_dir().unwrap(), config.clone()).unwrap();
+        let catalogue = router.handle(request("GET", "/v1/domain-workflows", json!({})));
+        assert_eq!(catalogue.status, 200);
+        let catalogue: Value = serde_json::from_slice(&catalogue.body).unwrap();
+        assert_eq!(catalogue["workflow"], "domain_workflow_catalogue");
+        assert_eq!(catalogue["workflow_count"], 30);
+        assert_eq!(catalogue["coverage"]["all_groups_have_workflow"], true);
+        assert_eq!(
+            catalogue["coverage"]["all_workflows_have_domain_contract"],
+            true
+        );
+        assert!(catalogue["workflows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|workflow| workflow["domain_contract"].is_object()));
+
+        let scaffolded = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/scaffold",
+            json!({
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "api-scaffold-1",
+                "goal": "prepare a repository discovery starting plan",
+                "tools": ["workspace_capabilities"],
+                "arguments": {"workspace_capabilities": {}}
+            }),
+        ));
+        assert_eq!(scaffolded.status, 200);
+        let scaffolded: Value = serde_json::from_slice(&scaffolded.body).unwrap();
+        assert_eq!(scaffolded["workflow"], "domain_workflow_scaffold");
+        assert_eq!(scaffolded["execution"], "not_started");
+        assert_eq!(scaffolded["readiness_claimed"], false);
+        assert_eq!(scaffolded["mission"]["policy"]["execute"], false);
+        assert_eq!(scaffolded["selection"]["strategy"], "explicit_tools");
+        assert_eq!(scaffolded["preflight_report"]["dispatch"], "not_started");
+        assert_eq!(scaffolded["preflight_status"], "ready");
+
+        let instantiated = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/instantiate",
+            json!({
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "api-workflow-1",
+                "goal": "discover repository capabilities",
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+                "policy": {"execute": true}
+            }),
+        ));
+        assert_eq!(instantiated.status, 200);
+        let instantiated: Value = serde_json::from_slice(&instantiated.body).unwrap();
+        assert_eq!(instantiated["workflow"], "domain_workflow_instantiate");
+        assert_eq!(
+            instantiated["preflight_report"]["workflow"],
+            "agent_mission"
+        );
+        assert_eq!(instantiated["execution"], "not_started");
+        assert_eq!(
+            instantiated["selection"]["all_selected_tools_available"],
+            true
+        );
+        assert_eq!(
+            instantiated["evidence_plan"]["steps"][0]["step_id"],
+            "catalog"
+        );
+
+        let portfolio = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/portfolio",
+            json!({
+                "requests": [{
+                    "workflow_id": "documentation_and_knowledge",
+                    "mission_id": "api-portfolio-1",
+                    "goal": "discover repository capabilities",
+                    "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+                    "policy": {"execute": true}
+                }]
+            }),
+        ));
+        assert_eq!(portfolio.status, 200);
+        let portfolio: Value = serde_json::from_slice(&portfolio.body).unwrap();
+        assert_eq!(portfolio["workflow"], "domain_workflow_portfolio");
+        assert_eq!(portfolio["valid"], true);
+        assert_eq!(portfolio["portfolio_ready"], true);
+        assert_eq!(
+            portfolio["portfolio_status"],
+            "ready_for_authoritative_preflight"
+        );
+        assert_eq!(portfolio["summary"]["preflight_status"], "matched");
+        assert_eq!(portfolio["items"][0]["status"], "instantiated");
+        assert_eq!(portfolio["items"][0]["mission_preflight"]["matched"], true);
+        assert_eq!(portfolio["dispatch"], "not_started");
+
+        let portfolio_verified = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/portfolio/verify",
+            json!({
+                "portfolio": portfolio.clone(),
+                "replay_requests": [{
+                    "workflow_id": "documentation_and_knowledge",
+                    "mission_id": "api-portfolio-1",
+                    "goal": "discover repository capabilities",
+                    "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+                    "policy": {"execute": true}
+                }],
+                "policy": {"require_replay": true}
+            }),
+        ));
+        assert_eq!(portfolio_verified.status, 200);
+        let portfolio_verified: Value = serde_json::from_slice(&portfolio_verified.body).unwrap();
+        assert_eq!(
+            portfolio_verified["workflow"],
+            "domain_workflow_portfolio_verify"
+        );
+        assert_eq!(portfolio_verified["valid"], true);
+        assert_eq!(portfolio_verified["verification_status"], "verified");
+        assert_eq!(portfolio_verified["summary"]["replay_matched_count"], 1);
+        assert_eq!(portfolio_verified["items"][0]["status"], "verified");
+        assert_eq!(portfolio_verified["dispatch"], "not_started");
+
+        let verified = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/verify",
+            json!({
+                "instantiation": instantiated.clone(),
+                "replay_request": {
+                    "workflow_id": "documentation_and_knowledge",
+                    "mission_id": "api-workflow-1",
+                    "goal": "discover repository capabilities",
+                    "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+                    "policy": {"execute": true}
+                }
+            }),
+        ));
+        assert_eq!(verified.status, 200);
+        let verified: Value = serde_json::from_slice(&verified.body).unwrap();
+        assert_eq!(verified["workflow"], "domain_workflow_verify");
+        assert_eq!(verified["valid"], true);
+        assert_eq!(verified["verification_status"], "verified");
+        assert_eq!(verified["replay"]["matched"], true);
+        assert_eq!(verified["mission_preflight"]["matched"], true);
+        assert_eq!(verified["dispatch"], "not_started");
+
+        let executed = router.handle(request(
+            "POST",
+            "/v1/tools/agent_mission",
+            instantiated["mission"].clone(),
+        ));
+        assert_eq!(executed.status, 200);
+        let executed: Value = serde_json::from_slice(&executed.body).unwrap();
+        let mission_report: Value = serde_json::from_str(
+            executed["mcp"]["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(mission_report["mission_status"], "succeeded");
+        assert_eq!(mission_report["workflow_reconciliation"]["present"], true);
+        assert_eq!(mission_report["workflow_reconciliation"]["automatic"], true);
+        let automatic_digest = mission_report["workflow_reconciliation"]["reconciliation_digest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let automatic_query = router.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=api-workflow-1",
+            json!({}),
+        ));
+        assert_eq!(automatic_query.status, 200);
+        let automatic_query: Value = serde_json::from_slice(&automatic_query.body).unwrap();
+        assert_eq!(automatic_query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            automatic_query["rows"][0]["reconciliation_digest"],
+            automatic_digest
+        );
+        let reconciled = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/reconcile",
+            json!({"instantiation": instantiated, "mission_report": mission_report}),
+        ));
+        assert_eq!(reconciled.status, 200);
+        let reconciled: Value = serde_json::from_slice(&reconciled.body).unwrap();
+        assert_eq!(reconciled["workflow"], "domain_workflow_reconcile");
+        assert_eq!(reconciled["completion"]["status"], "complete");
+        assert_eq!(reconciled["completion"]["ready"], true);
+
+        let refused = router.handle(request(
+            "POST",
+            "/v1/domain-workflows/instantiate",
+            json!({
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "api-workflow-refused",
+                "goal": "refuse cross-group selection",
+                "steps": [{"id": "compile", "tool": "bioql_compile"}]
+            }),
+        ));
+        assert_eq!(refused.status, 422);
+        let refused: Value = serde_json::from_slice(&refused.body).unwrap();
+        assert_eq!(refused["error"]["code"], "invalid_domain_workflow");
+        drop(router);
+        let restored = ApiRouter::new(std::env::current_dir().unwrap(), config).unwrap();
+        let restored_query = restored.handle(request(
+            "GET",
+            "/v1/domain-workflows/reconciliations?mission_id=api-workflow-1",
+            json!({}),
+        ));
+        assert_eq!(restored_query.status, 200);
+        let restored_query: Value = serde_json::from_slice(&restored_query.body).unwrap();
+        assert_eq!(restored_query["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            restored_query["rows"][0]["reconciliation_digest"],
+            automatic_digest
+        );
+        let _ = std::fs::remove_file(reconciliation_path);
+    }
+
+    #[test]
     fn mission_preflight_returns_authoritative_plan_without_queueing_or_dispatching() {
         let router =
             ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
@@ -6854,6 +14471,75 @@ mod tests {
         );
         assert_eq!(body["operations_evidence"]["acceptance_required"], true);
         assert_eq!(body["operations_evidence"]["acceptance_valid"], false);
+        let reviewed = router.handle(request(
+            "POST",
+            "/v1/missions/preflight",
+            json!({
+                "mission_id": "api-route-review-1",
+                "goal": "preview a reviewed route",
+                "steps": [{
+                    "id": "catalog",
+                    "domain": "workspace",
+                    "capability": "discovery",
+                    "objective": "discover routes",
+                    "tool": "workspace_capabilities",
+                    "arguments": {},
+                    "depends_on": [],
+                    "bindings": [],
+                    "required": true
+                }],
+                "route_review": {
+                    "ok": true,
+                    "workflow": "capability_route_review",
+                    "review_id": "a".repeat(64),
+                    "route_id": "b".repeat(64),
+                    "catalog_digest": "c".repeat(64),
+                    "goal": "preview a reviewed route",
+                    "findings": [],
+                    "review_status": "ready",
+                    "handoff_status": "mission_preflight_required",
+                    "execution": "not_started",
+                    "evidence_digest": "e".repeat(64),
+                    "evidence_scope": "capability_route",
+                    "evidence_binding": {
+                        "present": true,
+                        "evidence_digest": "e".repeat(64),
+                        "scope": "capability_route",
+                        "summary": {"evidence_digest": "e".repeat(64), "scope": "capability_route"},
+                        "posture": "carried_forward_not_recomputed",
+                        "readiness_claimed": false,
+                        "execution": "not_started"
+                    },
+                    "mission_draft": {
+                        "goal": "preview a reviewed route",
+                        "steps": [{
+                            "id": "catalog",
+                            "domain": "workspace",
+                            "capability": "discovery",
+                            "objective": "discover routes",
+                            "tool": "workspace_capabilities",
+                            "arguments": {},
+                            "depends_on": [],
+                            "bindings": [],
+                            "required": true
+                        }],
+                        "dependency_waves": [["catalog"]],
+                        "route_evidence_digest": "e".repeat(64),
+                        "route_evidence_scope": "capability_route"
+                    }
+                }
+            }),
+        ));
+        assert_eq!(reviewed.status, 200);
+        let reviewed_body: Value = serde_json::from_slice(&reviewed.body).unwrap();
+        assert_eq!(
+            reviewed_body["plan"]["route_review_provenance"]["present"],
+            true
+        );
+        assert_eq!(
+            reviewed_body["plan"]["route_review_provenance"]["evidence_present"],
+            true
+        );
         let missing = router.handle(request("GET", "/v1/missions/api-preflight-1", json!({})));
         assert_eq!(missing.status, 404);
 

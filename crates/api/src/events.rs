@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const MAX_EVENT_TYPE_BYTES: usize = 128;
 pub const MAX_SUBSCRIPTION_ID_BYTES: usize = 128;
@@ -25,6 +26,7 @@ const PREVIOUS_EVENT_STATE_SCHEMA_VERSION: u64 = 4;
 pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_DELIVERY_WORKER_BATCH: usize = 100;
 pub const MAX_DELIVERY_ERROR_BYTES: usize = 8 * 1024;
+static NEXT_EVENT_CHECKPOINT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApiEvent {
@@ -567,7 +569,10 @@ impl EventLog {
                     .file_name()
                     .ok_or_else(|| "event_state_path must name a file".to_string())?
                     .to_string_lossy();
-                let temporary = path.with_file_name(format!(".{filename}.tmp"));
+                let temporary = path.with_file_name(format!(
+                    ".{filename}.tmp-{}",
+                    NEXT_EVENT_CHECKPOINT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+                ));
                 std::fs::write(&temporary, &bytes).map_err(|error| {
                     format!("event state temporary file could not be written: {error}")
                 })?;

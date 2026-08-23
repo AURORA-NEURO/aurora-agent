@@ -8,6 +8,7 @@ interpretation to the authoritative MCP server.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
@@ -27,6 +28,8 @@ MAX_MISSION_POLL_INTERVAL_SECONDS = 60.0
 MAX_MISSION_CLAIM_REQUESTS = 64
 MAX_MISSION_CLAIM_REFERENCES = 32
 MAX_MISSION_CLAIM_EVALUATORS = 16
+MAX_WORKFLOW_BINDING_BYTES = 2_000_000
+MAX_ROUTE_REVIEW_BYTES = 2_000_000
 OPERATIONS_REQUIRED_GATES = (
     "catalogue",
     "observed_activity",
@@ -484,6 +487,130 @@ class OperationsGateAcceptance(OperationsGateReviewRequest):
         return {**super().to_dict(), "review_id": self.review_id}
 
 
+def _route_review_digest(name: str, value: Any) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ArgumentError(f"{name} must be a lowercase 64-character digest")
+    return value
+
+
+def _route_review_provenance(
+    value: Mapping[str, Any],
+    goal: str,
+    normalized_steps: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    review = _mapping("route_review", value)
+    encoded = json.dumps(review, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(encoded) > MAX_ROUTE_REVIEW_BYTES:
+        raise ArgumentError(
+            f"route_review may contain at most {MAX_ROUTE_REVIEW_BYTES} serialized bytes"
+        )
+    if (
+        review.get("ok") is not True
+        or review.get("workflow") != "capability_route_review"
+        or review.get("review_status") != "ready"
+        or review.get("handoff_status") != "mission_preflight_required"
+        or review.get("execution") != "not_started"
+    ):
+        raise ArgumentError("route_review must be an ok, ready, non-executing mission handoff")
+    findings = review.get("findings")
+    if not isinstance(findings, Sequence) or isinstance(findings, (str, bytes)):
+        raise ArgumentError("route_review.findings must be a sequence")
+    if findings:
+        raise ArgumentError("route_review findings must be empty before mission preflight")
+    review_id = _route_review_digest("route_review.review_id", review.get("review_id"))
+    route_id = _route_review_digest("route_review.route_id", review.get("route_id"))
+    catalog_digest = _route_review_digest(
+        "route_review.catalog_digest", review.get("catalog_digest")
+    )
+    _text("route_review.goal", review.get("goal"))
+    if review["goal"] != goal:
+        raise ArgumentError("route_review.goal does not match mission goal")
+    draft = review.get("mission_draft")
+    if not isinstance(draft, Mapping):
+        raise ArgumentError("ready route_review requires a mission_draft mapping")
+    if draft.get("goal") != goal:
+        raise ArgumentError("route_review.mission_draft.goal does not match mission goal")
+    reviewed_steps = draft.get("steps")
+    if not isinstance(reviewed_steps, Sequence) or isinstance(reviewed_steps, (str, bytes)):
+        raise ArgumentError("route_review.mission_draft.steps must be a sequence")
+    if content_digest(list(reviewed_steps)) != content_digest(list(normalized_steps)):
+        raise ArgumentError("route_review.mission_draft.steps do not exactly match mission steps")
+    waves = draft.get("dependency_waves")
+    if not isinstance(waves, Sequence) or isinstance(waves, (str, bytes)):
+        raise ArgumentError("route_review.mission_draft.dependency_waves must be a sequence")
+
+    evidence_digest = review.get("evidence_digest")
+    evidence_scope = review.get("evidence_scope")
+    if evidence_digest is None and evidence_scope is None:
+        normalized_evidence_digest = None
+        normalized_evidence_scope = None
+    elif evidence_digest is None or evidence_scope is None:
+        raise ArgumentError("route_review evidence_digest and evidence_scope must be supplied together")
+    else:
+        normalized_evidence_digest = _route_review_digest(
+            "route_review.evidence_digest", evidence_digest
+        )
+        if not isinstance(evidence_scope, str) or not evidence_scope.strip():
+            raise ArgumentError("route_review.evidence_scope must be a non-empty string")
+        normalized_evidence_scope = evidence_scope
+
+    raw_binding = review.get("evidence_binding", {"present": False})
+    binding = _mapping("route_review.evidence_binding", raw_binding)
+    binding_present = binding.get("present")
+    if not isinstance(binding_present, bool):
+        raise ArgumentError("route_review.evidence_binding.present must be a boolean")
+    if binding_present:
+        if normalized_evidence_digest is None or normalized_evidence_scope is None:
+            raise ArgumentError("present route evidence_binding requires a digest and scope")
+        if (
+            binding.get("evidence_digest") != normalized_evidence_digest
+            or binding.get("scope") != normalized_evidence_scope
+        ):
+            raise ArgumentError("route_review evidence_binding digest and scope do not match")
+        if (
+            binding.get("posture") != "carried_forward_not_recomputed"
+            or binding.get("readiness_claimed") is not False
+            or binding.get("execution") != "not_started"
+        ):
+            raise ArgumentError(
+                "route_review evidence_binding must remain carried-forward, non-ready, and non-executing"
+            )
+        summary = _mapping("route_review.evidence_binding.summary", binding.get("summary"))
+        if (
+            summary.get("evidence_digest") != normalized_evidence_digest
+            or summary.get("scope") != normalized_evidence_scope
+        ):
+            raise ArgumentError("route_review evidence summary does not match its digest and scope")
+        if (
+            draft.get("route_evidence_digest") != normalized_evidence_digest
+            or draft.get("route_evidence_scope") != normalized_evidence_scope
+        ):
+            raise ArgumentError("route_review mission draft evidence does not match its binding")
+    elif (
+        normalized_evidence_digest is not None
+        or normalized_evidence_scope is not None
+        or binding.get("posture") not in (None, "not_supplied")
+    ):
+        raise ArgumentError("legacy route review cannot claim evidence without a present binding")
+
+    provenance: dict[str, Any] = {
+        "present": True,
+        "review_id": review_id,
+        "route_id": route_id,
+        "catalog_digest": catalog_digest,
+        "evidence_present": binding_present,
+        "posture": binding.get("posture", "not_supplied"),
+        "readiness_claimed": False,
+        "execution": "not_started",
+    }
+    if binding_present:
+        provenance["evidence_digest"] = normalized_evidence_digest
+        provenance["evidence_scope"] = normalized_evidence_scope
+    return provenance
+
+
 @dataclass(frozen=True)
 class MissionRequest:
     """Build a previewable or explicitly executable cross-domain mission."""
@@ -495,6 +622,8 @@ class MissionRequest:
     operations_gate_acceptance: OperationsGateAcceptance | Mapping[str, Any] | None = None
     claim_requests: Sequence[MissionClaimRequest | Mapping[str, Any]] = ()
     evaluator_review: Mapping[str, Any] | None = None
+    workflow_binding: Mapping[str, Any] | None = None
+    route_review: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _text("mission_id", self.mission_id)
@@ -545,6 +674,38 @@ class MissionRequest:
                 raise ArgumentError("evaluator_review must have a ready binding posture")
             if review.get("execution") != "not_started":
                 raise ArgumentError("evaluator_review must be non-executing")
+        if self.workflow_binding is not None:
+            binding = _mapping("workflow_binding", self.workflow_binding)
+            if len(str(binding).encode("utf-8")) > MAX_WORKFLOW_BINDING_BYTES:
+                raise ArgumentError(
+                    f"workflow_binding may contain at most {MAX_WORKFLOW_BINDING_BYTES} serialized bytes"
+                )
+            required = (
+                "workflow_id",
+                "workflow_digest",
+                "catalog_digest",
+                "domain_contract_digest",
+                "domain_contract",
+                "evidence_plan",
+                "evidence_plan_digest",
+            )
+            missing = [name for name in required if name not in binding]
+            if missing:
+                raise ArgumentError(f"workflow_binding is missing required fields: {', '.join(missing)}")
+            _text("workflow_binding.workflow_id", binding["workflow_id"])
+            for name in ("workflow_digest", "catalog_digest", "domain_contract_digest", "evidence_plan_digest"):
+                digest = binding[name]
+                if not isinstance(digest, str) or len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+                    raise ArgumentError(f"workflow_binding.{name} must be a lowercase 64-character digest")
+            if not isinstance(binding["domain_contract"], Mapping):
+                raise ArgumentError("workflow_binding.domain_contract must be a mapping")
+            evidence_plan = binding["evidence_plan"]
+            if not isinstance(evidence_plan, Mapping) or not isinstance(evidence_plan.get("steps"), Sequence) or isinstance(evidence_plan.get("steps"), (str, bytes)):
+                raise ArgumentError("workflow_binding.evidence_plan.steps must be a sequence")
+            if not 0 < len(evidence_plan["steps"]) <= MAX_MISSION_STEPS:
+                raise ArgumentError(f"workflow_binding.evidence_plan.steps must contain 1..{MAX_MISSION_STEPS} entries")
+        if self.route_review is not None:
+            _route_review_provenance(self.route_review, self.goal, normalized_steps)
 
     def to_mcp_arguments(self) -> dict[str, Any]:
         arguments: dict[str, Any] = {
@@ -568,6 +729,10 @@ class MissionRequest:
             arguments["claim_requests"] = [_claim_request(value) for value in self.claim_requests]
         if self.evaluator_review is not None:
             arguments["evaluator_review"] = _mapping("evaluator_review", self.evaluator_review)
+        if self.workflow_binding is not None:
+            arguments["workflow_binding"] = _mapping("workflow_binding", self.workflow_binding)
+        if self.route_review is not None:
+            arguments["route_review"] = _mapping("route_review", self.route_review)
         return arguments
 
 
@@ -666,6 +831,7 @@ def mission_from_route(
     selections: Sequence[MissionRouteSelection | Mapping[str, Any]],
     *,
     policy: MissionPolicy | Mapping[str, Any] | None = None,
+    route_review: Mapping[str, Any] | None = None,
 ) -> MissionAssembly:
     """Build an explicit mission only from tools selected out of one capability-route result.
 
@@ -753,6 +919,7 @@ def mission_from_route(
         goal,
         [selected_by_need[need_id].to_step() for need_id in ordered_need_ids],
         policy,
+        route_review=route_review,
     )
     return MissionAssembly(
         route_id=route_id,
@@ -827,6 +994,7 @@ class MissionPreflight:
     steps: tuple[MissionStepPreflight, ...]
     issues: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    route_review_provenance: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -867,6 +1035,7 @@ class MissionPreflight:
             "waves": [list(wave) for wave in self.waves],
             "issues": list(self.issues),
             "warnings": list(self.warnings),
+            "route_review_provenance": self.route_review_provenance,
             "steps": [step.to_dict() for step in self.steps],
             "limitations": [
                 "preflight checks transport shape and mission graph invariants only",
@@ -1071,6 +1240,24 @@ class MissionExecutionReport:
         if value is None:
             return {}
         return _mapping("mission evaluator review", value)
+
+    @property
+    def workflow_reconciliation(self) -> Mapping[str, Any]:
+        """Return the automatic post-execution reconciliation link, when present."""
+
+        value = self.raw.get("workflow_reconciliation")
+        if value is None:
+            return {}
+        return _mapping("mission workflow reconciliation", value)
+
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the non-claiming automatic cross-domain artifact projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _mapping("mission artifact registry projection", value)
 
     @property
     def cancelled(self) -> int:
@@ -1286,6 +1473,7 @@ class MissionJob:
     result_omitted: MissionResultOmission | None
     error: str | None
     progress: MissionProgress | None
+    route_review_provenance: Mapping[str, Any] | None
     execution_provenance: Mapping[str, Any] | None
 
     @classmethod
@@ -1318,10 +1506,13 @@ class MissionJob:
             _text("mission job error", error)
         progress_value = raw.get("progress")
         progress = None if progress_value is None else MissionProgress.from_wire(progress_value)
+        route_review_provenance = raw.get("route_review_provenance")
+        if route_review_provenance is not None and not isinstance(route_review_provenance, Mapping):
+            raise ArgumentError("mission job route_review_provenance must be an object or null")
         execution_provenance = raw.get("execution_provenance")
         if execution_provenance is not None and not isinstance(execution_provenance, Mapping):
             raise ArgumentError("mission job execution_provenance must be an object or null")
-        return cls(raw, mission_id, status, cancel_requested, cancel_reason, recovered_after_restart, result, result_omitted, error, progress, execution_provenance)
+        return cls(raw, mission_id, status, cancel_requested, cancel_reason, recovered_after_restart, result, result_omitted, error, progress, route_review_provenance, execution_provenance)
 
     @property
     def terminal(self) -> bool:
@@ -1402,6 +1593,7 @@ class MissionInventoryItem:
     poll: str
     cancel: str
     trace: str
+    route_review_provenance: Mapping[str, Any] | None
     execution_provenance: Mapping[str, Any] | None
 
     @classmethod
@@ -1433,6 +1625,9 @@ class MissionInventoryItem:
             candidate = raw.get(name)
             _text(f"mission inventory {name}", candidate)
             links[name] = candidate
+        route_review_provenance = raw.get("route_review_provenance")
+        if route_review_provenance is not None and not isinstance(route_review_provenance, Mapping):
+            raise ArgumentError("mission inventory route_review_provenance must be an object or null")
         execution_provenance = raw.get("execution_provenance")
         if execution_provenance is not None and not isinstance(execution_provenance, Mapping):
             raise ArgumentError("mission inventory execution_provenance must be an object or null")
@@ -1448,6 +1643,7 @@ class MissionInventoryItem:
             links["poll"],
             links["cancel"],
             links["trace"],
+            route_review_provenance,
             execution_provenance,
         )
 
@@ -1579,6 +1775,387 @@ class MissionPersistenceStatus:
         return dict(self.raw)
 
 
+@dataclass(frozen=True)
+class MissionQueueJob:
+    """Typed projection of one durable mission-queue record.
+
+    The queue deliberately does not return the original job specification from its inventory
+    route. Callers get the lifecycle and recovery posture without accidentally treating a
+    checkpoint projection as an authorization to replay work.
+    """
+
+    raw: dict[str, Any]
+    mission_id: str
+    resource_class: str
+    idempotency: str
+    idempotency_key: str
+    priority: int
+    max_attempts: int
+    state: str
+    attempts: int
+    attempts_remaining: int
+    reason: str | None
+    spec_digest: str
+    route_review_provenance: Mapping[str, Any] | None
+    spec_returned: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueJob":
+        raw = _mapping("mission queue job", value)
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission queue job {name} must be a non-negative integer")
+            return candidate
+
+        mission_id = raw.get("mission_id")
+        resource_class = raw.get("resource_class")
+        idempotency = raw.get("idempotency")
+        idempotency_key = raw.get("idempotency_key")
+        state = raw.get("state")
+        for name, candidate in (
+            ("mission_id", mission_id),
+            ("resource_class", resource_class),
+            ("idempotency", idempotency),
+            ("idempotency_key", idempotency_key),
+            ("state", state),
+        ):
+            _text(f"mission queue job {name}", candidate)
+        if resource_class not in {"compile", "ingest", "sandbox", "evaluate", "mutate", "index"}:
+            raise ArgumentError(f"unknown mission queue resource_class: {resource_class}")
+        if idempotency not in {"idempotent", "non_idempotent", "compensable"}:
+            raise ArgumentError(f"unknown mission queue idempotency: {idempotency}")
+        if state not in {
+            "queued",
+            "leased",
+            "staged",
+            "succeeded",
+            "failed",
+            "quarantined",
+            "dead_lettered",
+            "cancelled",
+        }:
+            raise ArgumentError(f"unknown mission queue state: {state}")
+        priority = raw.get("priority")
+        if not isinstance(priority, int) or isinstance(priority, bool) or not 0 <= priority <= 255:
+            raise ArgumentError("mission queue job priority must be an integer between 0 and 255")
+        max_attempts = non_negative("max_attempts")
+        attempts = non_negative("attempts")
+        attempts_remaining = non_negative("attempts_remaining")
+        reason = raw.get("reason")
+        if reason is not None:
+            _text("mission queue job reason", reason)
+        supplied_spec_digest = raw.get("spec_digest")
+        spec_digest = idempotency_key if supplied_spec_digest is None else supplied_spec_digest
+        _text("mission queue job spec_digest", spec_digest)
+        if supplied_spec_digest is not None and (
+            len(spec_digest) != 64
+            or any(character not in "0123456789abcdef" for character in spec_digest)
+        ):
+            raise ArgumentError("mission queue job spec_digest must be 64 lowercase hexadecimal characters")
+        route_review_provenance = raw.get("route_review_provenance")
+        if route_review_provenance is not None and not isinstance(route_review_provenance, Mapping):
+            raise ArgumentError("mission queue job route_review_provenance must be an object or null")
+        spec_returned = raw.get("spec_returned")
+        if not isinstance(spec_returned, bool):
+            raise ArgumentError("mission queue job spec_returned must be a boolean")
+        if spec_returned:
+            raise ArgumentError("mission queue inventory must not return job specifications")
+        return cls(
+            raw,
+            mission_id,
+            resource_class,
+            idempotency,
+            idempotency_key,
+            priority,
+            max_attempts,
+            state,
+            attempts,
+            attempts_remaining,
+            reason,
+            spec_digest,
+            route_review_provenance,
+            spec_returned,
+        )
+
+    @property
+    def terminal(self) -> bool:
+        return self.state in {"succeeded", "dead_lettered", "cancelled"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionQueueStatus:
+    """Operator view of the bounded local mission queue checkpoint."""
+
+    raw: dict[str, Any]
+    enabled: bool
+    file_present: bool
+    file_bytes: int | None
+    schema_version: int
+    state_digest: str
+    authority_digest: str
+    authority: Mapping[str, Any]
+    integrity_verified: bool | None
+    max_file_bytes: int
+    admission_policy: Mapping[str, Any]
+    registry_size: int
+    jobs: tuple[MissionQueueJob, ...]
+    startup_recoveries: tuple[Mapping[str, Any], ...]
+    automatic_resume: bool
+    execution_scope: str
+    recovery_policy: str
+    does_not_claim: tuple[str, ...]
+    flush: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueStatus":
+        raw = _mapping("mission queue status", value)
+
+        def non_negative(name: str) -> int:
+            candidate = raw.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission queue {name} must be a non-negative integer")
+            return candidate
+
+        enabled = raw.get("enabled")
+        file_present = raw.get("file_present")
+        automatic_resume = raw.get("automatic_resume")
+        for name, candidate in (
+            ("enabled", enabled),
+            ("file_present", file_present),
+            ("automatic_resume", automatic_resume),
+        ):
+            if not isinstance(candidate, bool):
+                raise ArgumentError(f"mission queue {name} must be a boolean")
+        file_bytes = raw.get("file_bytes")
+        if file_bytes is not None and (
+            not isinstance(file_bytes, int) or isinstance(file_bytes, bool) or file_bytes < 0
+        ):
+            raise ArgumentError("mission queue file_bytes must be a non-negative integer or null")
+        schema_version = non_negative("schema_version")
+        state_digest = raw.get("state_digest")
+        if (
+            not isinstance(state_digest, str)
+            or len(state_digest) != 64
+            or any(character not in "0123456789abcdef" for character in state_digest)
+        ):
+            raise ArgumentError("mission queue state_digest must be 64 lowercase hexadecimal characters")
+        authority_digest = raw.get("authority_digest")
+        if (
+            not isinstance(authority_digest, str)
+            or len(authority_digest) != 64
+            or any(character not in "0123456789abcdef" for character in authority_digest)
+        ):
+            raise ArgumentError("mission queue authority_digest must be 64 lowercase hexadecimal characters")
+        authority_value = raw.get("authority")
+        if not isinstance(authority_value, Mapping):
+            raise ArgumentError("mission queue authority must be an object")
+        authority = dict(authority_value)
+        for name in ("revision", "event_count"):
+            candidate = authority.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission queue authority {name} must be a non-negative integer")
+        queue_state_digest = authority.get("queue_state_digest")
+        if (
+            not isinstance(queue_state_digest, str)
+            or len(queue_state_digest) != 64
+            or any(character not in "0123456789abcdef" for character in queue_state_digest)
+        ):
+            raise ArgumentError("mission queue authority queue_state_digest must be 64 lowercase hexadecimal characters")
+        if queue_state_digest != state_digest:
+            raise ArgumentError("mission queue authority queue_state_digest must match state_digest")
+        if authority.get("integrity_verified") is not True:
+            raise ArgumentError("mission queue authority integrity_verified must be true")
+        integrity_verified = raw.get("integrity_verified")
+        if integrity_verified is not None and not isinstance(integrity_verified, bool):
+            raise ArgumentError("mission queue integrity_verified must be a boolean or null")
+        admission_policy_value = raw.get("admission_policy")
+        if not isinstance(admission_policy_value, Mapping):
+            raise ArgumentError("mission queue admission_policy must be an object")
+        admission_policy = dict(admission_policy_value)
+        for name in ("max_jobs", "max_active_leases", "observed_active_leases"):
+            candidate = admission_policy.get(name)
+            if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 0:
+                raise ArgumentError(f"mission queue admission_policy {name} must be a non-negative integer")
+        values = raw.get("jobs")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ArgumentError("mission queue jobs must be an array")
+        jobs = tuple(MissionQueueJob.from_wire(item) for item in values)
+        if len(jobs) != non_negative("registry_size"):
+            raise ArgumentError("mission queue registry_size must equal the number of jobs")
+        recoveries = raw.get("startup_recoveries")
+        if not isinstance(recoveries, Sequence) or isinstance(recoveries, (str, bytes)):
+            raise ArgumentError("mission queue startup_recoveries must be an array")
+        startup_recoveries: list[Mapping[str, Any]] = []
+        for recovery in recoveries:
+            if not isinstance(recovery, Mapping):
+                raise ArgumentError("mission queue startup recovery rows must be objects")
+            startup_recoveries.append(dict(recovery))
+        execution_scope = raw.get("execution_scope")
+        recovery_policy = raw.get("recovery_policy")
+        flush = raw.get("flush")
+        for name, candidate in (
+            ("execution_scope", execution_scope),
+            ("recovery_policy", recovery_policy),
+            ("flush", flush),
+        ):
+            _text(f"mission queue {name}", candidate)
+        claims = raw.get("does_not_claim")
+        if not isinstance(claims, Sequence) or isinstance(claims, (str, bytes)):
+            raise ArgumentError("mission queue does_not_claim must be an array")
+        does_not_claim: list[str] = []
+        for claim in claims:
+            _text("mission queue non-claim", claim)
+            does_not_claim.append(claim)
+        return cls(
+            raw,
+            enabled,
+            file_present,
+            file_bytes,
+            schema_version,
+            state_digest,
+            authority_digest,
+            authority,
+            integrity_verified,
+            non_negative("max_file_bytes"),
+            admission_policy,
+            non_negative("registry_size"),
+            jobs,
+            tuple(startup_recoveries),
+            automatic_resume,
+            execution_scope,
+            recovery_policy,
+            tuple(does_not_claim),
+            flush,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionQueueInventory:
+    """Typed response for the queue inventory envelope."""
+
+    raw: dict[str, Any]
+    queue: MissionQueueStatus
+    schema: str
+    guarantees: tuple[str, ...]
+    persistence: str
+    flush: str
+    mission_inventory: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueInventory":
+        raw = _mapping("mission queue inventory", value)
+        queue = raw.get("queue")
+        if not isinstance(queue, Mapping):
+            raise ArgumentError("mission queue inventory queue must be an object")
+        schema = raw.get("schema")
+        _text("mission queue inventory schema", schema)
+        guarantees = raw.get("guarantees")
+        if not isinstance(guarantees, Sequence) or isinstance(guarantees, (str, bytes)):
+            raise ArgumentError("mission queue inventory guarantees must be an array")
+        guarantee_values: list[str] = []
+        for guarantee in guarantees:
+            _text("mission queue guarantee", guarantee)
+            guarantee_values.append(guarantee)
+        links = raw.get("links")
+        if not isinstance(links, Mapping):
+            raise ArgumentError("mission queue inventory links must be an object")
+        persistence = links.get("persistence")
+        flush = links.get("flush")
+        mission_inventory = links.get("mission_inventory")
+        for name, candidate in (
+            ("persistence", persistence),
+            ("flush", flush),
+            ("mission_inventory", mission_inventory),
+        ):
+            _text(f"mission queue inventory link {name}", candidate)
+        return cls(raw, MissionQueueStatus.from_wire(queue), schema, tuple(guarantee_values), persistence, flush, mission_inventory)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionQueueFlushResult:
+    """Typed response for an atomic queue checkpoint flush."""
+
+    raw: dict[str, Any]
+    bytes: int
+    queue: MissionQueueStatus
+    request_id: str
+    guarantees: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueFlushResult":
+        raw = _mapping("mission queue flush", value)
+        byte_count = raw.get("bytes")
+        if not isinstance(byte_count, int) or isinstance(byte_count, bool) or byte_count < 0:
+            raise ArgumentError("mission queue flush bytes must be a non-negative integer")
+        queue = raw.get("queue")
+        if not isinstance(queue, Mapping):
+            raise ArgumentError("mission queue flush queue must be an object")
+        request_id = raw.get("request_id")
+        _text("mission queue flush request_id", request_id)
+        guarantees = raw.get("guarantees")
+        if not isinstance(guarantees, Sequence) or isinstance(guarantees, (str, bytes)):
+            raise ArgumentError("mission queue flush guarantees must be an array")
+        guarantee_values: list[str] = []
+        for guarantee in guarantees:
+            _text("mission queue flush guarantee", guarantee)
+            guarantee_values.append(guarantee)
+        return cls(raw, byte_count, MissionQueueStatus.from_wire(queue), request_id, tuple(guarantee_values))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionQueueLockReleaseResult:
+    """Typed receipt for an explicitly attributed orphan-lock release."""
+
+    raw: dict[str, Any]
+    operator: str
+    reason: str
+    previous_owner: Mapping[str, Any]
+    recorded_revision: int
+    request_id: str
+    warning: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionQueueLockReleaseResult":
+        raw = _mapping("mission queue lock release", value)
+        if raw.get("ok") is not True:
+            raise ArgumentError("mission queue lock release ok must be true")
+        receipt = raw.get("receipt")
+        if not isinstance(receipt, Mapping):
+            raise ArgumentError("mission queue lock release receipt must be an object")
+        operator = receipt.get("operator")
+        reason = receipt.get("reason")
+        _text("mission queue lock release operator", operator)
+        _text("mission queue lock release reason", reason)
+        previous_owner = receipt.get("previous_owner")
+        if not isinstance(previous_owner, Mapping):
+            raise ArgumentError("mission queue lock release previous_owner must be an object")
+        recorded_revision = receipt.get("recorded_revision")
+        if not isinstance(recorded_revision, int) or isinstance(recorded_revision, bool) or recorded_revision < 0:
+            raise ArgumentError("mission queue lock release recorded_revision must be a non-negative integer")
+        request_id = raw.get("request_id")
+        warning = raw.get("warning")
+        _text("mission queue lock release request_id", request_id)
+        _text("mission queue lock release warning", warning)
+        return cls(raw, operator, reason, dict(previous_owner), recorded_revision, request_id, warning)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
 def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> MissionPreflight:
     """Review a mission against a live schema snapshot without dispatching any tool."""
 
@@ -1597,6 +2174,14 @@ def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> Miss
         issues.append(f"policy: {error}")
 
     raw_steps = [_step(value) for value in request.steps]
+    route_review_provenance: dict[str, Any] | None = None
+    if request.route_review is not None:
+        try:
+            route_review_provenance = _route_review_provenance(
+                request.route_review, request.goal, raw_steps
+            )
+        except ArgumentError as error:
+            issues.append(f"route_review: {error}")
     if len(raw_steps) > MAX_MISSION_STEPS:
         issues.append(f"mission has {len(raw_steps)} steps; maximum is {MAX_MISSION_STEPS}")
     if len(raw_steps) > policy.max_steps:
@@ -1752,6 +2337,7 @@ def preflight_mission(request: MissionRequest, catalogue: ToolCatalogue) -> Miss
         steps=tuple(step_results),
         issues=tuple(dict.fromkeys(issues)),
         warnings=tuple(dict.fromkeys(warnings)),
+        route_review_provenance=route_review_provenance,
     )
 
 
@@ -1817,6 +2403,7 @@ __all__ = [
     "MAX_MISSION_CLAIM_REQUESTS",
     "MAX_MISSION_CLAIM_REFERENCES",
     "MAX_MISSION_CLAIM_EVALUATORS",
+    "MAX_WORKFLOW_BINDING_BYTES",
     "MAX_STEP_OUTPUT_BYTES",
     "MAX_TOTAL_OUTPUT_BYTES",
     "OPERATIONS_REQUIRED_GATES",
@@ -1841,6 +2428,11 @@ __all__ = [
     "MissionInventoryPage",
     "MissionInventorySummary",
     "MissionPersistenceStatus",
+    "MissionQueueJob",
+    "MissionQueueStatus",
+    "MissionQueueInventory",
+    "MissionQueueFlushResult",
+    "MissionQueueLockReleaseResult",
     "MissionTraceEvent",
     "MissionPreflightError",
     "MissionRouteSelection",

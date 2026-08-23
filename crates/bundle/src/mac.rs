@@ -7,18 +7,17 @@
 //!
 //! # What this module can build, and what it therefore cannot promise
 //!
-//! This workspace builds offline against pinned dependencies. The only cryptographic primitive
-//! available is `sha2`. From SHA-256 one can construct HMAC (RFC 2104), which is a **symmetric**
-//! message authentication code: the same secret both produces and checks a tag. One cannot
-//! construct a public-key signature scheme, because there is no field arithmetic, no elliptic
-//! curve, no big-integer type and no key generation in the dependency set, and adding one is not
-//! possible here.
+//! This module owns the HMAC compatibility path. The sibling [`crate::signature`] module owns the
+//! Ed25519 public-key path. From SHA-256 one can construct HMAC (RFC 2104), which is a **symmetric**
+//! message authentication code: the same secret both produces and checks a tag. That remains
+//! useful for cooperating local processes, but it must never be serialized or described as a
+//! public-key signature.
 //!
 //! The consequence is not a missing feature, it is a missing *property*. Every party able to
 //! verify a tag is also able to forge one, because verification requires the producing secret.
 //! Therefore:
 //!
-//! - There is **no third-party verifiability**. A verifier who does not hold the key cannot check
+//! - There is **no third-party verifiability for this path**. A verifier who does not hold the key cannot check
 //!   anything; a verifier who does hold the key is indistinguishable from the producer.
 //! - There is **no non-repudiation**. A producer can truthfully say "any of you could have made
 //!   that", and nothing in this crate contradicts them.
@@ -28,11 +27,10 @@
 //!
 //! # The type says so too
 //!
-//! [`AuthenticationScheme`] has exactly one variant, [`AuthenticationScheme::SymmetricSharedSecret`],
-//! following the pattern `bioprism-sdk` uses for `Enforcement::DeclaredOnly`. There is no
-//! `AuthenticationScheme::PublicKeySignature` for a later refactor to reach for, so no value in this
-//! crate can record that a bundle was signed with an asymmetric key. Adding one would be a visible
-//! change to a public enum rather than a quiet change to a string.
+//! [`AuthenticationScheme`] records whether a value uses
+//! [`AuthenticationScheme::SymmetricSharedSecret`] or
+//! [`AuthenticationScheme::Ed25519PublicKey`]. The two paths use separate bundle wrapper types so
+//! deserializing an old MAC bundle cannot silently upgrade its meaning.
 //!
 //! [`MacTag`]'s [`std::fmt::Display`] always emits the `hmac-sha256:` prefix, so a tag pasted into a
 //! log, a UI or an issue carries its own algorithm with it and cannot be quoted as "the signature".
@@ -72,33 +70,48 @@ pub const TAG_SIZE: usize = 32;
 const IPAD: u8 = 0x36;
 const OPAD: u8 = 0x5c;
 
-/// How a bundle is authenticated. Symmetrically, and only symmetrically.
+/// How a bundle or attestation is authenticated.
 ///
-/// One variant, on purpose. See the module docs. A reader of a stored bundle learns the crate's
-/// limitation from the bundle itself rather than having to know this crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthenticationScheme {
     /// HMAC-SHA256 under a secret both the producer and the verifier hold.
     SymmetricSharedSecret,
+    /// Ed25519 over a canonical attestation or bundle manifest preimage.
+    Ed25519PublicKey,
 }
 
 impl AuthenticationScheme {
     /// The algorithm identifier that appears in serialized bundles.
     pub fn algorithm(self) -> &'static str {
-        "hmac-sha256"
+        match self {
+            AuthenticationScheme::SymmetricSharedSecret => "hmac-sha256",
+            AuthenticationScheme::Ed25519PublicKey => "ed25519",
+        }
     }
 
     /// The sentence any surface displaying an authentication result must be able to print.
     pub fn honest_label(self) -> &'static str {
-        "hmac-sha256 under a shared secret: authenticates a key holder, not a party; \
-         any verifier can forge; not a signature"
+        match self {
+            AuthenticationScheme::SymmetricSharedSecret => {
+                "hmac-sha256 under a shared secret: authenticates a key holder, not a party; \
+                 any verifier can forge; not a signature"
+            }
+            AuthenticationScheme::Ed25519PublicKey => {
+                "ed25519 public-key signature: third parties can verify possession of the \
+                 corresponding private key; key identity and producer name still require an \
+                 external key registry"
+            }
+        }
     }
 }
 
 impl fmt::Display for AuthenticationScheme {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("symmetric-shared-secret")
+        f.write_str(match self {
+            AuthenticationScheme::SymmetricSharedSecret => "symmetric-shared-secret",
+            AuthenticationScheme::Ed25519PublicKey => "ed25519-public-key-signature",
+        })
     }
 }
 
@@ -112,11 +125,19 @@ impl fmt::Display for AuthenticationScheme {
 pub enum Repudiability {
     /// Every party able to verify this tag was also able to produce it.
     ForgeableByAnyVerifier,
+    /// A verifier can check the public key but does not possess the private signing key.
+    ///
+    /// This is a cryptographic non-forgeability statement, not proof that a human, organization,
+    /// or registry assigned the key identity correctly.
+    NotForgeableByVerifier,
 }
 
 impl fmt::Display for Repudiability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("forgeable-by-any-verifier")
+        f.write_str(match self {
+            Repudiability::ForgeableByAnyVerifier => "forgeable-by-any-verifier",
+            Repudiability::NotForgeableByVerifier => "not-forgeable-by-verifier",
+        })
     }
 }
 
@@ -215,7 +236,10 @@ impl fmt::Debug for SecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SecretKey")
             .field("identity", &self.identity)
-            .field("bytes", &format_args!("<{} bytes redacted>", self.bytes.len()))
+            .field(
+                "bytes",
+                &format_args!("<{} bytes redacted>", self.bytes.len()),
+            )
             .finish()
     }
 }
@@ -240,14 +264,21 @@ impl MacTag {
 
     /// The wire form, `hmac-sha256:<hex>`.
     pub fn to_prefixed_hex(&self) -> String {
-        format!("{}:{}", AuthenticationScheme::SymmetricSharedSecret.algorithm(), hex_lower(&self.0))
+        format!(
+            "{}:{}",
+            AuthenticationScheme::SymmetricSharedSecret.algorithm(),
+            hex_lower(&self.0)
+        )
     }
 
     /// Parses the wire form. A bare hex string is rejected: an unlabelled 64-hex blob is
     /// indistinguishable from a SHA-256 digest, and this crate contains plenty of those.
     pub fn parse_prefixed_hex(text: &str) -> Result<Self, MacError> {
         let prefix = AuthenticationScheme::SymmetricSharedSecret.algorithm();
-        let Some(hex) = text.strip_prefix(prefix).and_then(|rest| rest.strip_prefix(':')) else {
+        let Some(hex) = text
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_prefix(':'))
+        else {
             return Err(MacError::MissingAlgorithmPrefix {
                 text: text.to_string(),
             });
@@ -262,9 +293,10 @@ impl MacTag {
             let hi = hex_value(hex.as_bytes()[i * 2]).ok_or_else(|| MacError::MalformedTag {
                 text: text.to_string(),
             })?;
-            let lo = hex_value(hex.as_bytes()[i * 2 + 1]).ok_or_else(|| MacError::MalformedTag {
-                text: text.to_string(),
-            })?;
+            let lo =
+                hex_value(hex.as_bytes()[i * 2 + 1]).ok_or_else(|| MacError::MalformedTag {
+                    text: text.to_string(),
+                })?;
             *byte = (hi << 4) | lo;
         }
         Ok(MacTag(bytes))
@@ -320,7 +352,9 @@ impl<'de> Deserialize<'de> for MacTag {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MacError {
-    #[error("tag `{text}` has no algorithm prefix; an unlabelled hex string is not accepted as a tag")]
+    #[error(
+        "tag `{text}` has no algorithm prefix; an unlabelled hex string is not accepted as a tag"
+    )]
     MissingAlgorithmPrefix { text: String },
     #[error("tag `{text}` is not `hmac-sha256:` followed by 64 lowercase hex digits")]
     MalformedTag { text: String },
@@ -365,8 +399,14 @@ mod tests {
         let tag = key(b"k").authenticate(b"message");
         for rendering in [format!("{tag}"), format!("{tag:?}"), tag.to_prefixed_hex()] {
             assert!(rendering.contains("hmac-sha256:"), "{rendering}");
-            assert!(!rendering.to_lowercase().contains("signature"), "{rendering}");
-            assert!(!rendering.to_lowercase().contains("signed by"), "{rendering}");
+            assert!(
+                !rendering.to_lowercase().contains("signature"),
+                "{rendering}"
+            );
+            assert!(
+                !rendering.to_lowercase().contains("signed by"),
+                "{rendering}"
+            );
         }
     }
 
@@ -425,7 +465,13 @@ mod tests {
         naive.update(b"secret");
         naive.update(b"payload");
         let naive: Vec<u8> = naive.finalize().to_vec();
-        assert_ne!(key(b"secret").authenticate(b"payload").as_bytes().as_slice(), naive.as_slice());
+        assert_ne!(
+            key(b"secret")
+                .authenticate(b"payload")
+                .as_bytes()
+                .as_slice(),
+            naive.as_slice()
+        );
     }
 
     #[test]

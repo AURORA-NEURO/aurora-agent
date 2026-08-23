@@ -5,8 +5,8 @@ use bioprism_adaptive::{AdaptivePanel, PanelConfig};
 use bioprism_atlas::{
     Atlas, CapabilityDimension, CapabilityFamily, CapabilityId, CapabilityNode, CapabilityOntology,
     CausalChain, Detectability, EvidenceRecord, EvidenceStatus, EvidenceTier, FailureAxes,
-    FailureLabel, FailureMechanism, FailureRecord, Inducement, LabelDistribution, Reversibility,
-    OracleTier, Severity, TrialOutcome, UnmeasuredReason, WeightingPolicy,
+    FailureLabel, FailureMechanism, FailureRecord, Inducement, LabelDistribution, OracleTier,
+    Reversibility, Severity, TrialOutcome, UnmeasuredReason, WeightingPolicy,
 };
 use bioprism_bioethics::action::{ActionKind, ActionPlan, Authorisation, PlannedStep};
 use bioprism_bioethics::dualuse::{CapabilityRelease, MisuseSurface, SurfaceAssessment};
@@ -22,13 +22,20 @@ use bioprism_bioevalx::repro::{Observed, OutputSpec, Reexecution};
 use bioprism_bioevalx::trajectory::{PathProperty, Step, Trajectory};
 use bioprism_bioevalx::worldline::{Decision, Observation as EvalObservation, Worldline};
 use bioprism_biolang::{BioType, CollectionDecl, QuerySchema};
-use bioprism_bundle::{EntryRole, ResultBundle};
+use bioprism_bundle::{
+    AttestationPurpose, ClaimedProducer, EntryRole, KeyIdentity, KeyRegistry, KeyRole, KeyValidity,
+    PubliclyAttestedBundle, RegisteredKey, ResultBundle, SigningKey, TrustPolicy,
+};
+use bioprism_devplat::{
+    build_domain_workflow_catalogue, instantiate_domain_workflow, plan_mission,
+    reconcile_domain_workflow, MissionRequest,
+};
 use bioprism_evalengine::{
     compose, Conclusion, Contribution, CoverageFloor, Observation, ReleaseGate, ScoreTier,
     UnknownPolicy,
 };
 use bioprism_fabric::synth::{Candidate as FabricCandidate, Goal as FabricGoal, RoleGraph};
-use bioprism_factory::{Idempotency, Job, ResourceClass, WorkerCapability};
+use bioprism_factory::{Idempotency, Job, JobStore, ResourceClass, WorkerCapability};
 use bioprism_governance::SchemaVersion;
 use bioprism_hub::{
     AccessTier, Board, BoardId, BudgetEnvelope, BuildProvenance, ComparabilityConditions,
@@ -54,20 +61,23 @@ use bioprism_ledger::{
     ValidTime as LedgerValidTime,
 };
 use bioprism_mcp::{
-    serve, tool_definitions, Lifecycle, Request, Server, CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI,
-    PROTOCOL_VERSION,
+    serve, tool_definitions, Lifecycle, Request, Server, ADAPTIVE_QUERY_SCHEMA_URI,
+    CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI, PROTOCOL_VERSION,
+};
+use bioprism_megafactory::{
+    AccessTier as PlacementAccessTier, Attestation, Locale, TrustDomain, WorkRequest, WorkerProfile,
 };
 use bioprism_metrics::{
     CapabilityGrid, GridCell, MeasurementConditions, NoIntervalReason, ScoringRule,
     Subject as MetricsSubject,
 };
 use bioprism_modalities::{
-    ClaimKind as ModalityClaimKind, EvidenceTier as LiteratureEvidenceTier,
-    EvaluationHorizon, LiteratureClaim, Modality, ModalMeasurement, Resolution,
-    RetractionStatus, SourceProvenance,
+    ClaimKind as ModalityClaimKind, EvaluationHorizon, EvidenceTier as LiteratureEvidenceTier,
+    LiteratureClaim, ModalMeasurement, Modality, Resolution, RetractionStatus, SourceProvenance,
 };
-use bioprism_megafactory::{
-    AccessTier as PlacementAccessTier, Attestation, Locale, TrustDomain, WorkRequest, WorkerProfile,
+use bioprism_obligation::{
+    Action as ObligationAction, Obligation, ObligationGraph, ObligationPredicate, ObligationState,
+    RegretClass, StateRecord,
 };
 use bioprism_onco::{
     AcquisitionTime, AvailabilityTime, BoundaryRequest, ClinicalObservation, ClinicalTrend, Clocks,
@@ -76,10 +86,6 @@ use bioprism_onco::{
     Observation as OncoObservation, ObservationStatus, Observed as OncoObserved, OutputUse,
     Population, ProgressionEvidence, RequestContext, ResponseCriterion, SubjectRef, TargetLesion,
     TerminalFact, Timepoint, TreatmentContext, TreatmentModality, TumourWorldline,
-};
-use bioprism_obligation::{
-    Action as ObligationAction, Obligation, ObligationGraph, ObligationPredicate,
-    ObligationState, RegretClass, StateRecord,
 };
 use bioprism_oncoworlds::{
     Artifact as OncoArtifact, ArtifactLevel, Calibration, CellularFraction, ClaimTarget,
@@ -320,7 +326,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 177);
+    assert_eq!(tools.len(), 259);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -546,7 +552,10 @@ fn telemetry_projection_reports_loss_and_metric_observation_posture() {
         }),
     );
     assert_eq!(payload["ok"], json!(true));
-    assert_eq!(payload["schema"], json!("bioprism-mcp/telemetry-projection/0.1"));
+    assert_eq!(
+        payload["schema"],
+        json!("bioprism-mcp/telemetry-projection/0.1")
+    );
     assert_eq!(payload["lossless"], json!(false));
     assert_eq!(payload["loss"]["dropped"], json!(["count"]));
     assert_eq!(payload["metric"]["ok"], json!(true));
@@ -589,22 +598,22 @@ fn factory_lifecycle_replays_safe_retry_quarantine_compensation_and_commit_bound
                 { "kind": "lease", "worker_id": "worker-1", "now_nanos": 0 },
                 { "kind": "recover_expired", "now_nanos": 30_000_000_000i64 },
                 { "kind": "lease", "worker_id": "worker-1", "now_nanos": 31_000_000_000i64 },
-                { "kind": "stage", "job_id": "a-idempotent", "worker_id": "worker-1", "now_nanos": 31_000_000_001i64, "output": { "digest": "a-out" } },
-                { "kind": "commit", "job_id": "a-idempotent", "worker_id": "worker-1", "now_nanos": 31_000_000_002i64 },
+                { "kind": "stage", "job_id": "a-idempotent", "worker_id": "worker-1", "attempt": 2, "now_nanos": 31_000_000_001i64, "output": { "digest": "a-out" } },
+                { "kind": "commit", "job_id": "a-idempotent", "worker_id": "worker-1", "attempt": 2, "now_nanos": 31_000_000_002i64 },
                 { "kind": "lease", "worker_id": "worker-1", "now_nanos": 31_000_000_003i64 },
                 { "kind": "recover_expired", "now_nanos": 61_000_000_003i64 },
                 { "kind": "release_quarantine", "job_id": "b-nonidempotent", "operator": "reviewer-1" },
                 { "kind": "lease", "worker_id": "worker-1", "now_nanos": 62_000_000_000i64 },
-                { "kind": "fail", "job_id": "b-nonidempotent", "worker_id": "worker-1", "now_nanos": 62_000_000_001i64, "reason": "external service rejected the request" },
+                { "kind": "fail", "job_id": "b-nonidempotent", "worker_id": "worker-1", "attempt": 2, "now_nanos": 62_000_000_001i64, "reason": "external service rejected the request" },
                 { "kind": "lease", "worker_id": "worker-1", "now_nanos": 63_000_000_000i64 },
-                { "kind": "stage", "job_id": "b-nonidempotent", "worker_id": "worker-1", "now_nanos": 63_000_000_001i64, "output": { "effect_id": "effect-1" } },
-                { "kind": "commit", "job_id": "b-nonidempotent", "worker_id": "worker-1", "now_nanos": 63_000_000_002i64 },
+                { "kind": "stage", "job_id": "b-nonidempotent", "worker_id": "worker-1", "attempt": 3, "now_nanos": 63_000_000_001i64, "output": { "effect_id": "effect-1" } },
+                { "kind": "commit", "job_id": "b-nonidempotent", "worker_id": "worker-1", "attempt": 3, "now_nanos": 63_000_000_002i64 },
                 { "kind": "lease", "worker_id": "worker-1", "now_nanos": 63_000_000_003i64 },
                 { "kind": "recover_expired", "now_nanos": 93_000_000_003i64 },
                 { "kind": "compensate", "job_id": "c-compensable" },
                 { "kind": "lease", "worker_id": "worker-1", "now_nanos": 94_000_000_000i64 },
-                { "kind": "stage", "job_id": "c-compensable", "worker_id": "worker-1", "now_nanos": 94_000_000_001i64, "output": { "compensated": true } },
-                { "kind": "commit", "job_id": "c-compensable", "worker_id": "worker-1", "now_nanos": 94_000_000_002i64 }
+                { "kind": "stage", "job_id": "c-compensable", "worker_id": "worker-1", "attempt": 2, "now_nanos": 94_000_000_001i64, "output": { "compensated": true } },
+                { "kind": "commit", "job_id": "c-compensable", "worker_id": "worker-1", "attempt": 2, "now_nanos": 94_000_000_002i64 }
             ]
         }),
     );
@@ -640,6 +649,1972 @@ fn factory_lifecycle_replays_safe_retry_quarantine_compensation_and_commit_bound
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("idempotency")));
+}
+
+#[test]
+fn factory_authority_verify_audits_legacy_queue_checkpoint_without_dispatch() {
+    let mut server = server();
+    let checkpoint = JobStore::new().snapshot().unwrap();
+    let payload = call(
+        &mut server,
+        "factory_authority_verify",
+        json!({
+            "checkpoint": serde_json::to_value(checkpoint).unwrap(),
+            "include_events": true,
+            "max_events": 8,
+        }),
+    );
+
+    assert_eq!(payload["valid"], json!(true));
+    assert_eq!(payload["revision"], json!(0));
+    assert_eq!(payload["authority_epoch"], json!(1));
+    assert_eq!(payload["event_count"], json!(0));
+    assert_eq!(payload["events"], json!([]));
+    assert_eq!(payload["job_count"], json!(0));
+    assert_eq!(payload["active_lease_count"], json!(0));
+    assert!(payload["does_not_claim"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "multi-host consensus or network-partition tolerance"));
+}
+
+#[test]
+fn artifact_registry_audit_joins_cross_domain_records_without_inventing_provenance() {
+    let mut server = server();
+    let leaf = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({
+            "operation": "register",
+            "registration": {
+                "kind": "domain_report",
+                "subject_id": "mission-leaf",
+                "domains": ["oncology", "genomics"],
+                "parent_digests": [],
+                "artifact": {"status": "review_required"}
+            }
+        }),
+    );
+    assert_eq!(leaf["created"], json!(true));
+    let leaf_digest = leaf["content_digest"].as_str().unwrap();
+    let root = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({
+            "operation": "register",
+            "registration": {
+                "kind": "mission_report",
+                "subject_id": "mission-root",
+                "domains": ["oncology"],
+                "parent_digests": [leaf_digest, "f".repeat(64)],
+                "artifact": {"status": "partial"}
+            }
+        }),
+    );
+    assert_eq!(root["created"], json!(true));
+    let lineage = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({
+            "operation": "lineage",
+            "content_digest": root["content_digest"]
+        }),
+    );
+    assert_eq!(lineage["nodes"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        lineage["missing_parent_digests"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(lineage["cycles"], json!([]));
+    assert!(lineage["does_not_claim"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "parent presence proves causal provenance or scientific validity"));
+    let cross_store = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({"operation": "cross_store"}),
+    );
+    assert_eq!(
+        cross_store["workflow"],
+        json!("artifact_registry_cross_store_audit")
+    );
+    assert_eq!(cross_store["consistent"], json!(true));
+    assert_eq!(
+        cross_store["coverage"]["mission_evidence_bundle"]["complete"],
+        json!(true)
+    );
+    assert_eq!(
+        cross_store["stores"]["artifact_registry"]["record_count"],
+        json!(2)
+    );
+    assert!(cross_store["does_not_claim"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "the four stores were read in one atomic transaction"));
+}
+
+#[test]
+fn artifact_registry_domain_evidence_lineage_traces_intake_and_reverse_children() {
+    let mut server = server();
+    let intake = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "mcp-lineage-subject",
+            "source_tool": "modality_catalog",
+            "request": {"modality": "single_cell"},
+            "response": {"modalities": ["single_cell"]},
+            "outcome": "observed",
+            "claim_posture": {
+                "status": "observed",
+                "does_not_claim": ["clinical validity"]
+            }
+        }),
+    );
+    let intake_digest = intake["artifact_registry"]["content_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let trace = call(
+        &mut server,
+        "artifact_registry_audit",
+        json!({
+            "operation": "domain_evidence_lineage",
+            "content_digest": intake_digest,
+            "include_children": true
+        }),
+    );
+    assert_eq!(
+        trace["workflow"],
+        json!("artifact_registry_domain_evidence_lineage")
+    );
+    assert_eq!(trace["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(trace["rows"][0]["outcome"], json!("observed"));
+    assert_eq!(
+        trace["rows"][0]["source_plan"]["binding_state"],
+        json!("not_declared")
+    );
+    assert_eq!(
+        trace["rows"][0]["request_digest"].as_str().unwrap().len(),
+        64
+    );
+    assert!(trace["rows"][0]["artifact_lookup"]
+        .as_str()
+        .unwrap()
+        .contains("/v1/artifacts/"));
+    assert!(trace["guarantees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item
+            == "reverse child links are computed only from exact declared parent content digests"));
+}
+
+#[test]
+fn domain_report_projection_checks_catalogue_indexes_idempotently_and_reports_coverage() {
+    let mut server = server();
+    let arguments = json!({
+        "group_id": "biological_domains",
+        "domains": ["modalities"],
+        "subject_id": "domain-report-subject",
+        "source_tool": "modality_catalog",
+        "report": {"observations": ["caller supplied"], "status": "review_required"},
+        "claim_posture": {
+            "status": "review_required",
+            "does_not_claim": ["clinical validity", "execution completion"],
+            "limitations": ["no external provenance was supplied"]
+        }
+    });
+    let first = call(&mut server, "domain_report_project", arguments.clone());
+    assert_eq!(first["workflow"], json!("domain_report_project"));
+    assert_eq!(first["readiness_claimed"], json!(false));
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        first["artifact_registry"]["verification"]["method"],
+        json!("domain_report_projection")
+    );
+    let second = call(&mut server, "domain_report_project", arguments);
+    assert_eq!(
+        first["artifact_registry"]["content_digest"],
+        second["artifact_registry"]["content_digest"]
+    );
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+
+    let coverage = call(
+        &mut server,
+        "domain_report_project",
+        json!({"operation": "coverage", "include_report_digests": true}),
+    );
+    assert_eq!(coverage["workflow"], json!("domain_report_coverage"));
+    assert_eq!(coverage["group_count"], json!(30));
+    assert_eq!(coverage["reported_group_count"], json!(1));
+    assert_eq!(coverage["missing_group_count"], json!(29));
+    assert_eq!(coverage["complete"], json!(false));
+    assert_eq!(coverage["readiness_claimed"], json!(false));
+    assert_eq!(
+        coverage["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|group| group["id"] == "biological_domains")
+            .unwrap()["report_classes"]["ordinary"],
+        json!(1)
+    );
+    assert_eq!(
+        coverage["bridge_summary"]["lineage"]["reports_without_lineage_parents"],
+        json!(1)
+    );
+    let filtered = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "operation": "coverage",
+            "group_id": "biological_domains",
+            "report_class": "ordinary",
+            "bridge_mode": "inline"
+        }),
+    );
+    assert_eq!(filtered["filters"]["report_class"], json!("ordinary"));
+    assert_eq!(filtered["filters"]["bridge_mode"], json!("inline"));
+    assert_eq!(filtered["reported_group_count"], json!(0));
+    assert_eq!(filtered["missing_group_count"], json!(1));
+    assert_eq!(coverage["coverage_digest"].as_str().unwrap().len(), 64);
+}
+
+#[test]
+fn domain_report_projection_refuses_unknown_source_and_domain_claims() {
+    let mut server = server();
+    let refused = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "domain-report-invalid",
+            "source_tool": "not_a_declared_tool",
+            "report": {"status": "review_required"},
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(refused["ok"], json!(false));
+    assert!(refused["error"].as_str().unwrap().contains("not declared"));
+
+    let domain_refused = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["not_declared"],
+            "subject_id": "domain-report-invalid-domain",
+            "source_tool": "modality_catalog",
+            "report": {"status": "review_required"},
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(domain_refused["ok"], json!(false));
+    assert!(domain_refused["error"]
+        .as_str()
+        .unwrap()
+        .contains("not declared"));
+}
+
+#[test]
+fn adapter_domain_report_operation_validates_and_joins_adapter_evidence() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "operation": "from_adapter_execution",
+            "evidence": {
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "subject_id": "adapter-domain-report-subject",
+                "adapter_id": "bioprism.python.vcf_text",
+                "adapter_version": "0.1.0",
+                "source_id": "adapter-domain-report-source",
+                "input_digest": "a".repeat(64),
+                "output_digest": "b".repeat(64),
+                "execution_status": "succeeded",
+                "conformance_status": "verified",
+                "semantic_loss_status": "unknown",
+                "losses": [],
+                "parent_digests": ["c".repeat(64)]
+            },
+            "conformance": {"status": "verified", "report_digest": "d".repeat(64)}
+        }),
+    );
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-devplat-adapter-domain-report/0.1")
+    );
+    assert_eq!(result["workflow"], json!("adapter_domain_report"));
+    assert_eq!(
+        result["evidence"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+    assert_eq!(
+        result["domain_report"]["workflow"],
+        json!("domain_report_project")
+    );
+    assert_eq!(
+        result["domain_report"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+    assert_eq!(
+        result["domain_report"]["report"]["claim_posture"]["status"],
+        json!("observed")
+    );
+    assert!(result["domain_report"]["report"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|parent| parent == &result["evidence"]["artifact_registry"]["content_digest"]));
+    assert_eq!(result["readiness_claimed"], json!(false));
+}
+
+#[test]
+fn provider_domain_report_operations_compose_inline_and_external_normalization() {
+    let mut server = server();
+    let payload = json!({"records": [{"id": "pmid:1", "title": "opaque"}]});
+    let inline = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "operation": "from_provider_normalization",
+            "normalization": {
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "subject_id": "provider-domain-report",
+                "source_tool": "literature_bind_check",
+                "connector_kind": "literature",
+                "provider": "pubmed",
+                "payload": payload,
+                "outcome": "observed",
+                "parent_digests": ["a".repeat(64)]
+            }
+        }),
+    );
+    assert_eq!(inline["ok"], json!(true));
+    assert_eq!(inline["mode"], json!("inline"));
+    assert_eq!(inline["workflow"], json!("provider_domain_report"));
+    assert_eq!(
+        inline["domain_report"]["report"]["source_tool"],
+        json!("domain_evidence_provider_normalize")
+    );
+    assert_eq!(
+        inline["domain_report"]["report"]["claim_posture"]["status"],
+        json!("observed")
+    );
+    assert_eq!(
+        inline["domain_report"]["report"]["report"]["kind"],
+        json!("provider_normalization")
+    );
+    assert_eq!(
+        inline["domain_report"]["report"]["report"]["payload_digest"],
+        inline["normalization"]["payload_digest"]
+    );
+    assert!(inline["domain_report"]["report"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|parent| parent == &inline["normalization"]["artifact_registry"]["content_digest"]));
+    assert_eq!(inline["readiness_claimed"], json!(false));
+
+    let payload_digest = ContentHash::of_value(&payload).unwrap().to_string();
+    let byte_length = serde_json::to_vec(&payload).unwrap().len() as u64;
+    let external = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "operation": "from_external_provider_normalization",
+            "normalization": {
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "subject_id": "external-provider-domain-report",
+                "source_tool": "literature_bind_check",
+                "provider": "pubmed",
+                "connector_kind": "literature",
+                "handoff_digest": "b".repeat(64),
+                "transfer_id": "provider-domain-report-transfer",
+                "payload_digest": payload_digest,
+                "byte_length": byte_length,
+                "storage_backend": "object_store",
+                "locator_kind": "opaque",
+                "locator": "store://caller/pubmed/provider-domain-report",
+                "availability": "available",
+                "retention": "durable",
+                "payload": payload,
+                "outcome": "observed"
+            }
+        }),
+    );
+    assert_eq!(external["ok"], json!(true));
+    assert_eq!(external["mode"], json!("external_payload"));
+    assert_eq!(
+        external["domain_report"]["report"]["source_tool"],
+        json!("domain_evidence_provider_external_payload_normalize")
+    );
+    assert_eq!(
+        external["domain_report"]["report"]["report"]["materialization"]["locator_opened"],
+        json!(false)
+    );
+    assert!(external["domain_report"]["report"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|parent| parent
+            == &external["normalization"]["receipt_artifact_registry"]["content_digest"]));
+    assert_eq!(external["readiness_claimed"], json!(false));
+}
+
+#[test]
+fn domain_evidence_harmonization_indexes_traceability_idempotently() {
+    let mut server = server();
+    let first = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "harmonization-subject",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["modality contract retained"]},
+            "claim_posture": {
+                "status": "observed",
+                "does_not_claim": ["clinical validity"]
+            }
+        }),
+    );
+    let second = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_ir_and_query",
+            "domains": ["BioQL syntax"],
+            "subject_id": "harmonization-subject",
+            "source_tool": "bioql_compile",
+            "report": {"observations": ["query syntax contract retained"]},
+            "claim_posture": {
+                "status": "review_required",
+                "does_not_claim": ["query execution", "biological truth"],
+                "limitations": ["no source dataset supplied"]
+            }
+        }),
+    );
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(second["artifact_registry"]["indexed"], json!(true));
+
+    let arguments = json!({
+        "subject_id": "harmonization-subject",
+        "claim": {"id": "claim-opaque-1", "statement": "caller-owned claim"},
+        "reports": [first["report"].clone(), second["report"].clone()],
+        "links": [
+            {"report_index": 0, "role": "supports"},
+            {"report_index": 1, "role": "qualifies", "note": "syntax coverage is not execution"}
+        ],
+        "required_group_ids": ["biological_domains", "biological_ir_and_query"],
+        "required_domains": ["modalities", "BioQL syntax"]
+    });
+    let harmonized = call(&mut server, "domain_evidence_harmonize", arguments.clone());
+    assert_eq!(harmonized["workflow"], json!("domain_evidence_harmonize"));
+    assert_eq!(
+        harmonized["harmonization"]["coverage"]["traceability_state"],
+        json!("complete")
+    );
+    assert_eq!(
+        harmonized["harmonization"]["coverage"]["all_reports_linked"],
+        json!(true)
+    );
+    assert_eq!(
+        harmonized["harmonization"]["posture"]["qualification_link_count"],
+        json!(1)
+    );
+    assert_eq!(harmonized["readiness_claimed"], json!(false));
+    assert_eq!(harmonized["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        harmonized["artifact_registry"]["verification"]["method"],
+        json!("domain_evidence_harmonization")
+    );
+
+    let coverage = call(
+        &mut server,
+        "domain_evidence_harmonization_coverage",
+        json!({
+            "subject_id": "harmonization-subject",
+            "domain": "modalities",
+            "traceability_state": "complete",
+            "include_report_digests": true
+        }),
+    );
+    assert_eq!(
+        coverage["workflow"],
+        json!("domain_evidence_harmonization_coverage")
+    );
+    assert_eq!(coverage["matching_count"], json!(1));
+    assert_eq!(coverage["returned_count"], json!(1));
+    assert_eq!(coverage["rows"][0]["report_count"], json!(2));
+    assert_eq!(coverage["rows"][0]["link_count"], json!(2));
+    assert_eq!(
+        coverage["rows"][0]["report_digests"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        coverage["summary"]["domain_summary"]["modalities"]["report_count"],
+        json!(1)
+    );
+    let invalid_cursor = call(
+        &mut server,
+        "domain_evidence_harmonization_coverage",
+        json!({"after": "not-a-digest"}),
+    );
+    assert_eq!(invalid_cursor["__isError"], json!(true));
+
+    let replay = call(&mut server, "domain_evidence_harmonize", arguments);
+    assert_eq!(
+        harmonized["artifact_registry"]["content_digest"],
+        replay["artifact_registry"]["content_digest"]
+    );
+    assert_eq!(replay["artifact_registry"]["already_present"], json!(true));
+}
+
+#[test]
+fn domain_evidence_harmonization_refuses_subject_or_catalogue_mismatch() {
+    let mut server = server();
+    let report = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "subject-a",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["bounded"]},
+            "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+        }),
+    )["report"]
+        .clone();
+    let mismatched = call(
+        &mut server,
+        "domain_evidence_harmonize",
+        json!({
+            "subject_id": "subject-b",
+            "claim": {"id": "claim-mismatch"},
+            "reports": [report],
+            "links": [{"report_index": 0, "role": "context"}]
+        }),
+    );
+    assert_eq!(mismatched["__isError"], json!(true));
+    assert!(mismatched["error"].as_str().unwrap().contains("subject"));
+
+    let invalid_catalogue = call(
+        &mut server,
+        "domain_evidence_harmonize",
+        json!({
+            "subject_id": "subject-a",
+            "claim": {"id": "claim-catalogue"},
+            "reports": [{
+                "schema": "bioprism-devplat-domain-report/0.1",
+                "workflow": "domain_report_project",
+                "subject_id": "subject-a",
+                "group_id": "biological_domains",
+                "source_tool": "modality_catalog",
+                "domains": ["not-declared"],
+                "report": {},
+                "claim_posture": {"status": "observed", "does_not_claim": ["truth"]},
+                "parent_digests": [],
+                "non_claims": ["truth"]
+            }],
+            "links": [{"report_index": 0, "role": "context"}]
+        }),
+    );
+    assert_eq!(invalid_catalogue["__isError"], json!(true));
+}
+
+#[test]
+fn domain_decision_readiness_audit_retains_cross_domain_policy_and_review_state() {
+    let mut server = server();
+    let first = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "readiness-subject",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["modality contract retained"]},
+            "claim_posture": {
+                "status": "observed",
+                "does_not_claim": ["clinical validity"]
+            }
+        }),
+    );
+    let second = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_ir_and_query",
+            "domains": ["BioQL syntax"],
+            "subject_id": "readiness-subject",
+            "source_tool": "bioql_compile",
+            "report": {"observations": ["query syntax contract retained"]},
+            "claim_posture": {
+                "status": "review_required",
+                "does_not_claim": ["query execution", "biological truth"]
+            }
+        }),
+    );
+    let arguments = json!({
+        "subject_id": "readiness-subject",
+        "claim": {"id": "claim-readiness-1", "statement": "caller-owned structural claim"},
+        "reports": [first["report"].clone(), second["report"].clone()],
+        "links": [
+            {"report_index": 0, "role": "supports"},
+            {"report_index": 1, "role": "context"}
+        ],
+        "policy": {
+            "required_group_ids": ["biological_domains", "biological_ir_and_query"],
+            "required_domains": ["modalities", "BioQL syntax"],
+            "minimum_supporting_reports": 1,
+            "minimum_qualifying_reports": 0,
+            "allow_review_required": true
+        }
+    });
+
+    let first_audit = call(
+        &mut server,
+        "domain_decision_readiness_audit",
+        arguments.clone(),
+    );
+    assert_eq!(
+        first_audit["workflow"],
+        json!("domain_decision_readiness_audit")
+    );
+    assert_eq!(
+        first_audit["audit"]["decision_state"],
+        json!("review_required")
+    );
+    assert_eq!(first_audit["audit"]["policy_satisfied"], json!(false));
+    assert_eq!(first_audit["readiness_claimed"], json!(false));
+    assert_eq!(first_audit["execution"], json!("not_started"));
+    assert_eq!(first_audit["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        first_audit["artifact_registry"]["verification"]["method"],
+        json!("domain_decision_readiness")
+    );
+    assert_eq!(
+        first_audit["audit"]["counts"]["supporting_reports"],
+        json!(1)
+    );
+    assert_eq!(
+        first_audit["audit"]["counts"]["review_required_reports"],
+        json!(1)
+    );
+
+    let replay = call(&mut server, "domain_decision_readiness_audit", arguments);
+    assert_eq!(
+        replay["artifact_registry"]["content_digest"],
+        first_audit["artifact_registry"]["content_digest"]
+    );
+    assert_eq!(replay["artifact_registry"]["already_present"], json!(true));
+}
+
+#[test]
+fn control_plane_readiness_joins_components_without_widening_authority() {
+    let mut server = server();
+    let domain_report = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "control-plane-subject",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["retained"]},
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    let report = domain_report["report"].clone();
+    let report_digest = ContentHash::of_value(&report).unwrap().to_string();
+    let readiness = call(
+        &mut server,
+        "domain_decision_readiness_audit",
+        json!({
+            "subject_id": "control-plane-subject",
+            "claim": {"id": "control-plane-claim", "statement": "opaque"},
+            "reports": [report],
+            "links": [{"report_index": 0, "report_digest": report_digest, "role": "supports"}],
+            "policy": {
+                "required_group_ids": ["biological_domains"],
+                "required_domains": ["modalities"],
+                "minimum_supporting_reports": 1,
+                "allow_review_required": true
+            }
+        }),
+    );
+    let control = call(
+        &mut server,
+        "control_plane_readiness_audit",
+        json!({
+            "subject_id": "control-plane-subject",
+            "policy": {"require_route_review": true},
+            "readiness_audit": readiness,
+            "route_review": {
+                "ok": true,
+                "workflow": "capability_route_review",
+                "route_id": "a".repeat(64),
+                "review_id": "b".repeat(64),
+                "catalog_digest": "c".repeat(64),
+                "review_status": "ready",
+                "findings": [],
+                "execution": "not_started"
+            }
+        }),
+    );
+    assert_eq!(control["workflow"], json!("control_plane_readiness_audit"));
+    assert_eq!(
+        control["audit"]["component_states"]["capability_route"]["satisfied"],
+        json!(true)
+    );
+    assert_eq!(control["audit"]["control_plane_state"], json!("incomplete"));
+    assert_eq!(control["audit"]["policy_satisfied"], json!(false));
+    assert_eq!(control["readiness_claimed"], json!(false));
+    assert_eq!(control["execution"], json!("not_started"));
+    assert_eq!(control["artifact_registry"]["indexed"], json!(true));
+
+    let query = call(
+        &mut server,
+        "control_plane_readiness_query",
+        json!({
+            "subject_id": "control-plane-subject",
+            "control_plane_state": "incomplete",
+            "include_audits": true
+        }),
+    );
+    assert_eq!(
+        query["workflow"],
+        json!("artifact_registry_control_plane_readiness_query")
+    );
+    assert_eq!(query["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        query["rows"][0]["audit"]["subject_id"],
+        json!("control-plane-subject")
+    );
+}
+
+#[test]
+fn control_plane_readiness_compare_reports_structural_regression_and_recovery() {
+    let mut server = server();
+    let domain_report = call(
+        &mut server,
+        "domain_report_project",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "control-plane-compare-subject",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["retained"]},
+            "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+        }),
+    );
+    let report = domain_report["report"].clone();
+    let report_digest = ContentHash::of_value(&report).unwrap().to_string();
+    let readiness = call(
+        &mut server,
+        "domain_decision_readiness_audit",
+        json!({
+            "subject_id": "control-plane-compare-subject",
+            "claim": {"id": "control-plane-compare-claim"},
+            "reports": [report],
+            "links": [{"report_index": 0, "report_digest": report_digest, "role": "supports"}],
+            "policy": {
+                "required_group_ids": ["biological_domains"],
+                "required_domains": ["modalities"],
+                "minimum_supporting_reports": 1
+            }
+        }),
+    );
+    let before = call(
+        &mut server,
+        "control_plane_readiness_audit",
+        json!({
+            "subject_id": "control-plane-compare-subject",
+            "policy": {"require_route_review": true},
+            "readiness_audit": readiness.clone()
+        }),
+    );
+    let after = call(
+        &mut server,
+        "control_plane_readiness_audit",
+        json!({
+            "subject_id": "control-plane-compare-subject",
+            "policy": {"require_route_review": true},
+            "readiness_audit": readiness,
+            "route_review": {
+                "ok": true,
+                "workflow": "capability_route_review",
+                "route_id": "a".repeat(64),
+                "review_id": "b".repeat(64),
+                "catalog_digest": "c".repeat(64),
+                "review_status": "ready",
+                "findings": [],
+                "execution": "not_started"
+            }
+        }),
+    );
+    assert_eq!(before["audit"]["subject_id"], after["audit"]["subject_id"]);
+    let before_content_digest = before["artifact_registry"]["content_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let after_content_digest = after["artifact_registry"]["content_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let comparison = call(
+        &mut server,
+        "control_plane_readiness_compare",
+        json!({"before": before, "after": after}),
+    );
+    assert_eq!(
+        comparison["workflow"],
+        json!("control_plane_readiness_compare")
+    );
+    assert_eq!(
+        comparison["comparison"]["state_direction"],
+        json!("improved")
+    );
+    assert_eq!(
+        comparison["comparison"]["evidence_direction"],
+        json!("improved")
+    );
+    assert!(!comparison["comparison"]["comparison_digest"]
+        .as_str()
+        .unwrap()
+        .is_empty());
+    assert_eq!(comparison["readiness_claimed"], json!(false));
+    assert_eq!(comparison["execution"], json!("not_started"));
+
+    let retained_comparison = call(
+        &mut server,
+        "control_plane_readiness_compare_retained",
+        json!({
+            "before_content_digest": before_content_digest,
+            "after_content_digest": after_content_digest,
+            "subject_id": "control-plane-compare-subject"
+        }),
+    );
+    assert_eq!(
+        retained_comparison["workflow"],
+        json!("control_plane_readiness_compare_retained")
+    );
+    assert_eq!(
+        retained_comparison["comparison"]["state_direction"],
+        json!("improved")
+    );
+    assert_eq!(
+        retained_comparison["source"],
+        json!("content_addressed_artifact_registry")
+    );
+    assert_eq!(retained_comparison["readiness_claimed"], json!(false));
+    assert_eq!(retained_comparison["execution"], json!("not_started"));
+}
+
+#[test]
+fn domain_evidence_intake_accepts_one_declared_envelope_from_every_capability_group() {
+    let mut server = server();
+    let catalogue = call(&mut server, "workspace_capabilities", json!({}));
+    let groups = catalogue
+        .as_array()
+        .expect("workspace catalogue is an array");
+    assert_eq!(groups.len(), 30);
+    for group in groups {
+        let group_id = group["id"].as_str().expect("group id");
+        let source_tool = group["mcp_tools"][0].as_str().expect("source tool");
+        let domain = group["domains"][0].as_str().expect("domain");
+        let result = call(
+            &mut server,
+            "domain_evidence_intake",
+            json!({
+                "group_id": group_id,
+                "domains": [domain],
+                "subject_id": format!("all-domain-{group_id}"),
+                "source_tool": source_tool,
+                "request": {"probe": "retained"},
+                "response": {"group_id": group_id, "source_tool": source_tool, "status": "bounded"},
+                "outcome": "observed",
+                "claim_posture": {
+                    "status": "observed",
+                    "does_not_claim": ["scientific truth", "execution completion"]
+                }
+            }),
+        );
+        assert_eq!(result["__isError"], json!(false), "group={group_id}");
+        assert_eq!(result["workflow"], json!("domain_evidence_intake"));
+        assert_eq!(result["group_id"], json!(group_id));
+        assert_eq!(result["artifact_registry"]["indexed"], json!(true));
+        assert_eq!(result["report"]["group_id"], json!(group_id));
+        assert_eq!(result["report"]["source_tool"], json!(source_tool));
+        assert_eq!(result["report"]["domains"], json!([domain]));
+    }
+}
+
+#[test]
+fn domain_evidence_intake_replays_idempotently_and_refuses_catalogue_mismatch() {
+    let mut server = server();
+    let arguments = json!({
+        "group_id": "biological_domains",
+        "domains": ["modalities"],
+        "subject_id": "intake-replay",
+        "source_tool": "modality_catalog",
+        "response": {"status": "refused", "reason": "caller withheld execution"},
+        "outcome": "refused",
+        "claim_posture": {"status": "refused", "does_not_claim": ["execution", "truth"]}
+    });
+    let first = call(&mut server, "domain_evidence_intake", arguments.clone());
+    let second = call(&mut server, "domain_evidence_intake", arguments);
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        first["artifact_registry"]["content_digest"],
+        second["artifact_registry"]["content_digest"]
+    );
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+    assert_eq!(first["outcome"], json!("refused"));
+    assert_eq!(first["request_supplied"], json!(false));
+
+    let invalid = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["not-declared"],
+            "subject_id": "intake-invalid",
+            "source_tool": "modality_catalog",
+            "response": {},
+            "outcome": "unknown",
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(invalid["__isError"], json!(true));
+    assert!(invalid["error"].as_str().unwrap().contains("not declared"));
+}
+
+#[test]
+fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() {
+    let mut server = server();
+    let intake = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "coverage-subject",
+            "source_tool": "modality_catalog",
+            "response": {"status": "bounded"},
+            "outcome": "partial",
+            "claim_posture": {"status": "review_required", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(intake["artifact_registry"]["indexed"], json!(true));
+    let coverage = call(
+        &mut server,
+        "domain_evidence_coverage",
+        json!({
+            "include_intake_digests": true
+        }),
+    );
+    assert_eq!(
+        coverage["workflow"],
+        json!("domain_evidence_intake_coverage")
+    );
+    assert_eq!(coverage["group_count"], json!(30));
+    assert_eq!(coverage["reported_group_count"], json!(1));
+    assert_eq!(coverage["missing_group_count"], json!(29));
+    assert_eq!(coverage["complete"], json!(false));
+    assert_eq!(coverage["tool_coverage_complete"], json!(false));
+    assert_eq!(coverage["domain_coverage_complete"], json!(false));
+    assert_eq!(coverage["groups_with_artifact_evidence"], json!(1));
+    assert_eq!(coverage["artifact_evidence_records"], json!(1));
+    assert_eq!(
+        coverage["artifact_evidence_scope"],
+        json!("current_digest_verified_artifact_registry_exact_declared_matches")
+    );
+    assert_eq!(
+        coverage["domain_summary"]["modalities"]["intake_count"],
+        json!(1)
+    );
+    let group = coverage["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|group| group["id"] == "biological_domains")
+        .unwrap();
+    assert_eq!(group["outcomes"], json!(["partial"]));
+    assert!(group["declared_tools"].as_array().unwrap().len() > 1);
+    assert!(group["missing_source_tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool == "bioworlds_catalog"));
+    assert_eq!(group["tool_coverage_state"], json!("partial"));
+    assert_eq!(group["domain_coverage_state"], json!("partial"));
+    assert_eq!(group["artifact_evidence"]["state"], json!("observed"));
+    assert_eq!(
+        group["artifact_evidence"]["matching_record_count"],
+        json!(1)
+    );
+    assert_eq!(
+        group["artifact_evidence"]["family_counts"]["source_or_harmonization"],
+        json!(1)
+    );
+    assert_eq!(
+        group["source_tool_coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["tool"] == "modality_catalog")
+            .unwrap()["intake_count"],
+        json!(1)
+    );
+    assert_eq!(group["intake_digests"].as_array().unwrap().len(), 1);
+    let filtered = call(
+        &mut server,
+        "domain_evidence_coverage",
+        json!({"group_id": "biological_domains", "domain": "MODALITIES"}),
+    );
+    assert_eq!(filtered["group_count"], json!(1));
+    assert_eq!(filtered["reported_group_count"], json!(1));
+    assert_eq!(filtered["complete"], json!(true));
+    assert_eq!(filtered["tool_coverage_complete"], json!(false));
+    assert_eq!(filtered["domain_coverage_complete"], json!(false));
+}
+
+#[test]
+fn domain_evidence_source_plan_is_catalogue_bound_digest_addressed_and_non_executing() {
+    let mut server = server();
+    let arguments = json!({
+        "group_id": "biological_domains",
+        "domains": ["modalities"],
+        "subject_id": "source-plan-subject",
+        "source_tool": "modality_catalog",
+        "connector_kind": "literature",
+        "locator_kind": "uri",
+        "locator": "https://example.org/article/1",
+        "retrieval_mode": "metadata_only",
+        "retrieval_policy": {"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed"},
+        "does_not_claim": ["retrieval occurred", "source is true"]
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        arguments.clone(),
+    );
+    assert_eq!(first["workflow"], json!("domain_evidence_source_plan"));
+    assert_eq!(first["retrieval_status"], json!("not_started"));
+    assert_eq!(first["readiness_claimed"], json!(false));
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        first["artifact_registry"]["verification"]["method"],
+        json!("domain_evidence_source_plan")
+    );
+    assert_eq!(first["plan_digest"].as_str().unwrap().len(), 64);
+    let bound_intake = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-plan-subject",
+            "source_tool": "modality_catalog",
+            "response": {"status": "bounded"},
+            "outcome": "observed",
+            "source_plan_digest": first["plan_digest"].clone(),
+            "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(bound_intake["source_plan_digest"], first["plan_digest"]);
+    assert!(bound_intake["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|digest| digest == &first["plan_digest"]));
+    let mut expected_arguments = arguments.clone();
+    expected_arguments["subject_id"] = json!("source-plan-expected");
+    expected_arguments["expected_content_digest"] = json!("a".repeat(64));
+    let expected_plan = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        expected_arguments,
+    );
+    let mismatch = call(
+        &mut server,
+        "domain_evidence_intake",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-plan-expected",
+            "source_tool": "modality_catalog",
+            "response": {"status": "bounded"},
+            "outcome": "observed",
+            "source_plan_digest": expected_plan["plan_digest"].clone(),
+            "claim_posture": {"status": "observed", "does_not_claim": ["truth"]}
+        }),
+    );
+    assert_eq!(mismatch["__isError"], json!(true));
+    assert!(mismatch["error"]
+        .as_str()
+        .unwrap()
+        .contains("response digest differs"));
+    let second = call(&mut server, "domain_evidence_source_plan", arguments);
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+    let credential_refused = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-plan-refused",
+            "connector_kind": "generic_http",
+            "locator_kind": "uri",
+            "locator": "https://user:secret@example.org/evidence",
+            "retrieval_mode": "content",
+            "does_not_claim": ["retrieval occurred"]
+        }),
+    );
+    assert_eq!(credential_refused["__isError"], json!(true));
+}
+
+#[test]
+fn domain_evidence_source_execute_reads_confined_file_and_retains_raw_and_json_digests() {
+    let mut server = server();
+    let planned = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-execution-subject",
+            "source_tool": "modality_catalog",
+            "connector_kind": "file",
+            "locator_kind": "path",
+            "locator": "fixtures/fiber-v0.1/leakage_query.json",
+            "retrieval_mode": "content",
+            "retrieval_policy": {"network": "disabled", "max_bytes": 65536, "cache": "content_addressed"},
+            "does_not_claim": ["source truth", "scientific validity"]
+        }),
+    );
+    let executed = call(
+        &mut server,
+        "domain_evidence_source_execute",
+        json!({"source_plan_digest": planned["plan_digest"].clone()}),
+    );
+    assert_eq!(
+        executed["workflow"],
+        json!("domain_evidence_source_execute")
+    );
+    assert_eq!(executed["outcome"], json!("observed"));
+    assert_eq!(
+        executed["intake"]["workflow"],
+        json!("domain_evidence_intake")
+    );
+    assert_eq!(
+        executed["intake"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+    assert_eq!(executed["raw_content_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(executed["response_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        executed["execution_result"]["response"]["retrieval"]["body_encoding"],
+        json!("json")
+    );
+    assert!(executed["intake"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|digest| digest == &planned["artifact_registry"]["content_digest"]));
+    let repeated = call(
+        &mut server,
+        "domain_evidence_source_execute",
+        json!({"source_plan_digest": planned["plan_digest"].clone()}),
+    );
+    assert_eq!(repeated["outcome"], json!("observed"));
+    assert_eq!(
+        repeated["intake"]["artifact_registry"]["already_present"],
+        json!(true)
+    );
+
+    let traversal_plan = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "source-execution-refused",
+            "source_tool": "modality_catalog",
+            "connector_kind": "file",
+            "locator_kind": "path",
+            "locator": "../outside.json",
+            "retrieval_mode": "content",
+            "does_not_claim": ["source truth"]
+        }),
+    );
+    let refused = call(
+        &mut server,
+        "domain_evidence_source_execute",
+        json!({"source_plan_digest": traversal_plan["plan_digest"].clone()}),
+    );
+    assert_eq!(refused["outcome"], json!("refused"));
+    assert_eq!(refused["intake"]["outcome"], json!("refused"));
+    assert_eq!(
+        refused["intake"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+}
+
+#[test]
+fn domain_evidence_provider_normalize_retains_caller_managed_payload_with_explicit_digests() {
+    let mut server = server();
+    let planned = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-subject",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "literature",
+            "locator_kind": "opaque",
+            "locator": "caller://pubmed/query/oncology",
+            "retrieval_mode": "reference_only",
+            "does_not_claim": ["provider authenticity", "clinical truth"]
+        }),
+    );
+    let normalized = call(
+        &mut server,
+        "domain_evidence_provider_normalize",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-subject",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "literature",
+            "provider": "pubmed",
+            "payload": {"records": [{"id": "pmid:1", "title": "opaque"}]},
+            "request": {"query": "oncology"},
+            "outcome": "observed",
+            "source_plan_digest": planned["plan_digest"].clone()
+        }),
+    );
+    assert_eq!(
+        normalized["workflow"],
+        json!("domain_evidence_provider_normalize")
+    );
+    assert_eq!(normalized["connector_kind"], json!("literature"));
+    assert_eq!(normalized["provider"], json!("pubmed"));
+    assert_eq!(normalized["payload_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(normalized["shape_audit"]["status"], json!("structured"));
+    assert_eq!(
+        normalized["shape_audit"]["recognized_container"],
+        json!("records")
+    );
+    assert_eq!(
+        normalized["shape_audit"]["identifier_coverage"]["present_record_count"],
+        json!(1)
+    );
+    assert_eq!(normalized["record_index"]["indexed_record_count"], json!(1));
+    assert_eq!(normalized["record_index"]["omitted_record_count"], json!(0));
+    assert_eq!(normalized["intake"]["outcome"], json!("observed"));
+    assert_eq!(
+        normalized["intake"]["artifact_registry"]["indexed"],
+        json!(true)
+    );
+    assert!(normalized["intake"]["parent_digests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|digest| digest == &planned["artifact_registry"]["content_digest"]));
+
+    let unknown = call(
+        &mut server,
+        "domain_evidence_provider_normalize",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-unknown",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "literature",
+            "provider": "caller",
+            "payload": {"records": []}
+        }),
+    );
+    assert_eq!(unknown["outcome"], json!("unknown"));
+    assert_eq!(unknown["intake"]["outcome"], json!("unknown"));
+    assert_eq!(unknown["shape_audit"]["status"], json!("structured"));
+
+    let fhir = call(
+        &mut server,
+        "domain_evidence_provider_normalize",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-fhir",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "fhir",
+            "provider": "caller",
+            "payload": {"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Patient", "id": "opaque"}}]}
+        }),
+    );
+    assert_eq!(fhir["shape_audit"]["recognized_container"], json!("entry"));
+    assert_eq!(fhir["shape_audit"]["status"], json!("structured"));
+
+    let object_store = call(
+        &mut server,
+        "domain_evidence_provider_normalize",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-object-store",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "object_store",
+            "provider": "caller",
+            "payload": {"objects": [{"key": "opaque", "content_digest": "opaque"}]}
+        }),
+    );
+    assert_eq!(object_store["shape_audit"]["status"], json!("structured"));
+    assert_eq!(
+        object_store["shape_audit"]["content_digest_coverage"]["present_record_count"],
+        json!(1)
+    );
+
+    let replay = call(
+        &mut server,
+        "domain_evidence_provider_replay_verify",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "provider-subject",
+            "source_tool": "literature_bind_check",
+            "connector_kind": "literature",
+            "provider": "pubmed",
+            "payload": {"records": [{"id": "pmid:1", "title": "opaque"}]},
+            "request": {"query": "oncology"},
+            "outcome": "observed",
+            "parent_digests": normalized["intake"]["parent_digests"].clone(),
+            "source_plan_digest": planned["plan_digest"].clone(),
+            "expected_payload_digest": normalized["payload_digest"].clone(),
+            "expected_request_digest": normalized["request_digest"].clone(),
+            "expected_shape_digest": normalized["shape_audit"]["shape_digest"].clone(),
+            "expected_normalization_digest": ContentHash::of_value(&normalized["normalization"])
+                .unwrap()
+                .to_string(),
+            "expected_intake_digest": normalized["intake"]["intake_digest"].clone()
+        }),
+    );
+    assert_eq!(replay["replay_status"], json!("matched"));
+    assert_eq!(replay["matched"], json!(true));
+    assert_eq!(replay["replay"]["differences"], json!([]));
+    assert_eq!(replay["artifact_registry"]["created"], json!(true));
+    assert_eq!(replay["replay_digest"].as_str().unwrap().len(), 64);
+}
+
+#[test]
+fn domain_evidence_provider_connector_handoff_is_scoped_secret_safe_and_idempotent() {
+    let mut server = server();
+    let request = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology", "genomics"],
+        "subject_id": "connector-subject",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "manifest": {
+            "schema": "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1",
+            "connector_id": "caller.pubmed",
+            "version": "1.2.0",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "domains": ["genomics", "oncology"],
+            "capabilities": ["query", "retain"],
+            "transport": "caller_managed",
+            "auth_posture": {
+                "status": "caller_asserted",
+                "secret_refs": ["secret://caller/pubmed"],
+                "does_not_claim": ["provider authentication"]
+            }
+        },
+        "status": "prepared",
+        "request_digest": "a".repeat(64),
+        "payload_digest": "b".repeat(64),
+        "source_plan_digest": "c".repeat(64),
+        "parent_digests": ["d".repeat(64)],
+        "attempt_id": "attempt-1"
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_provider_connector_handoff",
+        request.clone(),
+    );
+    assert_eq!(
+        first["workflow"],
+        json!("domain_evidence_provider_connector_handoff")
+    );
+    assert_eq!(first["execution"], json!("not_started"));
+    assert_eq!(first["readiness_claimed"], json!(false));
+    assert_eq!(first["handoff"]["status"], json!("prepared"));
+    assert_eq!(
+        first["handoff"]["manifest"]["auth_posture"]["secret_refs"][0],
+        json!("secret://caller/pubmed")
+    );
+    assert_eq!(first["handoff_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(first["artifact_registry"]["created"], json!(true));
+    let second = call(
+        &mut server,
+        "domain_evidence_provider_connector_handoff",
+        request,
+    );
+    assert_eq!(second["handoff_digest"], first["handoff_digest"]);
+    assert_eq!(second["artifact_registry"]["created"], json!(false));
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+    assert!(!serde_json::to_string(&first["handoff"])
+        .unwrap()
+        .contains("credential_material"));
+
+    let refused = call(
+        &mut server,
+        "domain_evidence_provider_connector_handoff",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "connector-refused",
+            "source_tool": "literature_bind_check",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "manifest": {
+                "schema": "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1",
+                "connector_id": "caller.pubmed",
+                "version": "1.2.0",
+                "provider": "pubmed",
+                "connector_kind": "literature",
+                "domains": ["oncology"],
+                "capabilities": ["query"],
+                "transport": "caller_managed",
+                "auth_posture": {"status": "unknown", "does_not_claim": ["auth"]}
+            },
+            "credential_material": "must-refuse"
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+}
+
+#[test]
+fn domain_evidence_provider_external_payload_receipt_is_out_of_line_and_restart_safe() {
+    let mut server = server();
+    let request = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "external-provider-subject",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "a".repeat(64),
+        "transfer_id": "export-2026-08-17-1",
+        "payload_digest": "b".repeat(64),
+        "byte_length": 4096,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/pubmed/objects/1",
+        "content_type": "application/json",
+        "content_encoding": "gzip",
+        "request_digest": "c".repeat(64),
+        "parent_digests": ["d".repeat(64)],
+        "availability": "available",
+        "retention": "durable",
+        "attempt_id": "attempt-1"
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        request.clone(),
+    );
+    assert_eq!(
+        first["workflow"],
+        json!("domain_evidence_provider_external_payload_receipt")
+    );
+    assert_eq!(first["receipt"]["byte_length"], json!(4096));
+    assert_eq!(first["receipt"]["retention"], json!("durable"));
+    assert_eq!(first["receipt"]["readiness_claimed"], json!(false));
+    assert_eq!(first["receipt"]["execution"], json!("not_started"));
+    assert_eq!(first["artifact_registry"]["created"], json!(true));
+    assert_eq!(first["receipt_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(first["receipt"]["handoff_digest"], json!("a".repeat(64)));
+    assert!(!serde_json::to_string(&first)
+        .unwrap()
+        .contains("credential_material"));
+
+    let second = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        request,
+    );
+    assert_eq!(second["receipt_digest"], first["receipt_digest"]);
+    assert_eq!(second["artifact_registry"]["created"], json!(false));
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+
+    let refused = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "external-provider-refused",
+            "source_tool": "literature_bind_check",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "handoff_digest": "a".repeat(64),
+            "transfer_id": "export-2",
+            "payload_digest": "b".repeat(64),
+            "byte_length": 1,
+            "storage_backend": "object_store",
+            "locator_kind": "uri",
+            "locator": "https://user:pass@example.org/object",
+            "credential_material": "never"
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+}
+
+#[test]
+fn domain_evidence_provider_external_payload_replay_is_metadata_only_and_idempotent() {
+    let mut server = server();
+    let receipt = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "external-provider-subject",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "a".repeat(64),
+        "transfer_id": "export-2026-08-17-replay-1",
+        "payload_digest": "b".repeat(64),
+        "byte_length": 4096,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/pubmed/objects/1",
+        "availability": "available",
+        "retention": "durable"
+    });
+    let recorded = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        receipt.clone(),
+    );
+    let replay_request = json!({
+        "expected_receipt_digest": recorded["receipt_digest"],
+        "expected_handoff_digest": "a".repeat(64),
+        "expected_payload_digest": "b".repeat(64),
+        "expected_byte_length": 4096,
+        "group_id": receipt["group_id"],
+        "domains": receipt["domains"],
+        "subject_id": receipt["subject_id"],
+        "source_tool": receipt["source_tool"],
+        "provider": receipt["provider"],
+        "connector_kind": receipt["connector_kind"],
+        "handoff_digest": receipt["handoff_digest"],
+        "transfer_id": receipt["transfer_id"],
+        "payload_digest": receipt["payload_digest"],
+        "byte_length": receipt["byte_length"],
+        "storage_backend": receipt["storage_backend"],
+        "locator_kind": receipt["locator_kind"],
+        "locator": receipt["locator"],
+        "availability": receipt["availability"],
+        "retention": receipt["retention"]
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_replay_verify",
+        replay_request.clone(),
+    );
+    assert_eq!(first["replay_status"], json!("matched"));
+    assert_eq!(first["matched"], json!(true));
+    assert_eq!(first["replay"]["matches"]["receipt_digest"], json!(true));
+    assert_eq!(first["artifact_registry"]["created"], json!(true));
+    assert!(first["replay"]["receipt"].get("records").is_none());
+    assert!(first["replay"]["receipt"]
+        .get("credential_material")
+        .is_none());
+    let second = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_replay_verify",
+        replay_request,
+    );
+    assert_eq!(second["replay_digest"], first["replay_digest"]);
+    assert_eq!(second["artifact_registry"]["created"], json!(false));
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+
+    let mut mismatch_request = receipt;
+    mismatch_request["byte_length"] = json!(8192);
+    mismatch_request["expected_receipt_digest"] =
+        first["replay"]["expected_receipt_digest"].clone();
+    mismatch_request["expected_handoff_digest"] = json!("a".repeat(64));
+    mismatch_request["expected_payload_digest"] = json!("b".repeat(64));
+    mismatch_request["expected_byte_length"] = json!(4096);
+    let mismatch = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_replay_verify",
+        mismatch_request,
+    );
+    assert_eq!(mismatch["replay_status"], json!("mismatch"));
+    assert_eq!(mismatch["matched"], json!(false));
+    assert_eq!(
+        mismatch["replay"]["differences"],
+        json!(["byte_length", "receipt_digest"])
+    );
+}
+
+#[test]
+fn domain_evidence_provider_external_payload_normalize_requires_digest_verified_materialization() {
+    let mut server = server();
+    let payload = json!({"records": [{"id": "pmid:1", "title": "opaque"}]});
+    let payload_digest = ContentHash::of_value(&payload).unwrap().to_string();
+    let byte_length = serde_json::to_vec(&payload).unwrap().len() as u64;
+    let request = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "external-provider-materialized",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "a".repeat(64),
+        "transfer_id": "export-materialized-1",
+        "payload_digest": payload_digest,
+        "byte_length": byte_length,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/pubmed/objects/materialized-1",
+        "availability": "available",
+        "retention": "durable",
+        "payload": payload,
+        "outcome": "observed"
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_normalize",
+        request.clone(),
+    );
+    assert_eq!(
+        first["workflow"],
+        json!("domain_evidence_provider_external_payload_normalize")
+    );
+    assert_eq!(first["materialization"]["matched"], json!(true));
+    assert_eq!(first["materialization"]["locator_opened"], json!(false));
+    assert_eq!(
+        first["normalization"]["payload_digest"],
+        first["payload_digest"]
+    );
+    assert_eq!(first["normalization"]["outcome"], json!("observed"));
+    assert_eq!(first["receipt_artifact_registry"]["created"], json!(true));
+    assert_eq!(first["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(first["readiness_claimed"], json!(false));
+
+    let second = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_normalize",
+        request.clone(),
+    );
+    assert_eq!(second["receipt_digest"], first["receipt_digest"]);
+    assert_eq!(second["receipt_artifact_registry"]["created"], json!(false));
+
+    let mut drift = request;
+    drift["payload"] = json!({"records": [{"id": "pmid:drift"}]});
+    let refused = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_normalize",
+        drift,
+    );
+    assert_eq!(refused["__isError"], json!(true));
+}
+
+#[test]
+fn domain_evidence_provider_external_payload_lineage_audit_reconciles_handoff_scope_and_payload() {
+    let mut server = server();
+    let handoff = call(
+        &mut server,
+        "domain_evidence_provider_connector_handoff",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "lineage-subject",
+            "source_tool": "literature_bind_check",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "manifest": {
+                "schema": "bioprism-devplat-domain-evidence-provider-connector-manifest/0.1",
+                "connector_id": "caller.pubmed",
+                "version": "1.2.0",
+                "provider": "pubmed",
+                "connector_kind": "literature",
+                "domains": ["oncology"],
+                "capabilities": ["query", "retain"],
+                "transport": "caller_managed",
+                "auth_posture": {
+                    "status": "caller_asserted",
+                    "secret_refs": ["secret://caller/pubmed"],
+                    "does_not_claim": ["provider authentication"]
+                }
+            },
+            "status": "prepared",
+            "payload_digest": "b".repeat(64)
+        }),
+    );
+    let receipt = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "lineage-subject",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": handoff["handoff_digest"].clone(),
+        "transfer_id": "transfer-lineage-1",
+        "payload_digest": "b".repeat(64),
+        "byte_length": 4096,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/pubmed/objects/lineage-1",
+        "availability": "available",
+        "retention": "durable"
+    });
+    let first = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_lineage_audit",
+        receipt.clone(),
+    );
+    assert_eq!(first["lineage_status"], json!("matched"));
+    assert_eq!(first["payload_binding_status"], json!("matched"));
+    assert_eq!(first["audit"]["matches"]["payload_digest"], json!(true));
+    assert_eq!(first["receipt_registry"]["created"], json!(true));
+    assert_eq!(first["artifact_registry"]["created"], json!(true));
+    assert_eq!(first["readiness_claimed"], json!(false));
+    let second = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_lineage_audit",
+        receipt,
+    );
+    assert_eq!(second["lineage_digest"], first["lineage_digest"]);
+    assert_eq!(second["artifact_registry"]["created"], json!(false));
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+
+    let orphaned = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_lineage_audit",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "orphaned-lineage-subject",
+            "source_tool": "literature_bind_check",
+            "provider": "pubmed",
+            "connector_kind": "literature",
+            "handoff_digest": "c".repeat(64),
+            "transfer_id": "transfer-lineage-orphan",
+            "payload_digest": "d".repeat(64),
+            "byte_length": 1,
+            "storage_backend": "caller_managed",
+            "locator_kind": "opaque",
+            "locator": "caller://orphaned",
+            "availability": "unknown",
+            "retention": "unknown"
+        }),
+    );
+    assert_eq!(orphaned["lineage_status"], json!("orphaned"));
+    assert_eq!(orphaned["payload_binding_status"], json!("not_available"));
+    assert_eq!(orphaned["readiness_claimed"], json!(false));
+}
+
+#[test]
+fn domain_evidence_provider_external_payload_execution_evidence_is_observation_bound_and_idempotent(
+) {
+    let mut server = server();
+    let base = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "execution-evidence-subject",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "a".repeat(64),
+        "transfer_id": "transfer-execution-evidence-1",
+        "payload_digest": "b".repeat(64),
+        "byte_length": 4096,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/pubmed/execution-evidence-1",
+        "availability": "available",
+        "retention": "durable"
+    });
+    let receipt = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        base.clone(),
+    );
+    let mut matched_request = base.clone();
+    matched_request["expected_receipt_digest"] = receipt["receipt_digest"].clone();
+    matched_request["execution_status"] = json!("transferred");
+    matched_request["executor_id"] = json!("caller-transfer-worker");
+    matched_request["observed_payload_digest"] = json!("b".repeat(64));
+    matched_request["observed_byte_length"] = json!(4096);
+    matched_request["locator_opened"] = json!(true);
+    matched_request["observation_digest"] = json!("c".repeat(64));
+    let first = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_execution_evidence",
+        matched_request.clone(),
+    );
+    assert_eq!(first["evidence_status"], json!("matched"));
+    assert_eq!(
+        first["evidence"]["matches"]["observed_payload_digest"],
+        json!(true)
+    );
+    assert_eq!(first["receipt_registry"]["already_present"], json!(true));
+    assert_eq!(first["artifact_registry"]["created"], json!(true));
+    assert_eq!(first["readiness_claimed"], json!(false));
+    let second = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_execution_evidence",
+        matched_request,
+    );
+    assert_eq!(second["evidence_digest"], first["evidence_digest"]);
+    assert_eq!(second["artifact_registry"]["created"], json!(false));
+    assert_eq!(second["artifact_registry"]["already_present"], json!(true));
+
+    let mut partial_request = base.clone();
+    partial_request["expected_receipt_digest"] = receipt["receipt_digest"].clone();
+    partial_request["execution_status"] = json!("transferred");
+    partial_request["executor_id"] = json!("caller-transfer-worker");
+    partial_request["observed_payload_digest"] = json!("b".repeat(64));
+    let partial = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_execution_evidence",
+        partial_request,
+    );
+    assert_eq!(partial["evidence_status"], json!("partial"));
+
+    let mut mismatch_request = base.clone();
+    mismatch_request["expected_receipt_digest"] = receipt["receipt_digest"].clone();
+    mismatch_request["execution_status"] = json!("transferred");
+    mismatch_request["executor_id"] = json!("caller-transfer-worker");
+    mismatch_request["observed_payload_digest"] = json!("d".repeat(64));
+    mismatch_request["observed_byte_length"] = json!(4096);
+    let mismatch = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_execution_evidence",
+        mismatch_request,
+    );
+    assert_eq!(mismatch["evidence_status"], json!("mismatch"));
+
+    let mut orphaned_request = base;
+    orphaned_request["expected_receipt_digest"] = json!("e".repeat(64));
+    orphaned_request["execution_status"] = json!("unknown");
+    orphaned_request["executor_id"] = json!("caller-transfer-worker");
+    let orphaned = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_execution_evidence",
+        orphaned_request,
+    );
+    assert_eq!(orphaned["evidence_status"], json!("orphaned"));
+}
+
+#[test]
+fn domain_evidence_provider_external_payload_evidence_query_joins_rows_and_paginates_deterministically(
+) {
+    let mut server = server();
+    let first = json!({
+        "group_id": "biological_domains",
+        "domains": ["oncology"],
+        "subject_id": "query-subject-1",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "a".repeat(64),
+        "transfer_id": "query-transfer-1",
+        "payload_digest": "b".repeat(64),
+        "byte_length": 4096,
+        "storage_backend": "object_store",
+        "locator_kind": "opaque",
+        "locator": "store://caller/query/1",
+        "availability": "available",
+        "retention": "durable"
+    });
+    let second = json!({
+        "group_id": "biological_domains",
+        "domains": ["genomics"],
+        "subject_id": "query-subject-2",
+        "source_tool": "literature_bind_check",
+        "provider": "pubmed",
+        "connector_kind": "literature",
+        "handoff_digest": "c".repeat(64),
+        "transfer_id": "query-transfer-2",
+        "payload_digest": "d".repeat(64),
+        "byte_length": 2048,
+        "storage_backend": "caller_managed",
+        "locator_kind": "opaque",
+        "locator": "caller://query/2",
+        "availability": "unknown",
+        "retention": "unknown"
+    });
+    let first_receipt = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        first,
+    );
+    let _second_receipt = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_receipt",
+        second,
+    );
+    let page = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_evidence_query",
+        json!({"max_items": 1, "include_artifacts": true}),
+    );
+    assert_eq!(page["ok"], json!(true));
+    assert_eq!(
+        page["workflow"],
+        json!("domain_evidence_provider_external_payload_evidence_query")
+    );
+    assert_eq!(page["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(page["rows"][0]["join_status"], json!("receipt_only"));
+    assert!(page["rows"][0].get("receipt_artifact").is_some());
+    assert_eq!(page["has_more"], json!(true));
+    let next_after = page["next_after"].clone();
+    assert_ne!(next_after, Value::Null);
+    let next = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_evidence_query",
+        json!({"after": next_after, "max_items": 2}),
+    );
+    assert_eq!(next["ok"], json!(true));
+    assert_eq!(next["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(next["has_more"], json!(false));
+    let filtered = call(
+        &mut server,
+        "domain_evidence_provider_external_payload_evidence_query",
+        json!({"subject_id": "query-subject-1"}),
+    );
+    assert_eq!(filtered["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        filtered["rows"][0]["receipt_digest"],
+        first_receipt["receipt_digest"]
+    );
+    assert_eq!(filtered["readiness_claimed"], json!(false));
 }
 
 #[test]
@@ -795,7 +2770,10 @@ fn hub_cards_and_leaderboards_compose_moderation_disclosure_and_comparability_ga
         }),
     );
     assert_eq!(leaderboard["ok"], json!(true));
-    assert_eq!(leaderboard["schema"], json!("bioprism-mcp/hub-leaderboard/0.1"));
+    assert_eq!(
+        leaderboard["schema"],
+        json!("bioprism-mcp/hub-leaderboard/0.1")
+    );
     assert_eq!(leaderboard["ranked_count"], json!(1));
     assert_eq!(leaderboard["unranked_count"], json!(1));
     assert_eq!(leaderboard["leader_count"], json!(1));
@@ -965,7 +2943,10 @@ fn bioatlas_publication_audit_binds_atlas_evidence_card_and_leaderboard_targets(
         }),
     );
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioatlas-publication-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioatlas-publication-audit/0.1")
+    );
     assert_eq!(result["workflow"], json!("bioatlas_publication_audit"));
     assert_eq!(result["release_request"]["ready"], json!(true));
     assert_eq!(
@@ -1163,7 +3144,23 @@ fn schemas_are_exposed_as_read_only_resources() {
     let list = Request::parse(r#"{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}"#)
         .unwrap();
     let listed = server.handle(&list).unwrap().to_json();
-    assert_eq!(listed["result"]["resources"].as_array().unwrap().len(), 4);
+    assert_eq!(listed["result"]["resources"].as_array().unwrap().len(), 5);
+
+    let adaptive = Request::parse(
+        &json!({
+            "jsonrpc":"2.0", "id":4, "method":"resources/read",
+            "params": { "uri": ADAPTIVE_QUERY_SCHEMA_URI }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let adaptive_document = server.handle(&adaptive).unwrap().to_json();
+    let adaptive_text = adaptive_document["result"]["contents"][0]["text"]
+        .as_str()
+        .unwrap();
+    let adaptive_schema: Value =
+        serde_json::from_str(adaptive_text).expect("adaptive schema is valid JSON");
+    assert_eq!(adaptive_schema["title"], json!("AURORA FIBER Query 0.5"));
 
     let read = Request::parse(
         &json!({
@@ -1228,6 +3225,587 @@ fn workspace_capabilities_are_explicit_about_every_major_domain_surface() {
 }
 
 #[test]
+fn domain_workflow_catalogue_covers_every_capability_group() {
+    let mut server = server();
+    let report = call(&mut server, "domain_workflow_catalogue", json!({}));
+    assert_eq!(report["workflow"], json!("domain_workflow_catalogue"));
+    assert_eq!(report["workflow_count"], json!(30));
+    assert_eq!(report["coverage"]["group_count"], json!(30));
+    assert_eq!(report["coverage"]["all_groups_have_workflow"], json!(true));
+    assert_eq!(
+        report["coverage"]["all_declared_tools_advertised"],
+        json!(true)
+    );
+    assert_eq!(
+        report["coverage"]["all_workflows_have_domain_contract"],
+        json!(true)
+    );
+    assert_eq!(report["execution"], json!("not_started"));
+    assert!(report["workflows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|workflow| {
+            workflow["workflow_id"].is_string()
+                && workflow["workflow_digest"].is_string()
+                && workflow["domain_contract"].is_object()
+                && workflow["tool_contracts"].is_array()
+                && workflow["recommended_stages"].is_array()
+                && workflow["tool_contracts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|contract| contract["argument_contract"].is_object())
+        }));
+}
+
+#[test]
+fn domain_workflow_scaffolds_are_actionable_and_execution_disabled_for_every_group() {
+    let mut server = server();
+    let catalogue = call(&mut server, "domain_workflow_catalogue", json!({}));
+    let workflows = catalogue["workflows"].as_array().unwrap();
+    assert_eq!(workflows.len(), 30);
+
+    for workflow in workflows {
+        let workflow_id = workflow["workflow_id"].as_str().unwrap();
+        let report = call(
+            &mut server,
+            "domain_workflow_scaffold",
+            json!({
+                "workflow_id": workflow_id,
+                "mission_id": format!("scaffold-{workflow_id}"),
+                "goal": format!("prepare a reviewed starting plan for {workflow_id}")
+            }),
+        );
+        assert_eq!(
+            report["ok"], true,
+            "scaffold failed for {workflow_id}: {report}"
+        );
+        assert_eq!(report["workflow"], "domain_workflow_scaffold");
+        assert_eq!(report["execution"], "not_started");
+        assert_eq!(report["mission"]["policy"]["execute"], false);
+        assert_eq!(
+            report["mission"]["workflow_binding"]["workflow_id"],
+            workflow_id
+        );
+        assert!(!report["selection"]["selected_tools"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            report["preflight_status"].as_str(),
+            Some("ready") | Some("blocked")
+        ));
+        assert_eq!(report["preflight_report"]["dispatch"], "not_started");
+        assert_eq!(report["preflight_report"]["preflight"], true);
+        assert_eq!(report["readiness_claimed"], false);
+        assert!(report["next_actions"].as_array().unwrap().len() >= 2);
+    }
+}
+
+#[test]
+fn domain_workflow_bindings_cover_every_available_capability_group() {
+    let capabilities = bioprism_mcp::workspace_capabilities();
+    let definitions = Value::Array(tool_definitions());
+    let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
+    let workflows = catalogue["workflows"].as_array().unwrap();
+    assert_eq!(workflows.len(), 30);
+
+    for workflow in workflows {
+        let workflow_id = workflow["workflow_id"].as_str().unwrap();
+        let tool = workflow["tools"]["available"]
+            .as_array()
+            .and_then(|tools| tools.first())
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("workflow {workflow_id} has no available tool"));
+        let mission_id = format!("all-domain-binding-{workflow_id}");
+        let report = instantiate_domain_workflow(
+            &capabilities,
+            &definitions,
+            &json!({
+                "workflow_id": workflow_id,
+                "mission_id": mission_id,
+                "goal": format!("exercise the {workflow_id} contract"),
+                "steps": [{
+                    "id": "contract-probe",
+                    "tool": tool,
+                    "arguments": {}
+                }],
+                "policy": {"execute": false}
+            }),
+        )
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} failed to instantiate: {error}"));
+        let binding = &report["mission"]["workflow_binding"];
+        assert_eq!(binding["workflow_id"], workflow["workflow_id"]);
+        assert_eq!(binding["workflow_digest"], workflow["workflow_digest"]);
+        assert_eq!(binding["catalog_digest"], workflow["catalog_digest"]);
+        assert_eq!(
+            binding["domain_contract_digest"],
+            workflow["domain_contract_digest"]
+        );
+        assert_eq!(binding["domain_contract"], workflow["domain_contract"]);
+        assert_eq!(binding["evidence_plan"], report["evidence_plan"]);
+        assert_eq!(
+            binding["evidence_plan_digest"],
+            ContentHash::of_value(&report["evidence_plan"])
+                .unwrap()
+                .to_string()
+        );
+        let verification = bioprism_devplat::verify_domain_workflow(
+            &capabilities,
+            &definitions,
+            &json!({
+                "instantiation": report,
+                "replay_request": {
+                    "workflow_id": workflow_id,
+                    "mission_id": mission_id,
+                    "goal": format!("exercise the {workflow_id} contract"),
+                    "steps": [{
+                        "id": "contract-probe",
+                        "tool": tool,
+                        "arguments": {}
+                    }],
+                    "policy": {"execute": false}
+                }
+            }),
+        )
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} failed verification: {error}"));
+        assert_eq!(verification["structural_valid"], true);
+        assert_eq!(verification["replay"]["status"], "matched");
+        assert_eq!(verification["mismatches"], json!([]));
+    }
+}
+
+#[test]
+fn domain_workflow_portfolio_preflights_every_capability_group_without_dispatch() {
+    let mut server = server();
+    let catalogue = call(&mut server, "domain_workflow_catalogue", json!({}));
+    let requests = catalogue["workflows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|workflow| {
+            let workflow_id = workflow["workflow_id"].as_str().unwrap();
+            let tool = workflow["tools"]["available"]
+                .as_array()
+                .and_then(|tools| tools.first())
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("workflow {workflow_id} has no available tool"));
+            json!({
+                "workflow_id": workflow_id,
+                "mission_id": format!("portfolio-{workflow_id}"),
+                "goal": format!("prepare a bounded portfolio plan for {workflow_id}"),
+                "steps": [{"id": "portfolio-probe", "tool": tool, "arguments": {}}],
+                "policy": {"execute": true}
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 30);
+
+    let portfolio = call(
+        &mut server,
+        "domain_workflow_portfolio",
+        json!({
+            "requests": requests,
+            "policy": {"allow_partial": true, "require_complete_catalogue": true}
+        }),
+    );
+    assert_eq!(portfolio["workflow"], "domain_workflow_portfolio");
+    assert_eq!(portfolio["valid"], false);
+    assert_eq!(portfolio["portfolio_ready"], false);
+    assert_eq!(portfolio["portfolio_status"], "partial");
+    assert_eq!(portfolio["coverage"]["complete_catalogue"], true);
+    assert_eq!(portfolio["summary"]["instantiated_count"], 30);
+    assert_eq!(portfolio["summary"]["blocked_count"], 0);
+    assert!(
+        portfolio["summary"]["preflight_blocked_count"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(portfolio["summary"]["preflight_status"], "blocked");
+    assert_eq!(portfolio["items"].as_array().unwrap().len(), 30);
+    for item in portfolio["items"].as_array().unwrap() {
+        assert!(matches!(
+            item["status"].as_str(),
+            Some("instantiated") | Some("blocked_by_mission_preflight")
+        ));
+        assert!(item["mission_preflight"]["matched"].is_boolean());
+        assert_eq!(item["mission_preflight"]["dispatch"], "not_started");
+        assert_eq!(item["instantiation"]["execution"], "not_started");
+    }
+    assert_eq!(portfolio["dispatch"], "not_started");
+    assert_eq!(portfolio["execution"], "not_started");
+}
+
+#[test]
+fn domain_workflow_reconciliation_preserves_outcomes_for_every_capability_group() {
+    let capabilities = bioprism_mcp::workspace_capabilities();
+    let definitions = Value::Array(tool_definitions());
+    let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
+    let workflows = catalogue["workflows"].as_array().unwrap();
+    assert_eq!(workflows.len(), 30);
+
+    for workflow in workflows {
+        let workflow_id = workflow["workflow_id"].as_str().unwrap();
+        let tool = workflow["tools"]["available"]
+            .as_array()
+            .and_then(|tools| tools.first())
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("workflow {workflow_id} has no available tool"));
+        let instantiation = instantiate_domain_workflow(
+            &capabilities,
+            &definitions,
+            &json!({
+                "workflow_id": workflow_id,
+                "mission_id": format!("all-domain-reconcile-{workflow_id}"),
+                "goal": format!("exercise retained evidence states for {workflow_id}"),
+                "steps": [{"id": "outcome", "tool": tool, "arguments": {}}],
+                "policy": {"execute": true}
+            }),
+        )
+        .unwrap_or_else(|error| panic!("workflow {workflow_id} failed to instantiate: {error}"));
+        let request: MissionRequest =
+            serde_json::from_value(instantiation["mission"].clone()).unwrap();
+        let plan = plan_mission(&request).unwrap();
+        let step = &plan.steps[0];
+        let report = |status: &str, wire: Option<Value>| {
+            json!({
+                "ok": true,
+                "workflow": "agent_mission",
+                "schema_version": "bioprism-devplat-mission/0.1",
+                "plan": serde_json::to_value(&plan).unwrap(),
+                "execution": "executed",
+                "mission_status": if status == "succeeded" { "succeeded" } else { "failed" },
+                "succeeded": usize::from(status == "succeeded"),
+                "refused": usize::from(status == "refused"),
+                "blocked": usize::from(status == "blocked"),
+                "cancelled": usize::from(status == "cancelled"),
+                "required_failures": usize::from(status != "succeeded"),
+                "returned_bytes": if wire.is_some() { 12 } else { 0 },
+                "results": [{
+                    "id": step.id,
+                    "tool": step.tool,
+                    "status": status,
+                    "required": step.required,
+                    "arguments_digest": "a".repeat(64),
+                    "bytes": if wire.is_some() { 12 } else { 0 },
+                    "wire": wire,
+                    "error": if status == "succeeded" { Value::Null } else { json!("explicit refusal") }
+                }],
+                "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
+                "execution_trace": [
+                    {"sequence": 0, "event": "mission.started", "wave": null, "step_id": null, "tool": null, "status": "running", "arguments_digest": null, "bytes": 0, "detail": null},
+                    {"sequence": 1, "event": "mission.completed", "wave": null, "step_id": null, "tool": null, "status": if status == "succeeded" { "succeeded" } else { "failed" }, "arguments_digest": null, "bytes": if wire.is_some() { 12 } else { 0 }, "detail": null}
+                ],
+                "claim_requests": [],
+                "claim_lineage": {},
+                "guarantees": [],
+                "limitations": []
+            })
+        };
+
+        let success = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": report("succeeded", Some(json!({"result": {"ok": true}})))
+        }))
+        .unwrap_or_else(|error| {
+            panic!("workflow {workflow_id} success reconciliation failed: {error}")
+        });
+        assert_eq!(success["completion"]["status"], "complete");
+        assert_eq!(success["completion"]["ready"], true);
+
+        let refused = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": report("refused", None)
+        }))
+        .unwrap_or_else(|error| {
+            panic!("workflow {workflow_id} refusal reconciliation failed: {error}")
+        });
+        assert_eq!(refused["completion"]["status"], "failed");
+        assert_eq!(refused["completion"]["ready"], false);
+        assert_eq!(
+            refused["evidence"]["rows"][0]["evidence_state"],
+            "explicit_refusal"
+        );
+
+        let omitted = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": report("succeeded", None)
+        }))
+        .unwrap_or_else(|error| {
+            panic!("workflow {workflow_id} omission reconciliation failed: {error}")
+        });
+        assert_eq!(
+            omitted["completion"]["status"],
+            "complete_with_output_omissions"
+        );
+        assert_eq!(omitted["completion"]["ready"], false);
+        assert_eq!(
+            omitted["evidence"]["rows"][0]["evidence_state"],
+            "completed_output_omitted"
+        );
+
+        let mut mismatched_report = report("succeeded", Some(json!({"result": {"ok": true}})));
+        mismatched_report["plan"]["digest"] = json!("b".repeat(64));
+        let mismatched = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": mismatched_report
+        }))
+        .unwrap_or_else(|error| {
+            panic!("workflow {workflow_id} mismatch reconciliation failed: {error}")
+        });
+        assert_eq!(mismatched["integrity"]["valid"], false);
+        assert_eq!(mismatched["completion"]["ready"], false);
+        assert!(mismatched["integrity"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "mission_plan_digest_mismatch"));
+    }
+}
+
+#[test]
+fn domain_workflow_instantiation_is_scoped_and_preflighted_without_dispatch() {
+    let mut server = server();
+    let report = call(
+        &mut server,
+        "domain_workflow_instantiate",
+        json!({
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "workflow-test",
+            "goal": "discover the repository capability surface",
+            "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+        }),
+    );
+    assert_eq!(report["workflow"], json!("domain_workflow_instantiate"));
+    assert_eq!(
+        report["mission"]["steps"][0]["tool"],
+        json!("workspace_capabilities")
+    );
+    assert_eq!(
+        report["selection"]["all_selected_tools_declared"],
+        json!(true)
+    );
+    assert_eq!(
+        report["selection"]["all_selected_tools_available"],
+        json!(true)
+    );
+    assert_eq!(
+        report["evidence_plan"]["steps"][0]["step_id"],
+        json!("catalog")
+    );
+    assert_eq!(
+        report["domain_contract"]["posture"],
+        json!("advisory_review_gated")
+    );
+    assert_eq!(report["execution"], json!("not_started"));
+    assert_eq!(
+        report["preflight_report"]["workflow"],
+        json!("agent_mission")
+    );
+
+    let verified = call(
+        &mut server,
+        "domain_workflow_verify",
+        json!({
+            "instantiation": report.clone(),
+            "replay_request": {
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "workflow-test",
+                "goal": "discover the repository capability surface",
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+            }
+        }),
+    );
+    assert_eq!(verified["workflow"], json!("domain_workflow_verify"));
+    assert_eq!(verified["valid"], json!(true));
+    assert_eq!(verified["verification_status"], json!("verified"));
+    assert_eq!(verified["replay"]["matched"], json!(true));
+    assert_eq!(verified["mission_preflight"]["matched"], json!(true));
+    assert_eq!(verified["dispatch"], json!("not_started"));
+    assert_eq!(verified["execution"], json!("not_started"));
+
+    let portfolio = call(
+        &mut server,
+        "domain_workflow_portfolio",
+        json!({
+            "requests": [{
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "workflow-portfolio-single",
+                "goal": "prepare the repository capability surface",
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+            }]
+        }),
+    );
+    assert_eq!(portfolio["workflow"], json!("domain_workflow_portfolio"));
+    assert_eq!(portfolio["valid"], json!(true));
+    assert_eq!(portfolio["summary"]["preflight_status"], json!("matched"));
+    assert_eq!(
+        portfolio["items"][0]["mission_preflight"]["matched"],
+        json!(true)
+    );
+    assert_eq!(portfolio["dispatch"], json!("not_started"));
+
+    let mut retained_portfolio = portfolio.clone();
+    retained_portfolio
+        .as_object_mut()
+        .unwrap()
+        .remove("__isError");
+    let portfolio_verified = call(
+        &mut server,
+        "domain_workflow_portfolio_verify",
+        json!({
+            "portfolio": retained_portfolio,
+            "replay_requests": [{
+                "workflow_id": "documentation_and_knowledge",
+                "mission_id": "workflow-portfolio-single",
+                "goal": "prepare the repository capability surface",
+                "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}]
+            }],
+            "policy": {"require_replay": true}
+        }),
+    );
+    assert_eq!(
+        portfolio_verified["workflow"],
+        json!("domain_workflow_portfolio_verify")
+    );
+    assert_eq!(portfolio_verified["valid"], json!(true));
+    assert_eq!(portfolio_verified["verification_status"], json!("verified"));
+    assert_eq!(portfolio_verified["summary"]["verified_count"], json!(1));
+    assert_eq!(
+        portfolio_verified["summary"]["replay_matched_count"],
+        json!(1)
+    );
+    assert_eq!(portfolio_verified["items"][0]["status"], json!("verified"));
+    assert_eq!(
+        portfolio_verified["items"][0]["mission_preflight"]["matched"],
+        json!(true)
+    );
+    assert_eq!(portfolio_verified["dispatch"], json!("not_started"));
+    assert_eq!(portfolio_verified["execution"], json!("not_started"));
+
+    let shape_only = call(
+        &mut server,
+        "domain_workflow_verify",
+        json!({"instantiation": report.clone()}),
+    );
+    assert_eq!(shape_only["valid"], json!(true));
+    assert_eq!(
+        shape_only["verification_status"],
+        json!("verified_without_replay")
+    );
+
+    let mut tampered = report.clone();
+    tampered["mission"]["goal"] = json!("tampered workflow goal");
+    let refused_tamper = call(
+        &mut server,
+        "domain_workflow_verify",
+        json!({"instantiation": tampered}),
+    );
+    assert_eq!(refused_tamper["valid"], json!(false));
+    assert_eq!(refused_tamper["verification_status"], json!("mismatch"));
+    assert!(refused_tamper["mismatches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["code"] == "mission_plan_digest_mismatch"));
+
+    let refused = call(
+        &mut server,
+        "domain_workflow_instantiate",
+        json!({
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "workflow-refused",
+            "goal": "must refuse cross-group selection",
+            "steps": [{"id": "compile", "tool": "bioql_compile"}]
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert!(refused["error"]
+        .as_str()
+        .unwrap()
+        .contains("outside workflow"));
+}
+
+#[test]
+fn domain_workflow_reconciliation_binds_execution_results_to_the_instantiated_contract() {
+    let mut server = server();
+    let instantiation = call(
+        &mut server,
+        "domain_workflow_instantiate",
+        json!({
+            "workflow_id": "documentation_and_knowledge",
+            "mission_id": "workflow-reconcile",
+            "goal": "reconcile repository capability evidence",
+            "steps": [{"id": "catalog", "tool": "workspace_capabilities", "arguments": {}}],
+            "policy": {"execute": true}
+        }),
+    );
+    let mission = call(
+        &mut server,
+        "agent_mission",
+        instantiation["mission"].clone(),
+    );
+    assert_eq!(mission["mission_status"], json!("succeeded"));
+    let reconciled = call(
+        &mut server,
+        "domain_workflow_reconcile",
+        json!({"instantiation": instantiation, "mission_report": mission}),
+    );
+    assert_eq!(reconciled["workflow"], json!("domain_workflow_reconcile"));
+    assert_eq!(reconciled["integrity"]["valid"], json!(true));
+    assert_eq!(reconciled["completion"]["status"], json!("complete"));
+    assert_eq!(reconciled["completion"]["ready"], json!(true));
+    assert_eq!(reconciled["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        reconciled["artifact_registry"]["kind"],
+        json!("workflow_reconciliation")
+    );
+    assert_eq!(
+        reconciled["evidence"]["rows"][0]["result_retained"],
+        json!(true)
+    );
+
+    let imported = call(
+        &mut server,
+        "domain_workflow_reconciliation_import",
+        json!({"record": reconciled}),
+    );
+    assert_eq!(
+        imported["workflow"],
+        json!("domain_workflow_reconciliation_import")
+    );
+    // Executed workflow-bound missions are reconciled and indexed automatically; the explicit
+    // import below must therefore exercise the registry's idempotent re-import path.
+    assert_eq!(imported["created"], json!(false));
+    assert_eq!(imported["already_present"], json!(true));
+    assert_eq!(imported["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        imported["artifact_registry"]["content_digest"],
+        reconciled["artifact_registry"]["content_digest"]
+    );
+    let digest = imported["reconciliation_digest"].as_str().unwrap();
+    let queried = call(
+        &mut server,
+        "domain_workflow_reconciliation_query",
+        json!({"mission_id": "workflow-reconcile", "completion_status": "complete"}),
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(queried["rows"][0]["reconciliation_digest"], json!(digest));
+    let fetched = call(
+        &mut server,
+        "domain_workflow_reconciliation_get",
+        json!({"reconciliation_digest": digest}),
+    );
+    assert_eq!(
+        fetched["workflow"],
+        json!("domain_workflow_reconciliation_get")
+    );
+    assert_eq!(fetched["record"]["reconciliation_digest"], json!(digest));
+}
+
+#[test]
 fn mission_evaluator_discovery_covers_domains_without_executing_tools() {
     let mut server = server();
     let all = call(&mut server, "mission_evaluator_discover", json!({}));
@@ -1236,10 +3814,13 @@ fn mission_evaluator_discovery_covers_domains_without_executing_tools() {
     assert_eq!(all["selection_posture"], json!("candidate_only"));
     assert_eq!(all["total_adapters"], json!(29));
     assert_eq!(all["result_count"], json!(29));
-    assert_eq!(all["coverage"]["capability_group_count"], json!(29));
+    assert_eq!(all["coverage"]["capability_group_count"], json!(30));
     assert_eq!(all["coverage"]["evaluator_group_count"], json!(29));
-    assert_eq!(all["coverage"]["complete"], json!(true));
-    assert_eq!(all["matches"][0]["adapter"]["status"], json!("candidate_only"));
+    assert_eq!(all["coverage"]["complete"], json!(false));
+    assert_eq!(
+        all["matches"][0]["adapter"]["status"],
+        json!("candidate_only")
+    );
     assert!(all["guarantees"]
         .as_array()
         .unwrap()
@@ -1289,9 +3870,15 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
     assert_eq!(ready["ok"], json!(true));
     assert_eq!(ready["workflow"], json!("mission_evaluator_review"));
     assert_eq!(ready["review_status"], json!("ready"));
-    assert_eq!(ready["binding_posture"], json!("ready_for_mission_claim_bindings"));
+    assert_eq!(
+        ready["binding_posture"],
+        json!("ready_for_mission_claim_bindings")
+    );
     assert_eq!(ready["bindings"][0]["binding_posture"], json!("ready"));
-    assert_eq!(ready["bindings"][0]["proposed_binding"]["step_id"], json!("assay"));
+    assert_eq!(
+        ready["bindings"][0]["proposed_binding"]["step_id"],
+        json!("assay")
+    );
     assert_eq!(ready["execution"], json!("not_started"));
 
     let mission = call(
@@ -1321,8 +3908,105 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
     );
     assert_eq!(mission["workflow"], json!("agent_mission"));
     assert_eq!(mission["execution"], json!("planned"));
-    assert_eq!(mission["claim_lineage"]["evaluator_review"]["present"], json!(true));
-    assert_eq!(mission["claim_lineage"]["claims"][0]["evaluator_review"]["review_status"], json!("ready"));
+    assert_eq!(
+        mission["claim_lineage"]["evaluator_review"]["present"],
+        json!(true)
+    );
+    assert_eq!(
+        mission["claim_lineage"]["claims"][0]["evaluator_review"]["review_status"],
+        json!("ready")
+    );
+
+    let replay = call(
+        &mut server,
+        "mission_evaluator_replay",
+        json!({"mission": mission, "include_fixtures": true, "max_items": 64}),
+    );
+    assert_eq!(replay["workflow"], json!("mission_evaluator_replay"));
+    assert_eq!(replay["execution"], json!("not_started"));
+    assert_eq!(replay["coverage"]["catalogue_adapter_count"], json!(29));
+    assert_eq!(replay["fixtures"].as_array().unwrap().len(), 29);
+    assert_eq!(
+        replay["fixtures"][0]["variants"].as_array().unwrap().len(),
+        4
+    );
+    assert_eq!(replay["coverage"]["complete"], json!(false));
+
+    let comparison = call(
+        &mut server,
+        "mission_evaluator_replay_compare",
+        json!({"mission": mission.clone(), "include_fixtures": false, "max_items": 64}),
+    );
+    assert_eq!(
+        comparison["workflow"],
+        json!("mission_evaluator_replay_compare")
+    );
+    assert_eq!(comparison["catalog_drift"]["status"], json!("unchanged"));
+    assert_eq!(comparison["catalog_drift"]["digest_match"], json!(true));
+    let mut drifted_mission = mission.clone();
+    drifted_mission["claim_lineage"]["evaluator_review"]["catalog_digest"] = json!("a".repeat(64));
+    let drifted_comparison = call(
+        &mut server,
+        "mission_evaluator_replay_compare",
+        json!({"mission": drifted_mission, "include_fixtures": false, "max_items": 64}),
+    );
+    assert_eq!(
+        drifted_comparison["catalog_drift"]["status"],
+        json!("drifted")
+    );
+
+    let mut bundle = json!({
+        "schema": "bioprism-api/mission-evidence-bundle/0.1",
+        "workflow": "mission_evidence_bundle_export",
+        "mission_id": "mission-protocol",
+        "retention": {"mode": "summary_only", "result_retained": false, "result_included": false, "summary_retained": true},
+        "result": Value::Null,
+        "result_digest": "d".repeat(64),
+        "evaluator_replay": {"workflow": "mission_evaluator_replay_summary"},
+        "catalog_drift": {"status": "not_recorded"},
+        "trace": [{"sequence": 1, "event": "mission_succeeded"}],
+        "export": {"format": "json", "include_result": false, "include_trace": true, "trace_included": true, "digest_algorithm": "sha256", "execution": "not_started"}
+    });
+    bundle["bundle_digest"] = json!(ContentHash::of_value(&bundle).unwrap().to_string());
+    let verified = call(
+        &mut server,
+        "mission_evidence_bundle_verify",
+        json!({"bundle": bundle.clone()}),
+    );
+    assert_eq!(
+        verified["workflow"],
+        json!("mission_evidence_bundle_verify")
+    );
+    assert_eq!(verified["valid"], json!(true));
+    let imported_bundle = call(
+        &mut server,
+        "mission_evidence_bundle_import",
+        json!({"bundle": bundle.clone()}),
+    );
+    assert_eq!(imported_bundle["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        imported_bundle["artifact_registry"]["kind"],
+        json!("mission_evidence_bundle")
+    );
+    bundle["catalog_drift"]["status"] = json!("drifted");
+    let tampered = call(
+        &mut server,
+        "mission_evidence_bundle_verify",
+        json!({"bundle": bundle}),
+    );
+    assert_eq!(tampered["valid"], json!(false));
+
+    let replayed_inconsistent = call(
+        &mut server,
+        "mission_evaluator_replay",
+        json!({"mission": {"workflow": "agent_mission", "plan": {"mission_id": "replay-inconsistent"}, "mission_status": "planned", "claim_lineage": {"claims": [{"id": "fidelity-claim", "evaluator_bindings": [{"id": "assay-evaluator", "adapter_id": "oncoworlds.assay_fidelity", "domain": "oncology", "step_id": "assay", "output_pointer": "/fidelity", "required": true, "outcome_state": "retained", "output_digest": "x".repeat(64)}], "evaluator_coverage": {"outcome_counts": {}, "distinct_output_digests": 1, "disagreement_posture": "single_observation"}}]}}}),
+    );
+    assert_eq!(replayed_inconsistent["replay_status"], json!("blocked"));
+    assert!(replayed_inconsistent["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| { finding["code"] == json!("outcome_count_mismatch") }));
 
     let mut mismatched_review = ready.clone();
     mismatched_review["bindings"][0]["domain"] = json!("unrelated");
@@ -1376,14 +4060,25 @@ fn mission_evaluator_review_builds_claim_bindings_and_blocks_adversarial_rows() 
         }),
     );
     assert_eq!(blocked["review_status"], json!("blocked"));
-    assert_eq!(blocked["binding_posture"], json!("requires_caller_correction"));
+    assert_eq!(
+        blocked["binding_posture"],
+        json!("requires_caller_correction")
+    );
     assert!(blocked["findings"].as_array().unwrap().len() >= 4);
-    assert!(blocked["findings"].as_array().unwrap().iter().any(|finding| {
-        finding["message"] == json!("selection.id must be unique within the review")
-    }));
-    assert!(blocked["findings"].as_array().unwrap().iter().any(|finding| {
-        finding["message"] == json!("selection.output_pointer must be a valid RFC 6901 pointer")
-    }));
+    assert!(blocked["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| {
+            finding["message"] == json!("selection.id must be unique within the review")
+        }));
+    assert!(blocked["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| {
+            finding["message"] == json!("selection.output_pointer must be a valid RFC 6901 pointer")
+        }));
 }
 
 #[test]
@@ -1457,10 +4152,16 @@ fn modality_support_check_separates_claim_eligibility_from_analysis_unit() {
     assert_eq!(refused["ok"], json!(true));
     assert_eq!(refused["outcome_kind"], json!("refused"));
     assert_eq!(refused["supported"], json!(false));
-    assert_eq!(refused["support"]["root_refusal_kind"], json!("missing_resolution"));
+    assert_eq!(
+        refused["support"]["root_refusal_kind"],
+        json!("missing_resolution")
+    );
     assert_eq!(refused["descriptor"]["complete"], json!(true));
     assert_eq!(refused["analysis_unit"]["admissible"], json!(false));
-    assert_eq!(refused["analysis_unit"]["refusal_kind"], json!("named_failure_mode"));
+    assert_eq!(
+        refused["analysis_unit"]["refusal_kind"],
+        json!("named_failure_mode")
+    );
 
     let admitted = call(
         &mut server(),
@@ -1529,16 +4230,16 @@ fn modality_transport_check_preserves_loss_fidelity_and_support_changes() {
     );
     assert_eq!(refused["outcome_kind"], json!("refused"));
     assert_eq!(refused["constructed"], json!(false));
-    assert_eq!(refused["transport_evidence"]["refusal_kind"], json!("unstated_basis"));
+    assert_eq!(
+        refused["transport_evidence"]["refusal_kind"],
+        json!("unstated_basis")
+    );
 }
 
 #[test]
 fn modality_comparability_check_blocks_category_errors_before_standards() {
-    let term = TermBinding::exact(
-        "TP53",
-        OntologyId::parse("HGNC:11998", "2026-01").unwrap(),
-    )
-    .unwrap();
+    let term =
+        TermBinding::exact("TP53", OntologyId::parse("HGNC:11998", "2026-01").unwrap()).unwrap();
     let rna = ModalMeasurement::new(
         bioprism_modalities::descriptor(Modality::BulkTranscriptomics),
         Resolution::Population,
@@ -1560,7 +4261,10 @@ fn modality_comparability_check_blocks_category_errors_before_standards() {
     assert_eq!(blocked["ok"], json!(true));
     assert_eq!(blocked["outcome_kind"], json!("blocked"));
     assert_eq!(blocked["comparable"], json!(false));
-    assert_eq!(blocked["report"]["verdict"]["reason"]["blocked_by"], json!("measurand_mismatch"));
+    assert_eq!(
+        blocked["report"]["verdict"]["reason"]["blocked_by"],
+        json!("measurand_mismatch")
+    );
     assert_eq!(blocked["report"]["standards"], Value::Null);
     assert_eq!(blocked["report_sha256"].as_str().unwrap().len(), 64);
 
@@ -1606,7 +4310,10 @@ fn literature_bind_check_separates_source_binding_from_citation_support() {
     assert_eq!(bound["bound"], json!(true));
     assert_eq!(bound["citable"], json!(true));
     assert_eq!(bound["evidence"]["citation"]["cited_as"], json!("primary"));
-    assert_eq!(bound["evidence"]["citation"]["direct_evidence"], json!(true));
+    assert_eq!(
+        bound["evidence"]["citation"]["direct_evidence"],
+        json!(true)
+    );
 
     let review = LiteratureClaim::new(
         "a review summary",
@@ -1629,7 +4336,10 @@ fn literature_bind_check_separates_source_binding_from_citation_support() {
     );
     assert_eq!(laundered["outcome_kind"], json!("refused"));
     assert_eq!(laundered["bound"], json!(false));
-    assert_eq!(laundered["evidence"]["refusal_kind"], json!("citation_laundering"));
+    assert_eq!(
+        laundered["evidence"]["refusal_kind"],
+        json!("citation_laundering")
+    );
 
     let flagged = LiteratureClaim::new(
         "a flagged source",
@@ -3302,7 +6012,10 @@ fn trace_otel_ingest_maps_spans_and_reports_compilation_readiness() {
         }),
     );
     assert_eq!(payload["ok"], json!(true));
-    assert_eq!(payload["schema"], json!("bioprism-mcp/trace-otel-ingest/0.1"));
+    assert_eq!(
+        payload["schema"],
+        json!("bioprism-mcp/trace-otel-ingest/0.1")
+    );
     assert_eq!(payload["mapping"]["format"], json!("otlp_json"));
     assert_eq!(payload["mapping"]["accepted_span_count"], json!(2));
     assert_eq!(payload["mapping"]["span_event_count"], json!(1));
@@ -3794,22 +6507,41 @@ fn engineering_manifest_audit_keeps_topology_ticket_readiness_and_raci_separate(
         "adrs": [{ "id": "ADR-001", "title": "use rust", "status": "accepted", "decision": "Rust owns canonical semantics", "affects": ["core", "api"] }],
         "ownership": [{ "surface": "api", "accountable": "platform-lead", "responsible": ["api-team"], "independent_reviewer": "review-board" }]
     });
-    let result = call(&mut server, "engineering_manifest_audit", json!({ "manifest": manifest.clone() }));
+    let result = call(
+        &mut server,
+        "engineering_manifest_audit",
+        json!({ "manifest": manifest.clone() }),
+    );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["valid"], json!(true));
     assert_eq!(result["audit"]["package_order"], json!(["core", "api"]));
-    assert_eq!(result["audit"]["ticket_readiness"][1]["state"], json!("actionable"));
+    assert_eq!(
+        result["audit"]["ticket_readiness"][1]["state"],
+        json!("actionable")
+    );
     assert_eq!(result["blocking_issue_count"], json!(0));
     assert_eq!(result["manifest_digest"].as_str().unwrap().len(), 64);
 
     let mut cyclic = manifest;
     cyclic["packages"][0]["depends_on"] = json!(["api", "missing"]);
     cyclic["ownership"][0]["independent_reviewer"] = json!("platform-lead");
-    let refused = call(&mut server, "engineering_manifest_audit", json!({ "manifest": cyclic }));
+    let refused = call(
+        &mut server,
+        "engineering_manifest_audit",
+        json!({ "manifest": cyclic }),
+    );
     assert_eq!(refused["ok"], json!(true));
     assert_eq!(refused["valid"], json!(false));
-    assert!(refused["audit"]["issues"].as_array().unwrap().iter().any(|issue| issue["code"] == "package_cycle"));
-    assert!(refused["audit"]["issues"].as_array().unwrap().iter().any(|issue| issue["code"] == "reviewer_not_independent"));
+    assert!(refused["audit"]["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|issue| issue["code"] == "package_cycle"));
+    assert!(refused["audit"]["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|issue| issue["code"] == "reviewer_not_independent"));
 }
 
 #[test]
@@ -3831,27 +6563,47 @@ fn engineering_execution_plan_derives_waves_critical_path_and_fail_closed_manife
         "adrs": [{ "id": "ADR-001", "title": "use rust", "status": "accepted", "decision": "Rust owns canonical semantics", "affects": ["core", "api"] }],
         "ownership": [{ "surface": "api", "accountable": "platform-lead", "responsible": ["api-team"], "independent_reviewer": "review-board" }]
     });
-    let request = json!({ "schema": "bioprism-engineering-plan/0.1", "manifest": manifest.clone() });
-    let result = call(&mut server, "engineering_execution_plan", json!({ "request": request.clone() }));
+    let request =
+        json!({ "schema": "bioprism-engineering-plan/0.1", "manifest": manifest.clone() });
+    let result = call(
+        &mut server,
+        "engineering_execution_plan",
+        json!({ "request": request.clone() }),
+    );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["valid"], json!(true));
     assert_eq!(result["engineering_plan_ready"], json!(true));
     assert_eq!(result["audit"]["waves"].as_array().unwrap().len(), 2);
     assert_eq!(result["audit"]["waves"][0]["ticket_ids"], json!(["T-002"]));
     assert_eq!(result["audit"]["waves"][1]["ticket_ids"], json!(["T-003"]));
-    assert_eq!(result["audit"]["critical_path"], json!(["T-001", "T-002", "T-003"]));
+    assert_eq!(
+        result["audit"]["critical_path"],
+        json!(["T-001", "T-002", "T-003"])
+    );
     assert_eq!(result["audit"]["planned_ticket_count"], json!(2));
     assert_eq!(result["plan_digest"].as_str().unwrap().len(), 64);
 
     let mut refused = request;
     refused["manifest"]["tickets"][1]["depends_on"] = json!(["missing"]);
-    let refusal = call(&mut server, "engineering_execution_plan", json!({ "request": refused }));
+    let refusal = call(
+        &mut server,
+        "engineering_execution_plan",
+        json!({ "request": refused }),
+    );
     assert_eq!(refusal["ok"], json!(true));
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["engineering_plan_ready"], json!(false));
     assert_eq!(refusal["audit"]["planning_started"], json!(false));
-    assert!(refusal["audit"]["manifest_issues"].as_array().unwrap().iter().any(|issue| issue["code"] == "missing_ticket_dependency"));
-    assert!(refusal["audit"]["issues"].as_array().unwrap().iter().any(|issue| issue["code"] == "manifest_invalid"));
+    assert!(refusal["audit"]["manifest_issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|issue| issue["code"] == "missing_ticket_dependency"));
+    assert!(refusal["audit"]["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|issue| issue["code"] == "manifest_invalid"));
 }
 
 #[test]
@@ -3881,25 +6633,40 @@ fn release_pipeline_audit_preserves_promotion_provenance_and_rollback_boundaries
             { "id": "rollback", "kind": "rollback", "from": "production", "to": "staging", "artifacts": ["binary"], "required_attestations": ["prov"], "approvals": [] }
         ]
     });
-    let result = call(&mut server, "release_pipeline_audit", json!({ "manifest": manifest.clone() }));
+    let result = call(
+        &mut server,
+        "release_pipeline_audit",
+        json!({ "manifest": manifest.clone() }),
+    );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["valid"], json!(true));
     assert_eq!(result["release_ready"], json!(true));
     assert_eq!(result["audit"]["stage_order"], json!(["build", "test"]));
-    assert_eq!(result["audit"]["promotion_audits"][0]["rollback_present"], json!(true));
+    assert_eq!(
+        result["audit"]["promotion_audits"][0]["rollback_present"],
+        json!(true)
+    );
     assert_eq!(result["blocking_issue_count"], json!(0));
 
     let mut refused = manifest;
     refused["attestations"][1]["digest"] = json!("b".repeat(64));
     refused["promotions"][0]["rollback_target"] = json!(null);
     refused["stages"][0]["depends_on"] = json!(["test"]);
-    let refusal = call(&mut server, "release_pipeline_audit", json!({ "manifest": refused }));
+    let refusal = call(
+        &mut server,
+        "release_pipeline_audit",
+        json!({ "manifest": refused }),
+    );
     assert_eq!(refusal["ok"], json!(true));
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["release_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues.iter().any(|issue| issue["code"] == "attestation_digest_mismatch"));
-    assert!(issues.iter().any(|issue| issue["code"] == "production_rollback_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "attestation_digest_mismatch"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "production_rollback_missing"));
     assert!(issues.iter().any(|issue| issue["code"] == "stage_cycle"));
 }
 
@@ -3916,28 +6683,50 @@ fn operational_readiness_audit_keeps_observation_fallback_and_incident_closure_e
         "incidents": [{ "id": "inc-1", "severity": "sev2", "state": "closed", "runbook": "api-degraded", "owner": "platform-oncall", "timeline": ["detected", "contained", "restored"], "postmortem": "postmortem-digest" }],
         "controls": { "on_call": true, "alerting": true, "tracing": true, "audit_logging": true, "backup": true, "restore_test": true, "access_review": true }
     });
-    let result = call(&mut server, "operational_readiness_audit", json!({ "manifest": manifest.clone() }));
+    let result = call(
+        &mut server,
+        "operational_readiness_audit",
+        json!({ "manifest": manifest.clone() }),
+    );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["valid"], json!(true));
     assert_eq!(result["operationally_ready"], json!(true));
     assert_eq!(result["audit"]["counts"]["observed_indicators"], json!(1));
-    assert_eq!(result["audit"]["dependency_audits"][0]["fallback_present"], json!(true));
-    assert_eq!(result["audit"]["incident_audits"][0]["postmortem_present"], json!(true));
+    assert_eq!(
+        result["audit"]["dependency_audits"][0]["fallback_present"],
+        json!(true)
+    );
+    assert_eq!(
+        result["audit"]["incident_audits"][0]["postmortem_present"],
+        json!(true)
+    );
 
     let mut refused = manifest;
     refused["indicators"][0]["status"] = json!("not_observed");
     refused["dependencies"][0]["fallback"] = json!(null);
     refused["controls"]["restore_test"] = json!(false);
     refused["incidents"][0]["postmortem"] = json!(null);
-    let refusal = call(&mut server, "operational_readiness_audit", json!({ "manifest": refused }));
+    let refusal = call(
+        &mut server,
+        "operational_readiness_audit",
+        json!({ "manifest": refused }),
+    );
     assert_eq!(refusal["ok"], json!(true));
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["operationally_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues.iter().any(|issue| issue["code"] == "indicator_not_observed"));
-    assert!(issues.iter().any(|issue| issue["code"] == "critical_dependency_fallback_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "required_control_disabled"));
-    assert!(issues.iter().any(|issue| issue["code"] == "closed_incident_postmortem_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "indicator_not_observed"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "critical_dependency_fallback_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "required_control_disabled"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "closed_incident_postmortem_missing"));
 }
 
 #[test]
@@ -3954,14 +6743,24 @@ fn security_privacy_audit_keeps_asset_flow_identity_threat_and_review_layers_exp
         "reviews": [{ "id": "pia-1", "kind": "privacy_impact", "scope": "patient-records", "reviewer": "independent-reviewer", "status": "complete", "evidence_digest": digest, "expires_at": "2027-01-01", "findings": ["none"] }],
         "controls": { "access_control": true, "encryption_at_rest": true, "encryption_in_transit": true, "key_rotation": true, "audit_logging": true, "vulnerability_management": true, "backup_restore": true, "incident_response": true, "vendor_review": true, "data_subject_rights": true }
     });
-    let result = call(&mut server, "security_privacy_audit", json!({ "manifest": manifest.clone() }));
+    let result = call(
+        &mut server,
+        "security_privacy_audit",
+        json!({ "manifest": manifest.clone() }),
+    );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["valid"], json!(true));
     assert_eq!(result["security_privacy_ready"], json!(true));
     assert_eq!(result["audit"]["counts"]["sensitive_assets"], json!(1));
-    assert_eq!(result["audit"]["flow_audits"][0]["authorization_present"], json!(true));
+    assert_eq!(
+        result["audit"]["flow_audits"][0]["authorization_present"],
+        json!(true)
+    );
     assert_eq!(result["audit"]["identity_audits"][0]["ready"], json!(true));
-    assert_eq!(result["audit"]["threat_audits"][0]["evidence_valid"], json!(true));
+    assert_eq!(
+        result["audit"]["threat_audits"][0]["evidence_valid"],
+        json!(true)
+    );
     assert_eq!(result["audit"]["review_audits"][0]["complete"], json!(true));
 
     let mut refused = manifest;
@@ -3971,21 +6770,38 @@ fn security_privacy_audit_keeps_asset_flow_identity_threat_and_review_layers_exp
     refused["threats"][0]["evidence_digest"] = Value::Null;
     refused["reviews"][0]["status"] = json!("expired");
     refused["controls"]["encryption_at_rest"] = json!(false);
-    let refusal = call(&mut server, "security_privacy_audit", json!({ "manifest": refused }));
+    let refusal = call(
+        &mut server,
+        "security_privacy_audit",
+        json!({ "manifest": refused }),
+    );
     assert_eq!(refusal["ok"], json!(true));
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["security_privacy_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues.iter().any(|issue| issue["code"] == "sensitive_retention_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "flow_authorization_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "sensitive_mfa_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "mitigation_evidence_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "review_evidence_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "required_control_disabled"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "sensitive_retention_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "flow_authorization_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "sensitive_mfa_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "mitigation_evidence_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "review_evidence_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "required_control_disabled"));
 }
 
 #[test]
-fn sandbox_admission_audit_keeps_artifact_isolation_capability_resource_and_output_layers_explicit() {
+fn sandbox_admission_audit_keeps_artifact_isolation_capability_resource_and_output_layers_explicit()
+{
     let mut server = server();
     let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     let manifest = json!({
@@ -4001,15 +6817,28 @@ fn sandbox_admission_audit_keeps_artifact_isolation_capability_resource_and_outp
         "capabilities": [{ "id": "network", "profile": "profile", "kind": "network_egress", "target": "packages.example", "decision": "allow", "evidence_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }],
         "outputs": [{ "id": "result", "profile": "profile", "artifact": "dataset", "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "destination": "quarantine", "quarantined": true, "released": false, "reviewed": false, "parents": ["dataset"] }]
     });
-    let result = call(&mut server, "sandbox_admission_audit", json!({ "manifest": manifest.clone() }));
+    let result = call(
+        &mut server,
+        "sandbox_admission_audit",
+        json!({ "manifest": manifest.clone() }),
+    );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["valid"], json!(true));
     assert_eq!(result["sandbox_ready"], json!(true));
     assert_eq!(result["audit"]["counts"]["untrusted_artifacts"], json!(1));
-    assert_eq!(result["audit"]["profile_audits"][0]["isolation_valid"], json!(true));
-    assert_eq!(result["audit"]["capability_audits"][0]["evidence_valid"], json!(true));
+    assert_eq!(
+        result["audit"]["profile_audits"][0]["isolation_valid"],
+        json!(true)
+    );
+    assert_eq!(
+        result["audit"]["capability_audits"][0]["evidence_valid"],
+        json!(true)
+    );
     assert_eq!(result["audit"]["resource_audits"][0]["ready"], json!(true));
-    assert_eq!(result["audit"]["output_audits"][0]["quarantined"], json!(true));
+    assert_eq!(
+        result["audit"]["output_audits"][0]["quarantined"],
+        json!(true)
+    );
 
     let mut refused = manifest;
     refused["profiles"][0]["rootless"] = json!(false);
@@ -4017,16 +6846,30 @@ fn sandbox_admission_audit_keeps_artifact_isolation_capability_resource_and_outp
     refused["profiles"][0]["resources"]["memory_mb"] = Value::Null;
     refused["capabilities"][0]["target"] = json!("*");
     refused["capabilities"][0]["evidence_digest"] = Value::Null;
-    let refusal = call(&mut server, "sandbox_admission_audit", json!({ "manifest": refused }));
+    let refusal = call(
+        &mut server,
+        "sandbox_admission_audit",
+        json!({ "manifest": refused }),
+    );
     assert_eq!(refusal["ok"], json!(true));
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["sandbox_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues.iter().any(|issue| issue["code"] == "rootless_required"));
-    assert!(issues.iter().any(|issue| issue["code"] == "network_boundary_invalid"));
-    assert!(issues.iter().any(|issue| issue["code"] == "resource_limits_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "capability_target_broad"));
-    assert!(issues.iter().any(|issue| issue["code"] == "dangerous_capability_evidence_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "rootless_required"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "network_boundary_invalid"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "resource_limits_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "capability_target_broad"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "dangerous_capability_evidence_missing"));
 }
 
 #[test]
@@ -4056,7 +6899,11 @@ fn sandbox_runtime_simulate_preserves_admission_capability_resource_and_refusal_
             { "id": "fetch-package", "kind": "network_egress", "target": "packages.example", "cpu_millis": 100, "memory_mb": 128, "wall_time_seconds": 5, "processes": 1, "output_bytes": 1000 }
         ]
     });
-    let result = call(&mut server, "sandbox_runtime_simulate", json!({ "manifest": runtime_manifest.clone() }));
+    let result = call(
+        &mut server,
+        "sandbox_runtime_simulate",
+        json!({ "manifest": runtime_manifest.clone() }),
+    );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["valid"], json!(true));
     assert_eq!(result["sandbox_runtime_ready"], json!(true));
@@ -4068,13 +6915,20 @@ fn sandbox_runtime_simulate_preserves_admission_capability_resource_and_refusal_
 
     let mut refused = runtime_manifest;
     refused["requests"][0]["cpu_millis"] = json!(2000);
-    let refusal = call(&mut server, "sandbox_runtime_simulate", json!({ "manifest": refused }));
+    let refusal = call(
+        &mut server,
+        "sandbox_runtime_simulate",
+        json!({ "manifest": refused }),
+    );
     assert_eq!(refusal["ok"], json!(true));
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["audit"]["refused_count"], json!(1));
     assert_eq!(refusal["audit"]["not_run_count"], json!(1));
     assert_eq!(refusal["audit"]["stopped_on_refusal"], json!(true));
-    assert_eq!(refusal["audit"]["steps"][0]["refusal"], json!("resource_budget_exceeded"));
+    assert_eq!(
+        refusal["audit"]["steps"][0]["refusal"],
+        json!("resource_budget_exceeded")
+    );
     assert_eq!(refusal["audit"]["steps"][1]["decision"], json!("not_run"));
 }
 
@@ -4093,15 +6947,31 @@ fn security_program_audit_keeps_scope_campaign_finding_incident_and_disclosure_l
         "disclosures": [{ "id": "advisory-1", "finding": "finding-1", "stage": "advisory", "audience": "affected operators", "requested_at": "2026-01-04", "approver": "independent-reviewer", "approval_digest": digest, "advisory_digest": digest, "published_at": "2026-01-04" }],
         "controls": { "scope_authorization": true, "operator_separation": true, "independent_review": true, "evidence_retention": true, "remediation_tracking": true, "incident_response": true, "disclosure_review": true, "regression_testing": true }
     });
-    let result = call(&mut server, "security_program_audit", json!({ "manifest": manifest.clone() }));
+    let result = call(
+        &mut server,
+        "security_program_audit",
+        json!({ "manifest": manifest.clone() }),
+    );
     assert_eq!(result["ok"], json!(true));
     assert_eq!(result["valid"], json!(true));
     assert_eq!(result["security_program_ready"], json!(true));
     assert_eq!(result["audit"]["counts"]["authorized_scopes"], json!(1));
-    assert_eq!(result["audit"]["finding_audits"][0]["incident_valid"], json!(true));
-    assert_eq!(result["audit"]["remediation_audits"][0]["verification_valid"], json!(true));
-    assert_eq!(result["audit"]["incident_audits"][0]["closure_valid"], json!(true));
-    assert_eq!(result["audit"]["disclosure_audits"][0]["approval_valid"], json!(true));
+    assert_eq!(
+        result["audit"]["finding_audits"][0]["incident_valid"],
+        json!(true)
+    );
+    assert_eq!(
+        result["audit"]["remediation_audits"][0]["verification_valid"],
+        json!(true)
+    );
+    assert_eq!(
+        result["audit"]["incident_audits"][0]["closure_valid"],
+        json!(true)
+    );
+    assert_eq!(
+        result["audit"]["disclosure_audits"][0]["approval_valid"],
+        json!(true)
+    );
 
     let mut refused = manifest;
     refused["scopes"][0]["authorization_digest"] = Value::Null;
@@ -4110,17 +6980,33 @@ fn security_program_audit_keeps_scope_campaign_finding_incident_and_disclosure_l
     refused["remediations"][0]["verification_digest"] = Value::Null;
     refused["incidents"][0]["closure_evidence"] = Value::Null;
     refused["controls"]["disclosure_review"] = json!(false);
-    let refusal = call(&mut server, "security_program_audit", json!({ "manifest": refused }));
+    let refusal = call(
+        &mut server,
+        "security_program_audit",
+        json!({ "manifest": refused }),
+    );
     assert_eq!(refusal["ok"], json!(true));
     assert_eq!(refusal["valid"], json!(false));
     assert_eq!(refusal["security_program_ready"], json!(false));
     let issues = refusal["audit"]["issues"].as_array().unwrap();
-    assert!(issues.iter().any(|issue| issue["code"] == "scope_authorization_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "campaign_independent_review_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "finding_evidence_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "remediation_verification_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "incident_closure_missing"));
-    assert!(issues.iter().any(|issue| issue["code"] == "required_control_disabled"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "scope_authorization_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "campaign_independent_review_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "finding_evidence_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "remediation_verification_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "incident_closure_missing"));
+    assert!(issues
+        .iter()
+        .any(|issue| issue["code"] == "required_control_disabled"));
 }
 
 #[test]
@@ -4251,6 +7137,133 @@ fn developer_workbench_refuses_notebook_cycles_and_unsafe_ci() {
 }
 
 #[test]
+fn developer_workbench_verify_replays_retained_projection_without_execution() {
+    let mut server = server();
+    let digest = "a".repeat(64);
+    let output_digest = "b".repeat(64);
+    let session = json!({
+        "session_id": "verify-studio",
+        "owner": "agent-a",
+        "goal": "verify an oncology authoring handoff",
+        "artifacts": [{
+            "id": "artifact-1", "title": "card", "path": "card.json", "domain": "oncology",
+            "capability": "verification", "state": "validated", "evidence": "reproduced",
+            "digest": digest, "score": 0.9
+        }],
+        "cells": [{
+            "id": "cell-1", "kind": "query", "source": "metrics", "inputs": [{"artifact_id": "artifact-1", "digest": digest}],
+            "depends_on": [], "executed": true, "output_digest": output_digest
+        }],
+        "changes": [{
+            "id": "change-1", "artifact_id": "artifact-1", "kind": "create", "actor": "agent-a",
+            "logical_time": 1, "output_digest": digest, "reason": "initial card"
+        }]
+    });
+    let ci = json!({
+        "workflow": "consumer contracts", "triggers": ["pull_request"], "rust_toolchain": "stable",
+        "offline": true, "checks": [{"name": "unit", "run": "cargo test -p bioprism-devplat", "required": true}]
+    });
+    let retained = call(
+        &mut server,
+        "developer_workbench",
+        json!({"session": session.clone(), "dashboard": {"domains": ["oncology"], "limit": 4}, "ci": ci.clone()}),
+    );
+    assert_eq!(retained["ok"], json!(true));
+    let verified = call(
+        &mut server,
+        "developer_workbench_verify",
+        json!({
+            "session": session.clone(),
+            "report": retained.clone(),
+            "ci_replay": ci.clone(),
+            "policy": {"require_dashboard": true, "require_ci": true, "require_ci_replay": true}
+        }),
+    );
+    assert_eq!(verified["ok"], json!(true));
+    assert_eq!(verified["workflow"], json!("developer_workbench_verify"));
+    assert_eq!(verified["valid"], json!(true));
+    assert_eq!(verified["status"], json!("verified"));
+    assert_eq!(verified["dashboard_verified"], json!(true));
+    assert_eq!(verified["ci_verified"], json!(true));
+    assert_eq!(verified["execution"], json!("not_started"));
+    assert_eq!(verified["network_access"], json!("not_started"));
+
+    let mut tampered = retained;
+    tampered["audit"]["ordered_cells"] = json!([]);
+    let mismatch = call(
+        &mut server,
+        "developer_workbench_verify",
+        json!({"session": session, "report": tampered, "ci_replay": ci}),
+    );
+    assert_eq!(mismatch["ok"], json!(true));
+    assert_eq!(mismatch["valid"], json!(false));
+    assert_eq!(mismatch["status"], json!("mismatch"));
+    assert!(mismatch["mismatches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["code"] == "audit_mismatch"));
+}
+
+#[test]
+fn developer_workbench_registry_retains_queries_and_fetches_reports() {
+    let mut server = server();
+    let retained = call(
+        &mut server,
+        "developer_workbench",
+        json!({
+            "session": {
+                "session_id": "registry-protocol",
+                "owner": "agent-a",
+                "goal": "retain a cross-domain report",
+                "artifacts": [{
+                    "id": "artifact-1", "title": "result", "path": "result.json",
+                    "domain": "oncology", "capability": "evidence", "state": "validated",
+                    "evidence": "observed", "digest": "a".repeat(64), "score": 0.8
+                }],
+                "cells": [], "changes": []
+            },
+            "dashboard": {"domains": ["oncology"], "limit": 10}
+        }),
+    );
+    assert_eq!(retained["ok"], json!(true));
+    let imported = call(
+        &mut server,
+        "developer_workbench_import",
+        json!({"report": retained.clone()}),
+    );
+    assert_eq!(imported["ok"], json!(true));
+    assert_eq!(imported["created"], json!(true));
+    let digest = imported["workbench_report_digest"].as_str().unwrap();
+    assert_eq!(digest.len(), 64);
+
+    let repeated = call(
+        &mut server,
+        "developer_workbench_import",
+        json!({"report": retained}),
+    );
+    assert_eq!(repeated["already_present"], json!(true));
+    let queried = call(
+        &mut server,
+        "developer_workbench_query",
+        json!({"domain": "oncology", "capability": "evidence"}),
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(queried["rows"][0]["workbench_report_digest"], digest);
+    let fetched = call(
+        &mut server,
+        "developer_workbench_get",
+        json!({"workbench_report_digest": digest}),
+    );
+    assert_eq!(fetched["ok"], json!(true));
+    assert_eq!(fetched["workbench_report_digest"], digest);
+    assert_eq!(
+        fetched["report"]["schema_version"],
+        "bioprism-devplat-workbench/0.1"
+    );
+}
+
+#[test]
 fn ci_execution_evidence_audit_reconciles_plan_and_run_without_execution() {
     let mut server = server();
     let ci = json!({
@@ -4296,7 +7309,10 @@ fn ci_execution_evidence_audit_reconciles_plan_and_run_without_execution() {
     assert_eq!(result["audit"]["complete"], json!(true));
     assert_eq!(result["audit"]["passed_check_count"], json!(2));
     assert_eq!(result["audit"]["verification"], json!("structural_only"));
-    assert_eq!(result["audit"]["execution"], json!("evidence_supplied_not_executed_here"));
+    assert_eq!(
+        result["audit"]["execution"],
+        json!("evidence_supplied_not_executed_here")
+    );
 
     let incomplete = call(
         &mut server,
@@ -4358,8 +7374,14 @@ fn ci_provider_normalize_projects_github_payload_into_auditable_evidence() {
     assert_eq!(normalized["source"], json!("provider_observed"));
     assert_eq!(normalized["run_id"], json!("9001"));
     assert_eq!(normalized["derived_result_digest_count"], json!(2));
-    assert_eq!(normalized["evidence"]["checks"][0]["status"], json!("passed"));
-    assert_eq!(normalized["evidence"]["run_url"], json!("https://example.test/runs/9001"));
+    assert_eq!(
+        normalized["evidence"]["checks"][0]["status"],
+        json!("passed")
+    );
+    assert_eq!(
+        normalized["evidence"]["run_url"],
+        json!("https://example.test/runs/9001")
+    );
 
     let gitlab = call(
         &mut server,
@@ -4468,6 +7490,97 @@ fn ci_provider_evidence_audit_binds_rows_and_preserves_structural_limits() {
 }
 
 #[test]
+fn ci_provider_evidence_registry_import_query_get_and_failed_retention_are_deterministic() {
+    let mut server = server();
+    let ci = json!({
+        "workflow": "provider-registry",
+        "triggers": ["push"],
+        "rust_toolchain": "stable",
+        "offline": true,
+        "checks": [{"name": "tests", "run": "cargo test -p core", "required": true}]
+    });
+    let digest = |label: &str| ContentHash::of_bytes(label.as_bytes()).to_string();
+    let request = json!({
+        "ci": ci.clone(),
+        "provider": "github_actions",
+        "payload": {
+            "run": {"id": 9030, "conclusion": "success"},
+            "jobs": [{"name": "tests", "conclusion": "success"}]
+        },
+        "artifacts": [{
+            "id": "artifact-registry", "kind": "junit", "digest": digest("artifact-registry"),
+            "check": "tests", "run_id": "9030", "provider": "github_actions"
+        }],
+        "logs": [{
+            "id": "log-registry", "digest": digest("log-registry"), "check": "tests",
+            "run_id": "9030", "provider": "github_actions"
+        }],
+        "attestations": [{
+            "id": "attestation-registry", "subject": "artifact-registry", "issuer": "ci",
+            "statement_digest": digest("statement-registry"), "method": "declared"
+        }]
+    });
+    let imported = call(&mut server, "ci_provider_evidence_import", request.clone());
+    assert_eq!(imported["created"], json!(true));
+    assert_eq!(imported["conformance_ready"], json!(true));
+    assert_eq!(
+        imported["artifact_record_digest"].as_str().unwrap().len(),
+        64
+    );
+    assert_eq!(imported["log_record_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        imported["attestation_record_digest"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    let digest = imported["provider_evidence_digest"].clone();
+    let duplicate = call(&mut server, "ci_provider_evidence_import", request);
+    assert_eq!(duplicate["created"], json!(false));
+    assert_eq!(duplicate["already_present"], json!(true));
+    assert_eq!(duplicate["provider_evidence_digest"], digest);
+    let queried = call(
+        &mut server,
+        "ci_provider_evidence_query",
+        json!({"provider": "github_actions", "conformance_ready": true, "include_records": true}),
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(queried["rows"][0]["provider_evidence_digest"], digest);
+    assert_eq!(queried["rows"][0]["audit"]["artifact_count"], json!(1));
+    let fetched = call(
+        &mut server,
+        "ci_provider_evidence_get",
+        json!({"provider_evidence_digest": digest}),
+    );
+    assert_eq!(fetched["audit"]["run_id"], json!("9030"));
+    assert_eq!(fetched["audit"]["verification"], json!("structural_only"));
+
+    let failed = call(
+        &mut server,
+        "ci_provider_evidence_import",
+        json!({
+            "ci": ci,
+            "provider": "generic",
+            "payload": {
+                "run_id": "9031",
+                "conclusion": "failure",
+                "checks": [{"name": "tests", "status": "failure"}]
+            }
+        }),
+    );
+    assert_eq!(failed["created"], json!(true));
+    assert_eq!(failed["structurally_valid"], json!(true));
+    assert_eq!(failed["conformance_ready"], json!(false));
+    let failed_rows = call(
+        &mut server,
+        "ci_provider_evidence_query",
+        json!({"conformance_ready": false}),
+    );
+    assert_eq!(failed_rows["rows"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn developer_delivery_composes_provider_normalization_into_ci_release_evidence() {
     let mut server = server();
     let ci = json!({
@@ -4493,9 +7606,18 @@ fn developer_delivery_composes_provider_normalization_into_ci_release_evidence()
         }),
     );
     assert_eq!(delivery["workflow"], json!("developer_delivery_audit"));
-    assert_eq!(delivery["ci_provider_normalization"]["provider"], json!("github_actions"));
-    assert_eq!(delivery["ci_provider_normalization"]["run_id"], json!("9010"));
-    assert_eq!(delivery["readiness"]["ci_execution_evidence_ready"], json!(true));
+    assert_eq!(
+        delivery["ci_provider_normalization"]["provider"],
+        json!("github_actions")
+    );
+    assert_eq!(
+        delivery["ci_provider_normalization"]["run_id"],
+        json!("9010")
+    );
+    assert_eq!(
+        delivery["readiness"]["ci_execution_evidence_ready"],
+        json!(true)
+    );
     assert_eq!(delivery["ci_evidence"]["ci_evidence_ready"], json!(true));
     assert_eq!(delivery["release_request"]["ready"], json!(true));
 
@@ -4548,10 +7670,19 @@ fn provider_evidence_flows_into_delivery_receipts_and_tamper_verification() {
             "release_request": {"id": "delivery-provider-evidence-1", "targets": ["ci_provider_evidence"]}
         }),
     );
-    assert_eq!(delivery["readiness"]["ci_provider_evidence_ready"], json!(true));
-    assert_eq!(delivery["ci_provider_evidence"]["conformance_ready"], json!(true));
+    assert_eq!(
+        delivery["readiness"]["ci_provider_evidence_ready"],
+        json!(true)
+    );
+    assert_eq!(
+        delivery["ci_provider_evidence"]["conformance_ready"],
+        json!(true)
+    );
     assert_eq!(delivery["ci_evidence"]["ci_evidence_ready"], json!(true));
-    assert_eq!(delivery["release_request"]["available_target_count"], json!(13));
+    assert_eq!(
+        delivery["release_request"]["available_target_count"],
+        json!(13)
+    );
     assert_eq!(delivery["release_request"]["ready"], json!(true));
 
     let receipt = call(
@@ -4586,9 +7717,15 @@ fn provider_evidence_flows_into_delivery_receipts_and_tamper_verification() {
     );
     assert_eq!(receipt["valid"], json!(true));
     assert_eq!(receipt["receipt_ready"], json!(true));
-    assert_eq!(receipt["evidence"][10]["name"], json!("ci_provider_evidence"));
+    assert_eq!(
+        receipt["evidence"][10]["name"],
+        json!("ci_provider_evidence")
+    );
     assert_eq!(receipt["evidence"][10]["ready"], json!(true));
-    assert_eq!(receipt["evidence"][10]["digest"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        receipt["evidence"][10]["digest"].as_str().unwrap().len(),
+        64
+    );
 
     let verified = call(
         &mut server,
@@ -4644,11 +7781,20 @@ fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
             "release_request": {"id": "delivery-ci-1", "targets": ["ci_execution_evidence"]}
         }),
     );
-    assert_eq!(payload["readiness"]["ci_execution_evidence_ready"], json!(true));
+    assert_eq!(
+        payload["readiness"]["ci_execution_evidence_ready"],
+        json!(true)
+    );
     assert_eq!(payload["ci_evidence"]["ci_evidence_ready"], json!(true));
-    assert_eq!(payload["release_request"]["available_target_count"], json!(13));
+    assert_eq!(
+        payload["release_request"]["available_target_count"],
+        json!(13)
+    );
     assert_eq!(payload["release_request"]["ready"], json!(true));
-    assert_eq!(payload["release_request"]["targets"][0]["eligible"], json!(true));
+    assert_eq!(
+        payload["release_request"]["targets"][0]["eligible"],
+        json!(true)
+    );
 
     let missing = call(
         &mut server,
@@ -4657,7 +7803,10 @@ fn developer_delivery_can_gate_ci_evidence_only_when_explicitly_requested() {
             "release_request": {"id": "delivery-ci-2", "targets": ["ci_execution_evidence"]}
         }),
     );
-    assert_eq!(missing["readiness"]["ci_execution_evidence_ready"], json!(false));
+    assert_eq!(
+        missing["readiness"]["ci_execution_evidence_ready"],
+        json!(false)
+    );
     assert_eq!(missing["release_request"]["ready"], json!(false));
     assert_eq!(
         missing["release_request"]["targets"][0]["blockers"],
@@ -4708,7 +7857,10 @@ fn developer_delivery_receipt_canonicalizes_explicit_targets_and_evidence() {
     assert_eq!(receipt["ready_target_count"], json!(1));
     assert_eq!(receipt["evidence"][8]["name"], json!("ci_evidence"));
     assert_eq!(receipt["evidence"][8]["ready"], json!(true));
-    assert_eq!(receipt["delivery"]["workflow"], json!("developer_delivery_audit"));
+    assert_eq!(
+        receipt["delivery"]["workflow"],
+        json!("developer_delivery_audit")
+    );
     assert_eq!(receipt["receipt_digest"].as_str().unwrap().len(), 64);
 
     let verified = call(
@@ -4716,7 +7868,10 @@ fn developer_delivery_receipt_canonicalizes_explicit_targets_and_evidence() {
         "developer_delivery_receipt_verify",
         json!({"receipt": receipt.clone(), "delivery": receipt["delivery"].clone()}),
     );
-    assert_eq!(verified["workflow"], json!("developer_delivery_receipt_verify"));
+    assert_eq!(
+        verified["workflow"],
+        json!("developer_delivery_receipt_verify")
+    );
     assert_eq!(verified["verified"], json!(true));
     assert_eq!(verified["receipt_digest_match"], json!(true));
 
@@ -4801,11 +7956,23 @@ fn execution_provenance_reconciles_mission_trace_and_delegated_checks() {
             "release_request": {"id": "delivery-provenance-1", "targets": ["execution_provenance"]}
         }),
     );
-    assert_eq!(delivery["readiness"]["execution_provenance_ready"], json!(true));
-    assert_eq!(delivery["execution_provenance"]["provenance_ready"], json!(true));
-    assert_eq!(delivery["release_request"]["available_target_count"], json!(13));
+    assert_eq!(
+        delivery["readiness"]["execution_provenance_ready"],
+        json!(true)
+    );
+    assert_eq!(
+        delivery["execution_provenance"]["provenance_ready"],
+        json!(true)
+    );
+    assert_eq!(
+        delivery["release_request"]["available_target_count"],
+        json!(13)
+    );
     assert_eq!(delivery["release_request"]["ready"], json!(true));
-    assert_eq!(delivery["release_request"]["targets"][0]["eligible"], json!(true));
+    assert_eq!(
+        delivery["release_request"]["targets"][0]["eligible"],
+        json!(true)
+    );
 
     let missing_provenance = call(
         &mut server,
@@ -4814,7 +7981,10 @@ fn execution_provenance_reconciles_mission_trace_and_delegated_checks() {
             "release_request": {"id": "delivery-provenance-2", "targets": ["execution_provenance"]}
         }),
     );
-    assert_eq!(missing_provenance["readiness"]["execution_provenance_ready"], json!(false));
+    assert_eq!(
+        missing_provenance["readiness"]["execution_provenance_ready"],
+        json!(false)
+    );
     assert_eq!(missing_provenance["release_request"]["ready"], json!(false));
     assert_eq!(
         missing_provenance["release_request"]["targets"][0]["blockers"],
@@ -4861,6 +8031,15 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     );
     assert_eq!(planned["results"].as_array().unwrap().len(), 0);
     assert_eq!(planned["plan"]["digest"].as_str().unwrap().len(), 64);
+    assert_eq!(planned["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        planned["artifact_registry"]["kind"],
+        json!("mission_report")
+    );
+    assert_eq!(
+        planned["artifact_registry"]["subject_id"],
+        json!("mission-plan-1")
+    );
 
     let executed = call(
         &mut server,
@@ -4912,6 +8091,14 @@ fn agent_mission_plans_and_executes_allow_listed_cross_domain_steps() {
     assert_eq!(
         executed["results"][1]["arguments_digest"],
         json!(expected_arguments_digest)
+    );
+    assert_eq!(executed["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(
+        executed["artifact_registry"]["content_digest"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
     );
 }
 
@@ -5240,18 +8427,227 @@ fn adapter_plan_routes_biological_formats_without_sniffing_or_execution() {
 }
 
 #[test]
+fn adapter_execution_evidence_binds_declared_adapter_scope_and_loss_posture() {
+    let mut server = server();
+    let evidence = call(
+        &mut server,
+        "adapter_execution_evidence",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "adapter-subject-1",
+            "adapter_id": "bioprism.python.vcf_text",
+            "adapter_version": "0.1.0",
+            "source_id": "vcf-source-1",
+            "input_digest": "a".repeat(64),
+            "output_digest": "b".repeat(64),
+            "execution_status": "succeeded",
+            "conformance_status": "verified",
+            "semantic_loss_status": "lossless",
+            "item_count": 4,
+            "byte_length": 128,
+            "parent_digests": ["c".repeat(64)]
+        }),
+    );
+    assert_eq!(evidence["ok"], json!(true));
+    assert_eq!(
+        evidence["evidence"]["adapter_id"],
+        json!("bioprism.python.vcf_text")
+    );
+    assert_eq!(
+        evidence["evidence"]["attestation_posture"],
+        json!("caller_asserted")
+    );
+    assert_eq!(evidence["adapter"]["execution"], json!("python_delegated"));
+    assert_eq!(evidence["artifact_registry"]["indexed"], json!(true));
+    assert_eq!(evidence["execution"], json!("not_started"));
+    assert_eq!(evidence["readiness_claimed"], json!(false));
+
+    let queried = call(
+        &mut server,
+        "adapter_execution_evidence_query",
+        json!({"subject_id": "adapter-subject-1", "include_artifacts": true}),
+    );
+    assert_eq!(queried["ok"], json!(true));
+    assert_eq!(
+        queried["workflow"],
+        json!("adapter_execution_evidence_query")
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        queried["rows"][0]["join_status"],
+        json!("bound_with_missing_parents")
+    );
+    assert_eq!(
+        queried["rows"][0]["evidence_artifact"]["evidence_digest"],
+        evidence["evidence_digest"]
+    );
+    assert_eq!(queried["page_summary"]["page_row_count"], json!(1));
+    assert_eq!(
+        queried["page_summary"]["rows_with_missing_parents"],
+        json!(1)
+    );
+    assert_eq!(queried["readiness_claimed"], json!(false));
+
+    let inconsistent = call(
+        &mut server,
+        "adapter_execution_evidence",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["oncology"],
+            "subject_id": "adapter-subject-1",
+            "adapter_id": "bioprism.python.vcf_text",
+            "adapter_version": "0.1.0",
+            "source_id": "vcf-source-1",
+            "input_digest": "a".repeat(64),
+            "execution_status": "refused",
+            "conformance_status": "refused",
+            "semantic_loss_status": "lossless"
+        }),
+    );
+    assert_eq!(inconsistent["__isError"], json!(true));
+
+    let out_of_scope = call(
+        &mut server,
+        "adapter_execution_evidence",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["not-a-declared-domain"],
+            "subject_id": "adapter-subject-1",
+            "adapter_id": "bioprism.python.vcf_text",
+            "adapter_version": "0.1.0",
+            "source_id": "vcf-source-1",
+            "input_digest": "a".repeat(64),
+            "execution_status": "unknown",
+            "conformance_status": "unknown",
+            "semantic_loss_status": "unknown"
+        }),
+    );
+    assert_eq!(out_of_scope["__isError"], json!(true));
+}
+
+#[test]
+fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
+    let mut server = server();
+    let full = call(
+        &mut server,
+        "domain_acquisition_catalogue",
+        json!({"include_adapters": true}),
+    );
+    assert_eq!(full["ok"], json!(true));
+    assert_eq!(full["workflow"], json!("domain_acquisition_catalogue"));
+    let catalogue = &full["catalogue"];
+    assert_eq!(catalogue["total_group_count"], json!(30));
+    assert_eq!(catalogue["selected_group_count"], json!(30));
+    assert_eq!(catalogue["complete"], json!(true));
+    assert_eq!(catalogue["truncated"], json!(false));
+    assert_eq!(
+        catalogue["selected_domain_count"],
+        catalogue["total_domain_count"]
+    );
+    assert_eq!(catalogue["groups"].as_array().unwrap().len(), 30);
+    assert_eq!(
+        catalogue["routes"].as_array().unwrap().len(),
+        catalogue["total_domain_count"].as_u64().unwrap() as usize
+    );
+    assert!(catalogue["routes"].as_array().unwrap().iter().all(|route| {
+        route["transport"]["status"] == "bounded_file_http"
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_normalize")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_replay_verify")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_connector_handoff")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_external_payload_receipt")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_external_payload_replay_verify")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_external_payload_normalize")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_external_payload_lineage_audit")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_external_payload_execution_evidence")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "domain_evidence_provider_external_payload_evidence_query")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "adapter_execution_evidence")
+            && route["transport"]["caller_managed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "adapter_execution_evidence_query")
+            && route["interpretation"]["status"].is_string()
+            && route["limitations"].as_array().is_some()
+    }));
+    assert!(catalogue["routes"].as_array().unwrap().iter().any(|route| {
+        route["adapters"]
+            .as_array()
+            .is_some_and(|adapters| !adapters.is_empty())
+    }));
+    assert_eq!(catalogue["digest"].as_str().unwrap().len(), 64);
+
+    let filtered = call(
+        &mut server,
+        "domain_acquisition_catalogue",
+        json!({"max_domains": 2}),
+    );
+    assert_eq!(filtered["ok"], json!(true));
+    assert_eq!(filtered["catalogue"]["truncated"], json!(true));
+    assert_eq!(filtered["catalogue"]["routes"].as_array().unwrap().len(), 2);
+
+    let refused = call(
+        &mut server,
+        "domain_acquisition_catalogue",
+        json!({"max_domains": 0}),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert!(refused["error"].as_str().unwrap().contains("max_domains"));
+}
+
+#[test]
 fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     let mut server = server();
     let result = call(&mut server, "capability_audit", json!({}));
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
-    assert_eq!(result["total_groups"], json!(29));
-    assert_eq!(result["unique_catalog_tools"], json!(177));
-    assert_eq!(result["advertised_tool_count"], json!(177));
+    assert_eq!(result["total_groups"], json!(30));
+    assert_eq!(result["unique_catalog_tools"], json!(259));
+    assert_eq!(result["advertised_tool_count"], json!(259));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(177));
-    assert_eq!(result["schema_quality"]["valid"], json!(177));
+    assert_eq!(result["schema_quality"]["checked"], json!(259));
+    assert_eq!(result["schema_quality"]["valid"], json!(259));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -5265,7 +8661,7 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
         result["invariants"]["all_input_schemas_are_well_formed"],
         json!(true)
     );
-    assert_eq!(result["groups"].as_array().unwrap().len(), 29);
+    assert_eq!(result["groups"].as_array().unwrap().len(), 30);
 
     let compact = call(
         &mut server,
@@ -5287,6 +8683,23 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
 #[test]
 fn capability_dashboard_separates_domain_surfaces_and_bounded_inventory() {
     let mut server = server();
+    let source_plan = call(
+        &mut server,
+        "domain_evidence_source_plan",
+        json!({
+            "group_id": "biological_domains",
+            "domains": ["modalities"],
+            "subject_id": "dashboard-evidence-subject",
+            "source_tool": "modality_catalog",
+            "connector_kind": "literature",
+            "locator_kind": "uri",
+            "locator": "https://example.org/dashboard-evidence",
+            "retrieval_mode": "metadata_only",
+            "retrieval_policy": {"network": "caller_managed", "max_bytes": 4096, "cache": "content_addressed"},
+            "does_not_claim": ["retrieval occurred"]
+        }),
+    );
+    assert_eq!(source_plan["artifact_registry"]["indexed"], json!(true));
     let oncology = call(
         &mut server,
         "capability_dashboard",
@@ -5311,6 +8724,27 @@ fn capability_dashboard_separates_domain_surfaces_and_bounded_inventory() {
         .unwrap()
         .iter()
         .any(|tool| tool == "onco_response_assess"));
+    assert_eq!(
+        oncology["audit"]["groups"][0]["artifact_evidence"]["state"],
+        json!("observed")
+    );
+    assert_eq!(
+        oncology["audit"]["groups"][0]["artifact_evidence"]["matching_record_count"],
+        json!(1)
+    );
+    assert_eq!(
+        oncology["audit"]["groups"][0]["workflow_reconciliation_evidence"]["state"],
+        json!("missing")
+    );
+    assert_eq!(
+        oncology["audit"]["evidence"]["groups_with_artifact_evidence"],
+        json!(1)
+    );
+    assert_eq!(
+        oncology["audit"]["evidence"]["artifact_evidence_records"],
+        json!(1)
+    );
+    assert_eq!(oncology["evidence_digest"].as_str().unwrap().len(), 64);
     assert_eq!(oncology["capability_dashboard_ready"], json!(true));
     assert_eq!(oncology["catalog_digest"].as_str().unwrap().len(), 64);
     assert_eq!(oncology["dashboard_digest"].as_str().unwrap().len(), 64);
@@ -5369,6 +8803,32 @@ fn capability_route_batches_ranked_and_explicit_needs_without_execution() {
     assert_eq!(result["route_coverage"]["needs_total"], json!(2));
     assert_eq!(result["route_coverage"]["needs_resolved"], json!(2));
     assert_eq!(result["route_coverage"]["needs_unresolved"], json!(0));
+    assert_eq!(
+        result["route_coverage"]["candidate_group_evidence_count"],
+        result["route_coverage"]["candidate_group_count"]
+    );
+    assert_eq!(result["evidence"]["readiness_claimed"], json!(false));
+    assert_eq!(
+        result["evidence"]["groups_with_artifact_evidence"],
+        json!(0)
+    );
+    assert_eq!(
+        result["evidence"]["groups_with_workflow_reconciliation"],
+        json!(0)
+    );
+    assert_eq!(result["evidence_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        result["evidence_digest"],
+        result["evidence"]["evidence_digest"]
+    );
+    assert!(!result["needs"][0]["candidate_group_evidence"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        result["needs"][0]["candidate_group_evidence"][0]["artifact_evidence"]["state"],
+        json!("missing")
+    );
     assert!(
         result["route_coverage"]["candidate_domain_count"]
             .as_u64()
@@ -5400,8 +8860,8 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         json!({
             "goal": "compose a reviewed handoff",
             "needs": [
-                {"id": "oncology", "query": "oncology"},
-                {"id": "release", "tool": "bundle_verify"}
+                {"id": "oncology", "tool": "workspace_capabilities"},
+                {"id": "release", "tool": "weave_protocol_catalog"}
             ],
             "max_candidates_per_need": 2,
             "max_tools": 4
@@ -5427,11 +8887,11 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
                 },
                 {
                     "need_id": "release",
-                    "tool": "bundle_verify",
+                    "tool": "weave_protocol_catalog",
                     "domain": "release",
                     "capability": "verification",
                     "objective": "verify the release bundle",
-                    "arguments": {},
+                    "arguments": {"context": null},
                     "depends_on": ["oncology"]
                 }
             ]
@@ -5445,6 +8905,59 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         json!("mission_preflight_required")
     );
     assert_eq!(review["execution"], json!("not_started"));
+    assert_eq!(review["evidence_binding"]["present"], json!(true));
+    assert_eq!(
+        review["evidence_binding"]["evidence_digest"],
+        route["evidence_digest"]
+    );
+    assert_eq!(
+        review["mission_draft"]["route_evidence_digest"],
+        route["evidence_digest"]
+    );
+    assert_eq!(
+        review["mission_draft"]["route_evidence_scope"],
+        route["evidence_scope"]
+    );
+    let mut tampered_route = route.clone();
+    tampered_route["evidence_scope"] = json!("tampered_scope");
+    let refused_tampering = call(
+        &mut server,
+        "capability_route_review",
+        json!({
+            "route": tampered_route,
+            "selections": []
+        }),
+    );
+    assert_eq!(refused_tampering["__isError"], json!(true));
+    assert!(refused_tampering["error"]
+        .as_str()
+        .unwrap()
+        .contains("route evidence summary does not match"));
+
+    let mut legacy_route = route.clone();
+    legacy_route.as_object_mut().unwrap().remove("evidence");
+    legacy_route
+        .as_object_mut()
+        .unwrap()
+        .remove("evidence_digest");
+    legacy_route
+        .as_object_mut()
+        .unwrap()
+        .remove("evidence_scope");
+    let legacy_review = call(
+        &mut server,
+        "capability_route_review",
+        json!({
+            "route": legacy_route,
+            "selections": []
+        }),
+    );
+    assert_eq!(legacy_review["review_status"], json!("blocked"));
+    assert_eq!(legacy_review["evidence_binding"]["present"], json!(false));
+    assert_eq!(
+        legacy_review["evidence_binding"]["posture"],
+        json!("not_supplied")
+    );
     assert_eq!(
         review["dependency_waves"],
         json!([["oncology"], ["release"]])
@@ -5453,6 +8966,49 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
         review["mission_draft"]["steps"].as_array().unwrap().len(),
         2
     );
+
+    let mission = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "route-review-mission",
+            "goal": review["goal"].clone(),
+            "steps": review["mission_draft"]["steps"].clone(),
+            "route_review": review.clone()
+        }),
+    );
+    assert_eq!(mission["__isError"], json!(false));
+    assert_eq!(mission["execution"], json!("planned"));
+    assert_eq!(
+        mission["plan"]["route_review_provenance"]["present"],
+        json!(true)
+    );
+    assert_eq!(
+        mission["plan"]["route_review_provenance"]["evidence_present"],
+        json!(true)
+    );
+    assert_eq!(
+        mission["plan"]["route_review_provenance"]["readiness_claimed"],
+        json!(false)
+    );
+
+    let mut tampered_review = review.clone();
+    tampered_review["mission_draft"]["steps"][0]["objective"] = json!("tampered after review");
+    let refused_handoff = call(
+        &mut server,
+        "agent_mission",
+        json!({
+            "mission_id": "route-review-tampered",
+            "goal": review["goal"].clone(),
+            "steps": review["mission_draft"]["steps"].clone(),
+            "route_review": tampered_review
+        }),
+    );
+    assert_eq!(refused_handoff["__isError"], json!(true));
+    assert!(refused_handoff["error"]
+        .as_str()
+        .unwrap()
+        .contains("route_review"));
 
     let blocked = call(
         &mut server,
@@ -5516,6 +9072,72 @@ fn capability_route_review_builds_non_executing_handoff_and_reports_bad_selectio
     assert_eq!(schema_review["schema_review"]["requested"], json!(true));
     assert_eq!(schema_review["schema_review"]["valid"], json!(true));
     assert_eq!(schema_review["schema_review"]["checked"], json!(1));
+}
+
+#[test]
+fn capability_route_plan_verifier_replays_inputs_and_preserves_no_dispatch() {
+    let mut server = server();
+    let route = call(
+        &mut server,
+        "capability_route",
+        json!({
+            "goal": "verify a reviewed plan",
+            "needs": [{"id": "audit", "tool": "capability_audit"}],
+            "max_candidates_per_need": 2,
+            "max_tools": 2
+        }),
+    );
+    let selections = json!([{
+        "need_id": "audit",
+        "tool": "capability_audit",
+        "domain": "developer_platform",
+        "capability": "capability_audit",
+        "objective": "audit the capability catalogue",
+        "arguments": {}
+    }]);
+    let plan = call(
+        &mut server,
+        "capability_route_plan",
+        json!({
+            "mission_id": "route-plan-verifier",
+            "route": route,
+            "selections": selections
+        }),
+    );
+    assert_eq!(plan["__isError"], json!(false));
+    assert_eq!(plan["plan_status"], json!("ready_for_caller_inspection"));
+    assert_eq!(plan["route_input_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(plan["selection_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(plan["selection_count"], json!(1));
+    let original_plan = plan.clone();
+
+    let verified = call(
+        &mut server,
+        "capability_route_plan_verify",
+        json!({
+            "plan": original_plan.clone(),
+            "route": route,
+            "selections": selections
+        }),
+    );
+    assert_eq!(verified["__isError"], json!(false));
+    assert_eq!(verified["workflow"], json!("capability_route_plan_verify"));
+    assert_eq!(verified["valid"], json!(true));
+    assert_eq!(verified["verification_status"], json!("verified"));
+    assert_eq!(verified["route_replay"]["status"], json!("matched"));
+    assert_eq!(verified["mission_preflight"]["status"], json!("matched"));
+    assert_eq!(verified["dispatch"], json!("not_started"));
+
+    let mut tampered_plan = original_plan;
+    tampered_plan["plan_digest"] = json!("f");
+    let invalid = call(
+        &mut server,
+        "capability_route_plan_verify",
+        json!({"plan": tampered_plan}),
+    );
+    assert_eq!(invalid["__isError"], json!(false));
+    assert_eq!(invalid["valid"], json!(false));
+    assert_eq!(invalid["verification_status"], json!("mismatch"));
 }
 
 #[test]
@@ -5811,7 +9433,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
             },
             "policy": "normative",
             "include_markdown": true,
-            "max_markdown_chars": 100000
+            "max_markdown_chars": 120000
         }),
     );
     assert_eq!(payload["ok"], json!(true));
@@ -5859,6 +9481,182 @@ fn compile_returns_the_contract_not_the_evidence() {
         payload["refine"]["handle"]["certificate_sha256"],
         payload["certificate_sha256"]
     );
+}
+
+/// The 0.3 decision contract crosses the MCP boundary as an explicit, certificate-bound summary.
+#[test]
+fn compile_projects_the_wire_decision_quotient_without_claiming_rate_distortion() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.3/decision_contract_query.json"
+        }),
+    );
+
+    assert_eq!(payload["layer"], json!("l0"));
+    let quotient = &payload["decision_quotient"];
+    assert_eq!(
+        quotient["schema"],
+        json!("bioprism-mcp/epistemic-decision-quotient/0.1")
+    );
+    assert_eq!(
+        quotient["permitted_actions"],
+        json!(["accept", "defer", "reject"])
+    );
+    assert_eq!(quotient["original_model_count"], json!(3));
+    assert_eq!(quotient["quotient_model_count"], json!(2));
+    assert_eq!(quotient["merged_model_count"], json!(1));
+    assert_eq!(
+        quotient["certificate_binding"]["query_sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        quotient["certificate_binding"]["certificate_sha256"],
+        payload["certificate_sha256"]
+    );
+    assert!(quotient["limitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("rate-distortion")));
+
+    let explained = call(
+        &mut server,
+        "fiber_explain",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.3/decision_contract_query.json"
+        }),
+    );
+    assert_eq!(
+        explained["decision_quotient"]["quotient_model_count"],
+        json!(2)
+    );
+    assert!(!explained["passes_not_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|pass| pass["name"] == "decision_quotient"));
+}
+
+/// The 0.4 observed-evidence contract crosses MCP as a full, certificate-bound context audit.
+#[test]
+fn compile_projects_the_wire_rate_distortion_audit() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.4/rate_distortion_query.json"
+        }),
+    );
+
+    let report = &payload["rate_distortion"];
+    assert_eq!(
+        report["schema"],
+        json!("bioprism-mcp/epistemic-context-audit/0.2")
+    );
+    assert_eq!(report["criterion"], json!("bayes_regret"));
+    assert_eq!(report["evidence_count"], json!(2));
+    assert_eq!(report["frontier"]["evaluated"], json!(4));
+    assert!(report["identification"].is_object());
+    assert!(report["sufficiency"].is_object());
+    assert_eq!(
+        report["certificate_binding"]["query_sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        report["certificate_binding"]["certificate_sha256"],
+        payload["certificate_sha256"]
+    );
+
+    let explained = call(
+        &mut server,
+        "fiber_explain",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.4/rate_distortion_query.json"
+        }),
+    );
+    assert_eq!(
+        explained["rate_distortion"]["frontier"]["evaluated"],
+        json!(4)
+    );
+    assert!(explained["passes_not_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|pass| pass["name"] != "rate_distortion"));
+}
+
+/// The 0.5 adaptive contract crosses MCP as a certificate-bound plan, never as an execution
+/// receipt or authorization claim.
+#[test]
+fn compile_projects_the_wire_adaptive_policy() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.5/adaptive_acquisition_query.json"
+        }),
+    );
+
+    let report = &payload["adaptive_acquisition"];
+    assert_eq!(
+        report["schema"],
+        json!("bioprism-mcp/fiber-adaptive-acquisition/0.1")
+    );
+    assert_eq!(report["budget"], json!(1.0));
+    assert_eq!(report["max_steps"], json!(2));
+    assert_eq!(report["prior"], json!([0.5, 0.25, 0.25]));
+    assert_eq!(report["acquisitions"].as_array().unwrap().len(), 2);
+    assert!(report["policy"]["nodes_evaluated"].as_u64().unwrap() > 0);
+    assert!(report["policy"]["root"].is_object());
+    assert_eq!(report["execution"], json!("not_started"));
+    assert_eq!(report["authorization"], json!("not_granted"));
+    assert_eq!(
+        report["certificate_binding"]["query_sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        report["certificate_binding"]["certificate_sha256"],
+        payload["certificate_sha256"]
+    );
+
+    let explained = call(
+        &mut server,
+        "fiber_explain",
+        json!({
+            "world": WORLD,
+            "query": "fixtures/fiber-v0.5/adaptive_acquisition_query.json"
+        }),
+    );
+    assert_eq!(
+        explained["adaptive_acquisition"]["schema"],
+        json!("bioprism-mcp/fiber-adaptive-acquisition/0.1")
+    );
+    assert!(explained["passes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|pass| pass["name"] == "adaptive_acquisition"));
+    assert!(explained["passes_not_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|pass| pass["name"] != "adaptive_acquisition"));
 }
 
 #[test]
@@ -5987,6 +9785,8 @@ fn absolute_paths_and_traversal_are_refused() {
         "fixtures/../../secrets.json",
         "/etc/passwd",
         "C:/Windows/System32/config/SAM",
+        "C:\\Windows\\System32\\config\\SAM",
+        "..\\outside.json",
     ] {
         assert!(
             server.resolve(hostile).is_err(),
@@ -6219,6 +10019,60 @@ fn bundle_verify_recomputes_carried_content_and_refuses_tampering() {
     );
     assert_eq!(refused["ok"], json!(false));
     assert!(refused["refusal"].as_str().unwrap().contains("digest"));
+}
+
+#[test]
+fn bundle_verify_applies_an_offline_registry_policy_to_public_attestations() {
+    let bundle = ResultBundle::builder("policy-bundle")
+        .carrying("query", EntryRole::Query, json!({ "goal": "policy" }))
+        .unwrap()
+        .build()
+        .unwrap();
+    let signing = SigningKey::new(KeyIdentity::new("policy-publisher"), [0x71; 32]);
+    let public = signing.verification_key(KeyValidity::unbounded());
+    let signed = PubliclyAttestedBundle::produce_with(
+        bundle,
+        &signing,
+        AttestationPurpose::PublisherManifest,
+        ClaimedProducer::new("AURORA Policy Publisher"),
+        None,
+        None,
+        Some(100),
+    )
+    .unwrap();
+    let mut registry = KeyRegistry::new();
+    registry
+        .register_root(
+            RegisteredKey::root(
+                public.identity().clone(),
+                public.public_key(),
+                KeyValidity::unbounded(),
+                "AURORA Policy Publisher",
+                [KeyRole::Publisher].into_iter().collect(),
+                std::collections::BTreeSet::new(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let result = call(
+        &mut server(),
+        "bundle_verify",
+        json!({
+            "publicly_attested_bundle": serde_json::to_value(signed).unwrap(),
+            "trust_registry": serde_json::to_value(registry).unwrap(),
+            "trust_policy": serde_json::to_value(TrustPolicy::for_purpose(AttestationPurpose::PublisherManifest)).unwrap(),
+        }),
+    );
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["verification_mode"],
+        json!("ed25519_registry_policy")
+    );
+    assert_eq!(result["trust_report"]["verdict"], json!("trusted"));
+    assert_eq!(
+        result["trust_report"]["key_identity"],
+        json!("policy-publisher")
+    );
 }
 
 #[test]
@@ -6504,7 +10358,10 @@ fn lab_pareto_audit_preserves_tradeoffs_holes_archive_and_ambiguous_selection() 
     assert_eq!(result["front"]["count"], json!(3));
     assert_eq!(result["archived_count"], json!(1));
     assert_eq!(result["front"]["unresolved_count"], json!(1));
-    assert_eq!(result["front"]["selection"]["selection"], json!("ambiguous"));
+    assert_eq!(
+        result["front"]["selection"]["selection"],
+        json!("ambiguous")
+    );
     assert_eq!(
         result["relations"][0]["relation"]["relation"],
         json!("incomparable")
@@ -6682,20 +10539,35 @@ fn lab_holdout_audit_never_mints_clean_scores_after_selection_and_rollback() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/lab-holdout-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/lab-holdout-audit/0.1")
+    );
     assert_eq!(result["current"], json!("v1"));
     assert_eq!(result["measurement_count"], json!(1));
     assert_eq!(result["measurement_refusal_count"], json!(2));
     assert_eq!(result["rollback_count"], json!(1));
     assert_eq!(result["operations"][1]["result"], json!("accepted"));
-    assert_eq!(result["operations"][2]["complete_restoration"], json!(false));
-    assert_eq!(result["operations"][3]["result"], json!("measurement_refused"));
+    assert_eq!(
+        result["operations"][2]["complete_restoration"],
+        json!(false)
+    );
+    assert_eq!(
+        result["operations"][3]["result"],
+        json!("measurement_refused")
+    );
     assert!(result["operations"][3]["refusal"]
         .as_str()
         .unwrap()
         .contains("used to select"));
-    assert_eq!(result["operations"][4]["result"], json!("clean_measurement"));
-    assert_eq!(result["operations"][5]["result"], json!("measurement_refused"));
+    assert_eq!(
+        result["operations"][4]["result"],
+        json!("clean_measurement")
+    );
+    assert_eq!(
+        result["operations"][5]["result"],
+        json!("measurement_refused")
+    );
     assert!(result["holdouts"][0]["exposure"].as_array().unwrap().len() >= 3);
     assert_eq!(result["holdouts"][0]["retired"], json!(false));
 }
@@ -6731,7 +10603,10 @@ fn lab_space_audit_preserves_lineage_diffs_and_fail_closed_candidate_validation(
     assert_eq!(result["candidate_rows_omitted"], json!(1));
     assert_eq!(result["inspection_rows"][0]["lineage"], json!(["v2", "v1"]));
     assert_eq!(result["inspection_rows"][0]["root"], json!("v1"));
-    assert_eq!(result["comparison_rows"][0]["derived_relation"], json!(true));
+    assert_eq!(
+        result["comparison_rows"][0]["derived_relation"],
+        json!(true)
+    );
     assert!(result["comparison_rows"][0]["changes"]
         .as_array()
         .unwrap()
@@ -6761,7 +10636,10 @@ fn lab_space_audit_preserves_lineage_diffs_and_fail_closed_candidate_validation(
     assert_eq!(invalid["stage"], json!("candidate_validation"));
     assert_eq!(invalid["fail_closed"], json!(true));
     assert_eq!(invalid["space_committed"], json!(false));
-    assert_eq!(invalid["candidate_rows"][0]["registration"], json!("not_attempted"));
+    assert_eq!(
+        invalid["candidate_rows"][0]["registration"],
+        json!("not_attempted")
+    );
 }
 
 #[test]
@@ -6822,11 +10700,17 @@ fn lab_evolution_audit_only_claims_clean_directional_improvement_and_retains_con
     );
     assert_eq!(claimed["__isError"], json!(false));
     assert_eq!(claimed["ok"], json!(true));
-    assert_eq!(claimed["schema"], json!("bioprism-mcp/lab-evolution-audit/0.1"));
+    assert_eq!(
+        claimed["schema"],
+        json!("bioprism-mcp/lab-evolution-audit/0.1")
+    );
     assert_eq!(claimed["status"], json!("improvement_claimed"));
     assert_eq!(claimed["claimable"], json!(true));
     assert!((claimed["claim"]["delta"].as_f64().unwrap() - 0.13).abs() < 1e-9);
-    assert!(claimed["sentence"].as_str().unwrap().contains("rotating_private_certification"));
+    assert!(claimed["sentence"]
+        .as_str()
+        .unwrap()
+        .contains("rotating_private_certification"));
 
     let contaminated = call(
         &mut server(),
@@ -6853,8 +10737,14 @@ fn lab_evolution_audit_only_claims_clean_directional_improvement_and_retains_con
     assert_eq!(contaminated["ok"], json!(true));
     assert_eq!(contaminated["status"], json!("contaminated"));
     assert_eq!(contaminated["claimable"], json!(false));
-    assert_eq!(contaminated["card"]["surface"]["surface"], json!("contaminated"));
-    assert!(contaminated["claim_refusal"].as_str().unwrap().contains("contaminated"));
+    assert_eq!(
+        contaminated["card"]["surface"]["surface"],
+        json!("contaminated")
+    );
+    assert!(contaminated["claim_refusal"]
+        .as_str()
+        .unwrap()
+        .contains("contaminated"));
 }
 
 #[test]
@@ -6904,12 +10794,21 @@ fn obligation_gate_check_keeps_effective_states_and_mandatory_closure_visible() 
         }),
     );
     assert_eq!(blocked["ok"], json!(true));
-    assert_eq!(blocked["schema"], json!("bioprism-mcp/obligation-gate-check/0.1"));
+    assert_eq!(
+        blocked["schema"],
+        json!("bioprism-mcp/obligation-gate-check/0.1")
+    );
     assert_eq!(blocked["outcome_kind"], json!("blocked"));
-    assert_eq!(blocked["gate"]["reason"]["reason"], json!("prerequisites_unmet"));
+    assert_eq!(
+        blocked["gate"]["reason"]["reason"],
+        json!("prerequisites_unmet")
+    );
     assert_eq!(blocked["graph"]["valid"], json!(true));
     assert_eq!(blocked["graph"]["omitted_effective_states"], json!(2));
-    assert_eq!(blocked["graph"]["frontier"][0]["obligation"], json!("validation"));
+    assert_eq!(
+        blocked["graph"]["frontier"][0]["obligation"],
+        json!("validation")
+    );
 
     graph
         .record(
@@ -6931,7 +10830,10 @@ fn obligation_gate_check_keeps_effective_states_and_mandatory_closure_visible() 
         blocked_closure["gate"]["reason"]["reason"],
         json!("mandatory_obligation_outstanding")
     );
-    assert_eq!(blocked_closure["gate"]["reason"]["obligation"], json!("consent"));
+    assert_eq!(
+        blocked_closure["gate"]["reason"]["obligation"],
+        json!("consent")
+    );
 
     graph
         .record(
@@ -7033,7 +10935,12 @@ fn atlas_surface_audit_preserves_debt_browse_visibility_and_rate_denominators() 
         MeasurementConditions::new(MetricsSubject::grid(label), ScoringRule::atlas_pass_rate())
     }
     fn measured(value: f64, effective_size: usize) -> GridCell {
-        GridCell::point(value, NoIntervalReason::EstimatorNotAvailable, effective_size).unwrap()
+        GridCell::point(
+            value,
+            NoIntervalReason::EstimatorNotAvailable,
+            effective_size,
+        )
+        .unwrap()
     }
     fn record(id: &str, inducement: Inducement) -> FailureRecord {
         let chain = CausalChain::new(
@@ -7102,7 +11009,10 @@ fn atlas_surface_audit_preserves_debt_browse_visibility_and_rate_denominators() 
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/atlas-surface-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/atlas-surface-audit/0.1")
+    );
     assert_eq!(result["coverage"]["measured"], json!(1));
     assert_eq!(result["coverage"]["unmeasured"], json!(2));
     assert_eq!(
@@ -7125,10 +11035,14 @@ fn atlas_surface_audit_preserves_debt_browse_visibility_and_rate_denominators() 
         result["rate_checks"]["rows"][0]["answer"]["cell"]["kind"],
         json!("score")
     );
-    assert!((result["rate_checks"]["rows"][0]["answer"]["cell"]["value"].as_f64().unwrap()
-        - 0.25)
-        .abs()
-        < 1e-9);
+    assert!(
+        (result["rate_checks"]["rows"][0]["answer"]["cell"]["value"]
+            .as_f64()
+            .unwrap()
+            - 0.25)
+            .abs()
+            < 1e-9
+    );
 
     let no_holes = call(
         &mut server(),
@@ -7189,7 +11103,10 @@ fn bioeval_reference_audit_validates_mass_and_preserves_distributed_truth() {
         }),
     );
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-reference-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-reference-audit/0.1")
+    );
     assert_eq!(result["reference_kind"], json!("distribution"));
     assert_eq!(result["can_certify_clean_pass"], json!(false));
     assert_eq!(result["modal_state"], json!("progression"));
@@ -7235,13 +11152,22 @@ fn bioeval_acquisition_audit_preserves_obligation_stopping_and_named_regret() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-acquisition-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-acquisition-audit/0.1")
+    );
     assert_eq!(result["status"], json!("admissible"));
     assert_eq!(result["required_open_count"], json!(0));
     assert_eq!(result["cost"], json!(48));
     assert_eq!(result["findings"]["deferred_decisive_cost"], json!(7));
-    assert_eq!(result["findings"]["redundant_action_ids"], json!(["extra", "search"]));
-    assert_eq!(result["findings"]["unnecessary_action_ids"], json!(["extra"]));
+    assert_eq!(
+        result["findings"]["redundant_action_ids"],
+        json!(["extra", "search"])
+    );
+    assert_eq!(
+        result["findings"]["unnecessary_action_ids"],
+        json!(["extra"])
+    );
     assert_eq!(result["regret"]["cost_difference"], json!(18));
     assert_eq!(result["regret"]["like_for_like"], json!(false));
 
@@ -7295,7 +11221,10 @@ fn bioeval_grounding_audit_preserves_states_locators_staleness_and_lineage() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-grounding-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-grounding-audit/0.1")
+    );
     assert_eq!(result["census"]["supported"], json!(1));
     assert_eq!(result["census"]["contested"], json!(1));
     assert_eq!(result["census"]["support_unverified"], json!(1));
@@ -7304,8 +11233,14 @@ fn bioeval_grounding_audit_preserves_states_locators_staleness_and_lineage() {
     assert_eq!(result["census"]["adjacent_citations"], json!(1));
     assert_eq!(result["census"]["fully_grounded"], json!(false));
     assert_eq!(result["staleness"]["stale_count"], json!(2));
-    assert_eq!(result["findings"]["lineage_gap_evidence"]["ids"], json!(["asserted", "orphan"]));
-    assert_eq!(result["findings"]["orphan_evidence"]["ids"], json!(["orphan"]));
+    assert_eq!(
+        result["findings"]["lineage_gap_evidence"]["ids"],
+        json!(["asserted", "orphan"])
+    );
+    assert_eq!(
+        result["findings"]["orphan_evidence"]["ids"],
+        json!(["orphan"])
+    );
     assert_eq!(result["claims"]["omitted"], json!(2));
     assert_eq!(result["graph"]["duplicate_edge_count"], json!(0));
 
@@ -7361,7 +11296,10 @@ fn bioeval_estimand_audit_preserves_claim_language_identification_and_transport(
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-estimand-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-estimand-audit/0.1")
+    );
     assert_eq!(result["estimand"]["five_elements_complete"], json!(true));
     assert_eq!(result["claim"]["kind"], json!("intervention"));
     assert_eq!(result["claim"]["still_model_conditional"], json!(false));
@@ -7369,8 +11307,14 @@ fn bioeval_estimand_audit_preserves_claim_language_identification_and_transport(
         .as_str()
         .unwrap()
         .contains("changes"));
-    assert_eq!(result["claim"]["identification_summary"]["status"], json!("probed"));
-    assert_eq!(result["claim"]["identification_summary"]["failed_check_count"], json!(1));
+    assert_eq!(
+        result["claim"]["identification_summary"]["status"],
+        json!("probed")
+    );
+    assert_eq!(
+        result["claim"]["identification_summary"]["failed_check_count"],
+        json!(1)
+    );
     assert_eq!(result["transport"]["status"], json!("partially_declared"));
     assert_eq!(result["transport"]["accepted"], json!(1));
     assert_eq!(result["transport"]["refused"], json!(1));
@@ -7449,7 +11393,10 @@ fn bioeval_evaluator_audit_separates_harness_health_task_outcomes_and_hidden_dat
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-evaluator-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-evaluator-audit/0.1")
+    );
     assert_eq!(result["panel"]["run_count"], json!(6));
     assert_eq!(result["panel"]["healthy_count"], json!(4));
     assert_eq!(result["panel"]["unhealthy_count"], json!(2));
@@ -7458,8 +11405,14 @@ fn bioeval_evaluator_audit_separates_harness_health_task_outcomes_and_hidden_dat
     assert_eq!(result["panel"]["outcomes"]["met"], json!(1));
     assert_eq!(result["panel"]["outcomes"]["not_met"], json!(1));
     assert_eq!(result["panel"]["outcomes"]["inapplicable"], json!(1));
-    assert_eq!(result["panel"]["posture"], json!("review_required_hidden_data"));
-    assert_eq!(result["findings"]["duplicate_evaluator_ids"]["ids"], json!(["grader-b"]));
+    assert_eq!(
+        result["panel"]["posture"],
+        json!("review_required_hidden_data")
+    );
+    assert_eq!(
+        result["findings"]["duplicate_evaluator_ids"]["ids"],
+        json!(["grader-b"])
+    );
     assert_eq!(result["runs"]["omitted"], json!(4));
     assert_eq!(result["runs"]["rows"][1]["task_outcome"], json!("not_met"));
 
@@ -7507,12 +11460,18 @@ fn bioeval_plane_audit_keeps_unscored_and_inapplicable_out_of_the_fold() {
     );
     assert_eq!(incomplete["__isError"], json!(false));
     assert_eq!(incomplete["ok"], json!(true));
-    assert_eq!(incomplete["schema"], json!("bioprism-mcp/bioeval-plane-audit/0.1"));
+    assert_eq!(
+        incomplete["schema"],
+        json!("bioprism-mcp/bioeval-plane-audit/0.1")
+    );
     assert_eq!(incomplete["plane"]["scored_count"], json!(1));
     assert_eq!(incomplete["plane"]["unscored_count"], json!(1));
     assert_eq!(incomplete["plane"]["inapplicable_count"], json!(1));
     assert_eq!(incomplete["findings"]["fold_blocked"], json!(true));
-    assert_eq!(incomplete["findings"]["unscored_dimensions"]["ids"], json!(["calibration"]));
+    assert_eq!(
+        incomplete["findings"]["unscored_dimensions"]["ids"],
+        json!(["calibration"])
+    );
     assert_eq!(incomplete["dimensions"]["omitted"], json!(1));
     assert!(incomplete["fold"]["value"].is_null());
 
@@ -7593,17 +11552,35 @@ fn bioeval_metamorphic_audit_separates_failure_directions_and_undetermined_trial
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-metamorphic-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-metamorphic-audit/0.1")
+    );
     assert_eq!(result["suite"]["family_count"], json!(2));
     assert_eq!(result["suite"]["trial_count"], json!(6));
-    assert_eq!(result["suite"]["relation_coverage"]["complete"], json!(true));
+    assert_eq!(
+        result["suite"]["relation_coverage"]["complete"],
+        json!(true)
+    );
     assert_eq!(result["suite"]["failing_family_count"], json!(2));
     assert_eq!(result["suite"]["undetermined_trial_count"], json!(1));
     assert_eq!(result["suite"]["has_suite_wide_consistency"], json!(false));
-    assert_eq!(result["findings"]["false_sensitivity_trials"]["ids"], json!(["filename-shortcut"]));
-    assert_eq!(result["findings"]["false_invariance_trials"]["ids"], json!(["blind-spot"]));
-    assert_eq!(result["findings"]["wrong_direction_trials"]["ids"], json!(["wrong-way"]));
-    assert_eq!(result["findings"]["undetermined_families"]["ids"], json!(["formatting"]));
+    assert_eq!(
+        result["findings"]["false_sensitivity_trials"]["ids"],
+        json!(["filename-shortcut"])
+    );
+    assert_eq!(
+        result["findings"]["false_invariance_trials"]["ids"],
+        json!(["blind-spot"])
+    );
+    assert_eq!(
+        result["findings"]["wrong_direction_trials"]["ids"],
+        json!(["wrong-way"])
+    );
+    assert_eq!(
+        result["findings"]["undetermined_families"]["ids"],
+        json!(["formatting"])
+    );
     assert_eq!(result["families"]["rows"][0]["trials"]["omitted"], json!(1));
 
     let undetermined_refusal = call(
@@ -7663,17 +11640,29 @@ fn bioeval_waiver_audit_preserves_gate_verdicts_and_nonwaivable_vetoes() {
     let result = call(&mut server(), "bioeval_waiver_audit", arguments.clone());
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-waiver-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-waiver-audit/0.1")
+    );
     assert_eq!(result["release"]["blocking_before"], json!(3));
     assert_eq!(result["release"]["blocking_after"], json!(2));
     assert_eq!(result["release"]["waived_count"], json!(1));
     assert_eq!(result["release"]["unevaluable_count"], json!(1));
     assert_eq!(result["release"]["releasable"], json!(false));
     assert_eq!(result["findings"]["waived_gates"]["ids"], json!(["health"]));
-    assert_eq!(result["findings"]["still_blocking"]["ids"], json!(["safety", "unknown-rate"]));
-    assert_eq!(result["gates"]["rows"][0]["verdict"]["verdict"], json!("violated"));
+    assert_eq!(
+        result["findings"]["still_blocking"]["ids"],
+        json!(["safety", "unknown-rate"])
+    );
+    assert_eq!(
+        result["gates"]["rows"][0]["verdict"]["verdict"],
+        json!("violated")
+    );
     assert_eq!(result["gates"]["rows"][0]["blocks_after"], json!(false));
-    assert_eq!(result["waivers"]["rows"][0]["waiver"]["follow_up"], json!("recalibrate before the next release"));
+    assert_eq!(
+        result["waivers"]["rows"][0]["waiver"]["follow_up"],
+        json!("recalibrate before the next release")
+    );
 
     let release_refusal = call(
         &mut server(),
@@ -7760,14 +11749,20 @@ fn bioeval_design_audit_keeps_single_factor_contrasts_and_interaction_holes_visi
     let result = call(&mut server(), "bioeval_design_audit", complete.clone());
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-design-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-design-audit/0.1")
+    );
     assert_eq!(result["design"]["contrast_count"], json!(4));
     assert_eq!(result["design"]["unattributable_arm_count"], json!(1));
     assert_eq!(result["interactions"]["estimable_count"], json!(1));
     assert_eq!(result["interactions"]["missing_count"], json!(0));
     assert_eq!(result["attributions"]["total"], json!(4));
     assert_eq!(result["attributions"]["causal_count"], json!(4));
-    assert_eq!(result["findings"]["unattributable_arms"]["ids"], json!(["both"]));
+    assert_eq!(
+        result["findings"]["unattributable_arms"]["ids"],
+        json!(["both"])
+    );
     assert_eq!(result["arms"]["omitted"], json!(2));
     assert_eq!(result["attributions"]["rows"][0]["causal"], json!(true));
 
@@ -7829,17 +11824,27 @@ fn bioeval_mesh_audit_collapses_shared_inputs_and_separates_disagreement_kinds()
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-mesh-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-mesh-audit/0.1")
+    );
     assert_eq!(result["mesh"]["evaluator_count"], json!(5));
     assert_eq!(result["mesh"]["independent_class_count"], json!(4));
     assert_eq!(result["mesh"]["independence_verified"], json!(true));
     assert_eq!(result["disagreements"]["within_class_count"], json!(1));
     assert_eq!(result["disagreements"]["across_class_count"], json!(4));
-    assert_eq!(result["findings"]["abstaining_evaluators"]["ids"], json!(["silent"]));
+    assert_eq!(
+        result["findings"]["abstaining_evaluators"]["ids"],
+        json!(["silent"])
+    );
     assert_eq!(result["independent_ratings"]["status"], json!("refused"));
     assert_eq!(result["findings"]["rating_projection_refused"], json!(true));
     assert_eq!(result["contributions"]["status"], json!("accepted"));
-    assert!(result["contributions"]["rows"].as_array().unwrap().iter().any(|row| row["conclusion"] == json!("unknown")));
+    assert!(result["contributions"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["conclusion"] == json!("unknown")));
     assert_eq!(result["classes"]["rows"][0]["size"], json!(2));
 
     let circular_refusal = call(
@@ -7894,7 +11899,10 @@ fn bioeval_burden_audit_preserves_inherited_residuals_waste_and_fork_refusals() 
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-burden-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-burden-audit/0.1")
+    );
     assert_eq!(result["burden"]["resource_count"], json!(2));
     assert_eq!(result["burden"]["branch_count"], json!(3));
     assert_eq!(result["burden"]["draw_count"], json!(4));
@@ -7902,7 +11910,10 @@ fn bioeval_burden_audit_preserves_inherited_residuals_waste_and_fork_refusals() 
     assert_eq!(result["findings"]["joint_feasibility_refused"], json!(true));
     assert_eq!(result["wasted_nonrenewable"]["total"], json!(1));
     assert_eq!(result["findings"]["failed_draws_still_counted"], json!(2));
-    assert_eq!(result["branches"]["rows"][1]["residual"]["biopsy"], json!(10));
+    assert_eq!(
+        result["branches"]["rows"][1]["residual"]["biopsy"],
+        json!(10)
+    );
 
     let joint_policy_refusal = call(
         &mut server(),
@@ -7920,7 +11931,10 @@ fn bioeval_burden_audit_preserves_inherited_residuals_waste_and_fork_refusals() 
         }),
     );
     assert_eq!(joint_policy_refusal["ok"], json!(false));
-    assert_eq!(joint_policy_refusal["stage"], json!("joint_feasibility_policy"));
+    assert_eq!(
+        joint_policy_refusal["stage"],
+        json!("joint_feasibility_policy")
+    );
     assert_eq!(joint_policy_refusal["fail_closed"], json!(true));
 
     let unit_refusal = call(
@@ -7955,13 +11969,19 @@ fn bioeval_reveal_audit_freezes_rubric_and_retains_unrevealed_commitments() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-reveal-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-reveal-audit/0.1")
+    );
     assert_eq!(result["commitments"]["total"], json!(2));
     assert_eq!(result["outcomes"]["total"], json!(1));
     assert_eq!(result["scoring"]["status"], json!("accepted"));
     assert_eq!(result["scoring"]["complete"], json!(false));
     assert_eq!(result["findings"]["selective_publication"], json!(true));
-    assert_eq!(result["findings"]["unrevealed_commitments"]["ids"], json!(["case-b"]));
+    assert_eq!(
+        result["findings"]["unrevealed_commitments"]["ids"],
+        json!(["case-b"])
+    );
     assert_eq!(result["seal_lock"]["status"], json!("refused"));
     assert_eq!(result["reveal_lock"]["status"], json!("refused"));
 
@@ -7996,7 +12016,10 @@ fn bioeval_reveal_audit_freezes_rubric_and_retains_unrevealed_commitments() {
     );
     assert_eq!(uncommitted["ok"], json!(true));
     assert_eq!(uncommitted["scoring"]["status"], json!("refused"));
-    assert_eq!(uncommitted["findings"]["uncommitted_outcome_refused"], json!(true));
+    assert_eq!(
+        uncommitted["findings"]["uncommitted_outcome_refused"],
+        json!(true)
+    );
 }
 
 #[test]
@@ -8081,12 +12104,18 @@ fn bioeval_boundary_audit_separates_authorization_denial_violations_vetoes_and_b
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/bioeval-boundary-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/bioeval-boundary-audit/0.1")
+    );
     assert_eq!(result["boundary"]["authorised_count"], json!(1));
     assert_eq!(result["boundary"]["compliant_count"], json!(1));
     assert_eq!(result["boundary"]["violation_count"], json!(3));
     assert_eq!(result["boundary"]["veto_count"], json!(2));
-    assert_eq!(result["findings"]["compliant_proposals"]["ids"], json!(["respected-denial"]));
+    assert_eq!(
+        result["findings"]["compliant_proposals"]["ids"],
+        json!(["respected-denial"])
+    );
     assert_eq!(result["composite"]["status"], json!("refused"));
     assert_eq!(result["findings"]["bypass_is_veto"], json!(true));
 
@@ -8177,7 +12206,10 @@ fn evaluation_worldline_audit_separates_future_leakage_from_dangling_context() {
         }),
     );
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/evaluation-worldline-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/evaluation-worldline-audit/0.1")
+    );
     assert_eq!(result["leak_count"], json!(1));
     assert_eq!(result["dangling_count"], json!(1));
     assert_eq!(result["leaks"][0]["observation"], json!("future"));
@@ -8377,7 +12409,7 @@ fn runtime_execution_simulate_records_replays_and_forks_without_live_effects() {
     assert_eq!(result["recording_complete"], json!(true));
     assert_eq!(result["partial_recording"], json!(false));
     assert_eq!(result["live_outcome_count"], json!(4));
-    assert_eq!(result["policy_journal_count"].as_u64().unwrap() >= 4, true);
+    assert!(result["policy_journal_count"].as_u64().unwrap() >= 4);
     assert_eq!(result["replay"]["verified"], json!(true));
     assert_eq!(result["replay"]["matched"], json!(true));
     assert_eq!(result["replay_complete"], json!(true));
@@ -8568,7 +12600,10 @@ fn onco_boundary_check_releases_aggregate_work_and_escalates_individual_use() {
     assert_eq!(result["released_count"], json!(1));
     assert_eq!(result["refused_count"], json!(1));
     assert_eq!(result["escalation_present"], json!(true));
-    assert_eq!(result["escalation_trigger"], json!("individual_clinical_request"));
+    assert_eq!(
+        result["escalation_trigger"],
+        json!("individual_clinical_request")
+    );
     assert_eq!(result["escalation_route"], json!("treating_clinical_team"));
     assert_eq!(result["identifier_fields_present"], json!(false));
 
@@ -8891,12 +12926,21 @@ fn oncoworlds_model_transport_keeps_model_and_patient_claims_separate() {
     );
     assert_eq!(accepted["supported"], json!(true));
     assert_eq!(accepted["outcome_kind"], json!("supported"));
-    assert_eq!(accepted["model_identity"]["verified_against_source"], json!(true));
+    assert_eq!(
+        accepted["model_identity"]["verified_against_source"],
+        json!(true)
+    );
     assert_eq!(accepted["fidelity_axes"][0]["axis"], json!("genomic"));
     assert_eq!(accepted["establishment"]["selected"], json!(false));
     assert_eq!(accepted["replicates"]["effective_biological_n"], json!(3));
     assert_eq!(accepted["replicates"]["claimed_n"], json!(3));
-    assert_eq!(accepted["transport_assumption_names"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        accepted["transport_assumption_names"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
     assert_eq!(accepted["effective_biological_n"], json!(3));
     assert!(accepted["patient_relevant_claim"].is_object());
     assert!(accepted["model_statement"]
@@ -8926,7 +12970,10 @@ fn oncoworlds_model_transport_keeps_model_and_patient_claims_separate() {
     assert_eq!(refused["supported"], json!(false));
     assert_eq!(refused["outcome_kind"], json!("refused"));
     assert_eq!(refused["refusal_kind"], json!("unverified_model_identity"));
-    assert_eq!(refused["model_identity"]["verified_against_source"], json!(false));
+    assert_eq!(
+        refused["model_identity"]["verified_against_source"],
+        json!(false)
+    );
     assert_eq!(
         refused["refusal"]["refusal"],
         json!("unverified_model_identity")
@@ -8990,7 +13037,10 @@ fn oncoworlds_methylation_tools_preserve_threshold_and_version_conditioning() {
     );
     assert_eq!(missing_threshold["ok"], json!(false));
     assert_eq!(missing_threshold["outcome_kind"], json!("refused"));
-    assert_eq!(missing_threshold["refusal_kind"], json!("undeclared_threshold"));
+    assert_eq!(
+        missing_threshold["refusal_kind"],
+        json!("undeclared_threshold")
+    );
     assert_eq!(missing_threshold["threshold_declared"], json!(false));
     assert_eq!(
         missing_threshold["refusal"]["refusal"],
@@ -9078,10 +13128,7 @@ fn oncoworlds_radiogenomic_check_refuses_leaky_splits_before_claims() {
     assert_eq!(refused["outcome_kind"], json!("refused"));
     assert_eq!(refused["claim_target"], json!("mechanism"));
     assert_eq!(refused["design"]["split_unit"], json!("image"));
-    assert_eq!(
-        refused["design"]["mechanism_strata_present"],
-        json!(false)
-    );
+    assert_eq!(refused["design"]["mechanism_strata_present"], json!(false));
     assert_eq!(refused["refusal_kind"], json!("leaky_split"));
     assert_eq!(refused["refusal"]["refusal"], json!("leaky_split"));
 
@@ -9115,10 +13162,19 @@ fn oncoworlds_radiogenomic_check_refuses_leaky_splits_before_claims() {
     assert_eq!(accepted["supported"], json!(true));
     assert_eq!(accepted["outcome_kind"], json!("supported"));
     assert_eq!(accepted["design"]["split_unit"], json!("participant"));
-    assert_eq!(accepted["design"]["feature_provenance"], json!("fitted_on_training_split_only"));
+    assert_eq!(
+        accepted["design"]["feature_provenance"],
+        json!("fitted_on_training_split_only")
+    );
     assert_eq!(accepted["design"]["mechanism_strata_present"], json!(true));
     assert_eq!(accepted["claim_target"], json!("mechanism"));
-    assert_eq!(accepted["transport_assumption_names"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        accepted["transport_assumption_names"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
     assert!(accepted["supported_claim"].is_object());
 }
 
@@ -9208,16 +13264,14 @@ fn oncoworlds_clonal_history_check_preserves_rejected_and_ambiguous_histories() 
 #[test]
 fn oncoworlds_clonal_evidence_check_preserves_sampling_bounds_and_causal_refusal() {
     let core = RegionId::new("enhancing-core");
-    let cellular = |parts| {
-        FractionEvidence::Cellular {
-            fraction: CellularFraction::from_parts_per_ten_thousand(parts).unwrap(),
-            derivation: FractionDerivation {
-                purity: CellularFraction::from_parts_per_ten_thousand(8_000).unwrap(),
-                local_copy_number: 2,
-                multiplicity: 1,
-                derived_by: "caller-copy-number-model-v1".into(),
-            },
-        }
+    let cellular = |parts| FractionEvidence::Cellular {
+        fraction: CellularFraction::from_parts_per_ten_thousand(parts).unwrap(),
+        derivation: FractionDerivation {
+            purity: CellularFraction::from_parts_per_ten_thousand(8_000).unwrap(),
+            local_copy_number: 2,
+            multiplicity: 1,
+            derived_by: "caller-copy-number-model-v1".into(),
+        },
     };
     let diagnosis = SpecimenObservation::new(
         MolecularMarker::EgfrAmplification,
@@ -9247,17 +13301,32 @@ fn oncoworlds_clonal_evidence_check_preserves_sampling_bounds_and_causal_refusal
         }),
     );
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/oncoworlds-clonal-evidence-check/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/oncoworlds-clonal-evidence-check/0.1")
+    );
     assert_eq!(result["outcome_kind"], json!("report"));
     assert_eq!(result["check_count"], json!(3));
     assert_eq!(result["refusal_count"], json!(1));
     assert_eq!(result["checks"]["promotion"]["allowed"], json!(true));
-    assert_eq!(result["checks"]["promotion"]["outcome_kind"], json!("present_in_sampled_regions"));
+    assert_eq!(
+        result["checks"]["promotion"]["outcome_kind"],
+        json!("present_in_sampled_regions")
+    );
     assert_eq!(result["checks"]["resistance"]["allowed"], json!(true));
-    assert_eq!(result["checks"]["resistance"]["unique_explanation"], json!("de_novo_emergence"));
-    assert_eq!(result["checks"]["resistance"]["de_novo_emergence_survives"], json!(true));
+    assert_eq!(
+        result["checks"]["resistance"]["unique_explanation"],
+        json!("de_novo_emergence")
+    );
+    assert_eq!(
+        result["checks"]["resistance"]["de_novo_emergence_survives"],
+        json!(true)
+    );
     assert_eq!(result["checks"]["attribution"]["allowed"], json!(false));
-    assert_eq!(result["checks"]["attribution"]["refusal_kind"], json!("unsupported_directionality"));
+    assert_eq!(
+        result["checks"]["attribution"]["refusal_kind"],
+        json!("unsupported_directionality")
+    );
 
     let missing = call(
         &mut server(),
@@ -9272,7 +13341,10 @@ fn oncoworlds_clonal_evidence_check_preserves_sampling_bounds_and_causal_refusal
     );
     assert_eq!(missing["all_admissible"], json!(false));
     assert_eq!(missing["refusal_count"], json!(1));
-    assert_eq!(missing["checks"]["promotion"]["refusal_kind"], json!("not_an_absence"));
+    assert_eq!(
+        missing["checks"]["promotion"]["refusal_kind"],
+        json!("not_an_absence")
+    );
 }
 
 #[test]
@@ -9295,14 +13367,26 @@ fn oncoworlds_era_shift_and_equity_checks_preserve_mapping_resource_and_interval
     );
     assert_eq!(comparable["outcome_kind"], json!("comparable"));
     assert_eq!(comparable["evidence"]["mapping_fate_count"], json!(1));
-    assert_eq!(comparable["evidence"]["mapping_versions_match"], json!(true));
-    assert_eq!(comparable["evidence"]["assay_contexts"][0]["negative_call_supported"], json!(false));
+    assert_eq!(
+        comparable["evidence"]["mapping_versions_match"],
+        json!(true)
+    );
+    assert_eq!(
+        comparable["evidence"]["assay_contexts"][0]["negative_call_supported"],
+        json!(false)
+    );
     assert_eq!(
         comparable["evidence"]["assay_contexts"][0]["negative_call_refusal_kind"],
         json!("resource_absence_read_as_biology")
     );
-    assert_eq!(comparable["evidence"]["descriptor_checks"][1]["allowed"], json!(false));
-    assert_eq!(comparable["evidence"]["descriptor_checks"][1]["refusal_kind"], json!("descriptor_used_as_mechanism"));
+    assert_eq!(
+        comparable["evidence"]["descriptor_checks"][1]["allowed"],
+        json!(false)
+    );
+    assert_eq!(
+        comparable["evidence"]["descriptor_checks"][1]["refusal_kind"],
+        json!("descriptor_used_as_mechanism")
+    );
 
     let refused = call(
         &mut server(),
@@ -9332,7 +13416,10 @@ fn oncoworlds_era_shift_and_equity_checks_preserve_mapping_resource_and_interval
         }),
     );
     assert_eq!(equity["ok"], json!(true));
-    assert_eq!(equity["schema"], json!("bioprism-mcp/oncoworlds-equity-check/0.1"));
+    assert_eq!(
+        equity["schema"],
+        json!("bioprism-mcp/oncoworlds-equity-check/0.1")
+    );
     assert_eq!(equity["outcome_kind"], json!("equity_report"));
     assert_eq!(equity["subgroup_count"], json!(2));
     assert_eq!(equity["interval_count"], json!(2));
@@ -9361,13 +13448,22 @@ fn oncoworlds_entity_world_check_keeps_independent_selection_and_event_refusals_
         }),
     );
     assert_eq!(admissible["ok"], json!(true));
-    assert_eq!(admissible["schema"], json!("bioprism-mcp/oncoworlds-entity-world-check/0.1"));
+    assert_eq!(
+        admissible["schema"],
+        json!("bioprism-mcp/oncoworlds-entity-world-check/0.1")
+    );
     assert_eq!(admissible["outcome_kind"], json!("report"));
     assert_eq!(admissible["all_admissible"], json!(true));
     assert_eq!(admissible["check_count"], json!(4));
     assert_eq!(admissible["refusal_count"], json!(0));
-    assert_eq!(admissible["checks"]["benchmark"]["feasibility_kind"], json!("feasible"));
-    assert_eq!(admissible["checks"]["lesion_analysis"]["event_allowed"], json!(true));
+    assert_eq!(
+        admissible["checks"]["benchmark"]["feasibility_kind"],
+        json!("feasible")
+    );
+    assert_eq!(
+        admissible["checks"]["lesion_analysis"]["event_allowed"],
+        json!(true)
+    );
 
     let refused = call(
         &mut server(),
@@ -9381,11 +13477,26 @@ fn oncoworlds_entity_world_check_keeps_independent_selection_and_event_refusals_
     );
     assert_eq!(refused["all_admissible"], json!(false));
     assert_eq!(refused["refusal_count"], json!(4));
-    assert_eq!(refused["checks"]["provenance"]["refusal_kind"], json!("unmodelled_provenance_selection"));
-    assert_eq!(refused["checks"]["alterations"]["refusal_kind"], json!("mechanism_collapse"));
-    assert_eq!(refused["checks"]["benchmark"]["refusal_kind"], json!("macro_score_without_counts"));
-    assert_eq!(refused["checks"]["lesion_analysis"]["cluster_refusal_kind"], json!("undeclared_cluster"));
-    assert_eq!(refused["checks"]["lesion_analysis"]["event_refusal_kind"], json!("competing_event_as_censoring"));
+    assert_eq!(
+        refused["checks"]["provenance"]["refusal_kind"],
+        json!("unmodelled_provenance_selection")
+    );
+    assert_eq!(
+        refused["checks"]["alterations"]["refusal_kind"],
+        json!("mechanism_collapse")
+    );
+    assert_eq!(
+        refused["checks"]["benchmark"]["refusal_kind"],
+        json!("macro_score_without_counts")
+    );
+    assert_eq!(
+        refused["checks"]["lesion_analysis"]["cluster_refusal_kind"],
+        json!("undeclared_cluster")
+    );
+    assert_eq!(
+        refused["checks"]["lesion_analysis"]["event_refusal_kind"],
+        json!("competing_event_as_censoring")
+    );
 }
 
 #[test]
@@ -10345,6 +14456,457 @@ fn epistemic_voi_keeps_gross_cost_net_and_action_change_separate() {
 }
 
 #[test]
+fn epistemic_adaptive_acquisition_projects_branch_dependent_named_policy() {
+    let result = call(
+        &mut server(),
+        "epistemic_adaptive_acquisition",
+        json!({
+            "problem": {
+                "actions": ["choose-m0", "choose-m1"],
+                "models": ["m0", "m1"],
+                "loss": [0.0, 1.0, 1.0, 0.0]
+            },
+            "belief": { "mass": [0.9, 0.1] },
+            "acquisitions": [
+                {
+                    "id": "screen",
+                    "cost": 0.01,
+                    "outcomes": [
+                        { "label": "positive", "likelihood": [0.9, 0.2] },
+                        { "label": "negative", "likelihood": [0.1, 0.8] }
+                    ]
+                },
+                {
+                    "id": "confirm",
+                    "cost": 0.1,
+                    "outcomes": [
+                        { "label": "positive", "likelihood": [0.01, 0.99] },
+                        { "label": "negative", "likelihood": [0.99, 0.01] }
+                    ]
+                }
+            ],
+            "budget": 0.11,
+            "max_steps": 2
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/epistemic-adaptive-acquisition/0.1")
+    );
+    assert_eq!(result["policy"]["root"]["kind"], json!("acquire"));
+    assert_eq!(result["policy"]["root"]["id"], json!("screen"));
+    assert!(result["policy"]["expected_total"].as_f64().unwrap() < 0.1);
+    assert!(result["policy"]["root"]["outcomes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|outcome| outcome["next"]["kind"] == json!("acquire")
+            && outcome["next"]["id"] == json!("confirm")));
+    assert!(result["policy"]["root"]["outcomes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|outcome| outcome["next"]["kind"] == json!("stop")));
+    assert_eq!(
+        result["policy"]["root"]["outcomes"][0]["posterior"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let refused = call(
+        &mut server(),
+        "epistemic_adaptive_acquisition",
+        json!({
+            "problem": {
+                "actions": ["choose-m0", "choose-m1"],
+                "models": ["m0", "m1"],
+                "loss": [0.0, 1.0, 1.0, 0.0]
+            },
+            "belief": { "mass": [0.5, 0.5] },
+            "acquisitions": [{
+                "id": "too-many-steps",
+                "cost": 0.1,
+                "outcomes": [
+                    { "label": "yes", "likelihood": [0.9, 0.1] },
+                    { "label": "no", "likelihood": [0.1, 0.9] }
+                ]
+            }],
+            "budget": 1.0,
+            "max_steps": 17
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert!(refused["error"].as_str().unwrap().contains("max_steps"));
+}
+
+#[test]
+fn epistemic_adaptive_execute_requires_authorization_and_replays_simulated_prefixes() {
+    let base = json!({
+        "problem": {
+            "actions": ["choose-m0", "choose-m1"],
+            "models": ["m0", "m1"],
+            "loss": [0.0, 1.0, 1.0, 0.0]
+        },
+        "belief": { "mass": [0.9, 0.1] },
+        "acquisitions": [
+            {
+                "id": "screen",
+                "cost": 0.01,
+                "outcomes": [
+                    { "label": "positive", "likelihood": [0.9, 0.2] },
+                    { "label": "negative", "likelihood": [0.1, 0.8] }
+                ]
+            },
+            {
+                "id": "confirm",
+                "cost": 0.1,
+                "outcomes": [
+                    { "label": "positive", "likelihood": [0.01, 0.99] },
+                    { "label": "negative", "likelihood": [0.99, 0.01] }
+                ]
+            }
+        ],
+        "budget": 0.11,
+        "max_steps": 2
+    });
+
+    let denied = call(&mut server(), "epistemic_adaptive_execute", base.clone());
+    assert_eq!(denied["ok"], json!(true));
+    assert_eq!(denied["completed"], json!(false));
+    assert_eq!(denied["receipt"]["status"], json!("refused"));
+    assert_eq!(denied["receipt"]["observations"], json!([]));
+    assert_eq!(
+        denied["receipt"]["refusal"],
+        json!("authorization_required")
+    );
+
+    let mut authorized = base;
+    authorized["provider"] = json!("mcp-simulated");
+    authorized["authorization"] = json!({ "grant_id": "grant-1", "provider": "mcp-simulated" });
+    authorized["observations"] = json!([
+        { "acquisition_id": "screen", "outcome_label": "negative" },
+        { "acquisition_id": "confirm", "outcome_label": "negative" }
+    ]);
+    let simulated = call(
+        &mut server(),
+        "epistemic_adaptive_execute",
+        authorized.clone(),
+    );
+    assert_eq!(simulated["completed"], json!(true));
+    assert_eq!(simulated["receipt"]["status"], json!("completed"));
+    assert_eq!(simulated["provenance_counts"]["simulated"], json!(2));
+
+    let replay = call(
+        &mut server(),
+        "epistemic_adaptive_execute",
+        json!({
+            "mode": "replay",
+            "problem": authorized["problem"].clone(),
+            "belief": authorized["belief"].clone(),
+            "acquisitions": authorized["acquisitions"].clone(),
+            "budget": 0.11,
+            "max_steps": 2,
+            "receipt": simulated["receipt"].clone()
+        }),
+    );
+    assert_eq!(replay["completed"], json!(true));
+    assert_eq!(replay["receipt"]["status"], json!("completed"));
+    assert_eq!(replay["provenance_counts"]["replayed"], json!(2));
+    assert_eq!(replay["provenance_counts"]["simulated"], json!(0));
+}
+
+#[test]
+fn interweave_workflow_execute_binds_all_reference_workflows_and_replays_receipts() {
+    let workflows = [
+        "reliable_software_repair",
+        "scientific_claim_reproduction",
+        "biomedical_research_data_audit",
+        "incident_response",
+        "evidence_grounded_policy_comparison",
+        "dataset_transformation_molecule",
+    ];
+    let base = json!({
+        "problem": {
+            "actions": ["choose-m0", "choose-m1"],
+            "models": ["m0", "m1"],
+            "loss": [0.0, 1.0, 1.0, 0.0]
+        },
+        "belief": { "mass": [0.5, 0.5] },
+        "acquisitions": [{
+            "id": "screen",
+            "cost": 0.01,
+            "outcomes": [
+                { "label": "positive", "likelihood": [0.9, 0.2] },
+                { "label": "negative", "likelihood": [0.1, 0.8] }
+            ]
+        }],
+        "budget": 0.1,
+        "max_steps": 1,
+        "provider": "mcp-simulated",
+        "capabilities": ["receipt-only"],
+        "observations": [{ "acquisition_id": "screen", "outcome_label": "negative" }]
+    });
+    for workflow in workflows {
+        let mut denied = base.clone();
+        denied["workflow"] = json!(workflow);
+        let refused = call(&mut server(), "interweave_workflow_execute", denied.clone());
+        assert_eq!(refused["ok"], json!(true));
+        assert_eq!(refused["workflow"], json!(workflow));
+        assert_eq!(refused["receipt"]["adaptive"]["status"], json!("refused"));
+        assert_eq!(
+            refused["receipt"]["adaptive"]["refusal"],
+            json!("authorization_required")
+        );
+
+        denied["authorization"] = json!({
+            "grant_id": "workflow-grant",
+            "provider": "mcp-simulated"
+        });
+        let simulated = call(&mut server(), "interweave_workflow_execute", denied.clone());
+        assert_eq!(simulated["completed"], json!(true));
+        assert_eq!(
+            simulated["receipt"]["adaptive"]["status"],
+            json!("completed")
+        );
+        assert_eq!(simulated["provenance_counts"]["simulated"], json!(1));
+        assert_eq!(
+            simulated["release_posture"],
+            json!("workflow_receipt_only_external_release_not_authorized")
+        );
+
+        let replay = call(
+            &mut server(),
+            "interweave_workflow_execute",
+            json!({
+                "mode": "replay",
+                "workflow": workflow,
+                "problem": denied["problem"].clone(),
+                "belief": denied["belief"].clone(),
+                "acquisitions": denied["acquisitions"].clone(),
+                "budget": 0.1,
+                "max_steps": 1,
+                "provider": "mcp-simulated",
+                "capabilities": ["receipt-only"],
+                "receipt": simulated["receipt"].clone()
+            }),
+        );
+        assert_eq!(replay["completed"], json!(true));
+        assert_eq!(replay["provenance_counts"]["replayed"], json!(1));
+        assert_eq!(replay["provenance_counts"]["simulated"], json!(0));
+    }
+}
+
+#[test]
+fn interweave_workflow_execution_evidence_is_digest_bound_queryable_and_non_promoting() {
+    let request = json!({
+        "workflow": "biomedical_research_data_audit",
+        "problem": {
+            "actions": ["hold", "release"],
+            "models": ["safe", "unsafe"],
+            "loss": [0.0, 2.0, 2.0, 0.0]
+        },
+        "belief": { "mass": [0.6, 0.4] },
+        "acquisitions": [{
+            "id": "screen",
+            "cost": 0.01,
+            "outcomes": [
+                { "label": "negative", "likelihood": [0.9, 0.2] },
+                { "label": "positive", "likelihood": [0.1, 0.8] }
+            ]
+        }],
+        "budget": 0.1,
+        "max_steps": 1,
+        "provider": "mcp-simulated",
+        "capabilities": ["data.read", "analysis.sandbox"],
+        "authorization": { "grant_id": "grant-1", "provider": "mcp-simulated" },
+        "observations": [{ "acquisition_id": "screen", "outcome_label": "negative" }],
+        "evidence": {
+            "subject_id": "bioaudit-subject-1",
+            "domains": ["biomedical_research", "privacy"],
+            "parent_digests": ["a".repeat(64)]
+        }
+    });
+    let first = call(
+        &mut server(),
+        "interweave_workflow_execute",
+        request.clone(),
+    );
+    assert_eq!(first["workflow_execution_evidence"]["ok"], json!(true));
+    assert_eq!(
+        first["workflow_execution_evidence"]["evidence"]["provenance"]["mode"],
+        json!("simulated")
+    );
+    assert_eq!(
+        first["workflow_execution_evidence"]["evidence"]["readiness_claimed"],
+        json!(false)
+    );
+    let digest = first["workflow_execution_evidence"]["evidence_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let query = call(
+        &mut server(),
+        "interweave_workflow_execution_evidence_query",
+        json!({ "subject_id": "bioaudit-subject-1", "include_records": false }),
+    );
+    assert_eq!(query["rows"].as_array().unwrap().len(), 0);
+
+    let mut shared = server();
+    let imported = call(
+        &mut shared,
+        "interweave_workflow_execution_evidence_import",
+        json!({ "evidence": first["workflow_execution_evidence"]["evidence"].clone() }),
+    );
+    assert_eq!(imported["registry"]["created"], json!(true));
+    let queried = call(
+        &mut shared,
+        "interweave_workflow_execution_evidence_query",
+        json!({ "subject_id": "bioaudit-subject-1", "include_records": false }),
+    );
+    assert_eq!(queried["rows"].as_array().unwrap().len(), 1);
+    let fetched = call(
+        &mut shared,
+        "interweave_workflow_execution_evidence_get",
+        json!({ "evidence_digest": digest }),
+    );
+    assert_eq!(
+        fetched["record"]["claim_posture"]["status"],
+        json!("review_required")
+    );
+
+    let mut tampered = first["workflow_execution_evidence"]["evidence"].clone();
+    tampered["subject_id"] = json!("tampered");
+    let refused = call(
+        &mut shared,
+        "interweave_workflow_execution_evidence_import",
+        json!({ "evidence": tampered }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+}
+
+#[test]
+fn epistemic_adaptive_costed_keeps_latency_infeasibility_out_of_scalarization() {
+    let result = call(
+        &mut server(),
+        "epistemic_adaptive_costed",
+        json!({
+            "problem": {
+                "actions": ["choose-m0", "choose-m1"],
+                "models": ["m0", "m1"],
+                "loss": [0.0, 1.0, 1.0, 0.0]
+            },
+            "belief": { "mass": [0.5, 0.5] },
+            "acquisitions": [{
+                "acquisition": {
+                    "id": "slow-screen",
+                    "cost": 0.01,
+                    "outcomes": [
+                        { "label": "positive", "likelihood": [0.9, 0.1] },
+                        { "label": "negative", "likelihood": [0.1, 0.9] }
+                    ]
+                },
+                "cost": {
+                    "tokens": 1.0,
+                    "compute_ms": 1.0,
+                    "latency_ms": 100.0,
+                    "money_usd": 0.0,
+                    "privacy_loss": 0.0,
+                    "specimen_units": 0.0,
+                    "expert_minutes": 0.0
+                }
+            }],
+            "budget": {
+                "tokens": 100.0,
+                "compute_ms": 100.0,
+                "latency_ms": 10.0,
+                "money_usd": 1.0,
+                "privacy_loss": 1.0,
+                "specimen_units": 1.0,
+                "expert_minutes": 10.0
+            },
+            "weights": {
+                "tokens": 0.0,
+                "compute_ms": 0.0,
+                "latency_ms": 1.0,
+                "money_usd": 0.0,
+                "privacy_loss": 0.0,
+                "specimen_units": 0.0,
+                "expert_minutes": 0.0
+            },
+            "max_steps": 1
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(result["cost_dimensions"].as_array().unwrap().len(), 7);
+    assert_eq!(result["policy"]["budget"]["latency_ms"], json!(10.0));
+    assert!(result["policy"]["root"].get("Stop").is_some());
+}
+
+#[test]
+fn epistemic_decision_quotient_keeps_permitted_boundary_and_merges_only_equivalent_models() {
+    let result = call(
+        &mut server(),
+        "epistemic_decision_quotient",
+        json!({
+            "problem": {
+                "actions": ["accept", "defer", "reject"],
+                "models": ["m-a", "m-b", "m-c"],
+                "loss": [
+                    0.0, 7.0, 0.0,
+                    4.0, 11.0, 5.0,
+                    8.0, 15.0, 8.0
+                ]
+            },
+            "permitted_actions": ["reject", "accept", "defer"]
+        }),
+    );
+    assert_eq!(result["__isError"], json!(false));
+    assert_eq!(result["ok"], json!(true));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/epistemic-decision-quotient/0.1")
+    );
+    assert_eq!(
+        result["quotient"]["permitted_actions"],
+        json!(["accept", "defer", "reject"])
+    );
+    assert_eq!(result["summary"]["original_model_count"], json!(3));
+    assert_eq!(result["summary"]["quotient_model_count"], json!(2));
+    assert_eq!(result["summary"]["merged_model_count"], json!(1));
+    assert_eq!(
+        result["quotient"]["model_to_class"]["m-a"],
+        result["quotient"]["model_to_class"]["m-b"]
+    );
+    assert_ne!(
+        result["quotient"]["model_to_class"]["m-a"],
+        result["quotient"]["model_to_class"]["m-c"]
+    );
+
+    let refused = call(
+        &mut server(),
+        "epistemic_decision_quotient",
+        json!({
+            "problem": {
+                "actions": ["accept"],
+                "models": ["m"],
+                "loss": []
+            },
+            "permitted_actions": ["accept"]
+        }),
+    );
+    assert_eq!(refused["__isError"], json!(true));
+    assert!(refused["error"]
+        .as_str()
+        .unwrap()
+        .contains("invariant failed"));
+}
+
+#[test]
 fn epistemic_context_audit_keeps_frontier_sufficiency_and_subset_refusals_distinct() {
     let result = call(
         &mut server(),
@@ -10372,7 +14934,10 @@ fn epistemic_context_audit_keeps_frontier_sufficiency_and_subset_refusals_distin
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/epistemic-context-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/epistemic-context-audit/0.1")
+    );
     assert_eq!(result["criterion"], json!("bayes_regret"));
     assert_eq!(result["evidence_pool"]["item_count"], json!(2));
     assert_eq!(result["evidence_pool"]["full_rate"], json!(3.0));
@@ -10412,11 +14977,17 @@ fn epistemic_selection_audit_gates_guarantees_and_exact_comparisons() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/epistemic-selection-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/epistemic-selection-audit/0.1")
+    );
     assert_eq!(result["objective"], json!("regret_reduction"));
     assert_eq!(result["evidence_pool"]["count"], json!(3));
     assert_eq!(result["submodularity"]["status"], json!("evaluated"));
-    assert_eq!(result["comparisons"]["exact_optimum"]["status"], json!("evaluated"));
+    assert_eq!(
+        result["comparisons"]["exact_optimum"]["status"],
+        json!("evaluated")
+    );
     assert!(result["greedy"]["chosen"].is_array());
     assert!(result["lazy"]["chosen"].is_array());
     assert!(result["comparisons"]["greedy_lazy_agree"].is_boolean());
@@ -10505,14 +15076,29 @@ fn benchmark_decision_audit_preserves_firewall_coverage_and_failure_evidence() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/benchmark-decision-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/benchmark-decision-audit/0.1")
+    );
     assert_eq!(result["decision"]["selected_step"], json!(1));
     assert_eq!(result["decision"]["causal_alignment"], json!("aligned"));
     assert_eq!(result["decision"]["action_counts"]["all"], json!(3));
-    assert_eq!(result["decision"]["action_counts"]["visible_to_agent"], json!(2));
-    assert_eq!(result["decision"]["action_counts"]["validation_only"], json!(1));
+    assert_eq!(
+        result["decision"]["action_counts"]["visible_to_agent"],
+        json!(2)
+    );
+    assert_eq!(
+        result["decision"]["action_counts"]["validation_only"],
+        json!(1)
+    );
     assert_eq!(result["failure_card"]["evidence_ratio"], json!(0.5));
-    assert_eq!(result["failure_card"]["hypotheses"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        result["failure_card"]["hypotheses"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(result["trace_digest"].as_str().unwrap().len(), 64);
 
     let leak = call(
@@ -10593,19 +15179,28 @@ fn benchmark_integrity_audit_keeps_duplicates_leaks_holdouts_and_effective_denom
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/benchmark-integrity-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/benchmark-integrity-audit/0.1")
+    );
     assert_eq!(result["counts"]["instances"], json!(5));
     assert_eq!(result["dedup"]["examined"], json!(5));
     assert_eq!(result["dedup"]["distinct"], json!(3));
     assert!(result["dedup"]["groups"].as_array().unwrap().len() >= 2);
     assert_eq!(result["holdout"]["counts"]["private"], json!(5));
     assert_eq!(result["contamination"]["counts"]["unassessed"], json!(1));
-    assert_eq!(result["contamination"]["counts"]["leaks_through_channel"], json!(1));
+    assert_eq!(
+        result["contamination"]["counts"]["leaks_through_channel"],
+        json!(1)
+    );
     assert_eq!(result["contamination"]["admissible"], json!(1));
     assert_eq!(result["calibration"]["unmeasured"], json!(3));
     assert_eq!(result["calibration"]["safety_vetoes"], json!(1));
     assert_eq!(result["effective_diversity"]["instances"], json!(4));
-    assert_eq!(result["effective_diversity"]["equivalence_classes"], json!(3));
+    assert_eq!(
+        result["effective_diversity"]["equivalence_classes"],
+        json!(3)
+    );
     assert!(result["guarantees"]
         .as_array()
         .unwrap()
@@ -10779,7 +15374,10 @@ fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_e
         (vec!["panel_manifest", "unused_service"], true),
         (vec!["panel_manifest", "stale_memory"], true),
         (vec!["unused_service", "stale_memory"], false),
-        (vec!["panel_manifest", "unused_service", "stale_memory"], true),
+        (
+            vec!["panel_manifest", "unused_service", "stale_memory"],
+            true,
+        ),
     ];
     let observations = subsets
         .into_iter()
@@ -10799,24 +15397,33 @@ fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_e
     let result = call(&mut server(), "benchmark_compile", arguments.clone());
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/benchmark-compile/0.1"));
-    assert_eq!(result["class"], json!({ "class": "candidate_research_cell" }));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/benchmark-compile/0.1")
+    );
+    assert_eq!(
+        result["class"],
+        json!({ "class": "candidate_research_cell" })
+    );
     assert_eq!(result["cell_step"], json!(3));
     assert_eq!(result["minimization"]["minimal"], json!(["panel_manifest"]));
-    assert_eq!(result["minimization"]["removed"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        result["minimization"]["removed"].as_array().unwrap().len(),
+        2
+    );
     assert_eq!(result["oracle"]["strength"], json!("exact_state_predicate"));
     assert!(result["unmeasured_stages"]
         .as_array()
         .unwrap()
         .iter()
         .any(|stage| stage == "state_reconstruction"));
-    assert_eq!(result["probe"]["execution"], json!("caller-supplied observation table; no world or architecture was run"));
+    assert_eq!(
+        result["probe"]["execution"],
+        json!("caller-supplied observation table; no world or architecture was run")
+    );
 
     let mut missing = arguments.clone();
-    missing["probe_observations"]
-        .as_array_mut()
-        .unwrap()
-        .pop();
+    missing["probe_observations"].as_array_mut().unwrap().pop();
     let refused = call(&mut server(), "benchmark_compile", missing);
     assert_eq!(refused["__isError"], json!(false));
     assert_eq!(refused["ok"], json!(false));
@@ -10841,10 +15448,17 @@ fn benchmark_compile_composes_causal_minimization_and_oracle_synthesis_without_e
     reviewed_arguments["world"] = json!({ "locator": "world.json", "sha256": "a".repeat(64) });
     reviewed_arguments["query"] = json!({ "locator": "query.json", "sha256": "b".repeat(64) });
     reviewed_arguments["grade"] = json!({ "verdict": "invalid", "witnesses": ["identity_leakage"], "closure_complete": true });
-    let reviewed = call(&mut server(), "benchmark_compile_review", reviewed_arguments);
+    let reviewed = call(
+        &mut server(),
+        "benchmark_compile_review",
+        reviewed_arguments,
+    );
     assert_eq!(reviewed["__isError"], json!(false));
     assert_eq!(reviewed["ok"], json!(true));
-    assert_eq!(reviewed["schema"], json!("bioprism-mcp/benchmark-compile-review/0.1"));
+    assert_eq!(
+        reviewed["schema"],
+        json!("bioprism-mcp/benchmark-compile-review/0.1")
+    );
     assert_eq!(reviewed["reviewer"], json!("reviewer-1"));
     assert_eq!(reviewed["grade"]["acceptance"]["outcome"], json!("passed"));
     assert_eq!(reviewed["cell"]["cell_id"], json!("dc_run_fail#step3"));
@@ -10888,13 +15502,19 @@ fn pack_coverage_audit_exposes_portfolio_gaps_and_refuses_unknown_subsets() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/pack-coverage-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/pack-coverage-audit/0.1")
+    );
     assert_eq!(result["selected_pack_count"], json!(25));
     assert!(result["summary"]["families"].as_u64().unwrap() > 0);
     assert!(result["summary"]["covered"].as_u64().unwrap() > 0);
     assert_eq!(result["rows"].as_array().unwrap().len(), 3);
     assert!(result["rows_omitted"].as_u64().unwrap() > 0);
-    assert!(result["summary"]["gap_summary"].as_str().unwrap().contains("capability families"));
+    assert!(result["summary"]["gap_summary"]
+        .as_str()
+        .unwrap()
+        .contains("capability families"));
 
     let refused = call(
         &mut server(),
@@ -10916,7 +15536,10 @@ fn pack_release_audit_preserves_stable_order_and_unsequenced_remainder() {
     );
     assert_eq!(result["__isError"], json!(false));
     assert_eq!(result["ok"], json!(true));
-    assert_eq!(result["schema"], json!("bioprism-mcp/pack-release-audit/0.1"));
+    assert_eq!(
+        result["schema"],
+        json!("bioprism-mcp/pack-release-audit/0.1")
+    );
     assert_eq!(result["selected_pack_count"], json!(25));
     assert_eq!(result["sequenced_count"], json!(13));
     assert_eq!(result["unsequenced_count"], json!(12));
@@ -10942,7 +15565,10 @@ fn pack_release_audit_preserves_stable_order_and_unsequenced_remainder() {
     assert_eq!(refused["__isError"], json!(false));
     assert_eq!(refused["ok"], json!(false));
     assert_eq!(refused["stage"], json!("pack_selection"));
-    assert_eq!(refused["out_of_section_pack_ids"], json!(["bio.statistical-estimands"]));
+    assert_eq!(
+        refused["out_of_section_pack_ids"],
+        json!(["bio.statistical-estimands"])
+    );
     assert_eq!(refused["fail_closed"], json!(true));
 }
 
@@ -11151,4 +15777,235 @@ fn projection_bundle_keeps_four_views_bound_to_one_compiled_certificate() {
     );
     assert_eq!(result["fidelity"].as_array().unwrap().len(), 4);
     assert!(result["views"].is_null());
+}
+
+#[test]
+fn brain_control_plane_is_idempotent_hash_chained_and_approval_gated() {
+    let mut server = server();
+    let spec_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let submitted = call(
+        &mut server,
+        "brain_job_submit",
+        json!({
+            "idempotency_key": "request-001",
+            "spec_digest": spec_digest,
+            "domain": "engineering",
+            "capability": "code_change",
+            "risk_class": "reversible",
+        }),
+    );
+    assert_eq!(submitted["__isError"], json!(false));
+    assert_eq!(submitted["created"], json!(true));
+    let job_id = submitted["job"]["job_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        submitted["job"]["spec"],
+        json!("not_returned; caller resolver owns rehydration")
+    );
+    assert!(submitted["job"].get("prompt").is_none());
+
+    let idempotent = call(
+        &mut server,
+        "brain_job_submit",
+        json!({
+            "idempotency_key": "request-001",
+            "spec_digest": spec_digest,
+            "domain": "engineering",
+            "capability": "code_change",
+            "risk_class": "reversible",
+        }),
+    );
+    assert_eq!(idempotent["__isError"], json!(false));
+    assert_eq!(idempotent["idempotent"], json!(true));
+    assert_eq!(idempotent["job"]["job_id"], json!(job_id));
+
+    let requested = call(
+        &mut server,
+        "brain_job_approval",
+        json!({"job_id": job_id, "action": "request", "reason": "write operation"}),
+    );
+    assert_eq!(requested["__isError"], json!(false));
+    assert_eq!(requested["job"]["state"], json!("waiting_approval"));
+
+    let missing_proof = call(
+        &mut server,
+        "brain_job_approval",
+        json!({"job_id": job_id, "action": "approve"}),
+    );
+    assert_eq!(missing_proof["__isError"], json!(true));
+
+    let approved = call(
+        &mut server,
+        "brain_job_approval",
+        json!({
+            "job_id": job_id,
+            "action": "approve",
+            "authorization_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        }),
+    );
+    assert_eq!(approved["__isError"], json!(false));
+    assert_eq!(approved["job"]["state"], json!("queued"));
+    assert_eq!(
+        approved["authorization"]["verified_by_server"],
+        json!(false)
+    );
+    assert_eq!(approved["authorization"]["execution"], json!("not_started"));
+
+    let status = call(&mut server, "brain_job_status", json!({"job_id": job_id}));
+    assert_eq!(status["__isError"], json!(false));
+    assert_eq!(status["job"]["state"], json!("queued"));
+    let events = call(
+        &mut server,
+        "brain_job_events",
+        json!({"job_id": job_id, "limit": 16}),
+    );
+    assert_eq!(events["__isError"], json!(false));
+    assert_eq!(events["events"].as_array().unwrap().len(), 3);
+    assert_eq!(events["chain"], json!("sha256_prev_digest"));
+    assert!(events["head_digest"].as_str().unwrap().len() == 64);
+
+    let claimed = call(
+        &mut server,
+        "brain_job_claim",
+        json!({"job_id": job_id, "worker_id": "worker-a", "lease_ms": 1000}),
+    );
+    assert_eq!(claimed["__isError"], json!(false));
+    assert_eq!(claimed["job"]["state"], json!("leased"));
+    assert_eq!(claimed["job"]["attempts"], json!(1));
+    let renewed = call(
+        &mut server,
+        "brain_job_renew",
+        json!({"job_id": job_id, "worker_id": "worker-a", "lease_ms": 1000}),
+    );
+    assert_eq!(renewed["__isError"], json!(false));
+    let checkpointed = call(
+        &mut server,
+        "brain_job_checkpoint",
+        json!({
+            "job_id": job_id,
+            "worker_id": "worker-a",
+            "phase": "preflight",
+            "checkpoint_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "side_effect_boundary": "preflight",
+        }),
+    );
+    assert_eq!(checkpointed["__isError"], json!(false));
+    assert_eq!(checkpointed["job"]["state"], json!("running"));
+    let completed = call(
+        &mut server,
+        "brain_job_complete",
+        json!({
+            "job_id": job_id,
+            "worker_id": "worker-a",
+            "result_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        }),
+    );
+    assert_eq!(completed["__isError"], json!(false));
+    assert_eq!(completed["job"]["state"], json!("succeeded"));
+}
+
+#[test]
+fn brain_control_plane_health_and_replay_remain_value_only() {
+    let mut server = server();
+    let health = call(
+        &mut server,
+        "brain_model_health",
+        json!({
+            "operation": "record",
+            "provider": "openai",
+            "model": "gpt-test",
+            "status": "success",
+            "latency_ms": 120,
+            "quality": 0.9,
+            "tokens": 512,
+            "registered": true,
+            "credential_ready": true,
+            "eligible": true,
+        }),
+    );
+    assert_eq!(health["__isError"], json!(false));
+    assert_eq!(health["health"][0]["provider"], json!("openai"));
+    assert_eq!(health["health"][0]["attempts"], json!(1));
+    assert_eq!(health["health"][0]["success_rate"], json!(1.0));
+    assert!(health["health"][0].get("secret").is_none());
+    let snapshot = call(
+        &mut server,
+        "brain_model_health",
+        json!({"operation": "snapshot", "provider": "openai"}),
+    );
+    assert_eq!(snapshot["__isError"], json!(false));
+    assert_eq!(
+        snapshot["model_health"]["openai/gpt-test"]["attempts"],
+        json!(1)
+    );
+    assert_eq!(
+        snapshot["model_health"]["openai/gpt-test"]["last_latency_ms"],
+        json!(120)
+    );
+    assert_eq!(
+        snapshot["model_health"]["openai/gpt-test"]["quality_observations"],
+        json!(1)
+    );
+    assert_eq!(
+        snapshot["model_health"]["openai/gpt-test"]["quality_mean"],
+        json!(0.9)
+    );
+
+    let evidence = json!({
+        "schema": "bioprism-brain-domain-evaluator/0.1",
+        "domain": "engineering",
+        "capability": "code_change",
+        "risk_class": "reversible",
+        "signals": {
+            "schema_valid": 1.0,
+            "tests_passed": 1.0,
+            "evidence_complete": 1.0,
+        },
+        "references": [],
+        "limitations": [],
+        "retention": "value_only_digests_and_signal_scores",
+    });
+    let evidence_digest = bioprism_ids::ContentHash::of_value(&evidence)
+        .unwrap()
+        .to_string();
+    let replay = call(
+        &mut server,
+        "brain_replay_evaluate",
+        json!({
+            "case_id": "case-001",
+            "domain": "engineering",
+            "capability": "code_change",
+            "risk_class": "reversible",
+            "evidence_digest": evidence_digest,
+            "signals": {
+                "schema_valid": true,
+                "tests_passed": true,
+                "evidence_complete": true,
+            },
+        }),
+    );
+    assert_eq!(replay["__isError"], json!(false));
+    assert_eq!(replay["passed"], json!(true));
+    assert_eq!(
+        replay["execution"],
+        json!("offline_value_only_replay; no provider or domain tool invocation")
+    );
+    assert_eq!(
+        replay["truth_authority"],
+        json!("caller_declared_normalized_signals")
+    );
+
+    let secret_attempt = call(
+        &mut server,
+        "brain_replay_evaluate",
+        json!({
+            "case_id": "case-002",
+            "domain": "engineering",
+            "capability": "code_change",
+            "risk_class": "reversible",
+            "evidence_digest": evidence_digest,
+            "signals": {"schema_valid": true, "tests_passed": true, "evidence_complete": true},
+            "api_key": "must-never-cross-the-boundary",
+        }),
+    );
+    assert_eq!(secret_attempt["__isError"], json!(true));
 }

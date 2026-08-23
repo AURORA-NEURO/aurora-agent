@@ -162,6 +162,7 @@ pub mod microbench;
 pub mod packs;
 pub mod threat;
 pub mod workflow;
+pub mod workflow_execution;
 
 /// The blueprint section this crate completes.
 pub const BLUEPRINT_SECTION: &str = "23_AGENT_INTERWEAVE_FABRIC";

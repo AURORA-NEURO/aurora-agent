@@ -32,6 +32,17 @@ pub const MAX_PARALLEL_WAVE_WIDTH: usize = 16;
 pub const MAX_CLAIM_REQUESTS: usize = 64;
 pub const MAX_CLAIM_REFERENCES: usize = 32;
 pub const MAX_CLAIM_EVALUATORS: usize = 16;
+/// Maximum serialized size of the workflow instantiation contract carried by a mission.
+///
+/// This is deliberately below the larger workflow/reconciliation envelopes: a mission must be
+/// able to carry its provenance through dispatch without becoming an unbounded transport cache.
+pub const MAX_WORKFLOW_BINDING_BYTES: usize = 2_000_000;
+/// Maximum serialized size of the ready capability-route review carried into mission preflight.
+///
+/// The review is provenance, not an execution cache. Keeping the bound explicit prevents a
+/// caller from smuggling an unbounded route, schema attachment, or evidence envelope through the
+/// mission digest.
+pub const MAX_ROUTE_REVIEW_BYTES: usize = 2_000_000;
 
 fn default_true() -> bool {
     true
@@ -78,6 +89,485 @@ fn require_text(field: &'static str, value: &str) -> Result<(), MissionError> {
         .any(|character| character == '\0' || character == '\n' || character == '\r')
     {
         return Err(MissionError::ControlCharacter { field });
+    }
+    Ok(())
+}
+
+fn validate_workflow_binding(binding: &Value) -> Result<(), MissionError> {
+    let encoded =
+        serde_json::to_vec(binding).map_err(|error| MissionError::InvalidWorkflowBinding {
+            reason: format!("cannot measure binding: {error}"),
+        })?;
+    if encoded.len() > MAX_WORKFLOW_BINDING_BYTES {
+        return Err(MissionError::InvalidWorkflowBinding {
+            reason: format!(
+                "serialized binding is {} bytes; maximum is {}",
+                encoded.len(),
+                MAX_WORKFLOW_BINDING_BYTES
+            ),
+        });
+    }
+    let object = binding
+        .as_object()
+        .ok_or_else(|| MissionError::InvalidWorkflowBinding {
+            reason: "binding must be an object".into(),
+        })?;
+    let required = [
+        "workflow_id",
+        "workflow_digest",
+        "catalog_digest",
+        "domain_contract_digest",
+        "domain_contract",
+        "evidence_plan",
+        "evidence_plan_digest",
+    ];
+    for key in required {
+        if !object.contains_key(key) {
+            return Err(MissionError::InvalidWorkflowBinding {
+                reason: format!("missing required field `{key}`"),
+            });
+        }
+    }
+    for key in [
+        "workflow_digest",
+        "catalog_digest",
+        "domain_contract_digest",
+        "evidence_plan_digest",
+    ] {
+        let value = object.get(key).and_then(Value::as_str).ok_or_else(|| {
+            MissionError::InvalidWorkflowBinding {
+                reason: format!("`{key}` must be a string"),
+            }
+        })?;
+        ContentHash::parse(value.to_owned()).map_err(|_| MissionError::InvalidWorkflowBinding {
+            reason: format!("`{key}` must be a 64-character hexadecimal digest"),
+        })?;
+    }
+    let workflow_id = object
+        .get("workflow_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| MissionError::InvalidWorkflowBinding {
+            reason: "`workflow_id` must be a string".into(),
+        })?;
+    require_text("workflow_id", workflow_id).map_err(|error| {
+        MissionError::InvalidWorkflowBinding {
+            reason: error.to_string(),
+        }
+    })?;
+    if !object.get("domain_contract").is_some_and(Value::is_object) {
+        return Err(MissionError::InvalidWorkflowBinding {
+            reason: "`domain_contract` must be an object".into(),
+        });
+    }
+    let evidence_plan = object
+        .get("evidence_plan")
+        .and_then(Value::as_object)
+        .ok_or_else(|| MissionError::InvalidWorkflowBinding {
+            reason: "`evidence_plan` must be an object".into(),
+        })?;
+    let steps = evidence_plan
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| MissionError::InvalidWorkflowBinding {
+            reason: "`evidence_plan.steps` must be an array".into(),
+        })?;
+    if steps.is_empty() || steps.len() > MAX_STEPS {
+        return Err(MissionError::InvalidWorkflowBinding {
+            reason: format!("`evidence_plan.steps` must contain 1..{MAX_STEPS} entries"),
+        });
+    }
+    let expected_digest = ContentHash::of_value(&Value::Object(evidence_plan.clone()))
+        .map_err(|error| MissionError::InvalidWorkflowBinding {
+            reason: format!("cannot hash evidence plan: {error}"),
+        })?
+        .to_string();
+    if object.get("evidence_plan_digest").and_then(Value::as_str) != Some(expected_digest.as_str())
+    {
+        return Err(MissionError::InvalidWorkflowBinding {
+            reason: "`evidence_plan_digest` does not match `evidence_plan`".into(),
+        });
+    }
+    Ok(())
+}
+
+fn route_review_digest(value: &Value, field: &str) -> Result<String, MissionError> {
+    let digest = value
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: format!("`{field}` must be a non-empty string"),
+        })?;
+    ContentHash::parse(digest.to_owned()).map_err(|_| MissionError::InvalidRouteReview {
+        reason: format!("`{field}` must be a 64-character hexadecimal digest"),
+    })?;
+    Ok(digest.to_owned())
+}
+
+fn optional_route_review_text(
+    object: &Map<String, Value>,
+    field: &str,
+) -> Result<Option<String>, MissionError> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: format!("`{field}` must be a non-empty string when supplied"),
+            })
+            .map(Some),
+    }
+}
+
+/// Validate the exact non-executing handoff emitted by `capability_route_review`.
+///
+/// A route review is intentionally not a permission token. It is a caller-owned checkpoint that
+/// proves which route, selections, dependency waves, and optional route evidence were reviewed.
+/// The mission boundary therefore binds the review to the current goal and serialized steps and
+/// carries only compact provenance into the plan. Any change after review is refused before a
+/// nested tool can be dispatched.
+fn validate_route_review(
+    review: &Value,
+    goal: &str,
+    steps: &[MissionStep],
+) -> Result<(), MissionError> {
+    let encoded = serde_json::to_vec(review).map_err(|error| MissionError::InvalidRouteReview {
+        reason: format!("cannot measure review: {error}"),
+    })?;
+    if encoded.len() > MAX_ROUTE_REVIEW_BYTES {
+        return Err(MissionError::InvalidRouteReview {
+            reason: format!(
+                "serialized review is {} bytes; maximum is {}",
+                encoded.len(),
+                MAX_ROUTE_REVIEW_BYTES
+            ),
+        });
+    }
+    let object = review
+        .as_object()
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "route_review must be an object".into(),
+        })?;
+    if object.get("ok").and_then(Value::as_bool) != Some(true)
+        || object.get("workflow").and_then(Value::as_str) != Some("capability_route_review")
+        || object.get("review_status").and_then(Value::as_str) != Some("ready")
+        || object.get("handoff_status").and_then(Value::as_str)
+            != Some("mission_preflight_required")
+        || object.get("execution").and_then(Value::as_str) != Some("not_started")
+    {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review must be an ok, ready, non-executing mission handoff".into(),
+        });
+    }
+    let findings = object
+        .get("findings")
+        .and_then(Value::as_array)
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "findings must be an array".into(),
+        })?;
+    if !findings.is_empty() {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "blocked route review findings must be corrected before mission preflight"
+                .into(),
+        });
+    }
+    let review_id = route_review_digest(
+        object
+            .get("review_id")
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: "missing required field `review_id`".into(),
+            })?,
+        "review_id",
+    )?;
+    let route_id = route_review_digest(
+        object
+            .get("route_id")
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: "missing required field `route_id`".into(),
+            })?,
+        "route_id",
+    )?;
+    let catalog_digest = route_review_digest(
+        object
+            .get("catalog_digest")
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: "missing required field `catalog_digest`".into(),
+            })?,
+        "catalog_digest",
+    )?;
+    let review_goal = object
+        .get("goal")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "route_review.goal must be a non-empty string".into(),
+        })?;
+    if review_goal != goal {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review.goal does not match mission goal".into(),
+        });
+    }
+    let mission_draft = object
+        .get("mission_draft")
+        .and_then(Value::as_object)
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "ready route_review must include a mission_draft object".into(),
+        })?;
+    if mission_draft.get("goal").and_then(Value::as_str) != Some(goal) {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review.mission_draft.goal does not match mission goal".into(),
+        });
+    }
+    let reviewed_steps = mission_draft
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| MissionError::InvalidRouteReview {
+            reason: "route_review.mission_draft.steps must be an array".into(),
+        })?;
+    let expected_steps =
+        serde_json::to_value(steps).map_err(|error| MissionError::InvalidRouteReview {
+            reason: format!("cannot encode mission steps for comparison: {error}"),
+        })?;
+    if !expected_steps
+        .as_array()
+        .is_some_and(|expected| reviewed_steps == expected)
+    {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review.mission_draft.steps do not exactly match mission steps".into(),
+        });
+    }
+    if !mission_draft
+        .get("dependency_waves")
+        .is_some_and(Value::is_array)
+    {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "route_review.mission_draft.dependency_waves must be an array".into(),
+        });
+    }
+
+    let evidence_digest = optional_route_review_text(object, "evidence_digest")?;
+    let evidence_scope = optional_route_review_text(object, "evidence_scope")?;
+    if evidence_digest.is_some() != evidence_scope.is_some() {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "evidence_digest and evidence_scope must be supplied together".into(),
+        });
+    }
+    if let Some(digest) = evidence_digest.as_deref() {
+        ContentHash::parse(digest.to_owned()).map_err(|_| MissionError::InvalidRouteReview {
+            reason: "evidence_digest must be a 64-character hexadecimal digest".into(),
+        })?;
+    }
+    let binding_present = match object.get("evidence_binding") {
+        None => false,
+        Some(binding) => {
+            let binding = binding
+                .as_object()
+                .ok_or_else(|| MissionError::InvalidRouteReview {
+                    reason: "evidence_binding must be an object".into(),
+                })?;
+            binding
+                .get("present")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| MissionError::InvalidRouteReview {
+                    reason: "evidence_binding.present must be a boolean".into(),
+                })?
+        }
+    };
+    if binding_present {
+        let binding = object
+            .get("evidence_binding")
+            .and_then(Value::as_object)
+            .expect("binding_present implies an object");
+        let digest =
+            evidence_digest
+                .as_deref()
+                .ok_or_else(|| MissionError::InvalidRouteReview {
+                    reason: "present evidence_binding requires evidence_digest and evidence_scope"
+                        .into(),
+                })?;
+        let scope = evidence_scope
+            .as_deref()
+            .expect("digest and scope are paired");
+        if binding.get("evidence_digest").and_then(Value::as_str) != Some(digest)
+            || binding.get("scope").and_then(Value::as_str) != Some(scope)
+        {
+            return Err(MissionError::InvalidRouteReview {
+                reason: "evidence_binding digest and scope do not match route_review".into(),
+            });
+        }
+        if binding.get("posture").and_then(Value::as_str) != Some("carried_forward_not_recomputed")
+            || binding.get("readiness_claimed").and_then(Value::as_bool) != Some(false)
+            || binding.get("execution").and_then(Value::as_str) != Some("not_started")
+        {
+            return Err(MissionError::InvalidRouteReview {
+                reason:
+                    "evidence_binding must remain carried-forward, non-ready, and non-executing"
+                        .into(),
+            });
+        }
+        let summary = binding
+            .get("summary")
+            .and_then(Value::as_object)
+            .ok_or_else(|| MissionError::InvalidRouteReview {
+                reason: "present evidence_binding requires a summary object".into(),
+            })?;
+        if summary.get("evidence_digest").and_then(Value::as_str) != Some(digest)
+            || summary.get("scope").and_then(Value::as_str) != Some(scope)
+        {
+            return Err(MissionError::InvalidRouteReview {
+                reason: "evidence_binding.summary does not match route_review evidence".into(),
+            });
+        }
+        if mission_draft
+            .get("route_evidence_digest")
+            .and_then(Value::as_str)
+            != Some(digest)
+            || mission_draft
+                .get("route_evidence_scope")
+                .and_then(Value::as_str)
+                != Some(scope)
+        {
+            return Err(MissionError::InvalidRouteReview {
+                reason: "mission_draft route evidence does not match route_review evidence".into(),
+            });
+        }
+    } else if evidence_digest.is_some()
+        || evidence_scope.is_some()
+        || object
+            .get("evidence_binding")
+            .and_then(Value::as_object)
+            .and_then(|binding| binding.get("posture"))
+            .is_some_and(|posture| posture != "not_supplied")
+    {
+        return Err(MissionError::InvalidRouteReview {
+            reason: "legacy route review cannot claim route evidence without a present binding"
+                .into(),
+        });
+    }
+    let _ = (review_id, route_id, catalog_digest);
+    Ok(())
+}
+
+/// Project a validated capability-route review into the small identity/provenance record that
+/// may safely travel through queues, reports, replay summaries, and reconciliation indexes. The
+/// complete review remains caller-owned and is intentionally not copied into every projection.
+pub fn route_review_provenance(review: Option<&Value>) -> Option<Value> {
+    let review = review?.as_object()?;
+    let mut provenance = Map::new();
+    provenance.insert("present".into(), Value::Bool(true));
+    for field in ["review_id", "route_id", "catalog_digest"] {
+        if let Some(value) = review.get(field) {
+            provenance.insert(field.into(), value.clone());
+        }
+    }
+    let binding = review.get("evidence_binding").and_then(Value::as_object);
+    let evidence_present = binding
+        .and_then(|value| value.get("present"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    provenance.insert("evidence_present".into(), Value::Bool(evidence_present));
+    provenance.insert(
+        "posture".into(),
+        binding
+            .and_then(|value| value.get("posture"))
+            .cloned()
+            .unwrap_or_else(|| json!("not_supplied")),
+    );
+    provenance.insert("readiness_claimed".into(), json!(false));
+    provenance.insert("execution".into(), json!("not_started"));
+    if evidence_present {
+        for field in ["evidence_digest", "evidence_scope"] {
+            if let Some(value) = review.get(field) {
+                provenance.insert(field.into(), value.clone());
+            }
+        }
+    }
+    Some(Value::Object(provenance))
+}
+
+/// Validate the compact route-review projection independently of the original review document.
+///
+/// This is used at boundaries that receive a retained mission report or checkpoint rather than
+/// the original route review. It prevents a caller from changing a review identity, adding a
+/// fabricated evidence binding, or upgrading a non-executing review into readiness after the
+/// full review has left the boundary.
+pub fn validate_route_review_provenance(provenance: &Value) -> Result<(), String> {
+    let encoded = serde_json::to_vec(provenance)
+        .map_err(|error| format!("route-review provenance cannot be encoded: {error}"))?;
+    if encoded.len() > 16 * 1024 {
+        return Err("route-review provenance exceeds the 16384-byte safety bound".into());
+    }
+    let object = provenance
+        .as_object()
+        .ok_or_else(|| "route-review provenance must be an object".to_string())?;
+    if object.get("present").and_then(Value::as_bool) != Some(true) {
+        return Err("route-review provenance.present must be true".into());
+    }
+    for field in ["review_id", "route_id", "catalog_digest"] {
+        let value = object
+            .get(field)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("route-review provenance.{field} must be a digest"))?;
+        if value.len() != 64
+            || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || value.bytes().any(|byte| byte.is_ascii_uppercase())
+            || ContentHash::parse(value.to_string()).is_err()
+        {
+            return Err(format!(
+                "route-review provenance.{field} must be a lowercase 64-character SHA-256 digest"
+            ));
+        }
+    }
+    if object.get("readiness_claimed").and_then(Value::as_bool) != Some(false) {
+        return Err("route-review provenance.readiness_claimed must be false".into());
+    }
+    if object.get("execution").and_then(Value::as_str) != Some("not_started") {
+        return Err("route-review provenance.execution must be not_started".into());
+    }
+    let evidence_present = object
+        .get("evidence_present")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "route-review provenance.evidence_present must be a boolean".to_string())?;
+    let posture = object
+        .get("posture")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "route-review provenance.posture must be a string".to_string())?;
+    if evidence_present {
+        if posture != "carried_forward_not_recomputed" {
+            return Err(
+                "route-review provenance with evidence must remain carried_forward_not_recomputed"
+                    .into(),
+            );
+        }
+        for field in ["evidence_digest", "evidence_scope"] {
+            let value = object
+                .get(field)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("route-review provenance.{field} is required"))?;
+            if field == "evidence_digest"
+                && (value.len() != 64
+                    || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    || value.bytes().any(|byte| byte.is_ascii_uppercase())
+                    || ContentHash::parse(value.to_string()).is_err())
+            {
+                return Err(
+                    "route-review provenance.evidence_digest must be a lowercase 64-character SHA-256 digest"
+                        .into(),
+                );
+            }
+            if field == "evidence_scope" && value.trim().is_empty() {
+                return Err("route-review provenance.evidence_scope must be non-empty".into());
+            }
+        }
+    } else if posture != "not_supplied"
+        || object.get("evidence_digest").is_some()
+        || object.get("evidence_scope").is_some()
+    {
+        return Err(
+            "route-review provenance without evidence must use not_supplied and omit evidence identity"
+                .into(),
+        );
     }
     Ok(())
 }
@@ -596,10 +1086,7 @@ fn validate_evaluator_review(
     let catalogue = MissionEvaluatorCatalogue::standard();
     if catalog_digest != catalogue.digest().to_string() {
         return Err(MissionError::InvalidEvaluatorReview {
-            reason: format!(
-                "catalog_digest is stale; expected {}",
-                catalogue.digest()
-            ),
+            reason: format!("catalog_digest is stale; expected {}", catalogue.digest()),
         });
     }
     let findings = object
@@ -621,7 +1108,12 @@ fn validate_evaluator_review(
         })?;
     let expected = claims
         .iter()
-        .flat_map(|claim| claim.evaluator_bindings.iter().map(move |binding| (claim, binding)))
+        .flat_map(|claim| {
+            claim
+                .evaluator_bindings
+                .iter()
+                .map(move |binding| (claim, binding))
+        })
         .collect::<Vec<_>>();
     if expected.is_empty() {
         return Err(MissionError::InvalidEvaluatorReview {
@@ -698,11 +1190,12 @@ fn validate_evaluator_review(
     }
 
     for (claim, binding) in expected {
-        let row = rows_by_id.get(&binding.id).ok_or_else(|| {
-            MissionError::InvalidEvaluatorReview {
-                reason: format!("binding `{}` is absent from evaluator_review", binding.id),
-            }
-        })?;
+        let row =
+            rows_by_id
+                .get(&binding.id)
+                .ok_or_else(|| MissionError::InvalidEvaluatorReview {
+                    reason: format!("binding `{}` is absent from evaluator_review", binding.id),
+                })?;
         let row_object = row.as_object().expect("review rows were checked above");
         for (field, expected_value) in [
             ("claim_id", claim.id.as_str()),
@@ -713,13 +1206,19 @@ fn validate_evaluator_review(
         ] {
             if row_object.get(field).and_then(Value::as_str) != Some(expected_value) {
                 return Err(MissionError::InvalidEvaluatorReview {
-                    reason: format!("binding `{}` does not match review field `{field}`", binding.id),
+                    reason: format!(
+                        "binding `{}` does not match review field `{field}`",
+                        binding.id
+                    ),
                 });
             }
         }
         if row_object.get("required").and_then(Value::as_bool) != Some(binding.required) {
             return Err(MissionError::InvalidEvaluatorReview {
-                reason: format!("binding `{}` does not match review required posture", binding.id),
+                reason: format!(
+                    "binding `{}` does not match review required posture",
+                    binding.id
+                ),
             });
         }
         let proposed = row_object
@@ -738,13 +1237,19 @@ fn validate_evaluator_review(
         ] {
             if proposed.get(field).and_then(Value::as_str) != Some(expected_value) {
                 return Err(MissionError::InvalidEvaluatorReview {
-                    reason: format!("binding `{}` proposed_binding does not match `{field}`", binding.id),
+                    reason: format!(
+                        "binding `{}` proposed_binding does not match `{field}`",
+                        binding.id
+                    ),
                 });
             }
         }
         if proposed.get("required").and_then(Value::as_bool) != Some(binding.required) {
             return Err(MissionError::InvalidEvaluatorReview {
-                reason: format!("binding `{}` proposed_binding does not match required posture", binding.id),
+                reason: format!(
+                    "binding `{}` proposed_binding does not match required posture",
+                    binding.id
+                ),
             });
         }
     }
@@ -765,6 +1270,14 @@ pub struct MissionRequest {
     /// selected through `mission_evaluator_review`.
     #[serde(default)]
     pub evaluator_review: Option<Value>,
+    /// The workflow instantiation contract that produced this mission, when the mission was
+    /// created from the domain-workflow surface.
+    #[serde(default)]
+    pub workflow_binding: Option<Value>,
+    /// The ready, non-executing capability route review consumed by this mission, when route
+    /// selections were reviewed before mission preflight.
+    #[serde(default)]
+    pub route_review: Option<Value>,
 }
 
 impl MissionRequest {
@@ -825,6 +1338,12 @@ impl MissionRequest {
         }
         if let Some(review) = &self.evaluator_review {
             validate_evaluator_review(review, &self.claim_requests)?;
+        }
+        if let Some(binding) = &self.workflow_binding {
+            validate_workflow_binding(binding)?;
+        }
+        if let Some(review) = &self.route_review {
+            validate_route_review(review, &self.goal, &self.steps)?;
         }
         for step in &self.steps {
             let mut dependencies = BTreeSet::new();
@@ -945,6 +1464,10 @@ pub struct MissionPlan {
     pub execution: String,
     pub execution_mode: String,
     pub max_parallelism: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_binding: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_review_provenance: Option<Value>,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
 }
@@ -968,7 +1491,10 @@ fn retained_result_payload(result: &MissionStepResult) -> Option<(Value, &'stati
     if let Some(payload) = wire.pointer("/result/structuredContent") {
         return Some((payload.clone(), "structured_content"));
     }
-    if let Some(text) = wire.pointer("/result/content/0/text").and_then(Value::as_str) {
+    if let Some(text) = wire
+        .pointer("/result/content/0/text")
+        .and_then(Value::as_str)
+    {
         if let Ok(payload) = serde_json::from_str::<Value>(text) {
             return Some((payload, "content_text_json"));
         }
@@ -1005,6 +1531,7 @@ fn evaluator_review_provenance(review: Option<&Value>) -> Value {
         "review_id": object.get("review_id").cloned().unwrap_or(Value::Null),
         "catalog_digest": object.get("catalog_digest").cloned().unwrap_or(Value::Null),
         "discovery_digest": object.get("discovery_digest").cloned().unwrap_or(Value::Null),
+        "catalogue_snapshot": object.get("catalogue_snapshot").cloned().unwrap_or(Value::Null),
         "review_status": object.get("review_status").cloned().unwrap_or(Value::Null),
         "binding_posture": object.get("binding_posture").cloned().unwrap_or(Value::Null),
         "execution": object.get("execution").cloned().unwrap_or(Value::Null),
@@ -1114,7 +1641,11 @@ pub fn mission_claim_lineage_with_review(
                     row["evaluator_state"] = json!("step_not_successful");
                     row["outcome_state"] = json!(evaluator_outcome_state(&result.status));
                     row["step_status"] = json!(result.status);
-                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                    row["step_error"] = result
+                        .error
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null);
                     return row;
                 }
                 let Some((payload, output_source)) = retained_result_payload(result) else {
@@ -1122,7 +1653,11 @@ pub fn mission_claim_lineage_with_review(
                     row["evaluator_state"] = json!("evaluator_output_omitted");
                     row["outcome_state"] = json!("output_omitted");
                     row["step_status"] = json!(result.status);
-                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                    row["step_error"] = result
+                        .error
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null);
                     return row;
                 };
                 let output = if binding.output_pointer.is_empty() {
@@ -1135,13 +1670,21 @@ pub fn mission_claim_lineage_with_review(
                     row["evaluator_state"] = json!("evaluator_pointer_missing");
                     row["outcome_state"] = json!("pointer_missing");
                     row["step_status"] = json!(result.status);
-                    row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                    row["step_error"] = result
+                        .error
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null);
                     row["output_source"] = json!(output_source);
                     return row;
                 };
                 let mut row = base();
                 row["step_status"] = json!(result.status);
-                row["step_error"] = result.error.clone().map(Value::String).unwrap_or(Value::Null);
+                row["step_error"] = result
+                    .error
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null);
                 row["output_source"] = json!(output_source);
                 row["output_type"] = json!(json_value_type(output));
                 row["output_bytes"] = serde_json::to_vec(output)
@@ -1184,11 +1727,19 @@ pub fn mission_claim_lineage_with_review(
             .collect::<Vec<_>>();
         let evaluator_required_total = evaluator_rows
             .iter()
-            .filter(|row| row.get("required").and_then(Value::as_bool).unwrap_or(false))
+            .filter(|row| {
+                row.get("required")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
             .count();
         let evaluator_required_retained = evaluator_rows
             .iter()
-            .filter(|row| row.get("required").and_then(Value::as_bool).unwrap_or(false))
+            .filter(|row| {
+                row.get("required")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
             .filter(|row| {
                 row.get("evaluator_state").and_then(Value::as_str)
                     == Some("evaluator_output_retained")
@@ -1424,6 +1975,10 @@ pub enum MissionError {
     UnknownClaimStep { claim: String, step: String },
     #[error("invalid evaluator review: {reason}")]
     InvalidEvaluatorReview { reason: String },
+    #[error("invalid workflow binding: {reason}")]
+    InvalidWorkflowBinding { reason: String },
+    #[error("invalid capability route review: {reason}")]
+    InvalidRouteReview { reason: String },
 }
 
 /// Build a deterministic plan from a mission request.
@@ -1500,14 +2055,18 @@ pub fn plan_mission(request: &MissionRequest) -> Result<MissionPlan, MissionErro
         .into(),
         execution_mode: request.policy.execution_mode.clone(),
         max_parallelism: request.policy.max_parallelism,
+        workflow_binding: request.workflow_binding.clone(),
+        route_review_provenance: route_review_provenance(request.route_review.as_ref()),
         guarantees: vec![
             "step dependencies are validated and ordered deterministically".into(),
             "execution requires an explicit tool allow-list and is opt-in".into(),
             "side-effect confirmation and output budgets are policy-controlled".into(),
             "the plan is content-addressed before any tool call".into(),
+            "a supplied ready capability route review is bound to the exact mission goal and steps without implying readiness or execution".into(),
         ],
         limitations: vec![
             "the planner does not infer missing arguments or scientific meaning".into(),
+            "route review provenance is caller-owned structure and does not authorize execution".into(),
             if request.policy.execution_mode == "parallel_waves" {
                 format!(
                     "independent steps in each wave execute in bounded batches of at most {} in the server process",
@@ -1552,6 +2111,8 @@ mod tests {
             policy: MissionPolicy::default(),
             claim_requests: Vec::new(),
             evaluator_review: None,
+            workflow_binding: None,
+            route_review: None,
         }
     }
 
@@ -1574,6 +2135,33 @@ mod tests {
         assert_eq!(plan.critical_path_length, 2);
         assert_eq!(plan.digest.len(), 64);
         assert_eq!(plan.execution, "planned");
+    }
+
+    #[test]
+    fn workflow_binding_is_bounded_and_evidence_plan_digest_bound() {
+        let evidence_plan = serde_json::json!({
+            "schema": "workflow-contract/0.1",
+            "steps": [{"step_id": "one", "tool": "metrics_analytics_audit"}],
+            "completion": {"required_steps": "succeeded"}
+        });
+        let evidence_plan_digest = ContentHash::of_value(&evidence_plan).unwrap().to_string();
+        let mut value = request(vec![step("one", "metrics_analytics_audit", &[])]);
+        value.workflow_binding = Some(serde_json::json!({
+            "workflow_id": "metrics_and_analytics",
+            "workflow_digest": "a".repeat(64),
+            "catalog_digest": "b".repeat(64),
+            "domain_contract_digest": "c".repeat(64),
+            "domain_contract": {"posture": "advisory_review_gated"},
+            "evidence_plan": evidence_plan,
+            "evidence_plan_digest": evidence_plan_digest,
+        }));
+        assert!(plan_mission(&value).is_ok());
+        value.workflow_binding.as_mut().unwrap()["evidence_plan"]["steps"][0]["tool"] =
+            serde_json::json!("tampered_tool");
+        assert!(matches!(
+            plan_mission(&value),
+            Err(MissionError::InvalidWorkflowBinding { .. })
+        ));
     }
 
     #[test]
@@ -1722,22 +2310,24 @@ mod tests {
             requires_steps: vec!["observe".into()],
             level: "observation".into(),
             evidence_mode: "successful_tool_result".into(),
-            evaluator_bindings: vec![MissionClaimEvaluatorBinding {
-                id: "metrics-evaluator".into(),
-                adapter_id: "metrics-audit-v1".into(),
-                domain: "metrics".into(),
-                step_id: "observe".into(),
-                output_pointer: "/value".into(),
-                required: true,
-            },
-            MissionClaimEvaluatorBinding {
-                id: "evaluation-evaluator".into(),
-                adapter_id: "evaluation-audit-v1".into(),
-                domain: "evaluation".into(),
-                step_id: "observe".into(),
-                output_pointer: "/ok".into(),
-                required: true,
-            }],
+            evaluator_bindings: vec![
+                MissionClaimEvaluatorBinding {
+                    id: "metrics-evaluator".into(),
+                    adapter_id: "metrics-audit-v1".into(),
+                    domain: "metrics".into(),
+                    step_id: "observe".into(),
+                    output_pointer: "/value".into(),
+                    required: true,
+                },
+                MissionClaimEvaluatorBinding {
+                    id: "evaluation-evaluator".into(),
+                    adapter_id: "evaluation-audit-v1".into(),
+                    domain: "evaluation".into(),
+                    step_id: "observe".into(),
+                    output_pointer: "/ok".into(),
+                    required: true,
+                },
+            ],
         }];
         assert!(plan_mission(&value).is_ok());
 
@@ -1754,25 +2344,27 @@ mod tests {
             requires_steps: vec!["observe".into()],
             level: "observation".into(),
             evidence_mode: "successful_tool_result".into(),
-            evaluator_bindings: vec![MissionClaimEvaluatorBinding {
-                id: "metrics-evaluator".into(),
-                adapter_id: "metrics-audit-v1".into(),
-                domain: "metrics".into(),
-                step_id: "observe".into(),
-                output_pointer: "/value".into(),
-                required: true,
-            },
-            MissionClaimEvaluatorBinding {
-                id: "evaluation-evaluator".into(),
-                adapter_id: "evaluation-audit-v1".into(),
-                domain: "evaluation".into(),
-                step_id: "observe".into(),
-                output_pointer: "/ok".into(),
-                required: true,
-            }],
+            evaluator_bindings: vec![
+                MissionClaimEvaluatorBinding {
+                    id: "metrics-evaluator".into(),
+                    adapter_id: "metrics-audit-v1".into(),
+                    domain: "metrics".into(),
+                    step_id: "observe".into(),
+                    output_pointer: "/value".into(),
+                    required: true,
+                },
+                MissionClaimEvaluatorBinding {
+                    id: "evaluation-evaluator".into(),
+                    adapter_id: "evaluation-audit-v1".into(),
+                    domain: "evaluation".into(),
+                    step_id: "observe".into(),
+                    output_pointer: "/ok".into(),
+                    required: true,
+                },
+            ],
         };
         let retained = mission_claim_lineage(
-            &[claim.clone()],
+            std::slice::from_ref(&claim),
             &[MissionStepResult {
                 id: "observe".into(),
                 tool: "metrics_analytics_audit".into(),
@@ -1913,7 +2505,7 @@ mod tests {
             }],
         };
         let retained = mission_claim_lineage(
-            &[claim.clone()],
+            std::slice::from_ref(&claim),
             &[MissionStepResult {
                 id: "assay".into(),
                 tool: "oncoworlds_model_transport".into(),

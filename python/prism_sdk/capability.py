@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any, Mapping, Sequence
 
+from .artifacts import _digest
 from .errors import ArgumentError
 
 
@@ -82,6 +83,7 @@ class CapabilityRouteNeedReport:
     candidate_groups: tuple[str, ...]
     candidate_domains: tuple[str, ...]
     candidate_tools: tuple[str, ...]
+    candidate_group_evidence: tuple[dict[str, Any], ...]
     search: dict[str, Any]
 
     @classmethod
@@ -90,12 +92,19 @@ class CapabilityRouteNeedReport:
         resolution = _route_text("need resolution", raw.get("resolution"))
         if resolution not in {"explicit", "ranked_candidates", "unresolved"}:
             raise ArgumentError(f"unknown route need resolution: {resolution}")
+        raw_evidence = raw.get("candidate_group_evidence", [])
+        if not isinstance(raw_evidence, Sequence) or isinstance(raw_evidence, (str, bytes)):
+            raise ArgumentError("candidate_group_evidence must be an array")
+        candidate_group_evidence = tuple(
+            _route_mapping("candidate group evidence", item) for item in raw_evidence
+        )
         return cls(
             id=_route_text("need id", raw.get("id")),
             resolution=resolution,
             candidate_groups=_route_strings("candidate_groups", raw.get("candidate_groups", [])),
             candidate_domains=_route_strings("candidate_domains", raw.get("candidate_domains", [])),
             candidate_tools=_route_strings("candidate_tools", raw.get("candidate_tools", [])),
+            candidate_group_evidence=candidate_group_evidence,
             search=_route_mapping("need search", raw.get("search", {})),
         )
 
@@ -112,6 +121,7 @@ class CapabilityRouteCoverage:
     candidate_domain_count: int
     candidate_domains: tuple[str, ...]
     candidate_tool_count: int
+    candidate_group_evidence_count: int | None
     posture: str
 
     @classmethod
@@ -131,6 +141,12 @@ class CapabilityRouteCoverage:
         candidate_tool_count = _route_count(
             "route coverage candidate_tool_count", raw.get("candidate_tool_count")
         )
+        evidence_count_raw = raw.get("candidate_group_evidence_count")
+        candidate_group_evidence_count = (
+            None
+            if evidence_count_raw is None
+            else _route_count("route coverage candidate_group_evidence_count", evidence_count_raw)
+        )
         if needs_resolved + needs_unresolved != needs_total:
             raise ArgumentError("route coverage need counts do not reconcile")
         if candidate_group_count != len(candidate_groups):
@@ -146,6 +162,7 @@ class CapabilityRouteCoverage:
             candidate_domain_count=candidate_domain_count,
             candidate_domains=candidate_domains,
             candidate_tool_count=candidate_tool_count,
+            candidate_group_evidence_count=candidate_group_evidence_count,
             posture=_route_text("route coverage posture", raw.get("posture")),
         )
 
@@ -170,6 +187,9 @@ class CapabilityRouteReport:
     recommended_tool_count: int
     recommended_tool_overflow: int
     route_coverage: CapabilityRouteCoverage
+    evidence_digest: str | None
+    evidence_scope: str | None
+    evidence: "CapabilityRouteEvidenceSummary | None"
     schema_attachment: dict[str, Any]
     execution: str
     guarantees: tuple[str, ...]
@@ -210,6 +230,27 @@ class CapabilityRouteReport:
             raise ArgumentError("recommended_tool_overflow does not match recommended_tools")
         if coverage.candidate_tool_count != recommended_tool_count:
             raise ArgumentError("route coverage candidate_tool_count does not match recommendations")
+        evidence_digest_raw = raw.get("evidence_digest")
+        evidence_digest = (
+            None if evidence_digest_raw is None else _digest("route evidence digest", evidence_digest_raw)
+        )
+        evidence_scope_raw = raw.get("evidence_scope")
+        evidence_scope = (
+            None if evidence_scope_raw is None else _route_text("route evidence scope", evidence_scope_raw)
+        )
+        evidence_raw = raw.get("evidence")
+        evidence = (
+            None
+            if evidence_raw is None
+            else CapabilityRouteEvidenceSummary.from_wire(evidence_raw)
+        )
+        if evidence is not None:
+            if evidence_digest != evidence.evidence_digest:
+                raise ArgumentError("route evidence digest does not match evidence summary")
+            if evidence_scope != evidence.scope:
+                raise ArgumentError("route evidence scope does not match evidence summary")
+            if coverage.candidate_group_evidence_count is not None and coverage.candidate_group_evidence_count != evidence.candidate_group_count:
+                raise ArgumentError("route evidence group count does not match route coverage")
         return cls(
             raw=raw,
             route_id=_route_text("route_id", raw.get("route_id")),
@@ -221,6 +262,9 @@ class CapabilityRouteReport:
             recommended_tool_count=recommended_tool_count,
             recommended_tool_overflow=recommended_tool_overflow,
             route_coverage=coverage,
+            evidence_digest=evidence_digest,
+            evidence_scope=evidence_scope,
+            evidence=evidence,
             schema_attachment=_route_mapping("schema_attachment", raw.get("schema_attachment", {})),
             execution=_route_text("route execution", raw.get("execution")),
             guarantees=_route_strings("route guarantees", raw.get("guarantees", [])),
@@ -237,6 +281,49 @@ class CapabilityRouteReport:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilityRouteEvidenceSummary:
+    """Digest-bound retained evidence summary attached to a capability route."""
+
+    raw: dict[str, Any]
+    scope: str
+    evidence_digest: str
+    artifact_registry_generation: int
+    artifact_registry_size: int
+    workflow_reconciliation_registry_generation: int
+    workflow_reconciliation_registry_size: int
+    candidate_group_count: int
+    groups_with_artifact_evidence: int
+    artifact_evidence_records: int
+    groups_with_workflow_reconciliation: int
+    workflow_reconciliation_records: int
+    readiness_claimed: bool
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityRouteEvidenceSummary":
+        raw = _route_mapping("route evidence summary", value)
+        readiness_claimed = raw.get("readiness_claimed")
+        if not isinstance(readiness_claimed, bool):
+            raise ArgumentError("route evidence readiness_claimed must be a boolean")
+        return cls(
+            raw=raw,
+            scope=_route_text("route evidence summary scope", raw.get("scope")),
+            evidence_digest=_digest("route evidence summary digest", raw.get("evidence_digest")),
+            artifact_registry_generation=_route_count("route artifact registry generation", raw.get("artifact_registry_generation")),
+            artifact_registry_size=_route_count("route artifact registry size", raw.get("artifact_registry_size")),
+            workflow_reconciliation_registry_generation=_route_count("route reconciliation registry generation", raw.get("workflow_reconciliation_registry_generation")),
+            workflow_reconciliation_registry_size=_route_count("route reconciliation registry size", raw.get("workflow_reconciliation_registry_size")),
+            candidate_group_count=_route_count("route evidence candidate_group_count", raw.get("candidate_group_count")),
+            groups_with_artifact_evidence=_route_count("route evidence groups_with_artifact_evidence", raw.get("groups_with_artifact_evidence")),
+            artifact_evidence_records=_route_count("route evidence artifact_evidence_records", raw.get("artifact_evidence_records")),
+            groups_with_workflow_reconciliation=_route_count("route evidence groups_with_workflow_reconciliation", raw.get("groups_with_workflow_reconciliation")),
+            workflow_reconciliation_records=_route_count("route evidence workflow_reconciliation_records", raw.get("workflow_reconciliation_records")),
+            readiness_claimed=readiness_claimed,
+            execution=_route_text("route evidence execution", raw.get("execution")),
+        )
 
 
 @dataclass(frozen=True)
@@ -277,6 +364,9 @@ class CapabilityRouteReviewReport:
     review_id: str
     route_id: str
     catalog_digest: str
+    evidence_digest: str | None
+    evidence_scope: str | None
+    evidence_binding: dict[str, Any]
     goal: str
     review_status: str
     handoff_status: str
@@ -321,6 +411,37 @@ class CapabilityRouteReviewReport:
         findings = tuple(_route_mapping("route finding", finding) for finding in raw_findings)
         mission_draft_value = raw.get("mission_draft")
         mission_draft = None if mission_draft_value is None else _route_mapping("mission_draft", mission_draft_value)
+        evidence_digest_raw = raw.get("evidence_digest")
+        evidence_digest = (
+            None if evidence_digest_raw is None else _digest("review evidence digest", evidence_digest_raw)
+        )
+        evidence_scope_raw = raw.get("evidence_scope")
+        evidence_scope = (
+            None if evidence_scope_raw is None else _route_text("review evidence scope", evidence_scope_raw)
+        )
+        if (evidence_digest is None) != (evidence_scope is None):
+            raise ArgumentError("review evidence_digest and evidence_scope must be supplied together")
+        evidence_binding = _route_mapping("review evidence_binding", raw.get("evidence_binding", {}))
+        binding_present = evidence_binding.get("present", False)
+        if not isinstance(binding_present, bool):
+            raise ArgumentError("review evidence_binding.present must be a boolean")
+        if binding_present:
+            if evidence_digest is None or evidence_scope is None:
+                raise ArgumentError("present review evidence_binding requires a digest and scope")
+            if evidence_binding.get("evidence_digest") != evidence_digest:
+                raise ArgumentError("review evidence_binding digest does not match evidence_digest")
+            if evidence_binding.get("scope") != evidence_scope:
+                raise ArgumentError("review evidence_binding scope does not match evidence_scope")
+            summary = _route_mapping("review evidence_binding.summary", evidence_binding.get("summary", {}))
+            if summary.get("evidence_digest") != evidence_digest:
+                raise ArgumentError("review evidence summary digest does not match evidence_digest")
+            if summary.get("scope") != evidence_scope:
+                raise ArgumentError("review evidence summary scope does not match evidence_scope")
+        if mission_draft is not None and evidence_digest is not None:
+            if mission_draft.get("route_evidence_digest") != evidence_digest:
+                raise ArgumentError("mission_draft route evidence digest does not match evidence_digest")
+            if mission_draft.get("route_evidence_scope") != evidence_scope:
+                raise ArgumentError("mission_draft route evidence scope does not match evidence_scope")
         if review_status == "ready":
             if findings or mission_draft is None or handoff_status != "mission_preflight_required":
                 raise ArgumentError("ready route review must have no findings and a mission draft")
@@ -331,6 +452,9 @@ class CapabilityRouteReviewReport:
             review_id=_route_text("review review_id", raw.get("review_id")),
             route_id=_route_text("review route_id", raw.get("route_id")),
             catalog_digest=_route_text("review catalog_digest", raw.get("catalog_digest")),
+            evidence_digest=evidence_digest,
+            evidence_scope=evidence_scope,
+            evidence_binding=evidence_binding,
             goal=_route_text("review goal", raw.get("goal")),
             review_status=review_status,
             handoff_status=handoff_status,
@@ -350,6 +474,263 @@ class CapabilityRouteReviewReport:
     @property
     def ready(self) -> bool:
         return self.review_status == "ready"
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilityRoutePlanRequest:
+    """Compose explicit route selections into a non-executing mission preflight."""
+
+    mission_id: str
+    route: Mapping[str, Any]
+    selections: Sequence[Mapping[str, Any]]
+    validate_schemas: bool = True
+    policy: Mapping[str, Any] | None = None
+    claim_requests: Sequence[Mapping[str, Any]] = ()
+    evaluator_review: Mapping[str, Any] | None = None
+    workflow_binding: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _route_text("route plan mission_id", self.mission_id)
+        route = _route_mapping("route plan route", self.route)
+        if route.get("workflow") != "capability_route":
+            raise ArgumentError("route plan route.workflow must be capability_route")
+        if not isinstance(self.selections, Sequence) or isinstance(self.selections, (str, bytes)):
+            raise ArgumentError("route plan selections must be an array")
+        if not 1 <= len(self.selections) <= 128:
+            raise ArgumentError("route plan selections must contain between 1 and 128 choices")
+        normalized = tuple(_review_selection(value) for value in self.selections)
+        if not isinstance(self.validate_schemas, bool):
+            raise ArgumentError("route plan validate_schemas must be a boolean")
+        if self.policy is not None:
+            policy = _route_mapping("route plan policy", self.policy)
+            if policy.get("execute") is True:
+                raise ArgumentError("route plan policy.execute must be false")
+            object.__setattr__(self, "policy", policy)
+        if not isinstance(self.claim_requests, Sequence) or isinstance(self.claim_requests, (str, bytes)) or len(self.claim_requests) > 64:
+            raise ArgumentError("route plan claim_requests must contain at most 64 objects")
+        claims = tuple(_route_mapping("route plan claim request", value) for value in self.claim_requests)
+        object.__setattr__(self, "route", route)
+        object.__setattr__(self, "selections", normalized)
+        object.__setattr__(self, "claim_requests", claims)
+        if self.evaluator_review is not None:
+            object.__setattr__(self, "evaluator_review", _route_mapping("route plan evaluator_review", self.evaluator_review))
+        if self.workflow_binding is not None:
+            object.__setattr__(self, "workflow_binding", _route_mapping("route plan workflow_binding", self.workflow_binding))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "mission_id": self.mission_id,
+            "route": dict(self.route),
+            "selections": [dict(value) for value in self.selections],
+            "validate_schemas": self.validate_schemas,
+            "claim_requests": [dict(value) for value in self.claim_requests],
+        }
+        for name in ("policy", "evaluator_review", "workflow_binding"):
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = dict(value)
+        return result
+
+
+@dataclass(frozen=True)
+class CapabilityRoutePlanVerifyRequest:
+    """Replay or structurally verify a previously returned route plan."""
+
+    plan: Mapping[str, Any]
+    route: Mapping[str, Any] | None = None
+    selections: Sequence[Mapping[str, Any]] | None = None
+    validate_schemas: bool | None = None
+
+    def __post_init__(self) -> None:
+        plan = _route_mapping("route plan verification plan", self.plan)
+        if plan.get("workflow") != "capability_route_plan":
+            raise ArgumentError("route plan verification plan.workflow must be capability_route_plan")
+        if (self.route is None) != (self.selections is None):
+            raise ArgumentError("route plan verification route and selections must be supplied together")
+        if self.route is not None:
+            route = _route_mapping("route plan verification route", self.route)
+            if route.get("workflow") != "capability_route":
+                raise ArgumentError("route plan verification route.workflow must be capability_route")
+            object.__setattr__(self, "route", route)
+        if self.selections is not None:
+            if not isinstance(self.selections, Sequence) or isinstance(self.selections, (str, bytes)):
+                raise ArgumentError("route plan verification selections must be an array")
+            if not 1 <= len(self.selections) <= 128:
+                raise ArgumentError("route plan verification selections must contain between 1 and 128 choices")
+            object.__setattr__(self, "selections", tuple(_review_selection(value) for value in self.selections))
+        if self.validate_schemas is not None and not isinstance(self.validate_schemas, bool):
+            raise ArgumentError("route plan verification validate_schemas must be a boolean")
+        object.__setattr__(self, "plan", plan)
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"plan": dict(self.plan)}
+        if self.route is not None:
+            result["route"] = dict(self.route)
+        if self.selections is not None:
+            result["selections"] = [dict(value) for value in self.selections]
+        if self.validate_schemas is not None:
+            result["validate_schemas"] = self.validate_schemas
+        return result
+
+
+@dataclass(frozen=True)
+class CapabilityRoutePlanReport:
+    """Validated route-review plus authoritative mission-preflight projection."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    route_id: str
+    review_id: str
+    catalog_digest: str
+    goal: str
+    plan_status: str
+    review: CapabilityRouteReviewReport
+    mission: dict[str, Any] | None
+    preflight: dict[str, Any] | None
+    plan_digest: str | None
+    route_input_digest: str | None
+    selection_digest: str | None
+    selection_count: int | None
+    route_review_provenance: dict[str, Any] | None
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityRoutePlanReport":
+        raw = _route_mapping("capability route plan report", value)
+        if raw.get("workflow") != "capability_route_plan":
+            raise ArgumentError("route plan.workflow must be capability_route_plan")
+        review = CapabilityRouteReviewReport.from_wire(_route_mapping("route plan review", raw.get("review")))
+        plan_status = _route_text("route plan status", raw.get("plan_status"))
+        if plan_status not in {"preflight_pending", "blocked_by_route_review", "ready_for_caller_inspection", "blocked_by_mission_preflight"}:
+            raise ArgumentError("unknown route plan status")
+        mission_value = raw.get("mission")
+        mission = None if mission_value is None else _route_mapping("route plan mission", mission_value)
+        preflight_value = raw.get("preflight")
+        preflight = None if preflight_value is None else _route_mapping("route plan preflight", preflight_value)
+        if plan_status in {"ready_for_caller_inspection", "blocked_by_mission_preflight"} and (mission is None or preflight is None):
+            raise ArgumentError("completed route plan status requires mission and preflight projections")
+        mission_id = _route_text("route plan mission_id", raw.get("mission_id"))
+        route_id = _route_text("route plan route_id", raw.get("route_id"))
+        review_id = _route_text("route plan review_id", raw.get("review_id"))
+        catalog_digest = _route_text("route plan catalog_digest", raw.get("catalog_digest"))
+        if route_id != review.route_id or review_id != review.review_id or catalog_digest != review.catalog_digest:
+            raise ArgumentError("route plan identity must match its nested route review")
+        if mission is not None and mission.get("mission_id") != mission_id:
+            raise ArgumentError("route plan mission_id must match the mission projection")
+        plan_digest_raw = raw.get("plan_digest")
+        plan_digest = None if plan_digest_raw is None else _digest("route plan plan digest", plan_digest_raw)
+        route_input_digest_raw = raw.get("route_input_digest")
+        route_input_digest = (
+            None
+            if route_input_digest_raw is None
+            else _digest("route plan route input digest", route_input_digest_raw)
+        )
+        selection_digest_raw = raw.get("selection_digest")
+        selection_digest = (
+            None
+            if selection_digest_raw is None
+            else _digest("route plan selection digest", selection_digest_raw)
+        )
+        selection_count_raw = raw.get("selection_count")
+        if selection_count_raw is not None and (
+            not isinstance(selection_count_raw, int) or isinstance(selection_count_raw, bool) or selection_count_raw < 0
+        ):
+            raise ArgumentError("route plan selection_count must be a non-negative integer")
+        provenance_value = raw.get("route_review_provenance")
+        provenance = None if provenance_value is None else _route_mapping("route plan route_review_provenance", provenance_value)
+        return cls(
+            raw=raw,
+            mission_id=mission_id,
+            route_id=route_id,
+            review_id=review_id,
+            catalog_digest=catalog_digest,
+            goal=_route_text("route plan goal", raw.get("goal")),
+            plan_status=plan_status,
+            review=review,
+            mission=mission,
+            preflight=preflight,
+            plan_digest=plan_digest,
+            route_input_digest=route_input_digest,
+            selection_digest=selection_digest,
+            selection_count=selection_count_raw,
+            route_review_provenance=provenance,
+            dispatch=_route_text("route plan dispatch", raw.get("dispatch")),
+            execution=_route_text("route plan execution", raw.get("execution")),
+        )
+
+    @property
+    def ready_for_inspection(self) -> bool:
+        return self.plan_status == "ready_for_caller_inspection"
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class CapabilityRoutePlanVerifyReport:
+    """Validated replay and live-preflight verification of a route plan."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    route_id: str
+    review_id: str
+    catalog_digest: str
+    plan_status: str
+    plan_digest: str | None
+    valid: bool
+    verification_status: str
+    route_replay: dict[str, Any]
+    mission_preflight: dict[str, Any]
+    mismatches: tuple[dict[str, Any], ...]
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityRoutePlanVerifyReport":
+        raw = _route_mapping("capability route plan verification report", value)
+        if raw.get("workflow") != "capability_route_plan_verify":
+            raise ArgumentError("route plan verification.workflow must be capability_route_plan_verify")
+        valid = raw.get("valid")
+        if not isinstance(valid, bool):
+            raise ArgumentError("route plan verification valid must be a boolean")
+        verification_status = _route_text("route plan verification status", raw.get("verification_status"))
+        if verification_status not in {
+            "verified",
+            "verified_without_route_replay",
+            "mismatch",
+            "blocked_by_route_replay",
+            "blocked_by_mission_preflight",
+        }:
+            raise ArgumentError("unknown route plan verification status")
+        mismatches_raw = raw.get("mismatches", [])
+        if not isinstance(mismatches_raw, Sequence) or isinstance(mismatches_raw, (str, bytes)):
+            raise ArgumentError("route plan verification mismatches must be an array")
+        mismatches = tuple(_route_mapping("route plan verification mismatch", item) for item in mismatches_raw)
+        plan_digest_raw = raw.get("plan_digest")
+        return cls(
+            raw=raw,
+            mission_id=_route_text("route plan verification mission_id", raw.get("mission_id")),
+            route_id=_route_text("route plan verification route_id", raw.get("route_id")),
+            review_id=_route_text("route plan verification review_id", raw.get("review_id")),
+            catalog_digest=_route_text("route plan verification catalog_digest", raw.get("catalog_digest")),
+            plan_status=_route_text("route plan verification plan_status", raw.get("plan_status")),
+            plan_digest=None if plan_digest_raw is None else _digest("route plan verification plan digest", plan_digest_raw),
+            valid=valid,
+            verification_status=verification_status,
+            route_replay=_route_mapping("route plan verification route_replay", raw.get("route_replay")),
+            mission_preflight=_route_mapping("route plan verification mission_preflight", raw.get("mission_preflight")),
+            mismatches=mismatches,
+            dispatch=_route_text("route plan verification dispatch", raw.get("dispatch")),
+            execution=_route_text("route plan verification execution", raw.get("execution")),
+        )
+
+    @property
+    def verified(self) -> bool:
+        return self.valid and self.verification_status in {"verified", "verified_without_route_replay"}
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
@@ -392,6 +773,1047 @@ def capability_route_review_report(value: Mapping[str, Any]) -> CapabilityRouteR
     """Parse either a direct review payload or an HTTP tool envelope into diagnostics."""
 
     return CapabilityRouteReviewReport.from_wire(_tool_payload(value, "capability_route_review"))
+
+
+def capability_route_plan_report(value: Mapping[str, Any]) -> CapabilityRoutePlanReport:
+    """Parse a direct route-plan payload or an HTTP tool envelope."""
+
+    return CapabilityRoutePlanReport.from_wire(_tool_payload(value, "capability_route_plan"))
+
+
+def capability_route_plan_verify_report(value: Mapping[str, Any]) -> CapabilityRoutePlanVerifyReport:
+    """Parse a direct route-plan verification payload or an HTTP tool envelope."""
+
+    return CapabilityRoutePlanVerifyReport.from_wire(
+        _tool_payload(value, "capability_route_plan_verify")
+    )
+
+
+@dataclass(frozen=True)
+class DomainWorkflowInstantiateRequest:
+    """Caller-owned selection for one capability-group workflow template."""
+
+    workflow_id: str
+    mission_id: str
+    goal: str
+    steps: Sequence[Mapping[str, Any]]
+    policy: Mapping[str, Any] | None = None
+    claim_requests: Sequence[Mapping[str, Any]] = ()
+    evaluator_review: Mapping[str, Any] | None = None
+    route_review: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in (("workflow_id", self.workflow_id), ("mission_id", self.mission_id), ("goal", self.goal)):
+            _route_text(f"workflow {name}", value)
+        if not isinstance(self.steps, Sequence) or isinstance(self.steps, (str, bytes)) or not 1 <= len(self.steps) <= 128:
+            raise ArgumentError("workflow steps must contain between 1 and 128 objects")
+        for index, step in enumerate(self.steps):
+            _route_mapping(f"workflow steps[{index}]", step)
+        if self.policy is not None:
+            _route_mapping("workflow policy", self.policy)
+        if not isinstance(self.claim_requests, Sequence) or isinstance(self.claim_requests, (str, bytes)) or len(self.claim_requests) > 64:
+            raise ArgumentError("workflow claim_requests must contain at most 64 objects")
+        for index, claim in enumerate(self.claim_requests):
+            _route_mapping(f"workflow claim_requests[{index}]", claim)
+        if self.evaluator_review is not None:
+            _route_mapping("workflow evaluator_review", self.evaluator_review)
+        if self.route_review is not None:
+            _route_mapping("workflow route_review", self.route_review)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "workflow_id": self.workflow_id,
+            "mission_id": self.mission_id,
+            "goal": self.goal,
+            "steps": [dict(step) for step in self.steps],
+            "claim_requests": [dict(claim) for claim in self.claim_requests],
+        }
+        if self.policy is not None:
+            result["policy"] = dict(self.policy)
+        if self.evaluator_review is not None:
+            result["evaluator_review"] = dict(self.evaluator_review)
+        if self.route_review is not None:
+            result["route_review"] = dict(self.route_review)
+        return result
+
+
+@dataclass(frozen=True)
+class DomainWorkflowPortfolioRequest:
+    """Bounded set of explicit domain-workflow requests for one non-executing portfolio."""
+
+    requests: Sequence[Mapping[str, Any]]
+    policy: Mapping[str, Any] | None = None
+    readiness_audit: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.requests, Sequence) or isinstance(self.requests, (str, bytes)) or not 1 <= len(self.requests) <= 64:
+            raise ArgumentError("workflow portfolio requests must contain between 1 and 64 objects")
+        workflow_ids: set[str] = set()
+        mission_ids: set[str] = set()
+        normalized: list[dict[str, Any]] = []
+        for index, request in enumerate(self.requests):
+            try:
+                typed = DomainWorkflowInstantiateRequest(**dict(_route_mapping(f"workflow portfolio requests[{index}]", request)))
+            except (TypeError, ValueError) as error:
+                raise ArgumentError(f"invalid workflow portfolio request {index}: {error}") from error
+            if typed.workflow_id in workflow_ids:
+                raise ArgumentError(f"workflow portfolio contains duplicate workflow_id {typed.workflow_id!r}")
+            if typed.mission_id in mission_ids:
+                raise ArgumentError(f"workflow portfolio contains duplicate mission_id {typed.mission_id!r}")
+            workflow_ids.add(typed.workflow_id)
+            mission_ids.add(typed.mission_id)
+            normalized.append(typed.to_arguments())
+        object.__setattr__(self, "requests", tuple(normalized))
+        if self.policy is not None:
+            policy = _route_mapping("workflow portfolio policy", self.policy)
+            for name in ("allow_partial", "require_complete_catalogue", "require_readiness"):
+                if name in policy and not isinstance(policy[name], bool):
+                    raise ArgumentError(f"workflow portfolio policy {name} must be boolean")
+            object.__setattr__(self, "policy", policy)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"requests": [dict(request) for request in self.requests]}
+        if self.policy is not None:
+            result["policy"] = dict(self.policy)
+        if self.readiness_audit is not None:
+            result["readiness_audit"] = dict(_route_mapping("workflow portfolio readiness_audit", self.readiness_audit))
+        return result
+
+
+@dataclass(frozen=True)
+class DomainWorkflowVerifyRequest:
+    """Verify a retained domain-workflow instantiation without dispatch."""
+
+    instantiation: Mapping[str, Any]
+    replay_request: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        instantiation = _route_mapping("workflow verification instantiation", self.instantiation)
+        if instantiation.get("workflow") != "domain_workflow_instantiate":
+            raise ArgumentError("workflow verification instantiation.workflow must be domain_workflow_instantiate")
+        if instantiation.get("execution") not in (None, "not_started"):
+            raise ArgumentError("workflow verification instantiation.execution must be not_started")
+        object.__setattr__(self, "instantiation", instantiation)
+        if self.replay_request is not None:
+            replay_request = _route_mapping("workflow verification replay_request", self.replay_request)
+            for name in ("workflow_id", "mission_id", "goal"):
+                _route_text(f"workflow verification replay_request {name}", replay_request.get(name))
+            if not isinstance(replay_request.get("steps"), Sequence) or isinstance(replay_request.get("steps"), (str, bytes)):
+                raise ArgumentError("workflow verification replay_request steps must be an array")
+            object.__setattr__(self, "replay_request", replay_request)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"instantiation": dict(self.instantiation)}
+        if self.replay_request is not None:
+            result["replay_request"] = dict(self.replay_request)
+        return result
+
+
+@dataclass(frozen=True)
+class DomainWorkflowPortfolioVerifyRequest:
+    """Verify a retained multi-domain portfolio with optional aligned request replay."""
+
+    portfolio: Mapping[str, Any]
+    replay_requests: Sequence[Mapping[str, Any] | None] | None = None
+    policy: Mapping[str, Any] | None = None
+    readiness_audit: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        portfolio = dict(_route_mapping("workflow portfolio verification portfolio", self.portfolio))
+        portfolio.pop("request_id", None)
+        portfolio.pop("__isError", None)
+        if portfolio.get("workflow") != "domain_workflow_portfolio":
+            raise ArgumentError("workflow portfolio verification portfolio.workflow must be domain_workflow_portfolio")
+        items = portfolio.get("items")
+        if not isinstance(items, Sequence) or isinstance(items, (str, bytes)) or not 1 <= len(items) <= 64:
+            raise ArgumentError("workflow portfolio verification portfolio.items must contain between 1 and 64 items")
+        if self.replay_requests is not None:
+            if not isinstance(self.replay_requests, Sequence) or isinstance(self.replay_requests, (str, bytes)):
+                raise ArgumentError("workflow portfolio verification replay_requests must be an array")
+            if len(self.replay_requests) != len(items):
+                raise ArgumentError("workflow portfolio verification replay_requests must align with portfolio.items")
+            normalized_replays: list[dict[str, Any] | None] = []
+            for index, replay_request in enumerate(self.replay_requests):
+                if replay_request is None:
+                    normalized_replays.append(None)
+                else:
+                    normalized_replays.append(
+                        dict(_route_mapping(f"workflow portfolio verification replay_requests[{index}]", replay_request))
+                    )
+            object.__setattr__(self, "replay_requests", tuple(normalized_replays))
+        object.__setattr__(self, "portfolio", portfolio)
+        if self.policy is not None:
+            policy = _route_mapping("workflow portfolio verification policy", self.policy)
+            for name in ("allow_partial", "require_complete_catalogue", "require_replay", "require_readiness"):
+                if name in policy and not isinstance(policy[name], bool):
+                    raise ArgumentError(f"workflow portfolio verification policy {name} must be boolean")
+            object.__setattr__(self, "policy", policy)
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"portfolio": dict(self.portfolio)}
+        if self.replay_requests is not None:
+            result["replay_requests"] = [
+                None if request is None else dict(request) for request in self.replay_requests
+            ]
+        if self.policy is not None:
+            result["policy"] = dict(self.policy)
+        if self.readiness_audit is not None:
+            result["readiness_audit"] = dict(_route_mapping("workflow portfolio verification readiness_audit", self.readiness_audit))
+        return result
+
+
+@dataclass(frozen=True)
+class DomainWorkflowScaffoldRequest:
+    """Caller-owned request for a deterministic, execution-disabled workflow scaffold."""
+
+    workflow_id: str
+    mission_id: str
+    goal: str
+    tools: Sequence[str] = ()
+    arguments: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name, value in (("workflow_id", self.workflow_id), ("mission_id", self.mission_id), ("goal", self.goal)):
+            _route_text(f"workflow scaffold {name}", value)
+        if not isinstance(self.tools, Sequence) or isinstance(self.tools, (str, bytes)) or len(self.tools) > 128:
+            raise ArgumentError("workflow scaffold tools must contain at most 128 strings")
+        _route_strings("workflow scaffold tools", self.tools)
+        if not isinstance(self.arguments, Mapping):
+            raise ArgumentError("workflow scaffold arguments must be an object")
+        for tool, value in self.arguments.items():
+            _route_text("workflow scaffold argument tool", tool)
+            _route_mapping(f"workflow scaffold arguments[{tool}]", value)
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {
+            "workflow_id": self.workflow_id,
+            "mission_id": self.mission_id,
+            "goal": self.goal,
+            "tools": list(self.tools),
+            "arguments": {tool: dict(value) for tool, value in self.arguments.items()},
+        }
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconcileRequest:
+    """Retained execution evidence to reconcile against one workflow instantiation."""
+
+    instantiation: Mapping[str, Any]
+    mission_report: Mapping[str, Any] | None = None
+    evidence_bundle: Mapping[str, Any] | None = None
+    policy: Mapping[str, Any] | None = None
+    readiness_audit: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _route_mapping("workflow instantiation", self.instantiation)
+        if self.mission_report is None and self.evidence_bundle is None:
+            raise ArgumentError("workflow reconciliation requires mission_report or evidence_bundle")
+        if self.mission_report is not None:
+            _route_mapping("workflow mission_report", self.mission_report)
+        if self.evidence_bundle is not None:
+            _route_mapping("workflow evidence_bundle", self.evidence_bundle)
+        if self.policy is not None:
+            policy = _route_mapping("workflow reconciliation policy", self.policy)
+            if "require_readiness" in policy and not isinstance(policy["require_readiness"], bool):
+                raise ArgumentError("workflow reconciliation policy require_readiness must be boolean")
+            object.__setattr__(self, "policy", policy)
+        if self.readiness_audit is not None:
+            object.__setattr__(self, "readiness_audit", _route_mapping("workflow reconciliation readiness_audit", self.readiness_audit))
+
+    def to_arguments(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"instantiation": dict(self.instantiation)}
+        if self.mission_report is not None:
+            result["mission_report"] = dict(self.mission_report)
+        if self.evidence_bundle is not None:
+            result["evidence_bundle"] = dict(self.evidence_bundle)
+        if self.policy is not None:
+            result["policy"] = dict(self.policy)
+        if self.readiness_audit is not None:
+            result["readiness_audit"] = dict(self.readiness_audit)
+        return result
+
+
+@dataclass(frozen=True)
+class DomainWorkflowCatalogueReport:
+    """Typed deterministic catalogue of all capability-group workflow templates."""
+
+    raw: dict[str, Any]
+    catalog_digest: str
+    workflow_catalog_digest: str
+    workflow_count: int
+    workflows: tuple[Mapping[str, Any], ...]
+    coverage: Mapping[str, Any]
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowCatalogueReport":
+        raw = _tool_payload(value, "domain_workflow_catalogue")
+        workflows = raw.get("workflows", [])
+        if not isinstance(workflows, Sequence) or isinstance(workflows, (str, bytes)):
+            raise ArgumentError("domain workflow catalogue workflows must be an array")
+        count = _route_count("domain workflow count", raw.get("workflow_count"))
+        if count != len(workflows):
+            raise ArgumentError("domain workflow count does not match workflows")
+        return cls(
+            raw=raw,
+            catalog_digest=_route_text("domain workflow catalog digest", raw.get("catalog_digest")),
+            workflow_catalog_digest=_route_text("domain workflow catalogue digest", raw.get("workflow_catalog_digest")),
+            workflow_count=count,
+            workflows=tuple(_route_mapping("domain workflow", item) for item in workflows),
+            coverage=_route_mapping("domain workflow coverage", raw.get("coverage", {})),
+            execution=_route_text("domain workflow catalogue execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowInstantiationReport:
+    """Typed group-scoped mission, domain contract, evidence plan, and preflight projection."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    workflow_digest: str
+    catalog_digest: str
+    mission: Mapping[str, Any]
+    selection: Mapping[str, Any]
+    domain_contract: Mapping[str, Any]
+    domain_contract_digest: str
+    evidence_plan: Mapping[str, Any]
+    workflow_binding: Mapping[str, Any]
+    preflight: Mapping[str, Any]
+    preflight_report: Mapping[str, Any] | None
+    execution: str
+    execution_contract: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowInstantiationReport":
+        raw = _tool_payload(value, "domain_workflow_instantiate")
+        mission = _route_mapping("domain workflow mission", raw.get("mission"))
+        preflight_report = raw.get("preflight_report")
+        if preflight_report is not None:
+            preflight_report = _route_mapping("domain workflow preflight report", preflight_report)
+        return cls(
+            raw=raw,
+            workflow_id=_route_text("domain workflow id", raw.get("workflow_id")),
+            workflow_digest=_route_text("domain workflow digest", raw.get("workflow_digest")),
+            catalog_digest=_route_text("domain workflow catalog digest", raw.get("catalog_digest")),
+            mission=mission,
+            selection=_route_mapping("domain workflow selection", raw.get("selection")),
+            domain_contract=_route_mapping("domain workflow domain contract", raw.get("domain_contract", {})),
+            domain_contract_digest=_route_text(
+                "domain workflow domain contract digest",
+                raw.get("domain_contract_digest", raw.get("workflow_digest")),
+            ),
+            evidence_plan=_route_mapping("domain workflow evidence plan", raw.get("evidence_plan", {})),
+            workflow_binding=_route_mapping(
+                "domain workflow mission workflow binding",
+                mission.get("workflow_binding", {}),
+            ),
+            preflight=_route_mapping("domain workflow preflight", raw.get("preflight")),
+            preflight_report=preflight_report,
+            execution=_route_text("domain workflow execution", raw.get("execution")),
+            execution_contract=_route_mapping(
+                "domain workflow execution contract", raw.get("execution_contract", {})
+            ),
+        )
+
+    @property
+    def selected_tools(self) -> tuple[str, ...]:
+        return _route_strings("selected workflow tools", self.selection.get("selected_tools", []))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowPortfolioReport:
+    """Typed multi-domain portfolio with per-item preflight and explicit coverage posture."""
+
+    raw: dict[str, Any]
+    portfolio_digest: str
+    valid: bool
+    portfolio_ready: bool
+    portfolio_status: str
+    policy: Mapping[str, Any]
+    decision_readiness: Mapping[str, Any]
+    coverage: Mapping[str, Any]
+    summary: Mapping[str, Any]
+    items: tuple[Mapping[str, Any], ...]
+    preflight: Mapping[str, Any]
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowPortfolioReport":
+        raw = _tool_payload(value, "domain_workflow_portfolio")
+        valid = raw.get("valid")
+        portfolio_ready = raw.get("portfolio_ready")
+        if not isinstance(valid, bool) or not isinstance(portfolio_ready, bool):
+            raise ArgumentError("workflow portfolio validity fields must be booleans")
+        status = _route_text("workflow portfolio status", raw.get("portfolio_status"))
+        if status not in {"ready_for_authoritative_preflight", "partial", "blocked", "blocked_by_decision_readiness", "incomplete_scope"}:
+            raise ArgumentError("unknown workflow portfolio status")
+        items = raw.get("items", [])
+        if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+            raise ArgumentError("workflow portfolio items must be an array")
+        return cls(
+            raw=raw,
+            portfolio_digest=_digest("workflow portfolio digest", raw.get("portfolio_digest")),
+            valid=valid,
+            portfolio_ready=portfolio_ready,
+            portfolio_status=status,
+            policy=_route_mapping("workflow portfolio policy", raw.get("policy", {})),
+            decision_readiness=_route_mapping("workflow portfolio decision readiness", raw.get("decision_readiness", {})),
+            coverage=_route_mapping("workflow portfolio coverage", raw.get("coverage", {})),
+            summary=_route_mapping("workflow portfolio summary", raw.get("summary", {})),
+            items=tuple(_route_mapping("workflow portfolio item", item) for item in items),
+            preflight=_route_mapping("workflow portfolio preflight", raw.get("preflight", {})),
+            dispatch=_route_text("workflow portfolio dispatch", raw.get("dispatch")),
+            execution=_route_text("workflow portfolio execution", raw.get("execution")),
+        )
+
+    @property
+    def complete_catalogue(self) -> bool:
+        return self.coverage.get("complete_catalogue") is True
+
+    @property
+    def preflight_ready(self) -> bool:
+        return self.preflight.get("matched") is True and self.summary.get("preflight_blocked_count", 0) == 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowPortfolioVerifyReport:
+    """Digest, replay, coverage, and authoritative-preflight evidence for a retained portfolio."""
+
+    raw: dict[str, Any]
+    portfolio_digest: str
+    observed_portfolio_digest: str
+    portfolio_digest_matched: bool
+    portfolio_verify_digest: str
+    valid: bool
+    portfolio_ready: bool
+    verification_status: str
+    policy: Mapping[str, Any]
+    decision_readiness: Mapping[str, Any]
+    coverage: Mapping[str, Any]
+    summary: Mapping[str, Any]
+    items: tuple[Mapping[str, Any], ...]
+    mismatches: tuple[Mapping[str, Any], ...]
+    preflight: Mapping[str, Any]
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowPortfolioVerifyReport":
+        raw = _tool_payload(value, "domain_workflow_portfolio_verify")
+        valid = raw.get("valid")
+        portfolio_ready = raw.get("portfolio_ready")
+        digest_matched = raw.get("portfolio_digest_matched")
+        if not all(isinstance(item, bool) for item in (valid, portfolio_ready, digest_matched)):
+            raise ArgumentError("workflow portfolio verification validity fields must be booleans")
+        status = _route_text("workflow portfolio verification status", raw.get("verification_status"))
+        if status not in {
+            "verified",
+            "verified_without_replay",
+            "partial",
+            "blocked",
+            "blocked_by_mission_preflight",
+            "replay_incomplete",
+            "incomplete_scope",
+            "blocked_by_decision_readiness",
+            "mismatch",
+        }:
+            raise ArgumentError("unknown workflow portfolio verification status")
+        items = raw.get("items", [])
+        mismatches = raw.get("mismatches", [])
+        if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+            raise ArgumentError("workflow portfolio verification items must be an array")
+        if not isinstance(mismatches, Sequence) or isinstance(mismatches, (str, bytes)):
+            raise ArgumentError("workflow portfolio verification mismatches must be an array")
+        return cls(
+            raw=raw,
+            portfolio_digest=_digest("workflow portfolio verification portfolio digest", raw.get("portfolio_digest")),
+            observed_portfolio_digest=_digest(
+                "workflow portfolio verification observed portfolio digest",
+                raw.get("observed_portfolio_digest"),
+            ),
+            portfolio_digest_matched=digest_matched,
+            portfolio_verify_digest=_digest(
+                "workflow portfolio verification report digest", raw.get("portfolio_verify_digest")
+            ),
+            valid=valid,
+            portfolio_ready=portfolio_ready,
+            verification_status=status,
+            policy=_route_mapping("workflow portfolio verification policy", raw.get("policy", {})),
+            decision_readiness=_route_mapping("workflow portfolio verification decision readiness", raw.get("decision_readiness", {})),
+            coverage=_route_mapping("workflow portfolio verification coverage", raw.get("coverage", {})),
+            summary=_route_mapping("workflow portfolio verification summary", raw.get("summary", {})),
+            items=tuple(_route_mapping("workflow portfolio verification item", item) for item in items),
+            mismatches=tuple(_route_mapping("workflow portfolio verification mismatch", item) for item in mismatches),
+            preflight=_route_mapping("workflow portfolio verification preflight", raw.get("preflight", {})),
+            dispatch=_route_text("workflow portfolio verification dispatch", raw.get("dispatch")),
+            execution=_route_text("workflow portfolio verification execution", raw.get("execution")),
+        )
+
+    @property
+    def verified(self) -> bool:
+        return self.valid and self.verification_status in {"verified", "verified_without_replay"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowVerifyReport:
+    """Typed structural, replay, and authoritative-preflight verification evidence."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    workflow_digest: str
+    catalog_digest: str
+    domain_contract_digest: str
+    mission_id: str
+    mission_digest: str
+    structural_valid: bool
+    valid: bool
+    verification_status: str
+    replay: Mapping[str, Any]
+    mission_preflight: Mapping[str, Any]
+    mismatches: tuple[Mapping[str, Any], ...]
+    preflight_report: Mapping[str, Any]
+    dispatch: str
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowVerifyReport":
+        raw = _tool_payload(value, "domain_workflow_verify")
+        for field in ("workflow_digest", "catalog_digest", "domain_contract_digest", "mission_digest"):
+            _digest(f"workflow verification {field}", raw.get(field))
+        structural_valid = raw.get("structural_valid")
+        valid = raw.get("valid")
+        if not isinstance(structural_valid, bool) or not isinstance(valid, bool):
+            raise ArgumentError("workflow verification validity fields must be booleans")
+        status = _route_text("workflow verification status", raw.get("verification_status"))
+        if status not in {"verified", "verified_without_replay", "mismatch", "blocked_by_replay", "blocked_by_mission_preflight"}:
+            raise ArgumentError("unknown workflow verification status")
+        mismatches = raw.get("mismatches", [])
+        if not isinstance(mismatches, Sequence) or isinstance(mismatches, (str, bytes)):
+            raise ArgumentError("workflow verification mismatches must be an array")
+        return cls(
+            raw=raw,
+            workflow_id=_route_text("workflow verification workflow_id", raw.get("workflow_id")),
+            workflow_digest=_digest("workflow verification workflow digest", raw.get("workflow_digest")),
+            catalog_digest=_digest("workflow verification catalog digest", raw.get("catalog_digest")),
+            domain_contract_digest=_digest("workflow verification domain contract digest", raw.get("domain_contract_digest")),
+            mission_id=_route_text("workflow verification mission_id", raw.get("mission_id")),
+            mission_digest=_digest("workflow verification mission digest", raw.get("mission_digest")),
+            structural_valid=structural_valid,
+            valid=valid,
+            verification_status=status,
+            replay=_route_mapping("workflow verification replay", raw.get("replay", {})),
+            mission_preflight=_route_mapping("workflow verification mission_preflight", raw.get("mission_preflight", {})),
+            mismatches=tuple(_route_mapping("workflow verification mismatch", item) for item in mismatches),
+            preflight_report=_route_mapping("workflow verification preflight report", raw.get("preflight_report", {})),
+            dispatch=_route_text("workflow verification dispatch", raw.get("dispatch")),
+            execution=_route_text("workflow verification execution", raw.get("execution")),
+        )
+
+    @property
+    def verified(self) -> bool:
+        return self.valid and self.verification_status in {"verified", "verified_without_replay"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def domain_workflow_catalogue_report(value: Mapping[str, Any]) -> DomainWorkflowCatalogueReport:
+    """Parse a direct REST/MCP workflow catalogue result."""
+
+    return DomainWorkflowCatalogueReport.from_wire(value)
+
+
+def domain_workflow_instantiation_report(value: Mapping[str, Any]) -> DomainWorkflowInstantiationReport:
+    """Parse a direct REST/MCP workflow instantiation result."""
+
+    return DomainWorkflowInstantiationReport.from_wire(value)
+
+
+def domain_workflow_portfolio_report(value: Mapping[str, Any]) -> DomainWorkflowPortfolioReport:
+    """Parse a direct REST/MCP domain-workflow portfolio result."""
+
+    return DomainWorkflowPortfolioReport.from_wire(value)
+
+
+def domain_workflow_portfolio_verify_report(value: Mapping[str, Any]) -> DomainWorkflowPortfolioVerifyReport:
+    """Parse a direct REST/MCP domain-workflow portfolio verification result."""
+
+    return DomainWorkflowPortfolioVerifyReport.from_wire(value)
+
+
+def domain_workflow_verify_report(value: Mapping[str, Any]) -> DomainWorkflowVerifyReport:
+    """Parse a direct REST/MCP domain-workflow verification result."""
+
+    return DomainWorkflowVerifyReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowScaffoldReport:
+    """Typed scaffold with explicit preflight status and no dispatch/readiness claim."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    workflow_digest: str
+    catalog_digest: str
+    mission: Mapping[str, Any]
+    selection: Mapping[str, Any]
+    preflight: Mapping[str, Any]
+    preflight_status: str
+    preflight_report: Mapping[str, Any]
+    execution: str
+    readiness_claimed: bool
+    execution_contract: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowScaffoldReport":
+        raw = _tool_payload(value, "domain_workflow_scaffold")
+        readiness_claimed = raw.get("readiness_claimed")
+        if not isinstance(readiness_claimed, bool):
+            raise ArgumentError("domain workflow scaffold readiness_claimed must be a boolean")
+        return cls(
+            raw=raw,
+            workflow_id=_route_text("domain workflow scaffold id", raw.get("workflow_id")),
+            workflow_digest=_route_text("domain workflow scaffold digest", raw.get("workflow_digest")),
+            catalog_digest=_route_text("domain workflow scaffold catalog digest", raw.get("catalog_digest")),
+            mission=_route_mapping("domain workflow scaffold mission", raw.get("mission")),
+            selection=_route_mapping("domain workflow scaffold selection", raw.get("selection")),
+            preflight=_route_mapping("domain workflow scaffold preflight", raw.get("preflight")),
+            preflight_status=_route_text("domain workflow scaffold preflight status", raw.get("preflight_status")),
+            preflight_report=_route_mapping("domain workflow scaffold preflight report", raw.get("preflight_report", {})),
+            execution=_route_text("domain workflow scaffold execution", raw.get("execution")),
+            readiness_claimed=readiness_claimed,
+            execution_contract=_route_mapping(
+                "domain workflow scaffold execution contract", raw.get("execution_contract", {})
+            ),
+        )
+
+    @property
+    def selected_tools(self) -> tuple[str, ...]:
+        return _route_strings("selected scaffold tools", self.selection.get("selected_tools", []))
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def domain_workflow_scaffold_report(value: Mapping[str, Any]) -> DomainWorkflowScaffoldReport:
+    """Parse a direct REST/MCP workflow scaffold result."""
+
+    return DomainWorkflowScaffoldReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationReport:
+    """Typed structural completion/evidence reconciliation for one domain workflow."""
+
+    raw: dict[str, Any]
+    workflow_id: str
+    workflow_digest: str
+    catalog_digest: str
+    mission_id: str
+    mission_plan_digest: str
+    reconciliation_digest: str
+    source: str
+    report: Mapping[str, Any]
+    evidence: Mapping[str, Any]
+    completion: Mapping[str, Any]
+    integrity: Mapping[str, Any]
+    decision_readiness: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationReport":
+        raw = _tool_payload(value, "domain_workflow_reconcile")
+        return cls(
+            raw=raw,
+            workflow_id=_route_text("workflow reconciliation id", raw.get("workflow_id")),
+            workflow_digest=_route_text("workflow reconciliation workflow digest", raw.get("workflow_digest")),
+            catalog_digest=_route_text("workflow reconciliation catalog digest", raw.get("catalog_digest")),
+            mission_id=_route_text("workflow reconciliation mission id", raw.get("mission_id")),
+            mission_plan_digest=_route_text("workflow reconciliation mission plan digest", raw.get("mission_plan_digest")),
+            reconciliation_digest=_route_text("workflow reconciliation digest", raw.get("reconciliation_digest")),
+            source=_route_text("workflow reconciliation source", raw.get("source")),
+            report=_route_mapping("workflow reconciliation report", raw.get("report", {})),
+            evidence=_route_mapping("workflow reconciliation evidence", raw.get("evidence", {})),
+            completion=_route_mapping("workflow reconciliation completion", raw.get("completion", {})),
+            integrity=_route_mapping("workflow reconciliation integrity", raw.get("integrity", {})),
+            decision_readiness=_route_mapping("workflow reconciliation decision readiness", raw.get("decision_readiness", {})),
+        )
+
+    @property
+    def ready(self) -> bool:
+        return self.completion.get("ready") is True
+
+    @property
+    def completion_status(self) -> str:
+        return _route_text("workflow reconciliation completion status", self.completion.get("status"))
+
+    @property
+    def decision_review_gate_satisfied(self) -> bool:
+        return self.raw.get("decision_review_gate_satisfied") is True
+
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the automatic non-claiming artifact-index projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _route_mapping("workflow reconciliation artifact registry projection", value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def domain_workflow_reconciliation_report(value: Mapping[str, Any]) -> DomainWorkflowReconciliationReport:
+    """Parse a direct REST/MCP workflow reconciliation result."""
+
+    return DomainWorkflowReconciliationReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationImportRequest:
+    """Import one canonical domain workflow reconciliation report into a registry."""
+
+    record: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "record", dict(_route_mapping("workflow reconciliation record", self.record)))
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"record": dict(self.record)}
+
+    def to_http_body(self) -> dict[str, Any]:
+        return self.to_arguments()
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationQueryRequest:
+    """Bounded registry query for retained workflow reconciliation posture."""
+
+    mission_id: str | None = None
+    workflow_id: str | None = None
+    mission_plan_digest: str | None = None
+    completion_status: str | None = None
+    decision_readiness_state: str | None = None
+    decision_readiness_gate_satisfied: bool | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_records: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("mission_id", self.mission_id),
+            ("workflow_id", self.workflow_id),
+            ("mission_plan_digest", self.mission_plan_digest),
+            ("completion_status", self.completion_status),
+            ("decision_readiness_state", self.decision_readiness_state),
+            ("after", self.after),
+        ):
+            if value is not None:
+                _route_text(f"workflow reconciliation query {name}", value)
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("workflow reconciliation query max_items must be between 1 and 256")
+        if self.decision_readiness_state is not None and self.decision_readiness_state not in {"ready_for_human_review", "review_required", "incomplete", "blocked"}:
+            raise ArgumentError("workflow reconciliation query decision_readiness_state is invalid")
+        if self.decision_readiness_gate_satisfied is not None and not isinstance(self.decision_readiness_gate_satisfied, bool):
+            raise ArgumentError("workflow reconciliation query decision_readiness_gate_satisfied must be boolean")
+        if not isinstance(self.include_records, bool):
+            raise ArgumentError("workflow reconciliation query include_records must be a boolean")
+
+    def to_query_params(self) -> dict[str, str]:
+        params: dict[str, str] = {
+            "limit": str(self.max_items),
+            "include_records": "true" if self.include_records else "false",
+        }
+        for name, value in (
+            ("mission_id", self.mission_id),
+            ("workflow_id", self.workflow_id),
+            ("mission_plan_digest", self.mission_plan_digest),
+            ("completion_status", self.completion_status),
+            ("decision_readiness_state", self.decision_readiness_state),
+            ("after", self.after),
+        ):
+            if value is not None:
+                params[name] = value
+        if self.decision_readiness_gate_satisfied is not None:
+            params["decision_readiness_gate_satisfied"] = "true" if self.decision_readiness_gate_satisfied else "false"
+        return params
+
+    def to_arguments(self) -> dict[str, Any]:
+        arguments: dict[str, Any] = {
+            "max_items": self.max_items,
+            "include_records": self.include_records,
+        }
+        for name, value in (
+            ("mission_id", self.mission_id),
+            ("workflow_id", self.workflow_id),
+            ("mission_plan_digest", self.mission_plan_digest),
+            ("completion_status", self.completion_status),
+            ("decision_readiness_state", self.decision_readiness_state),
+            ("after", self.after),
+        ):
+            if value is not None:
+                arguments[name] = value
+        if self.decision_readiness_gate_satisfied is not None:
+            arguments["decision_readiness_gate_satisfied"] = self.decision_readiness_gate_satisfied
+        return arguments
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationImportReport:
+    """Typed idempotent workflow reconciliation registry import result."""
+
+    raw: dict[str, Any]
+    reconciliation_digest: str
+    created: bool
+    already_present: bool
+    registry_generation: int
+    registry_size: int
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationImportReport":
+        raw = _tool_payload(value, "domain_workflow_reconciliation_import")
+        if raw.get("workflow") != "domain_workflow_reconciliation_import":
+            raise ArgumentError("workflow reconciliation import workflow is invalid")
+        created = raw.get("created")
+        already_present = raw.get("already_present")
+        if not isinstance(created, bool) or not isinstance(already_present, bool):
+            raise ArgumentError("workflow reconciliation import flags must be booleans")
+        return cls(
+            raw=raw,
+            reconciliation_digest=_route_text("workflow reconciliation import digest", raw.get("reconciliation_digest")),
+            created=created,
+            already_present=already_present,
+            registry_generation=_route_count("workflow reconciliation import generation", raw.get("registry_generation")),
+            registry_size=_route_count("workflow reconciliation import size", raw.get("registry_size")),
+            execution=_route_text("workflow reconciliation import execution", raw.get("execution")),
+        )
+
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the automatic non-claiming artifact-index projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _route_mapping("workflow reconciliation import artifact registry projection", value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationQueryReport:
+    """Typed deterministic workflow reconciliation registry index page."""
+
+    raw: dict[str, Any]
+    rows: tuple[Mapping[str, Any], ...]
+    next_after: str | None
+    has_more: bool
+    registry_generation: int
+    registry_size: int
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationQueryReport":
+        raw = _tool_payload(value, "domain_workflow_reconciliation_query")
+        if raw.get("workflow") != "domain_workflow_reconciliation_query":
+            raise ArgumentError("workflow reconciliation query workflow is invalid")
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("workflow reconciliation query rows must be an array")
+        next_after = raw.get("next_after")
+        if next_after is not None:
+            _route_text("workflow reconciliation query next cursor", next_after)
+        has_more = raw.get("has_more")
+        if not isinstance(has_more, bool):
+            raise ArgumentError("workflow reconciliation query has_more must be a boolean")
+        return cls(
+            raw=raw,
+            rows=tuple(_route_mapping("workflow reconciliation query row", row) for row in rows),
+            next_after=next_after,
+            has_more=has_more,
+            registry_generation=_route_count("workflow reconciliation query generation", raw.get("registry_generation")),
+            registry_size=_route_count("workflow reconciliation query size", raw.get("registry_size")),
+            execution=_route_text("workflow reconciliation query execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationSummaryReport:
+    """Typed compact operator posture derived from retained reconciliation reports."""
+
+    raw: dict[str, Any]
+    registry_generation: int
+    registry_size: int
+    completion_status_counts: Mapping[str, int]
+    workflow_count: int
+    workflow_status_counts: Mapping[str, Mapping[str, int]]
+    ready_count: int
+    review_required_count: int
+    integrity_invalid_count: int
+    evidence_invalid_count: int
+    readiness_claimed: bool
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationSummaryReport":
+        raw = _route_mapping("workflow reconciliation summary", value)
+        if raw.get("workflow") != "domain_workflow_reconciliation_summary":
+            raise ArgumentError("workflow reconciliation summary workflow is invalid")
+        counts_raw = _route_mapping(
+            "workflow reconciliation summary completion_status_counts",
+            raw.get("completion_status_counts"),
+        )
+        counts = {
+            _route_text("workflow reconciliation summary status", status): _route_count(
+                f"workflow reconciliation summary status count {status}", count
+            )
+            for status, count in counts_raw.items()
+        }
+        workflow_counts_raw = _route_mapping(
+            "workflow reconciliation summary workflow_status_counts",
+            raw.get("workflow_status_counts"),
+        )
+        workflow_counts = {
+            _route_text("workflow reconciliation summary workflow id", workflow_id): {
+                _route_text("workflow reconciliation summary workflow status", status): _route_count(
+                    f"workflow reconciliation summary workflow status count {workflow_id}/{status}",
+                    count,
+                )
+                for status, count in _route_mapping(
+                    f"workflow reconciliation summary workflow statuses {workflow_id}", statuses
+                ).items()
+            }
+            for workflow_id, statuses in workflow_counts_raw.items()
+        }
+        readiness_claimed = raw.get("readiness_claimed")
+        if readiness_claimed is not False:
+            raise ArgumentError("workflow reconciliation summary readiness_claimed must be false")
+        return cls(
+            raw=raw,
+            registry_generation=_route_count("workflow reconciliation summary generation", raw.get("registry_generation")),
+            registry_size=_route_count("workflow reconciliation summary size", raw.get("registry_size")),
+            completion_status_counts=counts,
+            workflow_count=_route_count("workflow reconciliation summary workflow count", raw.get("workflow_count")),
+            workflow_status_counts=workflow_counts,
+            ready_count=_route_count("workflow reconciliation summary ready count", raw.get("ready_count")),
+            review_required_count=_route_count("workflow reconciliation summary review count", raw.get("review_required_count")),
+            integrity_invalid_count=_route_count("workflow reconciliation summary integrity count", raw.get("integrity_invalid_count")),
+            evidence_invalid_count=_route_count("workflow reconciliation summary evidence count", raw.get("evidence_invalid_count")),
+            readiness_claimed=readiness_claimed,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationPersistenceStatus:
+    """Typed restart/checkpoint posture for the reconciliation registry."""
+
+    raw: dict[str, Any]
+    enabled: bool
+    file_present: bool
+    file_bytes: int | None
+    schema: str
+    state_digest: str | None
+    integrity_verified: bool | None
+    registry_size: int
+    registry_generation: int
+    max_reconciliations: int
+    max_file_bytes: int
+    recovery_policy: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationPersistenceStatus":
+        raw = _route_mapping("workflow reconciliation persistence", value)
+        enabled = raw.get("enabled")
+        file_present = raw.get("file_present")
+        if not isinstance(enabled, bool) or not isinstance(file_present, bool):
+            raise ArgumentError("workflow reconciliation persistence enabled and file_present must be booleans")
+        file_bytes = raw.get("file_bytes")
+        if file_bytes is not None:
+            file_bytes = _route_count("workflow reconciliation persistence file_bytes", file_bytes)
+        state_digest = raw.get("state_digest")
+        if state_digest is not None:
+            state_digest = _route_text("workflow reconciliation persistence state_digest", state_digest)
+            if len(state_digest) != 64 or any(character not in "0123456789abcdef" for character in state_digest):
+                raise ArgumentError("workflow reconciliation persistence state_digest must be a lowercase SHA-256 digest")
+        integrity_verified = raw.get("integrity_verified")
+        if integrity_verified is not None and not isinstance(integrity_verified, bool):
+            raise ArgumentError("workflow reconciliation persistence integrity_verified must be boolean or null")
+        return cls(
+            raw=raw,
+            enabled=enabled,
+            file_present=file_present,
+            file_bytes=file_bytes,
+            schema=_route_text("workflow reconciliation persistence schema", raw.get("schema")),
+            state_digest=state_digest,
+            integrity_verified=integrity_verified,
+            registry_size=_route_count("workflow reconciliation persistence size", raw.get("registry_size")),
+            registry_generation=_route_count("workflow reconciliation persistence generation", raw.get("registry_generation")),
+            max_reconciliations=_route_count("workflow reconciliation persistence max_reconciliations", raw.get("max_reconciliations")),
+            max_file_bytes=_route_count("workflow reconciliation persistence max_file_bytes", raw.get("max_file_bytes")),
+            recovery_policy=_route_text("workflow reconciliation persistence recovery_policy", raw.get("recovery_policy")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationGetRequest:
+    """Fetch one workflow reconciliation record by its content hash."""
+
+    reconciliation_digest: str
+
+    def __post_init__(self) -> None:
+        _route_text("workflow reconciliation digest", self.reconciliation_digest)
+
+    def to_arguments(self) -> dict[str, Any]:
+        return {"reconciliation_digest": self.reconciliation_digest}
+
+
+@dataclass(frozen=True)
+class DomainWorkflowReconciliationGetReport:
+    """Typed lookup result for one stored workflow reconciliation report."""
+
+    raw: dict[str, Any]
+    reconciliation_digest: str
+    record: Mapping[str, Any]
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "DomainWorkflowReconciliationGetReport":
+        raw = _tool_payload(value, "domain_workflow_reconciliation_get")
+        if raw.get("workflow") != "domain_workflow_reconciliation_get":
+            raise ArgumentError("workflow reconciliation get workflow is invalid")
+        return cls(
+            raw=raw,
+            reconciliation_digest=_route_text("workflow reconciliation get digest", raw.get("reconciliation_digest")),
+            record=_route_mapping("workflow reconciliation get record", raw.get("record")),
+            execution=_route_text("workflow reconciliation get execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
 
 
 @dataclass(frozen=True)
@@ -979,6 +2401,7 @@ class MissionEvaluatorReviewReport:
     review_id: str
     catalog_digest: str
     discovery_digest: str
+    catalogue_snapshot: Mapping[str, Any]
     selection_count: int
     claim_count: int
     bindings: tuple[MissionEvaluatorBindingReport, ...]
@@ -1006,6 +2429,9 @@ class MissionEvaluatorReviewReport:
             review_id=_route_text("mission evaluator review id", raw.get("review_id")),
             catalog_digest=_route_text("mission evaluator review catalog digest", raw.get("catalog_digest")),
             discovery_digest=_route_text("mission evaluator discovery digest", raw.get("discovery_digest")),
+            catalogue_snapshot=_route_mapping(
+                "mission evaluator catalogue snapshot", raw.get("catalogue_snapshot", {})
+            ),
             selection_count=_route_count("mission evaluator selection count", raw.get("selection_count")),
             claim_count=_route_count("mission evaluator claim count", raw.get("claim_count")),
             bindings=tuple(MissionEvaluatorBindingReport.from_wire(item) for item in bindings_value),
@@ -1029,6 +2455,11 @@ class MissionEvaluatorReviewReport:
             if binding.proposed_binding is not None
         )
 
+    @property
+    def snapshot_retained(self) -> bool:
+        retention = self.catalogue_snapshot.get("retention")
+        return isinstance(retention, Mapping) and retention.get("rows_retained") is True
+
     def to_dict(self) -> dict[str, Any]:
         return dict(self.raw)
 
@@ -1037,6 +2468,629 @@ def mission_evaluator_review_report(value: Mapping[str, Any]) -> MissionEvaluato
     """Parse a direct MCP result or HTTP envelope from mission evaluator review."""
 
     return MissionEvaluatorReviewReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayRequest:
+    """Request a structural replay of one retained agent mission report."""
+
+    mission: Mapping[str, Any]
+    include_fixtures: bool = True
+    max_items: int = 128
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mission", dict(_route_mapping("mission evaluator replay mission", self.mission)))
+        if not isinstance(self.include_fixtures, bool):
+            raise ArgumentError("mission evaluator replay include_fixtures must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 512:
+            raise ArgumentError("mission evaluator replay max_items must be between 1 and 512")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {
+            "mission": dict(self.mission),
+            "include_fixtures": self.include_fixtures,
+            "max_items": self.max_items,
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayReport:
+    """Typed structural replay, coverage, fixture, and refusal evidence for a mission report."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    mission_digest: str
+    catalog_digest: str
+    binding_count: int
+    omitted_bindings: int
+    state_counts: Mapping[str, int]
+    claims: tuple[dict[str, Any], ...]
+    bindings: tuple[dict[str, Any], ...]
+    coverage: Mapping[str, Any]
+    findings: tuple[dict[str, Any], ...]
+    replay_status: str
+    execution: str
+    fixtures: tuple[dict[str, Any], ...]
+    omitted_fixtures: int
+    route_review_provenance: Mapping[str, Any] | None
+    route_review_status: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorReplayReport":
+        raw = _tool_payload(value, "mission_evaluator_replay")
+        if raw.get("workflow") != "mission_evaluator_replay":
+            raise ArgumentError("mission evaluator replay workflow is invalid")
+        claims = raw.get("claims", [])
+        bindings = raw.get("bindings", [])
+        fixtures = raw.get("fixtures", [])
+        findings = raw.get("findings", [])
+        for name, candidate in (("claims", claims), ("bindings", bindings), ("fixtures", fixtures), ("findings", findings)):
+            if not isinstance(candidate, Sequence) or isinstance(candidate, (str, bytes)):
+                raise ArgumentError(f"mission evaluator replay {name} must be an array")
+        status = _route_text("mission evaluator replay status", raw.get("replay_status"))
+        if status not in {"ready", "blocked"}:
+            raise ArgumentError(f"unknown mission evaluator replay status: {status}")
+        state_counts = raw.get("state_counts", {})
+        coverage = raw.get("coverage", {})
+        if not isinstance(state_counts, Mapping) or not isinstance(coverage, Mapping):
+            raise ArgumentError("mission evaluator replay state_counts and coverage must be objects")
+        route_review_status = _route_text(
+            "mission evaluator replay route_review_status",
+            raw.get("route_review_status", "absent"),
+        )
+        if route_review_status not in {"absent", "valid", "invalid"}:
+            raise ArgumentError(f"unknown mission evaluator replay route_review_status: {route_review_status}")
+        return cls(
+            raw=raw,
+            mission_id=_route_text("mission evaluator replay mission id", raw.get("mission_id")),
+            mission_digest=_route_text("mission evaluator replay mission digest", raw.get("mission_digest")),
+            catalog_digest=_route_text("mission evaluator replay catalog digest", raw.get("catalog_digest")),
+            binding_count=_route_count("mission evaluator replay binding count", raw.get("binding_count")),
+            omitted_bindings=_route_count("mission evaluator replay omitted bindings", raw.get("omitted_bindings", 0)),
+            state_counts={str(key): _route_count(f"mission evaluator replay state {key}", value) for key, value in state_counts.items()},
+            claims=tuple(_route_mapping("mission evaluator replay claim", item) for item in claims),
+            bindings=tuple(_route_mapping("mission evaluator replay binding", item) for item in bindings),
+            coverage=dict(coverage),
+            findings=tuple(_route_mapping("mission evaluator replay finding", item) for item in findings),
+            replay_status=status,
+            execution=_route_text("mission evaluator replay execution", raw.get("execution")),
+            fixtures=tuple(_route_mapping("mission evaluator replay fixture", item) for item in fixtures),
+            omitted_fixtures=_route_count("mission evaluator replay omitted fixtures", raw.get("omitted_fixtures", 0)),
+            route_review_provenance=(
+                None
+                if raw.get("route_review_provenance") is None
+                else _route_mapping(
+                    "mission evaluator replay route_review_provenance",
+                    raw.get("route_review_provenance"),
+                )
+            ),
+            route_review_status=route_review_status,
+        )
+
+    @property
+    def ready(self) -> bool:
+        return self.replay_status == "ready" and not self.findings
+
+    @property
+    def catalogue_complete(self) -> bool:
+        return self.coverage.get("complete") is True
+
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the automatic non-claiming artifact-index projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _route_mapping("mission evaluator replay artifact registry projection", value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evaluator_replay_report(value: Mapping[str, Any]) -> MissionEvaluatorReplayReport:
+    """Parse a direct MCP result or HTTP envelope from mission evaluator replay."""
+
+    return MissionEvaluatorReplayReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayCompareRequest:
+    """Request a non-executing current-catalogue comparison for one mission report."""
+
+    mission: Mapping[str, Any]
+    include_fixtures: bool = True
+    max_items: int = 128
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mission", dict(_route_mapping("mission evaluator replay comparison mission", self.mission)))
+        if not isinstance(self.include_fixtures, bool):
+            raise ArgumentError("mission evaluator replay comparison include_fixtures must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 512:
+            raise ArgumentError("mission evaluator replay comparison max_items must be between 1 and 512")
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {
+            "mission": dict(self.mission),
+            "include_fixtures": self.include_fixtures,
+            "max_items": self.max_items,
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayComparisonReport:
+    """Typed digest-drift and current-binding compatibility evidence."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    replay: Mapping[str, Any]
+    catalog_drift: Mapping[str, Any]
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorReplayComparisonReport":
+        raw = _tool_payload(value, "mission_evaluator_replay_compare")
+        if raw.get("workflow") != "mission_evaluator_replay_compare":
+            raise ArgumentError("mission evaluator replay comparison workflow is invalid")
+        return cls(
+            raw=raw,
+            mission_id=_route_text("mission evaluator replay comparison mission id", raw.get("mission_id")),
+            replay=_route_mapping("mission evaluator replay comparison replay", raw.get("replay")),
+            catalog_drift=_route_mapping("mission evaluator replay catalog drift", raw.get("catalog_drift")),
+            execution=_route_text("mission evaluator replay comparison execution", raw.get("execution")),
+            guarantees=_route_strings("mission evaluator replay comparison guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("mission evaluator replay comparison limitations", raw.get("limitations", [])),
+        )
+
+    @property
+    def status(self) -> str:
+        return str(self.catalog_drift.get("status", "not_recorded"))
+
+    @property
+    def drifted(self) -> bool:
+        return self.status in {"drifted", "drifted_with_missing_bindings", "invalid_recorded_digest"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evaluator_replay_comparison_report(value: Mapping[str, Any]) -> MissionEvaluatorReplayComparisonReport:
+    """Parse a direct MCP result or HTTP envelope from replay comparison."""
+
+    return MissionEvaluatorReplayComparisonReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayQueryRequest:
+    """Bounded REST query for durable full or summary-only evaluator replay evidence."""
+
+    mission_id: str
+    include_fixtures: bool = False
+    max_items: int = 128
+
+    def __post_init__(self) -> None:
+        _route_text("mission evaluator replay query mission id", self.mission_id)
+        if not isinstance(self.include_fixtures, bool):
+            raise ArgumentError("mission evaluator replay query include_fixtures must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 512:
+            raise ArgumentError("mission evaluator replay query max_items must be between 1 and 512")
+
+    def to_query_params(self) -> dict[str, str]:
+        return {
+            "include_fixtures": "true" if self.include_fixtures else "false",
+            "max_items": str(self.max_items),
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvaluatorReplayQueryReport:
+    """Typed durable REST projection that distinguishes full and summary-only replay."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    query: Mapping[str, Any]
+    retention: Mapping[str, Any]
+    replay: Mapping[str, Any]
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+    links: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvaluatorReplayQueryReport":
+        raw = _tool_payload(value, "mission_evaluator_replay_query")
+        query = _route_mapping("mission evaluator replay query", raw.get("query"))
+        retention = _route_mapping("mission evaluator replay retention", raw.get("retention"))
+        replay = _route_mapping("mission evaluator replay query payload", raw.get("replay"))
+        mode = _route_text("mission evaluator replay retention mode", retention.get("mode"))
+        if mode not in {"full", "summary_only"}:
+            raise ArgumentError(f"unknown mission evaluator replay retention mode: {mode}")
+        return cls(
+            raw=raw,
+            mission_id=_route_text("mission evaluator replay query mission id", raw.get("mission_id")),
+            query=query,
+            retention=retention,
+            replay=replay,
+            execution=_route_text("mission evaluator replay query execution", raw.get("execution")),
+            guarantees=_route_strings("mission evaluator replay query guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("mission evaluator replay query limitations", raw.get("limitations", [])),
+            links=_route_mapping("mission evaluator replay query links", raw.get("links", {})),
+        )
+
+    @property
+    def summary_only(self) -> bool:
+        return self.retention.get("mode") == "summary_only"
+
+    @property
+    def full_result_retained(self) -> bool:
+        return self.retention.get("result_retained") is True
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evaluator_replay_query_report(value: Mapping[str, Any]) -> MissionEvaluatorReplayQueryReport:
+    """Parse the durable REST evaluator replay query response."""
+
+    return MissionEvaluatorReplayQueryReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleRequest:
+    """Bounded REST export options for a durable mission evidence bundle."""
+
+    mission_id: str
+    include_result: bool = False
+    include_trace: bool = True
+    include_fixtures: bool = False
+    max_items: int = 128
+
+    def __post_init__(self) -> None:
+        _route_text("mission evidence bundle mission id", self.mission_id)
+        for name, value in (
+            ("include_result", self.include_result),
+            ("include_trace", self.include_trace),
+            ("include_fixtures", self.include_fixtures),
+        ):
+            if not isinstance(value, bool):
+                raise ArgumentError(f"mission evidence bundle {name} must be a boolean")
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 512:
+            raise ArgumentError("mission evidence bundle max_items must be between 1 and 512")
+
+    def to_query_params(self) -> dict[str, str]:
+        return {
+            "include_result": "true" if self.include_result else "false",
+            "include_trace": "true" if self.include_trace else "false",
+            "include_fixtures": "true" if self.include_fixtures else "false",
+            "max_items": str(self.max_items),
+        }
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleVerifyRequest:
+    """Request verification of one exported, content-addressed mission bundle."""
+
+    bundle: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bundle", dict(_route_mapping("mission evidence bundle", self.bundle)))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"bundle": dict(self.bundle)}
+
+    def to_http_body(self) -> dict[str, Any]:
+        return {"bundle": dict(self.bundle)}
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleImportRequest:
+    """Import one independently verified bundle into the bounded evidence registry."""
+
+    bundle: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bundle", dict(_route_mapping("mission evidence bundle", self.bundle)))
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"bundle": dict(self.bundle)}
+
+    def to_http_body(self) -> dict[str, Any]:
+        return {"bundle": dict(self.bundle)}
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleQueryRequest:
+    """Bounded mission/domain index query for the evidence registry."""
+
+    mission_id: str | None = None
+    domain: str | None = None
+    after: str | None = None
+    max_items: int = 100
+    include_bundles: bool = False
+
+    def __post_init__(self) -> None:
+        for name, value in (("mission_id", self.mission_id), ("domain", self.domain), ("after", self.after)):
+            if value is not None:
+                _route_text(f"mission evidence bundle query {name}", value)
+        if isinstance(self.max_items, bool) or not isinstance(self.max_items, int) or not 1 <= self.max_items <= 256:
+            raise ArgumentError("mission evidence bundle query max_items must be between 1 and 256")
+        if not isinstance(self.include_bundles, bool):
+            raise ArgumentError("mission evidence bundle query include_bundles must be a boolean")
+
+    def to_query_params(self) -> dict[str, str]:
+        params: dict[str, str] = {"max_items": str(self.max_items), "include_bundles": "true" if self.include_bundles else "false"}
+        if self.mission_id is not None:
+            params["mission_id"] = self.mission_id
+        if self.domain is not None:
+            params["domain"] = self.domain
+        if self.after is not None:
+            params["after"] = self.after
+        return params
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return self.to_query_params()
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleImportReport:
+    """Typed idempotent registry import result."""
+
+    raw: dict[str, Any]
+    bundle_digest: str
+    created: bool
+    already_present: bool
+    registry_generation: int
+    registry_size: int
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleImportReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_import")
+        if raw.get("workflow") != "mission_evidence_bundle_import":
+            raise ArgumentError("mission evidence bundle import workflow is invalid")
+        created = raw.get("created")
+        already_present = raw.get("already_present")
+        if not isinstance(created, bool) or not isinstance(already_present, bool):
+            raise ArgumentError("mission evidence bundle import flags must be booleans")
+        return cls(
+            raw=raw,
+            bundle_digest=_route_text("mission evidence bundle import digest", raw.get("bundle_digest")),
+            created=created,
+            already_present=already_present,
+            registry_generation=_route_count("mission evidence bundle import generation", raw.get("registry_generation")),
+            registry_size=_route_count("mission evidence bundle import size", raw.get("registry_size")),
+            execution=_route_text("mission evidence bundle import execution", raw.get("execution")),
+        )
+
+    @property
+    def artifact_registry(self) -> Mapping[str, Any]:
+        """Return the automatic non-claiming artifact-index projection, when present."""
+
+        value = self.raw.get("artifact_registry")
+        if value is None:
+            return {}
+        return _route_mapping("evidence bundle import artifact registry projection", value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleQueryReport:
+    """Typed deterministic evidence registry index page."""
+
+    raw: dict[str, Any]
+    rows: tuple[Mapping[str, Any], ...]
+    next_after: str | None
+    has_more: bool
+    registry_generation: int
+    registry_size: int
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleQueryReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_query")
+        if raw.get("workflow") != "mission_evidence_bundle_query":
+            raise ArgumentError("mission evidence bundle query workflow is invalid")
+        rows = raw.get("rows", [])
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ArgumentError("mission evidence bundle query rows must be an array")
+        next_after = raw.get("next_after")
+        if next_after is not None:
+            _route_text("mission evidence bundle query next cursor", next_after)
+        has_more = raw.get("has_more")
+        if not isinstance(has_more, bool):
+            raise ArgumentError("mission evidence bundle query has_more must be a boolean")
+        return cls(
+            raw=raw,
+            rows=tuple(_route_mapping("mission evidence bundle query row", row) for row in rows),
+            next_after=next_after,
+            has_more=has_more,
+            registry_generation=_route_count("mission evidence bundle query generation", raw.get("registry_generation")),
+            registry_size=_route_count("mission evidence bundle query size", raw.get("registry_size")),
+            execution=_route_text("mission evidence bundle query execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleGetRequest:
+    """Fetch one registry bundle by its content hash."""
+
+    bundle_digest: str
+
+    def __post_init__(self) -> None:
+        _route_text("mission evidence bundle digest", self.bundle_digest)
+
+    def to_mcp_arguments(self) -> dict[str, Any]:
+        return {"bundle_digest": self.bundle_digest}
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleGetReport:
+    """Typed lookup result for one verified registry bundle."""
+
+    raw: dict[str, Any]
+    bundle_digest: str
+    bundle: Mapping[str, Any]
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleGetReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_get")
+        if raw.get("workflow") != "mission_evidence_bundle_get":
+            raise ArgumentError("mission evidence bundle get workflow is invalid")
+        return cls(
+            raw=raw,
+            bundle_digest=_route_text("mission evidence bundle get digest", raw.get("bundle_digest")),
+            bundle=_route_mapping("mission evidence bundle get bundle", raw.get("bundle")),
+            execution=_route_text("mission evidence bundle get execution", raw.get("execution")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleVerificationReport:
+    """Typed digest, retention, and result-integrity verification evidence."""
+
+    raw: dict[str, Any]
+    valid: bool
+    verification_status: str
+    bundle_digest: str
+    recomputed_bundle_digest: str
+    result_digest: str | None
+    recomputed_result_digest: str | None
+    checks: Mapping[str, Any]
+    failures: tuple[str, ...]
+    execution: str
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleVerificationReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_verify")
+        if raw.get("workflow") != "mission_evidence_bundle_verify":
+            raise ArgumentError("mission evidence bundle verification workflow is invalid")
+        valid = raw.get("valid")
+        if not isinstance(valid, bool):
+            raise ArgumentError("mission evidence bundle verification valid must be a boolean")
+        status = _route_text("mission evidence bundle verification status", raw.get("verification_status"))
+        if status not in {"verified", "failed"}:
+            raise ArgumentError(f"unknown mission evidence bundle verification status: {status}")
+        failures = raw.get("failures", [])
+        if not isinstance(failures, Sequence) or isinstance(failures, (str, bytes)):
+            raise ArgumentError("mission evidence bundle verification failures must be an array")
+        result_digest = raw.get("result_digest")
+        recomputed_result_digest = raw.get("recomputed_result_digest")
+        if result_digest is not None:
+            result_digest = _route_text("mission evidence bundle result digest", result_digest)
+        if recomputed_result_digest is not None:
+            recomputed_result_digest = _route_text(
+                "mission evidence bundle recomputed result digest", recomputed_result_digest
+            )
+        return cls(
+            raw=raw,
+            valid=valid,
+            verification_status=status,
+            bundle_digest=_route_text("mission evidence bundle digest", raw.get("bundle_digest")),
+            recomputed_bundle_digest=_route_text(
+                "mission evidence bundle recomputed digest", raw.get("recomputed_bundle_digest")
+            ),
+            result_digest=result_digest,
+            recomputed_result_digest=recomputed_result_digest,
+            checks=_route_mapping("mission evidence bundle verification checks", raw.get("checks")),
+            failures=tuple(_route_text("mission evidence bundle verification failure", item) for item in failures),
+            execution=_route_text("mission evidence bundle verification execution", raw.get("execution")),
+        )
+
+    @property
+    def digest_matches(self) -> bool:
+        return self.checks.get("bundle_digest") is True
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evidence_bundle_verification_report(
+    value: Mapping[str, Any],
+) -> MissionEvidenceBundleVerificationReport:
+    """Parse a direct MCP result or HTTP envelope from bundle verification."""
+
+    return MissionEvidenceBundleVerificationReport.from_wire(value)
+
+
+@dataclass(frozen=True)
+class MissionEvidenceBundleReport:
+    """Typed content-addressed mission evidence export."""
+
+    raw: dict[str, Any]
+    mission_id: str
+    retention: Mapping[str, Any]
+    result: Mapping[str, Any] | None
+    result_digest: str | None
+    evaluator_replay: Mapping[str, Any]
+    catalog_drift: Mapping[str, Any]
+    trace: tuple[Mapping[str, Any], ...]
+    bundle_digest: str
+    execution: str
+    guarantees: tuple[str, ...]
+    limitations: tuple[str, ...]
+    links: Mapping[str, Any]
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "MissionEvidenceBundleReport":
+        raw = _tool_payload(value, "mission_evidence_bundle_export")
+        if raw.get("workflow") != "mission_evidence_bundle_export":
+            raise ArgumentError("mission evidence bundle workflow is invalid")
+        result = raw.get("result")
+        if result is not None and not isinstance(result, Mapping):
+            raise ArgumentError("mission evidence bundle result must be an object or null")
+        trace = raw.get("trace", [])
+        if not isinstance(trace, Sequence) or isinstance(trace, (str, bytes)):
+            raise ArgumentError("mission evidence bundle trace must be an array")
+        digest = _route_text("mission evidence bundle digest", raw.get("bundle_digest"))
+        if len(digest) != 64:
+            raise ArgumentError("mission evidence bundle digest must be a 64-character digest")
+        export = _route_mapping("mission evidence bundle export", raw.get("export"))
+        result_digest = raw.get("result_digest")
+        if result_digest is not None:
+            result_digest = _route_text("mission evidence bundle result digest", result_digest)
+        return cls(
+            raw=raw,
+            mission_id=_route_text("mission evidence bundle mission id", raw.get("mission_id")),
+            retention=_route_mapping("mission evidence bundle retention", raw.get("retention")),
+            result=dict(result) if isinstance(result, Mapping) else None,
+            result_digest=result_digest,
+            evaluator_replay=_route_mapping("mission evidence bundle replay", raw.get("evaluator_replay")),
+            catalog_drift=_route_mapping("mission evidence bundle catalog drift", raw.get("catalog_drift")),
+            trace=tuple(_route_mapping("mission evidence bundle trace row", row) for row in trace),
+            bundle_digest=digest,
+            execution=_route_text("mission evidence bundle execution", export.get("execution")),
+            guarantees=_route_strings("mission evidence bundle guarantees", raw.get("guarantees", [])),
+            limitations=_route_strings("mission evidence bundle limitations", raw.get("limitations", [])),
+            links=_route_mapping("mission evidence bundle links", raw.get("links", {})),
+        )
+
+    @property
+    def summary_only(self) -> bool:
+        return self.retention.get("mode") == "summary_only"
+
+    @property
+    def result_included(self) -> bool:
+        return self.retention.get("result_included") is True
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
+
+
+def mission_evidence_bundle_report(value: Mapping[str, Any]) -> MissionEvidenceBundleReport:
+    """Parse the durable REST mission evidence bundle response."""
+
+    return MissionEvidenceBundleReport.from_wire(value)
 
 
 @dataclass(frozen=True)
@@ -1178,6 +3232,27 @@ def mission_evaluator_discover_report(value: Mapping[str, Any]) -> MissionEvalua
 
 
 __all__ = [
+    "DomainWorkflowInstantiateRequest",
+    "DomainWorkflowPortfolioRequest",
+    "DomainWorkflowPortfolioReport",
+    "DomainWorkflowPortfolioVerifyRequest",
+    "DomainWorkflowPortfolioVerifyReport",
+    "DomainWorkflowVerifyRequest",
+    "DomainWorkflowVerifyReport",
+    "DomainWorkflowScaffoldRequest",
+    "DomainWorkflowReconcileRequest",
+    "DomainWorkflowCatalogueReport",
+    "DomainWorkflowInstantiationReport",
+    "DomainWorkflowScaffoldReport",
+    "DomainWorkflowReconciliationReport",
+    "DomainWorkflowReconciliationImportRequest",
+    "DomainWorkflowReconciliationQueryRequest",
+    "DomainWorkflowReconciliationGetRequest",
+    "DomainWorkflowReconciliationImportReport",
+    "DomainWorkflowReconciliationQueryReport",
+    "DomainWorkflowReconciliationSummaryReport",
+    "DomainWorkflowReconciliationPersistenceStatus",
+    "DomainWorkflowReconciliationGetReport",
     "CapabilityQuery",
     "CapabilityGroupReport",
     "CapabilityMatchReport",
@@ -1189,21 +3264,56 @@ __all__ = [
     "CapabilityRouteRequest",
     "CapabilityRouteNeedReport",
     "CapabilityRouteCoverage",
+    "CapabilityRouteEvidenceSummary",
     "CapabilityRouteReport",
     "CapabilityRouteReviewRequest",
     "CapabilityRouteReviewReport",
+    "CapabilityRoutePlanRequest",
+    "CapabilityRoutePlanReport",
+    "CapabilityRoutePlanVerifyRequest",
+    "CapabilityRoutePlanVerifyReport",
     "MissionEvaluatorQuery",
     "MissionEvaluatorReviewRequest",
     "MissionEvaluatorBindingReport",
     "MissionEvaluatorReviewReport",
+    "MissionEvaluatorReplayRequest",
+    "MissionEvaluatorReplayReport",
+    "MissionEvaluatorReplayCompareRequest",
+    "MissionEvaluatorReplayComparisonReport",
+    "MissionEvaluatorReplayQueryRequest",
+    "MissionEvaluatorReplayQueryReport",
+    "MissionEvidenceBundleRequest",
+    "MissionEvidenceBundleImportRequest",
+    "MissionEvidenceBundleQueryRequest",
+    "MissionEvidenceBundleGetRequest",
+    "MissionEvidenceBundleVerifyRequest",
+    "MissionEvidenceBundleReport",
+    "MissionEvidenceBundleImportReport",
+    "MissionEvidenceBundleQueryReport",
+    "MissionEvidenceBundleGetReport",
+    "MissionEvidenceBundleVerificationReport",
     "MissionEvaluatorAdapterReport",
     "MissionEvaluatorMatchReport",
     "MissionEvaluatorCoverageReport",
     "MissionEvaluatorSearchReport",
     "capability_route_report",
+    "domain_workflow_catalogue_report",
+    "domain_workflow_instantiation_report",
+    "domain_workflow_portfolio_report",
+    "domain_workflow_portfolio_verify_report",
+    "domain_workflow_verify_report",
+    "domain_workflow_scaffold_report",
+    "domain_workflow_reconciliation_report",
     "capability_route_review_report",
+    "capability_route_plan_report",
+    "capability_route_plan_verify_report",
     "capability_discover_report",
     "capability_audit_report",
     "mission_evaluator_discover_report",
     "mission_evaluator_review_report",
+    "mission_evaluator_replay_report",
+    "mission_evaluator_replay_comparison_report",
+    "mission_evaluator_replay_query_report",
+    "mission_evidence_bundle_report",
+    "mission_evidence_bundle_verification_report",
 ]

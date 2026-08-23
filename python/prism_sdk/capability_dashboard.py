@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .artifacts import _digest
 from .capability import (
     _optional_text,
     _route_count,
@@ -14,10 +15,72 @@ from .capability import (
     _tool_payload,
 )
 from .errors import ArgumentError
+from .events import OperationsArtifactEvidencePosture, OperationsReconciliationPosture
 
 CAPABILITY_DASHBOARD_SCHEMA = "bioprism-devplat-capability-dashboard/0.1"
 MAX_DASHBOARD_GROUPS = 512
 DEFAULT_DASHBOARD_GROUPS = 128
+
+
+@dataclass(frozen=True)
+class CapabilityDashboardEvidenceSummary:
+    """Bounded registry metadata joined to the selected dashboard groups."""
+
+    raw: dict[str, Any]
+    scope: str
+    evidence_digest: str
+    artifact_registry_generation: int
+    artifact_registry_size: int
+    workflow_reconciliation_registry_generation: int
+    workflow_reconciliation_registry_size: int
+    groups_with_artifact_evidence: int
+    artifact_evidence_records: int
+    groups_with_workflow_reconciliation: int
+    workflow_reconciliation_records: int
+
+    @classmethod
+    def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityDashboardEvidenceSummary":
+        raw = _route_mapping("capability dashboard evidence summary", value)
+        return cls(
+            raw=raw,
+            scope=_route_text("dashboard evidence scope", raw.get("scope")),
+            evidence_digest=_digest(
+                "dashboard evidence digest", raw.get("evidence_digest")
+            ),
+            artifact_registry_generation=_route_count(
+                "dashboard artifact registry generation",
+                raw.get("artifact_registry_generation"),
+            ),
+            artifact_registry_size=_route_count(
+                "dashboard artifact registry size", raw.get("artifact_registry_size")
+            ),
+            workflow_reconciliation_registry_generation=_route_count(
+                "dashboard workflow reconciliation registry generation",
+                raw.get("workflow_reconciliation_registry_generation"),
+            ),
+            workflow_reconciliation_registry_size=_route_count(
+                "dashboard workflow reconciliation registry size",
+                raw.get("workflow_reconciliation_registry_size"),
+            ),
+            groups_with_artifact_evidence=_route_count(
+                "dashboard groups_with_artifact_evidence",
+                raw.get("groups_with_artifact_evidence"),
+            ),
+            artifact_evidence_records=_route_count(
+                "dashboard artifact_evidence_records", raw.get("artifact_evidence_records")
+            ),
+            groups_with_workflow_reconciliation=_route_count(
+                "dashboard groups_with_workflow_reconciliation",
+                raw.get("groups_with_workflow_reconciliation"),
+            ),
+            workflow_reconciliation_records=_route_count(
+                "dashboard workflow_reconciliation_records",
+                raw.get("workflow_reconciliation_records"),
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.raw)
 
 
 @dataclass(frozen=True)
@@ -52,6 +115,14 @@ class CapabilityDashboardQueryArgs:
                 result[name] = value
         return result
 
+    def to_query_params(self) -> dict[str, str]:
+        """Return the canonical bounded query used by the direct REST route."""
+
+        return {
+            name: str(value).lower() if isinstance(value, bool) else str(value)
+            for name, value in self.to_mcp_arguments().items()
+        }
+
 
 @dataclass(frozen=True)
 class CapabilityDashboardGroupReport:
@@ -68,6 +139,8 @@ class CapabilityDashboardGroupReport:
     invalid_transport_schemas: tuple[str, ...]
     tools: tuple[str, ...]
     gaps: tuple[str, ...]
+    artifact_evidence: OperationsArtifactEvidencePosture | None
+    workflow_reconciliation_evidence: OperationsReconciliationPosture | None
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> "CapabilityDashboardGroupReport":
@@ -79,6 +152,24 @@ class CapabilityDashboardGroupReport:
         schema_count = _route_count("dashboard group schema_backed_tool_count", raw.get("schema_backed_tool_count"))
         if callable_count > tool_count or schema_count > callable_count:
             raise ArgumentError("dashboard group tool counts do not reconcile")
+        artifact_raw = raw.get("artifact_evidence")
+        artifact_evidence = (
+            None
+            if artifact_raw is None
+            else OperationsArtifactEvidencePosture.from_wire(
+                _route_mapping("dashboard group artifact evidence", artifact_raw)
+            )
+        )
+        reconciliation_raw = raw.get("workflow_reconciliation_evidence")
+        workflow_reconciliation_evidence = (
+            None
+            if reconciliation_raw is None
+            else OperationsReconciliationPosture.from_wire(
+                _route_mapping(
+                    "dashboard group workflow reconciliation evidence", reconciliation_raw
+                )
+            )
+        )
         return cls(
             raw=raw,
             id=_route_text("dashboard group id", raw.get("id")),
@@ -93,6 +184,8 @@ class CapabilityDashboardGroupReport:
             invalid_transport_schemas=_route_strings("dashboard invalid schemas", raw.get("invalid_transport_schemas", [])),
             tools=_route_strings("dashboard group tools", raw.get("tools", [])),
             gaps=_route_strings("dashboard group gaps", raw.get("gaps", [])),
+            artifact_evidence=artifact_evidence,
+            workflow_reconciliation_evidence=workflow_reconciliation_evidence,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -105,6 +198,9 @@ class CapabilityDashboardReport:
     schema: str
     catalog_digest: str
     dashboard_digest: str
+    evidence_digest: str | None
+    evidence_scope: str | None
+    evidence: CapabilityDashboardEvidenceSummary | None
     ready: bool
     query: dict[str, Any]
     total_group_count: int
@@ -135,11 +231,34 @@ class CapabilityDashboardReport:
         selected = _route_count("dashboard selected_group_count", audit.get("selected_group_count"))
         if selected != len(groups):
             raise ArgumentError("dashboard selected group count does not reconcile")
+        evidence_raw = audit.get("evidence")
+        evidence = (
+            None
+            if evidence_raw is None
+            else CapabilityDashboardEvidenceSummary.from_wire(
+                _route_mapping("capability dashboard evidence", evidence_raw)
+            )
+        )
+        evidence_digest_raw = raw.get("evidence_digest")
+        evidence_digest = (
+            None
+            if evidence_digest_raw is None
+            else _digest("dashboard evidence digest", evidence_digest_raw)
+        )
+        if evidence is not None and evidence_digest != evidence.evidence_digest:
+            raise ArgumentError("dashboard evidence digest does not match its audit summary")
         return cls(
             raw=raw,
             schema=_route_text("dashboard schema", raw.get("schema")),
             catalog_digest=_route_text("dashboard catalog_digest", raw.get("catalog_digest")),
             dashboard_digest=_route_text("dashboard dashboard_digest", raw.get("dashboard_digest")),
+            evidence_digest=evidence_digest,
+            evidence_scope=(
+                None
+                if raw.get("evidence_scope") is None
+                else _route_text("dashboard evidence_scope", raw.get("evidence_scope"))
+            ),
+            evidence=evidence,
             ready=raw.get("capability_dashboard_ready") is True,
             query=_route_mapping("dashboard query", audit.get("query")),
             total_group_count=_route_count("dashboard total_group_count", audit.get("total_group_count")),
@@ -180,6 +299,7 @@ __all__ = [
     "CAPABILITY_DASHBOARD_SCHEMA",
     "MAX_DASHBOARD_GROUPS",
     "DEFAULT_DASHBOARD_GROUPS",
+    "CapabilityDashboardEvidenceSummary",
     "CapabilityDashboardQueryArgs",
     "CapabilityDashboardGroupReport",
     "CapabilityDashboardReport",

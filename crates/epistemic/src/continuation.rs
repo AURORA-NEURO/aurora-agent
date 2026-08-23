@@ -23,7 +23,7 @@
 //!
 //! A version-key comparison cannot tell those apart; it collapses all three into "the world
 //! changed". So this module takes the loss from the caller — same absence as everywhere else in
-//! this crate, same [`crate::gap`] — and classifies. The other two verdicts, [`Rebase::Stale`] and
+//! this crate, under the same explicit-contract rule — and classifies. The other two verdicts, [`Rebase::Stale`] and
 //! [`Rebase::Invalid`], are decided on keys alone and are checked first, because 43.30's invariant
 //! is that "stale continuations never silently execute" and a stale checkpoint must be rejected
 //! before anyone computes a regret from it.

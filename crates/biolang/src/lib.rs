@@ -66,10 +66,11 @@
 //!    [`worldline::Worldline::orders_on_a_carried_clock`] reports this rather than hiding it.
 //! 3. **25.14 "context policy" and "memory".** Both listed as required field groups with no shape.
 //!    They are carried as strings.
-//! 4. **25.20 "signatures".** Required, and unsatisfiable: the platform's only cryptographic
-//!    primitive is `sha2`, so `bioprism-bundle` offers symmetric authentication and states in its
-//!    own types that any verifier could forge a tag. [`bundle::Attestation`] therefore carries a MAC
-//!    tag and a [`bundle::Repudiability`], and there is no field called `signature`.
+//! 4. **25.20 "signatures".** The implementing bundle crate now offers an additive Ed25519
+//!    public-key path as well as symmetric authentication. This blueprint IR still models the
+//!    legacy HMAC-shaped [`bundle::Attestation`] only: it carries a MAC tag and a
+//!    [`bundle::Repudiability`], and there is no field called `signature`. Projection tests refuse
+//!    to coerce the stronger public-key value into that weaker shape.
 //!
 //! # How much of §25 is boilerplate, and how that was measured
 //!
@@ -147,7 +148,9 @@ pub use error::{
     MoleculeError, MutationIrError, OracleIrError, ParseError, QueryError, StateError, SystemError,
     TypeError, WorldError, WorldlineError,
 };
-pub use fbc::{ClaimSchema, EvidenceObligation, Falsifier, Fbc, Intent, TerminalState, Termination};
+pub use fbc::{
+    ClaimSchema, EvidenceObligation, Falsifier, Fbc, Intent, TerminalState, Termination,
+};
 pub use ids::{
     ActId, ActionId, AssetId, ComponentId, FbcId, MoleculeId, MutationId, ObligationId, StateId,
     SystemId, WorldlineId,

@@ -1,0 +1,47 @@
+{
+  "budgets": {
+    "max_facts": 64,
+    "max_tokens": 6000
+  },
+  "decision_loss": {
+    "actions": ["accept", "defer", "reject"],
+    "loss": [
+      [0.0, 7.0, 0.0],
+      [4.0, 11.0, 5.0],
+      [8.0, 15.0, 8.0]
+    ],
+    "models": ["m-a", "m-b", "m-c"],
+    "sense": "loss"
+  },
+  "decision_time": "2025-01-01T00:00:00Z",
+  "distortion_tolerance": 0.25,
+  "permitted_actions": ["reject", "accept", "defer"],
+  "policy": ["research-only"],
+  "protected_tags": [
+    "identity",
+    "split",
+    "site",
+    "scanner",
+    "time",
+    "specimen",
+    "preprocessing",
+    "policy",
+    "negative_evidence",
+    "protected"
+  ],
+  "query_id": "audit-split-integrity-rate-distortion-v4",
+  "rate_distortion": {
+    "criterion": "bayes_regret",
+    "compatibility_floor": 0.05,
+    "prior": [0.5, 0.25, 0.25],
+    "evidence_pool": {
+      "items": [
+        { "id": "scanner-review", "cost": 2.0, "likelihood": [0.9, 0.2, 0.8] },
+        { "id": "marker-panel", "cost": 1.0, "likelihood": [0.2, 0.8, 0.3] }
+      ]
+    }
+  },
+  "role": "research-auditor",
+  "schema_version": "fiber-query/0.4",
+  "targets": ["split_integrity_status"]
+}

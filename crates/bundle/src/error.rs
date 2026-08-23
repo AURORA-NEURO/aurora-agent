@@ -24,7 +24,9 @@ pub enum BundleError {
     },
 
     /// The manifest's own digest disagrees with the manifest bytes.
-    #[error("manifest digest {claimed} does not match the manifest body, which hashes to {recomputed}")]
+    #[error(
+        "manifest digest {claimed} does not match the manifest body, which hashes to {recomputed}"
+    )]
     ManifestDigestMismatch { claimed: String, recomputed: String },
 
     /// Two entries share a name, so "the digest of `x`" is ambiguous.
@@ -40,7 +42,9 @@ pub enum BundleError {
     UnlistedContent { entry: String },
 
     /// A manifest lists an inline entry whose content is absent.
-    #[error("manifest lists `{entry}` as carried inline but the bundle has no content under that name")]
+    #[error(
+        "manifest lists `{entry}` as carried inline but the bundle has no content under that name"
+    )]
     MissingInlineContent { entry: String },
 
     /// A carried Context Certificate failed 43.26's own self-verification.
@@ -55,6 +59,10 @@ pub enum BundleError {
     #[error("attestation tag does not verify under key `{key_identity}`; the bytes were altered, or the key is not the one that produced it — these are indistinguishable")]
     TagMismatch { key_identity: KeyIdentity },
 
+    /// An Ed25519 signature does not verify under the offered public key.
+    #[error("ed25519 signature does not verify under public key `{key_identity}`")]
+    SignatureMismatch { key_identity: KeyIdentity },
+
     /// The attestation names one key and the verifier offered another.
     #[error("attestation was produced under key `{attested}` but verification was offered key `{offered}`")]
     KeyIdentityMismatch {
@@ -62,19 +70,41 @@ pub enum BundleError {
         offered: KeyIdentity,
     },
 
+    /// A public key was not valid for the caller-supplied signing instant.
+    #[error("public key `{key_identity}` is not valid at signing instant {signed_at:?}: {detail}")]
+    KeyNotValidAtSigningTime {
+        key_identity: KeyIdentity,
+        signed_at: Option<u64>,
+        detail: String,
+    },
+
+    /// A bounded validity window cannot be applied without a caller-supplied signing instant.
+    #[error("public key `{key_identity}` has a bounded validity window but the attestation has no signing instant")]
+    MissingSigningTime { key_identity: KeyIdentity },
+
     /// The attestation covers a different manifest than the bundle presents.
-    #[error("attestation covers manifest {attested} but this bundle's manifest hashes to {actual}")]
+    #[error(
+        "attestation covers manifest {attested} but this bundle's manifest hashes to {actual}"
+    )]
     AttestationCoversDifferentManifest { attested: String, actual: String },
 
     /// The attestation could not be reduced to canonical bytes, so no check was possible.
     ///
     /// Distinct from a failing tag: nothing was checked, rather than checked and rejected.
-    #[error("attestation could not be reduced to canonical bytes, so no check was performed: {detail}")]
+    #[error(
+        "attestation could not be reduced to canonical bytes, so no check was performed: {detail}"
+    )]
     AttestationUnreadable { detail: String },
 
     /// A tag was replayed from a different attestation purpose.
     #[error("attestation was produced for purpose `{attested}` and cannot be reused for purpose `{requested}`")]
     PurposeMismatch { attested: String, requested: String },
+
+    /// A caller-supplied trust registry or policy rejected an otherwise well-formed public-key
+    /// attestation. Keeping this distinct from [`BundleError::SignatureMismatch`] makes it clear
+    /// that cryptographic validity and authorization are separate decisions.
+    #[error("trust registry policy rejected the attestation: {detail}")]
+    TrustPolicyRejected { detail: String },
 
     /// The audit chain's link digests do not form an unbroken sequence.
     #[error("audit chain breaks at sequence {sequence}: entry records previous={recorded} but the preceding entry hashes to {computed}")]

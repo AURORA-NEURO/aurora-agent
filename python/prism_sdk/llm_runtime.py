@@ -1,0 +1,6254 @@
+"""User-supplied LLM credentials and provider invocation.
+
+The MCP/Rust brain deliberately never accepts a provider secret. Applications use this module as
+the runtime boundary:
+
+1. collect a key from a UI, a no-echo prompt, an environment variable, or an external secret
+   manager;
+2. register it in an in-memory :class:`CredentialStore` and receive an opaque handle;
+3. invoke a configured provider with the handle; and
+4. revoke or discard the store when the session ends.
+
+The handle is metadata-only and cannot be JSON serialized into a brain plan. The store is
+intentionally not persistent. Production applications that need persistence should keep only an
+external secret-manager reference and recreate a short-lived handle at process startup.
+
+The OpenAI adapter uses the Responses API shape (``POST /v1/responses`` with ``model`` and
+``input``) and Bearer authentication. The transport is standard-library-only so the SDK remains
+dependency-free. Anthropic Messages and OpenAI-compatible Chat Completions are supported through
+the same explicit provider contract.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
+import getpass
+import hashlib
+import http.client
+import json
+import math
+import os
+from pathlib import Path
+import secrets
+import threading
+import time
+import uuid
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
+from urllib.parse import urlsplit
+
+
+MAX_MESSAGES = 512
+MAX_MESSAGE_CHARS = 2_000_000
+MAX_CREDENTIAL_BYTES = 16_384
+MAX_RESPONSE_BYTES = 20_000_000
+MAX_PROVIDER_TOOLS = 128
+MAX_TOOL_NAME_BYTES = 256
+MAX_TOOL_ARGUMENT_BYTES = 1_000_000
+MAX_PROVIDER_CONTENT_PARTS = 64
+MAX_PROVIDER_CONTENT_PART_BYTES = MAX_MESSAGE_CHARS
+MAX_STREAM_EVENTS = 100_000
+MAX_STREAM_EVENT_BYTES = 2_000_000
+MAX_STREAM_TEXT_BYTES = MAX_MESSAGE_CHARS
+SUPPORTED_PROTOCOLS = {
+    "openai_responses",
+    "openai_chat_completions",
+    "anthropic_messages",
+}
+PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
+MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
+PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
+_LEGACY_PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.1"
+PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.2"
+CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
+CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1"
+PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
+IN_MEMORY_PROVIDER_SCHEMA = "bioprism-llm-in-memory-provider/0.1"
+MAX_MODEL_CANDIDATES = 512
+MAX_MODEL_METADATA_BYTES = 256_000
+MAX_PROVIDER_HEALTH_RECORDS = 16_384
+MAX_PROVIDER_HEALTH_BYTES = 32_000_000
+MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES = 32_000_000
+MAX_PROVIDER_DISCOVERED_MODELS = 512
+MAX_PROVIDER_MODEL_DISCOVERY_BYTES = 8_000_000
+MAX_CREDENTIAL_PROVISIONING_SOURCES = 128
+MAX_CREDENTIAL_PROVISIONING_PROVIDERS = 128
+MAX_CREDENTIAL_SOURCE_LABEL_BYTES = 256
+CREDENTIAL_SOURCE_KINDS = ("environment_variable", "external_secret_resolver")
+_MODEL_CANDIDATE_FIELDS = frozenset(
+    {
+        "provider",
+        "model",
+        "context_window_tokens",
+        "max_output_tokens",
+        "quality",
+        "latency_ms",
+        "cost_per_million_tokens",
+        "reliability",
+        "capabilities",
+        "requires_credential",
+        "enabled",
+        "metadata",
+    }
+)
+_MODEL_SECRET_METADATA_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "bearer",
+        "credential",
+        "password",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+    }
+)
+_PROVIDER_IMAGE_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
+
+
+def _normalize_provider_path(value: str, field_name: str) -> str:
+    """Validate a relative HTTP path without allowing query/fragment injection."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ProviderError(f"{field_name} must be a non-empty path")
+    if len(value.encode("utf-8")) > 2048 or "\x00" in value or "?" in value or "#" in value:
+        raise ProviderError(f"{field_name} is outside its bounded path contract")
+    if any(character.isspace() or ord(character) < 32 for character in value):
+        raise ProviderError(f"{field_name} cannot contain whitespace or control characters")
+    return value if value.startswith("/") else "/" + value
+
+
+def _assert_secret_safe_json(value: Any, *, label: str, depth: int = 0) -> None:
+    if depth > 8:
+        raise ProviderError(f"{label} is too deeply nested")
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if not isinstance(key, str) or not key.strip() or len(key.encode("utf-8")) > 128:
+                raise ProviderError(f"{label} contains an invalid metadata key")
+            normalized_key = key.lower().replace("-", "_")
+            if normalized_key in _MODEL_SECRET_METADATA_KEYS:
+                raise ProviderError(f"{label} contains credential-shaped metadata")
+            _assert_secret_safe_json(child, label=label, depth=depth + 1)
+        return
+    if isinstance(value, (list, tuple)):
+        if len(value) > 256:
+            raise ProviderError(f"{label} contains too many metadata items")
+        for child in value:
+            _assert_secret_safe_json(child, label=label, depth=depth + 1)
+        return
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ProviderError(f"{label} contains a non-finite number")
+    if not isinstance(value, (str, int, float, bool)) and value is not None:
+        raise ProviderError(f"{label} must be JSON-safe")
+
+
+def _validate_environment_variable(variable: str) -> str:
+    if (
+        not isinstance(variable, str)
+        or not variable
+        or not variable.replace("_", "").isalnum()
+        or any(ord(character) < 32 for character in variable)
+    ):
+        raise CredentialError("environment variable name must be alphanumeric with underscores")
+    return variable
+
+
+def _validate_credential_reference(reference: str) -> str:
+    if not isinstance(reference, str) or not reference.strip() or len(reference) > 512:
+        raise CredentialError("external credential reference must be a bounded non-empty string")
+    if any(ord(character) < 32 for character in reference):
+        raise CredentialError("external credential reference contains a control character")
+    return reference
+
+
+def _validate_credential_source_label(label: str) -> str:
+    if (
+        not isinstance(label, str)
+        or not label.strip()
+        or len(label.encode("utf-8")) > MAX_CREDENTIAL_SOURCE_LABEL_BYTES
+        or any(ord(character) < 32 for character in label)
+    ):
+        raise CredentialError("credential source label is outside its bounded contract")
+    return label.strip()
+
+
+class CredentialError(ValueError):
+    """A credential was missing, invalid, expired, revoked, or used with the wrong provider."""
+
+
+class ProviderError(RuntimeError):
+    """A provider call failed without retaining or exposing the credential."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        status_code: int | None = None,
+        circuit_open: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
+        self.circuit_open = circuit_open
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderInvocationMetadata:
+    """Value-only metadata for one provider request boundary.
+
+    Observers receive token estimates and request shape, never the messages, headers, credential
+    handle, response text, or provider wire payload.  The estimate is deliberately conservative
+    and is useful for admission budgets; authoritative usage, when returned by a provider, is
+    supplied separately to :class:`ProviderInvocationObserver`.
+    """
+
+    provider: str
+    model: str
+    kind: str
+    input_tokens: int
+    requested_output_tokens: int
+    tool_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "kind": self.kind,
+            "input_tokens": self.input_tokens,
+            "requested_output_tokens": self.requested_output_tokens,
+            "tool_count": self.tool_count,
+            "retention": "metadata_only_no_provider_payloads",
+        }
+
+
+class ProviderInvocationObserver(Protocol):
+    """Optional per-request admission/outcome hook for autonomous execution accounting."""
+
+    def before(self, metadata: ProviderInvocationMetadata) -> None:
+        ...
+
+    def after(
+        self,
+        metadata: ProviderInvocationMetadata,
+        response: "ProviderResponse | None",
+        error: BaseException | None,
+        latency_ms: float,
+    ) -> None:
+        ...
+
+
+class CompositeProviderInvocationObserver:
+    """Fan out value-only provider lifecycle notifications to multiple observers.
+
+    The execution-policy observer remains in the chain alongside telemetry observers. Each
+    observer receives the same metadata object, and no composite method accepts provider
+    messages, credentials, response text, or wire payloads.
+    """
+
+    __slots__ = ("_observers",)
+
+    def __init__(self, observers: Sequence[ProviderInvocationObserver | None]) -> None:
+        selected = tuple(observer for observer in observers if observer is not None)
+        if not selected:
+            raise ValueError("composite provider invocation observer requires at least one observer")
+        if any(not callable(getattr(observer, "before", None)) or not callable(getattr(observer, "after", None)) for observer in selected):
+            raise TypeError("composite provider invocation observers must implement before and after")
+        self._observers = selected
+
+    @property
+    def observers(self) -> tuple[ProviderInvocationObserver, ...]:
+        return self._observers
+
+    def before(self, metadata: ProviderInvocationMetadata) -> None:
+        for observer in self._observers:
+            observer.before(metadata)
+
+    def after(
+        self,
+        metadata: ProviderInvocationMetadata,
+        response: "ProviderResponse | None",
+        error: BaseException | None,
+        latency_ms: float,
+    ) -> None:
+        failures: list[BaseException] = []
+        for observer in self._observers:
+            try:
+                observer.after(metadata, response, error, latency_ms)
+            except BaseException as observer_error:
+                failures.append(observer_error)
+        if failures:
+            raise failures[0]
+
+
+class SecretValue:
+    """A non-serializable secret wrapper whose display forms are always redacted."""
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: str) -> None:
+        if not isinstance(value, str) or not value:
+            raise CredentialError("credential value must be a non-empty string")
+        self._value = value
+
+    def expose(self) -> str:
+        """Expose the value only at the HTTP-header construction boundary."""
+
+        return self._value
+
+    def __repr__(self) -> str:
+        return "SecretValue(<redacted>)"
+
+    def __str__(self) -> str:
+        return "<redacted>"
+
+
+@dataclass(frozen=True, slots=True)
+class _CredentialEntry:
+    provider: str
+    secret: SecretValue
+    expires_at: float | None
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialStatus:
+    """Redacted readiness projection for one user-owned provider credential set."""
+
+    provider: str
+    configured: bool
+    credential_count: int
+    credentials: tuple[Mapping[str, Any], ...]
+    secret_persistence: str = "in_memory_only"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "configured": self.configured,
+            "credential_count": self.credential_count,
+            "credentials": [dict(item) for item in self.credentials],
+            "secret_persistence": self.secret_persistence,
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCredentialInstructions:
+    """Redacted, application-facing contract for collecting one provider credential.
+
+    This is deliberately a process description rather than a credential capability.  A UI can
+    render the next action and select a protected input path, but it cannot obtain a secret from
+    this object.  The raw value must be submitted directly to
+    :meth:`ProviderOnboarding.collect_user_credential` or resolved by the embedding application.
+    """
+
+    provider: str
+    provider_registered: bool
+    requires_credential: bool | None
+    ready: bool
+    next_action: str
+    input_methods: tuple[str, ...]
+    environment_variable: str | None
+    session_required: bool = True
+    secret_transport: str = "caller_supplied_in_memory_handle"
+    secret_persistence: str = "in_memory_only"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": CREDENTIAL_ONBOARDING_SCHEMA,
+            "provider": self.provider,
+            "provider_registered": self.provider_registered,
+            "requires_credential": self.requires_credential,
+            "ready": self.ready,
+            "next_action": self.next_action,
+            "input_methods": list(self.input_methods),
+            "environment_variable": self.environment_variable,
+            "session_required": self.session_required,
+            "secret_transport": self.secret_transport,
+            "secret_persistence": self.secret_persistence,
+            "secret_material": "never_returned",
+        }
+
+
+class CredentialHandle:
+    """Opaque capability for one provider credential.
+
+    The underlying store is held by identity and the secret is never an attribute of this handle.
+    ``to_metadata`` is the only supported serialization path and returns no secret material.
+    """
+
+    __slots__ = ("provider", "credential_id", "_store")
+
+    def __init__(self, provider: str, credential_id: str, store: "CredentialStore") -> None:
+        self.provider = provider
+        self.credential_id = credential_id
+        self._store = store
+
+    def to_metadata(
+        self,
+        *,
+        source: str = "unknown",
+        expires_at: float | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "credential_id": self.credential_id,
+            "credential_present": True,
+            "secret_persistence": "in_memory_only",
+            "source": source,
+            "expires_at": expires_at,
+        }
+
+    def __repr__(self) -> str:
+        return f"CredentialHandle(provider={self.provider!r}, credential_id='<redacted>')"
+
+    def __str__(self) -> str:
+        return "<credential-handle redacted>"
+
+
+class CredentialStore:
+    """Thread-safe, in-memory user credential store.
+
+    ``register`` is the normal UI integration point. ``prompt`` uses :mod:`getpass`, so a CLI
+    user can enter a key without terminal echo. Neither method writes the value to disk, an
+    environment variable, a log, a brain plan, or an MCP argument.
+    """
+
+    def __init__(self, *, max_credentials: int = 32, clock: Callable[[], float] = time.time) -> None:
+        if max_credentials <= 0:
+            raise CredentialError("max_credentials must be positive")
+        self._max_credentials = max_credentials
+        self._clock = clock
+        self._entries: dict[str, _CredentialEntry] = {}
+        self._lock = threading.RLock()
+
+    _SOURCES = frozenset({"direct", "protected_ui", "prompt", "environment", "external_resolver"})
+
+    def register(
+        self,
+        provider: str,
+        secret: str,
+        *,
+        ttl_seconds: float | None = None,
+        source: str = "direct",
+    ) -> CredentialHandle:
+        self._validate_provider(provider)
+        if not isinstance(secret, str) or not secret.strip():
+            raise CredentialError("credential value must be a non-empty string")
+        if len(secret.encode("utf-8")) > MAX_CREDENTIAL_BYTES:
+            raise CredentialError("credential value exceeds the bounded size")
+        if ttl_seconds is not None and (not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0):
+            raise CredentialError("ttl_seconds must be positive or None")
+        if not isinstance(source, str) or source not in self._SOURCES:
+            raise CredentialError("credential source is not supported")
+        with self._lock:
+            self._purge_expired_locked()
+            if len(self._entries) >= self._max_credentials:
+                raise CredentialError("credential store capacity is exhausted")
+            credential_id = secrets.token_urlsafe(24)
+            while credential_id in self._entries:
+                credential_id = secrets.token_urlsafe(24)
+            expires_at = None if ttl_seconds is None else self._clock() + float(ttl_seconds)
+            self._entries[credential_id] = _CredentialEntry(
+                provider=provider,
+                secret=SecretValue(secret),
+                expires_at=expires_at,
+                source=source,
+            )
+            return CredentialHandle(provider, credential_id, self)
+
+    def register_environment(
+        self,
+        provider: str,
+        variable: str,
+        *,
+        ttl_seconds: float | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialHandle:
+        """Load a named environment variable without including its value in any metadata."""
+
+        variable = _validate_environment_variable(variable)
+        source = os.environ if environ is None else environ
+        value = source.get(variable)
+        if value is None:
+            raise CredentialError(f"environment variable {variable!r} is not set")
+        return self.register(provider, value, ttl_seconds=ttl_seconds, source="environment")
+
+    def prompt(
+        self,
+        provider: str,
+        *,
+        prompt: str = "Provider API key: ",
+        ttl_seconds: float | None = None,
+        reader: Callable[[str], str] | None = None,
+    ) -> CredentialHandle:
+        """Collect a key without echo by default; ``reader`` makes UI/tests injectable."""
+
+        value = (getpass.getpass(prompt) if reader is None else reader(prompt))
+        return self.register(provider, value, ttl_seconds=ttl_seconds, source="prompt")
+
+    def register_resolver(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        """Resolve one external secret-manager reference for this short-lived process.
+
+        Only the resolver sees the reference and value. The store retains the resulting secret in
+        memory for the handle lifetime and deliberately does not retain the reference, so a ledger,
+        route, prompt, or provider response cannot accidentally become a secret-manager index.
+        """
+
+        self._validate_provider(provider)
+        reference = _validate_credential_reference(reference)
+        if not callable(resolver):
+            raise CredentialError("external credential resolver must be callable")
+        try:
+            value = resolver(reference)
+        except Exception as error:  # pragma: no cover - defensive boundary for foreign resolvers
+            raise CredentialError("external credential resolver failed") from error
+        return self.register(
+            provider,
+            value,
+            ttl_seconds=ttl_seconds,
+            source="external_resolver",
+        )
+
+    def revoke(self, handle: CredentialHandle) -> None:
+        self._assert_handle(handle)
+        with self._lock:
+            self._entries.pop(handle.credential_id, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+    def metadata(self, handle: CredentialHandle) -> dict[str, Any]:
+        entry = self._resolve_entry(handle)
+        return handle.to_metadata(source=entry.source, expires_at=entry.expires_at)
+
+    def status(self, provider: str) -> CredentialStatus:
+        """Return readiness metadata without returning handles or secret material."""
+
+        self._validate_provider(provider)
+        with self._lock:
+            self._purge_expired_locked()
+            entries = [
+                (credential_id, entry)
+                for credential_id, entry in self._entries.items()
+                if entry.provider == provider
+            ]
+        credentials = tuple(
+            {
+                "credential_id": credential_id,
+                "source": entry.source,
+                "expires_at": entry.expires_at,
+                "secret_persistence": "in_memory_only",
+            }
+            for credential_id, entry in sorted(entries)
+        )
+        return CredentialStatus(
+            provider=provider,
+            configured=bool(credentials),
+            credential_count=len(credentials),
+            credentials=credentials,
+        )
+
+    def statuses(self) -> list[CredentialStatus]:
+        """Return deterministic redacted status for every provider currently in the store."""
+
+        with self._lock:
+            self._purge_expired_locked()
+            providers = sorted({entry.provider for entry in self._entries.values()})
+        return [self.status(provider) for provider in providers]
+
+    def _assert_handle(self, handle: CredentialHandle) -> None:
+        if not isinstance(handle, CredentialHandle) or handle._store is not self:
+            raise CredentialError("credential handle belongs to a different store")
+
+    def _resolve(self, handle: CredentialHandle) -> SecretValue:
+        return self._resolve_entry(handle).secret
+
+    def _resolve_entry(self, handle: CredentialHandle) -> _CredentialEntry:
+        self._assert_handle(handle)
+        with self._lock:
+            self._purge_expired_locked()
+            entry = self._entries.get(handle.credential_id)
+            if entry is None:
+                raise CredentialError("credential handle is unknown, revoked, or expired")
+            if entry.provider != handle.provider:
+                raise CredentialError("credential handle provider mismatch")
+            return entry
+
+    def _purge_expired_locked(self) -> None:
+        now = self._clock()
+        expired = [
+            identifier
+            for identifier, entry in self._entries.items()
+            if entry.expires_at is not None and now >= entry.expires_at
+        ]
+        for identifier in expired:
+            self._entries.pop(identifier, None)
+
+    @staticmethod
+    def _validate_provider(provider: str) -> None:
+        if not isinstance(provider, str) or not provider.strip() or "/" in provider or " " in provider:
+            raise CredentialError("provider must be a non-empty path-safe identifier")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderConfig:
+    """Non-secret transport and protocol metadata for one provider."""
+
+    provider: str
+    base_url: str
+    protocol: str = "openai_responses"
+    path: str | None = None
+    requires_credential: bool = True
+    timeout_seconds: float = 60.0
+    max_response_bytes: int = MAX_RESPONSE_BYTES
+    allow_insecure_http: bool = False
+    api_key_header: str | None = None
+    max_attempts: int = 1
+    retry_backoff_seconds: float = 0.0
+    circuit_breaker_failure_threshold: int = 3
+    circuit_breaker_reset_seconds: float = 30.0
+    models_path: str | None = None
+    structured_output_mode: str = "json_schema"
+    transport: "InMemoryProvider | None" = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not self.provider or "/" in self.provider or " " in self.provider:
+            raise ProviderError("provider must be a non-empty path-safe identifier")
+        if self.protocol not in SUPPORTED_PROTOCOLS:
+            raise ProviderError(f"unsupported provider protocol {self.protocol!r}")
+        if self.structured_output_mode not in {"json_schema", "json_object", "disabled"}:
+            raise ProviderError(
+                "structured_output_mode must be json_schema, json_object, or disabled"
+            )
+        if self.transport is not None and not callable(getattr(self.transport, "invoke", None)):
+            raise ProviderError("provider transport must expose a callable invoke method")
+        parsed = urlsplit(self.base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ProviderError("base_url must be an absolute http(s) URL")
+        if parsed.username or parsed.password:
+            raise ProviderError("base_url must not contain embedded credentials")
+        if self.timeout_seconds <= 0 or self.max_response_bytes <= 0:
+            raise ProviderError("provider timeout and response bound must be positive")
+        if not 1 <= self.max_attempts <= 8:
+            raise ProviderError("max_attempts must be within [1, 8]")
+        if not 0 <= self.retry_backoff_seconds <= 60:
+            raise ProviderError("retry_backoff_seconds must be within [0, 60]")
+        if not 1 <= self.circuit_breaker_failure_threshold <= 100:
+            raise ProviderError("circuit_breaker_failure_threshold must be within [1, 100]")
+        if self.circuit_breaker_reset_seconds <= 0:
+            raise ProviderError("circuit_breaker_reset_seconds must be positive")
+        if parsed.scheme == "http" and not self.allow_insecure_http:
+            raise ProviderError("plain HTTP requires allow_insecure_http=True for local/test use")
+        if self.path is not None:
+            _normalize_provider_path(self.path, "provider path")
+        if self.models_path is not None:
+            _normalize_provider_path(self.models_path, "provider models_path")
+
+    @property
+    def endpoint(self) -> tuple[str, int | None, str, str]:
+        parsed = urlsplit(self.base_url)
+        default_port = 443 if parsed.scheme == "https" else 80
+        prefix = parsed.path.rstrip("/")
+        path = self.path or {
+            "openai_responses": "/v1/responses",
+            "openai_chat_completions": "/v1/chat/completions",
+            "anthropic_messages": "/v1/messages",
+        }[self.protocol]
+        path = _normalize_provider_path(path, "provider path")
+        return parsed.hostname or "", parsed.port or default_port, prefix + path, parsed.scheme
+
+    @property
+    def models_endpoint(self) -> tuple[str, int | None, str, str]:
+        """Return the bounded model-inventory endpoint for this provider."""
+
+        parsed = urlsplit(self.base_url)
+        default_port = 443 if parsed.scheme == "https" else 80
+        prefix = parsed.path.rstrip("/")
+        path = _normalize_provider_path(self.models_path or "/v1/models", "provider models_path")
+        return parsed.hostname or "", parsed.port or default_port, prefix + path, parsed.scheme
+
+    def to_metadata(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "protocol": self.protocol,
+            "path": self.endpoint[2],
+            "models_path": self.models_endpoint[2],
+            "requires_credential": self.requires_credential,
+            "credential_transport": "caller_supplied_in_memory_handle",
+            "secret_logging": "redacted",
+            "max_attempts": self.max_attempts,
+            "retry_backoff_seconds": self.retry_backoff_seconds,
+            "circuit_breaker_failure_threshold": self.circuit_breaker_failure_threshold,
+            "circuit_breaker_reset_seconds": self.circuit_breaker_reset_seconds,
+            "structured_output_mode": self.structured_output_mode,
+            "transport": "in_memory" if self.transport is not None else "http",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderModelDescriptor:
+    """Secret-free projection of one model returned by a provider inventory endpoint.
+
+    Inventory endpoints usually expose availability and capabilities, but not trustworthy
+    quality, latency, or current economics for a caller's workload.  Those routing priors are
+    therefore required explicitly by :meth:`to_candidate` instead of being guessed here.
+    """
+
+    provider: str
+    model: str
+    capabilities: tuple[str, ...] = ()
+    context_window_tokens: int | None = None
+    max_output_tokens: int | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.provider, str)
+            or not self.provider.strip()
+            or "/" in self.provider
+            or " " in self.provider
+        ):
+            raise ProviderError("provider model descriptor provider must be path-safe")
+        if not isinstance(self.model, str) or not self.model.strip() or len(self.model.encode("utf-8")) > 512:
+            raise ProviderError("provider model descriptor model must be bounded")
+        if not isinstance(self.capabilities, Sequence) or isinstance(self.capabilities, (str, bytes)):
+            raise ProviderError("provider model descriptor capabilities must be a string sequence")
+        normalized_capabilities: list[str] = []
+        for capability in self.capabilities:
+            if (
+                not isinstance(capability, str)
+                or not capability.strip()
+                or len(capability.encode("utf-8")) > 128
+                or any(ord(character) < 32 for character in capability)
+            ):
+                raise ProviderError("provider model descriptor capabilities are invalid")
+            if capability not in normalized_capabilities:
+                normalized_capabilities.append(capability)
+        object.__setattr__(self, "capabilities", tuple(normalized_capabilities))
+        for name, value in (
+            ("context_window_tokens", self.context_window_tokens),
+            ("max_output_tokens", self.max_output_tokens),
+        ):
+            if value is not None and (
+                not isinstance(value, int) or isinstance(value, bool) or value <= 0
+            ):
+                raise ProviderError(f"provider model descriptor {name} must be positive when present")
+        if (
+            self.context_window_tokens is not None
+            and self.max_output_tokens is not None
+            and self.max_output_tokens > self.context_window_tokens
+        ):
+            raise ProviderError("provider model descriptor max output cannot exceed context")
+        if not isinstance(self.metadata, Mapping):
+            raise ProviderError("provider model descriptor metadata must be an object")
+        _assert_secret_safe_json(self.metadata, label="provider model descriptor metadata")
+        try:
+            encoded = json.dumps(self.metadata, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise ProviderError("provider model descriptor metadata must be JSON-safe") from error
+        if len(encoded) > MAX_MODEL_METADATA_BYTES:
+            raise ProviderError("provider model descriptor metadata exceeds its bounded size")
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+    @property
+    def arm_id(self) -> str:
+        return f"{self.provider}/{self.model}"
+
+    @classmethod
+    def from_mapping(cls, provider: str, value: Mapping[str, Any]) -> "ProviderModelDescriptor":
+        """Project a provider row through a small allowlist; never retain the raw response."""
+
+        if not isinstance(value, Mapping):
+            raise ProviderError("provider model inventory rows must be objects")
+        model = value.get("id", value.get("model"))
+        if not isinstance(model, str) or not model.strip():
+            raise ProviderError("provider model inventory row has no bounded model id")
+        top_provider = value.get("top_provider")
+        top_provider = top_provider if isinstance(top_provider, Mapping) else {}
+
+        def first_positive(*items: Any) -> int | None:
+            for item in items:
+                if isinstance(item, int) and not isinstance(item, bool) and item > 0:
+                    return item
+            return None
+
+        context_window = first_positive(
+            value.get("context_window_tokens"),
+            value.get("context_length"),
+            value.get("max_context_length"),
+            top_provider.get("context_length"),
+        )
+        max_output = first_positive(
+            value.get("max_output_tokens"),
+            value.get("max_completion_tokens"),
+            top_provider.get("max_completion_tokens"),
+        )
+        capabilities: list[str] = []
+
+        def add_capability(capability: str) -> None:
+            normalized = capability.lower().replace("-", "_")
+            if normalized not in _MODEL_SECRET_METADATA_KEYS and capability not in capabilities:
+                capabilities.append(capability)
+
+        raw_capabilities = value.get("capabilities")
+        if isinstance(raw_capabilities, Mapping):
+            for capability, supported in raw_capabilities.items():
+                if isinstance(capability, str) and supported:
+                    add_capability(capability)
+        elif isinstance(raw_capabilities, Sequence) and not isinstance(raw_capabilities, (str, bytes)):
+            for capability in raw_capabilities:
+                if isinstance(capability, str) and capability.strip():
+                    add_capability(capability)
+        supported_parameters = value.get("supported_parameters")
+        if isinstance(supported_parameters, Sequence) and not isinstance(supported_parameters, (str, bytes)):
+            normalized_parameters = {
+                parameter.lower() for parameter in supported_parameters if isinstance(parameter, str)
+            }
+            if normalized_parameters.intersection({"tools", "tool_choice", "functions"}):
+                add_capability("tool_calling")
+            if normalized_parameters.intersection({"response_format", "structured_outputs"}):
+                add_capability("structured_output")
+        architecture = value.get("architecture")
+        architecture = architecture if isinstance(architecture, Mapping) else {}
+        input_modalities = architecture.get("input_modalities", value.get("input_modalities", ()))
+        output_modalities = architecture.get("output_modalities", value.get("output_modalities", ()))
+        input_modalities = tuple(item for item in input_modalities if isinstance(item, str)) if isinstance(input_modalities, Sequence) and not isinstance(input_modalities, (str, bytes)) else ()
+        output_modalities = tuple(item for item in output_modalities if isinstance(item, str)) if isinstance(output_modalities, Sequence) and not isinstance(output_modalities, (str, bytes)) else ()
+        if any(modality.lower() not in {"text"} for modality in (*input_modalities, *output_modalities)):
+            add_capability("multimodal")
+        if "embeddings" in output_modalities or "embed" in model.lower():
+            add_capability("embeddings")
+
+        metadata: dict[str, Any] = {}
+        for key in ("object", "owned_by", "name", "canonical_slug"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip() and len(item.encode("utf-8")) <= 512:
+                metadata[key] = item
+        created = value.get("created")
+        if isinstance(created, int) and not isinstance(created, bool) and created >= 0:
+            metadata["created"] = created
+        if isinstance(value.get("archived"), bool):
+            metadata["archived"] = value["archived"]
+        if isinstance(value.get("pricing"), Mapping):
+            pricing: dict[str, str | int | float] = {}
+            for key in ("prompt", "completion", "request", "image", "input_cache_read", "input_cache_write"):
+                item = value["pricing"].get(key)
+                if isinstance(item, (str, int, float)) and not isinstance(item, bool):
+                    if not isinstance(item, float) or math.isfinite(item):
+                        pricing[key] = item
+            if pricing:
+                metadata["pricing"] = pricing
+        if isinstance(supported_parameters, Sequence) and not isinstance(supported_parameters, (str, bytes)):
+            metadata["supported_parameters"] = [
+                parameter for parameter in supported_parameters
+                if isinstance(parameter, str)
+                and parameter.strip()
+                and len(parameter.encode("utf-8")) <= 128
+                and parameter.lower().replace("-", "_") not in _MODEL_SECRET_METADATA_KEYS
+            ]
+        if input_modalities:
+            metadata["input_modalities"] = list(input_modalities)
+        if output_modalities:
+            metadata["output_modalities"] = list(output_modalities)
+        return cls(
+            provider=provider,
+            model=model,
+            capabilities=tuple(capabilities),
+            context_window_tokens=context_window,
+            max_output_tokens=max_output,
+            metadata=metadata,
+        )
+
+    def to_candidate(
+        self,
+        *,
+        quality: float,
+        latency_ms: int,
+        cost_per_million_tokens: int,
+        context_window_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+        reliability: float = 0.5,
+        capabilities: Sequence[str] | None = None,
+        requires_credential: bool = True,
+        enabled: bool = True,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "ModelCandidate":
+        resolved_capabilities = list(self.capabilities)
+        if capabilities is not None:
+            if not isinstance(capabilities, Sequence) or isinstance(capabilities, (str, bytes)):
+                raise ProviderError("additional model candidate capabilities must be a sequence")
+            for capability in capabilities:
+                if capability not in resolved_capabilities:
+                    resolved_capabilities.append(capability)
+        resolved_metadata = dict(self.metadata)
+        if metadata is not None:
+            if not isinstance(metadata, Mapping):
+                raise ProviderError("additional model candidate metadata must be an object")
+            resolved_metadata.update(metadata)
+        resolved_context = self.context_window_tokens if context_window_tokens is None else context_window_tokens
+        resolved_output = self.max_output_tokens if max_output_tokens is None else max_output_tokens
+        if resolved_context is None or resolved_output is None:
+            raise ProviderError(
+                "provider model descriptor requires explicit context_window_tokens and max_output_tokens"
+            )
+        return ModelCandidate(
+            provider=self.provider,
+            model=self.model,
+            context_window_tokens=resolved_context,
+            max_output_tokens=resolved_output,
+            quality=quality,
+            latency_ms=latency_ms,
+            cost_per_million_tokens=cost_per_million_tokens,
+            reliability=reliability,
+            capabilities=tuple(resolved_capabilities),
+            requires_credential=requires_credential,
+            enabled=enabled,
+            metadata=resolved_metadata,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": PROVIDER_MODEL_DISCOVERY_SCHEMA,
+            "provider": self.provider,
+            "model": self.model,
+            "capabilities": list(self.capabilities),
+            "context_window_tokens": self.context_window_tokens,
+            "max_output_tokens": self.max_output_tokens,
+            "metadata": dict(self.metadata),
+            "credential_posture": "caller_supplied_opaque_handle_not_returned",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCandidate:
+    """Typed, non-secret metadata for one selectable provider model.
+
+    A candidate is a routing prior, not a claim that the model is available, safe, or suitable
+    for a particular decision.  Runtime registration and credential readiness are evaluated by
+    :class:`LLMRuntime`/``AutonomousBrain`` at selection time.  The catalogue intentionally
+    contains no key, endpoint credential, prompt, or provider response.
+    """
+
+    provider: str
+    model: str
+    context_window_tokens: int
+    max_output_tokens: int
+    quality: float
+    latency_ms: int
+    cost_per_million_tokens: int
+    reliability: float = 0.5
+    capabilities: tuple[str, ...] = ()
+    requires_credential: bool = True
+    enabled: bool = True
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.provider, str)
+            or not self.provider.strip()
+            or "/" in self.provider
+            or " " in self.provider
+        ):
+            raise ProviderError("model candidate provider must be a path-safe identifier")
+        if not isinstance(self.model, str) or not self.model.strip() or len(self.model.encode("utf-8")) > 512:
+            raise ProviderError("model candidate model must be a bounded non-empty string")
+        for name, value in (
+            ("context_window_tokens", self.context_window_tokens),
+            ("max_output_tokens", self.max_output_tokens),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ProviderError(f"model candidate {name} must be a positive integer")
+        for name, value in (
+            ("latency_ms", self.latency_ms),
+            ("cost_per_million_tokens", self.cost_per_million_tokens),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ProviderError(f"model candidate {name} must be a non-negative integer")
+        if self.max_output_tokens > self.context_window_tokens:
+            raise ProviderError("model candidate max_output_tokens cannot exceed its context window")
+        for name, value in (("quality", self.quality), ("reliability", self.reliability)):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or not 0 <= float(value) <= 1
+            ):
+                raise ProviderError(f"model candidate {name} must be within [0, 1]")
+        if not isinstance(self.capabilities, Sequence) or isinstance(self.capabilities, (str, bytes)):
+            raise ProviderError("model candidate capabilities must be a string sequence")
+        capabilities: list[str] = []
+        for capability in self.capabilities:
+            if (
+                not isinstance(capability, str)
+                or not capability.strip()
+                or len(capability.encode("utf-8")) > 128
+                or any(ord(character) < 32 for character in capability)
+            ):
+                raise ProviderError("model candidate capabilities must contain bounded strings")
+            if capability not in capabilities:
+                capabilities.append(capability)
+        object.__setattr__(self, "capabilities", tuple(capabilities))
+        if not isinstance(self.requires_credential, bool) or not isinstance(self.enabled, bool):
+            raise ProviderError("model candidate availability flags must be booleans")
+        if not isinstance(self.metadata, Mapping):
+            raise ProviderError("model candidate metadata must be an object")
+        for key in self.metadata:
+            if not isinstance(key, str) or not key.strip() or len(key.encode("utf-8")) > 128:
+                raise ProviderError("model candidate metadata keys must be bounded strings")
+            normalized_key = key.lower().replace("-", "_")
+            if normalized_key in _MODEL_CANDIDATE_FIELDS:
+                raise ProviderError(f"model candidate metadata cannot override field {key!r}")
+            if normalized_key in _MODEL_SECRET_METADATA_KEYS:
+                raise ProviderError("model candidate metadata cannot contain credential fields")
+        try:
+            encoded = json.dumps(self.metadata, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise ProviderError("model candidate metadata must be JSON-safe") from error
+        if len(encoded) > MAX_MODEL_METADATA_BYTES:
+            raise ProviderError("model candidate metadata exceeds its bounded size")
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+    @property
+    def arm_id(self) -> str:
+        return f"{self.provider}/{self.model}"
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ModelCandidate":
+        if not isinstance(value, Mapping):
+            raise ProviderError("model candidate must be an object")
+        known = _MODEL_CANDIDATE_FIELDS
+        metadata = value.get("metadata", {})
+        if not isinstance(metadata, Mapping):
+            raise ProviderError("model candidate metadata must be an object")
+        extras = {key: item for key, item in value.items() if key not in known}
+        merged_metadata = {**dict(metadata), **extras}
+        return cls(
+            provider=value.get("provider"),
+            model=value.get("model"),
+            context_window_tokens=value.get("context_window_tokens"),
+            max_output_tokens=value.get("max_output_tokens"),
+            quality=value.get("quality"),
+            latency_ms=value.get("latency_ms"),
+            cost_per_million_tokens=value.get("cost_per_million_tokens"),
+            reliability=value.get("reliability", 0.5),
+            capabilities=tuple(value.get("capabilities", ())),
+            requires_credential=value.get("requires_credential", True),
+            enabled=value.get("enabled", True),
+            metadata=merged_metadata,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "provider": self.provider,
+            "model": self.model,
+            "context_window_tokens": self.context_window_tokens,
+            "max_output_tokens": self.max_output_tokens,
+            "quality": float(self.quality),
+            "latency_ms": self.latency_ms,
+            "cost_per_million_tokens": self.cost_per_million_tokens,
+            "reliability": float(self.reliability),
+            "capabilities": list(self.capabilities),
+            "requires_credential": self.requires_credential,
+            "enabled": self.enabled,
+        }
+        result.update(dict(self.metadata))
+        return result
+
+
+class ModelCatalogue:
+    """Thread-safe caller-owned registry of selectable model metadata.
+
+    Registration is deliberately independent from provider credentials.  An application can
+    install its approved model inventory at startup, show it in a UI, then collect a key later.
+    ``candidates()`` returns deterministic mappings ready for ``AutonomousBrain`` selection;
+    provider registration, circuit state, and credential readiness remain live runtime gates.
+    """
+
+    def __init__(self, candidates: Sequence[ModelCandidate | Mapping[str, Any]] = ()) -> None:
+        if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
+            raise ProviderError("model catalogue candidates must be a sequence")
+        self._lock = threading.RLock()
+        self._candidates: dict[tuple[str, str], ModelCandidate] = {}
+        for candidate in candidates:
+            self.register(candidate)
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ModelCatalogue":
+        """Restore a caller-owned catalogue from its bounded, secret-free projection."""
+
+        if not isinstance(value, Mapping):
+            raise ProviderError("model catalogue must be an object")
+        allowed = {
+            "schema",
+            "candidate_count",
+            "candidates",
+            "credential_posture",
+            "secret_material",
+        }
+        if set(value).difference(allowed):
+            raise ProviderError("model catalogue contains unsupported fields")
+        if value.get("schema") != MODEL_CATALOGUE_SCHEMA:
+            raise ProviderError("model catalogue schema is invalid")
+        if value.get("credential_posture") != "caller_supplied_opaque_handles":
+            raise ProviderError("model catalogue credential posture is invalid")
+        if value.get("secret_material") != "never_returned":
+            raise ProviderError("model catalogue secret marker is invalid")
+        candidates = value.get("candidates")
+        if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
+            raise ProviderError("model catalogue candidates must be a sequence")
+        candidate_count = value.get("candidate_count")
+        if (
+            not isinstance(candidate_count, int)
+            or isinstance(candidate_count, bool)
+            or candidate_count != len(candidates)
+        ):
+            raise ProviderError("model catalogue candidate count is invalid")
+        return cls(tuple(ModelCandidate.from_mapping(candidate) for candidate in candidates))
+
+    def register(
+        self,
+        candidate: ModelCandidate | Mapping[str, Any],
+        *,
+        replace_existing: bool = False,
+    ) -> ModelCandidate:
+        resolved = candidate if isinstance(candidate, ModelCandidate) else ModelCandidate.from_mapping(candidate)
+        if not isinstance(replace_existing, bool):
+            raise ProviderError("replace_existing must be a boolean")
+        key = (resolved.provider, resolved.model)
+        with self._lock:
+            if key in self._candidates and not replace_existing:
+                raise ProviderError(f"model candidate is already registered: {resolved.arm_id}")
+            if len(self._candidates) >= MAX_MODEL_CANDIDATES and key not in self._candidates:
+                raise ProviderError("model catalogue capacity is exhausted")
+            self._candidates[key] = resolved
+        return resolved
+
+    def register_discovered(
+        self,
+        descriptors: Sequence[ProviderModelDescriptor],
+        *,
+        priors: Mapping[str, Mapping[str, Any]],
+        replace_existing: bool = False,
+    ) -> list[ModelCandidate]:
+        """Turn live inventory rows into selectable candidates using explicit caller priors.
+
+        ``priors`` is keyed by the unambiguous ``provider/model`` arm id.  The provider cannot
+        author quality, latency, or economics through its inventory response, and rows without
+        a caller-supplied prior are rejected instead of being silently routed.
+        """
+
+        if not isinstance(descriptors, Sequence) or isinstance(descriptors, (str, bytes)):
+            raise ProviderError("discovered model descriptors must be a sequence")
+        if any(not isinstance(descriptor, ProviderModelDescriptor) for descriptor in descriptors):
+            raise ProviderError("discovered model descriptors must contain ProviderModelDescriptor values")
+        if not isinstance(priors, Mapping):
+            raise ProviderError("discovered model priors must be an object keyed by provider/model")
+        if not isinstance(replace_existing, bool):
+            raise ProviderError("replace_existing must be a boolean")
+        resolved = self._resolve_discovered(descriptors, priors)
+        with self._lock:
+            for candidate in resolved:
+                key = (candidate.provider, candidate.model)
+                if key in self._candidates and not replace_existing:
+                    raise ProviderError(f"model candidate is already registered: {candidate.arm_id}")
+                if len(self._candidates) >= MAX_MODEL_CANDIDATES and key not in self._candidates:
+                    raise ProviderError("model catalogue capacity is exhausted")
+            for candidate in resolved:
+                self._candidates[(candidate.provider, candidate.model)] = candidate
+        return resolved
+
+    @staticmethod
+    def _resolve_discovered(
+        descriptors: Sequence[ProviderModelDescriptor],
+        priors: Mapping[str, Mapping[str, Any]],
+    ) -> list[ModelCandidate]:
+        if not isinstance(descriptors, Sequence) or isinstance(descriptors, (str, bytes)):
+            raise ProviderError("discovered model descriptors must be a sequence")
+        if any(not isinstance(descriptor, ProviderModelDescriptor) for descriptor in descriptors):
+            raise ProviderError("discovered model descriptors must contain ProviderModelDescriptor values")
+        if not isinstance(priors, Mapping):
+            raise ProviderError("discovered model priors must be an object keyed by provider/model")
+        resolved: list[ModelCandidate] = []
+        seen: set[tuple[str, str]] = set()
+        for descriptor in descriptors:
+            key = (descriptor.provider, descriptor.model)
+            if key in seen:
+                raise ProviderError(f"discovered model descriptor is duplicated: {descriptor.arm_id}")
+            seen.add(key)
+            prior = priors.get(descriptor.arm_id)
+            if not isinstance(prior, Mapping):
+                raise ProviderError(f"missing explicit routing prior for {descriptor.arm_id}")
+            try:
+                resolved.append(descriptor.to_candidate(**dict(prior)))
+            except TypeError as error:
+                raise ProviderError(f"routing prior is malformed for {descriptor.arm_id}") from error
+        return resolved
+
+    def reconcile_discovered(
+        self,
+        descriptors: Sequence[ProviderModelDescriptor],
+        *,
+        priors: Mapping[str, Mapping[str, Any]],
+        providers: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically reconcile provider inventory, including stale-arm retirement.
+
+        Every incoming row still requires an explicit caller-owned routing prior. ``providers``
+        is required when an authoritative inventory is empty so the caller can explicitly retire
+        every previously registered arm for that provider.
+        """
+
+        if not isinstance(descriptors, Sequence) or isinstance(descriptors, (str, bytes)):
+            raise ProviderError("discovered model descriptors must be a sequence")
+        resolved = self._resolve_discovered(descriptors, priors)
+        if providers is None:
+            provider_names = {descriptor.provider for descriptor in descriptors}
+        else:
+            if not isinstance(providers, Sequence) or isinstance(providers, (str, bytes)):
+                raise ProviderError("reconciliation providers must be a sequence")
+            if any(
+                not isinstance(provider, str)
+                or not provider.strip()
+                or "/" in provider
+                or " " in provider
+                for provider in providers
+            ):
+                raise ProviderError("reconciliation providers must be path-safe identifiers")
+            provider_names = set(providers)
+        if not provider_names:
+            raise ProviderError("reconciliation requires descriptors or explicit providers")
+        incoming_keys = {(candidate.provider, candidate.model) for candidate in resolved}
+        with self._lock:
+            stale_keys = sorted(
+                key
+                for key, candidate in self._candidates.items()
+                if candidate.provider in provider_names and key not in incoming_keys
+            )
+            existing_keys = set(self._candidates)
+            projected_count = len(self._candidates) - len(stale_keys) + sum(
+                1 for key in incoming_keys if key not in existing_keys
+            )
+            if projected_count > MAX_MODEL_CANDIDATES:
+                raise ProviderError("model catalogue capacity is exhausted")
+            replaced = sorted(
+                candidate.arm_id
+                for candidate in resolved
+                if (candidate.provider, candidate.model) in existing_keys
+            )
+            registered = sorted(
+                candidate.arm_id
+                for candidate in resolved
+                if (candidate.provider, candidate.model) not in existing_keys
+            )
+            for key in stale_keys:
+                self._candidates.pop(key, None)
+            for candidate in resolved:
+                self._candidates[(candidate.provider, candidate.model)] = candidate
+        return {
+            "schema": "bioprism-python-model-catalogue-reconciliation/0.1",
+            "providers": sorted(provider_names),
+            "candidates": [candidate.to_dict() for candidate in resolved],
+            "candidate_count": len(resolved),
+            "registered_model_ids": registered,
+            "replaced_model_ids": replaced,
+            "removed_model_ids": [f"{provider}/{model}" for provider, model in stale_keys],
+            "execution": "not_started;catalogue_registration_only",
+            "retention": "model_metadata_only;credentials_and_raw_catalogue_not_retained",
+            "secret_material": "never_returned",
+        }
+
+    def remove(self, provider: str, model: str) -> ModelCandidate:
+        key = (provider, model)
+        with self._lock:
+            candidate = self._candidates.pop(key, None)
+        if candidate is None:
+            raise ProviderError(f"model candidate is not registered: {provider}/{model}")
+        return candidate
+
+    def get(self, provider: str, model: str) -> ModelCandidate | None:
+        with self._lock:
+            return self._candidates.get((provider, model))
+
+    def candidates(
+        self,
+        *,
+        providers: Sequence[str] | None = None,
+        enabled_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        if providers is not None and (not isinstance(providers, Sequence) or isinstance(providers, (str, bytes))):
+            raise ProviderError("model catalogue providers must be a sequence")
+        if providers is not None and any(not isinstance(item, str) for item in providers):
+            raise ProviderError("model catalogue providers must contain strings")
+        provider_filter = None if providers is None else set(providers)
+        if not isinstance(enabled_only, bool):
+            raise ProviderError("enabled_only must be a boolean")
+        with self._lock:
+            values = tuple(self._candidates.values())
+        return [
+            candidate.to_dict()
+            for candidate in sorted(values, key=lambda item: item.arm_id)
+            if (provider_filter is None or candidate.provider in provider_filter)
+            and (not enabled_only or candidate.enabled)
+        ]
+
+    def compatibility_report(self, required_capabilities: Sequence[str]) -> dict[str, Any]:
+        """Report static model-capability coverage without declaring runtime readiness.
+
+        Provider discovery can establish transport-visible facts such as tool calling,
+        structured output, modalities, and embeddings. It cannot establish semantic strengths
+        such as ``science`` or ``operations``. Those labels must be supplied by the caller when
+        registering a candidate, and this report makes the resulting coverage auditable.
+        Credential, registration, circuit, cost, and context-window gates are intentionally not
+        inferred here; this is a catalogue-only compatibility projection.
+        """
+
+        if not isinstance(required_capabilities, Sequence) or isinstance(
+            required_capabilities, (str, bytes)
+        ):
+            raise ProviderError("required model capabilities must be a sequence")
+        normalized: list[str] = []
+        for capability in required_capabilities:
+            if not isinstance(capability, str) or not capability.strip():
+                raise ProviderError("required model capabilities must contain non-empty strings")
+            if len(capability.encode("utf-8")) > 128 or any(ord(character) < 32 for character in capability):
+                raise ProviderError("required model capabilities must contain bounded strings")
+            if capability not in normalized:
+                normalized.append(capability)
+        with self._lock:
+            values = tuple(self._candidates.values())
+        rows: list[dict[str, Any]] = []
+        for candidate in sorted(values, key=lambda item: item.arm_id):
+            declared = set(candidate.capabilities)
+            missing = [capability for capability in normalized if capability not in declared]
+            rows.append(
+                {
+                    "provider": candidate.provider,
+                    "model": candidate.model,
+                    "arm_id": candidate.arm_id,
+                    "declared_capabilities": list(candidate.capabilities),
+                    "required_capabilities": list(normalized),
+                    "missing_capabilities": missing,
+                    "enabled": candidate.enabled,
+                    "compatible": candidate.enabled and not missing,
+                }
+            )
+        compatible_count = sum(1 for row in rows if row["compatible"])
+        return {
+            "required_capabilities": normalized,
+            "candidate_count": len(rows),
+            "compatible_count": compatible_count,
+            "coverage": compatible_count / len(rows) if rows else 0.0,
+            "candidates": rows,
+            "evidence_posture": "static_caller_declared_capabilities_only",
+            "runtime_gates": "not_projected; check provider registration, credentials, circuit, cost, and context separately",
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        values = self.candidates()
+        return {
+            "schema": MODEL_CATALOGUE_SCHEMA,
+            "candidate_count": len(values),
+            "candidates": values,
+            "credential_posture": "caller_supplied_opaque_handles",
+            "secret_material": "never_returned",
+        }
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._candidates)
+
+
+class ProviderHealthLedger:
+    """Durable, value-only provider observations for restart-safe routing.
+
+    The runtime circuit is intentionally process-local because it owns the live transport. This
+    ledger persists only bounded outcome metadata, allowing an embedding application to restore
+    a conservative historical provider gate after a restart. It never accepts request messages,
+    response text, headers, credential handles, or arbitrary metadata fields.
+    """
+
+    _FORBIDDEN_FIELDS = frozenset(
+        {
+            "api_key",
+            "apikey",
+            "authorization",
+            "bearer",
+            "credential",
+            "password",
+            "secret",
+            "access_token",
+            "refresh_token",
+            "token",
+        }
+    )
+    _FORBIDDEN_NORMALIZED_FIELDS = frozenset(
+        "".join(character for character in field if character.isalnum())
+        for field in _FORBIDDEN_FIELDS
+    )
+    _ALLOWED_FIELDS = frozenset(
+        {
+            "schema",
+            "provider",
+            "model",
+            "observation_kind",
+            "status",
+            "outcome",
+            "latency_ms",
+            "observed_at",
+            "status_code",
+            "failure_class",
+            "circuit",
+            "consecutive_failures",
+            "opened_until",
+            "input_tokens",
+            "output_tokens",
+            "domain",
+            "capability",
+            "risk_class",
+            "quality_reward",
+            "quality_passed",
+            "evaluator_id",
+            "evaluator_version",
+            "feedback_digest",
+            "evidence_digest",
+            "outcome_digest",
+            "retention",
+        }
+    )
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_records: int = MAX_PROVIDER_HEALTH_RECORDS,
+        max_bytes: int = MAX_PROVIDER_HEALTH_BYTES,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if not isinstance(max_records, int) or isinstance(max_records, bool) or max_records <= 0:
+            raise ProviderError("provider health ledger max_records must be positive")
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
+            raise ProviderError("provider health ledger max_bytes must be positive")
+        if not callable(clock):
+            raise ProviderError("provider health ledger clock must be callable")
+        self.path = Path(path)
+        self.max_records = max_records
+        self.max_bytes = max_bytes
+        self._clock = clock
+        self._lock = threading.RLock()
+        self._snapshot_generation = 0
+        self._previous_snapshot_digest: str | None = None
+        self._cached_snapshot: dict[str, Any] | None = None
+        self._cached_record_signature: tuple[str, ...] | None = None
+
+    def record(self, observation: Mapping[str, Any]) -> dict[str, Any]:
+        """Append one runtime observation and return a metadata-only receipt.
+
+        This method is suitable as ``LLMRuntime(observation_callback=ledger.record)``. Runtime
+        callbacks are best-effort, so a full or temporarily unreadable ledger cannot alter the
+        provider invocation that produced the observation.
+        """
+
+        normalized = self._normalize_observation(observation, clock=self._clock)
+        line = json.dumps(
+            {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "observation": normalized},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8") + b"\n"
+        with self._lock:
+            existing_size = self.path.stat().st_size if self.path.exists() else 0
+            if existing_size + len(line) > self.max_bytes:
+                raise ProviderError("provider health ledger capacity is exhausted")
+            rows = self._read_records_locked()
+            if len(rows) >= self.max_records:
+                raise ProviderError("provider health ledger record capacity is exhausted")
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("ab") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._cached_snapshot = None
+            self._cached_record_signature = None
+            digest = hashlib.sha256(line.rstrip(b"\n")).hexdigest()
+            return {
+                "schema": PROVIDER_HEALTH_LEDGER_SCHEMA,
+                "record_index": len(rows),
+                "record_digest": digest,
+                "provider": normalized["provider"],
+                "model": normalized["model"],
+                "observation_kind": normalized.get("observation_kind", "invocation"),
+                "outcome": normalized["outcome"],
+            }
+
+    def record_evaluation(
+        self,
+        *,
+        provider: str,
+        model: str,
+        domain: str,
+        capability: str,
+        risk_class: str,
+        evaluator_id: str,
+        evaluator_version: str,
+        reward: float,
+        passed: bool,
+        outcome_digest: str,
+        evidence_digest: str | None = None,
+        feedback_digest: str | None = None,
+        observed_at: float | None = None,
+    ) -> dict[str, Any]:
+        """Append explicit task-quality feedback for one model arm.
+
+        Evaluation observations are intentionally a different kind from transport observations:
+        they never increment attempts, successes, failures, or circuit state. Only an explicit
+        evaluator can populate ``quality_mean`` in model selection overlays. ``outcome_digest``
+        is the replay barrier; an identical evaluation is a no-op and a contradictory reuse is
+        refused before the ledger is mutated.
+        """
+
+        if not isinstance(domain, str) or not domain.strip() or len(domain.encode("utf-8")) > 256:
+            raise ProviderError("provider quality domain is invalid")
+        if not isinstance(capability, str) or not capability.strip() or len(capability.encode("utf-8")) > 256:
+            raise ProviderError("provider quality capability is invalid")
+        if not isinstance(risk_class, str) or not risk_class.strip() or len(risk_class.encode("utf-8")) > 256:
+            raise ProviderError("provider quality risk_class is invalid")
+        for field_name, value in (("evaluator_id", evaluator_id), ("evaluator_version", evaluator_version)):
+            if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > 256:
+                raise ProviderError(f"provider quality {field_name} is invalid")
+        if not isinstance(passed, bool):
+            raise ProviderError("provider quality passed must be boolean")
+        if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not 0.0 <= float(reward) <= 1.0:
+            raise ProviderError("provider quality reward must be within [0, 1]")
+        for field_name, value in (("outcome_digest", outcome_digest), ("evidence_digest", evidence_digest), ("feedback_digest", feedback_digest)):
+            if value is not None and (not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value)):
+                raise ProviderError(f"provider quality {field_name} must be a lowercase SHA-256 digest or None")
+        observation: dict[str, Any] = {
+            "schema": PROVIDER_OBSERVATION_SCHEMA,
+            "provider": provider,
+            "model": model,
+            "observation_kind": "evaluation",
+            "status": "evaluated",
+            "outcome": "unknown",
+            "latency_ms": 0.0,
+            "domain": domain,
+            "capability": capability,
+            "risk_class": risk_class,
+            "quality_reward": float(reward),
+            "quality_passed": passed,
+            "evaluator_id": evaluator_id,
+            "evaluator_version": evaluator_version,
+            "outcome_digest": outcome_digest,
+        }
+        if evidence_digest is not None:
+            observation["evidence_digest"] = evidence_digest
+        if feedback_digest is not None:
+            observation["feedback_digest"] = feedback_digest
+        if observed_at is not None:
+            observation["observed_at"] = observed_at
+        normalized = self._normalize_observation(observation, clock=self._clock)
+        with self._lock:
+            rows = self._read_records_locked()
+            for row in rows:
+                prior = row["observation"]
+                if (
+                    prior.get("observation_kind", "invocation") != "evaluation"
+                    or prior.get("outcome_digest") != outcome_digest
+                    or prior.get("provider") != provider
+                    or prior.get("model") != model
+                    or prior.get("domain") != domain
+                    or prior.get("capability") != capability
+                    or prior.get("risk_class") != risk_class
+                ):
+                    continue
+                identity = ("provider", "model", "domain", "capability", "risk_class", "evaluator_id", "evaluator_version")
+                if any(prior.get(field_name) != normalized.get(field_name) for field_name in identity) or prior.get("quality_reward") != normalized.get("quality_reward") or prior.get("quality_passed") != normalized.get("quality_passed") or prior.get("evidence_digest") != normalized.get("evidence_digest") or prior.get("feedback_digest") != normalized.get("feedback_digest"):
+                    raise ProviderError("provider quality outcome_digest conflicts with an existing evaluation")
+                line = _canonical_provider_health_json({"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "observation": prior}).encode("utf-8")
+                return {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "record_index": rows.index(row), "record_digest": hashlib.sha256(line).hexdigest(), "provider": prior["provider"], "model": prior["model"], "observation_kind": "evaluation", "outcome": "unknown", "replayed": True}
+            line = json.dumps(
+                {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "observation": normalized},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8") + b"\n"
+            if len(rows) >= self.max_records or (self.path.stat().st_size if self.path.exists() else 0) + len(line) > self.max_bytes:
+                raise ProviderError("provider health ledger capacity is exhausted")
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("ab") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._cached_snapshot = None
+            self._cached_record_signature = None
+            return {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "record_index": len(rows), "record_digest": hashlib.sha256(line.rstrip(b"\n")).hexdigest(), "provider": normalized["provider"], "model": normalized["model"], "observation_kind": "evaluation", "outcome": "unknown", "replayed": False}
+
+    def records(self, *, provider: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        """Read bounded observations in append order, optionally filtered by provider."""
+
+        if provider is not None:
+            self._validate_provider(provider)
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= self.max_records
+        ):
+            raise ProviderError("provider health ledger limit is outside its bounds")
+        with self._lock:
+            rows = self._read_records_locked()
+        observations = [
+            dict(row["observation"])
+            for row in rows
+            if provider is None or row["observation"].get("provider") == provider
+        ]
+        if limit is not None:
+            observations = observations[-limit:]
+        return observations
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a digest-bound, metadata-only provider health handoff."""
+
+        with self._lock:
+            rows = self._read_records_locked()
+            signature = tuple(hashlib.sha256(_canonical_provider_health_json(row).encode("utf-8")).hexdigest() for row in rows)
+            if self._cached_snapshot is not None and self._cached_record_signature == signature:
+                return deepcopy(self._cached_snapshot)
+            snapshot = _build_provider_health_snapshot(
+                rows,
+                max_records=self.max_records,
+                max_bytes=self.max_bytes,
+                snapshot_generation=self._snapshot_generation + 1,
+                previous_snapshot_digest=None if self._snapshot_generation == 0 else self._previous_snapshot_digest,
+            )
+            self._snapshot_generation = snapshot["snapshot_generation"]
+            self._previous_snapshot_digest = snapshot["snapshot_digest"]
+            self._cached_snapshot = deepcopy(snapshot)
+            self._cached_record_signature = signature
+            return deepcopy(snapshot)
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace the JSONL health ledger with validated observations."""
+
+        normalized = _normalize_provider_health_snapshot(
+            snapshot,
+            max_records=self.max_records,
+            max_bytes=self.max_bytes,
+        )
+        lines = b"".join(
+            _canonical_provider_health_json(row).encode("utf-8") + b"\n"
+            for row in normalized["records"]
+        )
+        temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+        with self._lock:
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with temporary.open("wb") as handle:
+                    handle.write(lines)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, self.path)
+                self._snapshot_generation = int(normalized.get("snapshot_generation", 0))
+                self._previous_snapshot_digest = normalized["snapshot_digest"] if self._snapshot_generation > 0 else None
+                self._cached_snapshot = deepcopy(normalized) if self._snapshot_generation > 0 else None
+                self._cached_record_signature = tuple(hashlib.sha256(_canonical_provider_health_json(row).encode("utf-8")).hexdigest() for row in normalized["records"]) if self._cached_snapshot is not None else None
+            except (OSError, ValueError) as error:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise ProviderError("provider health snapshot could not be restored") from error
+
+    def health_snapshot(self, *, now: float | None = None) -> dict[str, dict[str, Any]]:
+        """Aggregate the latest safe health state for each observed provider.
+
+        An expired historical circuit is projected as closed. This prevents a transient outage
+        from permanently disabling a provider while preserving the latest success/failure and
+        latency evidence for diagnostics and future routing policies.
+        """
+
+        current_time = self._clock() if now is None else now
+        if not isinstance(current_time, (int, float)) or isinstance(current_time, bool) or not math.isfinite(float(current_time)):
+            raise ProviderError("provider health snapshot time must be finite")
+        aggregate: dict[str, dict[str, Any]] = {}
+        for observation in self.records():
+            provider = observation["provider"]
+            state = aggregate.setdefault(
+                provider,
+                {
+                    "attempts": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "quality_observations": 0,
+                    "quality_total": 0.0,
+                    "quality_passed": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                },
+            )
+            if observation.get("observation_kind", "invocation") == "invocation":
+                state["attempts"] += 1
+                state["successes"] += int(observation["outcome"] == "success")
+                state["failures"] += int(observation["outcome"] == "failure")
+                state["total_input_tokens"] += int(observation.get("input_tokens", 0))
+                state["total_output_tokens"] += int(observation.get("output_tokens", 0))
+                state.update(
+                    {
+                        "last_model": observation["model"],
+                        "circuit": observation.get("circuit", "closed"),
+                        "consecutive_failures": observation.get("consecutive_failures", 0),
+                        "opened_until": observation.get("opened_until"),
+                        "last_outcome": observation["outcome"],
+                        "last_status": observation["status"],
+                        "last_latency_ms": observation["latency_ms"],
+                        "observed_at": observation["observed_at"],
+                    }
+                )
+                if "status_code" in observation:
+                    state["last_status_code"] = observation["status_code"]
+            if observation.get("quality_reward") is not None:
+                state["quality_observations"] += 1
+                state["quality_total"] += float(observation["quality_reward"])
+                state["quality_passed"] += int(observation.get("quality_passed") is True)
+        for state in aggregate.values():
+            attempts = state["attempts"]
+            state["success_rate"] = state["successes"] / attempts if attempts else 0.0
+            quality_observations = state.pop("quality_observations")
+            quality_total = state.pop("quality_total")
+            quality_passed = state.pop("quality_passed")
+            state["quality_observations"] = quality_observations
+            state["quality_mean"] = quality_total / quality_observations if quality_observations else None
+            state["quality_pass_rate"] = quality_passed / quality_observations if quality_observations else None
+            opened_until = state.get("opened_until")
+            if state.get("circuit") == "open" and (
+                opened_until is None or float(opened_until) > float(current_time)
+            ):
+                state["circuit"] = "open"
+            else:
+                state["circuit"] = "closed"
+                state["opened_until"] = None
+        return {provider: aggregate[provider] for provider in sorted(aggregate)}
+
+    def model_health_snapshot(
+        self,
+        *,
+        provider: str | None = None,
+        now: float | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Aggregate restart-safe transport evidence for each observed provider/model arm.
+
+        The model row is a routing prior, not an independent transport gate. Provider circuit
+        state remains authoritative because a transport failure can affect every model served by
+        that provider. Keeping the rows separate still lets the selector demote one poor arm
+        while preserving a healthy sibling as a bounded fallback.
+        """
+
+        if provider is not None:
+            self._validate_provider(provider)
+        current_time = self._clock() if now is None else now
+        if not isinstance(current_time, (int, float)) or isinstance(current_time, bool) or not math.isfinite(float(current_time)):
+            raise ProviderError("provider health snapshot time must be finite")
+        aggregate: dict[tuple[str, str], dict[str, Any]] = {}
+        for observation in self.records(provider=provider):
+            key = (observation["provider"], observation["model"])
+            state = aggregate.setdefault(
+                key,
+                {
+                    "provider": key[0],
+                    "model": key[1],
+                    "attempts": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "quality_observations": 0,
+                    "quality_total": 0.0,
+                    "quality_passed": 0,
+                    "total_latency_ms": 0.0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                },
+            )
+            if observation.get("observation_kind", "invocation") == "invocation":
+                state["attempts"] += 1
+                state["successes"] += int(observation["outcome"] == "success")
+                state["failures"] += int(observation["outcome"] == "failure")
+                state["total_latency_ms"] += float(observation["latency_ms"])
+                state["total_input_tokens"] += int(observation.get("input_tokens", 0))
+                state["total_output_tokens"] += int(observation.get("output_tokens", 0))
+                state.update(
+                    {
+                        "last_outcome": observation["outcome"],
+                        "last_status": observation["status"],
+                        "last_latency_ms": observation["latency_ms"],
+                        "circuit": observation.get("circuit", "closed"),
+                        "consecutive_failures": observation.get("consecutive_failures", 0),
+                        "opened_until": observation.get("opened_until"),
+                        "observed_at": observation["observed_at"],
+                    }
+                )
+                if "status_code" in observation:
+                    state["last_status_code"] = observation["status_code"]
+            if observation.get("quality_reward") is not None:
+                state["quality_observations"] += 1
+                state["quality_total"] += float(observation["quality_reward"])
+                state["quality_passed"] += int(observation.get("quality_passed") is True)
+        for state in aggregate.values():
+            attempts = state["attempts"]
+            state["success_rate"] = state["successes"] / attempts if attempts else 0.0
+            state["mean_latency_ms"] = state["total_latency_ms"] / attempts if attempts else None
+            quality_observations = state.pop("quality_observations")
+            quality_total = state.pop("quality_total")
+            quality_passed = state.pop("quality_passed")
+            state["quality_observations"] = quality_observations
+            state["quality_mean"] = quality_total / quality_observations if quality_observations else None
+            state["quality_pass_rate"] = quality_passed / quality_observations if quality_observations else None
+            state.pop("total_latency_ms", None)
+            opened_until = state.get("opened_until")
+            if state.get("circuit") == "open" and (
+                opened_until is None or float(opened_until) > float(current_time)
+            ):
+                state["circuit"] = "open"
+            else:
+                state["circuit"] = "closed"
+                state["opened_until"] = None
+        return {
+            f"{row_provider}/{model}": aggregate[(row_provider, model)]
+            for row_provider, model in sorted(aggregate)
+        }
+
+    def selection_overrides(self, *, now: float | None = None) -> dict[str, Any]:
+        """Return safe historical provider and model health overlays for the brain selector."""
+
+        provider_snapshot = self.health_snapshot(now=now)
+        model_snapshot = self.model_health_snapshot(now=now)
+        result: dict[str, Any] = {}
+        if provider_snapshot:
+            result["provider_health"] = provider_snapshot
+        if model_snapshot:
+            result["model_health"] = model_snapshot
+        return result
+
+    def to_dict(self, *, now: float | None = None) -> dict[str, Any]:
+        snapshot = self.health_snapshot(now=now)
+        models = self.model_health_snapshot(now=now)
+        return {
+            "schema": PROVIDER_HEALTH_LEDGER_SCHEMA,
+            "provider_count": len(snapshot),
+            "providers": snapshot,
+            "model_count": len(models),
+            "models": models,
+            "record_count": len(self.records()),
+            "retention": "value_only_provider_outcomes_no_payloads_or_credentials",
+        }
+
+    @staticmethod
+    def _normalize_observation(
+        observation: Mapping[str, Any],
+        *,
+        clock: Callable[[], float] = time.time,
+    ) -> dict[str, Any]:
+        if not isinstance(observation, Mapping):
+            raise ProviderError("provider health observation must be an object")
+        ProviderHealthLedger._assert_value_only(observation)
+        unknown = [key for key in observation if not isinstance(key, str) or key not in ProviderHealthLedger._ALLOWED_FIELDS]
+        if unknown:
+            raise ProviderError("provider health observation contains unsupported fields")
+        if observation.get("schema") != PROVIDER_OBSERVATION_SCHEMA:
+            raise ProviderError("provider health observation schema is invalid")
+        provider = observation.get("provider")
+        ProviderHealthLedger._validate_provider(provider)
+        model = observation.get("model")
+        if not isinstance(model, str) or not model.strip() or len(model.encode("utf-8")) > 512:
+            raise ProviderError("provider health observation model is invalid")
+        observation_kind = observation.get("observation_kind", "invocation")
+        if observation_kind not in {"invocation", "evaluation"}:
+            raise ProviderError("provider health observation_kind is invalid")
+        status = observation.get("status")
+        outcome = observation.get("outcome")
+        if observation_kind == "invocation" and (status not in {"completed", "provider_refused"} or outcome not in {"success", "failure"}):
+            raise ProviderError("provider health observation status or outcome is invalid")
+        if observation_kind == "evaluation" and (status != "evaluated" or outcome != "unknown"):
+            raise ProviderError("provider health observation status or outcome is invalid")
+        latency = observation.get("latency_ms")
+        if not isinstance(latency, (int, float)) or isinstance(latency, bool) or not math.isfinite(float(latency)) or latency < 0:
+            raise ProviderError("provider health observation latency is invalid")
+        observed_at = observation.get("observed_at", clock())
+        if not isinstance(observed_at, (int, float)) or isinstance(observed_at, bool) or not math.isfinite(float(observed_at)):
+            raise ProviderError("provider health observation timestamp is invalid")
+        result: dict[str, Any] = {
+            "schema": PROVIDER_OBSERVATION_SCHEMA,
+            "provider": provider,
+            "model": model,
+            "status": status,
+            "outcome": outcome,
+            "latency_ms": float(latency),
+            "observed_at": float(observed_at),
+        }
+        if "observation_kind" in observation or observation_kind == "evaluation":
+            result["observation_kind"] = observation_kind
+        for field_name in ("status_code", "consecutive_failures", "input_tokens", "output_tokens"):
+            value = observation.get(field_name)
+            if value is not None:
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise ProviderError(f"provider health observation {field_name} is invalid")
+                result[field_name] = value
+        failure_class = observation.get("failure_class")
+        if failure_class is not None:
+            if failure_class not in {"provider_error", "circuit_open"}:
+                raise ProviderError("provider health observation failure_class is invalid")
+            result["failure_class"] = failure_class
+        circuit = observation.get("circuit", "closed")
+        if circuit not in {"open", "closed"}:
+            raise ProviderError("provider health observation circuit is invalid")
+        result["circuit"] = circuit
+        opened_until = observation.get("opened_until")
+        if opened_until is not None:
+            if not isinstance(opened_until, (int, float)) or isinstance(opened_until, bool) or not math.isfinite(float(opened_until)):
+                raise ProviderError("provider health observation opened_until is invalid")
+            result["opened_until"] = float(opened_until)
+        for field_name in ("domain", "capability", "risk_class", "evaluator_id", "evaluator_version"):
+            value = observation.get(field_name)
+            if value is not None:
+                if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > 256:
+                    raise ProviderError(f"provider health observation {field_name} is invalid")
+                result[field_name] = value
+        quality_reward = observation.get("quality_reward")
+        if quality_reward is not None:
+            if isinstance(quality_reward, bool) or not isinstance(quality_reward, (int, float)) or not math.isfinite(float(quality_reward)) or not 0.0 <= float(quality_reward) <= 1.0:
+                raise ProviderError("provider health observation quality_reward must be within [0, 1]")
+            result["quality_reward"] = float(quality_reward)
+        quality_passed = observation.get("quality_passed")
+        if quality_passed is not None:
+            if not isinstance(quality_passed, bool):
+                raise ProviderError("provider health observation quality_passed must be boolean")
+            result["quality_passed"] = quality_passed
+        for field_name in ("feedback_digest", "evidence_digest", "outcome_digest"):
+            value = observation.get(field_name)
+            if value is not None:
+                if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+                    raise ProviderError(f"provider health observation {field_name} must be a lowercase SHA-256 digest")
+                result[field_name] = value
+        if observation_kind == "evaluation":
+            if result.get("quality_reward") is None or result.get("quality_passed") is None or result.get("outcome_digest") is None:
+                raise ProviderError("evaluation observations require quality_reward, quality_passed, and outcome_digest")
+        return result
+
+    def _read_records_locked(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        if self.path.stat().st_size > self.max_bytes:
+            raise ProviderError("provider health ledger exceeds max_bytes")
+        rows: list[dict[str, Any]] = []
+        with self.path.open("rb") as handle:
+            for raw_line in handle:
+                if len(rows) >= self.max_records:
+                    raise ProviderError("provider health ledger exceeds max_records")
+                try:
+                    row = json.loads(raw_line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                    raise ProviderError("provider health ledger contains invalid JSON") from error
+                validated = _validate_provider_health_row(row)
+                if raw_line.rstrip(b"\r\n") != _canonical_provider_health_json(validated).encode("utf-8"):
+                    raise ProviderError("provider health ledger contains non-canonical JSON")
+                rows.append(validated)
+        return rows
+
+    @classmethod
+    def _assert_value_only(cls, value: Any, *, depth: int = 0) -> None:
+        if depth > 16:
+            raise ProviderError("provider health observation is too deeply nested")
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                normalized = "".join(character for character in key.lower() if character.isalnum()) if isinstance(key, str) else ""
+                if normalized in cls._FORBIDDEN_NORMALIZED_FIELDS:
+                    raise ProviderError("provider health observation contains forbidden secret fields")
+                cls._assert_value_only(child, depth=depth + 1)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                cls._assert_value_only(child, depth=depth + 1)
+        elif isinstance(value, float) and not math.isfinite(value):
+            raise ProviderError("provider health observation contains a non-finite number")
+
+    @staticmethod
+    def _validate_provider(provider: Any) -> None:
+        if not isinstance(provider, str) or not provider.strip() or "/" in provider or " " in provider:
+            raise ProviderError("provider health provider must be a path-safe identifier")
+
+
+def _canonical_provider_health_json(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ProviderError("provider health value must be canonical JSON") from error
+
+
+def _validate_provider_health_row(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"schema", "observation"}:
+        raise ProviderError("provider health ledger contains an invalid record envelope")
+    if value.get("schema") != PROVIDER_HEALTH_LEDGER_SCHEMA:
+        raise ProviderError("provider health ledger contains an invalid schema")
+    observation = value.get("observation")
+    if not isinstance(observation, Mapping) or "observed_at" not in observation:
+        raise ProviderError("provider health ledger observation is malformed")
+    normalized = ProviderHealthLedger._normalize_observation(observation)
+    return {
+        "schema": PROVIDER_HEALTH_LEDGER_SCHEMA,
+        "observation": normalized,
+    }
+
+
+def _build_provider_health_snapshot(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    max_records: int,
+    max_bytes: int,
+    snapshot_generation: int,
+    previous_snapshot_digest: str | None,
+) -> dict[str, Any]:
+    if len(rows) > max_records:
+        raise ProviderError("provider health snapshot exceeds max_records")
+    if not isinstance(snapshot_generation, int) or isinstance(snapshot_generation, bool) or snapshot_generation < 1:
+        raise ProviderError("provider health snapshot generation is outside its bound")
+    if snapshot_generation == 1 and previous_snapshot_digest is not None:
+        raise ProviderError("provider health snapshot generation and previous_snapshot_digest are inconsistent")
+    if previous_snapshot_digest is not None and (
+        not isinstance(previous_snapshot_digest, str)
+        or len(previous_snapshot_digest) != 64
+        or any(character not in "0123456789abcdef" for character in previous_snapshot_digest)
+    ):
+        raise ProviderError("provider health previous_snapshot_digest is invalid")
+    normalized_rows = [_validate_provider_health_row(row) for row in rows]
+    encoded_rows = [_canonical_provider_health_json(row).encode("utf-8") for row in normalized_rows]
+    if sum(len(row) + 1 for row in encoded_rows) > max_bytes:
+        raise ProviderError("provider health snapshot exceeds max_bytes")
+    record_digests = [hashlib.sha256(row).hexdigest() for row in encoded_rows]
+    descriptor = {
+        "schema": PROVIDER_HEALTH_SNAPSHOT_SCHEMA,
+        "snapshot_generation": snapshot_generation,
+        "previous_snapshot_digest": previous_snapshot_digest,
+        "records": normalized_rows,
+        "record_digests": record_digests,
+        "head_digest": record_digests[-1] if record_digests else "",
+        "retention": "value_only_provider_outcomes_no_payloads_or_credentials",
+        "secret_material": "never_returned",
+    }
+    snapshot = {**descriptor, "snapshot_digest": hashlib.sha256(_canonical_provider_health_json(descriptor).encode("utf-8")).hexdigest()}
+    if len(_canonical_provider_health_json(snapshot).encode("utf-8")) > min(max_bytes, MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES):
+        raise ProviderError("provider health snapshot exceeds its byte capacity")
+    return snapshot
+
+
+def _normalize_provider_health_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_records: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ProviderError("provider health snapshot is malformed")
+    legacy = value.get("schema") == _LEGACY_PROVIDER_HEALTH_SNAPSHOT_SCHEMA
+    expected_keys = {
+        "schema",
+        "records",
+        "record_digests",
+        "head_digest",
+        "retention",
+        "secret_material",
+        "snapshot_digest",
+    }
+    if not legacy:
+        expected_keys.update({"snapshot_generation", "previous_snapshot_digest"})
+    if set(value) != expected_keys:
+        raise ProviderError("provider health snapshot is malformed")
+    if value.get("schema") != PROVIDER_HEALTH_SNAPSHOT_SCHEMA and not legacy:
+        raise ProviderError("provider health snapshot schema is unsupported")
+    if value.get("retention") != "value_only_provider_outcomes_no_payloads_or_credentials" or value.get("secret_material") != "never_returned":
+        raise ProviderError("provider health snapshot retention is invalid")
+    if not legacy:
+        generation = value.get("snapshot_generation")
+        previous = value.get("previous_snapshot_digest")
+        if not isinstance(generation, int) or isinstance(generation, bool) or generation < 1:
+            raise ProviderError("provider health snapshot generation is outside its bound")
+        if previous is not None and (
+            not isinstance(previous, str)
+            or len(previous) != 64
+            or any(character not in "0123456789abcdef" for character in previous)
+        ):
+            raise ProviderError("provider health previous_snapshot_digest is invalid")
+        if (generation == 1) != (previous is None):
+            raise ProviderError("provider health snapshot generation and previous_snapshot_digest are inconsistent")
+    raw_rows = value.get("records")
+    raw_digests = value.get("record_digests")
+    if not isinstance(raw_rows, Sequence) or isinstance(raw_rows, (str, bytes, bytearray)) or len(raw_rows) > max_records:
+        raise ProviderError("provider health snapshot record count is outside its bound")
+    if not isinstance(raw_digests, Sequence) or isinstance(raw_digests, (str, bytes, bytearray)) or len(raw_digests) != len(raw_rows):
+        raise ProviderError("provider health snapshot record digest count is invalid")
+    rows: list[dict[str, Any]] = []
+    digests: list[str] = []
+    for raw_row, raw_digest in zip(raw_rows, raw_digests):
+        row = _validate_provider_health_row(raw_row)
+        encoded = _canonical_provider_health_json(row).encode("utf-8")
+        if not isinstance(raw_digest, str) or len(raw_digest) != 64 or any(character not in "0123456789abcdef" for character in raw_digest) or hashlib.sha256(encoded).hexdigest() != raw_digest:
+            raise ProviderError("provider health snapshot record digest does not match its row")
+        rows.append(row)
+        digests.append(raw_digest)
+    head_digest = value.get("head_digest")
+    expected_head = digests[-1] if digests else ""
+    if not isinstance(head_digest, str) or (head_digest and (len(head_digest) != 64 or any(character not in "0123456789abcdef" for character in head_digest))) or head_digest != expected_head:
+        raise ProviderError("provider health snapshot head_digest is invalid")
+    descriptor = {
+        "schema": PROVIDER_HEALTH_SNAPSHOT_SCHEMA if not legacy else _LEGACY_PROVIDER_HEALTH_SNAPSHOT_SCHEMA,
+        **({} if legacy else {"snapshot_generation": value["snapshot_generation"], "previous_snapshot_digest": value["previous_snapshot_digest"]}),
+        "records": rows,
+        "record_digests": digests,
+        "head_digest": head_digest,
+        "retention": "value_only_provider_outcomes_no_payloads_or_credentials",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = value.get("snapshot_digest")
+    expected_snapshot_digest = hashlib.sha256(_canonical_provider_health_json(descriptor).encode("utf-8")).hexdigest()
+    if not isinstance(snapshot_digest, str) or len(snapshot_digest) != 64 or any(character not in "0123456789abcdef" for character in snapshot_digest) or snapshot_digest != expected_snapshot_digest:
+        raise ProviderError("provider health snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if len(_canonical_provider_health_json(normalized).encode("utf-8")) > min(max_bytes, MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES):
+        raise ProviderError("provider health snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_provider_health_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public strict validator for provider-health ledger snapshots."""
+
+    return _normalize_provider_health_snapshot(
+        value,
+        max_records=MAX_PROVIDER_HEALTH_RECORDS,
+        max_bytes=MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES,
+    )
+
+
+class ProviderHealthSnapshotTextStore(Protocol):
+    """Portable text persistence for runtime provider observations."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalProviderHealthSnapshotTextStore(ProviderHealthSnapshotTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonProviderHealthSnapshotPersistence:
+    """Canonical JSON provider-health persistence over a caller-owned text store."""
+
+    def __init__(self, store: ProviderHealthSnapshotTextStore, *, max_bytes: int = MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ProviderError("provider health JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES:
+            raise ProviderError("provider health JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ProviderError("provider health JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ProviderError("provider health JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ProviderError("provider health JSON snapshot must be an object")
+        normalized = _normalize_provider_health_snapshot(raw, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)
+        if encoded != _canonical_provider_health_json(normalized):
+            raise ProviderError("provider health JSON snapshot is not canonical")
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_provider_health_snapshot(snapshot, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)
+        encoded = _canonical_provider_health_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ProviderError("provider health JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonProviderHealthSnapshotPersistence(JsonProviderHealthSnapshotPersistence):
+    """Canonical JSON provider-health persistence with stale-writer fencing."""
+
+    def __init__(self, store: TransactionalProviderHealthSnapshotTextStore, *, max_bytes: int = MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ProviderError("transactional provider health persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and (len(expected_snapshot_digest) != 64 or any(character not in "0123456789abcdef" for character in expected_snapshot_digest)):
+            raise ProviderError("provider health expected snapshot digest is invalid")
+        normalized = _normalize_provider_health_snapshot(snapshot, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)
+        return self.store.write_if_unchanged(expected_snapshot_digest, _canonical_provider_health_json(normalized))
+
+
+class ProviderHealthPersistenceCoordinator:
+    """Flush and restore provider health through caller-owned storage."""
+
+    def __init__(self, store: ProviderHealthLedger, persistence: Any) -> None:
+        if not isinstance(store, ProviderHealthLedger):
+            raise ProviderError("provider health persistence requires a ProviderHealthLedger")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ProviderError("provider health persistence adapter is malformed")
+        self.store = store
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = _normalize_provider_health_snapshot(raw, max_records=self.store.max_records, max_bytes=self.store.max_bytes)
+        self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.store.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise ProviderError("provider health persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderContentPart:
+    """Provider-neutral text/image content translated at the final wire boundary.
+
+    Content is transient request material. It may contain an HTTPS image URL or bounded inline
+    base64 bytes, but it is never copied into provider health, model selection, learning, or
+    public response projections. Unknown fields are rejected so a caller cannot smuggle a
+    provider credential or an unreviewed payload through this typed surface.
+    """
+
+    type: str
+    text: str | None = None
+    url: str | None = None
+    media_type: str | None = None
+    data: str | None = None
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        _canonical_provider_content_part(self)
+
+    @classmethod
+    def text_part(cls, text: str) -> "ProviderContentPart":
+        return cls(type="text", text=text)
+
+    @classmethod
+    def image_url_part(
+        cls,
+        url: str,
+        *,
+        detail: str = "auto",
+    ) -> "ProviderContentPart":
+        return cls(type="image_url", url=url, detail=detail)
+
+    @classmethod
+    def image_base64_part(
+        cls,
+        data: str,
+        media_type: str,
+        *,
+        detail: str = "auto",
+    ) -> "ProviderContentPart":
+        return cls(type="image_base64", data=data, media_type=media_type, detail=detail)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _canonical_provider_content_part(self)
+
+
+def _canonical_provider_content_part(value: ProviderContentPart | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(value, ProviderContentPart):
+        part_type = value.type
+        if part_type == "text":
+            raw = {"type": value.type, "text": value.text}
+        elif part_type == "image_url":
+            raw = {"type": value.type, "url": value.url, "detail": value.detail}
+        else:
+            raw = {"type": value.type, "media_type": value.media_type, "data": value.data, "detail": value.detail}
+    elif isinstance(value, Mapping):
+        part_type = value.get("type")
+        raw = value
+    else:
+        raise ProviderError("provider content part must be an object")
+    if part_type == "text":
+        allowed = {"type", "text"}
+        if set(raw) - allowed:
+            raise ProviderError("provider text content part contains unsupported fields")
+        text = raw.get("text")
+        if not isinstance(text, str) or not text or len(text.encode("utf-8")) > MAX_PROVIDER_CONTENT_PART_BYTES or "\x00" in text:
+            raise ProviderError("provider text content part is outside its bounds")
+        return {"type": "text", "text": text}
+    detail = raw.get("detail")
+    if detail not in {"auto", "low", "high"}:
+        raise ProviderError("provider image detail is invalid")
+    if part_type == "image_url":
+        allowed = {"type", "url", "detail"}
+        if set(raw) - allowed:
+            raise ProviderError("provider image URL content part contains unsupported fields")
+        url = raw.get("url")
+        if not isinstance(url, str) or not url or len(url.encode("utf-8")) > 8_192 or not url.lower().startswith("https://") or any(character.isspace() or ord(character) < 32 for character in url):
+            raise ProviderError("provider image URL content part must be an HTTPS URL")
+        return {"type": "image_url", "url": url, "detail": detail}
+    if part_type == "image_base64":
+        allowed = {"type", "media_type", "data", "detail"}
+        if set(raw) - allowed:
+            raise ProviderError("provider image base64 content part contains unsupported fields")
+        media_type = raw.get("media_type")
+        data = raw.get("data")
+        if media_type not in _PROVIDER_IMAGE_MEDIA_TYPES:
+            raise ProviderError("provider image media type is unsupported")
+        if not isinstance(data, str) or not data or len(data.encode("utf-8")) > MAX_PROVIDER_CONTENT_PART_BYTES:
+            raise ProviderError("provider image base64 content part is outside its bounds")
+        try:
+            base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise ProviderError("provider image base64 content part is malformed") from error
+        return {"type": "image_base64", "media_type": media_type, "data": data, "detail": detail}
+    raise ProviderError("provider content part type is unsupported")
+
+
+def provider_text_part(text: str) -> ProviderContentPart:
+    return ProviderContentPart.text_part(text)
+
+
+def provider_image_url_part(url: str, *, detail: str = "auto") -> ProviderContentPart:
+    return ProviderContentPart.image_url_part(url, detail=detail)
+
+
+def provider_image_base64_part(data: str, media_type: str, *, detail: str = "auto") -> ProviderContentPart:
+    return ProviderContentPart.image_base64_part(data, media_type, detail=detail)
+
+
+def normalize_provider_content_parts(
+    value: Sequence[ProviderContentPart | Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Return a canonical, provider-neutral tuple for transient user evidence."""
+
+    normalized = _normalize_provider_content(value, "user")
+    if isinstance(normalized, str):
+        raise ProviderError("provider content parts must be a sequence")
+    return tuple(normalized)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderTool:
+    """Provider-neutral function schema; it describes a tool but never grants execution."""
+
+    name: str
+    description: str = ""
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.name, str)
+            or not self.name.strip()
+            or len(self.name.encode("utf-8")) > MAX_TOOL_NAME_BYTES
+            or any(not (character.isalnum() or character in "_-.") for character in self.name)
+        ):
+            raise ProviderError("provider tool name is not a bounded safe identifier")
+        if not isinstance(self.description, str) or len(self.description) > MAX_MESSAGE_CHARS:
+            raise ProviderError("provider tool description is not bounded")
+        if not isinstance(self.parameters, Mapping):
+            raise ProviderError("provider tool parameters must be a JSON object")
+        try:
+            encoded = json.dumps(self.parameters, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ProviderError("provider tool parameters must be JSON-safe") from error
+        if len(encoded.encode("utf-8")) > 256_000:
+            raise ProviderError("provider tool parameters exceed the bounded size")
+
+    @classmethod
+    def from_mcp_schema(cls, schema: Mapping[str, Any]) -> "ProviderTool":
+        if not isinstance(schema, Mapping):
+            raise ProviderError("MCP tool schema must be an object")
+        parameters = schema.get("inputSchema", schema.get("parameters", {}))
+        if not isinstance(parameters, Mapping):
+            raise ProviderError("MCP tool schema inputSchema must be an object")
+        return cls(
+            name=schema.get("name", ""),
+            description=schema.get("description", ""),
+            parameters=dict(parameters),
+        )
+
+    def to_wire(self, protocol: str) -> dict[str, Any]:
+        if protocol == "anthropic_messages":
+            return {
+                "name": self.name,
+                "description": self.description,
+                "input_schema": dict(self.parameters),
+            }
+        if protocol == "openai_chat_completions":
+            return {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": dict(self.parameters),
+                },
+            }
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": dict(self.parameters),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderToolCall:
+    """A parsed provider intent; callers must validate and authorize it before execution."""
+
+    call_id: str
+    name: str
+    arguments: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.call_id, str) or not self.call_id.strip() or len(self.call_id) > 256:
+            raise ProviderError("provider tool call id is not bounded")
+        if not isinstance(self.name, str) or not self.name.strip() or len(self.name) > MAX_TOOL_NAME_BYTES:
+            raise ProviderError("provider tool call name is not bounded")
+        if not isinstance(self.arguments, Mapping):
+            raise ProviderError("provider tool call arguments must be an object")
+        try:
+            encoded = json.dumps(self.arguments, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ProviderError("provider tool call arguments must be JSON-safe") from error
+        if len(encoded.encode("utf-8")) > MAX_TOOL_ARGUMENT_BYTES:
+            raise ProviderError("provider tool call arguments exceed the bounded size")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "call_id": self.call_id,
+            "name": self.name,
+            "arguments": dict(self.arguments),
+            "execution": "not_started",
+            "authorization": "caller_owned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRequest:
+    model: str
+    messages: tuple[Mapping[str, Any], ...]
+    max_output_tokens: int = 1024
+    temperature: float | None = None
+    require_json: bool = False
+    response_schema: Mapping[str, Any] | None = None
+    idempotency_key: str | None = None
+    tools: tuple[ProviderTool, ...] = ()
+    tool_choice: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.model or len(self.messages) > MAX_MESSAGES:
+            raise ProviderError("model and messages are required within their bounds")
+        if self.max_output_tokens <= 0:
+            raise ProviderError("max_output_tokens must be positive")
+        if self.temperature is not None and not 0 <= self.temperature <= 2:
+            raise ProviderError("temperature must be within [0, 2]")
+        if not isinstance(self.require_json, bool):
+            raise ProviderError("require_json must be a boolean")
+        if self.response_schema is not None:
+            if not isinstance(self.response_schema, Mapping):
+                raise ProviderError("response_schema must be a JSON object")
+            try:
+                encoded_schema = json.dumps(self.response_schema, allow_nan=False)
+            except (TypeError, ValueError) as error:
+                raise ProviderError("response_schema must be JSON-safe") from error
+            if len(encoded_schema.encode("utf-8")) > 256_000:
+                raise ProviderError("response_schema exceeds the bounded size")
+        if self.idempotency_key is not None and (
+            not isinstance(self.idempotency_key, str)
+            or not self.idempotency_key.strip()
+            or len(self.idempotency_key) > 256
+        ):
+            raise ProviderError("idempotency_key must be a bounded non-empty string")
+        if not isinstance(self.tools, Sequence) or isinstance(self.tools, (str, bytes)):
+            raise ProviderError("tools must be a sequence of ProviderTool values")
+        if len(self.tools) > MAX_PROVIDER_TOOLS:
+            raise ProviderError("tools exceed the bounded provider limit")
+        names: set[str] = set()
+        for tool in self.tools:
+            if not isinstance(tool, ProviderTool):
+                raise ProviderError("tools must contain only ProviderTool values")
+            if tool.name in names:
+                raise ProviderError("provider tool names must be unique")
+            names.add(tool.name)
+        if self.tool_choice not in {None, "auto", "none", "required"}:
+            raise ProviderError("tool_choice must be auto, none, required, or None")
+        for message in self.messages:
+            _validate_provider_message(message)
+
+    def with_tool_results(
+        self,
+        tool_calls: Sequence[ProviderToolCall],
+        results: Sequence[ProviderToolResult],
+        *,
+        provider_output_items: Sequence[Mapping[str, Any]] = (),
+    ) -> "ProviderRequest":
+        """Append a provider-neutral assistant/tool turn for an explicit continuation.
+
+        The internal ``tool_calls`` and ``tool`` message shapes are translated by ``_body`` for
+        Responses, Chat Completions, and Anthropic Messages. The method requires one caller-
+        approved result for every call, so a model cannot silently advance after an unapproved
+        intent or a missing execution result.
+        """
+
+        if not isinstance(tool_calls, Sequence) or isinstance(tool_calls, (str, bytes)):
+            raise ProviderError("tool_calls must be a sequence")
+        if not isinstance(results, Sequence) or isinstance(results, (str, bytes)):
+            raise ProviderError("tool results must be a sequence")
+        if any(not isinstance(call, ProviderToolCall) for call in tool_calls):
+            raise ProviderError("tool_calls must contain ProviderToolCall values")
+        if any(not isinstance(result, ProviderToolResult) for result in results):
+            raise ProviderError("tool results must contain ProviderToolResult values")
+        if len(tool_calls) != len(results):
+            raise ProviderError("every provider tool call requires exactly one result")
+        if not isinstance(provider_output_items, Sequence) or isinstance(
+            provider_output_items, (str, bytes)
+        ):
+            raise ProviderError("provider output items must be a sequence")
+        if any(not isinstance(item, Mapping) for item in provider_output_items):
+            raise ProviderError("provider output items must contain mappings")
+        _bounded_json_bytes(
+            [dict(item) for item in provider_output_items],
+            MAX_RESPONSE_BYTES,
+            "provider output items",
+        )
+        expected_ids = [call.call_id for call in tool_calls]
+        result_ids = [result.call_id for result in results]
+        if result_ids != expected_ids or any(not result.approved for result in results):
+            raise ProviderError("provider tool results require caller approval in call order")
+        assistant_tool_calls = tuple(
+            {
+                "id": call.call_id,
+                "name": call.name,
+                "arguments": json.dumps(
+                    call.arguments,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            }
+            for call in tool_calls
+        )
+        continuation_messages: list[Mapping[str, Any]] = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": assistant_tool_calls,
+                # Responses models may return reasoning items alongside a function call.  The
+                # item list is transient runtime state; it is consumed only by _wire_messages
+                # and is intentionally omitted from ProviderResponse.to_dict()/learning state.
+                "provider_output_items": tuple(dict(item) for item in provider_output_items),
+            }
+        ]
+        continuation_messages.extend(
+            {
+                "role": "tool",
+                "tool_call_id": result.call_id,
+                "content": result.serialized_content(),
+                "is_error": result.is_error,
+            }
+            for result in results
+        )
+        combined = self.messages + tuple(continuation_messages)
+        if len(combined) > MAX_MESSAGES:
+            raise ProviderError("provider continuation would exceed the message bound")
+        return replace(self, messages=combined)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderResponse:
+    provider: str
+    model: str
+    text: str
+    status_code: int
+    request_id: str | None
+    usage: Mapping[str, Any]
+    raw: Mapping[str, Any]
+    structured: Any = None
+    tool_calls: tuple[ProviderToolCall, ...] = ()
+    # Some protocols require the complete assistant output item sequence for a valid
+    # continuation (for example Responses reasoning items plus a function_call).  This is
+    # deliberately process-local and never appears in the public projection.
+    provider_output_items: tuple[Mapping[str, Any], ...] = field(
+        default=(), repr=False, compare=False
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "text": self.text,
+            "status_code": self.status_code,
+            "request_id": self.request_id,
+            "usage": dict(self.usage),
+            "raw": dict(self.raw),
+            "structured": self.structured,
+            "tool_calls": [call.to_dict() for call in self.tool_calls],
+            "credential_posture": "not_in_response",
+        }
+
+
+class InMemoryProvider:
+    """Credentialless provider transport for deterministic local execution and tests.
+
+    The handler receives the same provider-neutral :class:`ProviderRequest` that the HTTP
+    boundary receives and may return a :class:`ProviderResponse`, a text string, or a bounded
+    response mapping.  The runtime re-normalizes the result, strips handler-owned raw payloads,
+    validates requested tool names and structured output, and then applies its normal circuit,
+    observation, admission, and tool-loop behavior.
+
+    This is intentionally an explicit transport, not a fake credential or an implicit fallback.
+    It is useful for local models, deterministic fixtures, and offline development; production
+    applications should register a real provider configuration or their own authenticated
+    transport.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        handler: Callable[[ProviderRequest], ProviderResponse | Mapping[str, Any] | str],
+        *,
+        stream_handler: Callable[[ProviderRequest], Iterable[ProviderStreamEvent]] | None = None,
+        model_discovery_handler: Callable[[], Mapping[str, Any]] | None = None,
+    ) -> None:
+        if (
+            not isinstance(provider, str)
+            or not provider.strip()
+            or "/" in provider
+            or " " in provider
+        ):
+            raise ProviderError("in-memory provider must be a path-safe identifier")
+        if not callable(handler):
+            raise ProviderError("in-memory provider handler must be callable")
+        if stream_handler is not None and not callable(stream_handler):
+            raise ProviderError("in-memory provider stream_handler must be callable or None")
+        if model_discovery_handler is not None and not callable(model_discovery_handler):
+            raise ProviderError("in-memory provider model_discovery_handler must be callable or None")
+        self.provider = provider
+        self._handler = handler
+        self._stream_handler = stream_handler
+        self._model_discovery_handler = model_discovery_handler
+
+    def invoke(self, request: ProviderRequest) -> ProviderResponse:
+        if not isinstance(request, ProviderRequest):
+            raise ProviderError("in-memory provider received a malformed request")
+        try:
+            value = self._handler(request)
+        except ProviderError as error:
+            raise ProviderError(
+                "in-memory provider handler failed",
+                retryable=error.retryable,
+                status_code=error.status_code,
+                circuit_open=error.circuit_open,
+            ) from error
+        except Exception as error:
+            raise ProviderError("in-memory provider handler failed") from error
+        return self._normalize_response(value, request)
+
+    def stream(self, request: ProviderRequest) -> Iterator[ProviderStreamEvent]:
+        if not isinstance(request, ProviderRequest):
+            raise ProviderError("in-memory provider received a malformed stream request")
+        if self._stream_handler is not None:
+            try:
+                events = self._stream_handler(request)
+                if not isinstance(events, Iterable) or isinstance(events, (str, bytes)):
+                    raise ProviderError("in-memory provider stream handler must return an iterable")
+                for event in events:
+                    if not isinstance(event, ProviderStreamEvent):
+                        raise ProviderError("in-memory provider stream handler returned a malformed event")
+                    if event.provider != self.provider or event.model != request.model:
+                        raise ProviderError("in-memory provider stream event identity does not match request")
+                    yield event
+                return
+            except ProviderError as error:
+                raise ProviderError(
+                    "in-memory provider stream handler failed",
+                    retryable=error.retryable,
+                    status_code=error.status_code,
+                    circuit_open=error.circuit_open,
+                ) from error
+            except Exception as error:
+                raise ProviderError("in-memory provider stream handler failed") from error
+
+        response = self.invoke(request)
+        sequence = 0
+        if response.text:
+            yield ProviderStreamEvent(
+                provider=self.provider,
+                model=request.model,
+                sequence=sequence,
+                event_type="in_memory.text",
+                request_id=response.request_id,
+                text_delta=response.text,
+                usage=response.usage,
+            )
+            sequence += 1
+        for call in response.tool_calls:
+            yield ProviderStreamEvent(
+                provider=self.provider,
+                model=request.model,
+                sequence=sequence,
+                event_type="in_memory.tool_call",
+                request_id=response.request_id,
+                tool_call=call,
+            )
+            sequence += 1
+        yield ProviderStreamEvent(
+            provider=self.provider,
+            model=request.model,
+            sequence=sequence,
+            event_type="in_memory.done",
+            request_id=response.request_id,
+            usage=response.usage,
+            done=True,
+        )
+
+    def discover_models(self) -> Mapping[str, Any]:
+        if self._model_discovery_handler is None:
+            raise ProviderError("in-memory provider has no model discovery handler")
+        try:
+            value = self._model_discovery_handler()
+        except ProviderError as error:
+            raise ProviderError(
+                "in-memory provider model discovery failed",
+                retryable=error.retryable,
+                status_code=error.status_code,
+                circuit_open=error.circuit_open,
+            ) from error
+        except Exception as error:
+            raise ProviderError("in-memory provider model discovery failed") from error
+        if not isinstance(value, Mapping):
+            raise ProviderError("in-memory provider model discovery must return an object")
+        _bounded_json_bytes(value, MAX_PROVIDER_MODEL_DISCOVERY_BYTES, "in-memory model discovery")
+        return dict(value)
+
+    def _normalize_response(
+        self,
+        value: ProviderResponse | Mapping[str, Any] | str,
+        request: ProviderRequest,
+    ) -> ProviderResponse:
+        if isinstance(value, ProviderResponse):
+            source: Mapping[str, Any] = {
+                "provider": value.provider,
+                "model": value.model,
+                "text": value.text,
+                "status_code": value.status_code,
+                "request_id": value.request_id,
+                "usage": value.usage,
+                "structured": value.structured,
+                "tool_calls": value.tool_calls,
+                "provider_output_items": value.provider_output_items,
+            }
+        elif isinstance(value, str):
+            source = {"text": value}
+        elif isinstance(value, Mapping):
+            source = value
+        else:
+            raise ProviderError("in-memory provider handler returned an unsupported response")
+
+        has_envelope = any(
+            key in source
+            for key in ("provider", "model", "text", "output_text", "status_code", "usage", "tool_calls")
+        )
+        if not has_envelope:
+            source = {"text": json.dumps(dict(source), ensure_ascii=False, separators=(",", ":")), "structured": dict(source)}
+        provider = source.get("provider", self.provider)
+        model = source.get("model", request.model)
+        if provider not in {self.provider, "", None} or model != request.model:
+            raise ProviderError("in-memory provider response identity does not match request")
+        status_code = source.get("status_code", 200)
+        if not isinstance(status_code, int) or isinstance(status_code, bool) or not 200 <= status_code < 300:
+            raise ProviderError("in-memory provider response status is not successful")
+        text = source.get("text", source.get("output_text", ""))
+        if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_MESSAGE_CHARS:
+            raise ProviderError("in-memory provider response text is outside its bound")
+        usage = source.get("usage", {})
+        if not isinstance(usage, Mapping):
+            raise ProviderError("in-memory provider response usage must be an object")
+        _bounded_json_bytes(usage, 256_000, "in-memory provider usage")
+        request_id = source.get("request_id")
+        if request_id is not None and (not isinstance(request_id, str) or len(request_id.encode("utf-8")) > 512):
+            raise ProviderError("in-memory provider request_id is outside its bound")
+        raw_calls = source.get("tool_calls", ())
+        if isinstance(raw_calls, (str, bytes)) or not isinstance(raw_calls, Sequence):
+            raise ProviderError("in-memory provider tool_calls must be a sequence")
+        tool_calls: list[ProviderToolCall] = []
+        for raw_call in raw_calls:
+            if isinstance(raw_call, ProviderToolCall):
+                call = raw_call
+            elif isinstance(raw_call, Mapping):
+                arguments = raw_call.get("arguments", {})
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except (TypeError, json.JSONDecodeError) as error:
+                        raise ProviderError("in-memory provider tool call arguments are invalid JSON") from error
+                call = ProviderToolCall(
+                    call_id=raw_call.get("call_id", raw_call.get("id", "")),
+                    name=raw_call.get("name", ""),
+                    arguments=arguments,
+                )
+            else:
+                raise ProviderError("in-memory provider tool_calls contain an invalid value")
+            tool_calls.append(call)
+        allowed_tool_names = {tool.name for tool in request.tools}
+        if tool_calls and (not allowed_tool_names or any(call.name not in allowed_tool_names for call in tool_calls)):
+            raise ProviderError("in-memory provider returned an unrequested tool call")
+        structured = source.get("structured")
+        if tool_calls:
+            structured = None
+        else:
+            validated = _validate_structured_response(text, request)
+            if request.require_json or request.response_schema is not None:
+                structured = validated
+        output_items = source.get("provider_output_items", ())
+        if isinstance(output_items, (str, bytes)) or not isinstance(output_items, Sequence):
+            raise ProviderError("in-memory provider output items must be a sequence")
+        if any(not isinstance(item, Mapping) for item in output_items):
+            raise ProviderError("in-memory provider output items must contain mappings")
+        _bounded_json_bytes(output_items, MAX_RESPONSE_BYTES, "in-memory provider output items")
+        return ProviderResponse(
+            provider=self.provider,
+            model=request.model,
+            text=text,
+            status_code=status_code,
+            request_id=request_id,
+            usage=dict(usage),
+            raw={"schema": IN_MEMORY_PROVIDER_SCHEMA, "transport": "caller_owned"},
+            structured=structured,
+            tool_calls=tuple(tool_calls),
+            provider_output_items=tuple(dict(item) for item in output_items),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderStreamEvent:
+    """A bounded provider-neutral projection of one SSE event.
+
+    The event deliberately exposes deltas and a finalized :class:`ProviderToolCall`, rather than
+    provider payloads. This keeps streaming useful to a UI while preventing raw event bodies from
+    becoming an accidental persistence or logging channel.
+    """
+
+    provider: str
+    model: str
+    sequence: int
+    event_type: str
+    request_id: str | None = None
+    text_delta: str = ""
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    arguments_delta: str = ""
+    tool_call: ProviderToolCall | None = None
+    usage: Mapping[str, Any] = field(default_factory=dict)
+    done: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provider, str) or not self.provider:
+            raise ProviderError("stream event provider is required")
+        if not isinstance(self.model, str) or not self.model:
+            raise ProviderError("stream event model is required")
+        if not isinstance(self.sequence, int) or self.sequence < 0:
+            raise ProviderError("stream event sequence must be non-negative")
+        if (
+            not isinstance(self.event_type, str)
+            or not self.event_type
+            or len(self.event_type) > 256
+            or any(ord(character) < 32 for character in self.event_type)
+        ):
+            raise ProviderError("stream event type is not bounded")
+        for label, value, limit in (
+            ("text delta", self.text_delta, MAX_STREAM_TEXT_BYTES),
+            ("arguments delta", self.arguments_delta, MAX_TOOL_ARGUMENT_BYTES),
+        ):
+            if not isinstance(value, str) or len(value.encode("utf-8")) > limit:
+                raise ProviderError(f"stream {label} exceeds the bounded size")
+        for label, value in (("request id", self.request_id), ("tool call id", self.tool_call_id), ("tool name", self.tool_name)):
+            if value is not None and (
+                not isinstance(value, str)
+                or not value
+                or len(value.encode("utf-8")) > MAX_TOOL_NAME_BYTES
+            ):
+                raise ProviderError(f"stream {label} is not bounded")
+        if self.tool_call is not None and not isinstance(self.tool_call, ProviderToolCall):
+            raise ProviderError("stream tool_call must be a ProviderToolCall")
+        if not isinstance(self.usage, Mapping):
+            raise ProviderError("stream usage must be an object")
+        _bounded_json_bytes(self.usage, 256_000, "stream usage")
+        if not isinstance(self.done, bool):
+            raise ProviderError("stream done must be a boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "sequence": self.sequence,
+            "event_type": self.event_type,
+            "request_id": self.request_id,
+            "text_delta": self.text_delta,
+            "tool_call_id": self.tool_call_id,
+            "tool_name": self.tool_name,
+            "arguments_delta": self.arguments_delta,
+            "tool_call": None if self.tool_call is None else self.tool_call.to_dict(),
+            "usage": dict(self.usage),
+            "done": self.done,
+            "credential_posture": "not_in_event",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderToolResult:
+    """Caller-approved output returned to a provider continuation turn."""
+
+    call_id: str
+    content: Any
+    approved: bool = False
+    is_error: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.call_id, str) or not self.call_id.strip() or len(self.call_id) > 256:
+            raise ProviderError("provider tool result call id is not bounded")
+        if not isinstance(self.approved, bool) or not isinstance(self.is_error, bool):
+            raise ProviderError("provider tool result flags must be booleans")
+        _bounded_json_bytes(self.content, MAX_TOOL_ARGUMENT_BYTES, "provider tool result")
+
+    def serialized_content(self) -> str:
+        if isinstance(self.content, str):
+            return self.content
+        return json.dumps(self.content, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "call_id": self.call_id,
+            "content": self.content,
+            "approved": self.approved,
+            "is_error": self.is_error,
+            "authorization": "caller_approved" if self.approved else "caller_approval_required",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderToolLoopResult:
+    """Bounded result of explicit caller-authorized multi-turn tool continuation."""
+
+    status: str
+    responses: tuple[ProviderResponse, ...]
+    final_response: ProviderResponse | None
+    turns: int
+    tool_calls: int
+
+    def __post_init__(self) -> None:
+        if self.status not in {"completed", "authorization_required", "turn_limit_reached"}:
+            raise ProviderError("provider tool loop returned an invalid status")
+        if not isinstance(self.responses, tuple) or any(
+            not isinstance(response, ProviderResponse) for response in self.responses
+        ):
+            raise ProviderError("provider tool loop responses are malformed")
+        if self.final_response is not None and not isinstance(self.final_response, ProviderResponse):
+            raise ProviderError("provider tool loop final response is malformed")
+        if not isinstance(self.turns, int) or self.turns < 0:
+            raise ProviderError("provider tool loop turns must be non-negative")
+        if not isinstance(self.tool_calls, int) or self.tool_calls < 0:
+            raise ProviderError("provider tool loop tool_calls must be non-negative")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "turns": self.turns,
+            "tool_calls": self.tool_calls,
+            "responses": [response.to_dict() for response in self.responses],
+            "final_response": None if self.final_response is None else self.final_response.to_dict(),
+            "tool_execution": "caller_authorized_only",
+        }
+
+
+@dataclass(slots=True)
+class _CircuitState:
+    consecutive_failures: int = 0
+    opened_until: float | None = None
+
+
+@dataclass(slots=True)
+class _ProviderObservationState:
+    """Process-local, value-only transport evidence used by adaptive routing."""
+
+    attempts: int = 0
+    successes: int = 0
+    failures: int = 0
+    total_latency_ms: float = 0.0
+    last_latency_ms: float | None = None
+    last_model: str | None = None
+    last_outcome: str | None = None
+    last_status: str | None = None
+    last_status_code: int | None = None
+    last_circuit: str | None = None
+    opened_until: float | None = None
+    observed_at: float | None = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+
+
+class LLMRuntime:
+    """Invoke configured providers while resolving secrets only at the header boundary."""
+
+    def __init__(
+        self,
+        credentials: CredentialStore | None = None,
+        *,
+        clock: Callable[[], float] = time.time,
+        sleeper: Callable[[float], None] = time.sleep,
+        observation_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    ) -> None:
+        self.credentials = credentials or CredentialStore()
+        self._providers: dict[str, ProviderConfig] = {}
+        self._circuits: dict[str, _CircuitState] = {}
+        self._provider_observations: dict[str, _ProviderObservationState] = {}
+        self._model_observations: dict[tuple[str, str], _ProviderObservationState] = {}
+        self._clock = clock
+        self._sleeper = sleeper
+        self._observation_lock = threading.RLock()
+        self._observation_callbacks: list[Callable[[Mapping[str, Any]], None]] = []
+        if observation_callback is not None:
+            self.add_observation_callback(observation_callback)
+
+    def add_observation_callback(self, callback: Callable[[Mapping[str, Any]], None]) -> None:
+        """Register a best-effort value-only provider outcome observer.
+
+        Observers receive provider/model/status/latency/usage metadata only. They never receive
+        request messages, response text, headers, credential handles, or raw provider payloads.
+        Observer failures are isolated from the provider call so telemetry cannot change runtime
+        authorization or retry semantics.
+        """
+
+        if not callable(callback):
+            raise ProviderError("observation callback must be callable")
+        with self._observation_lock:
+            if callback not in self._observation_callbacks:
+                self._observation_callbacks.append(callback)
+
+    def remove_observation_callback(self, callback: Callable[[Mapping[str, Any]], None]) -> None:
+        with self._observation_lock:
+            if callback in self._observation_callbacks:
+                self._observation_callbacks.remove(callback)
+
+    def _notify_observation(
+        self,
+        config: ProviderConfig,
+        request: ProviderRequest,
+        *,
+        status: str,
+        outcome: str,
+        latency_ms: float,
+        response: ProviderResponse | None = None,
+        error: ProviderError | None = None,
+    ) -> None:
+        observed_at = float(self._clock())
+        normalized_latency = max(0.0, float(latency_ms))
+        input_tokens = 0
+        output_tokens = 0
+        if response is not None:
+            for key in ("input_tokens", "output_tokens"):
+                value = response.usage.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    if key == "input_tokens":
+                        input_tokens = value
+                    else:
+                        output_tokens = value
+        circuit_state = self._circuits.get(config.provider)
+        circuit_label = "closed"
+        opened_until = None
+        if circuit_state is not None:
+            now = self._clock()
+            circuit_label = (
+                "open"
+                if circuit_state.opened_until is not None and now < circuit_state.opened_until
+                else "closed"
+            )
+            opened_until = circuit_state.opened_until
+        with self._observation_lock:
+            observations = (
+                self._provider_observations.setdefault(config.provider, _ProviderObservationState()),
+                self._model_observations.setdefault(
+                    (config.provider, request.model), _ProviderObservationState()
+                ),
+            )
+            for observed in observations:
+                observed.attempts += 1
+                if outcome == "success":
+                    observed.successes += 1
+                elif outcome == "failure":
+                    observed.failures += 1
+                observed.total_latency_ms += normalized_latency
+                observed.last_latency_ms = normalized_latency
+                observed.last_model = request.model
+                observed.last_outcome = outcome
+                observed.last_status = status
+                observed.last_status_code = None if error is None else error.status_code
+                observed.last_circuit = circuit_label
+                observed.opened_until = opened_until
+                observed.observed_at = observed_at
+                observed.total_input_tokens += input_tokens
+                observed.total_output_tokens += output_tokens
+        payload: dict[str, Any] = {
+            "schema": PROVIDER_OBSERVATION_SCHEMA,
+            "provider": config.provider,
+            "model": request.model,
+            "status": status,
+            "outcome": outcome,
+            "latency_ms": normalized_latency,
+            "observed_at": observed_at,
+            "retention": "metadata_only_no_provider_payloads",
+        }
+        if circuit_state is not None:
+            payload["circuit"] = circuit_label
+            payload["consecutive_failures"] = circuit_state.consecutive_failures
+            if circuit_state.opened_until is not None:
+                payload["opened_until"] = circuit_state.opened_until
+        if response is not None:
+            for key in ("input_tokens", "output_tokens"):
+                value = response.usage.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    payload[key] = value
+        if error is not None:
+            payload["failure_class"] = "circuit_open" if error.circuit_open else "provider_error"
+            if error.status_code is not None:
+                payload["status_code"] = error.status_code
+        with self._observation_lock:
+            callbacks = tuple(self._observation_callbacks)
+        for callback in callbacks:
+            try:
+                callback(dict(payload))
+            except Exception:
+                # Telemetry is deliberately non-authoritative and must not turn a successful
+                # provider response into a failed model invocation.
+                continue
+
+    def register_provider(self, config: ProviderConfig) -> None:
+        self._providers[config.provider] = config
+        self._circuits.setdefault(config.provider, _CircuitState())
+        with self._observation_lock:
+            self._provider_observations.setdefault(config.provider, _ProviderObservationState())
+
+    def register_in_memory_provider(
+        self,
+        provider: str,
+        handler: Callable[[ProviderRequest], ProviderResponse | Mapping[str, Any] | str],
+        *,
+        stream_handler: Callable[[ProviderRequest], Iterable[ProviderStreamEvent]] | None = None,
+        model_discovery_handler: Callable[[], Mapping[str, Any]] | None = None,
+        protocol: str = "openai_responses",
+        structured_output_mode: str = "json_schema",
+        max_attempts: int = 1,
+        retry_backoff_seconds: float = 0.0,
+        circuit_breaker_failure_threshold: int = 3,
+        circuit_breaker_reset_seconds: float = 30.0,
+    ) -> ProviderConfig:
+        """Register an explicit local provider without a credential or network socket.
+
+        The resulting config is credentialless by construction and still travels through the
+        same ``invoke``/stream/tool-loop path as a remote provider. This is intended for local
+        model bridges, deterministic development fixtures, and offline end-to-end verification.
+        It is never selected implicitly: callers must register the provider and its model arm.
+        """
+
+        transport = InMemoryProvider(
+            provider,
+            handler,
+            stream_handler=stream_handler,
+            model_discovery_handler=model_discovery_handler,
+        )
+        config = ProviderConfig(
+            provider=provider,
+            base_url="https://in-memory.invalid",
+            protocol=protocol,
+            requires_credential=False,
+            max_attempts=max_attempts,
+            retry_backoff_seconds=retry_backoff_seconds,
+            circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+            circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+            structured_output_mode=structured_output_mode,
+            transport=transport,
+        )
+        self.register_provider(config)
+        return config
+
+    def provider_metadata(self) -> list[dict[str, Any]]:
+        return [self._providers[name].to_metadata() for name in sorted(self._providers)]
+
+    def provider_status(self, provider: str) -> dict[str, Any]:
+        """Return value-only circuit and transport evidence.
+
+        The counters are process-local and intentionally do not replace the optional durable
+        :class:`ProviderHealthLedger`. They let a long-lived brain react immediately to the
+        runtime's own outcomes, while the ledger can carry the same bounded evidence across
+        restarts. No credential, prompt, response text, or provider payload is retained.
+        """
+
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        state = self._circuits.setdefault(provider, _CircuitState())
+        open_now = state.opened_until is not None and self._clock() < state.opened_until
+        with self._observation_lock:
+            observed = self._provider_observations.setdefault(provider, _ProviderObservationState())
+            attempts = observed.attempts
+            observation = {
+                "attempts": attempts,
+                "successes": observed.successes,
+                "failures": observed.failures,
+                "success_rate": observed.successes / attempts if attempts else 0.0,
+                "mean_latency_ms": (
+                    observed.total_latency_ms / attempts if attempts else None
+                ),
+                "last_latency_ms": observed.last_latency_ms,
+                "last_model": observed.last_model,
+                "last_outcome": observed.last_outcome,
+                "last_status": observed.last_status,
+                "last_status_code": observed.last_status_code,
+                "last_circuit": observed.last_circuit,
+                "observed_at": observed.observed_at,
+                "total_input_tokens": observed.total_input_tokens,
+                "total_output_tokens": observed.total_output_tokens,
+            }
+        return {
+            "provider": provider,
+            "configured": True,
+            "circuit": "open" if open_now else "closed",
+            "consecutive_failures": state.consecutive_failures,
+            "opened_until": state.opened_until,
+            "max_attempts": config.max_attempts,
+            "credential_posture": "caller_supplied_in_memory_handle",
+            **observation,
+        }
+
+    def model_health_snapshot(self, provider: str | None = None) -> dict[str, dict[str, Any]]:
+        """Return process-local, value-only health evidence keyed by ``provider/model``.
+
+        Model observations are intentionally separate from provider circuit state. A model's
+        observed reliability and latency can influence routing, but only the provider circuit
+        remains an authoritative transport gate. This lets a healthy sibling model remain a
+        viable fallback when the provider itself has not opened its circuit.
+        """
+
+        if provider is not None:
+            config = self._providers.get(provider)
+            if config is None:
+                raise ProviderError(f"provider {provider!r} is not configured")
+        with self._observation_lock:
+            rows = tuple(
+                (key, observed)
+                for key, observed in self._model_observations.items()
+                if provider is None or key[0] == provider
+            )
+        result: dict[str, dict[str, Any]] = {}
+        for (row_provider, model), observed in sorted(rows):
+            attempts = observed.attempts
+            result[f"{row_provider}/{model}"] = {
+                "provider": row_provider,
+                "model": model,
+                "attempts": attempts,
+                "successes": observed.successes,
+                "failures": observed.failures,
+                "success_rate": observed.successes / attempts if attempts else 0.0,
+                "mean_latency_ms": observed.total_latency_ms / attempts if attempts else None,
+                "last_latency_ms": observed.last_latency_ms,
+                "last_outcome": observed.last_outcome,
+                "last_status": observed.last_status,
+                "last_status_code": observed.last_status_code,
+                "circuit": observed.last_circuit or "closed",
+                "opened_until": observed.opened_until,
+                "observed_at": observed.observed_at,
+                "total_input_tokens": observed.total_input_tokens,
+                "total_output_tokens": observed.total_output_tokens,
+            }
+        return result
+
+    def model_status(self, provider: str, model: str) -> dict[str, Any]:
+        """Return one redacted model-health projection for configuration and operator UIs."""
+
+        if not isinstance(model, str) or not model.strip():
+            raise ProviderError("model status model must be a non-empty string")
+        snapshot = self.model_health_snapshot(provider)
+        return snapshot.get(
+            f"{provider}/{model}",
+            {
+                "provider": provider,
+                "model": model,
+                "attempts": 0,
+                "successes": 0,
+                "failures": 0,
+                "success_rate": 0.0,
+                "mean_latency_ms": None,
+                "last_latency_ms": None,
+                "last_outcome": None,
+                "last_status": None,
+                "last_status_code": None,
+                "circuit": "closed",
+                "opened_until": None,
+                "observed_at": None,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+            },
+        )
+
+    def provider_requires_credential(self, provider: str) -> bool:
+        """Return whether this registered transport requires a caller-owned credential handle."""
+
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        return config.requires_credential
+
+    def discover_models(
+        self,
+        provider: str,
+        *,
+        credential: CredentialHandle | None = None,
+        path: str | None = None,
+        limit: int = MAX_PROVIDER_DISCOVERED_MODELS,
+    ) -> tuple[ProviderModelDescriptor, ...]:
+        """Fetch a bounded, secret-free model inventory through a caller-owned credential.
+
+        The response is projected to :class:`ProviderModelDescriptor` values immediately. Raw
+        provider rows, response bodies, authorization headers, and credential material are not
+        returned or retained. Discovery establishes availability metadata only; it does not
+        auto-register a routing arm or invent quality/cost/latency priors.
+        """
+
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_PROVIDER_DISCOVERED_MODELS:
+            raise ProviderError("model discovery limit is outside its bounds")
+        if config.transport is not None:
+            payload = config.transport.discover_models()
+            rows = payload.get("data")
+            if not isinstance(rows, list):
+                raise ProviderError("provider model inventory must contain a data array")
+            descriptors: list[ProviderModelDescriptor] = []
+            seen: set[str] = set()
+            for row in rows[:limit]:
+                try:
+                    descriptor = ProviderModelDescriptor.from_mapping(provider, row)
+                except ProviderError:
+                    continue
+                if descriptor.model in seen:
+                    continue
+                seen.add(descriptor.model)
+                descriptors.append(descriptor)
+            if rows and not descriptors:
+                raise ProviderError("provider model inventory contained no valid model rows")
+            return tuple(sorted(descriptors, key=lambda descriptor: descriptor.arm_id))
+        secret: SecretValue | None = None
+        if config.requires_credential:
+            if credential is None:
+                raise CredentialError(f"provider {provider!r} requires a user credential handle")
+            if credential.provider != provider:
+                raise CredentialError("credential provider does not match model discovery provider")
+            secret = self.credentials._resolve(credential)
+        headers = {"Accept": "application/json"}
+        if secret is not None:
+            if config.protocol == "anthropic_messages":
+                headers[config.api_key_header or "x-api-key"] = secret.expose()
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
+        if path is None:
+            endpoint = config.models_endpoint
+        else:
+            normalized_path = _normalize_provider_path(path, "model discovery path")
+            parsed = urlsplit(config.base_url)
+            default_port = 443 if parsed.scheme == "https" else 80
+            endpoint = (parsed.hostname or "", parsed.port or default_port, parsed.path.rstrip("/") + normalized_path, parsed.scheme)
+        payload = self._get_models_with_retries(config, endpoint, headers)
+        rows = payload.get("data")
+        if not isinstance(rows, list):
+            raise ProviderError("provider model inventory must contain a data array")
+        descriptors: list[ProviderModelDescriptor] = []
+        seen: set[str] = set()
+        for row in rows[:limit]:
+            try:
+                descriptor = ProviderModelDescriptor.from_mapping(provider, row)
+            except ProviderError:
+                continue
+            if descriptor.model in seen:
+                continue
+            seen.add(descriptor.model)
+            descriptors.append(descriptor)
+        if rows and not descriptors:
+            raise ProviderError("provider model inventory contained no valid model rows")
+        return tuple(sorted(descriptors, key=lambda descriptor: descriptor.arm_id))
+
+    @staticmethod
+    def _invocation_metadata(
+        provider: str,
+        request: ProviderRequest,
+        kind: str,
+    ) -> ProviderInvocationMetadata:
+        if not isinstance(kind, str) or not kind.strip() or len(kind) > 128:
+            raise ProviderError("provider invocation kind must be a bounded non-empty string")
+        # This is an admission estimate only.  Provider-reported usage is used for the final
+        # receipt when available.  Counting bytes rather than retaining content keeps the hook
+        # useful for policy without giving telemetry access to prompt data.
+        input_bytes = 0
+        for message in request.messages:
+            input_bytes += _provider_content_bytes(message.get("content"), str(message.get("role")))
+        input_tokens = max(1, (input_bytes + 3) // 4)
+        return ProviderInvocationMetadata(
+            provider=provider,
+            model=request.model,
+            kind=kind,
+            input_tokens=input_tokens,
+            requested_output_tokens=request.max_output_tokens,
+            tool_count=len(request.tools),
+        )
+
+    @staticmethod
+    def _notify_invocation_before(
+        observer: ProviderInvocationObserver | None,
+        metadata: ProviderInvocationMetadata,
+    ) -> None:
+        if observer is not None:
+            observer.before(metadata)
+
+    @staticmethod
+    def _notify_invocation_after(
+        observer: ProviderInvocationObserver | None,
+        metadata: ProviderInvocationMetadata,
+        response: ProviderResponse | None,
+        error: BaseException | None,
+        started: float,
+    ) -> None:
+        if observer is not None:
+            observer.after(metadata, response, error, max(0.0, (time.perf_counter() - started) * 1000.0))
+
+    def reset_provider(self, provider: str) -> None:
+        """Explicitly close a circuit after an operator or health check has reviewed it."""
+
+        if provider not in self._providers:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        self._circuits[provider] = _CircuitState()
+
+    def invoke(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "provider_call",
+    ) -> ProviderResponse:
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        secret: SecretValue | None = None
+        if config.requires_credential:
+            if credential is None:
+                raise CredentialError(f"provider {provider!r} requires a user credential handle")
+            if credential.provider != provider:
+                raise CredentialError("credential provider does not match invocation provider")
+            secret = self.credentials._resolve(credential)
+        body = self._body(config, request)
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if secret is not None:
+            if config.protocol == "anthropic_messages":
+                headers[config.api_key_header or "x-api-key"] = secret.expose()
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
+        if request.idempotency_key is not None:
+            headers["Idempotency-Key"] = request.idempotency_key
+        metadata = self._invocation_metadata(provider, request, invocation_kind)
+        self._notify_invocation_before(invocation_observer, metadata)
+        started = time.perf_counter()
+        try:
+            response = self._post(config, body, headers, request)
+        except BaseException as error:
+            self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+            raise
+        self._notify_invocation_after(invocation_observer, metadata, response, None, started)
+        return response
+
+    def invoke_stream(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "provider_stream",
+    ) -> Iterator[ProviderStreamEvent]:
+        """Open one bounded SSE provider invocation.
+
+        The returned iterator yields provider-neutral deltas and finalized tool intents. It never
+        dispatches a tool. Streaming retries are intentionally not attempted after a connection
+        has begun yielding events because replaying a partial assistant turn could duplicate a
+        caller-visible intent.
+        """
+
+        config = self._providers.get(provider)
+        if config is None:
+            raise ProviderError(f"provider {provider!r} is not configured")
+        secret: SecretValue | None = None
+        if config.requires_credential:
+            if credential is None:
+                raise CredentialError(f"provider {provider!r} requires a user credential handle")
+            if credential.provider != provider:
+                raise CredentialError("credential provider does not match invocation provider")
+            secret = self.credentials._resolve(credential)
+        body = dict(self._body(config, request))
+        body["stream"] = True
+        headers = {
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+        }
+        if secret is not None:
+            if config.protocol == "anthropic_messages":
+                headers[config.api_key_header or "x-api-key"] = secret.expose()
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
+        if request.idempotency_key is not None:
+            headers["Idempotency-Key"] = request.idempotency_key
+        metadata = self._invocation_metadata(provider, request, invocation_kind)
+        stream = self._stream(config, body, headers, request)
+        if invocation_observer is None:
+            return stream
+
+        def observed_stream() -> Iterator[ProviderStreamEvent]:
+            self._notify_invocation_before(invocation_observer, metadata)
+            started = time.perf_counter()
+            try:
+                yield from stream
+            except BaseException as error:
+                self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+                raise
+            self._notify_invocation_after(invocation_observer, metadata, None, None, started)
+
+        return observed_stream()
+
+    def collect_stream(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "provider_stream",
+    ) -> ProviderResponse:
+        """Collect a stream into the same bounded response contract as ``invoke``."""
+
+        metadata = self._invocation_metadata(provider, request, invocation_kind)
+        self._notify_invocation_before(invocation_observer, metadata)
+        started = time.perf_counter()
+        text_parts: list[str] = []
+        text_bytes = 0
+        tool_calls: list[ProviderToolCall] = []
+        usage: Mapping[str, Any] = {}
+        request_id: str | None = None
+        model = request.model
+        event_count = 0
+        terminal_type: str | None = None
+        try:
+            for event in self.invoke_stream(provider, request, credential=credential):
+                event_count += 1
+                if event_count > MAX_STREAM_EVENTS:
+                    raise ProviderError("provider stream exceeded max event count")
+                if event.text_delta:
+                    text_parts.append(event.text_delta)
+                    text_bytes += len(event.text_delta.encode("utf-8"))
+                    if text_bytes > MAX_STREAM_TEXT_BYTES:
+                        raise ProviderError("provider stream text exceeded the bounded size")
+                if event.tool_call is not None:
+                    tool_calls.append(event.tool_call)
+                if event.usage:
+                    usage = event.usage
+                request_id = event.request_id or request_id
+                model = event.model or model
+                if event.done:
+                    terminal_type = event.event_type
+            if not text_parts and not tool_calls:
+                raise ProviderError("provider stream contained no assistant text or tool call")
+            text = "".join(text_parts)
+            structured = None if tool_calls else _validate_structured_response(text, request)
+            response = ProviderResponse(
+                provider=provider,
+                model=model,
+                text=text,
+                status_code=200,
+                request_id=request_id,
+                usage=dict(usage),
+                raw={
+                    "stream": True,
+                    "event_count": event_count,
+                    "terminal_event": terminal_type,
+                },
+                structured=structured,
+                tool_calls=tuple(tool_calls),
+            )
+        except BaseException as error:
+            self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+            raise
+        self._notify_invocation_after(invocation_observer, metadata, response, None, started)
+        return response
+
+    def invoke_tool_loop(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+        authorize_and_execute: Callable[[tuple[ProviderToolCall, ...]], Sequence[ProviderToolResult]],
+        max_turns: int = 4,
+        max_tool_calls: int = MAX_PROVIDER_TOOLS,
+        stream: bool = False,
+        initial_response: ProviderResponse | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "tool_loop_turn",
+    ) -> ProviderToolLoopResult:
+        """Run bounded native tool continuation with a caller-owned authorization callback.
+
+        ``authorize_and_execute`` is the only place where an application may perform effects. It
+        must return one explicitly ``approved`` result per model intent. The runtime only carries
+        those results back to the provider and stops at either caller refusal or the turn budget.
+        """
+
+        if not callable(authorize_and_execute):
+            raise ProviderError("authorize_and_execute must be callable")
+        if not 1 <= max_turns <= 32:
+            raise ProviderError("max_turns must be within [1, 32]")
+        if not 1 <= max_tool_calls <= 1024:
+            raise ProviderError("max_tool_calls must be within [1, 1024]")
+        if initial_response is not None and (
+            not isinstance(initial_response, ProviderResponse)
+            or initial_response.provider != provider
+            or initial_response.model != request.model
+        ):
+            raise ProviderError("initial response does not match the continuation request")
+        current = request
+        responses: list[ProviderResponse] = []
+        total_tool_calls = 0
+        response = initial_response
+        for _turn in range(max_turns):
+            if response is None:
+                response = (
+                    self.collect_stream(
+                        provider,
+                        current,
+                        credential=credential,
+                        invocation_observer=invocation_observer,
+                        invocation_kind=invocation_kind,
+                    )
+                    if stream
+                    else self.invoke(
+                        provider,
+                        current,
+                        credential=credential,
+                        invocation_observer=invocation_observer,
+                        invocation_kind=invocation_kind,
+                    )
+                )
+            responses.append(response)
+            if not response.tool_calls:
+                return ProviderToolLoopResult(
+                    status="completed",
+                    responses=tuple(responses),
+                    final_response=response,
+                    turns=len(responses),
+                    tool_calls=total_tool_calls,
+                )
+            total_tool_calls += len(response.tool_calls)
+            if total_tool_calls > max_tool_calls:
+                return ProviderToolLoopResult(
+                    status="turn_limit_reached",
+                    responses=tuple(responses),
+                    final_response=response,
+                    turns=len(responses),
+                    tool_calls=total_tool_calls,
+                )
+            if _turn + 1 >= max_turns:
+                return ProviderToolLoopResult(
+                    status="turn_limit_reached",
+                    responses=tuple(responses),
+                    final_response=response,
+                    turns=len(responses),
+                    tool_calls=total_tool_calls,
+                )
+            returned = authorize_and_execute(response.tool_calls)
+            if not isinstance(returned, Sequence) or isinstance(returned, (str, bytes)):
+                raise ProviderError("authorization callback must return a sequence of tool results")
+            if any(not isinstance(result, ProviderToolResult) for result in returned):
+                raise ProviderError("authorization callback returned a malformed tool result")
+            if len(returned) != len(response.tool_calls) or any(not result.approved for result in returned):
+                return ProviderToolLoopResult(
+                    status="authorization_required",
+                    responses=tuple(responses),
+                    final_response=response,
+                    turns=len(responses),
+                    tool_calls=total_tool_calls,
+                )
+            current = current.with_tool_results(
+                response.tool_calls,
+                returned,
+                provider_output_items=response.provider_output_items,
+            )
+            response = None
+        return ProviderToolLoopResult(
+            status="turn_limit_reached",
+            responses=tuple(responses),
+            final_response=responses[-1] if responses else None,
+            turns=len(responses),
+            tool_calls=total_tool_calls,
+        )
+
+    def _stream(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> Iterator[ProviderStreamEvent]:
+        started = time.perf_counter()
+        try:
+            yield from self._stream_with_circuit(config, body, headers, request)
+        except ProviderError as error:
+            self._notify_observation(
+                config,
+                request,
+                status="provider_refused",
+                outcome="failure",
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                error=error,
+            )
+            raise
+        else:
+            self._notify_observation(
+                config,
+                request,
+                status="completed",
+                outcome="success",
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+            )
+
+    def _stream_with_circuit(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> Iterator[ProviderStreamEvent]:
+        state = self._circuits.setdefault(config.provider, _CircuitState())
+        now = self._clock()
+        if state.opened_until is not None:
+            if now < state.opened_until:
+                raise ProviderError(
+                    "provider circuit is open; invocation is temporarily refused",
+                    circuit_open=True,
+                )
+            state.opened_until = None
+            state.consecutive_failures = 0
+        try:
+            yield from self._stream_once(config, body, headers, request)
+        except ProviderError as error:
+            if error.retryable:
+                state.consecutive_failures += 1
+                if state.consecutive_failures >= config.circuit_breaker_failure_threshold:
+                    state.opened_until = self._clock() + config.circuit_breaker_reset_seconds
+            raise
+        else:
+            state.consecutive_failures = 0
+            state.opened_until = None
+
+    def _stream_once(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> Iterator[ProviderStreamEvent]:
+        if config.transport is not None:
+            try:
+                yield from config.transport.stream(request)
+            except ProviderError:
+                raise
+            except Exception as error:
+                raise ProviderError(
+                    "provider stream transport failed; credential material was discarded"
+                ) from error
+            return
+        host, port, path, scheme = config.endpoint
+        try:
+            encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise ProviderError(f"provider request is not JSON-safe: {error}") from error
+        connection: http.client.HTTPConnection | http.client.HTTPSConnection = (
+            http.client.HTTPSConnection(host, port, timeout=config.timeout_seconds)
+            if scheme == "https"
+            else http.client.HTTPConnection(host, port, timeout=config.timeout_seconds)
+        )
+        try:
+            connection.request("POST", path, body=encoded, headers=dict(headers))
+            response = connection.getresponse()
+            response_headers = {name.lower(): value for name, value in response.getheaders()}
+            status = response.status
+            if status >= 400:
+                raise ProviderError(
+                    f"provider returned HTTP status {status}",
+                    retryable=status == 408 or status == 429 or status >= 500,
+                    status_code=status,
+                )
+            content_type = response_headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if content_type and content_type != "text/event-stream":
+                raise ProviderError("provider stream did not return text/event-stream")
+            state: dict[str, Any] = {
+                "model": request.model,
+                "request_id": None,
+                "calls": {},
+            }
+            sequence = 0
+            for event_name, data in _iter_sse_frames(response, config.max_response_bytes):
+                if data.strip() == "[DONE]":
+                    specs = _finalize_stream_tool_calls(config.protocol, state)
+                    specs.append({"event_type": "stream.done", "done": True})
+                else:
+                    try:
+                        payload = json.loads(data)
+                    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                        raise ProviderError("provider stream contained invalid JSON") from error
+                    if not isinstance(payload, Mapping):
+                        raise ProviderError("provider stream event must be a JSON object")
+                    specs = _project_stream_payload(config.protocol, event_name, payload, state)
+                for spec in specs:
+                    if sequence >= MAX_STREAM_EVENTS:
+                        raise ProviderError("provider stream exceeded max event count")
+                    sequence += 1
+                    event = ProviderStreamEvent(
+                        provider=config.provider,
+                        model=str(state.get("model") or request.model),
+                        sequence=sequence,
+                        request_id=_string_or_none(state.get("request_id")),
+                        **spec,
+                    )
+                    state["text_bytes"] = state.get("text_bytes", 0) + len(event.text_delta.encode("utf-8"))
+                    if state["text_bytes"] > MAX_STREAM_TEXT_BYTES:
+                        raise ProviderError("provider stream text exceeded the bounded size")
+                    if event.tool_name is not None and event.tool_name not in {tool.name for tool in request.tools}:
+                        raise ProviderError("provider returned an unrequested streamed tool call")
+                    yield event
+        except (OSError, http.client.HTTPException) as error:
+            raise ProviderError(
+                "provider stream transport failed; credential material was discarded",
+                retryable=True,
+            ) from error
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _body(config: ProviderConfig, request: ProviderRequest) -> dict[str, Any]:
+        messages = _wire_messages(config.protocol, request.messages)
+        if config.protocol == "openai_responses":
+            body: dict[str, Any] = {
+                "model": request.model,
+                "input": messages,
+                "max_output_tokens": request.max_output_tokens,
+            }
+        elif config.protocol == "anthropic_messages":
+            system = "\n\n".join(
+                _provider_content_text(message["content"], str(message["role"]))
+                for message in request.messages
+                if message.get("role") in {"system", "developer"}
+            )
+            body = {
+                "model": request.model,
+                "messages": [
+                    message for message in messages if message.get("role") not in {"system", "developer"}
+                ],
+                "max_tokens": request.max_output_tokens,
+            }
+            if system:
+                body["system"] = system
+        else:
+            body = {
+                "model": request.model,
+                "messages": messages,
+                "max_tokens": request.max_output_tokens,
+            }
+        if request.temperature is not None:
+            body["temperature"] = request.temperature
+        if request.tools:
+            body["tools"] = [tool.to_wire(config.protocol) for tool in request.tools]
+            if request.tool_choice is not None:
+                body["tool_choice"] = (
+                    {"type": request.tool_choice}
+                    if config.protocol == "anthropic_messages"
+                    else request.tool_choice
+                )
+        if (
+            (request.require_json or request.response_schema is not None)
+            and (not request.tools or request.tool_choice == "none")
+        ):
+            if config.protocol == "openai_responses" and config.structured_output_mode != "disabled":
+                # Responses structured output is configured under text.format.  Sending the
+                # Chat Completions response_format field here is accepted by neither the real
+                # Responses endpoint nor many compatible gateways.
+                if request.response_schema is not None and config.structured_output_mode == "json_schema":
+                    body["text"] = {
+                        "format": {
+                            "type": "json_schema",
+                            "name": "response",
+                            "schema": dict(request.response_schema),
+                            "strict": True,
+                        }
+                    }
+                else:
+                    body["text"] = {"format": {"type": "json_object"}}
+            elif config.protocol == "openai_chat_completions" and config.structured_output_mode != "disabled":
+                # Chat Completions nests JSON Schema under response_format.json_schema, while
+                # json_object remains the compatibility fallback for providers that do not
+                # implement Structured Outputs.
+                if request.response_schema is not None and config.structured_output_mode == "json_schema":
+                    body["response_format"] = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "response",
+                            "schema": dict(request.response_schema),
+                            "strict": True,
+                        },
+                    }
+                else:
+                    body["response_format"] = {"type": "json_object"}
+            # Anthropic has no provider-neutral structured-output field in this adapter.  The
+            # response is still parsed and validated locally, but unsupported wire fields are
+            # never sent to the provider.
+        return body
+
+    def _get_models_with_retries(
+        self,
+        config: ProviderConfig,
+        endpoint: tuple[str, int | None, str, str],
+        headers: Mapping[str, str],
+    ) -> Mapping[str, Any]:
+        state = self._circuits.setdefault(config.provider, _CircuitState())
+        now = self._clock()
+        if state.opened_until is not None:
+            if now < state.opened_until:
+                raise ProviderError(
+                    "provider circuit is open; model discovery is temporarily refused",
+                    circuit_open=True,
+                )
+            state.opened_until = None
+            state.consecutive_failures = 0
+        last_error: ProviderError | None = None
+        for attempt in range(config.max_attempts):
+            try:
+                payload = self._get_models_once(config, endpoint, headers)
+                state.consecutive_failures = 0
+                state.opened_until = None
+                return payload
+            except ProviderError as error:
+                last_error = error
+                if not error.retryable or attempt + 1 >= config.max_attempts:
+                    break
+                delay = min(config.retry_backoff_seconds * (2**attempt), 60.0)
+                if delay:
+                    self._sleeper(delay)
+        assert last_error is not None
+        if last_error.retryable:
+            state.consecutive_failures += 1
+            if state.consecutive_failures >= config.circuit_breaker_failure_threshold:
+                state.opened_until = self._clock() + config.circuit_breaker_reset_seconds
+        raise last_error
+
+    @staticmethod
+    def _get_models_once(
+        config: ProviderConfig,
+        endpoint: tuple[str, int | None, str, str],
+        headers: Mapping[str, str],
+    ) -> Mapping[str, Any]:
+        host, port, path, scheme = endpoint
+        connection: http.client.HTTPConnection | http.client.HTTPSConnection = (
+            http.client.HTTPSConnection(host, port, timeout=config.timeout_seconds)
+            if scheme == "https"
+            else http.client.HTTPConnection(host, port, timeout=config.timeout_seconds)
+        )
+        try:
+            connection.request("GET", path, headers=dict(headers))
+            response = connection.getresponse()
+            status = response.status
+            max_bytes = min(config.max_response_bytes, MAX_PROVIDER_MODEL_DISCOVERY_BYTES)
+            raw = response.read(max_bytes + 1)
+        except (OSError, http.client.HTTPException) as error:
+            raise ProviderError(
+                "provider model discovery transport failed; credential material was discarded",
+                retryable=True,
+            ) from error
+        finally:
+            connection.close()
+        if len(raw) > max_bytes:
+            raise ProviderError("provider model discovery exceeded its bounded response size")
+        if status >= 400:
+            raise ProviderError(
+                f"provider returned HTTP status {status}",
+                retryable=status == 408 or status == 429 or status >= 500,
+                status_code=status,
+            )
+        try:
+            decoded = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ProviderError("provider model discovery returned non-JSON data") from error
+        if not isinstance(decoded, Mapping):
+            raise ProviderError("provider model discovery response must be a JSON object")
+        return decoded
+
+    def _post(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> ProviderResponse:
+        started = time.perf_counter()
+        try:
+            response = self._post_with_retries(config, body, headers, request)
+        except ProviderError as error:
+            self._notify_observation(
+                config,
+                request,
+                status="provider_refused",
+                outcome="failure",
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                error=error,
+            )
+            raise
+        self._notify_observation(
+            config,
+            request,
+            status="completed",
+            outcome="success",
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            response=response,
+        )
+        return response
+
+    def _post_with_retries(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> ProviderResponse:
+        state = self._circuits.setdefault(config.provider, _CircuitState())
+        now = self._clock()
+        if state.opened_until is not None:
+            if now < state.opened_until:
+                raise ProviderError(
+                    "provider circuit is open; invocation is temporarily refused",
+                    circuit_open=True,
+                )
+            state.opened_until = None
+            state.consecutive_failures = 0
+
+        last_error: ProviderError | None = None
+        for attempt in range(config.max_attempts):
+            try:
+                response = self._post_once(config, body, headers, request)
+                state.consecutive_failures = 0
+                state.opened_until = None
+                return response
+            except ProviderError as error:
+                last_error = error
+                if not error.retryable or attempt + 1 >= config.max_attempts:
+                    break
+                delay = min(config.retry_backoff_seconds * (2**attempt), 60.0)
+                if delay:
+                    self._sleeper(delay)
+        assert last_error is not None
+        if last_error.retryable:
+            state.consecutive_failures += 1
+            if state.consecutive_failures >= config.circuit_breaker_failure_threshold:
+                state.opened_until = self._clock() + config.circuit_breaker_reset_seconds
+        raise last_error
+
+    def _post_once(
+        self,
+        config: ProviderConfig,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        request: ProviderRequest,
+    ) -> ProviderResponse:
+        if config.transport is not None:
+            try:
+                return config.transport.invoke(request)
+            except ProviderError:
+                raise
+            except Exception as error:
+                raise ProviderError(
+                    "provider transport failed; credential material was discarded"
+                ) from error
+        host, port, path, scheme = config.endpoint
+        try:
+            encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise ProviderError(f"provider request is not JSON-safe: {error}") from error
+        connection: http.client.HTTPConnection | http.client.HTTPSConnection
+        connection = (
+            http.client.HTTPSConnection(host, port, timeout=config.timeout_seconds)
+            if scheme == "https"
+            else http.client.HTTPConnection(host, port, timeout=config.timeout_seconds)
+        )
+        try:
+            connection.request("POST", path, body=encoded, headers=dict(headers))
+            response = connection.getresponse()
+            raw = response.read(config.max_response_bytes + 1)
+            status = response.status
+            response_headers = {name.lower(): value for name, value in response.getheaders()}
+        except (OSError, http.client.HTTPException) as error:
+            # Do not include the exception text: proxies and providers can echo request headers.
+            raise ProviderError(
+                "provider transport failed; credential material was discarded",
+                retryable=True,
+            ) from error
+        finally:
+            connection.close()
+        if len(raw) > config.max_response_bytes:
+            raise ProviderError("provider response exceeded max_response_bytes")
+        try:
+            decoded = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ProviderError("provider returned a non-JSON response") from error
+        if not isinstance(decoded, Mapping):
+            raise ProviderError("provider response must be a JSON object")
+        if status >= 400:
+            # The body is intentionally not returned: an upstream error may reflect headers or
+            # request content, and callers need a stable safe error rather than diagnostics.
+            raise ProviderError(
+                f"provider returned HTTP status {status}",
+                retryable=status == 408 or status == 429 or status >= 500,
+                status_code=status,
+            )
+        tool_calls = _extract_tool_calls(config.protocol, decoded)
+        if tool_calls:
+            allowed_tool_names = {tool.name for tool in request.tools}
+            if not allowed_tool_names or any(call.name not in allowed_tool_names for call in tool_calls):
+                raise ProviderError("provider returned an unrequested tool call")
+            text = ""
+            structured = None
+        else:
+            text = _extract_text(config.protocol, decoded)
+            structured = _validate_structured_response(text, request)
+        usage = decoded.get("usage")
+        provider_output_items: tuple[Mapping[str, Any], ...] = ()
+        if config.protocol == "openai_responses":
+            output = decoded.get("output")
+            if isinstance(output, list):
+                if any(not isinstance(item, Mapping) for item in output):
+                    raise ProviderError("provider Responses output items were malformed")
+                _bounded_json_bytes(output, MAX_RESPONSE_BYTES, "provider Responses output items")
+                provider_output_items = tuple(dict(item) for item in output)
+        return ProviderResponse(
+            provider=config.provider,
+            model=str(decoded.get("model") or request.model),
+            text=text,
+            status_code=status,
+            request_id=_header(response_headers, "x-request-id") or _string_or_none(decoded.get("id")),
+            usage=dict(usage) if isinstance(usage, Mapping) else {},
+            raw=dict(decoded),
+            structured=structured,
+            tool_calls=tool_calls,
+            provider_output_items=provider_output_items,
+        )
+
+
+class ProviderOnboarding:
+    """Explicit BYOK lifecycle for applications embedding the provider runtime.
+
+    The onboarding object owns no additional secret state. It coordinates provider transport
+    registration with one of the supported user-entry paths and returns only an opaque handle or
+    redacted readiness metadata. A UI can use ``configure_from_prompt``'s injected reader, a
+    server can use ``configure_from_environment``, and a deployment with a secret manager can use
+    ``configure_from_resolver`` without placing a credential in MCP arguments or brain state.
+    """
+
+    _DEFAULT_ENVIRONMENT_VARIABLES = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "mistral": "MISTRAL_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "xai": "XAI_API_KEY",
+    }
+
+    def __init__(
+        self,
+        runtime: LLMRuntime,
+        *,
+        environment_variables: Mapping[str, str] | None = None,
+    ) -> None:
+        if not isinstance(runtime, LLMRuntime):
+            raise CredentialError("ProviderOnboarding requires an LLMRuntime")
+        self.runtime = runtime
+        self._environment_variables = dict(self._DEFAULT_ENVIRONMENT_VARIABLES)
+        if environment_variables is not None:
+            for provider, variable in environment_variables.items():
+                CredentialStore._validate_provider(provider)
+                variable = _validate_environment_variable(variable)
+                self._environment_variables[provider] = variable
+
+    def register_provider(self, config: ProviderConfig) -> None:
+        """Register non-secret provider transport metadata before collecting a key."""
+
+        self.runtime.register_provider(config)
+
+    def register_value(
+        self,
+        provider: str,
+        value: str,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        self._require_provider(provider)
+        return self.runtime.credentials.register(provider, value, ttl_seconds=ttl_seconds)
+
+    def collect_user_credential(
+        self,
+        provider: str,
+        value: str,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        """Accept a secret from a protected application input boundary.
+
+        Web/mobile/desktop integrations should call this method only after receiving the value
+        over their own authenticated, encrypted input path.  The value is immediately converted
+        into an opaque in-memory handle; it is never accepted by the brain, a prompt, a tool
+        argument, a journal, or a metadata projection.  This explicit name and source label make
+        the intended onboarding route auditable instead of forcing UIs to use ``register_value``
+        as an undocumented convention.
+        """
+
+        self._require_provider(provider)
+        return self.runtime.credentials.register(
+            provider,
+            value,
+            ttl_seconds=ttl_seconds,
+            source="protected_ui",
+        )
+
+    def configure_from_prompt(
+        self,
+        provider: str,
+        *,
+        prompt: str | None = None,
+        ttl_seconds: float | None = None,
+        reader: Callable[[str], str] | None = None,
+    ) -> CredentialHandle:
+        self._require_provider(provider)
+        return self.runtime.credentials.prompt(
+            provider,
+            prompt=prompt or f"{provider} API key: ",
+            ttl_seconds=ttl_seconds,
+            reader=reader,
+        )
+
+    def configure_from_environment(
+        self,
+        provider: str,
+        *,
+        variable: str | None = None,
+        ttl_seconds: float | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialHandle:
+        self._require_provider(provider)
+        selected_variable = variable or self._environment_variables.get(provider)
+        if selected_variable is None:
+            raise CredentialError(
+                f"no default environment variable is registered for provider {provider!r}"
+            )
+        return self.runtime.credentials.register_environment(
+            provider,
+            selected_variable,
+            ttl_seconds=ttl_seconds,
+            environ=environ,
+        )
+
+    def configure_from_resolver(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        self._require_provider(provider)
+        return self.runtime.credentials.register_resolver(
+            provider,
+            reference,
+            resolver,
+            ttl_seconds=ttl_seconds,
+        )
+
+    def revoke(self, handle: CredentialHandle) -> None:
+        self.runtime.credentials.revoke(handle)
+
+    def status(self, provider: str) -> dict[str, Any]:
+        CredentialStore._validate_provider(provider)
+        metadata = next(
+            (row for row in self.runtime.provider_metadata() if row.get("provider") == provider),
+            None,
+        )
+        registered = metadata is not None
+        requires_credential = (
+            metadata.get("requires_credential") if isinstance(metadata, Mapping) else None
+        )
+        credential = self.runtime.credentials.status(provider)
+        ready = registered and (
+            requires_credential is False or credential.configured
+        )
+        return {
+            "provider": provider,
+            "provider_registered": registered,
+            "credential": credential.to_dict(),
+            "requires_credential": requires_credential,
+            "ready": ready,
+            "next_action": "ready" if ready else (
+                "register_provider" if not registered else "collect_user_credential"
+            ),
+            "secret_material": "never_returned",
+        }
+
+    def instructions(self, provider: str) -> ProviderCredentialInstructions:
+        """Return the redacted onboarding contract a UI can render before key submission."""
+
+        CredentialStore._validate_provider(provider)
+        metadata = next(
+            (row for row in self.runtime.provider_metadata() if row.get("provider") == provider),
+            None,
+        )
+        current = self.status(provider)
+        registered = metadata is not None
+        requires_credential = (
+            metadata.get("requires_credential") if isinstance(metadata, Mapping) else None
+        )
+        ready = bool(current["ready"])
+        if not registered:
+            next_action = "register_provider"
+        elif requires_credential is False:
+            next_action = "ready"
+            ready = True
+        elif ready:
+            next_action = "ready"
+        else:
+            next_action = "collect_user_credential"
+        return ProviderCredentialInstructions(
+            provider=provider,
+            provider_registered=registered,
+            requires_credential=(
+                requires_credential if isinstance(requires_credential, bool) else None
+            ),
+            ready=ready,
+            next_action=next_action,
+            input_methods=(
+                "protected_ui",
+                "no_echo_prompt",
+                "environment_variable",
+                "external_secret_resolver",
+            ),
+            environment_variable=self._environment_variables.get(provider),
+        )
+
+    def statuses(self) -> list[dict[str, Any]]:
+        providers = {
+            row.get("provider")
+            for row in self.runtime.provider_metadata()
+            if isinstance(row.get("provider"), str)
+        }
+        providers.update(status.provider for status in self.runtime.credentials.statuses())
+        return [self.status(provider) for provider in sorted(providers)]
+
+    def start_session(
+        self,
+        *,
+        ttl_seconds: float | None = None,
+        session_id: str | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> "CredentialSession":
+        """Create a short-lived collection session for one UI/request lifecycle."""
+
+        return CredentialSession(
+            self,
+            ttl_seconds=ttl_seconds,
+            session_id=session_id,
+            clock=clock,
+        )
+
+    def _require_provider(self, provider: str) -> None:
+        CredentialStore._validate_provider(provider)
+        if not any(row.get("provider") == provider for row in self.runtime.provider_metadata()):
+            raise CredentialError(f"provider {provider!r} is not registered with the runtime")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialSessionStatus:
+    """Redacted status for one caller-owned credential collection session."""
+
+    session_id: str
+    active: bool
+    created_at: float
+    expires_at: float | None
+    providers: tuple[str, ...]
+    secret_persistence: str = "in_memory_only"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "active": self.active,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+            "providers": list(self.providers),
+            "secret_persistence": self.secret_persistence,
+            "secret_material": "never_returned",
+        }
+
+
+class CredentialSession:
+    """Short-lived BYOK session that groups opaque handles for revocation and readiness.
+
+    The session retains only handles, never a key or external secret-manager reference. Closing
+    or expiring it revokes every handle it created. Applications may keep the redacted status in
+    UI state, but should recreate the session and resolve the secret again after a process restart.
+    """
+
+    def __init__(
+        self,
+        onboarding: ProviderOnboarding,
+        *,
+        ttl_seconds: float | None = None,
+        session_id: str | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if not isinstance(onboarding, ProviderOnboarding):
+            raise CredentialError("CredentialSession requires ProviderOnboarding")
+        if ttl_seconds is not None and (
+            not isinstance(ttl_seconds, (int, float))
+            or isinstance(ttl_seconds, bool)
+            or ttl_seconds <= 0
+        ):
+            raise CredentialError("session ttl_seconds must be positive or None")
+        if not callable(clock):
+            raise CredentialError("session clock must be callable")
+        resolved_id = session_id or secrets.token_urlsafe(18)
+        if (
+            not isinstance(resolved_id, str)
+            or not resolved_id.strip()
+            or len(resolved_id) > 256
+            or any(ord(character) < 32 for character in resolved_id)
+        ):
+            raise CredentialError("session_id must be a bounded non-empty string")
+        self.onboarding = onboarding
+        self.session_id = resolved_id
+        self._clock = clock
+        self.created_at = float(clock())
+        self.expires_at = None if ttl_seconds is None else self.created_at + float(ttl_seconds)
+        self._handles: dict[str, CredentialHandle] = {}
+        self._closed = False
+        self._lock = threading.RLock()
+
+    def register_value(
+        self,
+        provider: str,
+        value: str,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        handle = self._onboarded_call(
+            self.onboarding.register_value,
+            provider,
+            value,
+            ttl_seconds=ttl_seconds,
+        )
+        return self._attach(handle)
+
+    def collect_user_credential(
+        self,
+        provider: str,
+        value: str,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        """Submit one protected UI value into this session's opaque handle boundary."""
+
+        handle = self._onboarded_call(
+            self.onboarding.collect_user_credential,
+            provider,
+            value,
+            ttl_seconds=ttl_seconds,
+        )
+        return self._attach(handle)
+
+    def configure_from_prompt(
+        self,
+        provider: str,
+        *,
+        prompt: str | None = None,
+        ttl_seconds: float | None = None,
+        reader: Callable[[str], str] | None = None,
+    ) -> CredentialHandle:
+        handle = self._onboarded_call(
+            self.onboarding.configure_from_prompt,
+            provider,
+            prompt=prompt,
+            ttl_seconds=ttl_seconds,
+            reader=reader,
+        )
+        return self._attach(handle)
+
+    def configure_from_environment(
+        self,
+        provider: str,
+        *,
+        variable: str | None = None,
+        ttl_seconds: float | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialHandle:
+        handle = self._onboarded_call(
+            self.onboarding.configure_from_environment,
+            provider,
+            variable=variable,
+            ttl_seconds=ttl_seconds,
+            environ=environ,
+        )
+        return self._attach(handle)
+
+    def configure_from_resolver(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+    ) -> CredentialHandle:
+        handle = self._onboarded_call(
+            self.onboarding.configure_from_resolver,
+            provider,
+            reference,
+            resolver,
+            ttl_seconds=ttl_seconds,
+        )
+        return self._attach(handle)
+
+    def handle(self, provider: str) -> CredentialHandle:
+        self._assert_active()
+        CredentialStore._validate_provider(provider)
+        with self._lock:
+            handle = self._handles.get(provider)
+        if handle is None:
+            raise CredentialError(f"provider {provider!r} is not configured in this session")
+        self.onboarding.runtime.credentials.metadata(handle)
+        return handle
+
+    def status(self) -> CredentialSessionStatus:
+        active = self._is_active()
+        with self._lock:
+            providers = tuple(sorted(self._handles))
+        return CredentialSessionStatus(
+            session_id=self.session_id,
+            active=active,
+            created_at=self.created_at,
+            expires_at=self.expires_at,
+            providers=providers,
+        )
+
+    def provider_statuses(self) -> list[dict[str, Any]]:
+        self._assert_active()
+        with self._lock:
+            providers = tuple(sorted(self._handles))
+        return [self.onboarding.status(provider) for provider in providers]
+
+    def instructions(self, provider: str) -> ProviderCredentialInstructions:
+        """Return the redacted onboarding contract while this session is active."""
+
+        self._assert_active()
+        return self.onboarding.instructions(provider)
+
+    def handles(self) -> dict[str, CredentialHandle]:
+        """Return a caller-owned snapshot for one bounded execution call.
+
+        The returned mapping contains opaque handles only.  It is intentionally a snapshot so a
+        concurrent revoke or session expiry cannot mutate a mapping already handed to a brain
+        invocation; the runtime still revalidates every handle at the provider boundary.
+        """
+
+        self._assert_active()
+        with self._lock:
+            handles = dict(self._handles)
+        for handle in handles.values():
+            self.onboarding.runtime.credentials.metadata(handle)
+        return handles
+
+    def revoke(self, provider: str) -> None:
+        self._assert_active()
+        CredentialStore._validate_provider(provider)
+        with self._lock:
+            handle = self._handles.pop(provider, None)
+        if handle is not None:
+            self.onboarding.revoke(handle)
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            handles = tuple(self._handles.values())
+            self._handles.clear()
+            self._closed = True
+        for handle in handles:
+            self.onboarding.revoke(handle)
+
+    def __enter__(self) -> "CredentialSession":
+        self._assert_active()
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+    def __repr__(self) -> str:
+        return f"CredentialSession(session_id={self.session_id!r}, active={self._is_active()!r})"
+
+    def _attach(self, handle: CredentialHandle) -> CredentialHandle:
+        if not isinstance(handle, CredentialHandle):
+            raise CredentialError("onboarding did not return a credential handle")
+        try:
+            self._assert_active()
+        except CredentialError:
+            self.onboarding.revoke(handle)
+            raise
+        with self._lock:
+            previous = self._handles.get(handle.provider)
+            self._handles[handle.provider] = handle
+        if previous is not None and previous is not handle:
+            self.onboarding.revoke(previous)
+        return handle
+
+    def _onboarded_call(self, callback: Callable[..., CredentialHandle], *args: Any, **kwargs: Any) -> CredentialHandle:
+        self._assert_active()
+        return callback(*args, **kwargs)
+
+    def _is_active(self) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+            if self.expires_at is not None and self._clock() >= self.expires_at:
+                self._closed = True
+                handles = tuple(self._handles.values())
+                self._handles.clear()
+            else:
+                handles = ()
+        for handle in handles:
+            self.onboarding.revoke(handle)
+        return not self._closed
+
+    def _assert_active(self) -> None:
+        if not self._is_active():
+            raise CredentialError("credential session is closed or expired")
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialSourceSpec:
+    """Public, redacted configuration for one deployment-managed credential source.
+
+    A source spec is safe to put in configuration UI state and readiness responses.  It carries
+    an environment variable name or a digest of an external reference, never the reference
+    itself and never a resolver callback.  The live resolver remains owned by the process-local
+    :class:`CredentialProvisioner`.
+    """
+
+    provider: str
+    source_kind: str
+    source_id: str
+    source_label: str
+    environment_variable: str | None = None
+    reference_digest: str | None = None
+    ttl_seconds: float | None = None
+    required: bool = True
+    enabled: bool = True
+
+    def __post_init__(self) -> None:
+        CredentialStore._validate_provider(self.provider)
+        if self.source_kind not in CREDENTIAL_SOURCE_KINDS:
+            raise CredentialError("credential source kind is unsupported")
+        for name, value in (("source_id", self.source_id), ("source_label", self.source_label)):
+            if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > MAX_CREDENTIAL_SOURCE_LABEL_BYTES:
+                raise CredentialError(f"credential {name} is outside its bounded contract")
+            if any(ord(character) < 32 for character in value):
+                raise CredentialError(f"credential {name} contains a control character")
+        if self.source_kind == "environment_variable":
+            if self.environment_variable is None:
+                raise CredentialError("environment credential source requires an environment variable")
+            _validate_environment_variable(self.environment_variable)
+            if self.reference_digest is not None:
+                raise CredentialError("environment credential source cannot contain a reference digest")
+        else:
+            if self.environment_variable is not None:
+                raise CredentialError("resolver credential source cannot contain an environment variable")
+            if (
+                not isinstance(self.reference_digest, str)
+                or len(self.reference_digest) != 64
+                or any(character not in "0123456789abcdef" for character in self.reference_digest)
+            ):
+                raise CredentialError("resolver credential source reference digest is invalid")
+        if self.ttl_seconds is not None and (
+            not isinstance(self.ttl_seconds, (int, float))
+            or isinstance(self.ttl_seconds, bool)
+            or not math.isfinite(float(self.ttl_seconds))
+            or self.ttl_seconds <= 0
+        ):
+            raise CredentialError("credential source ttl_seconds must be positive or None")
+        if not isinstance(self.required, bool) or not isinstance(self.enabled, bool):
+            raise CredentialError("credential source required and enabled must be boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": CREDENTIAL_PROVISIONING_SCHEMA,
+            "provider": self.provider,
+            "source_kind": self.source_kind,
+            "source_id": self.source_id,
+            "source_label": self.source_label,
+            "environment_variable": self.environment_variable,
+            "reference_digest": self.reference_digest,
+            "ttl_seconds": self.ttl_seconds,
+            "required": self.required,
+            "enabled": self.enabled,
+            "secret_persistence": "in_memory_only",
+            "secret_material": "never_returned",
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CredentialSourceSpec":
+        if not isinstance(value, Mapping):
+            raise CredentialError("credential source spec must be a mapping")
+        allowed = {
+            "schema",
+            "provider",
+            "source_kind",
+            "source_id",
+            "source_label",
+            "environment_variable",
+            "reference_digest",
+            "ttl_seconds",
+            "required",
+            "enabled",
+            "secret_persistence",
+            "secret_material",
+        }
+        unknown = set(value).difference(allowed)
+        if unknown:
+            raise CredentialError("credential source spec contains unsupported fields")
+        if value.get("schema") not in (None, CREDENTIAL_PROVISIONING_SCHEMA):
+            raise CredentialError("credential source spec schema is unsupported")
+        return cls(
+            provider=value.get("provider"),
+            source_kind=value.get("source_kind"),
+            source_id=value.get("source_id"),
+            source_label=value.get("source_label"),
+            environment_variable=value.get("environment_variable"),
+            reference_digest=value.get("reference_digest"),
+            ttl_seconds=value.get("ttl_seconds"),
+            required=value.get("required", True),
+            enabled=value.get("enabled", True),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialProvisioningReceipt:
+    """Value-only result for one automatic credential resolution attempt."""
+
+    provider: str
+    status: str
+    credential_ready: bool
+    source_kind: str | None = None
+    source_id: str | None = None
+    source_attempts: int = 0
+    error_class: str | None = None
+
+    _STATUSES = frozenset(
+        {
+            "provisioned",
+            "already_present",
+            "not_required",
+            "missing_provider",
+            "missing_source",
+            "source_failed",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        CredentialStore._validate_provider(self.provider)
+        if self.status not in self._STATUSES:
+            raise CredentialError("credential provisioning status is unsupported")
+        if not isinstance(self.credential_ready, bool):
+            raise CredentialError("credential provisioning readiness must be boolean")
+        if self.source_kind is not None and self.source_kind not in CREDENTIAL_SOURCE_KINDS:
+            raise CredentialError("credential provisioning source kind is unsupported")
+        for name, value in (("source_id", self.source_id), ("error_class", self.error_class)):
+            if value is not None and (
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value.encode("utf-8")) > MAX_CREDENTIAL_SOURCE_LABEL_BYTES
+                or any(ord(character) < 32 for character in value)
+            ):
+                raise CredentialError(f"credential provisioning {name} is outside its bounds")
+        if not isinstance(self.source_attempts, int) or isinstance(self.source_attempts, bool) or not 0 <= self.source_attempts <= MAX_CREDENTIAL_PROVISIONING_SOURCES:
+            raise CredentialError("credential provisioning source attempts are outside their bounds")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": CREDENTIAL_PROVISIONING_SCHEMA,
+            "provider": self.provider,
+            "status": self.status,
+            "credential_ready": self.credential_ready,
+            "source_kind": self.source_kind,
+            "source_id": self.source_id,
+            "source_attempts": self.source_attempts,
+            "error_class": self.error_class,
+            "secret_persistence": "in_memory_only",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialProvisioningResult:
+    """Aggregate result for one session bootstrap across deployment-managed sources."""
+
+    session_id: str
+    ready: bool
+    receipts: tuple[CredentialProvisioningReceipt, ...]
+    required_failures: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not self.session_id.strip() or len(self.session_id) > 256:
+            raise CredentialError("credential provisioning session_id is invalid")
+        if not isinstance(self.ready, bool):
+            raise CredentialError("credential provisioning ready must be boolean")
+        if not isinstance(self.receipts, Sequence) or isinstance(self.receipts, (str, bytes)) or len(self.receipts) > MAX_CREDENTIAL_PROVISIONING_PROVIDERS:
+            raise CredentialError("credential provisioning receipts exceed their bound")
+        if any(not isinstance(receipt, CredentialProvisioningReceipt) for receipt in self.receipts):
+            raise CredentialError("credential provisioning receipts are invalid")
+        if not isinstance(self.required_failures, Sequence) or isinstance(self.required_failures, (str, bytes)) or len(self.required_failures) > MAX_CREDENTIAL_PROVISIONING_PROVIDERS:
+            raise CredentialError("credential provisioning required failures exceed their bound")
+        for provider in self.required_failures:
+            CredentialStore._validate_provider(provider)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": CREDENTIAL_PROVISIONING_SCHEMA,
+            "session_id": self.session_id,
+            "ready": self.ready,
+            "receipts": [receipt.to_dict() for receipt in self.receipts],
+            "required_failures": list(self.required_failures),
+            "credential_posture": "opaque_handles_only; sources_resolved_in_process",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _CredentialSource:
+    spec: CredentialSourceSpec
+    reference: str | None = None
+    resolver: Callable[[str], str] | None = None
+
+    def resolve(
+        self,
+        session: CredentialSession,
+        *,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialHandle:
+        if self.spec.source_kind == "environment_variable":
+            return session.configure_from_environment(
+                self.spec.provider,
+                variable=self.spec.environment_variable,
+                ttl_seconds=self.spec.ttl_seconds,
+                environ=environ,
+            )
+        if self.reference is None or self.resolver is None:
+            raise CredentialError("resolver credential source is not operational")
+        return session.configure_from_resolver(
+            self.spec.provider,
+            self.reference,
+            self.resolver,
+            ttl_seconds=self.spec.ttl_seconds,
+        )
+
+
+class CredentialProvisioner:
+    """Process-local resolver registry for non-interactive BYOK deployments.
+
+    Embedding applications register only deployment wiring here: an environment variable name or
+    a secret-manager reference plus its resolver callback.  The reference and callback stay in
+    this process-local object, while the public plan contains only source metadata and a digest.
+    ``provision`` creates or refreshes opaque handles inside a caller-owned
+    :class:`CredentialSession`; it never writes credentials to disk and never returns raw values.
+
+    This is the intended path when no person types a key into the agent.  A deployment injects
+    the environment or secret-manager resolver, then every worker process calls ``provision`` at
+    startup or before a restart-safe job attempt.  A restarted process must register its sources
+    again, which makes secret rotation and revocation explicit instead of restoring stale handles.
+    """
+
+    def __init__(
+        self,
+        onboarding: ProviderOnboarding,
+        *,
+        max_sources: int = MAX_CREDENTIAL_PROVISIONING_SOURCES,
+    ) -> None:
+        if not isinstance(onboarding, ProviderOnboarding):
+            raise CredentialError("CredentialProvisioner requires ProviderOnboarding")
+        if not isinstance(max_sources, int) or isinstance(max_sources, bool) or not 1 <= max_sources <= MAX_CREDENTIAL_PROVISIONING_SOURCES:
+            raise CredentialError("max_sources is outside its bounds")
+        self.onboarding = onboarding
+        self.max_sources = max_sources
+        self._sources: dict[str, list[_CredentialSource]] = {}
+        self._lock = threading.RLock()
+
+    def register_environment(
+        self,
+        provider: str,
+        *,
+        variable: str | None = None,
+        ttl_seconds: float | None = None,
+        required: bool = True,
+        source_label: str | None = None,
+        replace_existing: bool = False,
+    ) -> CredentialSourceSpec:
+        self.onboarding._require_provider(provider)
+        selected = _validate_environment_variable(
+            variable or self.onboarding._environment_variables.get(provider, "")
+        )
+        label = _validate_credential_source_label(source_label or f"environment:{selected}")
+        spec = CredentialSourceSpec(
+            provider=provider,
+            source_kind="environment_variable",
+            source_id=f"environment:{selected}",
+            source_label=label,
+            environment_variable=selected,
+            ttl_seconds=ttl_seconds,
+            required=required,
+        )
+        return self._register(
+            _CredentialSource(spec=spec),
+            key=(spec.source_kind, selected),
+            replace_existing=replace_existing,
+        )
+
+    def register_resolver(
+        self,
+        provider: str,
+        reference: str,
+        resolver: Callable[[str], str],
+        *,
+        ttl_seconds: float | None = None,
+        required: bool = True,
+        source_label: str | None = None,
+        replace_existing: bool = False,
+    ) -> CredentialSourceSpec:
+        self.onboarding._require_provider(provider)
+        reference = _validate_credential_reference(reference)
+        if not callable(resolver):
+            raise CredentialError("external credential resolver must be callable")
+        digest = hashlib.sha256(reference.encode("utf-8")).hexdigest()
+        spec = CredentialSourceSpec(
+            provider=provider,
+            source_kind="external_secret_resolver",
+            source_id=f"resolver:{digest[:16]}",
+            source_label=_validate_credential_source_label(source_label or "external secret resolver"),
+            reference_digest=digest,
+            ttl_seconds=ttl_seconds,
+            required=required,
+        )
+        return self._register(
+            _CredentialSource(spec=spec, reference=reference, resolver=resolver),
+            key=(spec.source_kind, digest),
+            replace_existing=replace_existing,
+        )
+
+    def unregister(self, provider: str, source_id: str) -> bool:
+        CredentialStore._validate_provider(provider)
+        source_id = _validate_credential_source_label(source_id)
+        with self._lock:
+            sources = self._sources.get(provider, [])
+            retained = [source for source in sources if source.spec.source_id != source_id]
+            if len(retained) == len(sources):
+                return False
+            if retained:
+                self._sources[provider] = retained
+            else:
+                self._sources.pop(provider, None)
+            return True
+
+    def source_specs(self, provider: str | None = None) -> tuple[CredentialSourceSpec, ...]:
+        if provider is not None:
+            CredentialStore._validate_provider(provider)
+        with self._lock:
+            sources = [
+                source
+                for name, rows in self._sources.items()
+                if provider is None or name == provider
+                for source in rows
+            ]
+        return tuple(source.spec for source in sorted(sources, key=lambda item: (item.spec.provider, item.spec.source_id)))
+
+    def plan(self, providers: Sequence[str] | None = None) -> dict[str, Any]:
+        selected = self._providers(providers)
+        rows: list[dict[str, Any]] = []
+        with self._lock:
+            source_map = {provider: tuple(self._sources.get(provider, ())) for provider in selected}
+        for provider in selected:
+            current = self.onboarding.status(provider)
+            metadata = next(
+                (row for row in self.onboarding.runtime.provider_metadata() if row.get("provider") == provider),
+                None,
+            )
+            requires = metadata.get("requires_credential") if isinstance(metadata, Mapping) else None
+            ready = bool(current.get("ready", False))
+            required = bool(source_map[provider]) and any(
+                source.spec.required for source in source_map[provider]
+            )
+            if metadata is None:
+                next_action = "register_provider"
+            elif requires is False or ready:
+                next_action = "ready"
+            elif not source_map[provider]:
+                next_action = "register_credential_source"
+            else:
+                next_action = "provision_session"
+            rows.append(
+                {
+                    "provider": provider,
+                    "provider_registered": metadata is not None,
+                    "requires_credential": requires,
+                    "credential_ready": ready,
+                    "required": required,
+                    "source_count": len(source_map[provider]),
+                    "sources": [source.spec.to_dict() for source in source_map[provider]],
+                    "next_action": next_action,
+                }
+            )
+        return {
+            "schema": CREDENTIAL_PROVISIONING_SCHEMA,
+            "providers": rows,
+            "provider_count": len(rows),
+            "execution": "process_local_resolution_into_short_lived_session",
+            "restart_posture": "re-register_sources_and_resolve_fresh_handles",
+            "retention": "metadata_only_no_keys_references_or_callbacks",
+            "secret_material": "never_returned",
+        }
+
+    def provision(
+        self,
+        session: CredentialSession,
+        *,
+        providers: Sequence[str] | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> CredentialProvisioningResult:
+        if not isinstance(session, CredentialSession) or session.onboarding is not self.onboarding:
+            raise CredentialError("credential session belongs to a different onboarding runtime")
+        selected = self._providers(providers)
+        if environ is not None and not isinstance(environ, Mapping):
+            raise CredentialError("credential provisioning environ must be a mapping or None")
+        receipts: list[CredentialProvisioningReceipt] = []
+        failures: list[str] = []
+        with self._lock:
+            source_map = {provider: tuple(self._sources.get(provider, ())) for provider in selected}
+        for provider in selected:
+            metadata = next(
+                (row for row in self.onboarding.runtime.provider_metadata() if row.get("provider") == provider),
+                None,
+            )
+            if metadata is None:
+                receipts.append(CredentialProvisioningReceipt(provider, "missing_provider", False))
+                failures.append(provider)
+                continue
+            if metadata.get("requires_credential") is False:
+                receipts.append(CredentialProvisioningReceipt(provider, "not_required", True))
+                continue
+            try:
+                session.handle(provider)
+            except CredentialError:
+                pass
+            else:
+                receipts.append(CredentialProvisioningReceipt(provider, "already_present", True))
+                continue
+            sources = tuple(source for source in source_map[provider] if source.spec.enabled)
+            required = bool(sources) and any(source.spec.required for source in sources)
+            if not sources:
+                receipts.append(CredentialProvisioningReceipt(provider, "missing_source", False))
+                failures.append(provider)
+                continue
+            last_error: str | None = None
+            success: CredentialProvisioningReceipt | None = None
+            for source in sources:
+                try:
+                    source.resolve(session, environ=environ)
+                except CredentialError as error:
+                    last_error = type(error).__name__
+                    continue
+                success = CredentialProvisioningReceipt(
+                    provider=provider,
+                    status="provisioned",
+                    credential_ready=True,
+                    source_kind=source.spec.source_kind,
+                    source_id=source.spec.source_id,
+                    source_attempts=sources.index(source) + 1,
+                )
+                break
+            if success is None:
+                receipts.append(
+                    CredentialProvisioningReceipt(
+                        provider=provider,
+                        status="source_failed",
+                        credential_ready=False,
+                        source_attempts=len(sources),
+                        error_class=last_error or "CredentialError",
+                    )
+                )
+                if required:
+                    failures.append(provider)
+            else:
+                receipts.append(success)
+        return CredentialProvisioningResult(
+            session_id=session.session_id,
+            ready=not failures,
+            receipts=tuple(receipts),
+            required_failures=tuple(sorted(set(failures))),
+        )
+
+    def _register(
+        self,
+        source: _CredentialSource,
+        *,
+        key: tuple[str, str],
+        replace_existing: bool,
+    ) -> CredentialSourceSpec:
+        if not isinstance(replace_existing, bool):
+            raise CredentialError("replace_existing must be boolean")
+        with self._lock:
+            count = sum(len(rows) for rows in self._sources.values())
+            current = self._sources.setdefault(source.spec.provider, [])
+            # The key is intentionally compared against the non-secret source identity.  The
+            # resolver reference itself is never exposed by this registry.
+            existing_index = next(
+                (
+                    index
+                    for index, row in enumerate(current)
+                    if (row.spec.source_kind, row.spec.environment_variable or row.spec.reference_digest) == key
+                ),
+                None,
+            )
+            if existing_index is not None:
+                if not replace_existing:
+                    raise CredentialError("credential source is already registered")
+                current[existing_index] = source
+                return source.spec
+            if count >= self.max_sources:
+                raise CredentialError("credential provisioning source capacity is exhausted")
+            current.append(source)
+            return source.spec
+
+    def _providers(self, providers: Sequence[str] | None) -> tuple[str, ...]:
+        if providers is None:
+            configured = {
+                row.get("provider")
+                for row in self.onboarding.runtime.provider_metadata()
+                if isinstance(row.get("provider"), str)
+            }
+            with self._lock:
+                configured.update(self._sources)
+            selected = sorted(configured)
+        else:
+            if not isinstance(providers, Sequence) or isinstance(providers, (str, bytes)):
+                raise CredentialError("credential provisioning providers must be a sequence")
+            raw_providers = list(providers)
+            for provider in raw_providers:
+                CredentialStore._validate_provider(provider)
+            selected = sorted(set(raw_providers))
+        if len(selected) > MAX_CREDENTIAL_PROVISIONING_PROVIDERS:
+            raise CredentialError("credential provisioning providers exceed their bound")
+        for provider in selected:
+            CredentialStore._validate_provider(provider)
+        return tuple(selected)
+
+
+def _bounded_json_bytes(value: Any, limit: int, label: str) -> int:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    except (TypeError, ValueError) as error:
+        raise ProviderError(f"{label} must be JSON-safe") from error
+    size = len(encoded.encode("utf-8"))
+    if size > limit:
+        raise ProviderError(f"{label} exceeds the bounded size")
+    return size
+
+
+def _normalize_provider_content(value: Any, role: str) -> str | list[dict[str, Any]]:
+    if isinstance(value, str):
+        if len(value.encode("utf-8")) > MAX_MESSAGE_CHARS:
+            raise ProviderError("provider message content is outside its bounded text contract")
+        return value
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value or len(value) > MAX_PROVIDER_CONTENT_PARTS:
+        raise ProviderError("provider message content parts are outside their bounds")
+    parts = [_canonical_provider_content_part(item) for item in value]
+    if role == "tool":
+        raise ProviderError("provider tool message content must remain text")
+    if role in {"system", "developer"} and any(part["type"] != "text" for part in parts):
+        raise ProviderError("provider system and developer messages support text content only")
+    _bounded_json_bytes(parts, MAX_MESSAGE_CHARS, "provider message content parts")
+    return parts
+
+
+def _provider_content_text(value: Any, role: str) -> str:
+    normalized = _normalize_provider_content(value, role)
+    if isinstance(normalized, str):
+        return normalized
+    return "\n".join(part["text"] for part in normalized if part["type"] == "text")
+
+
+def _provider_content_bytes(value: Any, role: str) -> int:
+    normalized = _normalize_provider_content(value, role)
+    return len((normalized if isinstance(normalized, str) else json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))).encode("utf-8"))
+
+
+def _image_data_url(part: Mapping[str, Any]) -> str:
+    return f"data:{part['media_type']};base64,{part['data']}"
+
+
+def _wire_provider_content(protocol: str, value: Any, role: str) -> str | list[dict[str, Any]]:
+    normalized = _normalize_provider_content(value, role)
+    if isinstance(normalized, str):
+        return normalized
+    if protocol == "openai_responses":
+        return [
+            {"type": "input_text", "text": part["text"]}
+            if part["type"] == "text"
+            else {
+                "type": "input_image",
+                "image_url": part["url"] if part["type"] == "image_url" else _image_data_url(part),
+                **({} if "detail" not in part else {"detail": part["detail"]}),
+            }
+            for part in normalized
+        ]
+    if protocol == "anthropic_messages":
+        return [
+            {"type": "text", "text": part["text"]}
+            if part["type"] == "text"
+            else (
+                {"type": "image", "source": {"type": "url", "url": part["url"]}}
+                if part["type"] == "image_url"
+                else {"type": "image", "source": {"type": "base64", "media_type": part["media_type"], "data": part["data"]}}
+            )
+            for part in normalized
+        ]
+    return [
+        {"type": "text", "text": part["text"]}
+        if part["type"] == "text"
+        else {
+            "type": "image_url",
+            "image_url": {
+                "url": part["url"] if part["type"] == "image_url" else _image_data_url(part),
+                **({} if "detail" not in part else {"detail": part["detail"]}),
+            },
+        }
+        for part in normalized
+    ]
+
+
+def _validate_provider_message(message: Mapping[str, Any]) -> None:
+    if not isinstance(message, Mapping) or not isinstance(message.get("role"), str):
+        raise ProviderError("each message must contain a string role")
+    content = message.get("content")
+    _normalize_provider_content(content, str(message.get("role")))
+    tool_call_id = message.get("tool_call_id")
+    if tool_call_id is not None and (
+        not isinstance(tool_call_id, str) or not tool_call_id.strip() or len(tool_call_id) > 256
+    ):
+        raise ProviderError("provider message tool_call_id is not bounded")
+    tool_calls = message.get("tool_calls")
+    if tool_calls is not None:
+        if not isinstance(tool_calls, Sequence) or isinstance(tool_calls, (str, bytes)):
+            raise ProviderError("provider message tool_calls must be a sequence")
+        if len(tool_calls) > MAX_PROVIDER_TOOLS:
+            raise ProviderError("provider message tool_calls exceed the bounded limit")
+        for call in tool_calls:
+            if not isinstance(call, Mapping):
+                raise ProviderError("provider message tool call must be an object")
+            name = call.get("name")
+            call_id = call.get("id")
+            arguments = call.get("arguments")
+            if not isinstance(name, str) or not name.strip() or len(name) > MAX_TOOL_NAME_BYTES:
+                raise ProviderError("provider message tool call name is not bounded")
+            if not isinstance(call_id, str) or not call_id.strip() or len(call_id) > 256:
+                raise ProviderError("provider message tool call id is not bounded")
+            if not isinstance(arguments, str):
+                raise ProviderError("provider message tool call arguments must be a string")
+            _bounded_json_bytes(arguments, MAX_TOOL_ARGUMENT_BYTES, "provider message tool arguments")
+    provider_output_items = message.get("provider_output_items")
+    if provider_output_items is not None:
+        if not isinstance(provider_output_items, Sequence) or isinstance(
+            provider_output_items, (str, bytes)
+        ):
+            raise ProviderError("provider message provider_output_items must be a sequence")
+        if any(not isinstance(item, Mapping) for item in provider_output_items):
+            raise ProviderError("provider message provider_output_items must contain objects")
+        _bounded_json_bytes(
+            [dict(item) for item in provider_output_items],
+            MAX_RESPONSE_BYTES,
+            "provider message provider_output_items",
+        )
+
+
+def _wire_messages(
+    protocol: str,
+    source_messages: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Translate continuation markers into each provider's native conversation shape."""
+
+    messages: list[dict[str, Any]] = []
+    for source in source_messages:
+        message = dict(source)
+        role = message.get("role")
+        tool_calls = message.get("tool_calls")
+        provider_output_items = message.get("provider_output_items")
+        if protocol == "openai_responses":
+            if provider_output_items:
+                if not isinstance(provider_output_items, Sequence) or isinstance(
+                    provider_output_items, (str, bytes)
+                ):
+                    raise ProviderError("provider continuation output items were malformed")
+                messages.extend(dict(item) for item in provider_output_items if isinstance(item, Mapping))
+                continue
+            if role == "assistant" and tool_calls:
+                content = _wire_provider_content(protocol, message.get("content"), str(role))
+                if content:
+                    messages.append({"role": "assistant", "content": content})
+                for call in tool_calls:
+                    messages.append(
+                        {
+                            "type": "function_call",
+                            "call_id": call["id"],
+                            "name": call["name"],
+                            "arguments": call["arguments"],
+                        }
+                    )
+                continue
+            if role == "tool":
+                messages.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": message["tool_call_id"],
+                        "output": message["content"],
+                    }
+                )
+                continue
+            message["content"] = _wire_provider_content(protocol, message.get("content"), str(role))
+            messages.append(message)
+            continue
+        if protocol == "anthropic_messages":
+            if role == "assistant" and tool_calls:
+                blocks: list[dict[str, Any]] = []
+                content = _wire_provider_content(protocol, message.get("content"), str(role))
+                if isinstance(content, list):
+                    blocks.extend(content)
+                elif content:
+                    blocks.append({"type": "text", "text": content})
+                for call in tool_calls:
+                    try:
+                        arguments = json.loads(call["arguments"])
+                    except (TypeError, ValueError) as error:
+                        raise ProviderError("provider continuation tool arguments are invalid") from error
+                    if not isinstance(arguments, Mapping):
+                        raise ProviderError("provider continuation tool arguments must be an object")
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": call["id"],
+                            "name": call["name"],
+                            "input": dict(arguments),
+                        }
+                    )
+                messages.append({"role": "assistant", "content": blocks})
+                continue
+            if role == "tool":
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": message["tool_call_id"],
+                                "content": message["content"],
+                                "is_error": bool(message.get("is_error", False)),
+                            }
+                        ],
+                    }
+                )
+                continue
+            message.pop("provider_output_items", None)
+            message["content"] = _wire_provider_content(protocol, message.get("content"), str(role))
+            messages.append(message)
+            continue
+        message.pop("provider_output_items", None)
+        if role == "assistant" and tool_calls:
+            wire_calls = [
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {
+                        "name": call["name"],
+                        "arguments": call["arguments"],
+                    },
+                }
+                for call in tool_calls
+            ]
+            message["tool_calls"] = wire_calls
+        message["content"] = _wire_provider_content(protocol, message.get("content"), str(role))
+        messages.append(message)
+    return messages
+
+
+def _iter_sse_frames(
+    response: http.client.HTTPResponse,
+    max_response_bytes: int,
+) -> Iterator[tuple[str | None, str]]:
+    """Parse SSE framing with total, line, and event data bounds."""
+
+    total_bytes = 0
+    event_bytes = 0
+    event_name: str | None = None
+    data_lines: list[str] = []
+
+    def flush() -> tuple[str | None, str] | None:
+        nonlocal event_bytes, event_name, data_lines
+        if not data_lines:
+            event_name = None
+            event_bytes = 0
+            return None
+        data = "\n".join(data_lines)
+        result = (event_name, data)
+        event_name = None
+        data_lines = []
+        event_bytes = 0
+        return result
+
+    while True:
+        line = response.readline()
+        if not line:
+            break
+        total_bytes += len(line)
+        if total_bytes > max_response_bytes:
+            raise ProviderError("provider stream exceeded max_response_bytes")
+        if len(line) > MAX_STREAM_EVENT_BYTES:
+            raise ProviderError("provider stream line exceeded the bounded size")
+        stripped = line.rstrip(b"\r\n")
+        if not stripped:
+            frame = flush()
+            if frame is not None:
+                yield frame
+            continue
+        if stripped.startswith(b":"):
+            continue
+        try:
+            decoded = stripped.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ProviderError("provider stream contained invalid UTF-8") from error
+        field, separator, value = decoded.partition(":")
+        if not separator:
+            continue
+        if value.startswith(" "):
+            value = value[1:]
+        if field == "event":
+            if len(value) > 256:
+                raise ProviderError("provider stream event name exceeded the bounded size")
+            event_name = value
+        elif field == "data":
+            event_bytes += len(value.encode("utf-8"))
+            if event_bytes > MAX_STREAM_EVENT_BYTES:
+                raise ProviderError("provider stream event exceeded the bounded size")
+            data_lines.append(value)
+    frame = flush()
+    if frame is not None:
+        yield frame
+
+
+def _stream_meta(payload: Mapping[str, Any], state: dict[str, Any]) -> None:
+    response = payload.get("response")
+    if isinstance(response, Mapping):
+        if isinstance(response.get("id"), str):
+            state["request_id"] = response["id"]
+        if isinstance(response.get("model"), str):
+            state["model"] = response["model"]
+    for key in ("id", "model"):
+        if isinstance(payload.get(key), str):
+            state["request_id" if key == "id" else "model"] = payload[key]
+
+
+def _parse_stream_arguments(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        arguments = value
+    elif isinstance(value, str):
+        if len(value.encode("utf-8")) > MAX_TOOL_ARGUMENT_BYTES:
+            raise ProviderError("provider streamed tool arguments exceed the bounded size")
+        try:
+            arguments = json.loads(value or "{}")
+        except (TypeError, ValueError) as error:
+            raise ProviderError("provider streamed tool arguments were not valid JSON") from error
+    else:
+        raise ProviderError("provider streamed tool arguments were malformed")
+    if not isinstance(arguments, Mapping):
+        raise ProviderError("provider streamed tool arguments must be an object")
+    _bounded_json_bytes(arguments, MAX_TOOL_ARGUMENT_BYTES, "provider streamed tool arguments")
+    return dict(arguments)
+
+
+def _append_stream_fragment(current: Any, fragment: Any, limit: int, label: str) -> str:
+    if not isinstance(current, str) or not isinstance(fragment, str):
+        raise ProviderError(f"{label} was malformed")
+    combined = current + fragment
+    if len(combined.encode("utf-8")) > limit:
+        raise ProviderError(f"{label} exceeded the bounded size")
+    return combined
+
+
+def _project_stream_payload(
+    protocol: str,
+    event_name: str | None,
+    payload: Mapping[str, Any],
+    state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    event_type = event_name or _string_or_none(payload.get("type")) or "provider.event"
+    _stream_meta(payload, state)
+    specs: list[dict[str, Any]] = []
+    handled = False
+    if protocol == "openai_responses":
+        response = payload.get("response")
+        if isinstance(response, Mapping):
+            _stream_meta(response, state)
+        if event_type == "response.output_text.delta" and isinstance(payload.get("delta"), str):
+            specs.append({"event_type": event_type, "text_delta": payload["delta"]})
+            handled = True
+        elif event_type == "response.output_item.added":
+            item = payload.get("item")
+            if isinstance(item, Mapping) and item.get("type") == "function_call":
+                key = str(item.get("id") or payload.get("item_id") or len(state["calls"]))
+                state["calls"][key] = {
+                    "call_id": item.get("call_id") or item.get("id") or key,
+                    "name": item.get("name"),
+                    "arguments": "",
+                }
+            handled = True
+        elif event_type == "response.function_call_arguments.delta":
+            item_id = str(payload.get("item_id") or payload.get("id") or len(state["calls"]))
+            call = state["calls"].setdefault(
+                item_id,
+                {"call_id": payload.get("call_id") or item_id, "name": payload.get("name"), "arguments": ""},
+            )
+            delta = payload.get("delta", "")
+            if not isinstance(delta, str):
+                raise ProviderError("provider streamed function arguments delta was malformed")
+            call["arguments"] = _append_stream_fragment(
+                call.get("arguments", ""),
+                delta,
+                MAX_TOOL_ARGUMENT_BYTES,
+                "provider streamed function arguments",
+            )
+            specs.append(
+                {
+                    "event_type": event_type,
+                    "tool_call_id": str(call["call_id"]),
+                    "tool_name": _string_or_none(call.get("name")),
+                    "arguments_delta": delta,
+                }
+            )
+            handled = True
+        elif event_type == "response.function_call_arguments.done":
+            item_id = str(payload.get("item_id") or payload.get("id") or len(state["calls"]))
+            call = state["calls"].setdefault(
+                item_id,
+                {"call_id": payload.get("call_id") or item_id, "name": payload.get("name"), "arguments": ""},
+            )
+            if isinstance(payload.get("arguments"), (str, Mapping)):
+                call["arguments"] = payload["arguments"]
+            if isinstance(payload.get("name"), str):
+                call["name"] = payload["name"]
+            specs.extend(_finalize_stream_tool_calls(protocol, state, only=item_id))
+            handled = True
+        elif event_type in {"response.completed", "response.done"}:
+            usage = {}
+            if isinstance(response, Mapping) and isinstance(response.get("usage"), Mapping):
+                usage = dict(response["usage"])
+            elif isinstance(payload.get("usage"), Mapping):
+                usage = dict(payload["usage"])
+            specs.extend(_finalize_stream_tool_calls(protocol, state))
+            specs.append({"event_type": event_type, "usage": usage, "done": True})
+            handled = True
+    elif protocol == "openai_chat_completions":
+        choices = payload.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], Mapping):
+            choice = choices[0]
+            delta = choice.get("delta")
+            if not isinstance(delta, Mapping):
+                delta = choice.get("message") if isinstance(choice.get("message"), Mapping) else {}
+            content = delta.get("content") if isinstance(delta, Mapping) else None
+            if isinstance(content, str) and content:
+                specs.append({"event_type": event_type, "text_delta": content})
+                handled = True
+            chunks = delta.get("tool_calls") if isinstance(delta, Mapping) else None
+            if isinstance(chunks, list):
+                for chunk in chunks:
+                    if not isinstance(chunk, Mapping):
+                        continue
+                    arguments_delta = ""
+                    index = str(chunk.get("index", len(state["calls"])))
+                    call = state["calls"].setdefault(
+                        index,
+                        {"call_id": chunk.get("id") or f"tool-call-{index}", "name": None, "arguments": ""},
+                    )
+                    if isinstance(chunk.get("id"), str):
+                        call["call_id"] = chunk["id"]
+                    function = chunk.get("function")
+                    if isinstance(function, Mapping):
+                        if isinstance(function.get("name"), str):
+                            call["name"] = function["name"]
+                        arguments_delta = function.get("arguments", "")
+                        if not isinstance(arguments_delta, str):
+                            raise ProviderError("provider streamed chat tool arguments were malformed")
+                        call["arguments"] = _append_stream_fragment(
+                            call.get("arguments", ""),
+                            arguments_delta,
+                            MAX_TOOL_ARGUMENT_BYTES,
+                            "provider streamed chat tool arguments",
+                        )
+                    specs.append(
+                        {
+                            "event_type": event_type,
+                            "tool_call_id": str(call["call_id"]),
+                            "tool_name": _string_or_none(call.get("name")),
+                            "arguments_delta": arguments_delta if isinstance(arguments_delta, str) else "",
+                        }
+                    )
+                    handled = True
+            finish_reason = choice.get("finish_reason")
+            if finish_reason == "tool_calls":
+                specs.extend(_finalize_stream_tool_calls(protocol, state))
+                specs.append({"event_type": event_type, "done": True})
+                handled = True
+            elif finish_reason is not None:
+                specs.append({"event_type": event_type, "done": True})
+                handled = True
+        if isinstance(payload.get("usage"), Mapping):
+            specs.append({"event_type": event_type, "usage": dict(payload["usage"])})
+            handled = True
+    else:
+        if event_type == "message_start":
+            message = payload.get("message")
+            if isinstance(message, Mapping):
+                if isinstance(message.get("id"), str):
+                    state["request_id"] = message["id"]
+                if isinstance(message.get("model"), str):
+                    state["model"] = message["model"]
+                if isinstance(message.get("usage"), Mapping):
+                    specs.append({"event_type": event_type, "usage": dict(message["usage"])})
+            handled = True
+        elif event_type == "content_block_start":
+            block = payload.get("content_block")
+            index = str(payload.get("index", len(state["calls"])))
+            if isinstance(block, Mapping) and block.get("type") == "tool_use":
+                state["calls"][index] = {
+                    "call_id": block.get("id") or f"tool-call-{index}",
+                    "name": block.get("name"),
+                    "arguments": "",
+                }
+            handled = True
+        elif event_type == "content_block_delta":
+            index = str(payload.get("index", len(state["calls"])))
+            delta = payload.get("delta")
+            if isinstance(delta, Mapping) and delta.get("type") == "text_delta":
+                text = delta.get("text", "")
+                if not isinstance(text, str):
+                    raise ProviderError("provider streamed Anthropic text delta was malformed")
+                specs.append({"event_type": event_type, "text_delta": text})
+            elif isinstance(delta, Mapping) and delta.get("type") == "input_json_delta":
+                call = state["calls"].setdefault(
+                    index,
+                    {"call_id": f"tool-call-{index}", "name": None, "arguments": ""},
+                )
+                partial = delta.get("partial_json", "")
+                if not isinstance(partial, str):
+                    raise ProviderError("provider streamed Anthropic tool arguments were malformed")
+                call["arguments"] = _append_stream_fragment(
+                    call.get("arguments", ""),
+                    partial,
+                    MAX_TOOL_ARGUMENT_BYTES,
+                    "provider streamed Anthropic tool arguments",
+                )
+                specs.append(
+                    {
+                        "event_type": event_type,
+                        "tool_call_id": str(call["call_id"]),
+                        "tool_name": _string_or_none(call.get("name")),
+                        "arguments_delta": partial,
+                    }
+                )
+            handled = True
+        elif event_type == "message_delta":
+            usage = payload.get("usage")
+            if isinstance(usage, Mapping):
+                specs.append({"event_type": event_type, "usage": dict(usage)})
+            handled = True
+        elif event_type == "message_stop":
+            specs.extend(_finalize_stream_tool_calls(protocol, state))
+            specs.append({"event_type": event_type, "done": True})
+            handled = True
+    if not handled:
+        specs.append({"event_type": event_type})
+    return specs
+
+
+def _finalize_stream_tool_calls(
+    protocol: str,
+    state: dict[str, Any],
+    *,
+    only: str | None = None,
+) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    keys = [only] if only is not None else list(state["calls"])
+    for key in keys:
+        if key is None or key not in state["calls"]:
+            continue
+        call = state["calls"].pop(key)
+        name = call.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ProviderError("provider stream completed a tool call without a name")
+        arguments = _parse_stream_arguments(call.get("arguments", "{}"))
+        parsed = ProviderToolCall(
+            call_id=str(call.get("call_id") or key),
+            name=name,
+            arguments=arguments,
+        )
+        specs.append(
+            {
+                "event_type": "provider.tool_call.done",
+                "tool_call_id": parsed.call_id,
+                "tool_name": parsed.name,
+                "tool_call": parsed,
+            }
+        )
+    return specs
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    value = headers.get(name.lower())
+    return value if value else None
+
+
+def _string_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _extract_text(protocol: str, payload: Mapping[str, Any]) -> str:
+    if protocol == "openai_responses":
+        direct = payload.get("output_text")
+        if isinstance(direct, str):
+            return direct
+        output = payload.get("output")
+        if isinstance(output, list):
+            pieces: list[str] = []
+            for item in output:
+                if not isinstance(item, Mapping):
+                    continue
+                content = item.get("content")
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, Mapping) and isinstance(block.get("text"), str):
+                            pieces.append(block["text"])
+            if pieces:
+                return "".join(pieces)
+    elif protocol == "anthropic_messages":
+        content = payload.get("content")
+        if isinstance(content, list):
+            pieces = [
+                block["text"]
+                for block in content
+                if isinstance(block, Mapping) and block.get("type") == "text" and isinstance(block.get("text"), str)
+            ]
+            if pieces:
+                return "".join(pieces)
+    else:
+        choices = payload.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], Mapping):
+            message = choices[0].get("message")
+            if isinstance(message, Mapping):
+                content = message.get("content")
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    return "".join(
+                        block["text"]
+                        for block in content
+                        if isinstance(block, Mapping) and isinstance(block.get("text"), str)
+                    )
+    raise ProviderError("provider response contained no assistant text")
+
+
+def _extract_tool_calls(
+    protocol: str,
+    payload: Mapping[str, Any],
+) -> tuple[ProviderToolCall, ...]:
+    """Parse provider-native function calls without ever dispatching them."""
+
+    candidates: list[Mapping[str, Any]] = []
+    if protocol == "openai_responses":
+        output = payload.get("output")
+        if isinstance(output, list):
+            candidates = [
+                item
+                for item in output
+                if isinstance(item, Mapping) and item.get("type") == "function_call"
+            ]
+    elif protocol == "anthropic_messages":
+        content = payload.get("content")
+        if isinstance(content, list):
+            candidates = [
+                item
+                for item in content
+                if isinstance(item, Mapping) and item.get("type") == "tool_use"
+            ]
+    else:
+        choices = payload.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], Mapping):
+            message = choices[0].get("message")
+            calls = message.get("tool_calls") if isinstance(message, Mapping) else None
+            if isinstance(calls, list):
+                candidates = [item for item in calls if isinstance(item, Mapping)]
+    if len(candidates) > MAX_PROVIDER_TOOLS:
+        raise ProviderError("provider returned too many tool calls")
+
+    parsed: list[ProviderToolCall] = []
+    for index, candidate in enumerate(candidates):
+        if protocol == "openai_chat_completions":
+            function = candidate.get("function")
+            if not isinstance(function, Mapping):
+                raise ProviderError("provider returned a malformed tool call")
+            name = function.get("name")
+            arguments = function.get("arguments")
+            call_id = candidate.get("id") or f"tool-call-{index}"
+        elif protocol == "anthropic_messages":
+            name = candidate.get("name")
+            arguments = candidate.get("input")
+            call_id = candidate.get("id") or f"tool-call-{index}"
+        else:
+            name = candidate.get("name")
+            arguments = candidate.get("arguments")
+            call_id = candidate.get("call_id") or candidate.get("id") or f"tool-call-{index}"
+        if not isinstance(name, str) or not name.strip():
+            raise ProviderError("provider returned a tool call without a name")
+        if isinstance(arguments, str):
+            if len(arguments.encode("utf-8")) > MAX_TOOL_ARGUMENT_BYTES:
+                raise ProviderError("provider tool call arguments exceed the bounded size")
+            try:
+                arguments = json.loads(arguments)
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ProviderError("provider returned invalid JSON tool arguments") from error
+        if not isinstance(arguments, Mapping):
+            raise ProviderError("provider tool call arguments must be a JSON object")
+        parsed.append(
+            ProviderToolCall(
+                call_id=str(call_id),
+                name=name,
+                arguments=dict(arguments),
+            )
+        )
+    return tuple(parsed)
+
+
+def _validate_structured_response(
+    text: str,
+    request: ProviderRequest,
+) -> Any:
+    """Parse and validate a bounded JSON response without echoing response contents in errors."""
+
+    if not request.require_json and request.response_schema is None:
+        return None
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError) as error:
+        raise ProviderError("provider response was not valid JSON") from error
+    if request.response_schema is not None:
+        _validate_json_schema(value, request.response_schema, "$")
+    return value
+
+
+def _validate_json_schema(value: Any, schema: Mapping[str, Any], path: str) -> None:
+    """Validate the deliberately small, dependency-free JSON Schema subset used by the brain."""
+
+    schema_type = schema.get("type")
+    if schema_type is not None:
+        allowed_types = [schema_type] if isinstance(schema_type, str) else schema_type
+        if not isinstance(allowed_types, list) or not all(isinstance(item, str) for item in allowed_types):
+            raise ProviderError("structured-output schema has an invalid type declaration")
+        if not any(_json_type_matches(value, item) for item in allowed_types):
+            raise ProviderError("provider response failed structured-output validation")
+    if "enum" in schema:
+        enum = schema["enum"]
+        if not isinstance(enum, list) or value not in enum:
+            raise ProviderError("provider response failed structured-output validation")
+    if isinstance(value, Mapping):
+        required = schema.get("required", [])
+        if not isinstance(required, list) or any(not isinstance(item, str) for item in required):
+            raise ProviderError("structured-output schema has invalid required fields")
+        if any(field not in value for field in required):
+            raise ProviderError("provider response failed structured-output validation")
+        properties = schema.get("properties", {})
+        if properties is not None and not isinstance(properties, Mapping):
+            raise ProviderError("structured-output schema has invalid properties")
+        if isinstance(properties, Mapping):
+            if schema.get("additionalProperties") is False and any(field not in properties for field in value):
+                raise ProviderError("provider response failed structured-output validation")
+            for field, child_schema in properties.items():
+                if field in value:
+                    if not isinstance(child_schema, Mapping):
+                        raise ProviderError("structured-output schema has invalid child schema")
+                    _validate_json_schema(value[field], child_schema, f"{path}.{field}")
+    if isinstance(value, list):
+        if "minItems" in schema and (not isinstance(schema["minItems"], int) or len(value) < schema["minItems"]):
+            raise ProviderError("provider response failed structured-output validation")
+        if "maxItems" in schema and (not isinstance(schema["maxItems"], int) or len(value) > schema["maxItems"]):
+            raise ProviderError("provider response failed structured-output validation")
+        items = schema.get("items")
+        if items is not None:
+            if not isinstance(items, Mapping):
+                raise ProviderError("structured-output schema has invalid array items")
+            for index, item in enumerate(value):
+                _validate_json_schema(item, items, f"{path}[{index}]")
+    if isinstance(value, str):
+        if "minLength" in schema and (not isinstance(schema["minLength"], int) or len(value) < schema["minLength"]):
+            raise ProviderError("provider response failed structured-output validation")
+        if "maxLength" in schema and (not isinstance(schema["maxLength"], int) or len(value) > schema["maxLength"]):
+            raise ProviderError("provider response failed structured-output validation")
+
+
+def _json_type_matches(value: Any, schema_type: str) -> bool:
+    return {
+        "object": isinstance(value, Mapping),
+        "array": isinstance(value, list),
+        "string": isinstance(value, str),
+        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        "integer": isinstance(value, int) and not isinstance(value, bool),
+        "boolean": isinstance(value, bool),
+        "null": value is None,
+    }.get(schema_type, False)
+
+
+def openai_provider(
+    *,
+    base_url: str = "https://api.openai.com",
+    path: str | None = None,
+    models_path: str | None = None,
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_schema",
+) -> ProviderConfig:
+    """Create a metadata-only OpenAI Responses provider configuration."""
+
+    return ProviderConfig(
+        provider="openai",
+        base_url=base_url,
+        protocol="openai_responses",
+        path=path,
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def anthropic_provider(
+    *,
+    base_url: str = "https://api.anthropic.com",
+    models_path: str | None = None,
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "disabled",
+) -> ProviderConfig:
+    """Create a metadata-only Anthropic Messages provider configuration."""
+
+    return ProviderConfig(
+        provider="anthropic",
+        base_url=base_url,
+        protocol="anthropic_messages",
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def openai_compatible_provider(
+    provider: str,
+    base_url: str,
+    *,
+    path: str | None = None,
+    models_path: str | None = None,
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
+) -> ProviderConfig:
+    """Configure a provider exposing the OpenAI Chat Completions wire shape.
+
+    Generic gateways default to ``json_object`` because the older structured-output mode is
+    broadly compatible.  A provider with verified JSON Schema support can opt into
+    ``structured_output_mode="json_schema"``; callers can also disable provider-side hints and
+    retain the runtime's local schema validation.
+    """
+
+    return ProviderConfig(
+        provider=provider,
+        base_url=base_url,
+        protocol="openai_chat_completions",
+        path=path,
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def _compatible_provider_preset(
+    provider: str,
+    base_url: str,
+    path: str,
+    *,
+    models_path: str,
+    timeout_seconds: float,
+    allow_insecure_http: bool,
+    max_attempts: int,
+    retry_backoff_seconds: float,
+    circuit_breaker_failure_threshold: int,
+    circuit_breaker_reset_seconds: float,
+    structured_output_mode: str,
+) -> ProviderConfig:
+    return openai_compatible_provider(
+        provider,
+        base_url,
+        path=path,
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def deepseek_provider(
+    *,
+    base_url: str = "https://api.deepseek.com",
+    path: str = "/chat/completions",
+    models_path: str = "/models",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
+) -> ProviderConfig:
+    """Create the official DeepSeek OpenAI-compatible Chat Completions configuration."""
+
+    return _compatible_provider_preset(
+        "deepseek",
+        base_url,
+        path,
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def groq_provider(
+    *,
+    base_url: str = "https://api.groq.com/openai/v1",
+    path: str = "/chat/completions",
+    models_path: str = "/models",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
+) -> ProviderConfig:
+    """Create the official Groq OpenAI-compatible Chat Completions configuration."""
+
+    return _compatible_provider_preset(
+        "groq",
+        base_url,
+        path,
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def mistral_provider(
+    *,
+    base_url: str = "https://api.mistral.ai",
+    path: str = "/v1/chat/completions",
+    models_path: str = "/v1/models",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
+) -> ProviderConfig:
+    """Create the official Mistral Chat Completions configuration."""
+
+    return _compatible_provider_preset(
+        "mistral",
+        base_url,
+        path,
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def openrouter_provider(
+    *,
+    base_url: str = "https://openrouter.ai/api/v1",
+    path: str = "/chat/completions",
+    models_path: str = "/models",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
+) -> ProviderConfig:
+    """Create the official OpenRouter OpenAI-compatible configuration."""
+
+    return _compatible_provider_preset(
+        "openrouter",
+        base_url,
+        path,
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def xai_provider(
+    *,
+    base_url: str = "https://api.x.ai",
+    path: str = "/v1/chat/completions",
+    models_path: str = "/v1/models",
+    timeout_seconds: float = 60.0,
+    allow_insecure_http: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
+) -> ProviderConfig:
+    """Create the official xAI OpenAI-compatible Chat Completions configuration."""
+
+    return _compatible_provider_preset(
+        "xai",
+        base_url,
+        path,
+        models_path=models_path,
+        timeout_seconds=timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
