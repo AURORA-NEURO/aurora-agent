@@ -4,6 +4,7 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAIN_POLICY_DOMAINS,
+    AutonomousAgent,
     AutonomousBrain,
     AutonomousDomainPolicyError,
     AutonomousTaskOrchestrator,
@@ -105,3 +106,80 @@ def test_strict_orchestrator_policy_blocks_every_domain_before_provider_dispatch
                 domain_policy_mode="strict",
                 approve_provider_call=True,
             )
+
+
+def test_strict_provider_planning_is_gated_for_every_domain_before_model_selection():
+    orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(object(), LLMRuntime()))
+    for domain in AUTONOMOUS_DOMAIN_POLICY_DOMAINS:
+        blueprint = orchestrator.prepare(
+            task=f"prepare a bounded {domain} plan",
+            domain=domain,
+        )
+        held = orchestrator.plan_with_provider(
+            blueprint=blueprint,
+            model_candidates=(),
+            credentials={},
+            domain_policy_mode="strict",
+            approve_provider_call=True,
+        )
+        assert held.status == "policy_review_required"
+        assert held.domain_policy_admission is not None
+        assert held.domain_policy_admission.domain == domain
+        assert "evaluator_required" in held.domain_policy_admission.reasons
+
+        admitted = orchestrator.plan_with_provider(
+            blueprint=blueprint,
+            model_candidates=(),
+            credentials={},
+            domain_policy_mode="strict",
+            domain_policy_evidence_ready=True,
+            domain_policy_evaluator_configured=True,
+            approve_provider_call=False,
+        )
+        assert admitted.status == "approval_required"
+        assert admitted.domain_policy_admission is not None
+        assert admitted.domain_policy_admission.decision == "admitted"
+
+
+def test_strict_automatic_provider_planning_stops_before_model_selection():
+    agent = AutonomousAgent(object(), LLMRuntime())
+    result = agent.run_auto(
+        task="prepare a bounded coding plan",
+        credentials={},
+        model_candidates=(),
+        planning_mode="provider",
+        domain_policy_mode="strict",
+        approve_provider_call=True,
+    )
+    assert result.status == "planning_review_required"
+    assert result.planning is not None
+    assert result.planning.status == "policy_review_required"
+    assert result.planning.domain_policy_admission is not None
+    assert result.planning.domain_policy_admission.domain == "coding"
+
+
+def test_strict_workflow_stage_rechecks_policy_before_provider_dispatch():
+    orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(object(), LLMRuntime()))
+    blueprint = orchestrator.prepare(
+        task="execute a bounded staged coding review",
+        domain="coding",
+    )
+    with pytest.raises(AutonomousDomainPolicyError, match="strict autonomous domain policy"):
+        orchestrator.run_workflow(
+            blueprint=blueprint,
+            model_candidates=(
+                {
+                    "provider": "openai",
+                    "model": "test-model",
+                    "capabilities": ["code", "reasoning"],
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 20,
+                    "cost_per_million_tokens": 10,
+                },
+            ),
+            credentials={},
+            domain_policy_mode="strict",
+            approve_provider_call=True,
+        )

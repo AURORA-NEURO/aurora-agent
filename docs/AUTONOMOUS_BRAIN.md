@@ -97,6 +97,13 @@ evaluate every child domain and the synthesis domain independently, so one unsaf
 whole run before dispatch. Strict mode is an admission layer, not a secret manager: callers still
 own credentials, provider registration, and the final effect approval.
 
+Provider-assisted planning is covered by the same boundary. `planWithProvider`, `planAndRun`, and
+Python `run_auto(..., planning_mode="provider")` check strict evidence, evaluator, response, and
+budget posture before model selection or planner invocation. A planner admission only authorizes a
+bounded proposal to be produced; the subsequent execution re-checks the caller's actual plan
+acceptance and effect posture. This prevents a planner call from becoming an unreviewed escape
+hatch around the execution policy.
+
 ## Credential lifecycle
 
 Applications collect provider keys themselves. The SDK supports four caller-owned entry points:

@@ -121,3 +121,65 @@ test("strict policy mode admits an explicitly reviewed, evidence-backed, evaluat
   assert.equal(result.domain_policy_admission?.decision, "admitted");
   assert.equal(result.domain_policy_admission?.domain, "coding");
 });
+
+test("strict policy mode gates provider-assisted planning across every domain", async () => {
+  let providerCalls = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("strict planning test must not contact HTTP"); } });
+  runtime.registerInMemoryProvider("planner", async () => {
+    providerCalls += 1;
+    return { output_text: "unexpected planner dispatch" };
+  });
+  const agent = new AutonomousAgent(runtime);
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const envelope = await agent.blueprint(`prepare a bounded ${domain} plan`, { domain });
+    assert.ok(envelope.blueprint, domain);
+    const held = await agent.planWithProvider(envelope.blueprint, {
+      domainPolicyMode: "strict",
+      approveProviderCall: true,
+    });
+    assert.equal(held.status, "policy_review_required", domain);
+    assert.equal(held.domain_policy_admission?.domain, domain);
+    assert.ok(held.domain_policy_admission?.reasons.includes("evaluator_required"), domain);
+
+    const admitted = await agent.planWithProvider(envelope.blueprint, {
+      domainPolicyMode: "strict",
+      domainPolicyEvidenceReady: true,
+      domainPolicyEvaluatorConfigured: true,
+      approveProviderCall: false,
+    });
+    assert.equal(admitted.status, "approval_required", domain);
+    assert.equal(admitted.domain_policy_admission?.decision, "admitted", domain);
+  }
+  assert.equal(providerCalls, 0);
+});
+
+test("strict planAndRun and cross-domain planning share the pre-dispatch policy gate", async () => {
+  let providerCalls = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("strict planAndRun test must not contact HTTP"); } });
+  runtime.registerInMemoryProvider("planner", async () => {
+    providerCalls += 1;
+    return { output_text: "unexpected planner dispatch" };
+  });
+  const agent = new AutonomousAgent(runtime);
+
+  const single = await agent.planAndRun("prepare a bounded coding plan", {
+    domain: "coding",
+    planning: { approveProviderCall: true },
+    domainPolicyMode: "strict",
+    approveProviderCall: true,
+  });
+  assert.equal(single.status, "policy_review_required");
+  assert.equal(single.plan_refinement?.domain_policy_admission?.domain, "coding");
+
+  const cross = await agent.blueprint("Research a biomedical neuroscience experiment with EEG patient evidence.", {
+    allowCrossDomain: true,
+  });
+  assert.ok(cross.cross_domain_blueprint);
+  const crossPlan = await agent.planCrossDomainWithProvider(cross.cross_domain_blueprint, {
+    domainPolicyMode: "strict",
+    approveProviderCall: true,
+  });
+  assert.equal(crossPlan.status, "policy_review_required");
+  assert.equal(crossPlan.domain_policy_admission?.domain, "cross_domain");
+  assert.equal(providerCalls, 0);
+});

@@ -1172,6 +1172,13 @@ export interface AutonomousProviderPlanningOptions {
   observer?: ProviderInvocationObserver;
   /** Metadata-only lifecycle callback for each model-selection attempt. */
   selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
+  /** Apply the same provider-free domain admission boundary to the planning call. */
+  domainPolicyMode?: AutonomousDomainPolicyExecutionMode;
+  domainPolicyEvidenceReady?: boolean;
+  domainPolicyEvaluatorConfigured?: boolean;
+  /** Planning itself has no effect by default; callers may declare an effectful planner explicitly. */
+  domainPolicyEffectsRequested?: boolean;
+  domainPolicyEffectsApproved?: boolean;
 }
 
 /** Metadata-safe input for planning an existing dependency-closed step graph. */
@@ -2224,6 +2231,34 @@ function domainPolicyAdmissionForBlueprint(
 
 function domainPolicyStatus(admission: AutonomousDomainPolicyAdmission): "policy_review_required" | "policy_blocked" {
   return admission.decision === "blocked" ? "policy_blocked" : "policy_review_required";
+}
+
+/**
+ * Provider-free admission for a planner call. Planning is still a provider boundary, but it is
+ * not execution-plan acceptance: the planner may propose a reorder while the later run() call
+ * must re-check the actual accepted plan and effect posture.
+ */
+function domainPolicyAdmissionForPlanning(
+  domain: AutonomousDomainName,
+  estimatedInputTokens: number,
+  options: AutonomousProviderPlanningOptions,
+  costBudget: AutonomousCostBudget | undefined,
+): AutonomousDomainPolicyAdmission | null {
+  if (normalizeAutonomousDomainPolicyMode(options.domainPolicyMode) !== "strict") return null;
+  const policy = autonomousDomainPolicy(domain);
+  return evaluateAutonomousDomainPolicy(policy, {
+    estimated_input_tokens: estimatedInputTokens,
+    requested_output_tokens: options.maxOutputTokens ?? 1_024,
+    estimated_cost_units: options.maxTotalCostUnits ?? costBudget?.snapshot().max_cost_units,
+    structured_response: true,
+    evidence_ready: options.domainPolicyEvidenceReady,
+    evaluator_configured: options.domainPolicyEvaluatorConfigured,
+    // This gate means the planner is allowed to propose a reviewed plan. The execution call
+    // performs the separate acceptance check with the caller's actual accepted proposal.
+    plan_accepted: true,
+    effects_requested: options.domainPolicyEffectsRequested ?? false,
+    effects_approved: options.domainPolicyEffectsApproved,
+  });
 }
 
 function validateAutonomousDomainResponseOrThrow(
@@ -5267,7 +5302,7 @@ export class AutonomousAgent {
     const basePlanDigest = request.basePlanDigest ?? derivedBasePlanDigest;
     if (typeof basePlanDigest !== "string" || !/^[0-9a-f]{64}$/.test(basePlanDigest)) throw new ArgumentError("ordered-step planning basePlanDigest must be a lowercase SHA-256 digest");
     if (request.protectedContractDigest !== undefined && request.protectedContractDigest !== null && !/^[0-9a-f]{64}$/.test(request.protectedContractDigest)) throw new ArgumentError("ordered-step planning protectedContractDigest must be a lowercase SHA-256 digest or null");
-    const costBudget = resolveAutonomousCostBudget(options);
+    let costBudget = resolveAutonomousCostBudget(options);
     const budgetSnapshot = (): AutonomousCostBudgetSnapshot | null => costBudget?.snapshot() ?? null;
     const prepared = await prepareOrderedStepPlanning({ ...request, task: taskText, steps }, profile, ids, taskDigest, basePlanDigest, options);
     const base = {
@@ -5348,7 +5383,7 @@ export class AutonomousAgent {
   ): Promise<AutonomousPlanRefinementResult> {
     if (!isObject(blueprint) || blueprint.schema !== "bioprism-python-autonomous-task/0.1") throw new ArgumentError("provider planning requires an AutonomousTaskBlueprint");
     if (!isObject(blueprint.workflow) || !Array.isArray(blueprint.workflow.stages)) throw new ProviderRuntimeError("provider planning workflow is malformed");
-    const costBudget = resolveAutonomousCostBudget(options);
+    let costBudget = resolveAutonomousCostBudget(options);
     const budgetSnapshot = (): AutonomousCostBudgetSnapshot | null => costBudget?.snapshot() ?? null;
     const stages = blueprint.workflow.stages;
     const stageIds = validatePlanningWorkflow(stages);
@@ -5363,6 +5398,14 @@ export class AutonomousAgent {
       does_not_authorize: ["tools", "provider effects", "external writes", "credentials"],
     };
     const prepared = await prepareProviderPlanning(blueprint.domain_profile, blueprint, stageIds, "focus_stage_ids", contract, options);
+    const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
+    const policy = autonomousDomainPolicy(blueprint.domain_profile.domain);
+    const domainPolicyAdmission = domainPolicyAdmissionForPlanning(blueprint.domain_profile.domain, prepared.prompt.estimated_input_tokens, options, costBudget);
+    const policyStatus = domainPolicyAdmission && domainPolicyAdmission.decision !== "admitted" ? domainPolicyStatus(domainPolicyAdmission) : null;
+    if (policyStatus === null && domainPolicyMode === "strict" && costBudget === undefined) costBudget = new AutonomousCostBudget(policy.max_total_cost_units);
+    const effectiveMaxProviderFailovers = domainPolicyMode === "strict"
+      ? Math.min(options.maxProviderFailovers ?? Math.max(0, policy.max_provider_attempts - 1), Math.max(0, policy.max_provider_attempts - 1))
+      : options.maxProviderFailovers;
     const base = {
       schema: AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
       status: "approval_required",
@@ -5381,7 +5424,9 @@ export class AutonomousAgent {
       cost_budget: null,
       retention: "stage_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_or_effects_authorized",
+      ...(domainPolicyAdmission === null ? {} : { domain_policy_admission: domainPolicyAdmission }),
     } satisfies AutonomousPlanRefinementResult;
+    if (policyStatus !== null) return { ...base, status: policyStatus };
     if (options.approveProviderCall !== true) return { ...base, status: "approval_required", cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("provider planning requires at least one model candidate");
@@ -5395,7 +5440,7 @@ export class AutonomousAgent {
         selectionEventCallback: options.selectionEventCallback,
         execution: options.execution,
         executionAttempt: options.executionAttempt,
-        maxProviderFailovers: options.maxProviderFailovers,
+        maxProviderFailovers: effectiveMaxProviderFailovers,
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
       });
     } catch (error) {
@@ -5434,7 +5479,7 @@ export class AutonomousAgent {
   ): Promise<AutonomousCrossDomainPlanRefinementResult> {
     if (!isObject(blueprint) || blueprint.schema !== AUTONOMOUS_CROSS_DOMAIN_SCHEMA) throw new ArgumentError("cross-domain provider planning requires an AutonomousCrossDomainBlueprint");
     if (!Array.isArray(blueprint.child_ids) || !isObject(blueprint.dependency_graph) || !Array.isArray(blueprint.dependency_graph.fan_out)) throw new ProviderRuntimeError("cross-domain provider planning blueprint is malformed");
-    const costBudget = resolveAutonomousCostBudget(options);
+    let costBudget = resolveAutonomousCostBudget(options);
     const budgetSnapshot = (): AutonomousCostBudgetSnapshot | null => costBudget?.snapshot() ?? null;
     const childIds = [...blueprint.child_ids];
     if (childIds.length < 2 || childIds.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || childIds.some((id) => typeof id !== "string" || !id.trim()) || new Set(childIds).size !== childIds.length) throw new ProviderRuntimeError("cross-domain provider planning children are malformed");
@@ -5450,6 +5495,14 @@ export class AutonomousAgent {
       does_not_authorize: ["new domains", "new tools", "new credentials", "effects", "synthesis authority"],
     };
     const prepared = await prepareProviderPlanning(blueprint.synthesis_blueprint.domain_profile, blueprint.synthesis_blueprint, childIds, "focus_child_ids", contract, options);
+    const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
+    const policy = autonomousDomainPolicy("cross_domain");
+    const domainPolicyAdmission = domainPolicyAdmissionForPlanning("cross_domain", prepared.prompt.estimated_input_tokens, options, costBudget);
+    const policyStatus = domainPolicyAdmission && domainPolicyAdmission.decision !== "admitted" ? domainPolicyStatus(domainPolicyAdmission) : null;
+    if (policyStatus === null && domainPolicyMode === "strict" && costBudget === undefined) costBudget = new AutonomousCostBudget(policy.max_total_cost_units);
+    const effectiveMaxProviderFailovers = domainPolicyMode === "strict"
+      ? Math.min(options.maxProviderFailovers ?? Math.max(0, policy.max_provider_attempts - 1), Math.max(0, policy.max_provider_attempts - 1))
+      : options.maxProviderFailovers;
     const base = {
       schema: AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
       status: "approval_required",
@@ -5467,7 +5520,9 @@ export class AutonomousAgent {
       cost_budget: null,
       retention: "child_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_or_effects_authorized",
+      ...(domainPolicyAdmission === null ? {} : { domain_policy_admission: domainPolicyAdmission }),
     } satisfies AutonomousCrossDomainPlanRefinementResult;
+    if (policyStatus !== null) return { ...base, status: policyStatus };
     if (options.approveProviderCall !== true) return { ...base, cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("cross-domain provider planning requires at least one model candidate");
@@ -5481,7 +5536,7 @@ export class AutonomousAgent {
         selectionEventCallback: options.selectionEventCallback,
         execution: options.execution,
         executionAttempt: options.executionAttempt,
-        maxProviderFailovers: options.maxProviderFailovers,
+        maxProviderFailovers: effectiveMaxProviderFailovers,
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
       });
     } catch (error) {
@@ -5544,6 +5599,11 @@ export class AutonomousAgent {
     const planningOptions: AutonomousProviderPlanningOptions = {
       ...(planning ?? {}),
       ...(sharedBudget ? { costBudget: sharedBudget, maxTotalCostUnits: undefined } : {}),
+      ...(options.domainPolicyMode === undefined ? {} : { domainPolicyMode: options.domainPolicyMode }),
+      ...(options.domainPolicyEvidenceReady === undefined ? {} : { domainPolicyEvidenceReady: options.domainPolicyEvidenceReady }),
+      ...(options.domainPolicyEvaluatorConfigured === undefined ? {} : { domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured }),
+      ...(options.domainPolicyEffectsRequested === undefined ? {} : { domainPolicyEffectsRequested: options.domainPolicyEffectsRequested }),
+      ...(options.domainPolicyEffectsApproved === undefined ? {} : { domainPolicyEffectsApproved: options.domainPolicyEffectsApproved }),
     };
     const executionOptions: AutonomousRunOptions = {
       ...options,
@@ -5558,7 +5618,7 @@ export class AutonomousAgent {
     if (envelope.cross_domain_blueprint) {
       const proposal = await this.planCrossDomainWithProvider(envelope.cross_domain_blueprint, planningOptions);
       if (proposal.status !== "completed") {
-        const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
+        const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
         return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
       }
       if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
@@ -5569,7 +5629,7 @@ export class AutonomousAgent {
     if (!blueprint) throw new ProviderRuntimeError("planAndRun single-domain blueprint is missing");
     const proposal = await this.planWithProvider(blueprint, planningOptions);
     if (proposal.status !== "completed") {
-      const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
+      const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
       return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
     if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };

@@ -194,6 +194,46 @@ AUTONOMOUS_BATCH_MODES = ("domain", "auto", "cross_domain")
 AUTONOMOUS_BATCH_CHECKPOINT_STATUSES = ("running", "partial", "completed")
 AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA = "bioprism-python-autonomous-model-selection-preview/0.1"
 MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES = 250_000
+
+
+def _planning_domain_policy_admission(
+    *,
+    domain: str,
+    mode: str,
+    estimated_input_tokens: int,
+    requested_output_tokens: int,
+    evidence_ready: bool | None,
+    evaluator_configured: bool | None,
+    effects_requested: bool | None,
+    effects_approved: bool | None,
+) -> AutonomousDomainPolicyAdmission | None:
+    """Evaluate strict planning gates before the planner can select or invoke a provider."""
+
+    if mode not in AUTONOMOUS_DOMAIN_POLICY_MODES:
+        raise AutonomousDomainPolicyError(
+            "domain_policy_mode must be one of: " + ", ".join(AUTONOMOUS_DOMAIN_POLICY_MODES)
+        )
+    if mode == "audit":
+        return None
+    if any(
+        value is not None and not isinstance(value, bool)
+        for value in (evidence_ready, evaluator_configured, effects_requested, effects_approved)
+    ):
+        raise AutonomousDomainPolicyError("strict planning domain policy gates must be booleans or None")
+    return evaluate_autonomous_domain_policy(
+        autonomous_domain_policy(domain),
+        estimated_input_tokens=estimated_input_tokens,
+        requested_output_tokens=requested_output_tokens,
+        structured_response=True,
+        evidence_ready=evidence_ready,
+        evaluator_configured=evaluator_configured,
+        # Planning is allowed to propose a plan; execution checks acceptance again.
+        plan_accepted=True,
+        effects_requested=False if effects_requested is None else effects_requested,
+        effects_approved=effects_approved,
+    )
+
+
 MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE = 32
 MAX_AUTONOMOUS_WORKFLOW_CHECKPOINT_BYTES = 1_000_000
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES = 1_000_000
@@ -1089,6 +1129,7 @@ class AutonomousPlanRefinementResult:
     planner_prompt_digest: str | None = None
     planner_plan_digest: str | None = None
     outcome_digest: str | None = None
+    domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -1097,6 +1138,8 @@ class AutonomousPlanRefinementResult:
             "plan_refused",
             "provider_invalid",
             "provider_disagreement",
+            "policy_review_required",
+            "policy_blocked",
         }:
             raise BrainRunError("plan refinement result has an invalid status")
         _route_digest(self.task_digest, "plan refinement task_digest")
@@ -1128,12 +1171,14 @@ class AutonomousPlanRefinementResult:
         ):
             if value is not None:
                 _route_digest(value, f"plan refinement {name}")
+        if self.domain_policy_admission is not None and not isinstance(self.domain_policy_admission, AutonomousDomainPolicyAdmission):
+            raise BrainRunError("plan refinement domain policy admission is malformed")
         object.__setattr__(self, "priority_stage_ids", priority)
         object.__setattr__(self, "focus_stage_ids", focus)
         object.__setattr__(self, "confidence", float(self.confidence))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema": AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
             "status": self.status,
             "task_digest": self.task_digest,
@@ -1151,6 +1196,9 @@ class AutonomousPlanRefinementResult:
             "retention": "stage_ids_and_digests_only; planner_transcript_not_retained",
             "authorization": "plan_proposal_only; no_tools_or_effects_authorized",
         }
+        if self.domain_policy_admission is not None:
+            result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
+        return result
 
 
 class AutonomousTaskRouter:
@@ -4236,6 +4284,7 @@ class AutonomousCrossDomainPlanRefinementResult:
     planner_prompt_digest: str | None = None
     planner_plan_digest: str | None = None
     outcome_digest: str | None = None
+    domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -4244,6 +4293,8 @@ class AutonomousCrossDomainPlanRefinementResult:
             "plan_refused",
             "provider_invalid",
             "provider_disagreement",
+            "policy_review_required",
+            "policy_blocked",
         }:
             raise BrainRunError("cross-domain plan refinement result has an invalid status")
         _route_digest(self.task_digest, "cross-domain plan refinement task_digest")
@@ -4282,12 +4333,14 @@ class AutonomousCrossDomainPlanRefinementResult:
         ):
             if value is not None:
                 _route_digest(value, f"cross-domain plan refinement {name}")
+        if self.domain_policy_admission is not None and not isinstance(self.domain_policy_admission, AutonomousDomainPolicyAdmission):
+            raise BrainRunError("cross-domain plan refinement domain policy admission is malformed")
         object.__setattr__(self, "priority_child_ids", priority)
         object.__setattr__(self, "focus_child_ids", focus)
         object.__setattr__(self, "confidence", float(self.confidence))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema": AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
             "status": self.status,
             "task_digest": self.task_digest,
@@ -4304,6 +4357,9 @@ class AutonomousCrossDomainPlanRefinementResult:
             "retention": "child_ids_and_digests_only; planner_transcript_not_retained",
             "authorization": "plan_proposal_only; caller_acceptance_required",
         }
+        if self.domain_policy_admission is not None:
+            result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
+        return result
 
 
 def _autonomous_result_digest(
@@ -7384,6 +7440,11 @@ class AutonomousTaskOrchestrator:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
     ) -> AutonomousPlanRefinementResult:
         """Ask a provider to prioritize existing stages under a dependency-closed contract."""
 
@@ -7461,6 +7522,34 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=blueprint.required_capabilities,
         )
+        domain_policy_admission = _planning_domain_policy_admission(
+            domain=blueprint.profile.domain,
+            mode=domain_policy_mode,
+            estimated_input_tokens=input_tokens,
+            requested_output_tokens=max_output_tokens,
+            evidence_ready=domain_policy_evidence_ready,
+            evaluator_configured=domain_policy_evaluator_configured,
+            effects_requested=domain_policy_effects_requested,
+            effects_approved=domain_policy_effects_approved,
+        )
+        if domain_policy_admission is not None and domain_policy_admission.decision != "admitted":
+            return AutonomousPlanRefinementResult(
+                status=("policy_blocked" if domain_policy_admission.decision == "blocked" else "policy_review_required"),
+                task_digest=blueprint.spec.task_digest,
+                base_plan_digest=base_plan_digest,
+                workflow_digest=blueprint.workflow.workflow_digest,
+                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                domain_policy_admission=domain_policy_admission,
+            )
+        if domain_policy_mode == "strict" and approve_provider_call is not True:
+            return AutonomousPlanRefinementResult(
+                status="approval_required",
+                task_digest=blueprint.spec.task_digest,
+                base_plan_digest=base_plan_digest,
+                workflow_digest=blueprint.workflow.workflow_digest,
+                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                domain_policy_admission=domain_policy_admission,
+            )
         selection_request = self.brain.build_adaptive_model_selection(
             task=planner_task,
             model_candidates=model_candidates,
@@ -7517,6 +7606,8 @@ class AutonomousTaskOrchestrator:
             "planner_plan_digest": planner_plan_digest,
             "outcome_digest": run.outcome_digest,
         }
+        if domain_policy_admission is not None:
+            metadata["domain_policy_admission"] = domain_policy_admission
         if run.status != "completed_provider_call" or run.response is None:
             return AutonomousPlanRefinementResult(
                 status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
@@ -7592,6 +7683,11 @@ class AutonomousTaskOrchestrator:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
     ) -> AutonomousCrossDomainPlanRefinementResult:
         """Ask a provider to prioritize existing cross-domain specialists only."""
 
@@ -7685,6 +7781,32 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=required_model_capabilities,
         )
+        domain_policy_admission = _planning_domain_policy_admission(
+            domain="cross_domain",
+            mode=domain_policy_mode,
+            estimated_input_tokens=input_tokens,
+            requested_output_tokens=max_output_tokens,
+            evidence_ready=domain_policy_evidence_ready,
+            evaluator_configured=domain_policy_evaluator_configured,
+            effects_requested=domain_policy_effects_requested,
+            effects_approved=domain_policy_effects_approved,
+        )
+        if domain_policy_admission is not None and domain_policy_admission.decision != "admitted":
+            return AutonomousCrossDomainPlanRefinementResult(
+                status=("policy_blocked" if domain_policy_admission.decision == "blocked" else "policy_review_required"),
+                task_digest=blueprint.task_digest,
+                base_plan_digest=base_plan_digest,
+                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                domain_policy_admission=domain_policy_admission,
+            )
+        if domain_policy_mode == "strict" and approve_provider_call is not True:
+            return AutonomousCrossDomainPlanRefinementResult(
+                status="approval_required",
+                task_digest=blueprint.task_digest,
+                base_plan_digest=base_plan_digest,
+                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                domain_policy_admission=domain_policy_admission,
+            )
         selection_request = self.brain.build_adaptive_model_selection(
             task=planner_task,
             model_candidates=model_candidates,
@@ -7732,6 +7854,8 @@ class AutonomousTaskOrchestrator:
             "planner_plan_digest": planner_plan_digest,
             "outcome_digest": run.outcome_digest,
         }
+        if domain_policy_admission is not None:
+            metadata["domain_policy_admission"] = domain_policy_admission
         if run.status != "completed_provider_call" or run.response is None:
             return AutonomousCrossDomainPlanRefinementResult(
                 status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
@@ -10203,6 +10327,12 @@ class AutonomousTaskOrchestrator:
         tool_choice: str | None = None,
         max_provider_failovers: int = 2,
         tool_loop_options: Mapping[str, Any] | None = None,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_plan_accepted: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         execution_plan_context: Mapping[str, Any] | None = None,
@@ -10465,6 +10595,12 @@ class AutonomousTaskOrchestrator:
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
                 tool_loop_options=tool_loop_options,
+                domain_policy_mode=domain_policy_mode,
+                domain_policy_evidence_ready=domain_policy_evidence_ready,
+                domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+                domain_policy_plan_accepted=domain_policy_plan_accepted,
+                domain_policy_effects_requested=domain_policy_effects_requested,
+                domain_policy_effects_approved=domain_policy_effects_approved,
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
                 trace_event_callback=trace_event_callback,
@@ -11134,6 +11270,12 @@ class AutonomousTaskOrchestrator:
         tool_choice: str | None = None,
         tool_loop_options: Mapping[str, Any] | None = None,
         max_provider_failovers: int = 2,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_plan_accepted: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
         synthesize: bool = True,
         allow_partial: bool = False,
         bandit_state: Mapping[str, Any] | None = None,
@@ -11240,10 +11382,16 @@ class AutonomousTaskOrchestrator:
                 auto_route=auto_route,
                 enforce_route_tools=enforce_route_tools,
                 require_resolved_route=require_resolved_route,
-                provider_tools=provider_tools,
-                tool_choice=tool_choice,
-                max_provider_failovers=max_provider_failovers,
-                tool_loop_options=self._cross_domain_tool_loop_options(
+                 provider_tools=provider_tools,
+                 tool_choice=tool_choice,
+                 max_provider_failovers=max_provider_failovers,
+                 domain_policy_mode=domain_policy_mode,
+                 domain_policy_evidence_ready=domain_policy_evidence_ready,
+                 domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+                 domain_policy_plan_accepted=domain_policy_plan_accepted,
+                 domain_policy_effects_requested=domain_policy_effects_requested,
+                 domain_policy_effects_approved=domain_policy_effects_approved,
+                 tool_loop_options=self._cross_domain_tool_loop_options(
                     tool_loop_options,
                     execution_id=self._cross_domain_identity("cross-tool", run_id, child_id),
                     domain=child.spec.domain,
@@ -11342,6 +11490,12 @@ class AutonomousTaskOrchestrator:
             provider_tools=provider_tools,
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
+            domain_policy_mode=domain_policy_mode,
+            domain_policy_evidence_ready=domain_policy_evidence_ready,
+            domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+            domain_policy_plan_accepted=domain_policy_plan_accepted,
+            domain_policy_effects_requested=domain_policy_effects_requested,
+            domain_policy_effects_approved=domain_policy_effects_approved,
             tool_loop_options=self._cross_domain_tool_loop_options(
                 tool_loop_options,
                 execution_id=self._cross_domain_identity("cross-tool", run_id, "synthesis"),
@@ -11449,6 +11603,12 @@ class AutonomousTaskOrchestrator:
         tool_choice = take("tool_choice", None)
         tool_loop_options = take("tool_loop_options", None)
         max_provider_failovers = take("max_provider_failovers", 2)
+        domain_policy_mode = take("domain_policy_mode", "audit")
+        domain_policy_evidence_ready = take("domain_policy_evidence_ready", None)
+        domain_policy_evaluator_configured = take("domain_policy_evaluator_configured", None)
+        domain_policy_plan_accepted = take("domain_policy_plan_accepted", None)
+        domain_policy_effects_requested = take("domain_policy_effects_requested", None)
+        domain_policy_effects_approved = take("domain_policy_effects_approved", None)
         synthesize = take("synthesize", True)
         allow_partial = take("allow_partial", False)
         execution_plan_context = take("execution_plan_context", None)
@@ -11622,10 +11782,16 @@ class AutonomousTaskOrchestrator:
                 auto_route=auto_route,
                 enforce_route_tools=enforce_route_tools,
                 require_resolved_route=require_resolved_route,
-                provider_tools=provider_tools,
-                tool_choice=tool_choice,
-                max_provider_failovers=max_provider_failovers,
-                tool_loop_options=self._cross_domain_tool_loop_options(
+                 provider_tools=provider_tools,
+                 tool_choice=tool_choice,
+                 max_provider_failovers=max_provider_failovers,
+                 domain_policy_mode=domain_policy_mode,
+                 domain_policy_evidence_ready=domain_policy_evidence_ready,
+                 domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+                 domain_policy_plan_accepted=domain_policy_plan_accepted,
+                 domain_policy_effects_requested=domain_policy_effects_requested,
+                 domain_policy_effects_approved=domain_policy_effects_approved,
+                 tool_loop_options=self._cross_domain_tool_loop_options(
                     tool_loop_options,
                     execution_id=self._cross_domain_identity("cross-tool", run_id, child_id),
                     domain=child.spec.domain,
@@ -11731,10 +11897,16 @@ class AutonomousTaskOrchestrator:
             auto_route=auto_route,
             enforce_route_tools=enforce_route_tools,
             require_resolved_route=require_resolved_route,
-            provider_tools=provider_tools,
-            tool_choice=tool_choice,
-            max_provider_failovers=max_provider_failovers,
-            tool_loop_options=self._cross_domain_tool_loop_options(
+             provider_tools=provider_tools,
+             tool_choice=tool_choice,
+             max_provider_failovers=max_provider_failovers,
+             domain_policy_mode=domain_policy_mode,
+             domain_policy_evidence_ready=domain_policy_evidence_ready,
+             domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+             domain_policy_plan_accepted=domain_policy_plan_accepted,
+             domain_policy_effects_requested=domain_policy_effects_requested,
+             domain_policy_effects_approved=domain_policy_effects_approved,
+             tool_loop_options=self._cross_domain_tool_loop_options(
                 tool_loop_options,
                 execution_id=self._cross_domain_identity("cross-tool", run_id, "synthesis"),
                 domain=synthesis.spec.domain,
@@ -15418,7 +15590,10 @@ class AutonomousAgent:
         """Ask a BYOK provider to prioritize an existing blueprint's reviewed workflow stages."""
 
         self._assert_selection_promotion_admitted()
-        candidates = self._resolve_candidates(model_candidates)
+        candidates = self._resolve_candidates(
+            model_candidates,
+            allow_empty=kwargs.get("domain_policy_mode") == "strict",
+        )
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
         if self.health_ledger is not None:
@@ -15444,7 +15619,10 @@ class AutonomousAgent:
         """Ask a BYOK provider to prioritize an existing cross-domain fan-out."""
 
         self._assert_selection_promotion_admitted()
-        candidates = self._resolve_candidates(model_candidates)
+        candidates = self._resolve_candidates(
+            model_candidates,
+            allow_empty=kwargs.get("domain_policy_mode") == "strict",
+        )
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
         if self.health_ledger is not None:
@@ -16075,6 +16253,8 @@ class AutonomousAgent:
     def _resolve_candidates(
         self,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
+        *,
+        allow_empty: bool = False,
     ) -> list[dict[str, Any]]:
         candidates = self.catalogue.candidates() if model_candidates is None else [
             candidate.to_dict()
@@ -16082,7 +16262,7 @@ class AutonomousAgent:
             else ModelCandidate.from_mapping(candidate).to_dict()
             for candidate in model_candidates
         ]
-        if not candidates:
+        if not candidates and not allow_empty:
             raise BrainRunError("the autonomous agent has no model candidates")
         return candidates
 
@@ -17424,6 +17604,12 @@ class AutonomousAgent:
         planning_mode: str = "deterministic",
         planning_run_id: str | None = None,
         planning_max_output_tokens: int = 1_024,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_plan_accepted: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
         learning_mode: str = "off",
         workflow_execution: bool = False,
         workflow_learning: bool = False,
@@ -17792,7 +17978,10 @@ class AutonomousAgent:
         if planning_mode == "provider":
             if decision_cycle is not None:
                 decision_cycle.advance(phase="planning_pending")
-            planning_candidates = self._resolve_candidates(model_candidates)
+            planning_candidates = self._resolve_candidates(
+                model_candidates,
+                allow_empty=domain_policy_mode == "strict",
+            )
             planning_credentials = self._credential_mapping(credentials)
             planning_state = kwargs.get("bandit_state")
             if planning_state is None and learning_mode != "off":
@@ -17813,6 +18002,11 @@ class AutonomousAgent:
                 "run_id": planning_run_id,
                 "max_output_tokens": planning_max_output_tokens,
                 "temperature": kwargs.get("temperature"),
+                "domain_policy_mode": domain_policy_mode,
+                "domain_policy_evidence_ready": domain_policy_evidence_ready,
+                "domain_policy_evaluator_configured": domain_policy_evaluator_configured,
+                "domain_policy_effects_requested": domain_policy_effects_requested,
+                "domain_policy_effects_approved": domain_policy_effects_approved,
             }
             if blueprint.blueprint is not None:
                 planning_result = self.plan_with_provider(
@@ -17870,6 +18064,20 @@ class AutonomousAgent:
         if decision_cycle is not None:
             decision_cycle.advance(phase="execution_pending")
         execution_kwargs = dict(kwargs)
+        execution_kwargs.update(
+            {
+                "domain_policy_mode": domain_policy_mode,
+                "domain_policy_evidence_ready": domain_policy_evidence_ready,
+                "domain_policy_evaluator_configured": domain_policy_evaluator_configured,
+                "domain_policy_plan_accepted": (
+                    domain_policy_plan_accepted
+                    if domain_policy_plan_accepted is not None
+                    else planning_result is not None and planning_result.status == "completed"
+                ),
+                "domain_policy_effects_requested": domain_policy_effects_requested,
+                "domain_policy_effects_approved": domain_policy_effects_approved,
+            }
+        )
         for key in {
             "context",
             "constraints",

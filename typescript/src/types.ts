@@ -384,6 +384,8 @@ export interface AutonomousPlanRefinementResult extends JsonObject {
   planner_prompt_digest: string | null;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
+  /** Strict-mode provider-free admission for the planner call, when enabled. */
+  domain_policy_admission?: JsonObject;
   /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
   cost_budget?: {
     max_cost_units: number;
@@ -409,6 +411,8 @@ export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
   planner_prompt_digest: string | null;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
+  /** Strict-mode provider-free admission for the cross-domain planner call, when enabled. */
+  domain_policy_admission?: JsonObject;
   /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
   cost_budget?: {
     max_cost_units: number;
