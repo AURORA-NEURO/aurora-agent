@@ -15,6 +15,8 @@ from prism_sdk import (
     BrainModelHealthPersistenceCoordinator,
     BrainModelHealthStore,
     BrainModelObservation,
+    AutonomousGoalLedger,
+    AutonomousGoalPersistenceCoordinator,
     AutonomousDecisionCycle,
     AutonomousDecisionCyclePersistenceCoordinator,
     AutonomousExecutionController,
@@ -26,6 +28,7 @@ from prism_sdk import (
     TransactionalJsonAutonomousExecutionSnapshotPersistence,
     TransactionalJsonBrainLearningSnapshotPersistence,
     TransactionalJsonBrainMemorySnapshotPersistence,
+    TransactionalJsonAutonomousGoalSnapshotPersistence,
     TransactionalJsonBrainJobSnapshotPersistence,
     TransactionalJsonBrainModelHealthSnapshotPersistence,
     TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
@@ -425,6 +428,50 @@ def test_http_snapshot_store_plugs_into_episodic_memory_restart_for_every_domain
     assert restored_snapshot is not None
     assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
     assert {row["context"]["domain"] for row in restored.retrieve(limit=128)} == set(AUTONOMOUS_DOMAINS)
+    assert restored.verify_integrity()["ok"] is True
+    source.close()
+    restored.close()
+
+
+def test_http_snapshot_store_plugs_into_goal_restart_for_every_domain(tmp_path) -> None:
+    remote: str | None = None
+
+    def opener(request, _timeout):
+        nonlocal remote
+        if request.get_method() == "GET":
+            return _Response(remote.encode("utf-8")) if remote is not None else _Response(status=404)
+        current = None if remote is None else json.loads(remote)["snapshot_digest"]
+        expected = _header(request, "If-Match")
+        if _header(request, "If-None-Match") == "*" and current is not None:
+            return _Response(status=412)
+        if expected is not None and current != expected.strip('"'):
+            return _Response(status=412)
+        remote = request.data.decode("utf-8")
+        return _Response(status=204)
+
+    text_store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "all-domains/goals",
+        allowed_hosts=("state.test",),
+        opener=opener,
+    )
+    persistence = TransactionalJsonAutonomousGoalSnapshotPersistence(text_store)
+    source = AutonomousGoalLedger(str(tmp_path / "source-goals.sqlite3"), max_goals=len(AUTONOMOUS_DOMAINS))
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+        source.create(
+            goal_id=f"http-goal-{index}",
+            task_digest=content_digest({"domain": domain, "index": index}),
+            domain=domain,
+            capability="review",
+            risk_class="read_only",
+            now_ns=index + 1,
+        )
+    flushed = AutonomousGoalPersistenceCoordinator(source, persistence).flush()
+    restored = AutonomousGoalLedger(str(tmp_path / "restored-goals.sqlite3"), max_goals=len(AUTONOMOUS_DOMAINS))
+    restored_snapshot = AutonomousGoalPersistenceCoordinator(restored, persistence).restore()
+    assert restored_snapshot is not None
+    assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
+    assert {record.domain for record in restored.list(limit=128)} == set(AUTONOMOUS_DOMAINS)
     assert restored.verify_integrity()["ok"] is True
     source.close()
     restored.close()

@@ -23,15 +23,17 @@ import sqlite3
 import threading
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Protocol
 
 
 GOAL_SCHEMA = "bioprism-autonomous-goal/0.1"
 GOAL_EVENT_SCHEMA = "bioprism-autonomous-goal-event/0.1"
+GOAL_SNAPSHOT_SCHEMA = "bioprism-autonomous-goal-snapshot/0.1"
 GOAL_STEP_SCHEMA = "bioprism-autonomous-goal-step/0.1"
 GOAL_RETENTION = "value_only_goal_state;task_prompt_response_tool_payloads_and_credentials_not_retained"
 MAX_GOALS = 4_096
 MAX_GOAL_EVENTS = 16_384
+MAX_GOAL_SNAPSHOT_BYTES = 4_000_000
 MAX_GOAL_CRITERIA = 64
 MAX_GOAL_BLOCKERS = 32
 MAX_GOAL_IDENTIFIER_BYTES = 256
@@ -137,6 +139,12 @@ def _digest_value(value: Any, *, name: str, allow_none: bool = False) -> str | N
     if any(character not in "0123456789abcdef" for character in value):
         raise AutonomousGoalError(f"{name} must be a lowercase SHA-256 digest")
     return value
+
+
+def _valid_digest(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == MAX_GOAL_DIGEST_BYTES and all(
+        character in "0123456789abcdef" for character in value
+    )
 
 
 def _bounded_sequence(value: Any, *, name: str, maximum: int) -> list[Any]:
@@ -684,6 +692,87 @@ class AutonomousGoalLedger:
             "secret_material": "never_returned",
         }
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return a strict, portable lifecycle image for cross-process goal handoff."""
+
+        with self._lock:
+            integrity = self.verify_integrity()
+            event_rows = self._connection.execute(
+                "SELECT sequence, goal_id, event_type, payload_json, previous_digest, event_digest, created_ns "
+                "FROM autonomous_goal_events ORDER BY sequence ASC"
+            ).fetchall()
+            goal_rows = self._connection.execute(
+                "SELECT state_json FROM autonomous_goals ORDER BY goal_id ASC"
+            ).fetchall()
+            events: list[dict[str, Any]] = []
+            for row in event_rows:
+                try:
+                    payload = json.loads(row["payload_json"])
+                except (TypeError, ValueError, json.JSONDecodeError) as error:
+                    raise AutonomousGoalError("goal event contains invalid JSON") from error
+                events.append(
+                    {
+                        "schema": GOAL_EVENT_SCHEMA,
+                        "sequence": int(row["sequence"]),
+                        "goal_id": str(row["goal_id"]),
+                        "event_type": str(row["event_type"]),
+                        "payload": payload,
+                        "previous_digest": str(row["previous_digest"]),
+                        "created_ns": int(row["created_ns"]),
+                        "event_digest": str(row["event_digest"]),
+                        "retention": GOAL_RETENTION,
+                        "secret_material": "never_returned",
+                    }
+                )
+            goals = [AutonomousGoalRecord.from_mapping(json.loads(row["state_json"])).to_dict() for row in goal_rows]
+            return _build_goal_snapshot(
+                goals,
+                events,
+                max_goals=self.max_goals,
+                max_events=self.max_events,
+                max_bytes=MAX_GOAL_SNAPSHOT_BYTES,
+                expected_goal_count=int(integrity["goals"]),
+            )
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace goals and rebuild their current-state index from a validated image."""
+
+        normalized = _normalize_goal_snapshot(
+            snapshot,
+            max_goals=self.max_goals,
+            max_events=self.max_events,
+            max_bytes=MAX_GOAL_SNAPSHOT_BYTES,
+        )
+        with self._lock:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                self._connection.execute("DELETE FROM autonomous_goal_events")
+                self._connection.execute("DELETE FROM autonomous_goals")
+                self._connection.execute(
+                    "DELETE FROM sqlite_sequence WHERE name = 'autonomous_goal_events'"
+                )
+                for goal in normalized["goals"]:
+                    self._insert_record(AutonomousGoalRecord.from_mapping(goal))
+                for event in normalized["events"]:
+                    self._connection.execute(
+                        "INSERT INTO autonomous_goal_events "
+                        "(sequence, goal_id, event_type, payload_json, previous_digest, event_digest, created_ns) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            event["sequence"],
+                            event["goal_id"],
+                            event["event_type"],
+                            json.dumps(event["payload"], ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                            event["previous_digest"],
+                            event["event_digest"],
+                            event["created_ns"],
+                        ),
+                    )
+                self._connection.execute("COMMIT")
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+
     def stats(self) -> dict[str, Any]:
         with self._lock:
             goals = self._connection.execute("SELECT status, COUNT(*) AS count FROM autonomous_goals GROUP BY status").fetchall()
@@ -792,20 +881,357 @@ class AutonomousGoalLedger:
         return value
 
 
+def _normalize_goal_event(
+    value: Any,
+    *,
+    expected_sequence: int,
+    previous_digest: str,
+) -> dict[str, Any]:
+    event_keys = {
+        "schema",
+        "sequence",
+        "goal_id",
+        "event_type",
+        "payload",
+        "previous_digest",
+        "created_ns",
+        "event_digest",
+        "retention",
+        "secret_material",
+    }
+    if not isinstance(value, Mapping) or set(value) != event_keys:
+        raise AutonomousGoalError("goal snapshot event is malformed")
+    if (
+        value.get("schema") != GOAL_EVENT_SCHEMA
+        or value.get("retention") != GOAL_RETENTION
+        or value.get("secret_material") != "never_returned"
+    ):
+        raise AutonomousGoalError("goal snapshot event retention or schema is invalid")
+    if value.get("sequence") != expected_sequence or value.get("previous_digest") != previous_digest:
+        raise AutonomousGoalError("goal snapshot event sequence or chain is invalid")
+    goal_id = _identifier(value.get("goal_id"), name="goal event goal_id")
+    event_type = value.get("event_type")
+    if event_type not in {"created", "transition"}:
+        raise AutonomousGoalError("goal snapshot event type is unsupported")
+    created_ns = value.get("created_ns")
+    if not isinstance(created_ns, int) or isinstance(created_ns, bool) or created_ns < 0:
+        raise AutonomousGoalError("goal snapshot event timestamp is invalid")
+    event_digest = value.get("event_digest")
+    if not _valid_digest(event_digest):
+        raise AutonomousGoalError("goal snapshot event digest is invalid")
+    payload = value.get("payload")
+    if not isinstance(payload, Mapping):
+        raise AutonomousGoalError("goal snapshot event payload is invalid")
+    record = AutonomousGoalRecord.from_mapping(payload)
+    normalized_payload = record.to_dict()
+    if record.goal_id != goal_id or set(payload) != set(normalized_payload) or dict(payload) != normalized_payload:
+        raise AutonomousGoalError("goal snapshot event payload is not a normalized current goal")
+    body = {
+        "schema": GOAL_EVENT_SCHEMA,
+        "sequence": expected_sequence,
+        "goal_id": goal_id,
+        "event_type": event_type,
+        "payload": normalized_payload,
+        "previous_digest": previous_digest,
+        "created_ns": created_ns,
+        "retention": GOAL_RETENTION,
+        "secret_material": "never_returned",
+    }
+    if _digest(body) != event_digest:
+        raise AutonomousGoalError("goal snapshot event digest does not match its metadata")
+    return {**body, "event_digest": event_digest}
+
+
+def _build_goal_snapshot(
+    goals: Sequence[Mapping[str, Any]],
+    events: Sequence[Mapping[str, Any]],
+    *,
+    max_goals: int,
+    max_events: int,
+    max_bytes: int,
+    expected_goal_count: int | None = None,
+) -> dict[str, Any]:
+    if len(goals) > max_goals or len(events) > max_events:
+        raise AutonomousGoalError("goal snapshot exceeds its capacity")
+    normalized_goals = [AutonomousGoalRecord.from_mapping(goal).to_dict() for goal in goals]
+    if len({goal["goal_id"] for goal in normalized_goals}) != len(normalized_goals):
+        raise AutonomousGoalError("goal snapshot contains duplicate goals")
+    normalized_goals.sort(key=lambda goal: goal["goal_id"])
+    normalized_events: list[dict[str, Any]] = []
+    previous = ""
+    latest: dict[str, str] = {}
+    for expected_sequence, raw_event in enumerate(events, start=1):
+        event = _normalize_goal_event(
+            raw_event,
+            expected_sequence=expected_sequence,
+            previous_digest=previous,
+        )
+        if event["event_type"] == "created":
+            if event["goal_id"] in latest:
+                raise AutonomousGoalError("goal snapshot contains a duplicate created event")
+        elif event["goal_id"] not in latest:
+            raise AutonomousGoalError("goal snapshot transition references an unknown goal")
+        latest[event["goal_id"]] = event["payload"]["state_digest"]
+        normalized_events.append(event)
+        previous = event["event_digest"]
+    if expected_goal_count is not None and expected_goal_count != len(normalized_goals):
+        raise AutonomousGoalError("goal snapshot goal count disagrees with the ledger")
+    if set(latest) != {goal["goal_id"] for goal in normalized_goals}:
+        raise AutonomousGoalError("goal snapshot current goals are not represented by events")
+    by_goal = {goal["goal_id"]: goal for goal in normalized_goals}
+    for goal_id, state_digest in latest.items():
+        if by_goal[goal_id]["state_digest"] != state_digest:
+            raise AutonomousGoalError(f"goal snapshot current state is not bound to its latest event for {goal_id}")
+    body = {
+        "schema": GOAL_SNAPSHOT_SCHEMA,
+        "sequence": len(normalized_events),
+        "head_digest": previous,
+        "goals": normalized_goals,
+        "events": normalized_events,
+        "retention": GOAL_RETENTION,
+        "secret_material": "never_returned",
+    }
+    snapshot = {**body, "snapshot_digest": _digest(body)}
+    if len(_canonical_goal_json(snapshot).encode("utf-8")) > min(max_bytes, MAX_GOAL_SNAPSHOT_BYTES):
+        raise AutonomousGoalError("goal snapshot exceeds its byte bound")
+    return snapshot
+
+
+def _canonical_goal_json(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise AutonomousGoalError("goal value is not canonical JSON") from error
+
+
+def _normalize_goal_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_goals: int,
+    max_events: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    expected_keys = {
+        "schema",
+        "sequence",
+        "head_digest",
+        "goals",
+        "events",
+        "snapshot_digest",
+        "retention",
+        "secret_material",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise AutonomousGoalError("goal snapshot is malformed")
+    if value.get("schema") != GOAL_SNAPSHOT_SCHEMA:
+        raise AutonomousGoalError("goal snapshot schema is unsupported")
+    if value.get("retention") != GOAL_RETENTION or value.get("secret_material") != "never_returned":
+        raise AutonomousGoalError("goal snapshot contains unsupported or unsafe metadata")
+    raw_goals = value.get("goals")
+    raw_events = value.get("events")
+    if not isinstance(raw_goals, Sequence) or isinstance(raw_goals, (str, bytes, bytearray)) or len(raw_goals) > max_goals:
+        raise AutonomousGoalError("goal snapshot goal capacity is invalid")
+    if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes, bytearray)) or len(raw_events) > max_events:
+        raise AutonomousGoalError("goal snapshot event capacity is invalid")
+    sequence = value.get("sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0 or sequence != len(raw_events):
+        raise AutonomousGoalError("goal snapshot sequence is invalid")
+    goals = [AutonomousGoalRecord.from_mapping(goal).to_dict() for goal in raw_goals]
+    if len({goal["goal_id"] for goal in goals}) != len(goals):
+        raise AutonomousGoalError("goal snapshot contains duplicate goals")
+    goals.sort(key=lambda goal: goal["goal_id"])
+    events: list[dict[str, Any]] = []
+    previous = ""
+    latest: dict[str, str] = {}
+    for expected_sequence, raw_event in enumerate(raw_events, start=1):
+        event = _normalize_goal_event(
+            raw_event,
+            expected_sequence=expected_sequence,
+            previous_digest=previous,
+        )
+        if event["event_type"] == "created":
+            if event["goal_id"] in latest:
+                raise AutonomousGoalError("goal snapshot contains a duplicate created event")
+        elif event["goal_id"] not in latest:
+            raise AutonomousGoalError("goal snapshot transition references an unknown goal")
+        latest[event["goal_id"]] = event["payload"]["state_digest"]
+        events.append(event)
+        previous = event["event_digest"]
+    if set(latest) != {goal["goal_id"] for goal in goals}:
+        raise AutonomousGoalError("goal snapshot current goals are not represented by events")
+    by_goal = {goal["goal_id"]: goal for goal in goals}
+    for goal_id, state_digest in latest.items():
+        if by_goal[goal_id]["state_digest"] != state_digest:
+            raise AutonomousGoalError(f"goal snapshot current state is not bound to its latest event for {goal_id}")
+    head_digest = value.get("head_digest")
+    if not isinstance(head_digest, str) or (sequence > 0 and not _valid_digest(head_digest)) or (sequence == 0 and head_digest != "") or head_digest != previous:
+        raise AutonomousGoalError("goal snapshot head digest is invalid")
+    body = {
+        "schema": GOAL_SNAPSHOT_SCHEMA,
+        "sequence": sequence,
+        "head_digest": head_digest,
+        "goals": goals,
+        "events": events,
+        "retention": GOAL_RETENTION,
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = value.get("snapshot_digest")
+    if not isinstance(snapshot_digest, str) or not _valid_digest(snapshot_digest) or _digest(body) != snapshot_digest:
+        raise AutonomousGoalError("goal snapshot digest mismatch")
+    normalized = {**body, "snapshot_digest": snapshot_digest}
+    if len(_canonical_goal_json(normalized).encode("utf-8")) > min(max_bytes, MAX_GOAL_SNAPSHOT_BYTES):
+        raise AutonomousGoalError("goal snapshot exceeds its byte bound")
+    return normalized
+
+
+def validate_goal_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public strict validator for value-only autonomous goal snapshots."""
+
+    return _normalize_goal_snapshot(
+        value,
+        max_goals=MAX_GOALS,
+        max_events=MAX_GOAL_EVENTS,
+        max_bytes=MAX_GOAL_SNAPSHOT_BYTES,
+    )
+
+
+class AutonomousGoalSnapshotTextStore(Protocol):
+    """Portable text persistence for objective lifecycle snapshots."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalAutonomousGoalSnapshotTextStore(AutonomousGoalSnapshotTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonAutonomousGoalSnapshotPersistence:
+    """Canonical JSON goal persistence over a caller-owned text store."""
+
+    def __init__(self, store: AutonomousGoalSnapshotTextStore, *, max_bytes: int = MAX_GOAL_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise AutonomousGoalError("goal JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_GOAL_SNAPSHOT_BYTES:
+            raise AutonomousGoalError("goal JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise AutonomousGoalError("goal JSON exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AutonomousGoalError("goal JSON is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise AutonomousGoalError("goal JSON snapshot must be an object")
+        return _normalize_goal_snapshot(
+            raw,
+            max_goals=MAX_GOALS,
+            max_events=MAX_GOAL_EVENTS,
+            max_bytes=self.max_bytes,
+        )
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_goal_snapshot(
+            snapshot,
+            max_goals=MAX_GOALS,
+            max_events=MAX_GOAL_EVENTS,
+            max_bytes=self.max_bytes,
+        )
+        encoded = _canonical_goal_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise AutonomousGoalError("goal JSON exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousGoalSnapshotPersistence(JsonAutonomousGoalSnapshotPersistence):
+    """Canonical JSON goal persistence with stale-writer fencing."""
+
+    def __init__(self, store: TransactionalAutonomousGoalSnapshotTextStore, *, max_bytes: int = MAX_GOAL_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise AutonomousGoalError("transactional goal persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and not _valid_digest(expected_snapshot_digest):
+            raise AutonomousGoalError("goal expected snapshot digest is invalid")
+        normalized = _normalize_goal_snapshot(
+            snapshot,
+            max_goals=MAX_GOALS,
+            max_events=MAX_GOAL_EVENTS,
+            max_bytes=self.max_bytes,
+        )
+        return self.store.write_if_unchanged(expected_snapshot_digest, _canonical_goal_json(normalized))
+
+
+class AutonomousGoalPersistenceCoordinator:
+    """Flush and restore the objective ledger through caller-owned storage."""
+
+    def __init__(self, store: AutonomousGoalLedger, persistence: Any) -> None:
+        if not isinstance(store, AutonomousGoalLedger):
+            raise AutonomousGoalError("goal persistence requires an AutonomousGoalLedger")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise AutonomousGoalError("goal persistence adapter is malformed")
+        self.store = store
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = _normalize_goal_snapshot(
+            raw,
+            max_goals=self.store.max_goals,
+            max_events=self.store.max_events,
+            max_bytes=MAX_GOAL_SNAPSHOT_BYTES,
+        )
+        self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.store.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise AutonomousGoalError("goal persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+
 __all__ = [
     "GOAL_EVENT_SCHEMA",
+    "GOAL_SNAPSHOT_SCHEMA",
     "GOAL_RETENTION",
     "GOAL_SCHEMA",
     "GOAL_STEP_SCHEMA",
     "MAX_GOAL_BLOCKERS",
     "MAX_GOAL_CRITERIA",
     "MAX_GOAL_EVENTS",
+    "MAX_GOAL_SNAPSHOT_BYTES",
     "MAX_GOALS",
     "AutonomousGoalConflict",
     "AutonomousGoalCriterion",
     "AutonomousGoalError",
     "AutonomousGoalLedger",
     "AutonomousGoalRecord",
+    "AutonomousGoalPersistenceCoordinator",
+    "AutonomousGoalSnapshotTextStore",
+    "JsonAutonomousGoalSnapshotPersistence",
+    "TransactionalAutonomousGoalSnapshotTextStore",
+    "TransactionalJsonAutonomousGoalSnapshotPersistence",
     "goal_status_for_result",
     "goal_task_digest",
+    "validate_goal_snapshot",
 ]

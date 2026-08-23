@@ -1237,3 +1237,10 @@ the same caller-owned JSON and conditional-write/HTTP adapters as the other auto
 surfaces. All twelve domains are covered by local and HTTP restart tests; duplicate episode
 events, evaluations for unknown episodes, malformed normalized packets, broken chain/head/event
 digests, raw-content fields, and stale writers fail closed.
+
+Python objective state now has the matching goal handoff boundary. `AutonomousGoalLedger` snapshots
+carry the sorted current objective records and full lifecycle event chain with strict sequence,
+state-binding, retention, head, and outer digest checks. Restore rebuilds the SQLite current-state
+index atomically, while JSON and conditional-write/HTTP coordinators fence stale revisions. The
+all-domain test matrix covers restart, tampering, lifecycle consistency, and stale writers without
+persisting task text, provider payloads, credentials, or raw criterion evidence.

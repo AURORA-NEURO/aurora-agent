@@ -4224,6 +4224,16 @@ text and specialist/synthesis outputs remain caller-owned and transient. The rec
 separate outcome, evaluator, learning-state, and progress digests, allowing an evaluator or bandit
 controller to be reconciled after restart without treating provider success as task quality.
 
+The Python `AutonomousGoalLedger` now exposes the same portable restart contract as the other
+state boundaries. `snapshot()` exports the sorted current goal projection plus its complete
+hash-chained lifecycle, and `restore()` validates event order, created/transition lifecycle,
+current-state-to-latest-event binding, head digest, and the outer snapshot digest before
+atomically rebuilding SQLite. `AutonomousGoalPersistenceCoordinator` with
+`TransactionalJsonAutonomousGoalSnapshotPersistence` adds caller-owned JSON/HTTP storage and
+compare-and-swap fencing, so a stale objective worker cannot overwrite a newer revision. The goal
+snapshot remains value-only: task text, prompts, provider responses, tool arguments, credentials,
+and raw criterion/evidence text never cross this boundary.
+
 The TypeScript goal ledger also has a strict restart/persistence boundary. `validateAutonomousGoalSnapshot()`
 checks the schema allow-list, retention marker, event sequence, hash-chain head, record identities,
 snapshot digest, and the four-megabyte canonical byte limit before a caller's live ledger is touched.

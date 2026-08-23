@@ -11,12 +11,82 @@ from prism_sdk.goals import (
     AutonomousGoalConflict,
     AutonomousGoalError,
     AutonomousGoalLedger,
+    AutonomousGoalPersistenceCoordinator,
+    TransactionalJsonAutonomousGoalSnapshotPersistence,
     goal_task_digest,
 )
 
 
 def _digest(value: str) -> str:
     return goal_task_digest(value)
+
+
+class _CasTextStore:
+    def __init__(self) -> None:
+        self.value: str | None = None
+
+    def read(self) -> str | None:
+        return self.value
+
+    def write(self, value: str) -> None:
+        self.value = value
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+        if observed != expected_snapshot_digest:
+            return False
+        self.value = value
+        return True
+
+
+def test_goal_snapshots_rehydrate_all_domains_and_fence_stale_writers(tmp_path: Path) -> None:
+    backend = _CasTextStore()
+    persistence = TransactionalJsonAutonomousGoalSnapshotPersistence(backend)
+    source = AutonomousGoalLedger(str(tmp_path / "source-goals.sqlite3"), max_goals=len(AUTONOMOUS_DOMAINS) + 1)
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+        source.create(
+            goal_id=f"snapshot-{domain}",
+            task_digest=_digest(f"snapshot task {domain}"),
+            domain=domain,
+            capability="review",
+            risk_class="read_only",
+            now_ns=index + 1,
+        )
+    source_coordinator = AutonomousGoalPersistenceCoordinator(source, persistence)
+    flushed = source_coordinator.flush()
+    assert flushed["sequence"] == len(AUTONOMOUS_DOMAINS)
+    assert flushed["head_digest"] == flushed["events"][-1]["event_digest"]
+
+    restored = AutonomousGoalLedger(str(tmp_path / "restored-goals.sqlite3"), max_goals=len(AUTONOMOUS_DOMAINS))
+    restored_snapshot = AutonomousGoalPersistenceCoordinator(restored, persistence).restore()
+    assert restored_snapshot is not None
+    assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
+    assert {record.domain for record in restored.list(limit=128)} == set(AUTONOMOUS_DOMAINS)
+    assert restored.verify_integrity()["ok"] is True
+
+    stale = AutonomousGoalLedger(str(tmp_path / "stale-goals.sqlite3"), max_goals=len(AUTONOMOUS_DOMAINS) + 1)
+    stale_coordinator = AutonomousGoalPersistenceCoordinator(stale, persistence)
+    stale_coordinator.restore()
+    source.create(
+        goal_id="snapshot-new",
+        task_digest=_digest("snapshot new task"),
+        domain=AUTONOMOUS_DOMAINS[0],
+        now_ns=99,
+    )
+    source_coordinator.flush()
+    with pytest.raises(AutonomousGoalError, match="compare-and-swap conflict"):
+        stale_coordinator.flush()
+
+    tampered = json.loads(backend.value)
+    tampered["events"][0]["event_digest"] = "0" * 64
+    backend.value = json.dumps(tampered)
+    tampered_ledger = AutonomousGoalLedger(str(tmp_path / "tampered-goals.sqlite3"))
+    with pytest.raises(AutonomousGoalError, match="digest"):
+        AutonomousGoalPersistenceCoordinator(tampered_ledger, persistence).restore()
+    source.close()
+    restored.close()
+    stale.close()
+    tampered_ledger.close()
 
 
 def test_goal_ledger_survives_restart_and_keeps_objective_value_only(tmp_path: Path) -> None:
@@ -88,7 +158,7 @@ def test_goal_ledger_applies_optimistic_conflicts_and_fail_closed_completion(tmp
         )
         with pytest.raises(AutonomousGoalConflict):
             ledger.transition("bounded-goal", "running", expected_revision=4)
-        running = ledger.transition("bounded-goal", "running", expected_revision=0)
+        ledger.transition("bounded-goal", "running", expected_revision=0)
         with pytest.raises(AutonomousGoalError, match="required criterion"):
             ledger.transition("bounded-goal", "completed", expected_revision=1)
         failed = ledger.transition("bounded-goal", "failed", expected_revision=1)
