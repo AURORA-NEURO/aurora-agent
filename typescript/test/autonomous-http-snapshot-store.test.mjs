@@ -8,8 +8,11 @@ import {
   AutonomousHttpSnapshotTextStore,
   AutonomousRunTracePersistenceCoordinator,
   AutonomousRunTraceSession,
+  InMemoryAutonomousWorkflowPortfolioRemoteJobQueue,
   InMemoryAutonomousRunTraceStore,
   TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence,
+  TransactionalJsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence,
+  AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator,
   TransactionalJsonAutonomousRunTracePersistence,
   ArgumentError,
   ResponseTooLargeError,
@@ -205,4 +208,46 @@ test("HTTP snapshot text store carries a hash-chained autonomous run trace throu
   await restarted.restore();
   assert.equal(restartedStore.verifyIntegrity().events, 2);
   assert.deepEqual(restartedStore.snapshot(), traceStore.snapshot());
+});
+
+test("HTTP snapshot text store carries a lease-fenced remote portfolio queue through CAS transitions", async () => {
+  let remote = null;
+  const fetch = async (_url, init) => {
+    const headers = new Headers(init.headers);
+    if (init.method === "GET") return remote === null ? response(null, 404) : response(remote);
+    const current = remote === null ? null : JSON.parse(remote);
+    if (headers.get("if-none-match") === "*" && current !== null) return response(null, 412);
+    if (headers.get("if-match") !== null && (current === null || current.snapshot_digest !== headers.get("if-match").replaceAll('"', ""))) return response(null, 412);
+    remote = String(init.body);
+    return response(null, 204);
+  };
+  const store = new AutonomousHttpSnapshotTextStore({
+    endpoint: "https://state.test/snapshots",
+    allowedHosts: ["state.test"],
+    resource: "tenant/portfolio-remote-jobs",
+    fetch,
+  });
+  const queue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const job = queue.enqueue({
+    jobId: "http-remote-job",
+    planDigest: "a".repeat(64),
+    requireAdmission: false,
+    itemIds: ["item-1"],
+    requestDigests: ["b".repeat(64)],
+    now: 10,
+  });
+  const persistence = new TransactionalJsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence(store);
+  const coordinator = new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(queue, persistence);
+  await coordinator.flush();
+  const restartedQueue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const restarted = new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(restartedQueue, persistence);
+  assert.equal((await restarted.restore()).snapshot_digest, queue.snapshot().snapshot_digest);
+  const stale = new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue(), persistence);
+  await stale.restore();
+  const claimed = await restarted.claim(job.job_id, "http-worker", 1_000, 11);
+  assert.equal(claimed.status, "leased");
+  assert.equal(JSON.parse(remote).jobs[0].lease_owner, "http-worker");
+  const renewed = await restarted.renew(job.job_id, "http-worker", 1_000, 12);
+  assert.equal(renewed.lease_until, 1_012);
+  await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
 });
