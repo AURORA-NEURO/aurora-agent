@@ -220,6 +220,9 @@ AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA = "bioprism-python-autonomous-domain-lea
 AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA = "bioprism-python-autonomous-capability-contract/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-python-autonomous-capability-plan/0.1"
 AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA = "bioprism-python-autonomous-capability-portfolio/0.1"
+AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA = "bioprism-autonomous-tool-selection-state/0.1"
+AUTONOMOUS_TOOL_SELECTION_POLICY = "stage_coverage_then_capability_then_ucb_value_then_task_relevance_then_read_only_then_name"
+MAX_AUTONOMOUS_TOOL_SELECTION_ARMS = 512
 AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_STATUSES = (
     "ready",
@@ -389,7 +392,11 @@ def _portfolio_score(
     requested_capabilities: Sequence[str],
     stage: "AutonomousWorkflowStage",
     binding: AutonomousDomainToolBinding,
-) -> tuple[int, int, int, int]:
+    domain: str,
+    tool_selection_state: Mapping[str, Any],
+    total_pulls: int,
+    exploration: float,
+) -> tuple[int, int, float, int, int]:
     corpus = _normalize_route_text(
         f"{binding.name} {binding.capability} {stage.id} {stage.objective}"
     )
@@ -397,16 +404,140 @@ def _portfolio_score(
     return (
         int(binding.capability in requested_capabilities),
         int(binding.capability in stage.required_capabilities),
+        _tool_selection_utility(_tool_selection_arm_for(tool_selection_state, domain, stage, binding), total_pulls, exploration),
         relevance,
         int(binding.read_only),
     )
 
 
 def _portfolio_score_key(
-    score: tuple[int, int, int, int],
+    score: tuple[int, int, float, int, int],
     name: str,
-) -> tuple[int, int, int, int, str]:
-    return (-score[0], -score[1], -score[2], -score[3], name)
+) -> tuple[int, int, float, int, int, str]:
+    return (-score[0], -score[1], -score[2], -score[3], -score[4], name)
+
+
+def _tool_selection_number(name: str, value: Any, minimum: float, maximum: float, *, integer: bool = False) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or value < minimum or value > maximum or (integer and not isinstance(value, int)):
+        raise BrainRunError(f"{name} is outside the tool-selection learning contract")
+    return value
+
+
+def _tool_selection_json_number(value: int | float | None) -> int | float | None:
+    """Keep integral floats byte-compatible with JSON.stringify's number projection."""
+
+    if value is None:
+        return None
+    return int(value) if float(value).is_integer() else value
+
+
+def normalize_autonomous_tool_selection_state(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Normalize bounded value-only tool-arm state for deterministic portfolio planning."""
+
+    if value is None:
+        return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": 0, "arms": []}
+    if not isinstance(value, Mapping):
+        raise BrainRunError("tool selection state must be a mapping")
+    if value.get("schema") not in (None, AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA):
+        raise BrainRunError("tool selection state schema is unsupported")
+    generation = int(_tool_selection_number("tool selection generation", value.get("generation", 0), 0, 1_000_000_000, integer=True))
+    raw_arms = value.get("arms", [])
+    if not isinstance(raw_arms, Sequence) or isinstance(raw_arms, (str, bytes)) or len(raw_arms) > MAX_AUTONOMOUS_TOOL_SELECTION_ARMS:
+        raise BrainRunError(f"tool selection state arms must contain at most {MAX_AUTONOMOUS_TOOL_SELECTION_ARMS} entries")
+    seen: set[str] = set()
+    arms: list[dict[str, Any]] = []
+    allowed = {"arm_id", "pulls", "reward_sum", "failures", "latency_ms", "disabled"}
+    for index, raw in enumerate(raw_arms):
+        if not isinstance(raw, Mapping):
+            raise BrainRunError(f"tool selection arm {index} is malformed")
+        if set(raw).difference(allowed):
+            raise BrainRunError("tool selection arm contains unsupported fields")
+        arm_id = _identifier(f"tool selection arm {index} arm_id", raw.get("arm_id"))
+        if arm_id in seen:
+            raise BrainRunError(f"tool selection state contains duplicate arm {arm_id}")
+        seen.add(arm_id)
+        pulls = int(_tool_selection_number(f"tool selection arm {arm_id} pulls", raw.get("pulls", 0), 0, 1_000_000_000, integer=True))
+        reward_sum = _tool_selection_json_number(float(_tool_selection_number(f"tool selection arm {arm_id} reward_sum", raw.get("reward_sum", 0), -pulls, pulls)))
+        failures = int(_tool_selection_number(f"tool selection arm {arm_id} failures", raw.get("failures", 0), 0, pulls, integer=True))
+        latency_raw = raw.get("latency_ms")
+        latency_ms = None if latency_raw is None else _tool_selection_json_number(float(_tool_selection_number(f"tool selection arm {arm_id} latency_ms", latency_raw, 0, 3_600_000)))
+        disabled = raw.get("disabled", False)
+        if not isinstance(disabled, bool):
+            raise BrainRunError(f"tool selection arm {arm_id} disabled must be boolean")
+        arms.append({"arm_id": arm_id, "pulls": pulls, "reward_sum": reward_sum, "failures": failures, "latency_ms": latency_ms, "disabled": disabled})
+    arms.sort(key=lambda arm: arm["arm_id"])
+    return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": generation, "arms": arms}
+
+
+def autonomous_tool_selection_arm_id(domain: str, capability: str, tool: str) -> str:
+    if domain not in AUTONOMOUS_DOMAINS:
+        raise BrainRunError("tool selection domain is unsupported")
+    return ".".join((
+        _identifier("tool selection domain", domain),
+        _identifier("tool selection capability", capability),
+        _identifier("tool selection tool", tool),
+    ))
+
+
+def _tool_selection_arm_for(state: Mapping[str, Any], domain: str, stage: "AutonomousWorkflowStage", binding: AutonomousDomainToolBinding) -> Mapping[str, Any] | None:
+    arms = state.get("arms", [])
+    ids = (
+        autonomous_tool_selection_arm_id(domain, binding.capability, binding.name),
+        autonomous_tool_selection_arm_id(domain, stage.required_capabilities[0] if stage.required_capabilities else binding.capability, binding.name),
+    )
+    return next((arm for arm in arms if arm.get("arm_id") in ids), next((arm for arm in arms if arm.get("arm_id") == binding.name), None))
+
+
+def _tool_selection_utility(arm: Mapping[str, Any] | None, total_pulls: int, exploration: float) -> float:
+    if arm is None:
+        return 0.0
+    pulls = int(arm["pulls"])
+    mean_reward = 0.0 if pulls == 0 else float(arm["reward_sum"]) / pulls
+    failure_rate = 0.0 if pulls == 0 else int(arm["failures"]) / pulls
+    latency = arm.get("latency_ms")
+    latency_penalty = 0.0 if latency is None else min(float(latency) / 10_000, 1.0) * 0.1
+    exploration_bonus = exploration * math.sqrt(math.log(total_pulls + 2) / (pulls + 1))
+    return round(mean_reward - (failure_rate * 0.5) - latency_penalty + exploration_bonus, 12)
+
+
+def settle_autonomous_tool_selection_outcome(
+    state: Mapping[str, Any] | None,
+    *,
+    domain: str,
+    capability: str,
+    tool: str,
+    reward: float,
+    failed: bool = False,
+    latency_ms: float | None = None,
+) -> dict[str, Any]:
+    """Apply one evaluator-approved value-only outcome to caller-owned tool-arm state."""
+
+    if domain not in AUTONOMOUS_DOMAINS:
+        raise BrainRunError("tool selection outcome domain is unsupported")
+    if not isinstance(failed, bool):
+        raise BrainRunError("tool selection outcome failed must be boolean")
+    capability = _identifier("tool selection outcome capability", capability)
+    tool = _identifier("tool selection outcome tool", tool)
+    reward = float(_tool_selection_number("tool selection outcome reward", reward, -1, 1))
+    if latency_ms is not None:
+        latency_ms = float(_tool_selection_number("tool selection outcome latency_ms", latency_ms, 0, 3_600_000))
+    current = normalize_autonomous_tool_selection_state(state)
+    arm_id = autonomous_tool_selection_arm_id(domain, capability, tool)
+    prior = next((arm for arm in current["arms"] if arm["arm_id"] == arm_id), None)
+    pulls = int(prior["pulls"] if prior else 0)
+    prior_latency = prior.get("latency_ms") if prior else None
+    next_arm = {
+        "arm_id": arm_id,
+        "pulls": pulls + 1,
+        "reward_sum": _tool_selection_json_number(round(float(prior["reward_sum"] if prior else 0) + reward, 12)),
+        "failures": int(prior["failures"] if prior else 0) + int(failed),
+        "latency_ms": None if latency_ms is None and prior_latency is None else _tool_selection_json_number(round(((float(prior_latency if prior_latency is not None else latency_ms) * pulls) + float(latency_ms if latency_ms is not None else prior_latency)) / (pulls + 1), 6)),
+        "disabled": bool(prior["disabled"]) if prior else False,
+    }
+    arms = [arm for arm in current["arms"] if arm["arm_id"] != arm_id] + [next_arm]
+    if len(arms) > MAX_AUTONOMOUS_TOOL_SELECTION_ARMS:
+        raise BrainRunError("tool selection state has reached its arm bound")
+    return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": current["generation"] + 1, "arms": sorted(arms, key=lambda arm: arm["arm_id"])}
 
 
 # This is an intentionally small, reviewed routing vocabulary rather than a claim that a
@@ -13469,6 +13600,8 @@ class AutonomousAgent:
         allowed_tools: Sequence[str] | None = None,
         max_tools: int = 32,
         read_only_only: bool = False,
+        tool_learning_state: Mapping[str, Any] | None = None,
+        exploration: float = 0.15,
     ) -> dict[str, Any]:
         """Select a bounded exact-name tool portfolio for a transient task.
 
@@ -13498,6 +13631,9 @@ class AutonomousAgent:
             raise BrainRunError(
                 f"capability portfolio max_tools must be between 1 and {MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS}"
             )
+        tool_learning_state = normalize_autonomous_tool_selection_state(tool_learning_state)
+        exploration = float(_tool_selection_number("capability portfolio exploration", exploration, 0, 1))
+        total_pulls = sum(int(arm["pulls"]) for arm in tool_learning_state["arms"])
         requested_capabilities = () if capability is None else (
             _identifier("capability portfolio capability", capability),
         )
@@ -13553,11 +13689,12 @@ class AutonomousAgent:
                     for binding in live_bindings
                     if (not read_only_only or binding.read_only)
                     and (effective_allowed is None or binding.name in effective_allowed)
+                    and not bool((_tool_selection_arm_for(tool_learning_state, domain, stage, binding) or {}).get("disabled", False))
                 ]
                 ranked = sorted(
                     eligible,
                     key=lambda binding: _portfolio_score_key(
-                        _portfolio_score(tokens, requested_capabilities, stage, binding),
+                        _portfolio_score(tokens, requested_capabilities, stage, binding, domain, tool_learning_state, total_pulls, exploration),
                         binding.name,
                     ),
                 )
@@ -13572,12 +13709,12 @@ class AutonomousAgent:
                     }
                 )
 
-        preferred: dict[str, tuple[AutonomousDomainToolBinding, tuple[int, int, int, int], str]] = {}
+        preferred: dict[str, tuple[AutonomousDomainToolBinding, tuple[int, int, float, int, int], str]] = {}
         for row in stage_rows:
             candidate = row["ranked"][0] if row["ranked"] else None
             if candidate is None:
                 continue
-            score = _portfolio_score(tokens, requested_capabilities, row["stage"], candidate)
+            score = _portfolio_score(tokens, requested_capabilities, row["stage"], candidate, row["domain"], tool_learning_state, total_pulls, exploration)
             previous = preferred.get(candidate.name)
             if previous is None or _portfolio_score_key(score, candidate.name) < _portfolio_score_key(previous[1], candidate.name) or (
                 score == previous[1] and row["domain"] < previous[2]
@@ -13592,6 +13729,7 @@ class AutonomousAgent:
             )
         ]
         selected_names: set[str] = set()
+        selected_tool_order: list[str] = []
         for row in stage_rows:
             candidate = next(
                 (binding for binding in row["ranked"] if binding.name not in selected_names),
@@ -13599,10 +13737,14 @@ class AutonomousAgent:
             )
             if candidate is not None and len(selected_names) < max_tools:
                 selected_names.add(candidate.name)
+                if candidate.name not in selected_tool_order:
+                    selected_tool_order.append(candidate.name)
         for name in ranked_names:
             if len(selected_names) >= max_tools:
                 break
             selected_names.add(name)
+            if name not in selected_tool_order:
+                selected_tool_order.append(name)
 
         selected_tool_names = sorted(selected_names)
         def binding_projection(binding: AutonomousDomainToolBinding) -> dict[str, Any]:
@@ -13635,8 +13777,11 @@ class AutonomousAgent:
                 status = "catalogue_missing"
             elif effective_allowed is not None and not row["eligible"]:
                 status = "activation_required"
+            elif any(bool((_tool_selection_arm_for(tool_learning_state, row["domain"], row["stage"], binding) or {}).get("disabled", False)) for binding in row["live_bindings"]):
+                status = "learning_disabled"
             else:
                 status = "capacity_limited"
+            selected_arm = None if selected is None else _tool_selection_arm_for(tool_learning_state, row["domain"], row["stage"], selected)
             coverage.append(
                 {
                     "domain": row["domain"],
@@ -13646,6 +13791,8 @@ class AutonomousAgent:
                     "selected_tool": None if selected is None else selected.name,
                     "selected_capability": None if selected is None else selected.capability,
                     "approval_required": False if selected is None else selected.approval_required,
+                    "selected_arm_id": None if selected_arm is None else selected_arm["arm_id"],
+                    "selection_utility": None if selected is None else _tool_selection_utility(selected_arm, total_pulls, exploration),
                     "status": status,
                 }
             )
@@ -13665,12 +13812,23 @@ class AutonomousAgent:
         for name in sorted(binding_by_name):
             if name in selected_names:
                 continue
+            binding = binding_by_name[name]
+            disabled = any(
+                bool((_tool_selection_arm_for(tool_learning_state, domain, row, binding) or {}).get("disabled", False))
+                for domain in selected_domains
+                for row in workflow_map[domain].stages
+                if _portfolio_binding_supports_stage(domain, row, binding)
+            )
             reason = (
                 "activation_required"
                 if effective_allowed is not None and name not in effective_allowed
-                else "capacity_limited"
-                if name in preferred
-                else "not_required_for_reviewed_workflow"
+                else (
+                    "learning_disabled"
+                    if disabled
+                    else "capacity_limited"
+                    if name in preferred
+                    else "not_required_for_reviewed_workflow"
+                )
             )
             omissions.append(
                 {
@@ -13697,6 +13855,7 @@ class AutonomousAgent:
             "requested_capabilities": list(requested_capabilities),
             "max_tools": max_tools,
             "selected_tool_names": selected_tool_names,
+            "selected_tool_order": selected_tool_order,
             "selected_bindings": selected_bindings,
             "approval_required_tools": sorted(
                 binding["name"] for binding in selected_bindings if binding.get("approval_required") is True
@@ -13704,7 +13863,17 @@ class AutonomousAgent:
             "missing_tools": missing_tools,
             "omissions": omissions[:MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS],
             "coverage": coverage,
-            "selection_policy": "stage_coverage_then_task_relevance_then_read_only_then_name",
+            "selection_learning": {
+                "schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA,
+                "generation": tool_learning_state["generation"],
+                "state_digest": content_digest(tool_learning_state),
+                "exploration": exploration,
+                "total_pulls": total_pulls,
+                "known_arm_count": len(tool_learning_state["arms"]),
+                "disabled_arm_count": sum(int(arm["disabled"]) for arm in tool_learning_state["arms"]),
+                "retention": "value_only;tool_arguments_outputs_prompts_and_credentials_never_returned",
+            },
+            "selection_policy": AUTONOMOUS_TOOL_SELECTION_POLICY,
             "execution": "metadata_only; no_provider_or_tool_calls",
             "authorization": "selection_does_not_authorize_tools_or_effects",
             "secret_material": "never_returned",
@@ -15436,6 +15605,8 @@ class AutonomousAgent:
         )
         capability_focus = resolved_options.pop("_aurora_capability_focus", None)
         capability_contract = resolved_options.pop("_aurora_capability_contract", None)
+        tool_learning_state = resolved_options.pop("tool_learning_state", resolved_options.pop("toolSelectionState", None))
+        tool_selection_exploration = resolved_options.pop("tool_selection_exploration", resolved_options.pop("toolSelectionExploration", 0.15))
         if capability_focus is not None:
             capability_focus = _identifier("capability focus", capability_focus)
             if not tool_domains:
@@ -15468,12 +15639,16 @@ class AutonomousAgent:
         if self.tool_registry is not None and "provider_tools" not in resolved_options:
             selected_tools = self.tool_registry.tools_for(tool_domains or None)
             registered_tool_names = {tool.name for tool in selected_tools}
-            reviewed_tool_names = {
-                binding.name
+            reviewed_tool_bindings = {
+                (binding.name, binding.capability)
                 for profile in builtin_autonomous_domain_tool_profiles()
                 for binding in profile.bindings
             }
-            custom_tool_names = registered_tool_names.difference(reviewed_tool_names)
+            custom_tool_names = {
+                tool.name
+                for tool in selected_tools
+                if (tool.name, tool.capability) not in reviewed_tool_bindings
+            }
             if activation_state.status == "revoked":
                 selected_tools = ()
             elif activation_state.plan_digest is not None:
@@ -15485,6 +15660,8 @@ class AutonomousAgent:
                     task_text,
                     domains=tuple(dict.fromkeys(tool_domains)),
                     capability=capability_focus,
+                    tool_learning_state=tool_learning_state,
+                    exploration=tool_selection_exploration,
                 )
                 selected_names = set(portfolio_packet["selected_tool_names"])
                 # A caller-owned binding may intentionally describe a capability that is not
@@ -15493,8 +15670,14 @@ class AutonomousAgent:
                 # separate read-only/effect approval gate at execution time.
                 if capability_focus is None:
                     selected_names.update(custom_tool_names)
-                if selected_names:
-                    selected_tools = tuple(tool for tool in selected_tools if tool.name in selected_names)
+                # A non-empty portfolio is an explicit narrowing decision, including the
+                # learned-disabled case. Preserve only caller-registered compatibility tools;
+                # never silently restore every reviewed tool when the adaptive planner selects
+                # an empty set.
+                selected_tools = tuple(
+                    tool for tool in selected_tools
+                    if tool.name in selected_names or tool.name in custom_tool_names
+                )
             pack_capabilities: set[str] = set()
             for domain in tool_domains:
                 if domain in AUTONOMOUS_DOMAINS:
@@ -15558,6 +15741,8 @@ class AutonomousAgent:
                     "profile_digest": portfolio_packet["profile_digest"],
                     "domains": list(portfolio_packet["domains"]),
                     "selected_tool_names": list(portfolio_packet["selected_tool_names"]),
+                    "selected_tool_order": list(portfolio_packet["selected_tool_order"]),
+                    "selection_learning": dict(portfolio_packet["selection_learning"]),
                     "execution": portfolio_packet["execution"],
                     "authority_posture": portfolio_packet["authorization"],
                 }

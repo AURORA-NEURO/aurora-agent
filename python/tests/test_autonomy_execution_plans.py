@@ -5,6 +5,8 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA,
     AUTONOMOUS_DOMAINS,
+    AUTONOMOUS_TOOL_SELECTION_POLICY,
+    AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA,
     AutonomousAgent,
     AutonomousCapabilityActivation,
     AutonomousDomainTool,
@@ -18,6 +20,8 @@ from prism_sdk import (
     ModelCatalogue,
     plan_mcp_catalogue_bindings,
     builtin_autonomous_domain_tool_profiles,
+    autonomous_tool_selection_arm_id,
+    settle_autonomous_tool_selection_outcome,
 )
 
 
@@ -257,6 +261,118 @@ def test_task_capability_portfolio_reports_sparse_catalogue_without_claiming_cov
     )
     assert any(row["status"] == "catalogue_missing" for row in portfolio["coverage"])
     assert portfolio["missing_tools"]
+
+
+def test_adaptive_tool_arm_selection_is_deterministic_value_only_and_all_domain_bounded():
+    bindings_by_name: dict[str, AutonomousDomainToolBinding] = {}
+    for profile in builtin_autonomous_domain_tool_profiles():
+        for binding in profile.bindings:
+            bindings_by_name.setdefault(binding.name, binding)
+    registry = AutonomousDomainToolRegistry()
+    registry.register_mcp_catalogue(
+        [
+            {
+                "name": name,
+                "description": f"Adaptive {name}",
+                "inputSchema": {"type": "object", "additionalProperties": True},
+            }
+            for name in sorted(bindings_by_name)
+        ],
+        bindings_by_name,
+    )
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+        tool_registry=registry,
+    )
+    state = settle_autonomous_tool_selection_outcome(
+        None,
+        domain="coding",
+        capability="repository_inspection",
+        tool="repository_catalog",
+        reward=0.9,
+        latency_ms=40,
+    )
+    state = settle_autonomous_tool_selection_outcome(
+        state,
+        domain="coding",
+        capability="repository_inspection",
+        tool="repository_catalog",
+        reward=0.9,
+        latency_ms=40,
+    )
+    assert state["schema"] == AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA
+    assert state["generation"] == 2
+    assert state["arms"][0]["arm_id"] == autonomous_tool_selection_arm_id(
+        "coding", "repository_inspection", "repository_catalog"
+    )
+    portfolio = agent.capability_portfolio(
+        "inspect the repository and verify the evidence",
+        domains=AUTONOMOUS_DOMAINS,
+        max_tools=24,
+        tool_learning_state=state,
+        exploration=0.2,
+    )
+    repeated = agent.capability_portfolio(
+        "inspect the repository and verify the evidence",
+        domains=AUTONOMOUS_DOMAINS,
+        max_tools=24,
+        tool_learning_state=state,
+        exploration=0.2,
+    )
+    assert repeated == portfolio
+    assert portfolio["selection_policy"] == AUTONOMOUS_TOOL_SELECTION_POLICY
+    assert portfolio["selection_learning"]["generation"] == 2
+    assert portfolio["selection_learning"]["known_arm_count"] == 1
+    assert len(portfolio["selected_tool_order"]) == len(portfolio["selected_tool_names"])
+    assert {row["domain"] for row in portfolio["coverage"]} == set(AUTONOMOUS_DOMAINS)
+    assert any(row["selected_arm_id"] == state["arms"][0]["arm_id"] for row in portfolio["coverage"])
+    public = json.dumps(portfolio)
+    assert "inspect the repository" not in public
+    assert "api_key" not in public.lower()
+    _, _, runtime_options, _ = agent._execution_inputs(
+        credentials={},
+        model_candidates=None,
+        options={"tool_learning_state": state, "tool_selection_exploration": 0.2},
+        tool_domains=("coding",),
+        task="inspect the repository and verify the evidence",
+    )
+    runtime_portfolio = runtime_options["context"]["_aurora_capability_portfolio"]
+    assert runtime_portfolio["selection_learning"]["generation"] == 2
+    assert "tool_learning_state" not in runtime_options
+    coding = next(profile for profile in builtin_autonomous_domain_tool_profiles() if profile.domain == "coding")
+    disabled = {
+        **state,
+        "arms": [
+            {
+                "arm_id": autonomous_tool_selection_arm_id("coding", binding.capability, binding.name),
+                "pulls": 1,
+                "reward_sum": 0,
+                "failures": 0,
+                "latency_ms": None,
+                "disabled": True,
+            }
+            for binding in coding.bindings
+        ],
+    }
+    disabled_portfolio = agent.capability_portfolio(
+        "inspect the repository",
+        domains=("coding",),
+        max_tools=8,
+        tool_learning_state=disabled,
+    )
+    assert "repository_catalog" not in disabled_portfolio["selected_tool_names"]
+    assert any(row["status"] == "learning_disabled" for row in disabled_portfolio["coverage"])
+    assert any(row["reason"] == "learning_disabled" for row in disabled_portfolio["omissions"])
+    with pytest.raises(BrainRunError, match="tool-selection learning contract"):
+        settle_autonomous_tool_selection_outcome(
+            None,
+            domain="coding",
+            capability="repository_inspection",
+            tool="repository_catalog",
+            reward=2,
+        )
 
 
 def test_runtime_plan_context_cannot_be_spoofed_by_caller_context():

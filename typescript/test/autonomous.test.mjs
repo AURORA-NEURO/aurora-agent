@@ -47,6 +47,11 @@ import {
   routeAutonomousTask,
   autonomousCrossDomainExecutionReceipt,
   validateAutonomousCrossDomainExecutionReceipt,
+  AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA,
+  AUTONOMOUS_TOOL_SELECTION_POLICY,
+  autonomousDomainToolBindingSupportsStage,
+  autonomousToolSelectionArmId,
+  settleAutonomousToolSelectionOutcome,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200) {
@@ -823,6 +828,81 @@ test("capability portfolio planning covers all domains without widening authorit
   const sparsePlan = await sparseRegistry.planForTask("review this coding repository", { domains: ["coding"], maxTools: 4 });
   assert.ok(sparsePlan.coverage.some((row) => row.status === "catalogue_missing"));
   assert.ok(sparsePlan.missing_tools.length > 0);
+});
+
+test("adaptive tool-arm selection is deterministic, value-only, and bounded across every domain", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const definitions = [...new Map(profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => ({
+    name: binding.name,
+    description: `Adaptive ${binding.name}`,
+    inputSchema: { type: "object", additionalProperties: true },
+  }))).map((definition) => [definition.name, definition])).values()];
+  const registry = await AutonomousDomainToolRegistry.create(await ToolCatalogue.fromDefinitions(definitions));
+  const state = settleAutonomousToolSelectionOutcome(undefined, {
+    domain: "coding",
+    capability: "repository_inspection",
+    tool: "repository_catalog",
+    reward: 0.9,
+    latencyMs: 40,
+  });
+  const repeatedState = settleAutonomousToolSelectionOutcome(state, {
+    domain: "coding",
+    capability: "repository_inspection",
+    tool: "repository_catalog",
+    reward: 0.9,
+    latencyMs: 40,
+  });
+  assert.equal(state.schema, AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA);
+  assert.equal(state.arms[0].arm_id, autonomousToolSelectionArmId("coding", "repository_inspection", "repository_catalog"));
+  assert.equal(repeatedState.generation, 2);
+  const plan = await registry.planForTask("inspect the repository and verify the evidence", {
+    domains: profiles.map((profile) => profile.domain),
+    maxTools: 24,
+    toolSelectionState: repeatedState,
+    exploration: 0.2,
+  });
+  const repeated = await registry.planForTask("inspect the repository and verify the evidence", {
+    domains: profiles.map((profile) => profile.domain),
+    maxTools: 24,
+    toolSelectionState: repeatedState,
+    exploration: 0.2,
+  });
+  assert.deepEqual(repeated, plan);
+  assert.equal(plan.selection_policy, AUTONOMOUS_TOOL_SELECTION_POLICY);
+  assert.equal(plan.selection_learning.generation, 2);
+  assert.equal(plan.selection_learning.known_arm_count, 1);
+  assert.equal(plan.selected_tool_order.length, plan.selected_tool_names.length);
+  assert.equal(new Set(plan.coverage.map((row) => row.domain)).size, 12);
+  assert.ok(plan.coverage.some((row) => row.selected_arm_id === state.arms[0].arm_id));
+  assert.doesNotMatch(JSON.stringify(plan), /inspect the repository/);
+  assert.doesNotMatch(JSON.stringify(plan), /api[_ -]?key|authorization\s*:/i);
+
+  const coding = profiles.find((profile) => profile.domain === "coding");
+  const disabled = {
+    ...repeatedState,
+    arms: coding.tool_profile.bindings.map((binding) => ({
+      arm_id: autonomousToolSelectionArmId("coding", binding.capability, binding.name),
+      pulls: 1,
+      reward_sum: 0,
+      failures: 0,
+      latency_ms: null,
+      disabled: true,
+    })),
+  };
+  const disabledPlan = await registry.planForTask("inspect the repository", {
+    domains: ["coding"],
+    toolSelectionState: disabled,
+    maxTools: 8,
+  });
+  assert.equal(disabledPlan.selected_tool_names.includes("repository_catalog"), false);
+  assert.ok(disabledPlan.coverage.some((row) => row.status === "learning_disabled"));
+  assert.ok(disabledPlan.omissions.some((row) => row.reason === "learning_disabled"));
+  assert.throws(() => settleAutonomousToolSelectionOutcome(undefined, {
+    domain: "coding",
+    capability: "repository_inspection",
+    tool: "repository_catalog",
+    reward: 2,
+  }), /tool-selection learning contract/);
 });
 
 test("stage-bound adapter execution emits evidence receipts for every reviewed domain", async () => {

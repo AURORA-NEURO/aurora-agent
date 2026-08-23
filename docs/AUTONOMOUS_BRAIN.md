@@ -7364,10 +7364,11 @@ an evaluator, and the delayed-credit learning ledger.
 
 For automatic task intake, `agent.capability_portfolio(task)` adds the missing task-level decision
 without changing the underlying reviewed contracts. It walks the selected domains' workflow
-stages, ranks exact live bindings by stage coverage, requested capability, local task relevance,
-and read-only posture, and caps the result with `max_tools`. The task itself is never returned;
-the portfolio carries only a task digest, catalogue/profile digests, selected names, omissions, and
-coverage states. The method performs no provider or tool call:
+stages, ranks exact live bindings by stage coverage, requested capability, a caller-owned value-only
+tool-arm prior, local task relevance, and read-only posture, and caps the result with `max_tools`.
+The task itself is never returned; the portfolio carries only a task digest, catalogue/profile
+digests, selected names/order, bounded selection utilities, omissions, and coverage states. The
+method performs no provider or tool call:
 
 ```python
 portfolio = agent.capability_portfolio(
@@ -7379,8 +7380,46 @@ print(portfolio["selected_tool_names"])
 print(portfolio["coverage"])
 ```
 
+The adaptive prior is deliberately separate from the model bandit. It is a small, caller-owned
+state with a generation and at most 512 reviewed arm rows. Each row contains only an exact
+contextual arm ID (`domain.capability.tool`), pulls, reward sum in `[-pulls, pulls]`, failure
+count, optional bounded latency, and an explicit disabled bit. The deterministic UCB-like utility
+uses the mean evaluator reward, a failure penalty, a bounded latency penalty, and a configurable
+exploration weight. It never sees task text, prompts, tool arguments, tool outputs, credentials,
+or evaluator evidence bodies. Applications settle a value-only outcome after independent review,
+then pass the returned state into the next portfolio:
+
+```python
+from prism_sdk import settle_autonomous_tool_selection_outcome
+
+tool_state = settle_autonomous_tool_selection_outcome(
+    None,
+    domain="coding",
+    capability="repository_inspection",
+    tool="repository_catalog",
+    reward=0.9,
+    latency_ms=40,
+)
+portfolio = agent.capability_portfolio(
+    "inspect the repository and verify the evidence",
+    domains=("coding", "evaluation"),
+    tool_learning_state=tool_state,
+    exploration=0.2,
+)
+```
+
+TypeScript exposes the same `bioprism-autonomous-tool-selection-state/0.1` contract through
+`settleAutonomousToolSelectionOutcome()` and accepts `toolSelectionState` plus
+`toolSelectionExploration` on `AutonomousDomainToolRegistry.planForTask()` and
+`AutonomousRunOptions`. Both runtimes return the normalized state digest, generation, total pulls,
+and per-stage `selected_arm_id`/`selection_utility` metadata. `selected_tool_names` remains sorted
+for stable set comparison, while `selected_tool_order` preserves the adaptive planner's order for
+stage compilation. A disabled learned arm is reported as `learning_disabled` and can only narrow
+the already reviewed live set; it cannot authorize an effect or make a missing tool available.
+Malformed, duplicate, out-of-range, or secret-shaped state is rejected before provider planning.
+
 Coverage explicitly distinguishes `selected`, `activation_required`, `catalogue_missing`,
-`provider_only`, and `capacity_limited`. `run()`, workflow execution, and cross-domain façade
+`provider_only`, `capacity_limited`, and `learning_disabled`. `run()`, workflow execution, and cross-domain façade
 paths use this portfolio when the caller has not supplied explicit provider tools; a caller-owned
 custom tool remains visible as a compatibility fallback when no reviewed portfolio candidate is
 available. Activation can only narrow the result, and selection never authorizes provider access,
