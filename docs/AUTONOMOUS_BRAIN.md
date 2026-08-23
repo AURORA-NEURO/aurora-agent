@@ -1884,6 +1884,16 @@ items are materialized as blocked execution rows, so partial admission cannot si
 the full plan. Existing callers may omit admission for compatibility, while durable deployments
 should set `requireAdmission: true` at the worker boundary.
 
+Evidence handoffs expose the provider admission identity directly as well. The resumable evidence
+checkpoint schema `0.2` carries `admission_digest` alongside the portfolio plan and provider
+execution digests, and validates that identity before journal replay or acquisition.
+`requireAdmission: true` makes the evidence boundary fail closed when the provider execution was
+not produced from a reviewed portfolio admission. Evidence work-queue items carry the same
+nullable admission digest, so a remote worker can audit plan → admission → provider execution →
+evidence continuity without receiving task text, prompts, source values, provider output, or
+credentials; the provider execution digest remains the transitive integrity fence for the complete
+execution image.
+
 The portfolio compiler rejects duplicate ids, unknown dependencies, self-dependencies, and
 oversized input. Cycles become explicit blocked items rather than being silently reordered, and
 an item whose prerequisite failed is blocked without being dispatched. After a restart, the

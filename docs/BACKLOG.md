@@ -50,6 +50,14 @@ validated before settled-item rehydration and held items cannot dispatch. This c
 restart/remote-handoff integrity seam while leaving storage encryption, transport, leases, and
 approval UX to the embedding deployment.
 
+The evidence handoff now preserves that same identity explicitly. Portfolio evidence checkpoints
+use schema `0.2` and carry the nullable provider admission digest; `requireAdmission: true`
+refuses resumable evidence execution without a reviewed admission before journal replay or
+acquisition. Dependency-aware evidence work-queue items also carry the admission digest, allowing
+remote workers to verify plan → admission → provider execution → evidence continuity from
+metadata alone. Queue storage, leases, approval, and source/evaluator authority remain caller
+responsibilities.
+
 Domain evidence adapters now also have a digest-bound selector. It supports deterministic
 lexicographic routing, caller-supplied health/success/reward/latency/cost scoring, conservative
 abstention, candidate/registry drift detection, and an explicit acquirer handoff without putting

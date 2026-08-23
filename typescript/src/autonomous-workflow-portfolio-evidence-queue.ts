@@ -11,8 +11,8 @@ import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only multi-worker admission and lease state for one portfolio's evidence items. */
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-evidence-work-queue/0.1" as const;
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-evidence-work-item/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-evidence-work-queue/0.2" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-evidence-work-item/0.2" as const;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEMS = 64;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_LEASE_MS = 300_000;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ATTEMPTS = 8;
@@ -49,6 +49,7 @@ export interface AutonomousWorkflowPortfolioEvidenceWorkItem extends JsonObject 
   dependency_item_ids: string[];
   provider_status: AutonomousWorkflowPortfolioExecutionItemStatus;
   portfolio_plan_digest: string;
+  admission_digest: string | null;
   provider_execution_digest: string;
   evidence_plan_digest: string;
   request_digest: string;
@@ -184,7 +185,7 @@ function refresh(
 function validateItem(raw: unknown): AutonomousWorkflowPortfolioEvidenceWorkItem {
   if (!isObject(raw) || raw.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEM_SCHEMA) throw new ArgumentError("portfolio evidence work item schema is invalid");
   const item = raw as unknown as AutonomousWorkflowPortfolioEvidenceWorkItem;
-  const allowed = new Set(["schema", "work_id", "job_id", "item_id", "domain", "wave_index", "dependency_item_ids", "provider_status", "portfolio_plan_digest", "provider_execution_digest", "evidence_plan_digest", "request_digest", "checkpoint_digest", "max_attempts", "attempts", "status", "available_at", "lease_owner", "lease_until", "result_digest", "failure_class", "last_error_class", "created_at", "updated_at", "item_digest", "retention", "secret_material"]);
+  const allowed = new Set(["schema", "work_id", "job_id", "item_id", "domain", "wave_index", "dependency_item_ids", "provider_status", "portfolio_plan_digest", "admission_digest", "provider_execution_digest", "evidence_plan_digest", "request_digest", "checkpoint_digest", "max_attempts", "attempts", "status", "available_at", "lease_owner", "lease_until", "result_digest", "failure_class", "last_error_class", "created_at", "updated_at", "item_digest", "retention", "secret_material"]);
   if (Object.keys(raw).some((key) => !allowed.has(key))) throw new ArgumentError("portfolio evidence work item contains unsupported fields");
   const normalized = {
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_WORK_ITEM_SCHEMA,
@@ -196,6 +197,7 @@ function validateItem(raw: unknown): AutonomousWorkflowPortfolioEvidenceWorkItem
     dependency_item_ids: Array.isArray(item.dependency_item_ids) ? item.dependency_item_ids.map((value, index) => identifier(`portfolio evidence work dependency_item_ids[${index}]`, value)) : [],
     provider_status: item.provider_status,
     portfolio_plan_digest: digest("portfolio evidence work portfolio_plan_digest", item.portfolio_plan_digest),
+    admission_digest: item.admission_digest === null ? null : digest("portfolio evidence work admission_digest", item.admission_digest),
     provider_execution_digest: digest("portfolio evidence work provider_execution_digest", item.provider_execution_digest),
     evidence_plan_digest: digest("portfolio evidence work evidence_plan_digest", item.evidence_plan_digest),
     request_digest: digest("portfolio evidence work request_digest", item.request_digest),
@@ -345,6 +347,7 @@ export class InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue {
     dependencyItemIds?: readonly string[];
     providerStatus: AutonomousWorkflowPortfolioExecutionItemStatus;
     portfolioPlanDigest: string;
+    admissionDigest?: string | null;
     providerExecutionDigest: string;
     evidencePlanDigest: string;
     requestDigest: string;
@@ -361,7 +364,8 @@ export class InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue {
     const time = nowMs(input.now);
     const existing = this.items.get(workId);
     if (existing) {
-      if (existing.job_id !== jobId || existing.item_id !== itemId || existing.domain !== input.domain || existing.wave_index !== input.waveIndex || JSON.stringify(existing.dependency_item_ids) !== JSON.stringify(dependencies) || existing.provider_status !== input.providerStatus || existing.portfolio_plan_digest !== input.portfolioPlanDigest || existing.provider_execution_digest !== input.providerExecutionDigest || existing.evidence_plan_digest !== input.evidencePlanDigest || existing.request_digest !== input.requestDigest || existing.max_attempts !== maxAttempts) throw new ArgumentError("portfolio evidence work identity conflicts with an existing item");
+      const admissionDigest = input.admissionDigest === undefined || input.admissionDigest === null ? null : digest("portfolio evidence work admissionDigest", input.admissionDigest);
+      if (existing.job_id !== jobId || existing.item_id !== itemId || existing.domain !== input.domain || existing.wave_index !== input.waveIndex || JSON.stringify(existing.dependency_item_ids) !== JSON.stringify(dependencies) || existing.provider_status !== input.providerStatus || existing.portfolio_plan_digest !== input.portfolioPlanDigest || existing.admission_digest !== admissionDigest || existing.provider_execution_digest !== input.providerExecutionDigest || existing.evidence_plan_digest !== input.evidencePlanDigest || existing.request_digest !== input.requestDigest || existing.max_attempts !== maxAttempts) throw new ArgumentError("portfolio evidence work identity conflicts with an existing item");
       return clone(existing);
     }
     if (this.items.size >= this.maxItems) throw new ArgumentError("portfolio evidence work queue is full");
@@ -375,6 +379,7 @@ export class InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue {
       dependency_item_ids: dependencies,
       provider_status: input.providerStatus,
       portfolio_plan_digest: digest("portfolio evidence work portfolioPlanDigest", input.portfolioPlanDigest),
+      admission_digest: input.admissionDigest === undefined || input.admissionDigest === null ? null : digest("portfolio evidence work admissionDigest", input.admissionDigest),
       provider_execution_digest: digest("portfolio evidence work providerExecutionDigest", input.providerExecutionDigest),
       evidence_plan_digest: digest("portfolio evidence work evidencePlanDigest", input.evidencePlanDigest),
       request_digest: digest("portfolio evidence work requestDigest", input.requestDigest),
@@ -605,6 +610,7 @@ export function admitAutonomousWorkflowPortfolioEvidenceWorkItems(
     dependencyItemIds: item.depends_on.map((dependency) => `${input.jobId}:${dependency}`),
     providerStatus: input.execution.items.find((candidate) => candidate.itemId === item.item_id)?.status ?? "omitted",
     portfolioPlanDigest: input.execution.plan.portfolio_digest,
+    admissionDigest: input.execution.admissionDigest,
     providerExecutionDigest: input.execution.executionDigest,
     evidencePlanDigest: input.evidencePlanDigest,
     requestDigest: digest("portfolio evidence admission request digest", input.itemRequestDigests[index]),

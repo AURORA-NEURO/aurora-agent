@@ -496,7 +496,52 @@ test("portfolio evidence work worker retries bounded failures, reconciles expire
   restoredQueue.bindCheckpointDigest("worker-job", "5".repeat(64), 3_000);
   await restored.flush();
   await assert.rejects(() => coordinator.flush(), /compare-and-swap conflict/, "a stale coordinator cannot overwrite a newer queue snapshot");
-  assert.equal(snapshot.schema, "bioprism-typescript-autonomous-workflow-portfolio-evidence-work-queue/0.1");
+  assert.equal(snapshot.schema, "bioprism-typescript-autonomous-workflow-portfolio-evidence-work-queue/0.2");
+});
+
+test("portfolio evidence carries reviewed admission identity through checkpoints and queue handoffs", async () => {
+  const agent = agentFor();
+  const requests = [{ id: "admitted-coding", task: "admitted coding evidence task", domain: "coding" }];
+  const admission = await agent.admitWorkflowPortfolio(requests);
+  const execution = await agent.executeWorkflowPortfolio(requests, {
+    plan: admission.plan,
+    admission,
+    approveProviderCall: true,
+  });
+  const evidencePlan = await agent.evidencePlan(["coding"]);
+  const items = evidenceRequests(evidencePlan, ["coding"]).map((entry) => ({ ...entry, item_id: "admitted-coding" }));
+  const checkpointStore = new InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore();
+  const controller = new AutonomousWorkflowPortfolioEvidenceController(agent, "admitted-evidence", checkpointStore);
+  const result = await controller.run(execution, {
+    requireAdmission: true,
+    evidencePlan,
+    items,
+    runtime: evidenceRuntime(),
+  });
+  const checkpoint = await checkpointStore.read();
+  assert.equal(result.evidence.status, "completed");
+  assert.equal(checkpoint.admission_digest, admission.admission_digest);
+
+  const queue = new InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue();
+  const queued = admitAutonomousWorkflowPortfolioEvidenceWorkItems(queue, {
+    jobId: "admitted-evidence",
+    execution,
+    evidencePlanDigest: evidencePlan.plan_digest,
+    itemRequestDigests: ["a".repeat(64)],
+    checkpointDigest: checkpoint.checkpoint_digest,
+  });
+  assert.equal(queued[0].admission_digest, admission.admission_digest);
+
+  const unadmitted = await agent.executeWorkflowPortfolio(requests, { approveProviderCall: true });
+  await assert.rejects(
+    () => new AutonomousWorkflowPortfolioEvidenceController(agent, "unadmitted-evidence", new InMemoryAutonomousWorkflowPortfolioEvidenceCheckpointStore()).run(unadmitted, {
+      requireAdmission: true,
+      evidencePlan,
+      items,
+      runtime: evidenceRuntime(),
+    }),
+    /requires a reviewed portfolio admission/,
+  );
 });
 
 test("portfolio evidence work queue has bounded JSON, transactional, and browser-storage persistence", async () => {

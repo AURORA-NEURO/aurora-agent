@@ -22,7 +22,7 @@ import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Digest-bound metadata-only restart checkpoint for portfolio evidence waves. */
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-evidence-checkpoint/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-evidence-checkpoint/0.2" as const;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_BYTES = 256_000;
 
 export type AutonomousWorkflowPortfolioEvidenceCheckpointStatus =
@@ -37,6 +37,7 @@ export interface AutonomousWorkflowPortfolioEvidenceCheckpointJSON extends JsonO
   schema: typeof AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_SCHEMA;
   job_id: string;
   portfolio_plan_digest: string;
+  admission_digest: string | null;
   provider_execution_digest: string;
   evidence_plan_digest: string;
   evidence_input_digest: string;
@@ -75,6 +76,8 @@ export interface AutonomousWorkflowPortfolioEvidenceTransactionalCheckpointTextS
 
 export interface AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions extends AutonomousWorkflowPortfolioEvidenceSupervisorOptions {
   jobId: string;
+  /** Require the provider execution to carry a separately reviewed portfolio admission. */
+  requireAdmission?: boolean;
   checkpoint?: AutonomousWorkflowPortfolioEvidenceCheckpointJSON;
   checkpointSink?: (checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON) => Promise<void> | void;
   /** Digest of caller-owned source/evaluator policy not represented by the adapter identity. */
@@ -202,6 +205,7 @@ async function makeCheckpoint(input: {
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_SCHEMA,
     job_id: input.jobId,
     portfolio_plan_digest: input.execution.plan.portfolio_digest,
+    admission_digest: input.execution.admissionDigest,
     provider_execution_digest: input.execution.executionDigest,
     evidence_plan_digest: input.progress.evidencePlan.plan_digest,
     evidence_input_digest: input.evidenceInputDigest,
@@ -225,10 +229,11 @@ async function makeCheckpoint(input: {
 /** Validate checkpoint fields, retention, ordering, and its content digest. */
 export async function validateAutonomousWorkflowPortfolioEvidenceCheckpoint(value: unknown): Promise<AutonomousWorkflowPortfolioEvidenceCheckpointJSON> {
   if (!isObject(value) || value.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_SCHEMA) throw new ArgumentError("portfolio evidence checkpoint schema is invalid");
-  const allowed = new Set(["schema", "job_id", "portfolio_plan_digest", "provider_execution_digest", "evidence_plan_digest", "evidence_input_digest", "item_ids", "item_request_digests", "settled_item_ids", "settled_item_statuses", "settled_result_digests", "max_parallelism", "stop_on_failure", "reevaluate_pending", "evaluator_id", "evaluator_version", "runtime_policy_digest", "status", "checkpoint_digest", "retention", "secret_material"]);
+  const allowed = new Set(["schema", "job_id", "portfolio_plan_digest", "admission_digest", "provider_execution_digest", "evidence_plan_digest", "evidence_input_digest", "item_ids", "item_request_digests", "settled_item_ids", "settled_item_statuses", "settled_result_digests", "max_parallelism", "stop_on_failure", "reevaluate_pending", "evaluator_id", "evaluator_version", "runtime_policy_digest", "status", "checkpoint_digest", "retention", "secret_material"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new ArgumentError("portfolio evidence checkpoint contains unsupported fields");
   const jobId = boundedIdentifier("portfolio evidence checkpoint job_id", value.job_id);
   const portfolioPlanDigest = digest(value.portfolio_plan_digest, "portfolio evidence checkpoint portfolio_plan_digest");
+  const admissionDigest = optionalDigest("portfolio evidence checkpoint admission_digest", value.admission_digest);
   const providerExecutionDigest = digest(value.provider_execution_digest, "portfolio evidence checkpoint provider_execution_digest");
   const evidencePlanDigest = digest(value.evidence_plan_digest, "portfolio evidence checkpoint evidence_plan_digest");
   const evidenceInputDigest = digest(value.evidence_input_digest, "portfolio evidence checkpoint evidence_input_digest");
@@ -259,6 +264,7 @@ export async function validateAutonomousWorkflowPortfolioEvidenceCheckpoint(valu
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_SCHEMA,
     job_id: jobId,
     portfolio_plan_digest: portfolioPlanDigest,
+    admission_digest: admissionDigest,
     provider_execution_digest: providerExecutionDigest,
     evidence_plan_digest: evidencePlanDigest,
     evidence_input_digest: evidenceInputDigest,
@@ -287,7 +293,7 @@ async function validateBinding(
   binding: Awaited<ReturnType<typeof inputBinding>>,
   configuration: ReturnType<typeof controls>,
 ): Promise<void> {
-  if (checkpoint.portfolio_plan_digest !== plan.portfolio_digest || checkpoint.provider_execution_digest !== execution.executionDigest || checkpoint.evidence_plan_digest !== evidencePlan.plan_digest || checkpoint.evidence_input_digest !== binding.evidenceInputDigest || JSON.stringify(checkpoint.item_ids) !== JSON.stringify(binding.itemIds) || JSON.stringify(checkpoint.item_request_digests) !== JSON.stringify(binding.itemRequestDigests)) throw new ArgumentError("portfolio evidence checkpoint does not match the current reviewed execution or evidence input");
+  if (checkpoint.portfolio_plan_digest !== plan.portfolio_digest || checkpoint.admission_digest !== execution.admissionDigest || checkpoint.provider_execution_digest !== execution.executionDigest || checkpoint.evidence_plan_digest !== evidencePlan.plan_digest || checkpoint.evidence_input_digest !== binding.evidenceInputDigest || JSON.stringify(checkpoint.item_ids) !== JSON.stringify(binding.itemIds) || JSON.stringify(checkpoint.item_request_digests) !== JSON.stringify(binding.itemRequestDigests)) throw new ArgumentError("portfolio evidence checkpoint does not match the current reviewed execution or evidence input");
   if (checkpoint.max_parallelism !== configuration.maxParallelism || checkpoint.stop_on_failure !== configuration.stopOnFailure || checkpoint.reevaluate_pending !== configuration.reevaluatePending || checkpoint.evaluator_id !== configuration.evaluatorId || checkpoint.evaluator_version !== configuration.evaluatorVersion || checkpoint.runtime_policy_digest !== configuration.runtimePolicyDigest) throw new ArgumentError("portfolio evidence checkpoint controls do not match");
   if (checkpoint.status === "completed" && (checkpoint.settled_item_ids.length !== plan.items.length || checkpoint.settled_item_statuses.some((status) => status !== "completed"))) throw new ArgumentError("completed portfolio evidence checkpoint is not complete");
 }
@@ -326,6 +332,9 @@ export async function executeAutonomousWorkflowPortfolioEvidenceResumable(
   const jobId = boundedIdentifier("portfolio evidence resumable jobId", options.jobId);
   if (!execution || !(execution instanceof AutonomousWorkflowPortfolioExecutionResult)) throw new ArgumentError("portfolio evidence resumable execution requires a typed provider execution result");
   if (typeof options.checkpointSink !== "function") throw new ArgumentError("portfolio evidence resumable execution requires checkpointSink");
+  if (options.requireAdmission !== undefined && typeof options.requireAdmission !== "boolean") throw new ArgumentError("portfolio evidence resumable requireAdmission must be boolean");
+  if (execution.admissionDigest !== null) digest(execution.admissionDigest, "portfolio evidence execution admission_digest");
+  if (options.requireAdmission === true && execution.admissionDigest === null) throw new ArgumentError("portfolio evidence resumable execution requires a reviewed portfolio admission");
   const configuration = controls(options);
   const plan = options.plan ? await validateAutonomousWorkflowPortfolioPlan(options.plan) : execution.plan;
   if (plan.portfolio_digest !== execution.plan.portfolio_digest) throw new ArgumentError("portfolio evidence resumable plan does not match provider execution");
@@ -342,7 +351,7 @@ export async function executeAutonomousWorkflowPortfolioEvidenceResumable(
       await requireReplayBoundary(agent, plan, evidencePlan, restored, options.journalFor);
     }
   }
-  const { checkpoint: _checkpoint, checkpointSink: _checkpointSink, jobId: _jobId, runtimePolicyDigest: _runtimePolicyDigest, progressSink: callerProgressSink, ...supervisorOptions } = options;
+  const { checkpoint: _checkpoint, checkpointSink: _checkpointSink, jobId: _jobId, requireAdmission: _requireAdmission, runtimePolicyDigest: _runtimePolicyDigest, progressSink: callerProgressSink, ...supervisorOptions } = options;
   const progressSink = async (progress: AutonomousWorkflowPortfolioEvidenceProgress): Promise<void> => {
     const checkpoint = await makeCheckpoint({ jobId, execution, progress, itemIds: binding.itemIds, itemRequestDigests: binding.itemRequestDigests, evidenceInputDigest: binding.evidenceInputDigest, configuration });
     await options.checkpointSink!(checkpoint);
