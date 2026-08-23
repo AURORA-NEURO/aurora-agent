@@ -5888,6 +5888,15 @@ approval request; approval releases it back to `queued`, while denial terminally
 operation grants identity or policy authority—the caller remains responsible for authenticating the
 approver and deciding whether the requested scope is allowed.
 
+The TypeScript `AutonomousBrainControlPlaneMonitor` applies the same contract at the remote client
+boundary. It accepts an empty head for a valid empty journal, requires the server to echo the
+requested cursor and advance `next_after` exactly to the last returned sequence, rejects duplicate or
+backward pages, checks predecessor digests whenever adjacent global events are present, and validates
+the optional per-event head and payload digests. Job-filtered pages may have sequence gaps because
+the underlying journal is global; those gaps are preserved rather than incorrectly treated as chain
+breaks. Payloads still pass the secret-free metadata guard, so a dashboard cannot ingest prompts,
+responses, credentials, or tool bodies while collecting operator diagnostics.
+
 ```python
 from prism_sdk import BrainControlPlane, BrainJobStore
 

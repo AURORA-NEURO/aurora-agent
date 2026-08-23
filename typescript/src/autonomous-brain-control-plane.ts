@@ -110,6 +110,11 @@ function digest(name: string, value: unknown): string {
   return value;
 }
 
+function chainDigest(name: string, value: unknown): string {
+  if (value === "") return "";
+  return digest(name, value);
+}
+
 function secretFree(value: unknown, depth = 0): void {
   if (depth > 8) throw new ProviderRuntimeError("brain control-plane metadata nesting exceeds its bound", { code: "protocol" });
   if (Array.isArray(value)) {
@@ -153,19 +158,33 @@ function validateJob(value: unknown): BrainJobRecord {
 function validateStatus(value: BrainJobStatusResult): BrainJobStatusResult {
   if (!isObject(value)) throw new ProviderRuntimeError("brain control-plane status projection is malformed", { code: "protocol" });
   validateJob(value.job);
-  digest("brain control-plane head_digest", value.head_digest);
+  chainDigest("brain control-plane head_digest", value.head_digest);
   return value;
 }
 
-function validateEvents(value: BrainJobEventsResult, limit: number): BrainJobEventsResult {
+function validateEvents(value: BrainJobEventsResult, after: number, limit: number): BrainJobEventsResult {
   if (!isObject(value) || !Array.isArray(value.events) || value.events.length > limit) throw new ProviderRuntimeError("brain control-plane events projection is malformed", { code: "protocol" });
   nonnegativeInteger("brain control-plane event after", value.after, Number.MAX_SAFE_INTEGER);
   nonnegativeInteger("brain control-plane event next_after", value.next_after, Number.MAX_SAFE_INTEGER);
-  digest("brain control-plane event head_digest", value.head_digest);
+  if (value.after !== after) throw new ProviderRuntimeError("brain control-plane event cursor was not honored", { code: "protocol" });
+  const expectedNextAfter = value.events.at(-1)?.sequence ?? after;
+  if (value.next_after !== expectedNextAfter || value.next_after < after) throw new ProviderRuntimeError("brain control-plane event cursor advanced inconsistently", { code: "protocol" });
+  chainDigest("brain control-plane event head_digest", value.head_digest);
+  let previousSequence = after;
+  let previousDigest = "";
   for (const event of value.events) {
-    if (!isObject(event) || !Number.isSafeInteger(event.sequence) || event.sequence < 1 || typeof event.event_type !== "string" || typeof event.job_id !== "string") throw new ProviderRuntimeError("brain control-plane event row is malformed", { code: "protocol" });
+    if (!isObject(event) || !Number.isSafeInteger(event.sequence) || event.sequence <= previousSequence || typeof event.event_type !== "string" || !event.event_type.trim() || event.event_type.length > 128 || typeof event.job_id !== "string" || !event.job_id.trim() || event.job_id.length > 256 || !isObject(event.payload) || !Number.isSafeInteger(event.created_ns) || event.created_ns < 0) throw new ProviderRuntimeError("brain control-plane event row is malformed", { code: "protocol" });
+    secretFree(event.payload);
     digest("brain control-plane event digest", event.event_digest);
     if (event.previous_digest !== "") digest("brain control-plane event previous_digest", event.previous_digest);
+    if (event.sequence === previousSequence + 1 && event.previous_digest !== previousDigest) throw new ProviderRuntimeError("brain control-plane event predecessor digest is inconsistent", { code: "protocol" });
+    if (event.head_digest !== undefined) {
+      digest("brain control-plane event head_digest", event.head_digest);
+      if (event.head_digest !== event.event_digest) throw new ProviderRuntimeError("brain control-plane event head digest is inconsistent", { code: "protocol" });
+    }
+    if (event.payload_digest !== undefined) digest("brain control-plane event payload_digest", event.payload_digest);
+    previousSequence = event.sequence;
+    previousDigest = event.event_digest;
   }
   return value;
 }
@@ -196,7 +215,7 @@ export class AutonomousBrainControlPlaneMonitor {
     const normalizedJobId = jobId === undefined ? undefined : identifier("brain control-plane jobId", jobId);
     const boundedAfter = nonnegativeInteger("brain control-plane after", after, Number.MAX_SAFE_INTEGER);
     const boundedLimit = positiveInteger("brain control-plane event limit", limit, MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_EVENTS);
-    const value = validateEvents(project<BrainJobEventsResult>(await this.client.brainJobEvents({ job_id: normalizedJobId, after: boundedAfter, limit: boundedLimit }), "brain_job_events"), boundedLimit);
+    const value = validateEvents(project<BrainJobEventsResult>(await this.client.brainJobEvents({ job_id: normalizedJobId, after: boundedAfter, limit: boundedLimit }), "brain_job_events"), boundedAfter, boundedLimit);
     return { schema: AUTONOMOUS_BRAIN_CONTROL_PLANE_MONITOR_SCHEMA, events: value, retention: "metadata_only_control_plane_projection", secret_material: "never_returned" };
   }
 

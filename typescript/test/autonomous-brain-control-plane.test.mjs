@@ -98,6 +98,14 @@ test("control-plane monitor validates approval authorization and collects bounde
   const events = await monitor.events(record.job_id, 0, 4);
   assert.equal(events.events.events.length, 1);
   assert.equal(events.events.next_after, 1);
+
+  const cursorClient = { ...client, brainJobEvents: async ({ job_id }) => eventsResult(job_id, 1, []) };
+  await assert.rejects(new AutonomousBrainControlPlaneMonitor({ client: cursorClient }).events(record.job_id, 0, 4), ProviderRuntimeError);
+
+  const first = { ...event, event_digest: digest("1") };
+  const second = { ...event, sequence: 2, previous_digest: digest("2"), event_digest: digest("3") };
+  const brokenChainClient = { ...client, brainJobEvents: async ({ job_id, after = 0 }) => eventsResult(job_id, after, after === 0 ? [first, second] : []) };
+  await assert.rejects(new AutonomousBrainControlPlaneMonitor({ client: brokenChainClient }).events(record.job_id, 0, 4), ProviderRuntimeError);
 });
 
 test("control-plane monitor reaches terminal state, times out explicitly, and refuses unsafe projections", async () => {
