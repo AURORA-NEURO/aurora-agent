@@ -245,9 +245,19 @@ def test_connector_reconciliation_receipts_are_idempotent_and_gate_requeue(tmp_p
     queued = queue.requeue(no_effect.work_id, reconciliation_digest=observed.reconciliation_digest, now=2_204)
     assert queued.status == "queued"
     assert queued.execution_phase == "not_started"
+    assert queued.reconciliation_digest is None
+    assert queued.reconciliation_history == (observed.reconciliation_digest,)
+    queue.claim(no_effect.work_id, "worker-a", lease_ms=100, now=2_205)
+    queue.begin_execution(no_effect.work_id, "worker-a", now=2_206)
+    queue.reclaim_expired(now=2_306)
+    second_observed = queue.settle_reconciliation(no_effect.work_id, outcome="not_executed", evidence_digest="e" * 64, now=2_307)
+    assert second_observed.reconciliation_digest != observed.reconciliation_digest
+    assert second_observed.reconciliation_history == (observed.reconciliation_digest,)
+    assert queue.settle_reconciliation(no_effect.work_id, outcome="not_executed", evidence_digest="e" * 64, now=2_308) == second_observed
     restored = InMemoryAutonomousConnectorWorkQueue(operations)
     restored.restore(queue.snapshot())
-    assert restored.get(no_effect.work_id).reconciliation_digest == queued.reconciliation_digest
+    assert restored.get(no_effect.work_id).reconciliation_digest == second_observed.reconciliation_digest
+    assert restored.get(no_effect.work_id).reconciliation_history == (observed.reconciliation_digest,)
 
 
 def test_connector_worker_quarantines_post_dispatch_executor_failure(tmp_path) -> None:

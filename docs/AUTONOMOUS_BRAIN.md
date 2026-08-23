@@ -7248,8 +7248,10 @@ digest, outcome, evidence kind, operator, and the `effect_absent` assertion
 (`settleReconciliation(...)` in TypeScript and `settle_reconciliation(...)` in Python). Only a
 matching `not_executed + effect_absent=True` receipt and exact `reconciliation_digest` can authorize
 `requeue(...)`; `succeeded`, `failed`, and `unknown` outcomes cannot be treated as a convenient
-retry signal. Connector work-item, queue, and worker schemas are `0.2`, and old snapshots are
-rejected rather than guessed into the new execution model.
+retry signal. A safe requeue consumes the current receipt and appends its digest to a bounded
+`reconciliation_history`, so a later attempt gets a fresh idempotency identity while the prior
+no-effect authorization remains auditable. Connector work-item, queue, and worker schemas are
+`0.3`, and old snapshots are rejected rather than guessed into the new execution model.
 
 ```typescript
 const operations = new AutonomousConnectorOperationRegistry();
@@ -8247,8 +8249,10 @@ same work identity returns the existing row; a conflicting request or operation 
 
 For uncertain work, `settle_reconciliation` persists no connector response or request payload. It
 binds the caller's evidence digest to the observed work-item digest and makes settlement idempotent.
-Only an exact no-effect receipt authorizes `requeue`; cancellation, completion, and retry cannot
-cross an active or uncertain execution boundary.
+Only an exact no-effect receipt authorizes `requeue`; requeue clears the current receipt metadata
+after recording its digest in bounded `reconciliation_history`, preventing stale receipt reuse
+across attempts. Cancellation, completion, and retry cannot cross an active or uncertain execution
+boundary.
 
 The worker rehydrates state by work identity and then verifies all joins before invocation:
 

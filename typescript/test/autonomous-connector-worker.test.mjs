@@ -171,9 +171,19 @@ test("connector reconciliation receipts are idempotent and gate exact no-effect 
   const queued = queue.requeue(noEffect.work_id, { reconciliationDigest: observed.reconciliation_digest }, 2_204);
   assert.equal(queued.status, "queued");
   assert.equal(queued.execution_phase, "not_started");
+  assert.equal(queued.reconciliation_digest, null);
+  assert.deepEqual(queued.reconciliation_history, [observed.reconciliation_digest]);
+  queue.claim(noEffect.work_id, "worker-a", 100, 2_205);
+  queue.beginExecution(noEffect.work_id, "worker-a", 2_206);
+  queue.reclaimExpired(128, 2_306);
+  const secondObserved = queue.settleReconciliation(noEffect.work_id, { outcome: "not_executed", evidenceDigest: "e".repeat(64) }, 2_307);
+  assert.notEqual(secondObserved.reconciliation_digest, observed.reconciliation_digest);
+  assert.deepEqual(secondObserved.reconciliation_history, [observed.reconciliation_digest]);
+  assert.deepEqual(queue.settleReconciliation(noEffect.work_id, { outcome: "not_executed", evidenceDigest: "e".repeat(64) }, 2_308), secondObserved);
   const restored = new InMemoryAutonomousConnectorWorkQueue(fixtureData.operationRegistry);
   restored.restore(queue.snapshot());
-  assert.equal(restored.get(noEffect.work_id).reconciliation_digest, queued.reconciliation_digest);
+  assert.equal(restored.get(noEffect.work_id).reconciliation_digest, secondObserved.reconciliation_digest);
+  assert.deepEqual(restored.get(noEffect.work_id).reconciliation_history, [observed.reconciliation_digest]);
 });
 
 test("connector worker executes one reviewed operation for every autonomous domain", async () => {

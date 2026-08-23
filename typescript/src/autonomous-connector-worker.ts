@@ -24,9 +24,9 @@ import type { JsonObject, JsonValue } from "./types.js";
  */
 export const AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-connector-operation-registry/0.1" as const;
 export const AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA = "bioprism-typescript-autonomous-connector-operation/0.1" as const;
-export const AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-connector-work-item/0.2" as const;
-export const AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-connector-work-queue/0.2" as const;
-export const AUTONOMOUS_CONNECTOR_WORKER_SCHEMA = "bioprism-typescript-autonomous-connector-worker/0.2" as const;
+export const AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-connector-work-item/0.3" as const;
+export const AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-connector-work-queue/0.3" as const;
+export const AUTONOMOUS_CONNECTOR_WORKER_SCHEMA = "bioprism-typescript-autonomous-connector-worker/0.3" as const;
 export const AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA = "bioprism-typescript-autonomous-connector-feedback/0.1" as const;
 export const AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA = "bioprism-typescript-autonomous-connector-feedback-ledger/0.1" as const;
 
@@ -343,6 +343,7 @@ export interface AutonomousConnectorWorkItem extends JsonObject {
   reconciliation_evidence_kind: string | null;
   reconciliation_operator: string | null;
   reconciliation_effect_absent: boolean | null;
+  reconciliation_history: string[];
   item_digest: string;
   retention: "metadata_only_request_plan_and_payload_not_retained";
   secret_material: "never_returned";
@@ -419,6 +420,8 @@ function validateWorkItem(raw: unknown, operationRegistry: AutonomousConnectorOp
   const reconciliationEvidenceKind = raw.reconciliation_evidence_kind === null ? null : identifier("autonomous connector work reconciliation_evidence_kind", raw.reconciliation_evidence_kind);
   const reconciliationOperator = raw.reconciliation_operator === null ? null : identifier("autonomous connector work reconciliation_operator", raw.reconciliation_operator);
   const reconciliationEffectAbsent = raw.reconciliation_effect_absent === null ? null : raw.reconciliation_effect_absent as boolean;
+  const reconciliationHistory = arrayOfDigests("autonomous connector work reconciliation_history", raw.reconciliation_history, MAX_AUTONOMOUS_CONNECTOR_WORK_ATTEMPTS);
+  if (new Set(reconciliationHistory).size !== reconciliationHistory.length) throw new ArgumentError("autonomous connector work reconciliation_history contains duplicates");
   if (reconciliationEffectAbsent !== null && typeof reconciliationEffectAbsent !== "boolean") throw new ArgumentError("autonomous connector work reconciliation effect_absent is invalid");
   if (reconciliationDigest === null) {
     if ([reconciliationObservedItemDigest, reconciliationOutcome, reconciliationEvidenceDigest, reconciliationEvidenceKind, reconciliationOperator, reconciliationEffectAbsent].some((value) => value !== null)) throw new ArgumentError("autonomous connector reconciliation metadata requires a reconciliation digest");
@@ -463,6 +466,7 @@ function validateWorkItem(raw: unknown, operationRegistry: AutonomousConnectorOp
     reconciliation_evidence_kind: reconciliationEvidenceKind,
     reconciliation_operator: reconciliationOperator,
     reconciliation_effect_absent: reconciliationEffectAbsent,
+    reconciliation_history: reconciliationHistory,
     item_digest: digest("autonomous connector work item_digest", raw.item_digest) as string,
     retention: "metadata_only_request_plan_and_payload_not_retained",
     secret_material: "never_returned",
@@ -556,6 +560,7 @@ export class InMemoryAutonomousConnectorWorkQueue {
       reconciliation_evidence_kind: null,
       reconciliation_operator: null,
       reconciliation_effect_absent: null,
+      reconciliation_history: [],
       item_digest: "",
       retention: "metadata_only_request_plan_and_payload_not_retained" as const,
       secret_material: "never_returned" as const,
@@ -751,7 +756,21 @@ export class InMemoryAutonomousConnectorWorkQueue {
     if (item.attempts >= item.max_attempts) throw new ArgumentError("autonomous connector work has exhausted its attempts");
     if (item.reconciliation_digest === null || item.reconciliation_outcome !== "not_executed" || item.reconciliation_effect_absent !== true) throw new ArgumentError("connector requeue requires a matching no-effect reconciliation receipt");
     if (options.reconciliationDigest !== item.reconciliation_digest) throw new ArgumentError("connector requeue requires the matching reconciliation digest");
-    const next = refreshItem(item, { status: "queued", execution_phase: "not_started", available_at: time, failure_class: null, last_error_class: item.last_error_class }, time);
+    const next = refreshItem(item, {
+      status: "queued",
+      execution_phase: "not_started",
+      available_at: time,
+      failure_class: null,
+      last_error_class: item.last_error_class,
+      reconciliation_digest: null,
+      reconciliation_observed_item_digest: null,
+      reconciliation_outcome: null,
+      reconciliation_evidence_digest: null,
+      reconciliation_evidence_kind: null,
+      reconciliation_operator: null,
+      reconciliation_effect_absent: null,
+      reconciliation_history: [...item.reconciliation_history, item.reconciliation_digest],
+    }, time);
     this.items.set(id, next);
     return clone(next);
   }

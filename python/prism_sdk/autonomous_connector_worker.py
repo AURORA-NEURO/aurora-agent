@@ -38,9 +38,9 @@ from .errors import ArgumentError
 
 AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA = "bioprism-python-autonomous-connector-operation-registry/0.1"
 AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA = "bioprism-python-autonomous-connector-operation/0.1"
-AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-connector-work-item/0.2"
-AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-connector-work-queue/0.2"
-AUTONOMOUS_CONNECTOR_WORKER_SCHEMA = "bioprism-python-autonomous-connector-worker/0.2"
+AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-connector-work-item/0.3"
+AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-connector-work-queue/0.3"
+AUTONOMOUS_CONNECTOR_WORKER_SCHEMA = "bioprism-python-autonomous-connector-worker/0.3"
 AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA = "bioprism-python-autonomous-connector-feedback/0.1"
 AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA = "bioprism-python-autonomous-connector-feedback-ledger/0.1"
 
@@ -78,7 +78,7 @@ _WORK_ITEM_KEYS = frozenset({
     "lease_until", "receipt_digest", "payload_digest", "failure_class", "last_error_class", "created_at",
     "updated_at", "execution_phase", "reconciliation_digest", "reconciliation_observed_item_digest",
     "reconciliation_outcome", "reconciliation_evidence_digest", "reconciliation_evidence_kind",
-    "reconciliation_operator", "reconciliation_effect_absent", "item_digest", "retention", "secret_material",
+    "reconciliation_operator", "reconciliation_effect_absent", "reconciliation_history", "item_digest", "retention", "secret_material",
 })
 _EXECUTION_PHASES = frozenset({"not_started", "running", "settled"})
 _RECONCILIATION_OUTCOMES = frozenset({"succeeded", "failed", "not_executed", "unknown"})
@@ -465,6 +465,7 @@ class AutonomousConnectorWorkItem:
     reconciliation_evidence_kind: str | None = None
     reconciliation_operator: str | None = None
     reconciliation_effect_absent: bool | None = None
+    reconciliation_history: tuple[str, ...] = ()
     item_digest: str = field(default="")
 
     def __post_init__(self) -> None:
@@ -543,6 +544,14 @@ class AutonomousConnectorWorkItem:
             ):
                 raise ArgumentError("autonomous connector work reconciliation digest is invalid")
         object.__setattr__(self, "parent_digests", parents)
+        reconciliation_history = _digest_sequence(
+            "autonomous connector work reconciliation_history",
+            self.reconciliation_history,
+            maximum=MAX_AUTONOMOUS_CONNECTOR_WORK_ATTEMPTS,
+        )
+        if len(reconciliation_history) != len(set(reconciliation_history)):
+            raise ArgumentError("autonomous connector work reconciliation_history contains duplicates")
+        object.__setattr__(self, "reconciliation_history", reconciliation_history)
         object.__setattr__(self, "available_at", available_at)
         object.__setattr__(self, "created_at", created_at)
         object.__setattr__(self, "updated_at", updated_at)
@@ -590,6 +599,7 @@ class AutonomousConnectorWorkItem:
             "reconciliation_evidence_kind": self.reconciliation_evidence_kind,
             "reconciliation_operator": self.reconciliation_operator,
             "reconciliation_effect_absent": self.reconciliation_effect_absent,
+            "reconciliation_history": list(self.reconciliation_history),
             "retention": "metadata_only_request_plan_and_payload_not_retained",
             "secret_material": "never_returned",
         }
@@ -611,7 +621,7 @@ def _work_item_from_mapping(value: Mapping[str, Any], operation_registry: Autono
     if not isinstance(raw_parent_digests, Sequence) or isinstance(raw_parent_digests, (str, bytes)):
         raise ArgumentError("autonomous connector work parent_digests must be a sequence")
     item = AutonomousConnectorWorkItem(
-        work_id=value.get("work_id"), operation_id=value.get("operation_id"), operation_digest=value.get("operation_digest"), domain=value.get("domain"), capability=value.get("capability"), connector_id=value.get("connector_id"), selection_plan_digest=value.get("selection_plan_digest"), request_digest=value.get("request_digest"), dispatch_id=value.get("dispatch_id"), execution_id=value.get("execution_id"), call_id=value.get("call_id"), attempt_id=value.get("attempt_id"), parent_digests=tuple(raw_parent_digests), approved=value.get("approved"), max_attempts=value.get("max_attempts"), attempts=value.get("attempts"), status=value.get("status"), available_at=value.get("available_at"), lease_owner=value.get("lease_owner"), lease_until=value.get("lease_until"), receipt_digest=value.get("receipt_digest"), payload_digest=value.get("payload_digest"), failure_class=value.get("failure_class"), last_error_class=value.get("last_error_class"), created_at=value.get("created_at"), updated_at=value.get("updated_at"), execution_phase=value.get("execution_phase"), reconciliation_digest=value.get("reconciliation_digest"), reconciliation_observed_item_digest=value.get("reconciliation_observed_item_digest"), reconciliation_outcome=value.get("reconciliation_outcome"), reconciliation_evidence_digest=value.get("reconciliation_evidence_digest"), reconciliation_evidence_kind=value.get("reconciliation_evidence_kind"), reconciliation_operator=value.get("reconciliation_operator"), reconciliation_effect_absent=value.get("reconciliation_effect_absent"), item_digest=value.get("item_digest"),
+        work_id=value.get("work_id"), operation_id=value.get("operation_id"), operation_digest=value.get("operation_digest"), domain=value.get("domain"), capability=value.get("capability"), connector_id=value.get("connector_id"), selection_plan_digest=value.get("selection_plan_digest"), request_digest=value.get("request_digest"), dispatch_id=value.get("dispatch_id"), execution_id=value.get("execution_id"), call_id=value.get("call_id"), attempt_id=value.get("attempt_id"), parent_digests=tuple(raw_parent_digests), approved=value.get("approved"), max_attempts=value.get("max_attempts"), attempts=value.get("attempts"), status=value.get("status"), available_at=value.get("available_at"), lease_owner=value.get("lease_owner"), lease_until=value.get("lease_until"), receipt_digest=value.get("receipt_digest"), payload_digest=value.get("payload_digest"), failure_class=value.get("failure_class"), last_error_class=value.get("last_error_class"), created_at=value.get("created_at"), updated_at=value.get("updated_at"), execution_phase=value.get("execution_phase"), reconciliation_digest=value.get("reconciliation_digest"), reconciliation_observed_item_digest=value.get("reconciliation_observed_item_digest"), reconciliation_outcome=value.get("reconciliation_outcome"), reconciliation_evidence_digest=value.get("reconciliation_evidence_digest"), reconciliation_evidence_kind=value.get("reconciliation_evidence_kind"), reconciliation_operator=value.get("reconciliation_operator"), reconciliation_effect_absent=value.get("reconciliation_effect_absent"), reconciliation_history=tuple(value.get("reconciliation_history", ())), item_digest=value.get("item_digest"),
     )
     contract = operation_registry.resolve(item.operation_id)
     if contract.operation_digest != item.operation_digest or contract.domain != item.domain or not contract.supports(item.capability):
@@ -1000,7 +1010,24 @@ class InMemoryAutonomousConnectorWorkQueue:
                 raise ArgumentError("connector requeue requires a matching no-effect reconciliation receipt")
             if reconciliation_digest != item.reconciliation_digest:
                 raise ArgumentError("connector requeue requires the matching reconciliation digest")
-            queued = self._refresh(item, current, status="queued", execution_phase="not_started", available_at=current, failure_class=None, last_error_class=item.last_error_class)
+            history = (*item.reconciliation_history, item.reconciliation_digest)
+            queued = self._refresh(
+                item,
+                current,
+                status="queued",
+                execution_phase="not_started",
+                available_at=current,
+                failure_class=None,
+                last_error_class=item.last_error_class,
+                reconciliation_digest=None,
+                reconciliation_observed_item_digest=None,
+                reconciliation_outcome=None,
+                reconciliation_evidence_digest=None,
+                reconciliation_evidence_kind=None,
+                reconciliation_operator=None,
+                reconciliation_effect_absent=None,
+                reconciliation_history=history,
+            )
             self._items[work_id] = queued
             return queued
 
