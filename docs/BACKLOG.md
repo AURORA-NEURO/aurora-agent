@@ -112,6 +112,13 @@ This closes the local “what is missing before deployment?” projection seam; 
 distributed queue, auth/session, telemetry, source truth, and approval implementations remain
 deployment work.
 
+`AutonomousHttpSnapshotTextStore` now supplies a bounded HTTPS/host-policy/timeout/cancellation
+transport for the existing strict JSON and transactional CAS adapters. It supports all-domain
+learner, evaluator, goal, evidence, admission, and remote-job snapshots without knowing their
+schemas; conditional HTTP writes map cleanly to the existing stale-writer fence, and protected
+header resolution is transient. The embedding service still owns atomic CAS semantics, tenant
+isolation, encryption, authorization, backups, and distributed consensus.
+
 The evidence handoff now preserves that same identity explicitly. Portfolio evidence checkpoints
 use schema `0.2` and carry the nullable provider admission digest; `requireAdmission: true`
 refuses resumable evidence execution without a reviewed admission before journal replay or

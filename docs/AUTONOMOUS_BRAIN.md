@@ -7641,6 +7641,42 @@ credential collection, live health checks, queue initialization, and source/eval
 configuration. The report is therefore an honest integration checklist and handoff identity, not
 a claim that production infrastructure exists.
 
+### Remote metadata persistence over HTTP
+
+The strict JSON/CAS persistence adapters can now be backed by the reusable
+`AutonomousHttpSnapshotTextStore`. It is deliberately schema-neutral: learning, evaluator
+feedback, settlement receipts, episodes/trajectories, goals, evidence checkpoints, portfolio
+admission, and remote job queues continue to validate their own snapshots before the transport
+sees them. The store supplies the production boundary those adapters were missing:
+
+```ts
+const textStore = new AutonomousHttpSnapshotTextStore({
+  endpoint: "https://state.example.internal/v1/snapshots/learner",
+  allowedHosts: ["state.example.internal"],
+  resource: "tenant-opaque/all-domains/online-learner",
+  headerResolver: async ({ operation, resource }) => {
+    // Resolve a short-lived deployment session for this one request.
+    return await deploymentHeaders({ operation, resource });
+  },
+});
+
+const persistence = new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(textStore);
+```
+
+`GET` returns `200` with a JSON object or `404` for an absent snapshot. Unconditional `PUT`
+accepts a successful 2xx response. Conditional writes send `If-Match: "<snapshot_digest>"`, or
+`If-None-Match: *` for first creation; `409` and `412` become a clean CAS miss (`false`). The
+adapter rejects credentials embedded in the endpoint, requires HTTPS unless loopback development
+is explicitly enabled, applies an allow-listed host policy, bounds request/response bytes, uses
+`redirect: "error"`, enforces a finite timeout, supports caller cancellation, and consumes the
+response under the same byte/deadline boundary. It never logs or returns the resolved headers,
+body contents, or authentication material.
+
+This is a transport adapter, not a database or distributed-consensus claim. The server must
+implement atomic conditional writes, tenant isolation, encryption, retention, backups, and
+authorization. A `describe()` projection exposes only host/resource/policy metadata and declares
+`transient_header_resolver;never_returned`; it contains no endpoint credentials or snapshot data.
+
 ## Safety boundary
 
 This is research/developer infrastructure. The brain does not diagnose, recommend treatment,

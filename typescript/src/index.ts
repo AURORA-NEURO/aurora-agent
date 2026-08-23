@@ -172,6 +172,26 @@ export type {
   AutonomousDeploymentCapabilityName,
 } from "./autonomous-deployment-readiness.js";
 export {
+  AUTONOMOUS_HTTP_SNAPSHOT_STORE_SCHEMA,
+  MAX_AUTONOMOUS_HTTP_SNAPSHOT_STORE_RESOURCE_BYTES,
+  MAX_AUTONOMOUS_HTTP_SNAPSHOT_STORE_REQUEST_BYTES,
+  MAX_AUTONOMOUS_HTTP_SNAPSHOT_STORE_RESPONSE_BYTES,
+  MAX_AUTONOMOUS_HTTP_SNAPSHOT_STORE_TIMEOUT_MS,
+  MAX_AUTONOMOUS_HTTP_SNAPSHOT_STORE_HEADER_COUNT,
+  MAX_AUTONOMOUS_HTTP_SNAPSHOT_STORE_HEADER_BYTES,
+  AutonomousHttpSnapshotTextStore,
+} from "./autonomous-http-snapshot-store.js";
+export type {
+  AutonomousHttpSnapshotStoreOperation,
+  AutonomousHttpSnapshotStoreHeaderContext,
+  AutonomousHttpSnapshotStoreHeaderResolver,
+  AutonomousHttpSnapshotStorePolicy,
+  AutonomousHttpSnapshotStoreOptions,
+  AutonomousHttpSnapshotStoreFetch,
+  AutonomousHttpSnapshotStoreDescription,
+  AutonomousHttpSnapshotTextStoreDescription,
+} from "./autonomous-http-snapshot-store.js";
+export {
   PROVIDER_PROTOCOL_CONFORMANCE_SCHEMA,
   PROVIDER_PROTOCOL_CONFORMANCE_MODE,
   MAX_PROVIDER_CONFORMANCE_PROVIDERS,
