@@ -73,6 +73,10 @@ test("online learner persistence restores state, fences stale writers, and round
   const browserPersistence = new JsonAutonomousOnlineLearnerSnapshotPersistence(browserStore);
   await browserPersistence.write(await snapshotAutonomousOnlineLearner(learner));
   assert.deepEqual((await browserPersistence.read()).state, learner.snapshot());
+  const canonical = values.get("online-learner-state");
+  values.set("online-learner-state", JSON.stringify(JSON.parse(canonical), null, 2));
+  await assert.rejects(() => browserPersistence.read(), /not canonical/);
+  values.set("online-learner-state", canonical);
 });
 
 test("online learner persistence rejects tampered state and credential-shaped fields", async () => {

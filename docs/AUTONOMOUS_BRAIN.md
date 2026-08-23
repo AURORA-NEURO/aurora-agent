@@ -5618,6 +5618,27 @@ and bandit-selection path without retaining prompts, responses, credentials, or 
 The worker is still a single-process scheduler adapter: multi-host transactions, provider-side
 idempotency, and secret manager/session ownership remain deployment responsibilities.
 
+The TypeScript health ledger has the same durable boundary as the scheduler and run trace. Use
+`JsonAutonomousModelHealthSnapshotPersistence` for a caller-owned text store or
+`TransactionalJsonAutonomousModelHealthSnapshotPersistence` when multiple workers can flush the
+same health image:
+
+```ts
+const persistence = new TransactionalJsonAutonomousModelHealthSnapshotPersistence(textStore);
+const healthCoordinator = new AutonomousModelHealthPersistenceCoordinator(healthStore, persistence);
+await healthCoordinator.restore();
+// Provider observers and evaluator settlement add only bounded metadata.
+await healthCoordinator.flush();
+```
+
+Every observation and hash-chain head is validated before restore, the snapshot is emitted as
+canonical JSON, non-canonical text is rejected on read, and a stale coordinator receives a typed
+compare-and-swap conflict. Restore and flush are serialized per coordinator, so concurrent local
+calls cannot reorder the expected digest. `WebStorageAutonomousModelHealthSnapshotTextStore`
+provides the browser seam; HTTP/object-store adapters can implement the same text-store contract.
+The snapshot remains metadata-only and never contains prompts, responses, credentials, or raw
+evaluator evidence.
+
 The server-visible equivalent is `AutonomousDurableJobWorker` over
 `AutonomousDurableJobController`. It atomically pulls `brain_job_claim_next`, hands only the
 metadata projection to a caller-owned resolver, recomputes the deterministic route/task digest,

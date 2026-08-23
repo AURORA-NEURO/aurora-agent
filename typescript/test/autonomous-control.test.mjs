@@ -9,6 +9,8 @@ import {
   AutonomousModelCataloguePersistenceCoordinator,
   AutonomousOfflineReplayEngine,
   InMemoryAutonomousModelHealthStore,
+  TransactionalJsonAutonomousModelHealthSnapshotPersistence,
+  validateAutonomousModelHealthSnapshot,
   LLMRuntime,
   builtinAutonomousDomainEvaluatorProfiles,
   autonomousReplayEvidenceDigest,
@@ -31,6 +33,21 @@ function invocation(domain, model = "model-a") {
     input_tokens: 100,
     output_tokens: 40,
     outcome_digest: digest,
+  };
+}
+
+function transactionalHealthTextStore() {
+  let encoded = null;
+  return {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (current !== expected) return false;
+      encoded = value;
+      return true;
+    },
+    encoded: () => encoded,
   };
 }
 
@@ -69,6 +86,35 @@ test("health snapshots restore through a caller adapter and refuse tampering", a
   const tampered = structuredClone(snapshot);
   tampered.events[0].observation.status = "tampered";
   await assert.rejects(restored.restore(tampered), /snapshot digest mismatch/);
+});
+
+test("health JSON persistence is canonical, restart-safe, serialized, and CAS-fenced", async () => {
+  const textStore = transactionalHealthTextStore();
+  const persistence = new TransactionalJsonAutonomousModelHealthSnapshotPersistence(textStore);
+  const source = new InMemoryAutonomousModelHealthStore({ clock: () => 200 });
+  const coordinator = new AutonomousModelHealthPersistenceCoordinator(source, persistence);
+  await source.recordInvocation(invocation("coding"));
+  const first = await coordinator.flush();
+  assert.equal(textStore.encoded(), JSON.stringify(JSON.parse(textStore.encoded())));
+  assert.deepEqual(await validateAutonomousModelHealthSnapshot(JSON.parse(textStore.encoded())), first);
+
+  const restartedStore = new InMemoryAutonomousModelHealthStore({ clock: () => 201 });
+  const restarted = new AutonomousModelHealthPersistenceCoordinator(restartedStore, persistence);
+  assert.deepEqual(await restarted.restore(), first);
+  assert.equal((await restartedStore.health({ domain: "coding" }))[0].attempts, 1);
+
+  const staleStore = new InMemoryAutonomousModelHealthStore({ clock: () => 202 });
+  const stale = new AutonomousModelHealthPersistenceCoordinator(staleStore, persistence);
+  await stale.restore();
+  await source.recordInvocation(invocation("science", "model-b"));
+  await coordinator.flush();
+  await staleStore.recordInvocation(invocation("operations", "model-c"));
+  await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
+
+  const canonical = textStore.encoded();
+  textStore.write(` ${canonical}`);
+  await assert.rejects(() => persistence.read(), /not canonical/);
+  textStore.write(canonical);
 });
 
 test("model catalogue snapshots survive restart and fail closed atomically", async () => {

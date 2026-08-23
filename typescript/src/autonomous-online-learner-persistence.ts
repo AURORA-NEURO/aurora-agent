@@ -196,6 +196,7 @@ export class JsonAutonomousOnlineLearnerSnapshotPersistence implements Autonomou
     if (new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_BYTES) throw new ArgumentError("online learner JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("online learner JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("online learner JSON is not canonical");
     return validateAutonomousOnlineLearnerSnapshot(parsed);
   }
 

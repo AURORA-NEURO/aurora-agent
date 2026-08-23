@@ -30,6 +30,7 @@ export const AUTONOMOUS_REPLAY_REPORT_SCHEMA = "bioprism-typescript-autonomous-r
 export const BRAIN_DOMAIN_EVALUATOR_SCHEMA = "bioprism-brain-domain-evaluator/0.1" as const;
 export const AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS = 16_384;
 export const AUTONOMOUS_MODEL_HEALTH_MAX_QUERY_LIMIT = 256;
+export const MAX_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_BYTES = 16_000_000;
 export const AUTONOMOUS_REPLAY_MAX_CASES = 4_096;
 export const AUTONOMOUS_REPLAY_MAX_SIGNALS = 128;
 
@@ -155,6 +156,16 @@ export interface AutonomousModelHealthSnapshot extends JsonObject {
 export interface AutonomousModelHealthPersistence {
   read(): Promise<AutonomousModelHealthSnapshot | null> | AutonomousModelHealthSnapshot | null;
   write(snapshot: AutonomousModelHealthSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousModelHealthSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousModelHealthSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousModelHealthTransactionalSnapshotTextStore extends AutonomousModelHealthSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousModelHealthStore {
@@ -537,18 +548,12 @@ export class InMemoryAutonomousModelHealthStore implements AutonomousModelHealth
 
   async snapshot(): Promise<AutonomousModelHealthSnapshot> {
     const body = { schema: AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA, sequence: this.events.length, head_digest: this.events.at(-1)?.event_digest ?? "", events: this.events.map(clone), retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
-    return { ...body, snapshot_digest: await digestJson(body) };
+    return validateAutonomousModelHealthSnapshot({ ...body, snapshot_digest: await digestJson(body) }, { maxEvents: this.maxEvents });
   }
 
   async restore(snapshot: AutonomousModelHealthSnapshot): Promise<void> {
-    if (!isObject(snapshot) || snapshot.schema !== AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA || !Array.isArray(snapshot.events)) throw new ArgumentError("model health snapshot is malformed");
-    const { snapshot_digest: supplied, ...body } = snapshot;
-    if (await digestJson(body) !== supplied) throw new ArgumentError("model health snapshot digest mismatch");
-    if (snapshot.events.length > this.maxEvents) throw new ArgumentError("model health snapshot exceeds store capacity");
-    const events = snapshot.events.map(clone);
-    const verified = await this.verifyEvents(events);
-    if (verified.events !== snapshot.sequence || verified.head_digest !== snapshot.head_digest) throw new ArgumentError("model health snapshot head is inconsistent");
-    this.events.splice(0, this.events.length, ...events);
+    const validated = await validateAutonomousModelHealthSnapshot(snapshot, { maxEvents: this.maxEvents });
+    this.events.splice(0, this.events.length, ...validated.events.map(clone));
   }
 
   async verifyIntegrity(): Promise<{ verified: true; events: number; head_digest: string }> {
@@ -569,22 +574,156 @@ export class InMemoryAutonomousModelHealthStore implements AutonomousModelHealth
   }
 }
 
+/** Validate a metadata-only model-health restart image before it reaches a live ledger. */
+export async function validateAutonomousModelHealthSnapshot(
+  raw: unknown,
+  options: { maxEvents?: number; maxBytes?: number } = {},
+): Promise<AutonomousModelHealthSnapshot> {
+  const maxEvents = options.maxEvents ?? AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS;
+  const maxBytes = options.maxBytes ?? MAX_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_BYTES;
+  if (!Number.isSafeInteger(maxEvents) || maxEvents < 1 || maxEvents > AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS) throw new ArgumentError("model health snapshot maxEvents is outside its bound");
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_BYTES) throw new ArgumentError("model health snapshot maxBytes is outside its bound");
+  if (!isObject(raw) || raw.schema !== AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA || !Array.isArray(raw.events)) throw new ArgumentError("model health snapshot is malformed");
+  const snapshotValue = raw as unknown as Record<string, unknown>;
+  const rawEvents = snapshotValue.events as unknown[];
+  const allowedSnapshotKeys = new Set(["schema", "sequence", "head_digest", "events", "snapshot_digest", "retention", "secret_material"]);
+  for (const key of Object.keys(raw)) if (!allowedSnapshotKeys.has(key)) throw new ArgumentError("model health snapshot contains unsupported metadata");
+  if (raw.retention !== PRIVATE_RETENTION || raw.secret_material !== "never_returned") throw new ArgumentError("model health snapshot retention is invalid");
+  if (!Number.isSafeInteger(snapshotValue.sequence) || (snapshotValue.sequence as number) < 0 || snapshotValue.sequence !== rawEvents.length || rawEvents.length > maxEvents) throw new ArgumentError("model health snapshot sequence is outside its bound");
+  if (raw.head_digest !== "") digest("model health snapshot head_digest", raw.head_digest);
+  digest("model health snapshot snapshot_digest", raw.snapshot_digest);
+
+  const allowedEventKeys = new Set(["schema", "sequence", "observation", "previous_digest", "created_at", "event_digest", "retention", "secret_material"]);
+  const events: AutonomousModelHealthEvent[] = [];
+  let previous = "";
+  for (let index = 0; index < rawEvents.length; index += 1) {
+    const candidate = rawEvents[index];
+    if (!isObject(candidate)) throw new ArgumentError(`model health event ${index + 1} is malformed`);
+    for (const key of Object.keys(candidate)) if (!allowedEventKeys.has(key)) throw new ArgumentError(`model health event ${index + 1} contains unsupported metadata`);
+    if (candidate.schema !== AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA || candidate.sequence !== index + 1 || candidate.previous_digest !== previous || candidate.retention !== PRIVATE_RETENTION || candidate.secret_material !== "never_returned") throw new ArgumentError(`model health event chain is invalid at sequence ${index + 1}`);
+    finite(`model health event ${index + 1} created_at`, candidate.created_at, 0, Number.MAX_SAFE_INTEGER);
+    if (candidate.event_digest === "") throw new ArgumentError(`model health event ${index + 1} digest is empty`);
+    digest(`model health event ${index + 1} digest`, candidate.event_digest);
+    normalizeObservation(candidate.observation as unknown as AutonomousModelObservationInput);
+    const { event_digest: suppliedEventDigest, ...eventBody } = candidate;
+    if (await digestJson(eventBody) !== suppliedEventDigest) throw new ArgumentError(`model health snapshot digest mismatch: event ${index + 1} digest does not match its metadata`);
+    const event = clone(candidate) as unknown as AutonomousModelHealthEvent;
+    events.push(event);
+    previous = suppliedEventDigest as string;
+  }
+  if (raw.head_digest !== previous) throw new ArgumentError("model health snapshot head is inconsistent");
+  const { snapshot_digest: suppliedSnapshotDigest, ...snapshotBody } = raw;
+  if (await digestJson(snapshotBody) !== suppliedSnapshotDigest) throw new ArgumentError("model health snapshot digest mismatch");
+  const snapshot = clone(raw) as unknown as AutonomousModelHealthSnapshot;
+  if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > maxBytes) throw new ArgumentError("model health snapshot exceeds its byte bound");
+  return snapshot;
+}
+
+/** Canonical JSON persistence for health state over a caller-owned text store. */
+export class JsonAutonomousModelHealthSnapshotPersistence implements AutonomousModelHealthPersistence {
+  protected readonly textStore: AutonomousModelHealthSnapshotTextStore;
+  readonly maxEvents: number;
+  readonly maxBytes: number;
+
+  constructor(textStore: AutonomousModelHealthSnapshotTextStore, options: { maxEvents?: number; maxBytes?: number } = {}) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("model health text store is malformed");
+    this.textStore = textStore;
+    this.maxEvents = options.maxEvents ?? AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS;
+    this.maxBytes = options.maxBytes ?? MAX_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_BYTES;
+    if (!Number.isSafeInteger(this.maxEvents) || this.maxEvents < 1 || this.maxEvents > AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS) throw new ArgumentError("model health JSON maxEvents is outside its bound");
+    if (!Number.isSafeInteger(this.maxBytes) || this.maxBytes < 1 || this.maxBytes > MAX_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_BYTES) throw new ArgumentError("model health JSON maxBytes is outside its bound");
+  }
+
+  async read(): Promise<AutonomousModelHealthSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > this.maxBytes) throw new ArgumentError("model health JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("model health JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("model health JSON is not canonical");
+    return validateAutonomousModelHealthSnapshot(parsed, { maxEvents: this.maxEvents, maxBytes: this.maxBytes });
+  }
+
+  async write(snapshot: AutonomousModelHealthSnapshot): Promise<void> {
+    await this.textStore.write(await this.encode(snapshot));
+  }
+
+  protected async encode(snapshot: AutonomousModelHealthSnapshot): Promise<string> {
+    const validated = await validateAutonomousModelHealthSnapshot(snapshot, { maxEvents: this.maxEvents, maxBytes: this.maxBytes });
+    const encoded = canonicalJson(validated);
+    if (new TextEncoder().encode(encoded).byteLength > this.maxBytes) throw new ArgumentError("model health JSON exceeds its byte bound");
+    return encoded;
+  }
+}
+
+/** Canonical JSON health persistence with atomic stale-writer fencing. */
+export class TransactionalJsonAutonomousModelHealthSnapshotPersistence extends JsonAutonomousModelHealthSnapshotPersistence {
+  declare protected readonly textStore: AutonomousModelHealthTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousModelHealthTransactionalSnapshotTextStore, options: { maxEvents?: number; maxBytes?: number } = {}) {
+    super(textStore, options);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("model health text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousModelHealthSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null) digest("model health expected snapshot digest", expectedSnapshotDigest);
+    const encoded = await this.encode(snapshot);
+    const committed = await this.textStore.writeIfUnchanged(expectedSnapshotDigest, encoded);
+    if (typeof committed !== "boolean") throw new ArgumentError("model health compare-and-swap returned a non-boolean result");
+    return committed;
+  }
+}
+
+/** Browser-compatible local text storage for model-health snapshots. */
+export class WebStorageAutonomousModelHealthSnapshotTextStore implements AutonomousModelHealthSnapshotTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("model health Web Storage adapter is malformed");
+    identifier("model health storage key", key, 256);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
+}
+
 export class AutonomousModelHealthPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly store: AutonomousModelHealthStore, readonly persistence: AutonomousModelHealthPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("model health store is malformed");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("model health persistence adapter is malformed");
   }
 
   async restore(): Promise<AutonomousModelHealthSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot) await this.store.restore(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = await validateAutonomousModelHealthSnapshot(raw);
+      await this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
   }
 
   async flush(): Promise<AutonomousModelHealthSnapshot> {
-    const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await this.store.snapshot();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("model health persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }
 
