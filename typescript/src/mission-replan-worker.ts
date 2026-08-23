@@ -77,11 +77,16 @@ export interface AutonomousMissionReplanRemoteJobQueueSnapshot extends JsonObjec
 export interface AutonomousMissionReplanRemoteJobQueuePersistence {
   read(): Promise<AutonomousMissionReplanRemoteJobQueueSnapshot | null> | AutonomousMissionReplanRemoteJobQueueSnapshot | null;
   write(snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot): Promise<boolean> | boolean;
 }
 
 export interface AutonomousMissionReplanRemoteJobQueueTextStore {
   read(): Promise<string | null> | string | null;
   write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousMissionReplanRemoteJobQueueTransactionalTextStore extends AutonomousMissionReplanRemoteJobQueueTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousMissionReplanRemoteJobAdmission {
@@ -98,6 +103,18 @@ export interface AutonomousMissionReplanRemoteJobRequeueOptions {
   planningStatus?: Exclude<AutonomousMissionReplanRemoteJob["planning_status"], "unknown">;
   planRefinementDigest?: string | null;
   availableAt?: number;
+}
+
+export interface AutonomousMissionReplanRemoteJobQueueHandle {
+  enqueue(input: AutonomousMissionReplanRemoteJobAdmission): Promise<AutonomousMissionReplanRemoteJob>;
+  load(jobId: string): Promise<AutonomousMissionReplanRemoteJob | null>;
+  claimNext(workerId: string, leaseMs?: number, now?: number): Promise<AutonomousMissionReplanRemoteJob | null>;
+  renew(jobId: string, workerId: string, leaseMs?: number, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
+  complete(jobId: string, workerId: string, result: AutonomousMissionReplanResult, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
+  fail(jobId: string, workerId: string, failureClass: AutonomousMissionReplanRemoteJobFailureClass, failureCode: string, retryable: boolean, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
+  cancel(jobId: string, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
+  requeue(jobId: string, options?: AutonomousMissionReplanRemoteJobRequeueOptions, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
+  snapshot(): Promise<AutonomousMissionReplanRemoteJobQueueSnapshot>;
 }
 
 export interface AutonomousMissionReplanRemoteWorkerRow extends JsonObject {
@@ -243,7 +260,7 @@ function refresh(job: AutonomousMissionReplanRemoteJob, patch: Partial<Autonomou
 }
 
 /** In-memory reference queue; callers can replace it with a transactional persistence adapter. */
-export class InMemoryAutonomousMissionReplanRemoteJobQueue {
+export class InMemoryAutonomousMissionReplanRemoteJobQueue implements AutonomousMissionReplanRemoteJobQueueHandle {
   private readonly jobs = new Map<string, AutonomousMissionReplanRemoteJob>();
 
   async enqueue(input: AutonomousMissionReplanRemoteJobAdmission): Promise<AutonomousMissionReplanRemoteJob> {
@@ -380,6 +397,11 @@ export class JsonAutonomousMissionReplanRemoteJobQueuePersistence {
     await queue.restore(validateSnapshot(snapshot));
     return true;
   }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot): Promise<boolean> {
+    if (typeof this.store.writeIfUnchanged !== "function") return false;
+    return this.store.writeIfUnchanged(expectedSnapshotDigest, validateSnapshot(snapshot));
+  }
 }
 
 export class JsonAutonomousMissionReplanRemoteJobQueueTextStore implements AutonomousMissionReplanRemoteJobQueuePersistence {
@@ -394,6 +416,102 @@ export class JsonAutonomousMissionReplanRemoteJobQueueTextStore implements Auton
     return validateSnapshot(parsed);
   }
   async write(snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot): Promise<void> { await this.textStore.write(canonicalJson(validateSnapshot(snapshot))); }
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot): Promise<boolean> {
+    if (typeof (this.textStore as Partial<AutonomousMissionReplanRemoteJobQueueTransactionalTextStore>).writeIfUnchanged !== "function") return false;
+    return (this.textStore as AutonomousMissionReplanRemoteJobQueueTransactionalTextStore).writeIfUnchanged(expectedSnapshotDigest, canonicalJson(validateSnapshot(snapshot)));
+  }
+}
+
+/** CAS-fenced persistence facade for multi-process queue adapters. */
+export class AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator implements AutonomousMissionReplanRemoteJobQueueHandle {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
+  constructor(readonly queue: InMemoryAutonomousMissionReplanRemoteJobQueue, readonly persistence: AutonomousMissionReplanRemoteJobQueuePersistence) {
+    if (!(queue instanceof InMemoryAutonomousMissionReplanRemoteJobQueue)) throw new ArgumentError("mission remote persistence requires a typed queue");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("mission remote persistence adapter is malformed");
+  }
+
+  async restore(): Promise<boolean> {
+    return this.serialize(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot === null) {
+        await this.queue.restore(emptyQueueSnapshot());
+        this.expectedSnapshotDigest = null;
+        return false;
+      }
+      await this.queue.restore(validateSnapshot(snapshot));
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return true;
+    });
+  }
+
+  async flush(): Promise<AutonomousMissionReplanRemoteJobQueueSnapshot> {
+    return this.serialize(async () => {
+      const snapshot = await this.queue.snapshot();
+      await this.persist(snapshot, this.expectedSnapshotDigest);
+      return clone(snapshot);
+    });
+  }
+
+  async enqueue(input: AutonomousMissionReplanRemoteJobAdmission): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.enqueue(input)); }
+  async load(jobId: string): Promise<AutonomousMissionReplanRemoteJob | null> { return this.serialize(async () => { await this.loadLatest(); return this.queue.load(jobId); }); }
+  async claimNext(workerId: string, leaseMs = 60_000, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob | null> { return this.transact((queue) => queue.claimNext(workerId, leaseMs, now)); }
+  async renew(jobId: string, workerId: string, leaseMs = 60_000, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.renew(jobId, workerId, leaseMs, now)); }
+  async complete(jobId: string, workerId: string, result: AutonomousMissionReplanResult, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.complete(jobId, workerId, result, now)); }
+  async fail(jobId: string, workerId: string, failureClass: AutonomousMissionReplanRemoteJobFailureClass, failureCode: string, retryable: boolean, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.fail(jobId, workerId, failureClass, failureCode, retryable, now)); }
+  async cancel(jobId: string, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.cancel(jobId, now)); }
+  async requeue(jobId: string, options: AutonomousMissionReplanRemoteJobRequeueOptions = {}, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.requeue(jobId, options, now)); }
+  async snapshot(): Promise<AutonomousMissionReplanRemoteJobQueueSnapshot> { return this.serialize(async () => { await this.loadLatest(); return this.queue.snapshot(); }); }
+
+  private async loadLatest(): Promise<string | null> {
+    const snapshot = await this.persistence.read();
+    if (snapshot === null) {
+      await this.queue.restore(emptyQueueSnapshot());
+      this.expectedSnapshotDigest = null;
+      return null;
+    }
+    await this.queue.restore(validateSnapshot(snapshot));
+    this.expectedSnapshotDigest = snapshot.snapshot_digest;
+    return snapshot.snapshot_digest;
+  }
+
+  private async persist(snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot, expected: string | null): Promise<void> {
+    if (typeof this.persistence.writeIfUnchanged === "function") {
+      if (!await this.persistence.writeIfUnchanged(expected, snapshot)) throw new ArgumentError("mission remote persistence compare-and-swap conflict");
+    } else await this.persistence.write(snapshot);
+    this.expectedSnapshotDigest = snapshot.snapshot_digest;
+  }
+
+  private async transact<T>(operation: (queue: InMemoryAutonomousMissionReplanRemoteJobQueue) => Promise<T>): Promise<T> {
+    return this.serialize(async () => {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const expected = await this.loadLatest();
+        const before = await this.queue.snapshot();
+        const value = await operation(this.queue);
+        const after = await this.queue.snapshot();
+        if (after.snapshot_digest === before.snapshot_digest) return value;
+        try {
+          await this.persist(after, expected);
+          return value;
+        } catch (error) {
+          if (attempt === 3) throw error;
+        }
+      }
+      throw new ArgumentError("mission remote persistence compare-and-swap conflicted repeatedly");
+    });
+  }
+
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+function emptyQueueSnapshot(): AutonomousMissionReplanRemoteJobQueueSnapshot {
+  const descriptor = { schema: AUTONOMOUS_MISSION_REPLAN_JOB_QUEUE_SCHEMA, jobs: [] as AutonomousMissionReplanRemoteJob[], retention: "metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
+  return { ...descriptor, snapshot_digest: digestJsonSync(descriptor) };
 }
 
 export interface AutonomousMissionReplanRemoteJobResolution {
@@ -412,7 +530,7 @@ export interface AutonomousMissionReplanRemoteJobResolverContext {
 export type AutonomousMissionReplanRemoteJobResolver = (context: AutonomousMissionReplanRemoteJobResolverContext) => AutonomousMissionReplanRemoteJobResolution | Promise<AutonomousMissionReplanRemoteJobResolution>;
 
 export interface AutonomousMissionReplanRemoteWorkerOptions {
-  queue: InMemoryAutonomousMissionReplanRemoteJobQueue;
+  queue: AutonomousMissionReplanRemoteJobQueueHandle;
   workerId: string;
   resolve: AutonomousMissionReplanRemoteJobResolver;
   leaseMs?: number;
@@ -432,13 +550,13 @@ export interface AutonomousMissionReplanRemoteWorkerRunOptions {
  * the queue carries only protected-contract, planner, lease, and result digests.
  */
 export class AutonomousMissionReplanRemoteWorker {
-  readonly queue: InMemoryAutonomousMissionReplanRemoteJobQueue;
+  readonly queue: AutonomousMissionReplanRemoteJobQueueHandle;
   readonly workerId: string;
   readonly resolve: AutonomousMissionReplanRemoteJobResolver;
   readonly leaseMs: number;
 
   constructor(options: AutonomousMissionReplanRemoteWorkerOptions) {
-    if (!options || !(options.queue instanceof InMemoryAutonomousMissionReplanRemoteJobQueue)) throw new ArgumentError("mission remote worker requires a typed queue");
+    if (!options || (!(options.queue instanceof InMemoryAutonomousMissionReplanRemoteJobQueue) && !(options.queue instanceof AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator))) throw new ArgumentError("mission remote worker requires a typed queue or CAS coordinator");
     this.queue = options.queue;
     this.workerId = identifier("mission remote workerId", options.workerId);
     if (typeof options.resolve !== "function") throw new ArgumentError("mission remote worker resolver must be callable");

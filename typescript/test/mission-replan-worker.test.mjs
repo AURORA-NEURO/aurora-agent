@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   AutonomousMissionExecutor,
   AutonomousMissionReplanRemoteWorker,
+  AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator,
   InMemoryAutonomousMissionReplanRemoteJobQueue,
   JsonAutonomousMissionReplanRemoteJobQueuePersistence,
   JsonAutonomousMissionReplanRemoteJobQueueTextStore,
@@ -144,4 +145,36 @@ test("remote mission worker renews long private resolution and retries typed pro
   assert.equal(run.retried, 1);
   assert.equal(run.failed, 0);
   assert.equal((await queue.load("heartbeat-job")).status, "queued");
+});
+
+test("remote mission CAS coordinator serializes competing lease writers and restores the latest snapshot", async () => {
+  const backing = {
+    value: null,
+    async read() { return this.value; },
+    async write(value) { this.value = value; },
+    async writeIfUnchanged(expectedDigest, value) {
+      const currentDigest = this.value === null ? null : JSON.parse(this.value).snapshot_digest;
+      if (currentDigest !== expectedDigest) return false;
+      this.value = value;
+      return true;
+    },
+  };
+  const persistence = new JsonAutonomousMissionReplanRemoteJobQueueTextStore(backing);
+  const first = new AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator(new InMemoryAutonomousMissionReplanRemoteJobQueue(), persistence);
+  const second = new AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator(new InMemoryAutonomousMissionReplanRemoteJobQueue(), persistence);
+  assert.equal(await first.restore(), false);
+  assert.equal(await second.restore(), false);
+  await Promise.all([
+    first.enqueue({ jobId: "cas-a", rootMissionId: "cas-root-a", protectedContractDigest: "a".repeat(64), availableAt: 0 }),
+    second.enqueue({ jobId: "cas-b", rootMissionId: "cas-root-b", protectedContractDigest: "b".repeat(64), availableAt: 0 }),
+  ]);
+  const claim = await first.claimNext("cas-worker", 10_000, Date.now());
+  assert.ok(claim);
+  assert.equal(claim.status, "leased");
+  const latest = await second.snapshot();
+  assert.equal(latest.jobs.length, 2);
+  const restored = new AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator(new InMemoryAutonomousMissionReplanRemoteJobQueue(), persistence);
+  assert.equal(await restored.restore(), true);
+  assert.equal((await restored.load(claim.job_id)).status, "leased");
+  assert.equal((await restored.snapshot()).snapshot_digest, JSON.parse(backing.value).snapshot_digest);
 });

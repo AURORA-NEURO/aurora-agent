@@ -2048,6 +2048,7 @@ export {
   InMemoryAutonomousMissionReplanRemoteJobQueue,
   JsonAutonomousMissionReplanRemoteJobQueuePersistence,
   JsonAutonomousMissionReplanRemoteJobQueueTextStore,
+  AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator,
   AutonomousMissionReplanRemoteWorker,
   validateAutonomousMissionReplanRemoteJobQueueSnapshot,
 } from "./mission-replan-worker.js";
@@ -2058,6 +2059,8 @@ export type {
   AutonomousMissionReplanRemoteJobQueueSnapshot,
   AutonomousMissionReplanRemoteJobQueuePersistence,
   AutonomousMissionReplanRemoteJobQueueTextStore,
+  AutonomousMissionReplanRemoteJobQueueTransactionalTextStore,
+  AutonomousMissionReplanRemoteJobQueueHandle,
   AutonomousMissionReplanRemoteJobAdmission,
   AutonomousMissionReplanRemoteJobRequeueOptions,
   AutonomousMissionReplanRemoteJobResolution,
