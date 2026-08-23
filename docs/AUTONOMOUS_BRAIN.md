@@ -2240,6 +2240,48 @@ const execution = await agent.executeWorkflowPortfolio(requests, {
 // prompts, credentials, provider responses, tool payloads, or predecessor output.
 ```
 
+Portfolio execution can optionally add a provider-assisted planning phase to every ready item.
+`providerPlanning` controls the planner provider call, while `approveProviderCall` still controls
+the eventual item execution. A proposal can only reorder the already-reviewed stage catalogue;
+it cannot add stages, tools, credentials, permissions, effects, or evidence. Omitting `acceptPlan`
+leaves every generated proposal in `plan_review_required` and dispatches no item. This keeps a
+portfolio-wide planner suitable for an operator review UI without turning model output into
+authority:
+
+```typescript
+const review = await agent.executeWorkflowPortfolio(requests, {
+  plan: portfolio,
+  providerPlanning: { candidates, credentialFor, approveProviderCall: true },
+  approveProviderCall: true,
+});
+
+const acceptedPlanRefinements = Object.fromEntries(
+  review.items
+    .filter((item) => item.planRefinement?.status === "completed")
+    .map((item) => [item.itemId, item.planRefinement]),
+);
+const execution = await agent.executeWorkflowPortfolio(requests, {
+  plan: portfolio,
+  acceptedPlanRefinements,
+  approveProviderCall: true,
+});
+```
+
+Each item exposes a value-only `plan_refinement_digest` and a separate `planning_status`:
+`approval_required`, `plan_review_required`, `provider_invalid`, `provider_disagreement`, or
+`accepted`. Planner quality is an independent learning stream. Supplying `evaluatePlanningItem`
+settles the selected planner arm through `settlePlanningQuality()`; `evaluateItem` continues to
+settle execution episodes separately. The result therefore reports planner and execution counts
+independently, and a successful item run never implies that its planner was good.
+
+Accepted proposals are restart-safe. Resumable portfolio checkpoints carry only one optional
+plan-refinement digest per item (never the planner transcript, task, prompt, credential, or
+provider response). On restart, `rehydratePlanRefinement` must return the exact value-only
+proposal for each persisted digest; the digest is checked before any item provider call. This
+prevents a worker from silently invoking the planner again or applying a proposal to a changed
+workflow. Older checkpoints without planner fields remain readable and behave as provider-free
+portfolio executions.
+
 For operational visibility, pass `traceId` and a caller-owned `traceSink` to the same execution.
 The sink receives a serialized hash chain covering plan verification, dependency decisions,
 provider dispatch intent, item outcomes, learning status, progress, and the terminal portfolio

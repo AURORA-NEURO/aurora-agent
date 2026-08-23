@@ -14,6 +14,8 @@ import {
   type AutonomousWorkflowPortfolioExecutionOptions,
   type AutonomousWorkflowPortfolioExecutionProgress,
   type AutonomousWorkflowPortfolioExecutionStatus,
+  type AutonomousWorkflowPortfolioPlanRehydrationContext,
+  type AutonomousWorkflowPortfolioPlanningStatus,
 } from "./autonomous-workflow-portfolio-execution.js";
 import {
   planAutonomousWorkflowPortfolio,
@@ -43,6 +45,10 @@ export interface AutonomousWorkflowPortfolioExecutionCheckpointJSON extends Json
   settled_item_ids: string[];
   settled_item_statuses: AutonomousWorkflowPortfolioExecutionItemStatus[];
   settled_result_digests: string[];
+  /** Optional in the 0.3 compatibility shape; present for planner-aware checkpoints. */
+  plan_refinement_digests?: (string | null)[];
+  /** Optional paired lifecycle; absent in legacy provider-free checkpoints. */
+  planning_statuses?: AutonomousWorkflowPortfolioPlanningStatus[];
   max_parallelism: number;
   stop_on_error: boolean;
   include_dependency_outputs: boolean;
@@ -188,6 +194,11 @@ async function makeCheckpoint(input: {
     settled_item_ids: settled.map((item) => item.itemId),
     settled_item_statuses: settled.map((item) => item.status),
     settled_result_digests: await Promise.all(settled.map((item) => digestAutonomousWorkflowPortfolioExecutionItem(item))),
+    plan_refinement_digests: await Promise.all(input.plan.items.map(async (item) => {
+      const refinement = byId.get(item.item_id)?.planRefinement;
+      return refinement ? await digestJson(refinement) : null;
+    })),
+    planning_statuses: input.plan.items.map((item) => byId.get(item.item_id)?.planningStatus ?? "disabled"),
     max_parallelism: input.maxParallelism,
     stop_on_error: input.stopOnError,
     include_dependency_outputs: input.includeDependencyOutputs,
@@ -203,7 +214,7 @@ async function makeCheckpoint(input: {
 /** Validate checkpoint structure, identity, digest, and retention markers before reuse. */
 export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(value: unknown): Promise<AutonomousWorkflowPortfolioExecutionCheckpointJSON> {
   if (!isObject(value) || value.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA) throw new ArgumentError("workflow portfolio execution checkpoint schema is invalid");
-  const allowed = new Set(["schema", "job_id", "plan_digest", "admission_digest", "portfolio_input_digest", "item_ids", "request_digests", "task_digests", "settled_item_ids", "settled_item_statuses", "settled_result_digests", "max_parallelism", "stop_on_error", "include_dependency_outputs", "max_dependency_handoff_bytes", "learning_policy_digest", "status", "checkpoint_digest", "retention", "secret_material"]);
+  const allowed = new Set(["schema", "job_id", "plan_digest", "admission_digest", "portfolio_input_digest", "item_ids", "request_digests", "task_digests", "settled_item_ids", "settled_item_statuses", "settled_result_digests", "plan_refinement_digests", "planning_statuses", "max_parallelism", "stop_on_error", "include_dependency_outputs", "max_dependency_handoff_bytes", "learning_policy_digest", "status", "checkpoint_digest", "retention", "secret_material"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new ArgumentError("workflow portfolio execution checkpoint contains unsupported fields");
   const jobId = boundedIdentifier("workflow portfolio execution checkpoint job_id", value.job_id);
   const planDigest = digest(value.plan_digest, "workflow portfolio execution checkpoint plan_digest");
@@ -226,6 +237,12 @@ export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(val
   const normalizedSettledStatuses = settledStatuses.map((status) => status as AutonomousWorkflowPortfolioExecutionItemStatus);
   if (normalizedSettledStatuses.some((status) => !checkpointable(status))) throw new ArgumentError("workflow portfolio execution checkpoint settled statuses are invalid");
   if (settledDigests.some((item) => typeof item !== "string" || !/^[0-9a-f]{64}$/.test(item))) throw new ArgumentError("workflow portfolio execution checkpoint settled result digests are invalid");
+  const planRefinementDigests = value.plan_refinement_digests === undefined ? undefined : value.plan_refinement_digests;
+  if (planRefinementDigests !== undefined && (!Array.isArray(planRefinementDigests) || planRefinementDigests.length !== normalizedItemIds.length || planRefinementDigests.some((item) => item !== null && (typeof item !== "string" || !/^[0-9a-f]{64}$/.test(item))))) throw new ArgumentError("workflow portfolio execution checkpoint plan_refinement_digests are invalid");
+  const planningStatuses = value.planning_statuses === undefined ? undefined : value.planning_statuses;
+  const validPlanningStatuses = new Set<AutonomousWorkflowPortfolioPlanningStatus>(["disabled", "approval_required", "plan_review_required", "provider_invalid", "provider_disagreement", "accepted"]);
+  if (planningStatuses !== undefined && (!Array.isArray(planningStatuses) || planningStatuses.length !== normalizedItemIds.length || planningStatuses.some((item) => typeof item !== "string" || !validPlanningStatuses.has(item as AutonomousWorkflowPortfolioPlanningStatus)))) throw new ArgumentError("workflow portfolio execution checkpoint planning_statuses are invalid");
+  if (planRefinementDigests !== undefined && planningStatuses !== undefined && planRefinementDigests.some((digestValue, index) => (digestValue === null) !== (planningStatuses[index] === "disabled"))) throw new ArgumentError("workflow portfolio execution checkpoint planning digest and status are inconsistent");
   if (!Number.isSafeInteger(value.max_parallelism) || (value.max_parallelism as number) < 1 || (value.max_parallelism as number) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_PARALLELISM || typeof value.stop_on_error !== "boolean" || typeof value.include_dependency_outputs !== "boolean" || !Number.isSafeInteger(value.max_dependency_handoff_bytes) || (value.max_dependency_handoff_bytes as number) < 512 || (value.max_dependency_handoff_bytes as number) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES) throw new ArgumentError("workflow portfolio execution checkpoint controls are invalid");
   const learningPolicyDigest = value.learning_policy_digest === null ? null : digest(value.learning_policy_digest, "workflow portfolio execution checkpoint learning_policy_digest");
   if (!["running", "partial", "completed", "blocked"].includes(value.status as string)) throw new ArgumentError("workflow portfolio execution checkpoint status is invalid");
@@ -242,6 +259,8 @@ export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(val
     settled_item_ids: normalizedSettledIds,
     settled_item_statuses: normalizedSettledStatuses,
     settled_result_digests: [...settledDigests as string[]],
+    ...(planRefinementDigests === undefined ? {} : { plan_refinement_digests: [...planRefinementDigests as (string | null)[]] }),
+    ...(planningStatuses === undefined ? {} : { planning_statuses: [...planningStatuses as AutonomousWorkflowPortfolioPlanningStatus[]] }),
     max_parallelism: value.max_parallelism as number,
     stop_on_error: value.stop_on_error as boolean,
     include_dependency_outputs: value.include_dependency_outputs as boolean,
@@ -328,13 +347,48 @@ export async function executeAutonomousWorkflowPortfolioResumable(
         throw new ArgumentError(`rehydrated workflow portfolio item ${itemId} could not be loaded`);
       }
       await validateRehydratedItem(planItem, context.expected_status, context.expected_result_digest, item);
+      const expectedPlanRefinementDigest = restored.plan_refinement_digests?.[plan.items.findIndex((candidate) => candidate.item_id === itemId)];
+      if (expectedPlanRefinementDigest !== undefined && expectedPlanRefinementDigest !== null) {
+        if (!item.planRefinement || await digestJson(item.planRefinement) !== expectedPlanRefinementDigest) throw new ArgumentError(`rehydrated workflow portfolio item ${itemId} provider plan digest does not match its checkpoint`);
+      }
       rehydrated.push(item);
+    }
+  }
+
+  const checkpointPlanRefinements: Record<string, import("./types.js").AutonomousPlanRefinementResult> = {};
+  const checkpointPlanningStatuses: Record<string, AutonomousWorkflowPortfolioPlanningStatus> = {};
+  if (restored?.plan_refinement_digests) {
+    const planItems = new Map(plan.items.map((item) => [item.item_id, item]));
+    for (let index = 0; index < restored.plan_refinement_digests.length; index += 1) {
+      const expectedDigest = restored.plan_refinement_digests[index];
+      if (expectedDigest === undefined || expectedDigest === null) continue;
+      const itemId = plan.items[index]!.item_id;
+      const planItem = planItems.get(itemId)!;
+      const planningStatus = restored.planning_statuses?.[index] ?? "accepted";
+      const supplied = options.acceptedPlanRefinements?.[itemId];
+      let refinement = supplied;
+      if (!refinement) {
+        if (!options.rehydratePlanRefinement) throw new ArgumentError(`workflow portfolio restart requires rehydratePlanRefinement for ${itemId}`);
+        const context: AutonomousWorkflowPortfolioPlanRehydrationContext = {
+          jobId,
+          itemId,
+          domain: planItem.domain,
+          requestDigest: planItem.request_digest,
+          taskDigest: planItem.task_digest,
+          expectedPlanRefinementDigest: expectedDigest,
+        };
+        refinement = await options.rehydratePlanRefinement(context);
+      }
+      if (!refinement || await digestJson(refinement) !== expectedDigest) throw new ArgumentError(`workflow portfolio rehydrated provider plan for ${itemId} does not match its checkpoint`);
+      checkpointPlanRefinements[itemId] = refinement;
+      checkpointPlanningStatuses[itemId] = planningStatus;
     }
   }
 
   const executionOptions: AutonomousWorkflowPortfolioExecutionOptions = {
     ...options,
     plan,
+    ...(Object.keys(checkpointPlanRefinements).length > 0 ? { rehydratedPlanRefinements: checkpointPlanRefinements, rehydratedPlanningStatuses: checkpointPlanningStatuses } : {}),
     ...(admission === null ? {} : { admission }),
     maxParallelism: controls.maxParallelism,
     stopOnError: controls.stopOnError,

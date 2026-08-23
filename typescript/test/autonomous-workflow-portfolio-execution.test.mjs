@@ -4,12 +4,17 @@ import test from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousLearningController,
+  AutonomousOnlineLearner,
   AutonomousWorkflowPortfolioExecutionTracePersistenceCoordinator,
   InMemoryAutonomousWorkflowPortfolioExecutionTraceStore,
   JsonAutonomousWorkflowPortfolioExecutionTracePersistence,
   TransactionalJsonAutonomousWorkflowPortfolioExecutionTracePersistence,
   WebStorageAutonomousWorkflowPortfolioExecutionTraceTextStore,
   LLMRuntime,
+  CredentialStore,
+  InMemoryAutonomousModelHealthStore,
+  openaiCompatibleProvider,
 } from "../dist/index.js";
 
 const model = {
@@ -40,6 +45,31 @@ function agentFor(onRequest = () => {}) {
   const value = new AutonomousAgent(runtime(onRequest));
   value.registerModel(model);
   return value;
+}
+
+function providerPlanningAgent(onRequest = () => {}) {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      let body = {};
+      try { body = JSON.parse(String(init?.body ?? "{}")); } catch { /* bounded fixture fallback */ }
+      const prompt = JSON.stringify(body.messages ?? []);
+      onRequest({ kind: prompt.includes("priority_order") ? "planning" : "execution", prompt });
+      if (prompt.includes("priority_order") && prompt.includes("review_required")) {
+        const contractMessage = (body.messages ?? []).find((message) => String(message.content ?? "").startsWith("Context planning-contract:\n"));
+        let contract = {};
+        try { contract = JSON.parse(String(contractMessage?.content ?? "").slice("Context planning-contract:\n".length)); } catch { /* bounded fixture fallback */ }
+        const ids = (contract.stage_catalogue ?? []).map((stage) => stage.id);
+        return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, focus_stage_ids: ids.slice(0, 1), review_required: false, confidence: 0.97, abstain: false }) }, finish_reason: "stop" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "portfolio execution result" }, finish_reason: "stop" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("portfolio-planner", "https://portfolio-planner.test", { requiresCredential: false }));
+  const health = new InMemoryAutonomousModelHealthStore();
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  agent.registerModel({ ...model, provider: "portfolio-planner", model: "portfolio-planner-model" });
+  return { agent, health };
 }
 
 function allDomainRequests() {
@@ -199,4 +229,42 @@ test("portfolio execution rejects a drifted reviewed plan before provider dispat
     /plan verification failed/,
   );
   assert.equal(providerCalls, 0);
+});
+
+test("portfolio provider planning is review-gated, accepted per item, and learns planner quality separately across every domain", async () => {
+  const calls = [];
+  const { agent, health } = providerPlanningAgent((event) => calls.push(event));
+  const requests = allDomainRequests().map((request) => ({ ...request, task: `${request.task} provider planning review` }));
+  const plan = await agent.planWorkflowPortfolio(requests, { requireAllDomains: true });
+  const learning = new AutonomousLearningController(agent);
+  const review = await agent.executeWorkflowPortfolio(requests, {
+    plan,
+    providerPlanning: { candidates: agent.models(), approveProviderCall: true },
+    approveProviderCall: true,
+  });
+
+  assert.equal(review.status, "plan_review_required");
+  assert.equal(review.items.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(review.items.every((item) => item.planningStatus === "plan_review_required" && item.planRefinement?.status === "completed"));
+  assert.equal(calls.filter((event) => event.kind === "planning").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(calls.filter((event) => event.kind === "execution").length, 0);
+  assert.doesNotMatch(JSON.stringify(review.toJSON()), /private task payload|provider planning review|portfolio execution result/);
+
+  const executed = await agent.executeWorkflowPortfolio(requests, {
+    plan,
+    providerPlanning: { candidates: agent.models(), approveProviderCall: true },
+    acceptPlan: true,
+    approveProviderCall: true,
+    learning,
+    evaluateItem: () => ({ evaluator_id: "portfolio-execution-reviewer", evaluator_version: "1", reward: 0.81, passed: true }),
+    evaluatePlanningItem: () => ({ evaluator_id: "portfolio-planner-reviewer", evaluator_version: "1", reward: 0.93, passed: true }),
+  });
+
+  assert.equal(executed.status, "completed");
+  assert.ok(executed.items.every((item) => item.status === "succeeded" && item.planningStatus === "accepted" && item.plannerLearningStatus === "settled" && item.learningStatus === "settled"));
+  assert.equal(executed.toJSON().planner_settled_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(executed.toJSON().learning_settled_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(calls.filter((event) => event.kind === "execution").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(health.health({ model: "portfolio-planner-model", capability: "planning" })[0]?.quality_observations, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(executed.toJSON()), /portfolio execution result/);
 });

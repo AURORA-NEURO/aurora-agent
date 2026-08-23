@@ -550,7 +550,11 @@ export type {
   AutonomousWorkflowPortfolioExecutionTraceTextStore,
   AutonomousWorkflowPortfolioExecutionTraceTransactionalTextStore,
   AutonomousWorkflowPortfolioLearningStatus,
+  AutonomousWorkflowPortfolioPlanningStatus,
+  AutonomousWorkflowPortfolioPlannerLearningStatus,
   AutonomousWorkflowPortfolioLearningEvaluationContext,
+  AutonomousWorkflowPortfolioPlanningEvaluationContext,
+  AutonomousWorkflowPortfolioPlanRehydrationContext,
   AutonomousWorkflowPortfolioLearningSettlementOptions,
 } from "./autonomous-workflow-portfolio-execution.js";
 export {
