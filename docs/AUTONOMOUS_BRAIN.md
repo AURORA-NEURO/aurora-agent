@@ -5326,13 +5326,12 @@ or service-backed adapter to `read()`/`write()`, while Python applications can u
 equivalent adapter, preserving the same snapshot schema, fencing rules, and metadata-only retention
 contract.
 
-Python also exposes `JsonAutonomousEvidenceWorkQueueSnapshotPersistence` and its transactional
-variant for the portable text-store path. Reads require canonical JSON, exact work-item fields,
-deterministic queue ordering, valid lease/retry state, and every item/snapshot digest; the
-`AutonomousEvidenceWorkQueuePersistenceCoordinator` carries the restored digest into its next
-flush. A plan or request payload is never reconstructed from the snapshot, and a stale queue
-worker receives a compare-and-swap conflict before it can hide a newer lease or reconciliation
-decision.
+Both SDKs expose `JsonAutonomousEvidenceWorkQueueSnapshotPersistence` and its transactional
+variant for the portable text-store path. Reads and queue restore require canonical JSON, exact
+work-item fields, deterministic queue ordering, valid lease/retry state, and every item/snapshot
+digest; the coordinator carries the restored digest into its next flush. A plan or request payload
+is never reconstructed from the snapshot, and a stale queue worker receives a compare-and-swap
+conflict before it can hide a newer lease or reconciliation decision.
 
 This worker is the safe handoff between autonomous planning and real source adapters: it can execute
 all built-in autonomous domains, but it does not decide what a source means, grant a credential,
@@ -6709,9 +6708,9 @@ operation contract before calling `dispatchFromPlan`. A runtime replay returns a
 receipt and no connector value, so a worker crash after provider completion is safe to recover
 without assuming distributed exactly-once delivery.
 
-For Python, `JsonAutonomousConnectorWorkQueueSnapshotPersistence` adds the same canonical text
-contract, while `TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence` and the
-coordinator's restored digest fence stale queue writers. Operation-registry drift, reordered or
+Both SDKs provide `JsonAutonomousConnectorWorkQueueSnapshotPersistence` and
+`TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence`. The canonical text contract
+and coordinator-restored digest fence stale queue writers; operation-registry drift, reordered or
 extra fields, non-canonical encodings, malformed leases, and tampered item or aggregate digests
 fail before queue replacement. This makes the connector worker safe to back with the same HTTP,
 object-store, or transactional text adapter used by model health, goals, memory, and evidence

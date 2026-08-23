@@ -13,6 +13,8 @@ import {
   InMemoryAutonomousConnectorFeedbackLedger,
   InMemoryAutonomousConnectorReceiptJournal,
   InMemoryAutonomousConnectorWorkQueue,
+  AutonomousConnectorWorkQueuePersistenceCoordinator,
+  TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence,
 } from "../dist/index.js";
 
 function connectorManifest(capabilities) {
@@ -122,6 +124,35 @@ test("the work queue is metadata-only, fenced, recoverable, retry-bounded, and t
   tampered.items[0].status = "completed";
   assert.throws(() => restored.restore(tampered), /snapshot digest/);
   assert.throws(() => queue.enqueue({ work_id: "work-1", operation_id: "coding.repository_change_analysis", request: request(plan, { dispatch_id: "other-dispatch" }), now: 3_000 }), /identity conflicts/);
+});
+
+test("connector work queue JSON persistence fences stale workers", async () => {
+  const fixtureData = fixture();
+  const plan = fixtureData.connectorRegistry.selectForDomains(["coding"], { capability: "review" });
+  const queue = new InMemoryAutonomousConnectorWorkQueue(fixtureData.operationRegistry);
+  queue.enqueue({ work_id: "persisted-work", operation_id: "coding.repository_change_analysis", request: request(plan), now: 1_000 });
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (observed !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence(textStore);
+  const coordinator = new AutonomousConnectorWorkQueuePersistenceCoordinator(queue, persistence);
+  const first = await coordinator.flush();
+  assert.equal(JSON.parse(encoded).snapshot_digest, first.snapshot_digest);
+  const stale = new AutonomousConnectorWorkQueuePersistenceCoordinator(new InMemoryAutonomousConnectorWorkQueue(fixtureData.operationRegistry), persistence);
+  await assert.rejects(() => stale.flush(), /compare-and-swap/);
+  const restored = new AutonomousConnectorWorkQueuePersistenceCoordinator(new InMemoryAutonomousConnectorWorkQueue(fixtureData.operationRegistry), persistence);
+  const receipt = await restored.restore();
+  assert.equal(receipt.items, 1);
+  encoded = "{invalid";
+  await assert.rejects(() => persistence.read(), /invalid/);
 });
 
 test("the worker rehydrates plans and requests, invokes once, handles replay, and reconciles missing state", async () => {

@@ -347,6 +347,16 @@ export interface AutonomousConnectorWorkQueueSnapshot extends JsonObject {
 export interface AutonomousConnectorWorkQueuePersistence {
   read(): Promise<AutonomousConnectorWorkQueueSnapshot | null> | AutonomousConnectorWorkQueueSnapshot | null;
   write(snapshot: AutonomousConnectorWorkQueueSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousConnectorWorkQueueSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousConnectorWorkQueueSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousConnectorWorkQueueTransactionalSnapshotTextStore extends AutonomousConnectorWorkQueueSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 function workItemPayload(item: AutonomousConnectorWorkItem): JsonObject {
@@ -616,23 +626,78 @@ export class InMemoryAutonomousConnectorWorkQueue {
 }
 
 export class AutonomousConnectorWorkQueuePersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly queue: InMemoryAutonomousConnectorWorkQueue, readonly persistence: AutonomousConnectorWorkQueuePersistence) {
     if (!(queue instanceof InMemoryAutonomousConnectorWorkQueue)) throw new ArgumentError("autonomous connector work persistence requires a typed queue");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("autonomous connector work persistence adapter is malformed");
   }
 
   async restore(): Promise<{ status: "empty" | "restored"; snapshot_digest: string | null; items: number }> {
-    const snapshot = await this.persistence.read();
-    if (snapshot === null) return { status: "empty", snapshot_digest: null, items: 0 };
-    this.queue.restore(snapshot);
-    const verified = this.queue.verifyIntegrity();
-    return { status: "restored", snapshot_digest: snapshot.snapshot_digest, items: verified.items };
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot === null) {
+        this.expectedSnapshotDigest = null;
+        return { status: "empty", snapshot_digest: null, items: 0 };
+      }
+      this.queue.restore(snapshot);
+      const verified = this.queue.verifyIntegrity();
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return { status: "restored", snapshot_digest: snapshot.snapshot_digest, items: verified.items };
+    });
   }
 
   async flush(): Promise<AutonomousConnectorWorkQueueSnapshot> {
-    const snapshot = this.queue.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = this.queue.snapshot();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("connector work persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+export class JsonAutonomousConnectorWorkQueueSnapshotPersistence implements AutonomousConnectorWorkQueuePersistence {
+  constructor(readonly textStore: AutonomousConnectorWorkQueueSnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("connector work text store is malformed");
+  }
+
+  async read(): Promise<AutonomousConnectorWorkQueueSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (bytes(encoded) > MAX_AUTONOMOUS_CONNECTOR_WORK_SNAPSHOT_BYTES) throw new ArgumentError("connector work JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("connector work JSON is invalid"); }
+    if (!isObject(parsed)) throw new ArgumentError("connector work JSON must be an object");
+    return parsed as unknown as AutonomousConnectorWorkQueueSnapshot;
+  }
+
+  async write(snapshot: AutonomousConnectorWorkQueueSnapshot): Promise<void> {
+    await this.textStore.write(canonicalJson(snapshot));
+  }
+}
+
+export class TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence extends JsonAutonomousConnectorWorkQueueSnapshotPersistence {
+  declare readonly textStore: AutonomousConnectorWorkQueueTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousConnectorWorkQueueTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("connector work text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousConnectorWorkQueueSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !/^[0-9a-f]{64}$/.test(expectedSnapshotDigest)) throw new ArgumentError("connector work expected snapshot digest is invalid");
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(snapshot));
   }
 }
 

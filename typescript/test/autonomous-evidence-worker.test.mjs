@@ -12,6 +12,7 @@ import {
   buildAutonomousEvidencePlan,
   builtinAutonomousDomainProfiles,
   digestJsonSync,
+  TransactionalJsonAutonomousEvidenceWorkQueueSnapshotPersistence,
 } from "../dist/index.js";
 
 function requestFor(requirement, index = 0) {
@@ -124,6 +125,35 @@ test("worker leases are fenced and queue snapshots refuse tampering", async () =
   const tampered = { ...snapshot, items: snapshot.items.map((row) => ({ ...row, source_id: "tampered" })) };
   assert.throws(() => new InMemoryAutonomousEvidenceWorkQueue().restore(tampered), /snapshot digest is invalid/);
   assert.throws(() => queue.requeue(item.work_id, 4_070), /not waiting/);
+});
+
+test("evidence work queue JSON persistence fences stale workers", async () => {
+  const plan = await singleDomainPlan("evaluation");
+  const request = requestFor(plan.requirements[0]);
+  const queue = new InMemoryAutonomousEvidenceWorkQueue();
+  queue.enqueue({ workId: "persisted-evidence", plan, request, now: 4_500 });
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (observed !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousEvidenceWorkQueueSnapshotPersistence(textStore);
+  const coordinator = new AutonomousEvidenceWorkQueuePersistenceCoordinator(queue, persistence);
+  const first = await coordinator.flush();
+  assert.equal(JSON.parse(encoded).snapshot_digest, first.snapshot_digest);
+  const stale = new AutonomousEvidenceWorkQueuePersistenceCoordinator(new InMemoryAutonomousEvidenceWorkQueue(), persistence);
+  await assert.rejects(() => stale.flush(), /compare-and-swap/);
+  const restored = new AutonomousEvidenceWorkQueuePersistenceCoordinator(new InMemoryAutonomousEvidenceWorkQueue(), persistence);
+  const receipt = await restored.restore();
+  assert.equal(receipt.items, 1);
+  encoded = "{invalid";
+  await assert.rejects(() => persistence.read(), /invalid/);
 });
 
 test("worker identity rehydration failures quarantine work instead of reacquiring", async () => {

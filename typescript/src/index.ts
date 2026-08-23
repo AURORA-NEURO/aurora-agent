@@ -1176,12 +1176,16 @@ export {
   AutonomousEvidenceWorkQueuePersistenceCoordinator,
   AutonomousEvidenceWorker,
   InMemoryAutonomousEvidenceWorkQueue,
+  JsonAutonomousEvidenceWorkQueueSnapshotPersistence,
+  TransactionalJsonAutonomousEvidenceWorkQueueSnapshotPersistence,
 } from "./autonomous-evidence-worker.js";
 export type {
   AutonomousEvidenceWorkFailureClass,
   AutonomousEvidenceWorkItem,
   AutonomousEvidenceWorkQueuePersistence,
   AutonomousEvidenceWorkQueueSnapshot,
+  AutonomousEvidenceWorkQueueSnapshotTextStore,
+  AutonomousEvidenceWorkQueueTransactionalSnapshotTextStore,
   AutonomousEvidenceWorkRehydration,
   AutonomousEvidenceWorkRehydrator,
   AutonomousEvidenceWorkerRow,
@@ -1502,6 +1506,8 @@ export {
   AutonomousConnectorWorkQueuePersistenceCoordinator,
   AutonomousConnectorWorker,
   InMemoryAutonomousConnectorFeedbackLedger,
+  JsonAutonomousConnectorWorkQueueSnapshotPersistence,
+  TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence,
 } from "./autonomous-connector-worker.js";
 export type {
   AutonomousConnectorWorkStatus,
@@ -1510,6 +1516,8 @@ export type {
   AutonomousConnectorWorkItem,
   AutonomousConnectorWorkQueueSnapshot,
   AutonomousConnectorWorkQueuePersistence,
+  AutonomousConnectorWorkQueueSnapshotTextStore,
+  AutonomousConnectorWorkQueueTransactionalSnapshotTextStore,
   AutonomousConnectorWorkRehydration,
   AutonomousConnectorWorkRehydrator,
   AutonomousConnectorWorkerRow,
