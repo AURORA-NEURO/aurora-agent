@@ -13,6 +13,7 @@ export const AUTONOMOUS_GOAL_MAX_GOALS = 4_096;
 export const AUTONOMOUS_GOAL_MAX_EVENTS = 16_384;
 export const AUTONOMOUS_GOAL_MAX_CRITERIA = 64;
 export const AUTONOMOUS_GOAL_MAX_BLOCKERS = 32;
+export const AUTONOMOUS_GOAL_MAX_SNAPSHOT_BYTES = 4_000_000;
 
 export type AutonomousGoalStatus = "ready" | "running" | "paused" | "blocked" | "failed" | "completed" | "cancelled";
 export type AutonomousGoalCriterionStatus = "pending" | "satisfied" | "failed" | "waived";
@@ -108,6 +109,16 @@ export interface AutonomousGoalSnapshot extends JsonObject {
 export interface AutonomousGoalPersistence {
   read(): AutonomousGoalSnapshot | null | Promise<AutonomousGoalSnapshot | null>;
   write(snapshot: AutonomousGoalSnapshot): void | Promise<void>;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousGoalSnapshot): boolean | Promise<boolean>;
+}
+
+export interface AutonomousGoalTextStore {
+  read(): string | null | Promise<string | null>;
+  write(value: string): void | Promise<void>;
+}
+
+export interface AutonomousGoalTransactionalTextStore extends AutonomousGoalTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): boolean | Promise<boolean>;
 }
 
 function identifier(value: unknown, name: string): string {
@@ -367,27 +378,41 @@ export class InMemoryAutonomousGoalLedger {
 
   verifyIntegrity(): JsonObject {
     let previous = "";
+    const latestByGoal = new Map<string, string>();
     for (let index = 0; index < this.events.length; index += 1) {
       const event = this.events[index]!;
+      if (event.schema !== AUTONOMOUS_GOAL_EVENT_SCHEMA || !["created", "transition"].includes(event.event_type) || event.retention !== AUTONOMOUS_GOAL_RETENTION || event.secret_material !== "never_returned" || event.goal_id !== event.payload.goal_id) throw new ArgumentError(`goal event metadata is malformed at sequence ${event.sequence}`);
+      verifyRecord(event.payload);
+      if ((event.event_type === "created" && latestByGoal.has(event.goal_id)) || (event.event_type === "transition" && !latestByGoal.has(event.goal_id))) throw new ArgumentError(`goal event lifecycle is malformed for ${event.goal_id}`);
       const { event_digest: _eventDigest, ...body } = event;
       if (event.sequence !== index + 1 || event.previous_digest !== previous || digestJsonSync(eventBody(body)) !== event.event_digest) throw new ArgumentError(`goal event hash chain breaks at sequence ${event.sequence}`);
       if (!this.goals.has(event.goal_id)) throw new ArgumentError(`goal event references missing goal ${event.goal_id}`);
+      latestByGoal.set(event.goal_id, event.payload.state_digest);
       previous = event.event_digest;
     }
-    for (const goal of this.goals.values()) verifyRecord(goal);
+    for (const goal of this.goals.values()) {
+      verifyRecord(goal);
+      if (latestByGoal.get(goal.goal_id) !== goal.state_digest) throw new ArgumentError(`goal current state is not bound to its latest event for ${goal.goal_id}`);
+    }
     return { schema: AUTONOMOUS_GOAL_EVENT_SCHEMA, ok: true, goals: this.goals.size, events: this.events.length, head_digest: previous, retention: AUTONOMOUS_GOAL_RETENTION, secret_material: "never_returned" };
   }
 
   snapshot(): AutonomousGoalSnapshot {
     const body = { schema: AUTONOMOUS_GOAL_SNAPSHOT_SCHEMA, sequence: this.events.length, head_digest: this.events.at(-1)?.event_digest ?? "", goals: [...this.goals.values()].sort((left, right) => left.goal_id.localeCompare(right.goal_id)).map(clone), events: this.events.map(clone), retention: AUTONOMOUS_GOAL_RETENTION, secret_material: "never_returned" as const };
-    return { ...body, snapshot_digest: digestJsonSync(body) };
+    const snapshot = { ...body, snapshot_digest: digestJsonSync(body) };
+    if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > AUTONOMOUS_GOAL_MAX_SNAPSHOT_BYTES) throw new ArgumentError("goal snapshot exceeds its byte bound");
+    return snapshot;
   }
 
   restore(snapshot: AutonomousGoalSnapshot): void {
     if (!isObject(snapshot) || snapshot.schema !== AUTONOMOUS_GOAL_SNAPSHOT_SCHEMA || !Array.isArray(snapshot.goals) || !Array.isArray(snapshot.events)) throw new ArgumentError("goal snapshot is malformed");
+    const allowed = new Set(["schema", "sequence", "head_digest", "goals", "events", "snapshot_digest", "retention", "secret_material"]);
+    if (Object.keys(snapshot).some((key) => !allowed.has(key)) || snapshot.retention !== AUTONOMOUS_GOAL_RETENTION || snapshot.secret_material !== "never_returned") throw new ArgumentError("goal snapshot contains unsupported or unsafe metadata");
+    if (!Number.isSafeInteger(snapshot.sequence) || snapshot.sequence < 0 || snapshot.sequence !== snapshot.events.length || snapshot.events.length > this.maxEvents || snapshot.goals.length > this.maxGoals) throw new ArgumentError("goal snapshot sequence or capacity is invalid");
+    if (typeof snapshot.head_digest !== "string" || (snapshot.sequence > 0 && !/^[0-9a-f]{64}$/.test(snapshot.head_digest)) || (snapshot.sequence === 0 && snapshot.head_digest !== "")) throw new ArgumentError("goal snapshot head digest is invalid");
     const { snapshot_digest: supplied, ...body } = snapshot;
-    if (typeof supplied !== "string" || digestJsonSync(body) !== supplied) throw new ArgumentError("goal snapshot digest mismatch");
-    if (snapshot.goals.length > this.maxGoals || snapshot.events.length > this.maxEvents) throw new ArgumentError("goal snapshot exceeds ledger capacity");
+    if (typeof supplied !== "string" || !/^[0-9a-f]{64}$/.test(supplied) || digestJsonSync(body) !== supplied) throw new ArgumentError("goal snapshot digest mismatch");
+    if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > AUTONOMOUS_GOAL_MAX_SNAPSHOT_BYTES) throw new ArgumentError("goal snapshot exceeds its byte bound");
     const restored = new InMemoryAutonomousGoalLedger({ maxGoals: this.maxGoals, maxEvents: this.maxEvents, clock: this.clock });
     for (const value of snapshot.goals) {
       const goal = verifyRecord(value);
@@ -413,20 +438,106 @@ export class InMemoryAutonomousGoalLedger {
 }
 
 export class AutonomousGoalPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly ledger: InMemoryAutonomousGoalLedger, readonly persistence: AutonomousGoalPersistence) {
     if (!ledger || typeof ledger.snapshot !== "function" || typeof ledger.restore !== "function") throw new ArgumentError("goal ledger is malformed");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("goal persistence is malformed");
   }
 
   async restore(): Promise<AutonomousGoalSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot) this.ledger.restore(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = validateAutonomousGoalSnapshot(raw);
+      this.ledger.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
   }
 
   async flush(): Promise<AutonomousGoalSnapshot> {
-    const snapshot = this.ledger.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = validateAutonomousGoalSnapshot(this.ledger.snapshot());
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("goal persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
   }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+/** Validate a goal restart image without mutating a caller's live ledger. */
+export function validateAutonomousGoalSnapshot(raw: unknown): AutonomousGoalSnapshot {
+  if (!isObject(raw) || raw.schema !== AUTONOMOUS_GOAL_SNAPSHOT_SCHEMA || !Array.isArray(raw.goals) || !Array.isArray(raw.events)) throw new ArgumentError("goal snapshot is malformed");
+  const snapshot = raw as unknown as AutonomousGoalSnapshot;
+  const allowed = new Set(["schema", "sequence", "head_digest", "goals", "events", "snapshot_digest", "retention", "secret_material"]);
+  if (Object.keys(raw).some((key) => !allowed.has(key)) || snapshot.retention !== AUTONOMOUS_GOAL_RETENTION || snapshot.secret_material !== "never_returned") throw new ArgumentError("goal snapshot contains unsupported or unsafe metadata");
+  if (!Number.isSafeInteger(snapshot.sequence) || snapshot.sequence < 0 || snapshot.sequence !== snapshot.events.length || snapshot.goals.length > AUTONOMOUS_GOAL_MAX_GOALS || snapshot.events.length > AUTONOMOUS_GOAL_MAX_EVENTS) throw new ArgumentError("goal snapshot sequence or capacity is invalid");
+  if (typeof snapshot.snapshot_digest !== "string" || !/^[0-9a-f]{64}$/.test(snapshot.snapshot_digest)) throw new ArgumentError("goal snapshot digest is malformed");
+  const { snapshot_digest: _snapshotDigest, ...body } = snapshot;
+  if (digestJsonSync(body) !== snapshot.snapshot_digest) throw new ArgumentError("goal snapshot digest mismatch");
+  if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > AUTONOMOUS_GOAL_MAX_SNAPSHOT_BYTES) throw new ArgumentError("goal snapshot exceeds its byte bound");
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: AUTONOMOUS_GOAL_MAX_GOALS, maxEvents: AUTONOMOUS_GOAL_MAX_EVENTS });
+  ledger.restore(snapshot);
+  return clone(ledger.snapshot());
+}
+
+/** Strict JSON persistence for goal ledgers. */
+export class JsonAutonomousGoalPersistence implements AutonomousGoalPersistence {
+  constructor(readonly textStore: AutonomousGoalTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("goal text store is malformed");
+  }
+
+  async read(): Promise<AutonomousGoalSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_GOAL_MAX_SNAPSHOT_BYTES) throw new ArgumentError("goal JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("goal JSON is invalid"); }
+    return validateAutonomousGoalSnapshot(parsed);
+  }
+
+  async write(snapshot: AutonomousGoalSnapshot): Promise<void> {
+    const validated = validateAutonomousGoalSnapshot(snapshot);
+    await this.textStore.write(canonicalJson(validated));
+  }
+}
+
+/** JSON persistence with compare-and-swap support for multi-writer goal handoffs. */
+export class TransactionalJsonAutonomousGoalPersistence extends JsonAutonomousGoalPersistence {
+  declare readonly textStore: AutonomousGoalTransactionalTextStore;
+
+  constructor(textStore: AutonomousGoalTransactionalTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("goal text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousGoalSnapshot): Promise<boolean> {
+    const validated = validateAutonomousGoalSnapshot(snapshot);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(validated));
+  }
+}
+
+/** Browser-compatible goal persistence; callers choose the storage lifetime and encryption. */
+export class WebStorageAutonomousGoalTextStore implements AutonomousGoalTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("goal Web Storage adapter is malformed");
+    identifier(key, "goal storage key");
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
 }

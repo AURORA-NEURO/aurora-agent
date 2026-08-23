@@ -9,10 +9,15 @@ import {
   CredentialStore,
   InMemoryAutonomousCycleReplanStateStore,
   InMemoryAutonomousGoalLedger,
+  JsonAutonomousGoalPersistence,
   LLMRuntime,
+  TransactionalJsonAutonomousGoalPersistence,
+  WebStorageAutonomousGoalTextStore,
   builtinAutonomousDomainProfiles,
+  digestJsonSync,
   goalTaskDigest,
   openaiCompatibleProvider,
+  validateAutonomousGoalSnapshot,
 } from "../dist/index.js";
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {
@@ -240,4 +245,64 @@ test("goal digest and state identity match the Python reference contract", () =>
   });
   assert.equal(goalTaskDigest("parity task"), "75c9dd12cec986f5aa50dcab2416229220e8c2b3e28283c550fb7fad9c8d9841");
   assert.equal(record.state_digest, "553312b08e201b99e81f39761bec11ed2127a9b7873f8e07859d867cdd1912cc");
+});
+
+test("goal JSON persistence round-trips through browser storage and rejects unsafe snapshots", async () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  const browserPersistence = new JsonAutonomousGoalPersistence(new WebStorageAutonomousGoalTextStore(storage, "aurora-goals"));
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 7 });
+  ledger.create({ goal_id: "browser-goal", task_digest: goalTaskDigest("browser persistence"), domain: "operations" });
+  ledger.transition("browser-goal", "running", { expected_revision: 0, now_ns: 8 });
+  const snapshot = ledger.snapshot();
+  await browserPersistence.write(snapshot);
+  assert.deepEqual(await browserPersistence.read(), snapshot);
+
+  const inconsistent = structuredClone(snapshot);
+  inconsistent.goals[0] = structuredClone(inconsistent.events[0].payload);
+  const { snapshot_digest: _snapshotDigest, ...snapshotBody } = inconsistent;
+  inconsistent.snapshot_digest = digestJsonSync(snapshotBody);
+  assert.throws(() => validateAutonomousGoalSnapshot(inconsistent), /current state is not bound to its latest event/);
+
+  const unsafe = structuredClone(snapshot);
+  unsafe.api_key = "must never be persisted";
+  assert.throws(() => validateAutonomousGoalSnapshot(unsafe), /unsupported or unsafe metadata/);
+  const malformed = structuredClone(snapshot);
+  malformed.events[0].payload.secret_material = "accidentally-retained";
+  await assert.rejects(() => browserPersistence.write(malformed), /goal snapshot digest mismatch/);
+});
+
+test("transactional goal persistence fences stale writers after restart", async () => {
+  let encoded = null;
+  const store = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expectedDigest, value) => {
+      const observedDigest = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (observedDigest !== expectedDigest) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousGoalPersistence(store);
+  const primary = new InMemoryAutonomousGoalLedger({ clock: () => 10 });
+  primary.create({ goal_id: "cas-goal", task_digest: goalTaskDigest("compare and swap"), domain: "coding" });
+  const primaryCoordinator = new AutonomousGoalPersistenceCoordinator(primary, persistence);
+  await primaryCoordinator.flush();
+
+  const stale = new InMemoryAutonomousGoalLedger({ clock: () => 11 });
+  const staleCoordinator = new AutonomousGoalPersistenceCoordinator(stale, persistence);
+  await staleCoordinator.restore();
+  primary.transition("cas-goal", "running", { expected_revision: 0, now_ns: 12 });
+  await primaryCoordinator.flush();
+  await assert.rejects(() => staleCoordinator.flush(), /compare-and-swap conflict/);
+
+  const recovered = new InMemoryAutonomousGoalLedger({ clock: () => 13 });
+  const recoveredCoordinator = new AutonomousGoalPersistenceCoordinator(recovered, persistence);
+  await recoveredCoordinator.restore();
+  assert.equal(recovered.get("cas-goal").status, "running");
+  assert.equal(recovered.verifyIntegrity().ok, true);
 });

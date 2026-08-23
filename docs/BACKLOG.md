@@ -71,6 +71,15 @@ statistics plus credited evaluator outcome digests. This persists adaptation met
 persisting prompts, provider output, credentials, or evidence; evaluator authority, reward quality,
 and multi-process storage ownership remain deployment concerns.
 
+The objective layer now has the same restart discipline. Goal snapshots are strictly allow-listed,
+canonical-digest validated, hash-chain checked, retention checked, and bounded before restore;
+`JsonAutonomousGoalPersistence`, `TransactionalJsonAutonomousGoalPersistence`, and
+`WebStorageAutonomousGoalTextStore` provide portable JSON, CAS-fenced, and browser storage seams.
+The coordinator remembers the restored snapshot digest and rejects stale writers, so a restarted
+worker cannot overwrite a newer goal lifecycle or evaluator/learning projection. Only value-only
+goal state is persisted; prompts, provider outputs, tool arguments, evidence bodies, credentials,
+and approval authority remain outside the SDK, and deployment still owns the backing store.
+
 The evidence handoff now preserves that same identity explicitly. Portfolio evidence checkpoints
 use schema `0.2` and carry the nullable provider admission digest; `requireAdmission: true`
 refuses resumable evidence execution without a reviewed admission before journal replay or

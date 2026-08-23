@@ -4127,6 +4127,17 @@ text and specialist/synthesis outputs remain caller-owned and transient. The rec
 separate outcome, evaluator, learning-state, and progress digests, allowing an evaluator or bandit
 controller to be reconciled after restart without treating provider success as task quality.
 
+The TypeScript goal ledger also has a strict restart/persistence boundary. `validateAutonomousGoalSnapshot()`
+checks the schema allow-list, retention marker, event sequence, hash-chain head, record identities,
+snapshot digest, and the four-megabyte canonical byte limit before a caller's live ledger is touched.
+`JsonAutonomousGoalPersistence` provides a dependency-free canonical JSON adapter,
+`WebStorageAutonomousGoalTextStore` makes the same contract usable in browser storage, and
+`TransactionalJsonAutonomousGoalPersistence` adds an atomic compare-and-swap handoff for multiple
+workers. `AutonomousGoalPersistenceCoordinator` serializes local operations, remembers the restored
+snapshot digest, and rejects stale flushes instead of silently overwriting a newer goal state. These
+adapters persist lifecycle/evaluator/learning digests only: they do not persist prompts, provider
+responses, tool arguments, evidence bodies, credentials, or approval authority.
+
 ## Resumable learning jobs
 
 For work that must survive a worker restart, `BrainJobStore` adds a separate orchestration journal.
