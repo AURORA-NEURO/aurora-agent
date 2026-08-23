@@ -191,6 +191,8 @@ async function runPolicyDigest(options: AutonomousEvidenceBackedResumableExecuti
     structured_domain_response: run.structuredDomainResponse ?? false,
     temperature: run.temperature ?? null,
     authorize_and_execute: run.authorizeAndExecute !== undefined,
+    evidence_checkpointed: options.evidenceCheckpointStore !== undefined,
+    evidence_job_id: options.evidenceJobId ?? null,
   });
 }
 

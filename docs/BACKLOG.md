@@ -90,6 +90,11 @@ credentials, and provider payloads remain caller-owned.
 `AutonomousAgent.executeReviewedEvidenceResumable()` exposes this lifecycle without forcing
 applications to construct the lower-level controller themselves.
 
+The existing evidence-to-provider resumable controller can now opt into the same source
+checkpoint with `evidenceCheckpointStore` and `evidenceJobId`. Provider approval may therefore
+pause after source completion, while a restart rehydrates the source journal and proves zero
+duplicate source dispatch before the provider boundary is separately resumed or reapproved.
+
 Evidence routing now also has a reviewed execution controller. The TypeScript
 `AutonomousEvidenceExecutionController` binds the evidence plan, selection, readiness image,
 retry policy, and explicit failover budget into one reviewable plan; execution revalidates the

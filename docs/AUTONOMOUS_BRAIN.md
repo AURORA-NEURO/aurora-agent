@@ -4635,6 +4635,28 @@ execution-plan, prompt, selection, response, and result digests without retainin
 is the intended high-level composition for all twelve domains; it still does not infer that source
 retrieval, evaluator acceptance, model completion, or HTTP success proves task correctness.
 
+The high-level run can additionally persist the source boundary alongside the provider boundary
+by supplying `evidenceCheckpointStore` and a stable `evidenceJobId` in the reviewed run options.
+This is opt-in because the caller must provide the matching journal and raw-value rehydrator on a
+restart. `evidenceResumeAfterReconciliation: true` is an explicit retry decision after an uncertain
+source dispatch; it is never inferred from a provider or transport exception:
+
+```typescript
+const result = await agent.runWithReviewedEvidence(task, {
+  registry: adapters,
+  requests,
+  evidenceCheckpointStore: sourceCheckpointStore,
+  evidenceJobId: "job-42-source",
+  execute: { approveSourceDispatch: true, journal, rehydrateValue },
+  run: { candidates, approveProviderCall: true },
+});
+```
+
+`AutonomousEvidenceBackedController` composes this source checkpoint with its existing provider
+checkpoint. Provider approval may pause after source completion; resuming with the same source
+checkpoint and caller-owned journal replays evidence metadata without a second source dispatch,
+then applies the provider's separate rehydration or approval decision.
+
 For process-restart recovery, use `runAutonomousEvidenceBackedResumable()` or the
 `AutonomousEvidenceBackedController`. The controller persists only task/request/policy/plan,
 evidence, prompt, and provider-result digests. The caller supplies the same evidence journal and

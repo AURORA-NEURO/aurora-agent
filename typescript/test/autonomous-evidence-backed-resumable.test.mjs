@@ -9,6 +9,7 @@ import {
   InMemoryAutonomousEvidenceRuntimeJournal,
   AutonomousEvidenceBackedController,
   CredentialStore,
+  InMemoryAutonomousEvidenceExecutionCheckpointStore,
   InMemoryAutonomousEvidenceBackedCheckpointStore,
   JsonAutonomousEvidenceBackedCheckpointStore,
   LLMRuntime,
@@ -112,6 +113,9 @@ async function optionsFor(agent, registry, domain, journal, overrides = {}) {
     }],
     rehydrateProviderRun: overrides.rehydrateProviderRun,
     resumeProvider: overrides.resumeProvider,
+    evidenceCheckpointStore: overrides.evidenceCheckpointStore,
+    evidenceJobId: overrides.evidenceJobId,
+    evidenceResumeAfterReconciliation: overrides.evidenceResumeAfterReconciliation,
   };
 }
 
@@ -171,6 +175,47 @@ test("provider-pending checkpoints require explicit resume approval and never re
 
   const resumed = await controller.run("Pause before a provider call and resume explicitly.", await optionsFor(agent, registry, domain, journal, {
     execute: { rehydrateValue: (receipt) => values[receipt.request_digest] ?? null },
+    resumeProvider: true,
+  }));
+  assert.equal(resumed.run.status, "completed");
+  assert.equal(resumed.run.result.status, "completed");
+  assert.equal(calls.evidence, sourceCalls);
+  assert.equal(calls.provider, 1);
+});
+
+test("provider checkpoint composition reuses the source checkpoint and never redispatches settled evidence", async () => {
+  const { agent, registry, calls } = await setup();
+  const domain = "coding";
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const sourceCheckpointStore = new InMemoryAutonomousEvidenceExecutionCheckpointStore();
+  const providerCheckpointStore = new InMemoryAutonomousEvidenceBackedCheckpointStore();
+  const controller = new AutonomousEvidenceBackedController(agent, "composed-evidence-brain-job", providerCheckpointStore);
+
+  const first = await controller.run("Pause after reviewed evidence before provider invocation.", await optionsFor(agent, registry, domain, journal, {
+    run: { approveProviderCall: false },
+    evidenceCheckpointStore: sourceCheckpointStore,
+    evidenceJobId: "composed-evidence-source-job",
+  }));
+  assert.equal(first.run.status, "provider_pending");
+  assert.equal(first.run.result.status, "approval_required");
+  assert.equal(sourceCheckpointStore.read().status, "completed");
+  const sourceCalls = calls.evidence;
+  const rawValues = first.run.result.evidence.runtime.values;
+  assert.equal(calls.provider, 0);
+
+  const pending = await controller.run("Pause after reviewed evidence before provider invocation.", await optionsFor(agent, registry, domain, journal, {
+    execute: { rehydrateValue: (receipt) => rawValues[receipt.request_digest] ?? null },
+    evidenceCheckpointStore: sourceCheckpointStore,
+    evidenceJobId: "composed-evidence-source-job",
+  }));
+  assert.equal(pending.run.status, "provider_pending");
+  assert.equal(calls.evidence, sourceCalls);
+  assert.equal(calls.provider, 0);
+
+  const resumed = await controller.run("Pause after reviewed evidence before provider invocation.", await optionsFor(agent, registry, domain, journal, {
+    execute: { rehydrateValue: (receipt) => rawValues[receipt.request_digest] ?? null },
+    evidenceCheckpointStore: sourceCheckpointStore,
+    evidenceJobId: "composed-evidence-source-job",
     resumeProvider: true,
   }));
   assert.equal(resumed.run.status, "completed");

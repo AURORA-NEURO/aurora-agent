@@ -849,6 +849,12 @@ export interface AutonomousEvidenceBackedRunOptions {
   providerRunOverride?: AutonomousRunResult;
   /** Permit a provider run when evidence is partial or awaiting evaluator settlement. */
   allowIncompleteEvidence?: boolean;
+  /** Optional job-level source checkpoint; source approval and provider approval remain separate. */
+  evidenceCheckpointStore?: AutonomousEvidenceExecutionCheckpointStore;
+  /** Required when evidenceCheckpointStore is configured; stable caller-owned source job identity. */
+  evidenceJobId?: string;
+  /** Explicitly resolve an uncertain source-dispatch checkpoint before retrying. */
+  evidenceResumeAfterReconciliation?: boolean;
 }
 
 export interface AutonomousEvidenceBackedRunProjection extends JsonObject {
@@ -4242,6 +4248,9 @@ export class AutonomousAgent {
     if (!options || typeof options !== "object") throw new ArgumentError("evidence-backed run options are malformed");
     if (!(options.registry instanceof (await import("./autonomous-evidence-adapters.js")).AutonomousEvidenceAdapterRegistry)) throw new ArgumentError("evidence-backed run requires a typed adapter registry");
     if (!Array.isArray(options.requests) || options.requests.length < 1) throw new ArgumentError("evidence-backed run requires acquisition requests");
+    if (options.evidenceCheckpointStore !== undefined && (!options.evidenceCheckpointStore || typeof options.evidenceCheckpointStore.read !== "function" || typeof options.evidenceCheckpointStore.write !== "function")) throw new ArgumentError("evidence-backed source checkpoint store is malformed");
+    if (options.evidenceCheckpointStore !== undefined && (typeof options.evidenceJobId !== "string" || !options.evidenceJobId.trim())) throw new ArgumentError("evidence-backed source checkpoint requires evidenceJobId");
+    if (options.evidenceCheckpointStore === undefined && options.evidenceJobId !== undefined) throw new ArgumentError("evidence-backed evidenceJobId requires evidenceCheckpointStore");
     const taskText = boundedText("evidence-backed autonomous task", task, 32_000);
     const taskDigest = await digestJson({ task: taskText });
     const domains = options.domains ?? AUTONOMOUS_DOMAIN_NAMES;
@@ -4297,9 +4306,24 @@ export class AutonomousAgent {
       };
     };
 
-    if (executeOptions.approveSourceDispatch !== true) return finish("evidence_review_required", null, [], null);
-    if (executionPlan.status !== "ready_for_review") return finish("evidence_blocked", null, [], null);
-    const evidence = await controller.execute(executionPlan, plan, options.requests, executeOptions);
+    let evidence: AutonomousEvidenceExecutionResult | null = null;
+    if (options.evidenceCheckpointStore !== undefined) {
+      const { AutonomousEvidenceExecutionResumableController } = await import("./autonomous-evidence-execution-resumable.js");
+      const resumable = new AutonomousEvidenceExecutionResumableController(controller, options.evidenceCheckpointStore, options.evidenceJobId!);
+      const sourceRun = await resumable.run(executionPlan, plan, options.requests, {
+        ...executeOptions,
+        resumeAfterReconciliation: options.evidenceResumeAfterReconciliation,
+      });
+      if (sourceRun.result === null) {
+        const status: AutonomousEvidenceBackedRunStatus = sourceRun.status === "approval_required" ? "evidence_review_required" : sourceRun.status === "blocked" ? "evidence_blocked" : "evidence_failed";
+        return finish(status, null, [], null);
+      }
+      evidence = sourceRun.result;
+    } else {
+      if (executeOptions.approveSourceDispatch !== true) return finish("evidence_review_required", null, [], null);
+      if (executionPlan.status !== "ready_for_review") return finish("evidence_blocked", null, [], null);
+      evidence = await controller.execute(executionPlan, plan, options.requests, executeOptions);
+    }
     if (evidence.status !== "completed" && options.allowIncompleteEvidence !== true) {
       return finish(evidenceBackedStatus(evidence.status), evidence, [], null);
     }
