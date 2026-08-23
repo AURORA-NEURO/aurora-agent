@@ -23,7 +23,7 @@ establish scientific, operational, or biomedical truth by itself.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import math
 from threading import Lock
@@ -64,11 +64,18 @@ from .autonomous_task_decision import (
     AutonomousTaskDecision,
     infer_autonomous_task_decision,
 )
+from .autonomous_domain_response import (
+    AutonomousDomainResponseContract,
+    build_autonomous_domain_response_contract,
+    evaluate_autonomous_domain_response,
+    validate_autonomous_provider_domain_response,
+)
 from .brain import (
     AutonomousBrain,
     BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
     BrainEvaluatorDecision,
     BrainLearningEpisode,
+    BrainLearningCycleResult,
     BrainLearningLedger,
     BrainLearningTrajectory,
     BrainLearningTrajectoryResult,
@@ -3120,6 +3127,7 @@ class AutonomousTaskSpec:
     context: Mapping[str, Any] = None  # type: ignore[assignment]
     max_steps: int = 8
     require_json: bool = False
+    structured_domain_response: bool = False
     response_schema: Mapping[str, Any] | None = None
     execution_mode: str = "provider"
 
@@ -3141,6 +3149,8 @@ class AutonomousTaskSpec:
             raise BrainRunError("autonomous task max_steps must be between 1 and 128")
         if not isinstance(self.require_json, bool):
             raise BrainRunError("autonomous task require_json must be a boolean")
+        if not isinstance(self.structured_domain_response, bool):
+            raise BrainRunError("autonomous task structured_domain_response must be a boolean")
         schema = None if self.response_schema is None else _safe_json("autonomous task response_schema", self.response_schema)
         if schema is not None and not isinstance(schema, Mapping):
             raise BrainRunError("autonomous task response_schema must be an object")
@@ -3170,6 +3180,7 @@ class AutonomousTaskSpec:
             "context_keys": sorted(str(key) for key in self.context),
             "max_steps": self.max_steps,
             "require_json": self.require_json,
+            "structured_domain_response": self.structured_domain_response,
             "response_schema_digest": None if self.response_schema is None else content_digest(self.response_schema),
             "execution_mode": self.execution_mode,
             "retention": "task_text_transient_only",
@@ -3196,6 +3207,8 @@ class AutonomousTaskBlueprint:
     task_intent: AutonomousTaskIntent | None = None
     # Intent-to-action posture; guidance metadata never authorizes execution.
     task_decision: AutonomousTaskDecision | None = None
+    # Digest-bound opt-in response contract for this reviewed workflow.
+    response_contract: AutonomousDomainResponseContract | None = None
 
     def evidence_plan(self) -> AutonomousEvidencePlan:
         """Return the deterministic evidence contract for this blueprint's workflow."""
@@ -3273,6 +3286,19 @@ class AutonomousTaskBlueprint:
                     required_model_capabilities=self.required_capabilities,
                 )
             ).to_dict(),
+            "response_contract": None if self.response_contract is None else {
+                "schema": self.response_contract.schema,
+                "contract_digest": self.response_contract.contract_digest,
+                "domain": self.response_contract.domain,
+                "workflow_id": self.response_contract.workflow_id,
+                "workflow_digest": self.response_contract.workflow_digest,
+                "stage_ids": list(self.response_contract.stage_ids),
+                "domain_fields": list(self.response_contract.domain_fields),
+                "prompt_contract_digest": content_digest(self.response_contract.prompt_contract),
+                "response_schema_digest": content_digest(self.response_contract.response_schema),
+                "retention": self.response_contract.retention,
+                "secret_material": self.response_contract.secret_material,
+            },
             "prompt": prompt_public,
             "plan": plan_public,
             "execution": "not_started",
@@ -6601,6 +6627,31 @@ class AutonomousPromptBuilder:
                 "priority": 996,
             }
         )
+        if spec.structured_domain_response:
+            response_contract = build_autonomous_domain_response_contract(profile, workflow=workflow)
+            context.append(
+                {
+                    "id": "autonomy-domain-response-contract",
+                    "role": "developer",
+                    "content": _json_text(
+                        {
+                            "schema": response_contract.schema,
+                            "contract_digest": response_contract.contract_digest,
+                            "domain": response_contract.domain,
+                            "workflow_id": response_contract.workflow_id,
+                            "workflow_digest": response_contract.workflow_digest,
+                            "stage_ids": list(response_contract.stage_ids),
+                            "domain_fields": list(response_contract.domain_fields),
+                            "prompt_contract": response_contract.prompt_contract,
+                            "response_schema": response_contract.response_schema,
+                            "retention": response_contract.retention,
+                            "secret_material": response_contract.secret_material,
+                        }
+                    ),
+                    "required": True,
+                    "priority": 994,
+                }
+            )
         if domain_pack is not None:
             context.append(
                 {
@@ -8284,6 +8335,7 @@ class AutonomousTaskOrchestrator:
         context: Mapping[str, Any] | None = None,
         max_steps: int = 8,
         require_json: bool = False,
+        structured_domain_response: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         execution_mode: str = "provider",
         max_input_tokens: int = 4_096,
@@ -8314,8 +8366,20 @@ class AutonomousTaskOrchestrator:
             workflow,
             resolved_capability,
         )
+        if not isinstance(structured_domain_response, bool):
+            raise BrainRunError("structured_domain_response must be a boolean")
+        if structured_domain_response and response_schema is not None:
+            raise BrainRunError("structured_domain_response cannot be combined with response_schema")
+        response_contract = (
+            build_autonomous_domain_response_contract(profile, workflow=workflow)
+            if structured_domain_response
+            else None
+        )
+        resolved_require_json = require_json or structured_domain_response
         resolved_response_schema = response_schema
-        if require_json and resolved_response_schema is None:
+        if response_contract is not None:
+            resolved_response_schema = response_contract.response_schema
+        if resolved_require_json and resolved_response_schema is None:
             resolved_response_schema = workflow.response_schema()
         spec = AutonomousTaskSpec(
             task=task,
@@ -8326,7 +8390,8 @@ class AutonomousTaskOrchestrator:
             desired_outputs=tuple(desired_outputs),
             context={} if context is None else context,
             max_steps=max_steps,
-            require_json=require_json,
+            require_json=resolved_require_json,
+            structured_domain_response=structured_domain_response,
             response_schema=resolved_response_schema,
             execution_mode=execution_mode,
         )
@@ -8452,6 +8517,7 @@ class AutonomousTaskOrchestrator:
             task_lens=task_lens,
             task_intent=task_intent,
             task_decision=task_decision,
+            response_contract=response_contract,
         )
 
     def evidence_plan(
@@ -8570,6 +8636,7 @@ class AutonomousTaskOrchestrator:
         risk_class: str | None = None,
         max_steps: int = 8,
         require_json: bool = False,
+        structured_domain_response: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         execution_mode: str = "provider",
         max_input_tokens: int = 4_096,
@@ -8592,6 +8659,7 @@ class AutonomousTaskOrchestrator:
                 context=routed_context,
                 max_steps=max_steps,
                 require_json=require_json,
+                structured_domain_response=structured_domain_response,
                 response_schema=response_schema,
                 execution_mode=execution_mode,
                 max_input_tokens=max_input_tokens,
@@ -8615,6 +8683,7 @@ class AutonomousTaskOrchestrator:
                 "context": routed_context,
                 "max_steps": max_steps,
                 "require_json": require_json,
+                "structured_domain_response": structured_domain_response,
                 "response_schema": response_schema,
                 "execution_mode": execution_mode,
                 "required_model_capabilities": required_model_capabilities,
@@ -8634,6 +8703,7 @@ class AutonomousTaskOrchestrator:
             synthesis_execution_mode=execution_mode,
             max_steps=max_steps,
             require_json=require_json,
+            structured_domain_response=structured_domain_response,
             response_schema=response_schema,
             max_input_tokens=max_input_tokens,
         )
@@ -8655,6 +8725,7 @@ class AutonomousTaskOrchestrator:
         risk_class: str | None = None,
         max_steps: int = 8,
         require_json: bool = False,
+        structured_domain_response: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         execution_mode: str = "provider",
         max_input_tokens: int = 4_096,
@@ -8685,6 +8756,7 @@ class AutonomousTaskOrchestrator:
             risk_class=risk_class,
             max_steps=max_steps,
             require_json=require_json,
+            structured_domain_response=structured_domain_response,
             response_schema=response_schema,
             execution_mode=execution_mode,
             max_input_tokens=max_input_tokens,
@@ -8706,6 +8778,7 @@ class AutonomousTaskOrchestrator:
         risk_class: str | None = None,
         max_steps: int = 8,
         require_json: bool = False,
+        structured_domain_response: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         execution_mode: str = "provider",
         max_input_tokens: int = 4_096,
@@ -8776,6 +8849,7 @@ class AutonomousTaskOrchestrator:
             risk_class=risk_class,
             max_steps=max_steps,
             require_json=require_json,
+            structured_domain_response=structured_domain_response,
             response_schema=response_schema,
             execution_mode=execution_mode,
             max_input_tokens=max_input_tokens,
@@ -8831,6 +8905,7 @@ class AutonomousTaskOrchestrator:
         synthesis_execution_mode: str = "provider",
         max_steps: int = 8,
         require_json: bool = False,
+        structured_domain_response: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         max_input_tokens: int = 4_096,
     ) -> AutonomousCrossDomainBlueprint:
@@ -8858,7 +8933,7 @@ class AutonomousTaskOrchestrator:
         child_ids: list[str] = []
         allowed = {
             "id", "task", "domain", "capability", "risk_class", "constraints", "desired_outputs",
-            "context", "max_steps", "require_json", "response_schema", "execution_mode",
+            "context", "max_steps", "require_json", "structured_domain_response", "response_schema", "execution_mode",
             "required_model_capabilities",
         }
         for index, raw in enumerate(subtasks):
@@ -8893,6 +8968,7 @@ class AutonomousTaskOrchestrator:
                 context=child_context,
                 max_steps=raw.get("max_steps", max_steps),
                 require_json=raw.get("require_json", require_json),
+                structured_domain_response=raw.get("structured_domain_response", structured_domain_response),
                 response_schema=raw.get("response_schema"),
                 execution_mode=raw.get("execution_mode", child_execution_mode),
                 max_input_tokens=max_input_tokens,
@@ -8926,6 +9002,7 @@ class AutonomousTaskOrchestrator:
             context=synthesis_context,
             max_steps=max_steps,
             require_json=require_json,
+            structured_domain_response=structured_domain_response,
             response_schema=response_schema,
             execution_mode=synthesis_execution_mode,
             max_input_tokens=max_input_tokens,
@@ -9057,6 +9134,35 @@ class AutonomousTaskOrchestrator:
         merged.update(generated)
         return merged
 
+    @classmethod
+    def _attach_domain_response_evaluation(
+        cls,
+        blueprint: AutonomousTaskBlueprint,
+        result: Any,
+    ) -> Any:
+        """Validate and score an opt-in structured response at the provider boundary."""
+
+        contract = blueprint.response_contract
+        if contract is None:
+            return result
+        if isinstance(result, BrainLearningCycleResult):
+            attempts = tuple(cls._attach_domain_response_evaluation(blueprint, attempt) for attempt in result.attempts)
+            final_result = cls._attach_domain_response_evaluation(blueprint, result.final_result)
+            return replace(result, attempts=attempts, final_result=final_result)
+        response = cls._workflow_provider_response(result)
+        normalized = validate_autonomous_provider_domain_response(response, contract)
+        if normalized is None:  # pragma: no cover - the contract branch requires a value
+            raise BrainRunError("structured domain response validation returned no response")
+        evaluation = evaluate_autonomous_domain_response(normalized.to_dict(), contract).to_dict()
+        if isinstance(result, BrainRunResult):
+            return replace(result, response_evaluation=evaluation)
+        if isinstance(result, BrainToolLoopResult):
+            return replace(
+                result,
+                brain_run=replace(result.brain_run, response_evaluation=evaluation),
+            )
+        return replace(result, brain_run=replace(result.brain_run, response_evaluation=evaluation))
+
     def _execute(
         self,
         blueprint: AutonomousTaskBlueprint,
@@ -9100,7 +9206,7 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError(f"unsupported autonomous execution mode: {execution_mode!r}")
         effective_mode = "mission" if execution_mode == "provider" and mission_policy is not None else execution_mode
         if effective_mode == "provider":
-            return self.brain.run_adaptive(
+            result = self.brain.run_adaptive(
                 task=blueprint.spec.task,
                 model_candidates=model_candidates,
                 prompt=blueprint.prompt,
@@ -9132,6 +9238,7 @@ class AutonomousTaskOrchestrator:
                 invocation_observer=invocation_observer,
                 trace_event_callback=trace_event_callback,
             )
+            return self._attach_domain_response_evaluation(blueprint, result)
         if effective_mode == "tool_loop":
             if tool_loop_options is not None and not isinstance(tool_loop_options, Mapping):
                 raise BrainRunError("tool_loop_options must be a mapping or None")
@@ -9167,7 +9274,7 @@ class AutonomousTaskOrchestrator:
                 # the built-in mission authorizer, but route evidence must constrain every facade.
                 loop_options["enforce_route_tools"] = enforce_route_tools
                 loop_options["require_resolved_route"] = require_resolved_route
-            return self.brain.run_adaptive_tool_loop(
+            result = self.brain.run_adaptive_tool_loop(
                 task=blueprint.spec.task,
                 model_candidates=model_candidates,
                 prompt=blueprint.prompt,
@@ -9191,6 +9298,7 @@ class AutonomousTaskOrchestrator:
                 invocation_observer=invocation_observer,
                 trace_event_callback=trace_event_callback,
             )
+            return self._attach_domain_response_evaluation(blueprint, result)
         if effective_mode != "mission":
             raise BrainRunError(f"unsupported autonomous execution mode: {effective_mode!r}")
         if mission_policy is None:
@@ -9221,7 +9329,7 @@ class AutonomousTaskOrchestrator:
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
         )
-        return self.brain.run_adaptive_mission(
+        result = self.brain.run_adaptive_mission(
             task=blueprint.spec.task,
             model_candidates=model_candidates,
             prompt=blueprint.prompt,
@@ -9235,6 +9343,7 @@ class AutonomousTaskOrchestrator:
             trace_event_callback=trace_event_callback,
             **options,
         )
+        return self._attach_domain_response_evaluation(blueprint, result)
 
     @staticmethod
     def _append_replan(
@@ -9363,6 +9472,7 @@ class AutonomousTaskOrchestrator:
                 task_lens=blueprint.task_lens,
                 task_intent=blueprint.task_intent,
                 task_decision=blueprint.task_decision,
+                response_contract=blueprint.response_contract,
             )
         else:
             replacement = blueprint
@@ -9958,6 +10068,7 @@ class AutonomousTaskOrchestrator:
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         max_steps: int = 8,
         require_json: bool = False,
+        structured_domain_response: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         execution_mode: str = "provider",
         domain_policy_mode: str = "audit",
@@ -10037,6 +10148,7 @@ class AutonomousTaskOrchestrator:
             context=context,
             max_steps=max_steps,
             require_json=require_json,
+            structured_domain_response=structured_domain_response,
             response_schema=response_schema,
             execution_mode=execution_mode,
             max_input_tokens=input_tokens,
@@ -10205,7 +10317,7 @@ class AutonomousTaskOrchestrator:
                         "max_provider_failovers": max_provider_failovers,
                     }
                 )
-                return finish_learning_trace(self.brain.run_adaptive_mission_learning_cycle(
+                learning_cycle = self.brain.run_adaptive_mission_learning_cycle(
                     task=blueprint.spec.task,
                     model_candidates=model_candidates,
                     prompt=blueprint.prompt,
@@ -10225,7 +10337,10 @@ class AutonomousTaskOrchestrator:
                     execution_controller=execution_controller,
                     invocation_observer=invocation_observer,
                     trace_event_callback=trace_event_callback,
-                ))
+                )
+                return finish_learning_trace(
+                    self._attach_domain_response_evaluation(blueprint, learning_cycle)
+                )
             if bandit_state is None:
                 raise BrainRunError("bandit_state is required when learn=True")
             return finish_learning_trace(self._run_learning_from_blueprint(
@@ -11656,6 +11771,7 @@ class AutonomousTaskOrchestrator:
         synthesis_execution_mode: str = "provider",
         max_steps: int = 8,
         require_json: bool = False,
+        structured_domain_response: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
@@ -11729,6 +11845,7 @@ class AutonomousTaskOrchestrator:
             synthesis_execution_mode=synthesis_execution_mode,
             max_steps=max_steps,
             require_json=require_json,
+            structured_domain_response=structured_domain_response,
             response_schema=response_schema,
             max_input_tokens=input_tokens,
         )
@@ -11774,6 +11891,7 @@ class AutonomousTaskOrchestrator:
                 content_parts=normalized_content_parts,
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
+                structured_domain_response=child.spec.structured_domain_response,
                 response_schema=child.spec.response_schema,
                 execution_mode=child.spec.execution_mode,
                 required_model_capabilities=tuple(
@@ -11884,6 +12002,7 @@ class AutonomousTaskOrchestrator:
             content_parts=normalized_content_parts,
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
+            structured_domain_response=synthesis.spec.structured_domain_response,
             response_schema=synthesis.spec.response_schema,
             execution_mode=synthesis.spec.execution_mode,
             ledger=ledger,
@@ -12000,6 +12119,7 @@ class AutonomousTaskOrchestrator:
         synthesis_execution_mode = take("synthesis_execution_mode", "provider")
         max_steps = take("max_steps", 8)
         require_json = take("require_json", False)
+        structured_domain_response = take("structured_domain_response", False)
         response_schema = take("response_schema", None)
         memory_query = take("memory_query", None)
         memory_limit = take("memory_limit", 8)
@@ -12056,6 +12176,7 @@ class AutonomousTaskOrchestrator:
             synthesis_execution_mode=synthesis_execution_mode,
             max_steps=max_steps,
             require_json=require_json,
+            structured_domain_response=structured_domain_response,
             response_schema=response_schema,
             max_input_tokens=input_tokens,
         )
@@ -12178,6 +12299,7 @@ class AutonomousTaskOrchestrator:
                 content_parts=normalized_content_parts,
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
+                structured_domain_response=child.spec.structured_domain_response,
                 response_schema=child.spec.response_schema,
                 execution_mode=child.spec.execution_mode,
                 required_model_capabilities=tuple(
@@ -12298,6 +12420,7 @@ class AutonomousTaskOrchestrator:
             content_parts=normalized_content_parts,
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
+            structured_domain_response=synthesis.spec.structured_domain_response,
             response_schema=synthesis.spec.response_schema,
             execution_mode=synthesis.spec.execution_mode,
             ledger=ledger,
@@ -12766,6 +12889,7 @@ class AutonomousTaskOrchestrator:
             "synthesis_execution_mode",
             "max_steps",
             "require_json",
+            "structured_domain_response",
             "response_schema",
         ):
             if option_name in kwargs:
@@ -18388,6 +18512,7 @@ class AutonomousAgent:
                 "risk_class",
                 "max_steps",
                 "require_json",
+                "structured_domain_response",
                 "response_schema",
                 "execution_mode",
                 "max_input_tokens",
@@ -18665,6 +18790,10 @@ class AutonomousAgent:
                     )
                 workflow_options = dict(execution_kwargs)
                 workflow_options.pop("context", None)
+                # The reviewed blueprint already carries the response contract; workflow stage
+                # execution uses that contract and must not forward this intake-only option to
+                # the stage runner as an unknown execution kwarg.
+                workflow_options.pop("structured_domain_response", None)
                 workflow_options["accepted_plan_refinement"] = accepted_plan_refinement
                 workflow_options["checkpoint"] = workflow_checkpoint
                 workflow_options["retry_blocked"] = workflow_retry_blocked
@@ -18745,6 +18874,7 @@ class AutonomousAgent:
                     "context": routed_context,
                     "max_steps": kwargs.get("max_steps", 8),
                     "require_json": kwargs.get("require_json", False),
+                    "structured_domain_response": kwargs.get("structured_domain_response", False),
                     "response_schema": kwargs.get("response_schema"),
                     "execution_mode": kwargs.get("execution_mode", "provider"),
                     "required_model_capabilities": kwargs.get("required_model_capabilities", ()),

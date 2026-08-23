@@ -1424,9 +1424,13 @@ class BrainRunResult:
     outcome_digest: str
     provider_failover: Mapping[str, Any] | None = None
     provider_invocations: tuple[Mapping[str, Any], ...] = ()
+    # Optional structural feedback for the opt-in autonomous domain response contract.  The
+    # provider response remains caller-owned; this field contains only value-only evaluation
+    # metadata and is omitted from legacy projections when unused.
+    response_evaluation: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "run_id": self.run_id,
             "status": self.status,
             "selection": dict(self.selection),
@@ -1440,6 +1444,9 @@ class BrainRunResult:
             "execution": "provider_call_only",
             "tool_execution": "not_started",
         }
+        if self.response_evaluation is not None:
+            result["response_evaluation"] = dict(self.response_evaluation)
+        return result
 
 
 @dataclass(frozen=True, slots=True)

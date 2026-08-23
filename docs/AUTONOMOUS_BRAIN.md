@@ -6662,9 +6662,10 @@ without sending an unsupported OpenAI field. This distinction matters for autono
 model discovery and provider configuration can describe capability support, but the runtime still
 owns schema validation and refuses malformed structured output.
 
-The TypeScript agent also exposes an opt-in domain response contract through
-`structuredDomainResponse: true`. It derives a digest-bound schema from the selected workflow for
-all twelve built-in domains. Every response then carries ordered stage results, observations,
+The TypeScript agent and Python agent expose equivalent opt-in domain response contracts through
+`structuredDomainResponse: true` and `structured_domain_response=True`, respectively. Each derives
+a digest-bound schema from the selected workflow for all twelve built-in domains. Every response
+then carries ordered stage results, observations,
 inferences, uncertainty, evidence gaps, next actions, and domain-specific fields such as coding
 verification, browser citations/freshness, data lineage/quality, biomedical provenance/escalation,
 operations blast radius/rollback, or evaluation coverage/replay. The provider capability gate and

@@ -218,6 +218,30 @@ answer = run.result                 # transient caller-owned provider result
 safe_event = run.to_dict()          # no result text, keys, or handles
 ```
 
+For domain-aware structured answers, Python exposes the same twelve-domain response contract as
+the TypeScript SDK through `structured_domain_response=True` on `prepare()`, `run()`,
+`prepare_auto()`, `run_auto()`, and cross-domain execution. The selected workflow is bound into a
+digest-addressed JSON Schema requiring an answer, ordered stage rows, observations, inferences,
+uncertainty, evidence gaps, next actions, and domain-specific detail fields. The provider result
+is validated in memory and remains caller-owned:
+
+```python
+result = agent.run_auto(
+    task="review this change and produce a verifiable handoff",
+    structured_domain_response=True,
+    approve_provider_call=True,
+)
+response = result.result.response.structured  # transient validated value
+evaluation = result.result.response_evaluation  # value-only composition feedback
+```
+
+`response_evaluation` scores contract integrity only—stage/reporting coverage, domain-field
+coverage, uncertainty and evidence-gap disclosure, and next-action coverage. It is not a truth,
+quality, source, or external-effect oracle. `evaluate_autonomous_domain_response()` and
+`replay_autonomous_domain_response_evaluation()` provide deterministic offline scoring and drift
+detection; no provider call or credential is needed for those operations. Credential-shaped fields
+and values are refused before the response can cross into durable learning metadata.
+
 Set `refresh_inventory=True` with explicit `inventory_priors` or an
 `inventory_prior_factory` when deployments should discover and reconcile model arms before the
 task. Inventory failure is raised instead of silently executing against a stale catalogue.
