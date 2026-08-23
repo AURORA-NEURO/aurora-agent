@@ -1620,6 +1620,13 @@ flow. It verifies that the short-lived session belongs to the setup instance and
 opaque provider-scoped handles to discovery; credentialless in-memory providers are handled
 without requiring a synthetic key.
 
+For TypeScript restart workers, use `TransactionalJsonAutonomousModelInventorySnapshotPersistence`
+with a text store that implements `writeIfUnchanged`. The inventory coordinator serializes refresh
+and restore operations, remembers the last `inventory_digest` only after a successful write, and
+requires an explicit restore before a new coordinator can refresh an already-populated CAS store.
+That prevents a process with no restart image from treating its empty local expectation as
+create-if-absent and erasing a newer provider catalogue.
+
 `refresh()` is the only operation that performs provider model discovery. Persistence and
 `restore()` are provider-free, digest-bound catalogue rehydration. Discovery can establish that
 an arm exists and declares a capability, but it never supplies quality, cost, reliability, task

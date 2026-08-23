@@ -5,6 +5,7 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousModelInventoryCoordinator,
+  TransactionalJsonAutonomousModelInventorySnapshotPersistence,
   LLMRuntime,
   ProviderSetup,
 } from "../dist/index.js";
@@ -67,6 +68,38 @@ test("model inventory reports partial provider discovery and rejects tampered sn
   const tampered = structuredClone(snapshot);
   tampered.models[0].quality = 1;
   await assert.rejects(() => new AutonomousModelInventoryCoordinator(agent).restore({ read: () => tampered, write: () => {} }), /digest mismatch/);
+});
+
+test("model inventory JSON persistence fences stale refresh writers", async () => {
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = encoded === null ? null : JSON.parse(encoded).inventory_digest;
+      if (observed !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousModelInventorySnapshotPersistence(textStore);
+  const specs = [{
+    provider: "offline",
+    defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.95 },
+  }];
+  const coordinator = new AutonomousModelInventoryCoordinator(new AutonomousAgent(runtime()), persistence);
+  const first = await coordinator.refresh(specs, { refreshId: "inventory-cas-1" });
+  assert.equal(JSON.parse(encoded).inventory_digest, first.inventory_digest);
+
+  const stale = new AutonomousModelInventoryCoordinator(new AutonomousAgent(runtime()), persistence);
+  await assert.rejects(() => stale.refresh(specs, { refreshId: "inventory-cas-stale" }), /compare-and-swap/);
+  assert.equal(JSON.parse(encoded).inventory_digest, first.inventory_digest);
+
+  const restored = new AutonomousModelInventoryCoordinator(new AutonomousAgent(runtime()), persistence);
+  const recovered = await restored.restore();
+  assert.equal(recovered.inventory_digest, first.inventory_digest);
+  const next = await restored.refresh(specs, { refreshId: "inventory-cas-2" });
+  assert.notEqual(next.inventory_digest, first.inventory_digest);
 });
 
 test("provider setup bridges an opaque session into agent inventory refresh", async () => {

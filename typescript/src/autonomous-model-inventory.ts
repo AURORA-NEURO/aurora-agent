@@ -17,7 +17,7 @@ import {
   type AutonomousModelCatalogueSnapshot,
   type AutonomousModelRefreshSpec,
 } from "./autonomous.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { AutonomousModelCandidate } from "./llm.js";
 
 /** Schema for a redacted provider inventory plus all-domain selection coverage. */
@@ -68,6 +68,16 @@ export interface AutonomousModelInventorySnapshot {
 export interface AutonomousModelInventoryPersistence {
   read(): Promise<AutonomousModelInventorySnapshot | null> | AutonomousModelInventorySnapshot | null;
   write(snapshot: AutonomousModelInventorySnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedInventoryDigest: string | null, snapshot: AutonomousModelInventorySnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousModelInventorySnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousModelInventoryTransactionalSnapshotTextStore extends AutonomousModelInventorySnapshotTextStore {
+  writeIfUnchanged(expectedInventoryDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousModelInventoryRefreshOptions {
@@ -227,12 +237,20 @@ export async function validateAutonomousModelInventorySnapshot(value: unknown): 
  * come from the caller and compatible models are not treated as successful task outcomes.
  */
 export class AutonomousModelInventoryCoordinator {
+  private expectedInventoryDigest: string | null = null;
+  private expectedPersistence: AutonomousModelInventoryPersistence | undefined;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly agent: AutonomousAgent, readonly persistence?: AutonomousModelInventoryPersistence) {
     if (!(agent instanceof AutonomousAgent)) throw new ArgumentError("model inventory requires an AutonomousAgent");
     if (persistence !== undefined && (typeof persistence.read !== "function" || typeof persistence.write !== "function")) throw new ArgumentError("model inventory persistence adapter is malformed");
   }
 
   async refresh(specs: readonly AutonomousModelRefreshSpec[], options: AutonomousModelInventoryRefreshOptions = {}): Promise<AutonomousModelInventorySnapshot> {
+    return this.enqueue(() => this.refreshInternal(specs, options));
+  }
+
+  private async refreshInternal(specs: readonly AutonomousModelRefreshSpec[], options: AutonomousModelInventoryRefreshOptions): Promise<AutonomousModelInventorySnapshot> {
     if (!Array.isArray(specs) || specs.length < 1 || specs.length > AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS) throw new ArgumentError(`model inventory refresh must contain 1..=${AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS} providers`);
     if (options.credentialSession !== undefined && !(options.credentialSession instanceof CredentialSession)) throw new ArgumentError("model inventory credentialSession is malformed");
     const estimatedInputTokens = boundedPositiveInteger("model inventory estimatedInputTokens", options.estimatedInputTokens ?? 4_096, 10_000_000);
@@ -308,14 +326,28 @@ export class AutonomousModelInventoryCoordinator {
     };
     const snapshot = await validateAutonomousModelInventorySnapshot({ ...descriptor, inventory_digest: await digestJson(descriptor) });
     const persistence = options.persistence ?? this.persistence;
-    if (persistence) await persistence.write(snapshot);
+    if (persistence) {
+      this.selectPersistence(persistence);
+      if (typeof persistence.writeIfUnchanged === "function") {
+        if (!await persistence.writeIfUnchanged(this.expectedInventoryDigest, snapshot)) throw new ArgumentError("model inventory persistence compare-and-swap conflict");
+      } else await persistence.write(snapshot);
+      this.expectedInventoryDigest = snapshot.inventory_digest;
+    }
     return snapshot;
   }
 
   async restore(persistence: AutonomousModelInventoryPersistence = this.persistence as AutonomousModelInventoryPersistence): Promise<AutonomousModelInventorySnapshot | null> {
+    return this.enqueue(() => this.restoreInternal(persistence));
+  }
+
+  private async restoreInternal(persistence: AutonomousModelInventoryPersistence): Promise<AutonomousModelInventorySnapshot | null> {
     if (!persistence || typeof persistence.read !== "function") throw new ArgumentError("model inventory restore requires persistence");
+    this.selectPersistence(persistence);
     const raw = await persistence.read();
-    if (raw === null) return null;
+    if (raw === null) {
+      this.expectedInventoryDigest = null;
+      return null;
+    }
     const snapshot = await validateAutonomousModelInventorySnapshot(raw);
     const catalogueSnapshot: AutonomousModelCatalogueSnapshot = {
       schema: AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA,
@@ -326,6 +358,56 @@ export class AutonomousModelInventoryCoordinator {
       secret_material: "never_returned",
     };
     await this.agent.restoreModels(catalogueSnapshot);
+    this.expectedInventoryDigest = snapshot.inventory_digest;
     return snapshot;
+  }
+
+  private selectPersistence(persistence: AutonomousModelInventoryPersistence): void {
+    if (this.expectedPersistence !== persistence) {
+      this.expectedPersistence = persistence;
+      this.expectedInventoryDigest = null;
+    }
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+export class JsonAutonomousModelInventorySnapshotPersistence implements AutonomousModelInventoryPersistence {
+  constructor(readonly textStore: AutonomousModelInventorySnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("model inventory text store is malformed");
+  }
+
+  async read(): Promise<AutonomousModelInventorySnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_MODEL_INVENTORY_MAX_SNAPSHOT_BYTES) throw new ArgumentError("model inventory JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("model inventory JSON is invalid"); }
+    return validateAutonomousModelInventorySnapshot(parsed);
+  }
+
+  async write(raw: AutonomousModelInventorySnapshot): Promise<void> {
+    const snapshot = await validateAutonomousModelInventorySnapshot(raw);
+    await this.textStore.write(canonicalJson(snapshot));
+  }
+}
+
+export class TransactionalJsonAutonomousModelInventorySnapshotPersistence extends JsonAutonomousModelInventorySnapshotPersistence {
+  declare readonly textStore: AutonomousModelInventoryTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousModelInventoryTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("model inventory text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedInventoryDigest: string | null, raw: AutonomousModelInventorySnapshot): Promise<boolean> {
+    if (expectedInventoryDigest !== null && !/^[0-9a-f]{64}$/.test(expectedInventoryDigest)) throw new ArgumentError("model inventory expected inventory digest is invalid");
+    const snapshot = await validateAutonomousModelInventorySnapshot(raw);
+    return this.textStore.writeIfUnchanged(expectedInventoryDigest, canonicalJson(snapshot));
   }
 }

@@ -372,6 +372,8 @@ export {
   AUTONOMOUS_MODEL_INVENTORY_MAX_DOMAINS,
   AUTONOMOUS_MODEL_INVENTORY_MAX_SNAPSHOT_BYTES,
   AutonomousModelInventoryCoordinator,
+  JsonAutonomousModelInventorySnapshotPersistence,
+  TransactionalJsonAutonomousModelInventorySnapshotPersistence,
   validateAutonomousModelInventorySnapshot,
 } from "./autonomous-model-inventory.js";
 export type {
@@ -380,6 +382,8 @@ export type {
   AutonomousModelInventoryCoverage,
   AutonomousModelInventorySnapshot,
   AutonomousModelInventoryPersistence,
+  AutonomousModelInventorySnapshotTextStore,
+  AutonomousModelInventoryTransactionalSnapshotTextStore,
   AutonomousModelInventoryRefreshOptions,
 } from "./autonomous-model-inventory.js";
 export {
