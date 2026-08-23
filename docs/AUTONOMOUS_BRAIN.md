@@ -2175,6 +2175,8 @@ turning an uncertain external effect into an automatic duplicate dispatch.
 
 The receipt fields are part of the `0.2` remote mission queue/job/worker schemas; older snapshots
 are rejected rather than silently interpreted with weaker execution guarantees.
+Cancellation is likewise refused while a lease is active or the execution phase is uncertain;
+the caller must first settle the boundary through reconciliation.
 
 For applications that need one reviewed plan spanning several domain workflows, the TypeScript
 facade also exposes `planWorkflowPortfolio()`. Each item supplies an explicit domain and task,

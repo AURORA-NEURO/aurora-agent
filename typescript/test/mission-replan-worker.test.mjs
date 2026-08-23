@@ -260,3 +260,21 @@ test("remote reconciliation can settle a completed external effect without repla
   assert.equal(repeated.job_digest, settled.job_digest);
   await assert.rejects(() => queue.requeue(claimed.job_id, {}, 14), /not requeueable/);
 });
+
+test("remote mission queue refuses cancellation and completion across an unrecorded execution boundary", async () => {
+  const queue = new InMemoryAutonomousMissionReplanRemoteJobQueue();
+  const contractDigest = "1".repeat(64);
+  await queue.enqueue({ jobId: "boundary-job", rootMissionId: "boundary-root", protectedContractDigest: contractDigest, availableAt: 0 });
+  const claimed = await queue.claimNext("worker-a", 10_000, 10);
+  const result = { status: "completed", root_mission_id: "boundary-root", protected_contract_digest: contractDigest, planning_status: "disabled", replan_count: 0 };
+  await assert.rejects(() => queue.complete(claimed.job_id, "worker-a", result, 11), /execution phase to be running/);
+  await assert.rejects(() => queue.cancel(claimed.job_id, 11), /active or uncertain execution/);
+  await queue.beginExecution(claimed.job_id, "worker-a", 12);
+  await assert.rejects(() => queue.cancel(claimed.job_id, 13), /active or uncertain execution/);
+  await queue.fail(claimed.job_id, "worker-a", "transport_error", "transport", true, 14);
+  await assert.rejects(() => queue.cancel(claimed.job_id, 15), /active or uncertain execution/);
+  const reconciled = await queue.reconcile(claimed.job_id, { outcome: "not_executed", evidenceDigest: "2".repeat(64), effectAbsent: true }, 16);
+  const reopened = await queue.requeue(claimed.job_id, { reconciliationDigest: reconciled.reconciliation_digest }, 17);
+  const cancelled = await queue.cancel(reopened.job_id, 18);
+  assert.equal(cancelled.status, "cancelled");
+});

@@ -413,6 +413,7 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
 
   async complete(jobId: string, workerId: string, result: AutonomousMissionReplanResult, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> {
     const job = this.assertLease(jobId, workerId, now);
+    if (job.execution_phase !== "running") throw new ArgumentError("mission remote completion requires the execution phase to be running");
     const planDigest = result.plan_refinement ? digestJsonSync(result.plan_refinement) : null;
     if (job.protected_contract_digest !== result.protected_contract_digest) throw new ArgumentError("mission remote result protected contract does not match the job");
     if (job.plan_refinement_digest !== null && job.plan_refinement_digest !== planDigest) throw new ArgumentError("mission remote result plan digest does not match the job");
@@ -477,6 +478,7 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
     const id = identifier("mission remote jobId", jobId);
     const job = this.jobs.get(id);
     if (!job) throw new ArgumentError("mission remote job was not found");
+    if (job.status === "leased" || job.execution_phase === "running") throw new ArgumentError("mission remote active or uncertain execution must be reconciled before cancellation");
     const next = refresh(job, { status: "cancelled", execution_phase: "settled", lease_owner: null, lease_until: null }, now);
     this.jobs.set(id, next);
     return clone(next);
