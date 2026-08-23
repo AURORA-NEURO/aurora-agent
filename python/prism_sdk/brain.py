@@ -5044,11 +5044,14 @@ class AutonomousBrain:
                 "plan_refinement_digest": checkpoint.plan_refinement_digest,
                 "synthesis_result_digest": checkpoint.synthesis_result_digest,
                 "cross_domain_status": checkpoint.status,
-                "last_item_id": None if step is None else step.item_id,
-                "last_item_phase": None if step is None else step.phase,
+                "last_item_id": checkpoint.last_item_id if step is None else step.item_id,
+                "last_item_phase": checkpoint.last_item_phase if step is None else step.phase,
+                "last_item_status": checkpoint.last_item_status if step is None else step.status,
+                "failure_class": checkpoint.failure_class,
                 "phase": phase,
             }
 
+        current: AutonomousCrossDomainCheckpoint | None = None
         try:
             previous_checkpoint = job.checkpoint
             previous_kind = previous_checkpoint.get("job_kind")
@@ -5278,6 +5281,47 @@ class AutonomousBrain:
                 if waiting is None:
                     raise BrainRunError("cross-domain approval-waiting job disappeared from the durable store")
                 return BrainJobRunResult(status="waiting_approval", job=waiting.to_dict(), cycle=None, workflow=step_result)
+            if step_result.status == "reconciliation_required":
+                item_phase = step_result.phase
+                reconciliation_checkpoint = AutonomousCrossDomainCheckpoint(
+                    run_id=current.run_id,
+                    task_digest=current.task_digest,
+                    base_plan_digest=current.base_plan_digest,
+                    execution_child_ids=current.execution_child_ids,
+                    completed_child_ids=current.completed_child_ids,
+                    child_result_digests=current.child_result_digests,
+                    next_child_id=current.next_child_id,
+                    plan_refinement_digest=current.plan_refinement_digest,
+                    status="reconciliation_required",
+                    last_item_id=step_result.item_id,
+                    last_item_phase=item_phase,
+                    last_item_status=step_result.status,
+                    failure_class="result_reconciliation_required",
+                )
+                store.checkpoint(
+                    job.job_id,
+                    worker_id,
+                    phase="cross_domain_reconciliation_required",
+                    checkpoint=checkpoint_metadata(
+                        reconciliation_checkpoint,
+                        phase="cross_domain_reconciliation_required",
+                        step=step_result,
+                    ),
+                    side_effect_boundary="unknown",
+                )
+                failed = store.fail(
+                    job.job_id,
+                    worker_id,
+                    reason=f"cross-domain {step_result.phase} {step_result.item_id} requires reconciliation",
+                    retryable=False,
+                )
+                return BrainJobRunResult(
+                    status=failed.state,
+                    job=failed.to_dict(),
+                    cycle=None,
+                    error_class="reconciliation_required",
+                    workflow=step_result,
+                )
             if not step_result.status.startswith("completed"):
                 failed = store.fail(
                     job.job_id,
@@ -5343,15 +5387,48 @@ class AutonomousBrain:
                 boundary = "unknown" if execution_started else current_boundary
                 current_job = store.get(job.job_id)
                 if current_job is not None and current_job.lease_owner == worker_id and current_job.state in {"leased", "running"}:
+                    checkpoint_phase = "cross_domain_execution_error"
+                    if execution_started and current is not None:
+                        item_id = current.next_child_id
+                        item_phase = "child"
+                        if item_id is None and len(current.completed_child_ids) == len(current.execution_child_ids):
+                            item_id = "synthesis"
+                            item_phase = "synthesis"
+                        if item_id is None:
+                            raise BrainRunError("cross-domain uncertain boundary has no identifiable next item")
+                        reconciliation_checkpoint = AutonomousCrossDomainCheckpoint(
+                            run_id=current.run_id,
+                            task_digest=current.task_digest,
+                            base_plan_digest=current.base_plan_digest,
+                            execution_child_ids=current.execution_child_ids,
+                            completed_child_ids=current.completed_child_ids,
+                            child_result_digests=current.child_result_digests,
+                            next_child_id=current.next_child_id,
+                            plan_refinement_digest=current.plan_refinement_digest,
+                            status="reconciliation_required",
+                            last_item_id=item_id,
+                            last_item_phase=item_phase,
+                            last_item_status="execution_uncertain",
+                            failure_class=error_class,
+                        )
+                        reconciliation_metadata = checkpoint_metadata(
+                            reconciliation_checkpoint,
+                            phase="cross_domain_reconciliation_required",
+                            step=step_result,
+                        )
+                        checkpoint_phase = "cross_domain_reconciliation_required"
+                    else:
+                        reconciliation_metadata = {
+                            **dict(current_job.checkpoint),
+                            "phase": "cross_domain_execution_error",
+                            "error_class": error_class,
+                        }
                     store.checkpoint(
                         job.job_id,
                         worker_id,
-                        phase="cross_domain_execution_error",
-                        checkpoint={
-                            **dict(current_job.checkpoint),
-                            "error_class": error_class,
-                        },
-                        side_effect_boundary=boundary,
+                        phase=checkpoint_phase,
+                        checkpoint=reconciliation_metadata,
+                        side_effect_boundary="unknown" if execution_started else boundary,
                     )
                     failed = store.fail(
                         job.job_id,

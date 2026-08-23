@@ -3913,6 +3913,102 @@ def test_durable_cross_domain_worker_parks_and_releases_provider_approval(tmp_pa
         server.server_close()
 
 
+def test_durable_cross_domain_uncertain_boundary_requires_explicit_reconciliation_before_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    runtime, credentials, server, thread = _runtime()
+    handle = credentials.register("openai", "durable-cross-domain-reconcile-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    blueprint = brain.prepare_cross_domain(
+        task="Recover a cross-domain review after an uncertain provider boundary.",
+        subtasks=[
+            {"id": "engineering", "task": "Review implementation risk.", "domain": "coding"},
+            {"id": "data", "task": "Review lineage risk.", "domain": "data"},
+        ],
+    )
+    original_step = AutonomousTaskOrchestrator.run_cross_domain_step
+
+    def uncertain_step(*_args: object, **_kwargs: object) -> object:
+        raise BrainRunError("provider boundary became uncertain during cross-domain execution")
+
+    monkeypatch.setattr(AutonomousTaskOrchestrator, "run_cross_domain_step", uncertain_step)
+    try:
+        def resolve(metadata: dict[str, object]) -> dict[str, object]:
+            checkpoint_wire = metadata.get("checkpoint", {})
+            checkpoint = checkpoint_wire if isinstance(checkpoint_wire, dict) else {}
+            nested = checkpoint.get("cross_domain_checkpoint")
+            completed = {}
+            if isinstance(nested, dict):
+                for child_id in nested.get("completed_child_ids", []):
+                    assert child_id not in completed
+            return {
+                "blueprint": blueprint,
+                "model_candidates": _model(),
+                "credentials": {"openai": handle},
+                "completed_child_results": completed,
+                "cross_domain_options": {"approve_provider_call": True},
+            }
+
+        with BrainJobStore(tmp_path / "cross-domain-reconciliation.sqlite3") as store:
+            job, _ = store.submit(
+                {
+                    "idempotency_key": "cross-domain-reconciliation",
+                    "spec_digest": "d" * 64,
+                    "domain": "cross_domain",
+                    "capability": "cross_domain_synthesis",
+                    "risk_class": "review",
+                    "max_attempts": 4,
+                }
+            )
+            worker = BrainWorker(
+                brain,
+                store,
+                worker_id="cross-domain-reconciliation-worker",
+                resolver=resolve,
+                evaluator=None,
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+                execution_kind="cross_domain",
+                lease_seconds=10,
+                heartbeat_seconds=0.1,
+            )
+            uncertain = worker.run_once(job.job_id)
+            assert uncertain is not None and uncertain.status == "reconciliation_required"
+            record = store.get(job.job_id)
+            assert record is not None and record.state == "reconciliation_required"
+            assert record.side_effect_boundary == "unknown"
+            nested = record.checkpoint["cross_domain_checkpoint"]
+            assert isinstance(nested, dict)
+            assert nested["status"] == "reconciliation_required"
+            assert nested["last_item_id"] == "engineering"
+            assert nested["last_item_phase"] == "child"
+            assert nested["last_item_status"] == "execution_uncertain"
+            assert nested["failure_class"] == "BrainRunError"
+            assert record.checkpoint["cross_domain_status"] == "reconciliation_required"
+
+            store.reconcile(
+                job.job_id,
+                outcome="not_executed",
+                evidence_digest="e" * 64,
+                evidence_kind="operator_observation",
+                metadata={"effect_absent": True},
+            )
+            monkeypatch.setattr(AutonomousTaskOrchestrator, "run_cross_domain_step", original_step)
+            resumed = worker.run_once(job.job_id)
+            assert resumed is not None and resumed.status == "queued"
+            assert resumed.workflow is not None and resumed.workflow.item_id == "engineering"
+            resumed_record = store.get(job.job_id)
+            assert resumed_record is not None and resumed_record.state == "queued"
+            resumed_nested = resumed_record.checkpoint["cross_domain_checkpoint"]
+            assert isinstance(resumed_nested, dict)
+            assert resumed_nested["status"] == "children_pending"
+            assert resumed_nested["last_item_id"] is None
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_durable_workflow_worker_rehydrates_accepted_plan_refinement_across_restart(tmp_path: Path):
     runtime, credentials, server, thread = _structured_runtime()
     handle = credentials.register("openai", "durable-accepted-plan-secret")
@@ -4299,6 +4395,127 @@ def test_run_auto_rehydration_seals_an_interrupted_execution_boundary():
     assert sealed is not None and sealed.phase == "terminal"
     assert sealed.terminal_status == "completed_provider_call"
     assert sealed.selection_digest == selection_digest
+
+
+def test_cross_domain_execution_receipt_is_truthful_and_covers_every_builtin_domain():
+    agent = AutonomousAgent(_Workspace(), LLMRuntime(), model_catalogue=ModelCatalogue(_model()))
+
+    def result(status: str, digest: str) -> BrainRunResult:
+        return BrainRunResult(
+            run_id=f"receipt-{digest[:8]}",
+            status=status,
+            selection={},
+            prompt={},
+            plan={},
+            response=None,
+            outcome_digest=digest,
+        )
+
+    # Preparation is provider-free, so the receipt can be tested across the complete built-in
+    # domain catalogue without credentials or network access. Cross-domain fan-out is bounded
+    # to eight children per blueprint; batching still proves every domain is represented.
+    for batch_index in range(0, len(AUTONOMOUS_DOMAINS), 8):
+        domains = AUTONOMOUS_DOMAINS[batch_index : batch_index + 8]
+        blueprint = agent.prepare_cross_domain(
+            task=f"audit receipt coverage batch {batch_index}",
+            subtasks=[
+                {"id": f"receipt-{domain}", "task": f"audit {domain}", "domain": domain}
+                for domain in domains
+            ],
+        )
+        child_results = tuple(
+            result("completed_provider_call", hashlib.sha256(domain.encode()).hexdigest())
+            for domain in domains
+        )
+        cross_domain = AutonomousCrossDomainResult(
+            status="children_completed",
+            blueprint=blueprint,
+            child_results=child_results,
+            synthesis_result=None,
+            execution_child_ids=blueprint.child_ids,
+        )
+        receipt = cross_domain.execution_receipt
+        assert set(receipt.child_domains.values()) == set(domains)
+        assert receipt.completed_child_ids == blueprint.child_ids
+        assert receipt.incomplete_child_ids == ()
+        assert receipt.next_action == "complete"
+        assert receipt.safe_to_synthesize is True
+        assert receipt.progress == 1.0
+        assert receipt.reconciliation_required is False
+        wire = cross_domain.to_dict()
+        assert wire["execution"] == "completed"
+        assert wire["execution_receipt"]["receipt_digest"] == receipt.receipt_digest
+        assert wire["execution_receipt"]["retention"] == "status_and_outcome_digests_only; provider_payloads_caller_owned"
+        restored_receipt = type(receipt).from_dict(wire["execution_receipt"])
+        assert restored_receipt.to_dict() == receipt.to_dict()
+        tampered_receipt = dict(wire["execution_receipt"])
+        tampered_receipt["next_action"] = "retry_child"
+        with pytest.raises(BrainRunError, match="receipt digest"):
+            type(receipt).from_dict(tampered_receipt)
+
+    partial_blueprint = agent.prepare_cross_domain(
+        task="audit approval recovery receipt",
+        subtasks=[
+            {"id": "receipt-complete", "task": "complete bounded review", "domain": "coding"},
+            {"id": "receipt-approval", "task": "hold bounded review", "domain": "data"},
+        ],
+    )
+    partial = AutonomousCrossDomainResult(
+        status="approval_required",
+        blueprint=partial_blueprint,
+        child_results=(
+            result("completed_provider_call", "a" * 64),
+            result("approval_required", "b" * 64),
+        ),
+        synthesis_result=None,
+        execution_child_ids=partial_blueprint.child_ids,
+    )
+    assert partial.execution_receipt.next_action == "approve_child"
+    assert partial.execution_receipt.safe_to_synthesize is False
+    assert partial.to_dict()["execution"] == "partial_or_blocked"
+
+    reconciliation = AutonomousCrossDomainResult(
+        status="reconciliation_required",
+        blueprint=partial_blueprint,
+        child_results=partial.child_results,
+        synthesis_result=result("reconciliation_required", "c" * 64),
+        execution_child_ids=partial_blueprint.child_ids,
+    )
+    assert reconciliation.execution_receipt.next_action == "reconcile_synthesis"
+    assert reconciliation.execution_receipt.reconciliation_required is True
+    assert reconciliation.to_dict()["execution"] == "partial_or_blocked"
+
+    checkpoint = AutonomousCrossDomainCheckpoint(
+        run_id="legacy-receipt-checkpoint",
+        task_digest="a" * 64,
+        base_plan_digest="b" * 64,
+        execution_child_ids=("receipt-child",),
+        next_child_id="receipt-child",
+    )
+    legacy_wire = checkpoint.to_dict()
+    for field in ("last_item_id", "last_item_phase", "last_item_status", "failure_class"):
+        legacy_wire.pop(field, None)
+    legacy_wire["checkpoint_digest"] = content_digest(
+        {
+            key: legacy_wire[key]
+            for key in (
+                "schema",
+                "run_id",
+                "task_digest",
+                "base_plan_digest",
+                "execution_child_ids",
+                "completed_child_ids",
+                "child_result_digests",
+                "next_child_id",
+                "plan_refinement_digest",
+                "synthesis_result_digest",
+                "status",
+            )
+        }
+    )
+    restored_checkpoint = AutonomousCrossDomainCheckpoint.from_dict(legacy_wire)
+    assert restored_checkpoint.last_item_id is None
+    assert restored_checkpoint.checkpoint_digest != legacy_wire["checkpoint_digest"]
 
 
 def test_run_auto_provider_planning_cycle_rehydrates_the_combined_selection_identity():

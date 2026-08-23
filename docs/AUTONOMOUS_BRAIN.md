@@ -2984,6 +2984,16 @@ caller-owned child results. This gives TypeScript and Python the same operationa
 steps, digest-bound replay, caller-owned payload retention, and no claim that a checkpoint itself
 authorizes external effects.
 
+The Python result envelope additionally exposes `AutonomousCrossDomainExecutionReceipt`, a
+stable value-only projection for every declared child across the twelve built-in domains. It
+records ordered child/domain/status mappings, completed and incomplete IDs, bounded progress,
+the synthesis status, outcome digests, a deterministic `next_action`, and whether synthesis is
+safe to attempt or reconciliation is required. The receipt is included in the cross-domain
+execution digest, so an approval pause, provider failure, partial synthesis, and successful
+completion cannot share one replay identity merely because they returned a typed result. Its
+`execution` summary is likewise truthful: the presence of a synthesis object alone no longer
+implies completion.
+
 An uncertain provider or effect outcome is a separate durable quarantine. The TypeScript executor
 records `reconciliation_required` in the checkpoint rather than collapsing it into `paused`; the
 next ordinary resume returns the same status before child-result rehydration and before provider
@@ -2995,6 +3005,16 @@ checkpoint generation and a `reconciliation_retry_authorized` event, then applie
 approval, model, credential, budget, tool, and effect gates again. The flag is an explicit replay
 decision, not proof that the original dispatch did not happen; idempotency and reconciliation
 remain application responsibilities.
+
+The Python `BrainWorker` applies the same quarantine to durable cross-domain steps. An exception
+after the step boundary is persisted as a typed `reconciliation_required` cross-domain checkpoint
+with the exact child or synthesis item, phase, bounded failure class, and unchanged next-child
+position. `BrainJobStore` therefore transitions the job to `reconciliation_required` with an
+unknown side-effect boundary. A caller must explicitly reconcile it; only evidence with
+`metadata={"effect_absent": True}` and outcome `not_executed` may return it to the queue. The
+next lease then retries the exact item under the original route, accepted plan, approval, model,
+credential, budget, and tool gates. A result already marked `reconciliation_required` follows
+the same path without being downgraded to an ordinary failed job.
 
 For long-running fan-out, `BrainWorker` can execute one provider or tool-loop child per lease and
 then one synthesis call. Submit a normal `BrainJobStore` packet with a caller-owned resolver and

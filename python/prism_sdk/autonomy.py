@@ -193,6 +193,7 @@ AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES = (
 AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-workflow-checkpoint/0.1"
 AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-cross-domain-checkpoint/0.1"
 AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA = "bioprism-python-autonomous-cross-domain-step/0.1"
+AUTONOMOUS_CROSS_DOMAIN_EXECUTION_RECEIPT_SCHEMA = "bioprism-python-autonomous-cross-domain-execution-receipt/0.1"
 AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA = "bioprism-python-autonomous-workflow-evaluator/0.1"
 AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA = "bioprism-python-autonomous-cross-domain-learning/0.1"
 AUTONOMOUS_GOAL_LEARNING_SCHEMA = "bioprism-python-autonomous-goal-learning/0.1"
@@ -3701,6 +3702,231 @@ def _resolve_cross_domain_evaluator(
 
 
 @dataclass(frozen=True, slots=True)
+class AutonomousCrossDomainExecutionReceipt:
+    """A value-only progress and recovery projection for a cross-domain run.
+
+    The provider response remains on the caller-owned result objects. This receipt is the
+    stable control-plane view used by UIs, job workers, evaluators, and replay: every declared
+    child has an explicit status, missing work is distinguishable from an incomplete result, and
+    the next safe action is deterministic. It deliberately contains no task text, prompts,
+    credentials, tool arguments, or provider output.
+    """
+
+    status: str
+    execution_child_ids: tuple[str, ...]
+    child_domains: Mapping[str, str]
+    child_statuses: Mapping[str, str]
+    child_result_digests: Mapping[str, str]
+    completed_child_ids: tuple[str, ...]
+    incomplete_child_ids: tuple[str, ...]
+    synthesis_status: str | None
+    synthesis_result_digest: str | None
+    completed_units: int
+    total_units: int
+    progress: float
+    next_action: str
+    safe_to_synthesize: bool
+    reconciliation_required: bool
+
+    def __post_init__(self) -> None:
+        _identifier("cross-domain execution receipt status", self.status)
+        execution = _sequence(
+            "cross-domain execution receipt execution_child_ids",
+            self.execution_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        if len(set(execution)) != len(execution):
+            raise BrainRunError("cross-domain execution receipt child IDs must be unique")
+        for name, value in (("child_domains", self.child_domains), ("child_statuses", self.child_statuses), ("child_result_digests", self.child_result_digests)):
+            if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
+                raise BrainRunError(f"cross-domain execution receipt {name} must be a mapping")
+        domains = dict(self.child_domains)
+        statuses = dict(self.child_statuses)
+        digests = dict(self.child_result_digests)
+        if set(domains) != set(execution) or set(statuses) != set(execution):
+            raise BrainRunError("cross-domain execution receipt child mappings must align with execution order")
+        for child_id in execution:
+            _identifier("cross-domain execution receipt child domain", domains[child_id])
+            _identifier("cross-domain execution receipt child status", statuses[child_id])
+        if not set(digests).issubset(set(execution)):
+            raise BrainRunError("cross-domain execution receipt contains an unknown child digest")
+        for child_id, digest in digests.items():
+            _route_digest(digest, f"cross-domain execution receipt result digest for {child_id}")
+        completed = _sequence(
+            "cross-domain execution receipt completed_child_ids",
+            self.completed_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        incomplete = _sequence(
+            "cross-domain execution receipt incomplete_child_ids",
+            self.incomplete_child_ids,
+            maximum=MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN,
+        )
+        if set(completed) | set(incomplete) != set(execution) or set(completed) & set(incomplete):
+            raise BrainRunError("cross-domain execution receipt child classifications must partition execution order")
+        if tuple(child_id for child_id in execution if statuses[child_id].startswith("completed")) != completed:
+            raise BrainRunError("cross-domain execution receipt completed children do not match statuses")
+        if tuple(child_id for child_id in execution if not statuses[child_id].startswith("completed")) != incomplete:
+            raise BrainRunError("cross-domain execution receipt incomplete children do not match statuses")
+        if self.synthesis_status is not None:
+            _identifier("cross-domain execution receipt synthesis_status", self.synthesis_status)
+        if self.synthesis_result_digest is not None:
+            _route_digest(self.synthesis_result_digest, "cross-domain execution receipt synthesis_result_digest")
+        if (
+            not isinstance(self.completed_units, int)
+            or isinstance(self.completed_units, bool)
+            or not 0 <= self.completed_units <= len(execution) + (1 if self.synthesis_status is not None else 0)
+        ):
+            raise BrainRunError("cross-domain execution receipt completed_units is outside its bound")
+        expected_total = len(execution) + (1 if self.synthesis_status is not None else 0)
+        if self.total_units != expected_total or self.total_units < 1:
+            raise BrainRunError("cross-domain execution receipt total_units does not match its stages")
+        if isinstance(self.progress, bool) or not isinstance(self.progress, (int, float)) or not math.isfinite(float(self.progress)) or not 0.0 <= float(self.progress) <= 1.0:
+            raise BrainRunError("cross-domain execution receipt progress must be within [0, 1]")
+        _identifier("cross-domain execution receipt next_action", self.next_action)
+        if not isinstance(self.safe_to_synthesize, bool) or not isinstance(self.reconciliation_required, bool):
+            raise BrainRunError("cross-domain execution receipt boolean fields are invalid")
+        object.__setattr__(self, "execution_child_ids", execution)
+        object.__setattr__(self, "child_domains", domains)
+        object.__setattr__(self, "child_statuses", statuses)
+        object.__setattr__(self, "child_result_digests", digests)
+        object.__setattr__(self, "completed_child_ids", completed)
+        object.__setattr__(self, "incomplete_child_ids", incomplete)
+        object.__setattr__(self, "progress", float(self.progress))
+
+    @property
+    def receipt_digest(self) -> str:
+        return content_digest(self._digest_payload())
+
+    def _digest_payload(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CROSS_DOMAIN_EXECUTION_RECEIPT_SCHEMA,
+            "status": self.status,
+            "children": [
+                {
+                    "id": child_id,
+                    "domain": self.child_domains[child_id],
+                    "status": self.child_statuses[child_id],
+                    "result_digest": self.child_result_digests.get(child_id),
+                }
+                for child_id in self.execution_child_ids
+            ],
+            "synthesis_status": self.synthesis_status,
+            "synthesis_result_digest": self.synthesis_result_digest,
+            "completed_units": self.completed_units,
+            "total_units": self.total_units,
+            "progress": self.progress,
+            "next_action": self.next_action,
+            "safe_to_synthesize": self.safe_to_synthesize,
+            "reconciliation_required": self.reconciliation_required,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._digest_payload(),
+            "execution_child_ids": list(self.execution_child_ids),
+            "completed_child_ids": list(self.completed_child_ids),
+            "incomplete_child_ids": list(self.incomplete_child_ids),
+            "child_domains": dict(self.child_domains),
+            "child_statuses": dict(self.child_statuses),
+            "child_result_digests": dict(self.child_result_digests),
+            "receipt_digest": self.receipt_digest,
+            "retention": "status_and_outcome_digests_only; provider_payloads_caller_owned",
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AutonomousCrossDomainExecutionReceipt":
+        """Restore and verify a receipt received from a caller-owned journal or UI."""
+
+        if not isinstance(value, Mapping) or value.get("schema") != AUTONOMOUS_CROSS_DOMAIN_EXECUTION_RECEIPT_SCHEMA:
+            raise BrainRunError("cross-domain execution receipt has an invalid schema")
+        receipt = cls(
+            status=value.get("status"),
+            execution_child_ids=tuple(value.get("execution_child_ids", ())),
+            child_domains=value.get("child_domains", {}),
+            child_statuses=value.get("child_statuses", {}),
+            child_result_digests=value.get("child_result_digests", {}),
+            completed_child_ids=tuple(value.get("completed_child_ids", ())),
+            incomplete_child_ids=tuple(value.get("incomplete_child_ids", ())),
+            synthesis_status=value.get("synthesis_status"),
+            synthesis_result_digest=value.get("synthesis_result_digest"),
+            completed_units=value.get("completed_units"),
+            total_units=value.get("total_units"),
+            progress=value.get("progress"),
+            next_action=value.get("next_action"),
+            safe_to_synthesize=value.get("safe_to_synthesize"),
+            reconciliation_required=value.get("reconciliation_required"),
+        )
+        supplied_digest = value.get("receipt_digest")
+        if supplied_digest is not None and supplied_digest != receipt.receipt_digest:
+            raise BrainRunError("cross-domain execution receipt digest does not match its contents")
+        return receipt
+
+    @classmethod
+    def from_result(cls, result: "AutonomousCrossDomainResult") -> "AutonomousCrossDomainExecutionReceipt":
+        if not isinstance(result, AutonomousCrossDomainResult):
+            raise BrainRunError("cross-domain execution receipt requires an AutonomousCrossDomainResult")
+        child_by_id = dict(zip(result.blueprint.child_ids, result.blueprint.child_blueprints))
+        statuses = {
+            child_id: (result.child_results[index].status if index < len(result.child_results) else "not_started")
+            for index, child_id in enumerate(result.execution_child_ids)
+        }
+        domains = {child_id: child_by_id[child_id].profile.domain for child_id in result.execution_child_ids}
+        digests = {
+            child_id: _autonomous_result_digest(result.child_results[index])
+            for index, child_id in enumerate(result.execution_child_ids)
+            if index < len(result.child_results)
+        }
+        completed = tuple(child_id for child_id in result.execution_child_ids if statuses[child_id].startswith("completed"))
+        incomplete = tuple(child_id for child_id in result.execution_child_ids if not statuses[child_id].startswith("completed"))
+        synthesis_status = None if result.synthesis_result is None else result.synthesis_result.status
+        synthesis_digest = None if result.synthesis_result is None else _autonomous_result_digest(result.synthesis_result)
+        if synthesis_status is not None and synthesis_status.startswith("completed"):
+            next_action = "complete" if not incomplete else "inspect_partial_synthesis"
+        elif synthesis_status is not None and synthesis_status == "approval_required":
+            next_action = "approve_synthesis"
+        elif synthesis_status is not None and synthesis_status == "reconciliation_required":
+            next_action = "reconcile_synthesis"
+        elif synthesis_status is not None:
+            next_action = "inspect_synthesis_failure"
+        elif incomplete:
+            first = incomplete[0]
+            first_status = statuses[first]
+            if first_status == "approval_required" or first_status.endswith("review_required"):
+                next_action = "approve_child"
+            elif first_status == "reconciliation_required":
+                next_action = "reconcile_child"
+            else:
+                next_action = "retry_child"
+        elif result.status == "children_completed":
+            next_action = "complete"
+        else:
+            next_action = "synthesize"
+        total_units = len(result.execution_child_ids) + (1 if result.synthesis_result is not None else 0)
+        completed_units = len(completed) + int(bool(synthesis_status and synthesis_status.startswith("completed")))
+        reconciliation_required = result.status == "reconciliation_required" or any(
+            status == "reconciliation_required" for status in (*statuses.values(), synthesis_status)
+        )
+        return cls(
+            status=result.status,
+            execution_child_ids=result.execution_child_ids,
+            child_domains=domains,
+            child_statuses=statuses,
+            child_result_digests=digests,
+            completed_child_ids=completed,
+            incomplete_child_ids=incomplete,
+            synthesis_status=synthesis_status,
+            synthesis_result_digest=synthesis_digest,
+            completed_units=completed_units,
+            total_units=total_units,
+            progress=completed_units / total_units,
+            next_action=next_action,
+            safe_to_synthesize=not incomplete and result.synthesis_result is None,
+            reconciliation_required=reconciliation_required,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AutonomousCrossDomainResult:
     """Results from bounded child execution and optional cross-domain synthesis."""
 
@@ -3739,6 +3965,7 @@ class AutonomousCrossDomainResult:
         object.__setattr__(self, "execution_child_ids", order)
 
     def to_dict(self) -> dict[str, Any]:
+        receipt = self.execution_receipt
         return {
             "schema": "bioprism-python-autonomous-cross-domain-result/0.1",
             "status": self.status,
@@ -3747,9 +3974,16 @@ class AutonomousCrossDomainResult:
             "synthesis_result": None if self.synthesis_result is None else self.synthesis_result.to_dict(),
             "plan_refinement_digest": self.plan_refinement_digest,
             "execution_child_ids": list(self.execution_child_ids),
-            "execution": "completed" if self.synthesis_result is not None else "partial_or_blocked",
+            "execution": "completed" if receipt.next_action == "complete" else "partial_or_blocked",
+            "execution_receipt": receipt.to_dict(),
             "retention": "provider_responses_returned_to_caller; learning_memory_not_implicit",
         }
+
+    @property
+    def execution_receipt(self) -> AutonomousCrossDomainExecutionReceipt:
+        """Return the deterministic, payload-free progress projection for this result."""
+
+        return AutonomousCrossDomainExecutionReceipt.from_result(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -3860,16 +4094,7 @@ def _cross_domain_execution_digest(cross_domain: AutonomousCrossDomainResult) ->
             "status": cross_domain.status,
             "task_digest": cross_domain.blueprint.task_digest,
             "plan_digest": _cross_domain_plan_digest(cross_domain.blueprint),
-            "children": [
-                {
-                    "id": child_id,
-                    "outcome_digest": _autonomous_result_digest(result),
-                }
-                for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results)
-            ],
-            "synthesis": None
-            if cross_domain.synthesis_result is None
-            else _autonomous_result_digest(cross_domain.synthesis_result),
+            "execution_receipt": cross_domain.execution_receipt.to_dict(),
         }
     )
 
@@ -3960,6 +4185,10 @@ class AutonomousCrossDomainCheckpoint:
     plan_refinement_digest: str | None = None
     synthesis_result_digest: str | None = None
     status: str = "children_pending"
+    last_item_id: str | None = None
+    last_item_phase: str | None = None
+    last_item_status: str | None = None
+    failure_class: str | None = None
 
     def __post_init__(self) -> None:
         _identifier("cross-domain checkpoint run_id", self.run_id)
@@ -4005,12 +4234,29 @@ class AutonomousCrossDomainCheckpoint:
             _route_digest(self.synthesis_result_digest, "cross-domain checkpoint synthesis_result_digest")
             if len(completed) != len(execution):
                 raise BrainRunError("cross-domain checkpoint cannot contain synthesis before all children")
-        if self.status not in {"children_pending", "synthesis_pending", "approval_required", "completed"}:
+        if self.status not in {"children_pending", "synthesis_pending", "approval_required", "completed", "reconciliation_required"}:
             raise BrainRunError("cross-domain checkpoint has an invalid status")
         if self.status == "synthesis_pending" and len(completed) != len(execution):
             raise BrainRunError("cross-domain synthesis_pending checkpoint has incomplete children")
         if self.status == "completed" and self.synthesis_result_digest is None:
             raise BrainRunError("completed cross-domain checkpoint must contain synthesis digest")
+        if self.last_item_id is not None:
+            _identifier("cross-domain checkpoint last_item_id", self.last_item_id)
+        if self.last_item_phase is not None and self.last_item_phase not in {"child", "synthesis"}:
+            raise BrainRunError("cross-domain checkpoint last_item_phase must be child or synthesis")
+        if self.last_item_status is not None:
+            _identifier("cross-domain checkpoint last_item_status", self.last_item_status)
+        if self.failure_class is not None:
+            _identifier("cross-domain checkpoint failure_class", self.failure_class)
+        if self.status == "reconciliation_required":
+            if self.last_item_id is None or self.last_item_phase is None or self.last_item_status is None:
+                raise BrainRunError("reconciliation-required cross-domain checkpoint is missing item metadata")
+            if self.failure_class is None:
+                raise BrainRunError("reconciliation-required cross-domain checkpoint is missing failure_class")
+            if self.last_item_phase == "child" and self.last_item_id != self.next_child_id:
+                raise BrainRunError("reconciliation-required child checkpoint must retain the next child")
+            if self.last_item_phase == "synthesis" and self.next_child_id is not None:
+                raise BrainRunError("reconciliation-required synthesis checkpoint cannot retain a next child")
         encoded = json.dumps(
             {
                 "execution_child_ids": list(execution),
@@ -4020,6 +4266,10 @@ class AutonomousCrossDomainCheckpoint:
                 "plan_refinement_digest": self.plan_refinement_digest,
                 "synthesis_result_digest": self.synthesis_result_digest,
                 "status": self.status,
+                "last_item_id": self.last_item_id,
+                "last_item_phase": self.last_item_phase,
+                "last_item_status": self.last_item_status,
+                "failure_class": self.failure_class,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -4047,6 +4297,10 @@ class AutonomousCrossDomainCheckpoint:
                 "plan_refinement_digest": self.plan_refinement_digest,
                 "synthesis_result_digest": self.synthesis_result_digest,
                 "status": self.status,
+                "last_item_id": self.last_item_id,
+                "last_item_phase": self.last_item_phase,
+                "last_item_status": self.last_item_status,
+                "failure_class": self.failure_class,
             }
         )
 
@@ -4063,6 +4317,10 @@ class AutonomousCrossDomainCheckpoint:
             "plan_refinement_digest": self.plan_refinement_digest,
             "synthesis_result_digest": self.synthesis_result_digest,
             "status": self.status,
+            "last_item_id": self.last_item_id,
+            "last_item_phase": self.last_item_phase,
+            "last_item_status": self.last_item_status,
+            "failure_class": self.failure_class,
             "checkpoint_digest": self.checkpoint_digest,
             "retention": "child_ids_and_outcome_digests_only; caller_owned_results",
         }
@@ -4082,10 +4340,28 @@ class AutonomousCrossDomainCheckpoint:
             plan_refinement_digest=value.get("plan_refinement_digest"),
             synthesis_result_digest=value.get("synthesis_result_digest"),
             status=value.get("status", "children_pending"),
+            last_item_id=value.get("last_item_id"),
+            last_item_phase=value.get("last_item_phase"),
+            last_item_status=value.get("last_item_status"),
+            failure_class=value.get("failure_class"),
         )
         supplied_digest = value.get("checkpoint_digest")
         if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:
-            raise BrainRunError("cross-domain checkpoint digest does not match its contents")
+            legacy_payload = {
+                "schema": AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA,
+                "run_id": checkpoint.run_id,
+                "task_digest": checkpoint.task_digest,
+                "base_plan_digest": checkpoint.base_plan_digest,
+                "execution_child_ids": list(checkpoint.execution_child_ids),
+                "completed_child_ids": list(checkpoint.completed_child_ids),
+                "child_result_digests": dict(checkpoint.child_result_digests),
+                "next_child_id": checkpoint.next_child_id,
+                "plan_refinement_digest": checkpoint.plan_refinement_digest,
+                "synthesis_result_digest": checkpoint.synthesis_result_digest,
+                "status": checkpoint.status,
+            }
+            if supplied_digest != content_digest(legacy_payload):
+                raise BrainRunError("cross-domain checkpoint digest does not match its contents")
         return checkpoint
 
 
