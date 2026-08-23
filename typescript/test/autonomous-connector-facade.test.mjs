@@ -51,10 +51,11 @@ test("connector operation facade selects and invokes every domain through one re
     runtime: fixture.runtime,
     operationRegistry: fixture.operationRegistry,
   });
+  const events = [];
   assert.equal(fixture.operationFacade.constructor, AutonomousConnectorOperationFacade);
   const result = await facade.executeBatch(
     AUTONOMOUS_DOMAIN_NAMES.map((domain) => input(domain, fixture.operationRegistry)),
-    { maxParallelism: 4 },
+    { maxParallelism: 4, traceEventCallback: (event) => { events.push(event); } },
   );
 
   assert.equal(result.status, "completed");
@@ -63,6 +64,9 @@ test("connector operation facade selects and invokes every domain through one re
   assert.equal(result.omitted_count, 0);
   assert.deepEqual(result.items.map((item) => item.index), [...Array(AUTONOMOUS_DOMAIN_NAMES.length).keys()]);
   assert.equal((await journal.verifyIntegrity()).entries, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(events.filter((event) => event.phase === "connector_started").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(events.filter((event) => event.phase === "connector_finished").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(events.filter((event) => event.phase === "connector_finished").every((event) => event.status === "partial"));
   for (const item of result.items) {
     assert.equal(item.status, "succeeded");
     assert.ok(item.execution);

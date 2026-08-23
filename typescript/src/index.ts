@@ -1301,6 +1301,8 @@ export type {
   AutonomousConnectorReceiptJournalSnapshot,
   AutonomousConnectorReceiptJournalPersistence,
   AutonomousConnectorDispatchResult,
+  AutonomousConnectorTraceEvent,
+  AutonomousConnectorTraceEventCallback,
 } from "./autonomous-connectors.js";
 export {
   AUTONOMOUS_HTTP_CONNECTOR_ADAPTER_SCHEMA,

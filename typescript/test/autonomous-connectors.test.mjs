@@ -134,6 +134,34 @@ test("connector runtime deduplicates concurrent dispatches and rejects credentia
   assert.throws(() => new AutonomousConnectorObservation({ access_token: "must-not-enter" }), /credential-shaped/);
 });
 
+test("connector runtime streams lifecycle metadata for fresh, replayed, and in-flight dispatches", async () => {
+  const events = [];
+  let release;
+  const entered = new Promise((resolve) => { release = resolve; });
+  let continueExecution;
+  const registry = new AutonomousConnectorRegistry([
+    new AutonomousConnectorRegistration(manifest("connector-a", ["coding"]), async () => {
+      continueExecution = () => release();
+      await entered;
+      return { ok: true };
+    }),
+  ]);
+  const runtime = new AutonomousConnectorRuntime(registry);
+  const base = request({ dispatch_id: "dispatch-trace", execution_id: "execution-trace", call_id: "call-trace" });
+  const callback = (event) => { events.push(event); };
+  const first = runtime.dispatch(base, { traceEventCallback: callback });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const second = runtime.dispatch(base, { traceEventCallback: callback });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  continueExecution();
+  const [left, right] = await Promise.all([first, second]);
+  assert.deepEqual([left.replay, right.replay].sort(), ["fresh", "replayed"]);
+  assert.equal(events.filter((event) => event.phase === "connector_started").length, 2);
+  assert.equal(events.filter((event) => event.phase === "connector_finished").length, 2);
+  assert.ok(events.filter((event) => event.phase === "connector_finished").every((event) => event.status === "completed"));
+  assert.equal(events.some((event) => Object.prototype.hasOwnProperty.call(event, "request")), false);
+});
+
 test("AutonomousAgent exposes connector coverage and selection without invoking a provider", async () => {
   const registry = new AutonomousConnectorRegistry([
     new AutonomousConnectorRegistration(manifest("connector-a"), async () => ({ ok: true })),

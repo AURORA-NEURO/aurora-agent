@@ -51,6 +51,21 @@ export type AutonomousConnectorExecutor = (
   request: JsonObject,
 ) => unknown | Promise<unknown>;
 
+/** Metadata-only lifecycle event emitted by connector dispatch boundaries. */
+export interface AutonomousConnectorTraceEvent extends JsonObject {
+  phase: "connector_started" | "connector_finished";
+  status: "running" | "completed" | "partial" | "refused" | "failed" | "unknown";
+  domains: AutonomousDomainName[];
+  route_digest: string | null;
+  selection_digest: string | null;
+  detail_digest: string | null;
+  provider: string;
+  failure_class: string | null;
+  failure_code: string | null;
+}
+
+export type AutonomousConnectorTraceEventCallback = (event: AutonomousConnectorTraceEvent) => unknown | Promise<unknown>;
+
 const SOURCE_CONNECTOR_STATUSES = ["observed", "partial", "refused", "error", "unknown"] as const;
 
 function sourceConnectorStructured<T extends JsonObject>(response: unknown, label: string): T {
@@ -824,18 +839,25 @@ export class AutonomousConnectorRuntime {
     this.receiptSink = options.receiptSink;
   }
 
-  async dispatch(request: AutonomousConnectorDispatchRequest): Promise<AutonomousConnectorDispatchResult> {
+  async dispatch(request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
     if (!(request instanceof AutonomousConnectorDispatchRequest)) throw new ArgumentError("autonomous connector dispatch requires a typed request");
+    if (options.traceEventCallback !== undefined && typeof options.traceEventCallback !== "function") throw new ArgumentError("autonomous connector traceEventCallback must be callable");
     const registration = this.registry.resolve(request.connector_id);
     const replay = await this.findReplay(request, registration);
-    if (replay) return replay;
+    if (replay) {
+      await this.emitTrace(options.traceEventCallback, request, registration, "connector_started", "running");
+      await this.emitTrace(options.traceEventCallback, request, registration, "connector_finished", traceStatus(replay.receipt.status), replay.receipt);
+      return replay;
+    }
     const identity = requestIdentity(request);
     const prior = this.inFlight.get(identity);
     if (prior) {
+      await this.emitTrace(options.traceEventCallback, request, registration, "connector_started", "running");
       const outcome = await prior;
+      await this.emitTrace(options.traceEventCallback, request, registration, "connector_finished", traceStatus(outcome.receipt.status), outcome.receipt);
       return { ...outcome, replay: "replayed", value: null };
     }
-    const work = this.dispatchFresh(request, registration);
+    const work = this.dispatchFresh(request, registration, options.traceEventCallback);
     this.inFlight.set(identity, work);
     try {
       return await work;
@@ -844,7 +866,7 @@ export class AutonomousConnectorRuntime {
     }
   }
 
-  async dispatchFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest): Promise<AutonomousConnectorDispatchResult> {
+  async dispatchFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
     const typedPlan = plan instanceof AutonomousConnectorSelectionPlan ? plan : AutonomousConnectorSelectionPlan.fromJSON(plan);
     if (!(request instanceof AutonomousConnectorDispatchRequest)) throw new ArgumentError("autonomous connector planned dispatch requires a typed request");
     typedPlan.verify(this.registry);
@@ -854,7 +876,7 @@ export class AutonomousConnectorRuntime {
       const row = rows.get(domain);
       if (!row || row.status !== "selected" || row.connector_id !== request.connector_id) throw new ArgumentError("autonomous connector planned dispatch does not select the requested connector");
     }
-    return this.dispatch(request);
+    return this.dispatch(request, options);
   }
 
   private async findReplay(request: AutonomousConnectorDispatchRequest, registration: AutonomousConnectorRegistration): Promise<AutonomousConnectorDispatchResult | null> {
@@ -866,22 +888,23 @@ export class AutonomousConnectorRuntime {
     return { schema: AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA, receipt: stored, value: null, replay: "replayed", retention: "receipt_metadata_only;value_transient", secret_material: "never_returned" };
   }
 
-  private async dispatchFresh(request: AutonomousConnectorDispatchRequest, registration: AutonomousConnectorRegistration): Promise<AutonomousConnectorDispatchResult> {
+  private async dispatchFresh(request: AutonomousConnectorDispatchRequest, registration: AutonomousConnectorRegistration, traceEventCallback?: AutonomousConnectorTraceEventCallback): Promise<AutonomousConnectorDispatchResult> {
+    await this.emitTrace(traceEventCallback, request, registration, "connector_started", "running");
     const missingDomains = request.domains.filter((domain) => !registration.manifest.domains.includes(domain));
-    if (missingDomains.length) return this.finish(request, registration, "refused", "domain_scope");
-    if (!registration.manifest.capabilities.includes(request.capability)) return this.finish(request, registration, "refused", "capability_scope");
-    if (registration.approval_required && !request.approved) return this.finish(request, registration, "refused", "approval_required");
+    if (missingDomains.length) return this.finish(request, registration, "refused", "domain_scope", null, null, traceEventCallback);
+    if (!registration.manifest.capabilities.includes(request.capability)) return this.finish(request, registration, "refused", "capability_scope", null, null, traceEventCallback);
+    if (registration.approval_required && !request.approved) return this.finish(request, registration, "refused", "approval_required", null, null, traceEventCallback);
     try {
       const raw = await registration.executor(registration.manifest, request.request);
       const observation = raw instanceof AutonomousConnectorObservation ? raw : new AutonomousConnectorObservation(raw);
       const payloadDigest = observation.value === null ? null : digestJsonSync(observation.value);
-      return this.finish(request, registration, observation.status, observation.failure_class, payloadDigest, observation.value);
+      return this.finish(request, registration, observation.status, observation.failure_class, payloadDigest, observation.value, traceEventCallback);
     } catch {
-      return this.finish(request, registration, "error", "executor_error");
+      return this.finish(request, registration, "error", "executor_error", null, null, traceEventCallback);
     }
   }
 
-  private async finish(request: AutonomousConnectorDispatchRequest, registration: AutonomousConnectorRegistration, status: AutonomousConnectorDispatchStatus, failureClass: string | null, payloadDigest: string | null = null, value: JsonValue | null = null): Promise<AutonomousConnectorDispatchResult> {
+  private async finish(request: AutonomousConnectorDispatchRequest, registration: AutonomousConnectorRegistration, status: AutonomousConnectorDispatchStatus, failureClass: string | null, payloadDigest: string | null = null, value: JsonValue | null = null, traceEventCallback?: AutonomousConnectorTraceEventCallback): Promise<AutonomousConnectorDispatchResult> {
     const receipt = new AutonomousConnectorDispatchReceipt({ dispatch_id: request.dispatch_id, execution_id: request.execution_id, call_id: request.call_id, connector_id: registration.manifest.connector_id, connector_version: registration.manifest.version, provider: registration.manifest.provider, connector_kind: registration.manifest.connector_kind, manifest_digest: registration.manifest_digest, domains: request.domains, capability: request.capability, status, request_digest: request.request_digest, payload_digest: payloadDigest, parent_digests: request.parent_digests, attempt_id: request.attempt_id, failure_class: failureClass });
     let persisted = receipt;
     if (this.receiptStore) {
@@ -895,6 +918,37 @@ export class AutonomousConnectorRuntime {
     if (this.receiptSink) {
       try { await this.receiptSink(persisted); } catch (error) { throw new ArgumentError(`autonomous connector receipt sink failed: ${error instanceof Error ? error.constructor.name : "UnknownError"}`); }
     }
+    await this.emitTrace(traceEventCallback, request, registration, "connector_finished", traceStatus(persisted.status), persisted);
     return { schema: AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA, receipt: persisted, value, replay: "fresh", retention: "receipt_metadata_only;value_transient", secret_material: "never_returned" };
   }
+
+  private async emitTrace(
+    callback: AutonomousConnectorTraceEventCallback | undefined,
+    request: AutonomousConnectorDispatchRequest,
+    registration: AutonomousConnectorRegistration,
+    phase: AutonomousConnectorTraceEvent["phase"],
+    status: AutonomousConnectorTraceEvent["status"],
+    receipt?: AutonomousConnectorDispatchReceipt,
+  ): Promise<void> {
+    if (!callback) return;
+    await callback({
+      phase,
+      status,
+      domains: [...request.domains],
+      route_digest: request.selection_plan_digest,
+      selection_digest: request.selection_plan_digest,
+      detail_digest: receipt?.payload_digest ?? (receipt ? null : request.request_digest),
+      provider: registration.manifest.provider,
+      failure_class: receipt?.failure_class ?? null,
+      failure_code: receipt?.failure_class ?? null,
+    });
+  }
+}
+
+function traceStatus(status: AutonomousConnectorDispatchStatus): AutonomousConnectorTraceEvent["status"] {
+  if (status === "observed") return "completed";
+  if (status === "partial") return "partial";
+  if (status === "refused") return "refused";
+  if (status === "error") return "failed";
+  return "unknown";
 }

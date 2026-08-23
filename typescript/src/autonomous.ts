@@ -45,6 +45,7 @@ import {
   type AutonomousConnectorDispatchRequest,
   type AutonomousConnectorDispatchResult,
   type AutonomousConnectorSelectionPlan,
+  type AutonomousConnectorTraceEventCallback,
 } from "./autonomous-connectors.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
@@ -3797,15 +3798,15 @@ export class AutonomousAgent {
   }
 
   /** Dispatch one already-reviewed connector request; external authority remains caller-owned. */
-  async dispatchConnector(request: AutonomousConnectorDispatchRequest): Promise<AutonomousConnectorDispatchResult> {
+  async dispatchConnector(request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
     if (!this.connectorRuntime) throw new ArgumentError("AutonomousAgent has no connector runtime");
-    return this.connectorRuntime.dispatch(request);
+    return this.connectorRuntime.dispatch(request, options);
   }
 
   /** Dispatch only when the digest-bound selection plan still matches the live connector catalogue. */
-  async dispatchConnectorFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest): Promise<AutonomousConnectorDispatchResult> {
+  async dispatchConnectorFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
     if (!this.connectorRuntime) throw new ArgumentError("AutonomousAgent has no connector runtime");
-    return this.connectorRuntime.dispatchFromPlan(plan, request);
+    return this.connectorRuntime.dispatchFromPlan(plan, request, options);
   }
 
   /**

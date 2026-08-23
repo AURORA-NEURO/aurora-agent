@@ -16,6 +16,7 @@ import {
   InMemoryAutonomousEpisodicMemory,
   InMemoryAutonomousLearningFeedbackOutboxStore,
   InMemoryAutonomousConnectorReceiptJournal,
+  InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   createBuiltinAutonomousConnectorRuntime,
 } from "../dist/index.js";
@@ -519,6 +520,18 @@ test("brain facade runs a connector observation before provider invocation and s
   assert.equal(replayed.connector.replay, "replayed");
   assert.equal(replayed.connector.dispatch.value, null);
   assert.equal(journal.verifyIntegrity().entries, 1);
+
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const traced = await brain.executePlannedWithTrace(restored, request, {
+    traceStore,
+    runId: "connector-brain-trace",
+    approveProviderCall: true,
+  });
+  assert.equal(traced.execution.status, "completed");
+  assert.deepEqual(
+    traceStore.events({ run_id: "connector-brain-trace" }).map((event) => event.phase),
+    ["started", "plan_compiled", "connector_started", "connector_finished", "provider_invocation_started", "provider_invocation_finished", "completed"],
+  );
 });
 
 test("brain facade composes connector evidence, evaluator reward, online learning, memory, and restart-safe cycle replay", async () => {

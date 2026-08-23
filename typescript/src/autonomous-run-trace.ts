@@ -637,8 +637,8 @@ export class AutonomousRunTraceSession {
 export function autonomousRunTraceStatus(status: string): AutonomousRunTraceStatus {
   if (status === "completed") return "completed";
   if (status === "cross_domain_partial" || status === "children_partial" || status === "children_completed" || status === "completed_without_replan" || status === "replan_limit_reached") return "partial";
-  if (status === "route_review_required" || status === "approval_required" || status === "reconciliation_required" || status === "turn_limit_reached" || status === "plan_review_required" || status === "connector_blocked") return "paused";
+  if (status === "route_review_required" || status === "approval_required" || status === "reconciliation_required" || status === "turn_limit_reached" || status === "plan_review_required" || status === "connector_blocked" || status === "paused" || status === "stage_blocked" || status === "stage_proposed" || status === "stage_not_attempted") return "paused";
   if (status === "abstained" || status === "provider_abstained" || status === "provider_invalid" || status === "provider_disagreement") return "refused";
-  if (status === "child_failed" || status === "execution_failed") return "failed";
+  if (status === "child_failed" || status === "execution_failed" || status === "stage_failed" || status === "provider_failed") return "failed";
   return "unknown";
 }

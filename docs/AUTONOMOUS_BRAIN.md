@@ -1453,6 +1453,14 @@ material into the observability store. Callbacks are synchronous and caller-owne
 deployments should keep them bounded and non-blocking or enqueue only the metadata projection for
 a separate trace writer.
 
+The TypeScript SDK exposes the same boundary as `traceEventCallback` on
+`AutonomousConnectorRuntime.dispatch()`/`dispatchFromPlan()`, the operation and intent facades,
+durable connector workers, and the mission/workflow connector adapters. Its traced brain façade
+uses the runtime callback directly, so a connector replay is represented once even when the
+operation is nested inside a provider-backed run. This keeps Python and TypeScript aligned for
+all twelve domains and for cross-domain fan-out, while preserving the same caller-owned opaque
+credential and transient-value rules.
+
 `ModelCatalogue` stores only deterministic model metadata and rejects credential-shaped metadata
 fields; it is safe to populate before a user has supplied any key. `agent.readiness()` projects
 provider registration, credential readiness, and model eligibility without exposing secret material.

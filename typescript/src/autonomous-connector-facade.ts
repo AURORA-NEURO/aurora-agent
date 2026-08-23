@@ -8,6 +8,7 @@ import {
   type AutonomousConnectorDispatchResult,
   type AutonomousConnectorDispatchStatus,
   type AutonomousConnectorSelectionStrategy,
+  type AutonomousConnectorTraceEventCallback,
 } from "./autonomous-connectors.js";
 import {
   AutonomousConnectorOperationContract,
@@ -457,19 +458,19 @@ export class AutonomousConnectorOperationFacade {
   }
 
   /** Execute one reviewed operation through the selected connector and replay boundary. */
-  async execute(input: AutonomousConnectorOperationInput): Promise<AutonomousConnectorOperationExecution> {
+  async execute(input: AutonomousConnectorOperationInput, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorOperationExecution> {
     const prepared = this.prepare(input);
     if (!prepared.dispatch || prepared.plan.status !== "ready") throw new ProviderRuntimeError("connector operation has no eligible connector", { code: "configuration" });
-    return this.dispatch(prepared);
+    return this.dispatch(prepared, options.traceEventCallback);
   }
 
   /** Rehydrate a metadata-only plan by resupplying transient request metadata and verify exact identity. */
-  async executePlanned(plan: AutonomousConnectorOperationPlan, input: AutonomousConnectorOperationInput): Promise<AutonomousConnectorOperationExecution> {
+  async executePlanned(plan: AutonomousConnectorOperationPlan, input: AutonomousConnectorOperationInput, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorOperationExecution> {
     if (!(plan instanceof AutonomousConnectorOperationPlan)) throw new ArgumentError("connector operation executePlanned requires a typed plan");
     const prepared = this.prepare(input);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("connector operation plan does not match the supplied transient request");
     if (!prepared.dispatch) throw new ProviderRuntimeError("connector operation plan has no eligible connector", { code: "configuration" });
-    return this.dispatch(prepared);
+    return this.dispatch(prepared, options.traceEventCallback);
   }
 
   /** Rehydrate a reviewed operation plan into a transient worker request without dispatching. */
@@ -482,7 +483,7 @@ export class AutonomousConnectorOperationFacade {
   }
 
   /** Execute independent operations with bounded concurrency and deterministic result ordering. */
-  async executeBatch(inputs: readonly AutonomousConnectorOperationInput[], options: { maxParallelism?: number; stopOnError?: boolean } = {}): Promise<AutonomousConnectorOperationBatchResult> {
+  async executeBatch(inputs: readonly AutonomousConnectorOperationInput[], options: { maxParallelism?: number; stopOnError?: boolean; traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorOperationBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_CONNECTOR_FACADE_BATCH) throw new ArgumentError(`connector operation batch must contain 1..=${MAX_AUTONOMOUS_CONNECTOR_FACADE_BATCH} entries`);
     const maxParallelism = options.maxParallelism ?? 4;
     if (!Number.isSafeInteger(maxParallelism) || maxParallelism < 1 || maxParallelism > MAX_AUTONOMOUS_CONNECTOR_FACADE_PARALLELISM) throw new ArgumentError("connector operation batch maxParallelism is outside its bound");
@@ -501,7 +502,7 @@ export class AutonomousConnectorOperationFacade {
           continue;
         }
         try {
-          const execution = await this.execute(inputs[index]!);
+          const execution = await this.execute(inputs[index]!, { traceEventCallback: options.traceEventCallback });
           items[index] = { index, status: execution.status === "observed" || execution.status === "partial" ? "succeeded" : "refused", plan_digest: execution.operation_plan.plan_digest, execution };
           if (stopOnError && execution.status !== "observed" && execution.status !== "partial") halted = true;
         } catch (error) {
@@ -575,9 +576,9 @@ export class AutonomousConnectorOperationFacade {
     return { operation, request, dispatch, plan };
   }
 
-  private async dispatch(prepared: PreparedOperation): Promise<AutonomousConnectorOperationExecution> {
+  private async dispatch(prepared: PreparedOperation, traceEventCallback?: AutonomousConnectorTraceEventCallback): Promise<AutonomousConnectorOperationExecution> {
     if (!prepared.dispatch) throw new ProviderRuntimeError("connector operation dispatch is unavailable", { code: "configuration" });
-    const dispatch = await this.runtime.dispatchFromPlan(prepared.plan.selection_plan, prepared.dispatch);
+    const dispatch = await this.runtime.dispatchFromPlan(prepared.plan.selection_plan, prepared.dispatch, { traceEventCallback });
     return {
       schema: AUTONOMOUS_CONNECTOR_OPERATION_FACADE_SCHEMA,
       status: dispatch.receipt.status,
@@ -695,7 +696,7 @@ export class AutonomousConnectorIntentFacade {
   async execute(
     plan: AutonomousConnectorIntentPlanJSON,
     input: AutonomousConnectorIntentInput,
-    options: { maxParallelism?: number; stopOnError?: boolean } = {},
+    options: { maxParallelism?: number; stopOnError?: boolean; traceEventCallback?: AutonomousConnectorTraceEventCallback } = {},
   ): Promise<AutonomousConnectorIntentExecution> {
     if (!plan || typeof plan !== "object" || typeof plan.plan_digest !== "string") throw new ArgumentError("connector intent execute requires a typed plan projection");
     const current = await this.plan(input);
@@ -740,6 +741,7 @@ export class AutonomousConnectorIntentFacade {
               selection_strategy: input.selectionStrategy,
               selection_signals: input.selectionSignals,
             },
+            { traceEventCallback: options.traceEventCallback },
           );
           const succeeded = execution.status === "observed" || execution.status === "partial";
           items[index] = { index, domain: selection.domain, status: succeeded ? "succeeded" : "refused", plan_digest: selection.operation_plan.plan_digest, execution };
@@ -839,7 +841,7 @@ export class AutonomousConnectorIntentFacade {
     plan: AutonomousConnectorIntentPlanJSON,
     input: AutonomousConnectorIntentInput & { jobId: string },
     queue: InMemoryAutonomousConnectorWorkQueue,
-    options: { workerId?: string; limit?: number; leaseMs?: number; now?: number } = {},
+    options: { workerId?: string; limit?: number; leaseMs?: number; now?: number; traceEventCallback?: AutonomousConnectorTraceEventCallback } = {},
   ): Promise<AutonomousConnectorWorkerRun> {
     if (!plan || typeof plan !== "object" || typeof plan.plan_digest !== "string") throw new ArgumentError("connector intent runQueued requires a typed plan projection");
     if (!(queue instanceof InMemoryAutonomousConnectorWorkQueue)) throw new ArgumentError("connector intent runQueued requires a typed work queue");
@@ -943,7 +945,7 @@ export class AutonomousConnectorIntentJobController {
   async runQueued(
     plan: AutonomousConnectorIntentPlanJSON,
     input: AutonomousConnectorIntentInput & { jobId: string },
-    options: { workerId?: string; limit?: number; leaseMs?: number; now?: number } = {},
+    options: { workerId?: string; limit?: number; leaseMs?: number; now?: number; traceEventCallback?: AutonomousConnectorTraceEventCallback } = {},
   ): Promise<AutonomousConnectorIntentControllerExecution> {
     this.requireRestored();
     if (!input || typeof input !== "object" || typeof input.jobId !== "string") throw new ArgumentError("connector intent controller input requires jobId");

@@ -69,7 +69,12 @@ async function connectorFixture() {
 test("connector-backed workflow stages execute every autonomous domain through durable checkpoints", async () => {
   const fixture = await connectorFixture();
   const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
-  const adapter = autonomousConnectorWorkflowStageExecutor({ runtime: fixture.runtime, approved: true });
+  const events = [];
+  const adapter = autonomousConnectorWorkflowStageExecutor({
+    runtime: fixture.runtime,
+    approved: true,
+    traceEventCallback: (event) => { events.push(event); },
+  });
   let totalStages = 0;
   for (const profile of fixture.profiles) {
     const result = await new AutonomousWorkflowExecutor(
@@ -91,6 +96,8 @@ test("connector-backed workflow stages execute every autonomous domain through d
   }
   assert.equal(fixture.calls(), totalStages);
   assert.equal((await fixture.journal.verifyIntegrity()).entries, totalStages);
+  assert.equal(events.filter((event) => event.phase === "connector_started").length, totalStages);
+  assert.equal(events.filter((event) => event.phase === "connector_finished").length, totalStages);
 });
 
 test("connector-backed workflow stages require explicit evidence acceptance across every domain", async () => {
@@ -222,12 +229,18 @@ test("connector-backed mission steps bind capability, approval, and caller-owned
     execution_attempt: 1,
     resumed: false,
   };
-  const firstAdapter = autonomousConnectorMissionStepExecutor({ runtime: fixture.runtime, approved: true });
+  const events = [];
+  const firstAdapter = autonomousConnectorMissionStepExecutor({
+    runtime: fixture.runtime,
+    approved: true,
+    traceEventCallback: (event) => { events.push(event); },
+  });
   const first = await firstAdapter(context);
   assert.equal(first.status, "succeeded");
   assert.equal(first.run_status, "connector_observed");
   assert.equal(first.decision.plan_digest.length, 64);
   assert.equal(fixture.calls(), 1);
+  assert.deepEqual(events.map((event) => event.phase), ["connector_started", "connector_finished"]);
 
   const rehydrated = autonomousConnectorMissionStepExecutor({
     runtime: fixture.runtime,

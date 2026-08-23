@@ -10,6 +10,7 @@ import {
   AutonomousConnectorRuntime,
   AutonomousConnectorSelectionPlan,
   type AutonomousConnectorDispatchResult,
+  type AutonomousConnectorTraceEventCallback,
 } from "./autonomous-connectors.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
@@ -753,7 +754,8 @@ export class AutonomousConnectorWorker {
     if (typeof rehydrate !== "function") throw new ArgumentError("autonomous connector worker requires a rehydrator");
   }
 
-  async run(options: { workerId?: string; limit?: number; leaseMs?: number; now?: number; signal?: { readonly aborted: boolean }; workIds?: readonly string[] } = {}): Promise<AutonomousConnectorWorkerRun> {
+  async run(options: { workerId?: string; limit?: number; leaseMs?: number; now?: number; signal?: { readonly aborted: boolean }; workIds?: readonly string[]; traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorWorkerRun> {
+    if (options.traceEventCallback !== undefined && typeof options.traceEventCallback !== "function") throw new ArgumentError("autonomous connector worker traceEventCallback must be callable");
     const workerId = identifier("autonomous connector worker_id", options.workerId ?? "connector-worker");
     const limit = boundedInteger("autonomous connector worker limit", options.limit ?? 64, 1, MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH);
     const leaseMs = boundedInteger("autonomous connector worker lease_ms", options.leaseMs ?? 30_000, 1, MAX_AUTONOMOUS_CONNECTOR_WORK_LEASE_MS);
@@ -781,7 +783,7 @@ export class AutonomousConnectorWorker {
         const plan = hydrated.plan instanceof AutonomousConnectorSelectionPlan ? hydrated.plan : AutonomousConnectorSelectionPlan.fromJSON(hydrated.plan);
         const request = hydrated.request;
         this.assertHydratedIdentity(claimed, plan, request);
-        const result = await this.runtime.dispatchFromPlan(plan, request);
+        const result = await this.runtime.dispatchFromPlan(plan, request, { traceEventCallback: options.traceEventCallback });
         if (result.receipt.status === "observed" || result.receipt.status === "partial") {
           const finished = this.queue.complete(claimed.work_id, workerId, result.receipt, currentTime());
           const outcome = result.replay === "replayed" ? "replayed" : "completed";

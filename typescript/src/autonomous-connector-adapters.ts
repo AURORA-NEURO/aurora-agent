@@ -6,6 +6,7 @@ import {
   AutonomousConnectorRuntime,
   AutonomousConnectorSelectionPlan,
   type AutonomousConnectorDispatchResult,
+  type AutonomousConnectorTraceEventCallback,
 } from "./autonomous-connectors.js";
 import {
   AutonomousConnectorOperationRegistry,
@@ -75,6 +76,7 @@ export interface AutonomousWorkflowConnectorAdapterOptions {
   requestForStage?: (context: AutonomousWorkflowStageExecutionContext) => JsonObject | Promise<JsonObject>;
   rehydratePayload?: AutonomousConnectorPayloadRehydrator;
   onDispatch?: (result: AutonomousConnectorDispatchResult, context: AutonomousWorkflowStageExecutionContext) => void | Promise<void>;
+  traceEventCallback?: AutonomousConnectorTraceEventCallback;
   evidence?: AutonomousWorkflowEvidenceBinding;
 }
 
@@ -92,6 +94,7 @@ export interface AutonomousMissionConnectorAdapterOptions {
   requestForStep?: (context: AutonomousMissionStepExecutionContext) => JsonObject | Promise<JsonObject>;
   rehydratePayload?: AutonomousConnectorPayloadRehydrator;
   onDispatch?: (result: AutonomousConnectorDispatchResult, context: AutonomousMissionStepExecutionContext) => void | Promise<void>;
+  traceEventCallback?: AutonomousConnectorTraceEventCallback;
 }
 
 function boundedAdapterId(value: string, label: string): string {
@@ -378,6 +381,7 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
   if (registry !== options.runtime.registry) throw new ArgumentError("workflow connector adapter registry must match its runtime");
   if (options.requestForStage !== undefined && typeof options.requestForStage !== "function") throw new ArgumentError("workflow connector requestForStage must be callable");
   if (options.onDispatch !== undefined && typeof options.onDispatch !== "function") throw new ArgumentError("workflow connector onDispatch must be callable");
+  if (options.traceEventCallback !== undefined && typeof options.traceEventCallback !== "function") throw new ArgumentError("workflow connector traceEventCallback must be callable");
   if (options.evidence !== undefined) {
     if (!(options.evidence.runtime instanceof AutonomousEvidenceRuntime)) throw new ArgumentError("workflow connector evidence runtime is invalid");
     if (options.evidence.projector !== undefined && typeof options.evidence.projector.project !== "function") throw new ArgumentError("workflow connector evidence projector is malformed");
@@ -410,7 +414,7 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
     });
     if (options.evidence !== undefined && request.request.stage_attempt !== undefined && request.request.stage_attempt !== 1) throw new ArgumentError("workflow connector evidence binding requires a stable stage_attempt of 1");
     if (operation) operation.assertRequest(request);
-    const result = await options.runtime.dispatchFromPlan(plan.plan, request);
+    const result = await options.runtime.dispatchFromPlan(plan.plan, request, { traceEventCallback: options.traceEventCallback });
     await options.onDispatch?.(result, context);
     const resolved = await connectorValue(result, options.rehydratePayload);
     if (resolved.replayRecoveryRequired) return connectorRun(context, result, resolved.value, true);
@@ -465,6 +469,7 @@ export function autonomousConnectorMissionStepExecutor(options: AutonomousMissio
   if (registry !== options.runtime.registry) throw new ArgumentError("mission connector adapter registry must match its runtime");
   if (options.requestForStep !== undefined && typeof options.requestForStep !== "function") throw new ArgumentError("mission connector requestForStep must be callable");
   if (options.onDispatch !== undefined && typeof options.onDispatch !== "function") throw new ArgumentError("mission connector onDispatch must be callable");
+  if (options.traceEventCallback !== undefined && typeof options.traceEventCallback !== "function") throw new ArgumentError("mission connector traceEventCallback must be callable");
   return async (context): Promise<AutonomousMissionStepExecutionResult> => {
     const domain = connectorDomain(context.step.domain, "mission connector domain");
     const argumentDigest = await digestJson(context.arguments);
@@ -489,7 +494,7 @@ export function autonomousConnectorMissionStepExecutor(options: AutonomousMissio
       approved: options.approved === true,
     });
     if (operation) operation.assertRequest(request);
-    const result = await options.runtime.dispatchFromPlan(plan.plan, request);
+    const result = await options.runtime.dispatchFromPlan(plan.plan, request, { traceEventCallback: options.traceEventCallback });
     await options.onDispatch?.(result, context);
     const resolved = await connectorValue(result, options.rehydratePayload);
     const decision = {

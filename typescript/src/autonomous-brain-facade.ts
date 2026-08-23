@@ -1373,9 +1373,11 @@ export class AutonomousBrainFacade {
     let connector: AutonomousConnectorOperationExecution | null = null;
     if (request.connector !== undefined && options.connectorFirst !== false) {
       if (!this.connectorOperations || !prepared.connectorPlan) throw new ArgumentError("autonomous brain connector plan is unavailable");
-      await trace?.record({ phase: "connector_started", status: "running", domains: route.cross_domain ? [...new Set([...route.selected_domains, "cross_domain"])] as AutonomousDomainName[] : [route.primary_domain ?? "cross_domain"], route_digest: route.route_digest, plan_digest: plan.plan_digest });
-      connector = await this.connectorOperations.executePlanned(prepared.connectorPlan, request.connector);
-      await trace?.record({ phase: "connector_finished", status: "running", domains: route.cross_domain ? [...new Set([...route.selected_domains, "cross_domain"])] as AutonomousDomainName[] : [route.primary_domain ?? "cross_domain"], route_digest: route.route_digest, plan_digest: plan.plan_digest, detail_digest: digestJsonSync({ status: connector.status, replay: connector.replay, connector_plan_digest: connector.operation_plan.plan_digest }) });
+      connector = await this.connectorOperations.executePlanned(
+        prepared.connectorPlan,
+        request.connector,
+        { traceEventCallback: trace === undefined ? undefined : (event) => trace.record(event) },
+      );
       if (!connectorSucceeded(connector.status)) return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: "connector_blocked", plan: plan.toJSON(), run: null, connector, error: { error_class: "ConnectorOperationError", failure_code: connector.status }, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
     }
     const context = [
@@ -1410,9 +1412,11 @@ export class AutonomousBrainFacade {
     let connector: AutonomousConnectorOperationExecution | null = null;
     if (request.connector !== undefined && options.connectorFirst !== false) {
       if (!this.connectorOperations || !prepared.connectorPlan) throw new ArgumentError("autonomous brain connector plan is unavailable");
-      await trace?.record({ phase: "connector_started", status: "running", domains: this.traceDomains(prepared), route_digest: route.route_digest, plan_digest: plan.plan_digest });
-      connector = await this.connectorOperations.executePlanned(prepared.connectorPlan, request.connector);
-      await trace?.record({ phase: "connector_finished", status: "running", domains: this.traceDomains(prepared), route_digest: route.route_digest, plan_digest: plan.plan_digest, detail_digest: digestJsonSync({ status: connector.status, replay: connector.replay, connector_plan_digest: connector.operation_plan.plan_digest }) });
+      connector = await this.connectorOperations.executePlanned(
+        prepared.connectorPlan,
+        request.connector,
+        { traceEventCallback: trace === undefined ? undefined : (event) => trace.record(event) },
+      );
       if (!connectorSucceeded(connector.status)) return base("connector_blocked", null, connector, { error_class: "ConnectorOperationError", failure_code: connector.status });
     }
     const context = [
@@ -1457,9 +1461,11 @@ export class AutonomousBrainFacade {
     let connector: AutonomousConnectorOperationExecution | null = null;
     if (request.connector !== undefined && options.connectorFirst !== false) {
       if (!this.connectorOperations || !prepared.connectorPlan) throw new ArgumentError("autonomous brain connector plan is unavailable");
-      await trace?.record({ phase: "connector_started", status: "running", domains: this.traceDomains(prepared), route_digest: route.route_digest, plan_digest: plan.plan_digest });
-      connector = await this.connectorOperations.executePlanned(prepared.connectorPlan, request.connector);
-      await trace?.record({ phase: "connector_finished", status: "running", domains: this.traceDomains(prepared), route_digest: route.route_digest, plan_digest: plan.plan_digest, detail_digest: digestJsonSync({ status: connector.status, replay: connector.replay, connector_plan_digest: connector.operation_plan.plan_digest }) });
+      connector = await this.connectorOperations.executePlanned(
+        prepared.connectorPlan,
+        request.connector,
+        { traceEventCallback: trace === undefined ? undefined : (event) => trace.record(event) },
+      );
       if (!connectorSucceeded(connector.status)) return base("connector_blocked", null, connector, { error_class: "ConnectorOperationError", failure_code: connector.status });
     }
     const context = [
