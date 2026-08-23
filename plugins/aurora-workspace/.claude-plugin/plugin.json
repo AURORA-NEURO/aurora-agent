@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "aurora-workspace",
+  "version": "0.1.0",
+  "description": "Engineering skills for working inside the aurora-agent (bioprism) workspace: adding crates, byte-parity checks, crate verification, blueprint classification, and boilerplate measurement. Only useful with the aurora-agent repo checked out.",
+  "author": {
+    "name": "AURORA-NEURO"
+  },
+  "homepage": "https://github.com/AURORA-NEURO/aurora-agent",
+  "license": "Apache-2.0",
+  "keywords": ["aurora", "bioprism", "rust", "workspace", "honest-labelling"]
+}
