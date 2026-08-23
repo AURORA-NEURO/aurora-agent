@@ -580,6 +580,8 @@ export {
 export type {
   AutonomousWorkflowPortfolioRemoteJobStatus,
   AutonomousWorkflowPortfolioRemoteJobFailureClass,
+  AutonomousWorkflowPortfolioRemoteJobExecutionPhase,
+  AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome,
   AutonomousWorkflowPortfolioRemoteJob,
   AutonomousWorkflowPortfolioRemoteJobQueueSnapshot,
   AutonomousWorkflowPortfolioRemoteJobQueuePersistence,
@@ -590,6 +592,8 @@ export type {
   AutonomousWorkflowPortfolioRemoteJobResolution,
   AutonomousWorkflowPortfolioRemoteJobResolver,
   AutonomousWorkflowPortfolioRemoteJobQueueHandle,
+  AutonomousWorkflowPortfolioRemoteJobRequeueOptions,
+  AutonomousWorkflowPortfolioRemoteJobReconciliationOptions,
 } from "./autonomous-workflow-portfolio-worker.js";
 export {
   AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA,

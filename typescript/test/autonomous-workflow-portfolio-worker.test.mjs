@@ -163,7 +163,8 @@ test("remote portfolio worker refuses plan/admission drift before provider dispa
   assert.equal(queue.claim(job.job_id, "other-worker", 100, 2_050), null);
   assert.throws(() => queue.renew(job.job_id, "other-worker", 100, 2_060), /cannot be renewed/);
   queue.reclaimExpired(2_101);
-  assert.equal(queue.get(job.job_id).status, "reconciliation_required");
+  assert.equal(queue.get(job.job_id).status, "queued");
+  queue.cancel(job.job_id, 2_102);
 
   const retryableJob = await admitAutonomousWorkflowPortfolioRemoteJob(queue, { jobId: "drift-job-2", plan, admission, now: 2_000 });
   const worker = new AutonomousWorkflowPortfolioRemoteWorker(agent, queue, () => ({
@@ -254,4 +255,67 @@ test("CAS remote portfolio coordinators prevent duplicate claims after two worke
   const persisted = await persistence.read();
   assert.equal(persisted.jobs[0].status, "leased");
   assert.ok(["cas-worker-a", "cas-worker-b"].includes(persisted.jobs[0].lease_owner));
+});
+
+test("remote portfolio execution quarantines in-flight expiry and requires evidence-bound requeue", async () => {
+  const agent = agentFor();
+  const privateRequests = [{ id: "reconcile-coding", task: "private reconciliation task", domain: "coding" }];
+  const plan = await agent.planWorkflowPortfolio(privateRequests);
+  const admission = await agent.admitWorkflowPortfolio(privateRequests, { plan });
+  const queue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const job = await admitAutonomousWorkflowPortfolioRemoteJob(queue, { jobId: "reconcile-portfolio-job", plan, admission, now: 0 });
+  const claimed = queue.claim(job.job_id, "reconcile-worker", 10, 1);
+  queue.beginExecution(claimed.job_id, "reconcile-worker", 2);
+  const expired = queue.reclaimExpired(12);
+  assert.equal(expired[0].status, "reconciliation_required");
+  assert.equal(expired[0].execution_phase, "running");
+  assert.throws(() => queue.requeue(job.job_id, 13), /matching no-effect reconciliation receipt/);
+  assert.throws(() => queue.cancel(job.job_id, 13), /active or uncertain execution boundary/);
+  const unknown = queue.settleReconciliation(job.job_id, { outcome: "unknown", evidenceDigest: "a".repeat(64), evidenceKind: "provider_status", operator: "operator-1" }, 14);
+  assert.equal(unknown.status, "reconciliation_required");
+  assert.throws(() => queue.requeue(job.job_id, 15, { reconciliationDigest: unknown.reconciliation_digest }), /matching no-effect/);
+  const notExecuted = queue.settleReconciliation(job.job_id, { outcome: "not_executed", evidenceDigest: "b".repeat(64), evidenceKind: "idempotency_probe", operator: "operator-1", effectAbsent: true }, 16);
+  const reopened = queue.requeue(job.job_id, 17, { reconciliationDigest: notExecuted.reconciliation_digest });
+  assert.equal(reopened.status, "queued");
+  assert.equal(reopened.reconciliation_outcome, "not_executed");
+  const restored = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  restored.restore(queue.snapshot());
+  assert.equal(restored.get(job.job_id).reconciliation_digest, reopened.reconciliation_digest);
+  queue.claim(job.job_id, "reconcile-worker-2", 10, 18);
+  queue.beginExecution(job.job_id, "reconcile-worker-2", 19);
+  queue.fail(job.job_id, "reconcile-worker-2", "transport_error", true, "transport", 20);
+  const succeeded = queue.settleReconciliation(job.job_id, { outcome: "succeeded", evidenceDigest: "c".repeat(64), evidenceKind: "provider_receipt", operator: "operator-2", effectAbsent: false }, 21);
+  assert.equal(succeeded.status, "completed");
+  assert.equal(succeeded.result_digest, succeeded.reconciliation_digest);
+  assert.equal(queue.settleReconciliation(job.job_id, { outcome: "succeeded", evidenceDigest: "c".repeat(64), evidenceKind: "provider_receipt", operator: "operator-2", effectAbsent: false }, 22).job_digest, succeeded.job_digest);
+});
+
+test("remote portfolio worker accepts an external structural queue adapter", async () => {
+  const agent = agentFor();
+  const privateRequests = [{ id: "adapter-coding", task: "private adapter task", domain: "coding" }];
+  const plan = await agent.planWorkflowPortfolio(privateRequests);
+  const admission = await agent.admitWorkflowPortfolio(privateRequests, { plan });
+  const backing = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  await admitAutonomousWorkflowPortfolioRemoteJob(backing, { jobId: "adapter-portfolio-job", plan, admission });
+  const queue = {
+    maxJobs: backing.maxJobs,
+    get: backing.get.bind(backing),
+    pending: backing.pending.bind(backing),
+    claim: backing.claim.bind(backing),
+    renew: backing.renew.bind(backing),
+    checkpoint: backing.checkpoint.bind(backing),
+    beginExecution: backing.beginExecution.bind(backing),
+    complete: backing.complete.bind(backing),
+    fail: backing.fail.bind(backing),
+    reconcile: backing.reconcile.bind(backing),
+    settleReconciliation: backing.settleReconciliation.bind(backing),
+    reclaimExpired: backing.reclaimExpired.bind(backing),
+    requeue: backing.requeue.bind(backing),
+    cancel: backing.cancel.bind(backing),
+    snapshot: backing.snapshot.bind(backing),
+  };
+  const worker = new AutonomousWorkflowPortfolioRemoteWorker(agent, queue, () => ({ requests: privateRequests, plan, admission, executionOptions: { approveProviderCall: true } }), "adapter-portfolio-worker");
+  const run = await worker.run();
+  assert.equal(run.completed, 1);
+  assert.equal(backing.get("adapter-portfolio-job").status, "completed");
 });

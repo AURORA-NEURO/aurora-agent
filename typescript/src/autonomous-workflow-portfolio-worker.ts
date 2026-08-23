@@ -14,13 +14,13 @@ import {
   type AutonomousWorkflowPortfolioPlan,
 } from "./autonomous-workflow-portfolio.js";
 import type { AutonomousWorkflowPortfolioResumableExecutionOptions } from "./autonomous-workflow-portfolio-resumable.js";
-import { canonicalJson, digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only remote handoff queue for one reviewed autonomous portfolio. */
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_QUEUE_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-job-queue/0.1" as const;
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-job/0.1" as const;
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_REMOTE_WORKER_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-remote-worker/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_QUEUE_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-job-queue/0.2" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-job/0.2" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_REMOTE_WORKER_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-remote-worker/0.2" as const;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOBS = 4_096;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ITEMS = 64;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS = 300_000;
@@ -51,7 +51,11 @@ export type AutonomousWorkflowPortfolioRemoteJobFailureClass =
   | "transport_error"
   | "rehydration_missing"
   | "executor_error"
+  | "reconciliation_required"
   | "unknown";
+
+export type AutonomousWorkflowPortfolioRemoteJobExecutionPhase = "not_started" | "running" | "settled";
+export type AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome = "succeeded" | "failed" | "not_executed" | "unknown";
 
 export interface AutonomousWorkflowPortfolioRemoteJob extends JsonObject {
   schema: typeof AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA;
@@ -65,6 +69,14 @@ export interface AutonomousWorkflowPortfolioRemoteJob extends JsonObject {
   checkpoint_digest: string | null;
   result_digest: string | null;
   trace_digest: string | null;
+  execution_phase: AutonomousWorkflowPortfolioRemoteJobExecutionPhase;
+  reconciliation_digest: string | null;
+  reconciliation_observed_job_digest: string | null;
+  reconciliation_outcome: AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome | null;
+  reconciliation_evidence_digest: string | null;
+  reconciliation_evidence_kind: string | null;
+  reconciliation_operator: string | null;
+  reconciliation_effect_absent: boolean | null;
   status: AutonomousWorkflowPortfolioRemoteJobStatus;
   max_attempts: number;
   attempts: number;
@@ -103,12 +115,25 @@ export interface AutonomousWorkflowPortfolioRemoteJobQueueTransactionalTextStore
   writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
+export interface AutonomousWorkflowPortfolioRemoteJobRequeueOptions {
+  reconciliationDigest?: string;
+}
+
+export interface AutonomousWorkflowPortfolioRemoteJobReconciliationOptions extends JsonObject {
+  outcome: AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome;
+  evidenceDigest: string;
+  evidenceKind?: string;
+  operator?: string;
+  effectAbsent?: boolean;
+}
+
 export interface AutonomousWorkflowPortfolioRemoteWorkerRow extends JsonObject {
   job_id: string;
   outcome: "completed" | "partial" | "blocked" | "approval_required" | "retry_scheduled" | "failed" | "reconciliation_required" | "leased_elsewhere";
   attempts: number;
   result_digest: string | null;
   trace_digest: string | null;
+  reconciliation_digest: string | null;
   failure_class: AutonomousWorkflowPortfolioRemoteJobFailureClass | null;
   lease_retained: false;
 }
@@ -133,7 +158,9 @@ export interface AutonomousWorkflowPortfolioRemoteWorkerRun extends JsonObject {
 const JOB_RETENTION = "metadata_only_plan_admission_request_and_result_digests;tasks_prompts_credentials_outputs_never_persisted" as const;
 const JOB_SECRET_MATERIAL = "never_returned" as const;
 const JOB_STATUSES: readonly AutonomousWorkflowPortfolioRemoteJobStatus[] = ["queued", "leased", "completed", "partial", "blocked", "approval_required", "failed", "reconciliation_required", "cancelled"];
-const FAILURE_CLASSES: readonly AutonomousWorkflowPortfolioRemoteJobFailureClass[] = ["resolver_missing", "plan_mismatch", "admission_mismatch", "request_mismatch", "checkpoint_mismatch", "lease_expired", "provider_execution_failed", "approval_required", "transport_error", "rehydration_missing", "executor_error", "unknown"];
+const FAILURE_CLASSES: readonly AutonomousWorkflowPortfolioRemoteJobFailureClass[] = ["resolver_missing", "plan_mismatch", "admission_mismatch", "request_mismatch", "checkpoint_mismatch", "lease_expired", "provider_execution_failed", "approval_required", "transport_error", "rehydration_missing", "executor_error", "reconciliation_required", "unknown"];
+const EXECUTION_PHASES: readonly AutonomousWorkflowPortfolioRemoteJobExecutionPhase[] = ["not_started", "running", "settled"];
+const RECONCILIATION_OUTCOMES: readonly AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome[] = ["succeeded", "failed", "not_executed", "unknown"];
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -165,6 +192,54 @@ function boundedInteger(name: string, value: unknown, minimum: number, maximum: 
   return value as number;
 }
 
+function reconciliationOutcome(value: unknown): AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome {
+  if (!RECONCILIATION_OUTCOMES.includes(value as AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome)) throw new ArgumentError("portfolio remote reconciliation outcome is invalid");
+  return value as AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome;
+}
+
+function reconciliationReceiptDigest(job: AutonomousWorkflowPortfolioRemoteJob, options: {
+  outcome: AutonomousWorkflowPortfolioRemoteJobReconciliationOutcome;
+  evidenceDigest: string;
+  evidenceKind: string;
+  operator: string;
+  effectAbsent: boolean | null;
+}): string {
+  return digestJsonSync({
+    schema: `${AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA}/reconciliation-receipt`,
+    job_id: job.job_id,
+    plan_digest: job.plan_digest,
+    observed_job_digest: job.job_digest,
+    outcome: options.outcome,
+    evidence_digest: options.evidenceDigest,
+    evidence_kind: options.evidenceKind,
+    operator: options.operator,
+    effect_absent: options.effectAbsent,
+  });
+}
+
+function isPortfolioRemoteJobQueueHandle(value: unknown): value is AutonomousWorkflowPortfolioRemoteJobQueueHandle {
+  if (!isObject(value)) return false;
+  return ["get", "pending", "claim", "renew", "checkpoint", "beginExecution", "complete", "fail", "reconcile", "settleReconciliation", "reclaimExpired", "requeue", "cancel", "snapshot"].every((method) => typeof (value as Record<string, unknown>)[method] === "function") && typeof (value as Record<string, unknown>).maxJobs === "number";
+}
+
+async function computePrivateRequestDigests(requests: readonly AutonomousWorkflowPortfolioItemRequest[]): Promise<Array<{ itemId: string; digest: string }>> {
+  if (!Array.isArray(requests) || requests.length < 1 || requests.length > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ITEMS) throw new ArgumentError("portfolio remote private requests are outside their bounds");
+  return Promise.all(requests.map((request, index) => {
+    if (!isObject(request)) throw new ArgumentError(`portfolio remote private request ${index} is malformed`);
+    const id = typeof request.id === "string" && request.id.length > 0 ? request.id : `item-${index + 1}`;
+    return digestJson({
+      schema: "bioprism-typescript-autonomous-workflow-portfolio-request/0.1",
+      item_id: id,
+      task: request.task,
+      domain: request.domain,
+      capability: request.capability ?? null,
+      depends_on: Array.isArray(request.dependsOn) ? [...request.dependsOn] : [],
+      hints: Array.isArray(request.hints) ? [...request.hints] : [],
+      context: Array.isArray(request.context) ? request.context : [],
+    }).then((requestDigest) => ({ itemId: id, digest: requestDigest }));
+  }));
+}
+
 function jobDescriptor(job: AutonomousWorkflowPortfolioRemoteJob): JsonObject {
   const { job_digest: _jobDigest, ...descriptor } = job;
   return descriptor;
@@ -182,7 +257,7 @@ function refresh(job: AutonomousWorkflowPortfolioRemoteJob, patch: Partial<Auton
 
 function validateJob(raw: unknown): AutonomousWorkflowPortfolioRemoteJob {
   if (!isObject(raw) || raw.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA) throw new ArgumentError("portfolio remote job schema is invalid");
-  const allowed = new Set(["schema", "job_id", "plan_digest", "admission_digest", "require_admission", "trace_id", "item_ids", "request_digests", "checkpoint_digest", "result_digest", "trace_digest", "status", "max_attempts", "attempts", "available_at", "lease_owner", "lease_until", "failure_class", "failure_code", "created_at", "updated_at", "job_digest", "retention", "secret_material"]);
+  const allowed = new Set(["schema", "job_id", "plan_digest", "admission_digest", "require_admission", "trace_id", "item_ids", "request_digests", "checkpoint_digest", "result_digest", "trace_digest", "execution_phase", "reconciliation_digest", "reconciliation_observed_job_digest", "reconciliation_outcome", "reconciliation_evidence_digest", "reconciliation_evidence_kind", "reconciliation_operator", "reconciliation_effect_absent", "status", "max_attempts", "attempts", "available_at", "lease_owner", "lease_until", "failure_class", "failure_code", "created_at", "updated_at", "job_digest", "retention", "secret_material"]);
   if (Object.keys(raw).some((key) => !allowed.has(key))) throw new ArgumentError("portfolio remote job contains unsupported fields");
   const value = raw as unknown as AutonomousWorkflowPortfolioRemoteJob;
   const itemIds = Array.isArray(value.item_ids) ? value.item_ids.map((item, index) => identifier(`portfolio remote job item_ids[${index}]`, item)) : [];
@@ -199,6 +274,14 @@ function validateJob(raw: unknown): AutonomousWorkflowPortfolioRemoteJob {
     checkpoint_digest: optionalDigest("portfolio remote job checkpoint_digest", value.checkpoint_digest),
     result_digest: optionalDigest("portfolio remote job result_digest", value.result_digest),
     trace_digest: optionalDigest("portfolio remote job trace_digest", value.trace_digest),
+    execution_phase: value.execution_phase,
+    reconciliation_digest: optionalDigest("portfolio remote job reconciliation_digest", value.reconciliation_digest),
+    reconciliation_observed_job_digest: optionalDigest("portfolio remote job reconciliation_observed_job_digest", value.reconciliation_observed_job_digest),
+    reconciliation_outcome: value.reconciliation_outcome === null ? null : reconciliationOutcome(value.reconciliation_outcome),
+    reconciliation_evidence_digest: optionalDigest("portfolio remote job reconciliation_evidence_digest", value.reconciliation_evidence_digest),
+    reconciliation_evidence_kind: value.reconciliation_evidence_kind === null ? null : identifier("portfolio remote job reconciliation_evidence_kind", value.reconciliation_evidence_kind),
+    reconciliation_operator: value.reconciliation_operator === null ? null : identifier("portfolio remote job reconciliation_operator", value.reconciliation_operator),
+    reconciliation_effect_absent: value.reconciliation_effect_absent === null ? null : value.reconciliation_effect_absent,
     status: value.status,
     max_attempts: boundedInteger("portfolio remote job max_attempts", value.max_attempts, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS),
     attempts: boundedInteger("portfolio remote job attempts", value.attempts, 0, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS),
@@ -215,11 +298,26 @@ function validateJob(raw: unknown): AutonomousWorkflowPortfolioRemoteJob {
   } satisfies AutonomousWorkflowPortfolioRemoteJob;
   if (typeof normalized.require_admission !== "boolean") throw new ArgumentError("portfolio remote job require_admission must be boolean");
   if (normalized.item_ids.length < 1 || normalized.item_ids.length > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ITEMS || normalized.item_ids.length !== normalized.request_digests.length || new Set(normalized.item_ids).size !== normalized.item_ids.length) throw new ArgumentError("portfolio remote job item identity is invalid");
+  if (!EXECUTION_PHASES.includes(normalized.execution_phase)) throw new ArgumentError("portfolio remote job execution_phase is invalid");
   if (!JOB_STATUSES.includes(normalized.status)) throw new ArgumentError("portfolio remote job status is invalid");
+  if (normalized.status === "queued" && normalized.execution_phase !== "not_started") throw new ArgumentError("queued portfolio remote job must not have started execution");
+  if (normalized.status === "reconciliation_required" && normalized.execution_phase !== "running") throw new ArgumentError("reconciliation-required portfolio remote job must retain its running execution phase");
+  if (["completed", "partial", "blocked", "approval_required", "cancelled"].includes(normalized.status) && normalized.execution_phase !== "settled") throw new ArgumentError("settled portfolio remote job status requires a settled execution phase");
+  if (normalized.status === "leased" && normalized.execution_phase === "settled") throw new ArgumentError("leased portfolio remote job cannot have a settled execution phase");
   if (normalized.require_admission && normalized.admission_digest === null) throw new ArgumentError("required portfolio remote job admission is missing");
   if (normalized.failure_class !== null && !FAILURE_CLASSES.includes(normalized.failure_class)) throw new ArgumentError("portfolio remote job failure_class is invalid");
   if (normalized.status === "approval_required" && normalized.failure_class !== "approval_required") throw new ArgumentError("approval-required portfolio remote job must retain its approval failure class");
   if (normalized.status !== "approval_required" && normalized.failure_class === "approval_required") throw new ArgumentError("approval failure class is only valid for approval-required jobs");
+  const reconciliationFields = [normalized.reconciliation_observed_job_digest, normalized.reconciliation_outcome, normalized.reconciliation_evidence_digest, normalized.reconciliation_evidence_kind, normalized.reconciliation_operator, normalized.reconciliation_effect_absent];
+  if (normalized.reconciliation_digest === null && reconciliationFields.some((field) => field !== null)) throw new ArgumentError("portfolio remote reconciliation metadata requires a reconciliation digest");
+  if (normalized.reconciliation_digest !== null && reconciliationFields.some((field) => field === null)) throw new ArgumentError("portfolio remote reconciliation digest requires complete receipt metadata");
+  if (normalized.reconciliation_digest !== null && normalized.reconciliation_outcome === "not_executed" && normalized.reconciliation_effect_absent !== true) throw new ArgumentError("portfolio remote not_executed receipt must assert effect absence");
+  if (normalized.reconciliation_digest !== null && (normalized.reconciliation_outcome === "succeeded" || normalized.reconciliation_outcome === "unknown") && normalized.reconciliation_effect_absent === true) throw new ArgumentError("portfolio remote reconciliation outcome contradicts effect absence");
+  if (normalized.reconciliation_digest !== null) {
+    const expectedReceipt = digestJsonSync({ schema: `${AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA}/reconciliation-receipt`, job_id: normalized.job_id, plan_digest: normalized.plan_digest, observed_job_digest: normalized.reconciliation_observed_job_digest, outcome: normalized.reconciliation_outcome, evidence_digest: normalized.reconciliation_evidence_digest, evidence_kind: normalized.reconciliation_evidence_kind, operator: normalized.reconciliation_operator, effect_absent: normalized.reconciliation_effect_absent });
+    if (expectedReceipt !== normalized.reconciliation_digest) throw new ArgumentError("portfolio remote reconciliation digest does not match its receipt metadata");
+  }
+  if (normalized.reconciliation_effect_absent !== null && typeof normalized.reconciliation_effect_absent !== "boolean") throw new ArgumentError("portfolio remote reconciliation_effect_absent must be boolean or null");
   if (normalized.status === "leased" && (normalized.lease_owner === null || normalized.lease_until === null)) throw new ArgumentError("leased portfolio remote job requires a lease");
   if (normalized.status !== "leased" && (normalized.lease_owner !== null || normalized.lease_until !== null)) throw new ArgumentError("non-leased portfolio remote job cannot retain a lease");
   if (normalized.retention !== JOB_RETENTION || normalized.secret_material !== JOB_SECRET_MATERIAL) throw new ArgumentError("portfolio remote job retention contract is invalid");
@@ -288,6 +386,14 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
       checkpoint_digest: null,
       result_digest: null,
       trace_digest: null,
+      execution_phase: "not_started",
+      reconciliation_digest: null,
+      reconciliation_observed_job_digest: null,
+      reconciliation_outcome: null,
+      reconciliation_evidence_digest: null,
+      reconciliation_evidence_kind: null,
+      reconciliation_operator: null,
+      reconciliation_effect_absent: null,
       status: "queued" as const,
       max_attempts: maxAttempts,
       attempts: 0,
@@ -324,15 +430,19 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const worker = identifier("portfolio remote job workerId", workerId);
     const lease = boundedInteger("portfolio remote job leaseMs", leaseMs, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS);
     const time = timestamp("portfolio remote job claim now", now);
-    const current = this.jobs.get(id);
+    let current = this.jobs.get(id);
     if (!current || ["completed", "partial", "blocked", "approval_required", "failed", "cancelled", "reconciliation_required"].includes(current.status)) return null;
     if (current.status === "leased") {
       if (current.lease_until !== null && current.lease_until > time) return null;
-      this.jobs.set(id, refresh(current, { status: "reconciliation_required", lease_owner: null, lease_until: null, failure_class: "lease_expired", failure_code: "lease_expired" }, time));
-      return null;
+      if (current.execution_phase === "running") {
+        this.jobs.set(id, refresh(current, { status: "reconciliation_required", lease_owner: null, lease_until: null, failure_class: "reconciliation_required", failure_code: "execution_in_flight" }, time));
+        return null;
+      }
+      current = refresh(current, { status: "queued", execution_phase: "not_started", lease_owner: null, lease_until: null, failure_class: null, failure_code: null }, time);
+      this.jobs.set(id, current);
     }
     if (current.available_at > time || current.attempts >= current.max_attempts) return null;
-    const next = refresh(current, { status: "leased", attempts: current.attempts + 1, lease_owner: worker, lease_until: time + lease, failure_class: null, failure_code: null }, time);
+    const next = refresh(current, { status: "leased", execution_phase: "not_started", attempts: current.attempts + 1, lease_owner: worker, lease_until: time + lease, failure_class: null, failure_code: null }, time);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -345,6 +455,17 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const current = this.jobs.get(id);
     if (!current || current.status !== "leased" || current.lease_owner !== worker || current.lease_until === null || current.lease_until <= time) throw new ArgumentError("portfolio remote job lease cannot be renewed by this worker");
     const next = refresh(current, { lease_until: time + lease }, time);
+    this.jobs.set(id, next);
+    return clone(next);
+  }
+
+  beginExecution(jobId: string, workerId: string, now = Date.now()): AutonomousWorkflowPortfolioRemoteJob {
+    const id = identifier("portfolio remote job jobId", jobId);
+    const worker = identifier("portfolio remote job workerId", workerId);
+    const time = timestamp("portfolio remote job execution start now", now);
+    const current = this.jobs.get(id);
+    if (!current || current.status !== "leased" || current.lease_owner !== worker || current.lease_until === null || current.lease_until <= time) throw new ArgumentError("portfolio remote job execution start is fenced by its lease");
+    const next = refresh(current, { execution_phase: "running" }, time);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -369,8 +490,10 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const traceDigest = optionalDigest("portfolio remote job traceDigest", input.traceDigest);
     const current = this.jobs.get(id);
     if (!current || current.status !== "leased" || current.lease_owner !== worker || current.lease_until === null || current.lease_until <= time) throw new ArgumentError("portfolio remote job completion is fenced by its lease");
+    if (current.execution_phase !== "running") throw new ArgumentError("portfolio remote job completion requires the execution phase to be running");
     const next = refresh(current, {
       status: input.status,
+      execution_phase: "settled",
       result_digest: resultDigest,
       trace_digest: traceDigest,
       lease_owner: null,
@@ -390,8 +513,9 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const time = timestamp("portfolio remote job failure now", now);
     const current = this.jobs.get(id);
     if (!current || current.status !== "leased" || current.lease_owner !== worker || current.lease_until === null || current.lease_until <= time) throw new ArgumentError("portfolio remote job failure is fenced by its lease");
-    const canRetry = retryable && current.attempts < current.max_attempts;
-    const next = refresh(current, { status: canRetry ? "queued" : "failed", available_at: canRetry ? time + Math.min(3_600_000, 1_000 * (2 ** Math.max(0, current.attempts - 1))) : current.available_at, lease_owner: null, lease_until: null, failure_class: canRetry ? null : normalizedFailure, failure_code: code }, time);
+    const uncertainExecution = current.execution_phase === "running";
+    const canRetry = !uncertainExecution && retryable && current.attempts < current.max_attempts;
+    const next = refresh(current, { status: uncertainExecution ? "reconciliation_required" : canRetry ? "queued" : "failed", execution_phase: uncertainExecution ? "running" : "not_started", available_at: canRetry ? time + Math.min(3_600_000, 1_000 * (2 ** Math.max(0, current.attempts - 1))) : current.available_at, lease_owner: null, lease_until: null, failure_class: uncertainExecution ? "reconciliation_required" : canRetry ? null : normalizedFailure, failure_code: uncertainExecution ? "execution_in_flight" : code }, time);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -402,7 +526,44 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const time = timestamp("portfolio remote job reconciliation now", now);
     const current = this.jobs.get(id);
     if (!current || current.status !== "leased" || current.lease_owner !== worker || current.lease_until === null || current.lease_until <= time) throw new ArgumentError("portfolio remote job reconciliation is fenced by its lease");
-    const next = refresh(current, { status: "reconciliation_required", lease_owner: null, lease_until: null, failure_class: "rehydration_missing", failure_code: "lease_reconciliation_required" }, time);
+    const next = refresh(current, { status: "reconciliation_required", execution_phase: "running", lease_owner: null, lease_until: null, failure_class: "reconciliation_required", failure_code: "lease_reconciliation_required" }, time);
+    this.jobs.set(id, next);
+    return clone(next);
+  }
+
+  /** Record caller-owned evidence for a quarantined portfolio execution without retaining raw values. */
+  settleReconciliation(jobId: string, options: AutonomousWorkflowPortfolioRemoteJobReconciliationOptions, now = Date.now()): AutonomousWorkflowPortfolioRemoteJob {
+    const id = identifier("portfolio remote job jobId", jobId);
+    const time = timestamp("portfolio remote reconciliation settle now", now);
+    const current = this.jobs.get(id);
+    if (!current) throw new ArgumentError("portfolio remote job was not found");
+    const outcome = reconciliationOutcome(options.outcome);
+    const evidenceDigest = digest("portfolio remote reconciliation evidenceDigest", options.evidenceDigest);
+    const evidenceKind = identifier("portfolio remote reconciliation evidenceKind", options.evidenceKind ?? "caller_observation");
+    const operator = identifier("portfolio remote reconciliation operator", options.operator ?? "caller");
+    const effectAbsent = options.effectAbsent === undefined ? (outcome === "not_executed" ? true : null) : options.effectAbsent;
+    if (typeof effectAbsent !== "boolean" && effectAbsent !== null) throw new ArgumentError("portfolio remote reconciliation effectAbsent must be boolean or omitted");
+    if (outcome === "not_executed" && effectAbsent !== true) throw new ArgumentError("not_executed portfolio reconciliation requires effectAbsent=true");
+    if ((outcome === "succeeded" || outcome === "unknown") && effectAbsent === true) throw new ArgumentError("portfolio reconciliation effectAbsent contradicts the selected outcome");
+    if (current.reconciliation_digest !== null && current.reconciliation_outcome === outcome && current.reconciliation_evidence_digest === evidenceDigest && current.reconciliation_evidence_kind === evidenceKind && current.reconciliation_operator === operator && current.reconciliation_effect_absent === effectAbsent) return clone(current);
+    if (current.status !== "reconciliation_required") throw new ArgumentError("portfolio remote job is not awaiting reconciliation");
+    const receipt = reconciliationReceiptDigest(current, { outcome, evidenceDigest, evidenceKind, operator, effectAbsent });
+    const next = refresh(current, {
+      status: outcome === "succeeded" ? "completed" : outcome === "failed" ? "failed" : "reconciliation_required",
+      execution_phase: outcome === "succeeded" || outcome === "failed" ? "settled" : "running",
+      result_digest: outcome === "succeeded" ? receipt : current.result_digest,
+      reconciliation_digest: receipt,
+      reconciliation_observed_job_digest: current.job_digest,
+      reconciliation_outcome: outcome,
+      reconciliation_evidence_digest: evidenceDigest,
+      reconciliation_evidence_kind: evidenceKind,
+      reconciliation_operator: operator,
+      reconciliation_effect_absent: effectAbsent,
+      failure_class: outcome === "succeeded" ? null : "reconciliation_required",
+      failure_code: outcome === "succeeded" ? null : outcome === "failed" ? "reconciled_failure" : "execution_in_flight",
+      lease_owner: null,
+      lease_until: null,
+    }, time);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -412,18 +573,24 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const boundedLimit = boundedInteger("portfolio remote job reclaim limit", limit, 1, this.maxJobs);
     const expired = [...this.jobs.values()].filter((job) => job.status === "leased" && job.lease_until !== null && job.lease_until <= time).sort((left, right) => left.lease_until! - right.lease_until!).slice(0, boundedLimit);
     return expired.map((job) => {
-      const next = refresh(job, { status: "reconciliation_required", lease_owner: null, lease_until: null, failure_class: "lease_expired", failure_code: "lease_expired" }, time);
+      const next = refresh(job, job.execution_phase === "running"
+        ? { status: "reconciliation_required", execution_phase: "running", lease_owner: null, lease_until: null, failure_class: "reconciliation_required", failure_code: "execution_in_flight" }
+        : { status: "queued", execution_phase: "not_started", lease_owner: null, lease_until: null, failure_class: null, failure_code: null }, time);
       this.jobs.set(job.job_id, next);
       return clone(next);
     });
   }
 
-  requeue(jobId: string, now = Date.now()): AutonomousWorkflowPortfolioRemoteJob {
+  requeue(jobId: string, now = Date.now(), options: AutonomousWorkflowPortfolioRemoteJobRequeueOptions = {}): AutonomousWorkflowPortfolioRemoteJob {
     const id = identifier("portfolio remote job jobId", jobId);
     const time = timestamp("portfolio remote job requeue now", now);
     const current = this.jobs.get(id);
     if (!current || !["reconciliation_required", "approval_required"].includes(current.status) || current.attempts >= current.max_attempts) throw new ArgumentError("portfolio remote job is not eligible for requeue");
-    const next = refresh(current, { status: "queued", available_at: time, failure_class: null, failure_code: null }, time);
+    if (current.status === "reconciliation_required") {
+      if (current.reconciliation_digest === null || current.reconciliation_outcome !== "not_executed" || current.reconciliation_effect_absent !== true) throw new ArgumentError("portfolio remote requeue requires a matching no-effect reconciliation receipt");
+      if (options.reconciliationDigest !== current.reconciliation_digest) throw new ArgumentError("portfolio remote requeue requires the matching reconciliation digest");
+    }
+    const next = refresh(current, { status: "queued", execution_phase: "not_started", available_at: time, failure_class: null, failure_code: null }, time);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -432,8 +599,8 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const id = identifier("portfolio remote job jobId", jobId);
     const time = timestamp("portfolio remote job cancel now", now);
     const current = this.jobs.get(id);
-    if (!current || ["completed", "partial", "blocked", "failed", "cancelled"].includes(current.status)) throw new ArgumentError("portfolio remote job cannot be cancelled in its current state");
-    const next = refresh(current, { status: "cancelled", lease_owner: null, lease_until: null, failure_class: "unknown", failure_code: "cancelled" }, time);
+    if (!current || ["completed", "partial", "blocked", "failed", "cancelled", "reconciliation_required"].includes(current.status) || current.execution_phase === "running") throw new ArgumentError("portfolio remote job cannot be cancelled across an active or uncertain execution boundary");
+    const next = refresh(current, { status: "cancelled", execution_phase: "settled", lease_owner: null, lease_until: null, failure_class: "unknown", failure_code: "cancelled" }, time);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -493,7 +660,23 @@ export interface AutonomousWorkflowPortfolioRemoteJobResolution {
   executionOptions?: Omit<AutonomousWorkflowPortfolioResumableExecutionOptions, "jobId" | "plan" | "admission" | "requireAdmission" | "checkpointSink"> & { checkpoint?: AutonomousWorkflowPortfolioResumableExecutionOptions["checkpoint"]; checkpointSink?: never };
 }
 
-export type AutonomousWorkflowPortfolioRemoteJobQueueHandle = InMemoryAutonomousWorkflowPortfolioRemoteJobQueue | AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator;
+export interface AutonomousWorkflowPortfolioRemoteJobQueueHandle {
+  readonly maxJobs: number;
+  get(jobId: string): Promise<AutonomousWorkflowPortfolioRemoteJob | null> | AutonomousWorkflowPortfolioRemoteJob | null;
+  pending(limit?: number, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob[]> | AutonomousWorkflowPortfolioRemoteJob[];
+  claim(jobId: string, workerId: string, leaseMs?: number, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob | null> | AutonomousWorkflowPortfolioRemoteJob | null;
+  renew(jobId: string, workerId: string, leaseMs?: number, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  checkpoint(jobId: string, workerId: string, checkpointDigest: string, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  beginExecution(jobId: string, workerId: string, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  complete(jobId: string, workerId: string, input: { status: "completed" | "partial" | "blocked" | "approval_required"; resultDigest: string; traceDigest?: string | null }, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  fail(jobId: string, workerId: string, failureClass: AutonomousWorkflowPortfolioRemoteJobFailureClass, retryable: boolean, failureCode?: string, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  reconcile(jobId: string, workerId: string, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  settleReconciliation(jobId: string, options: AutonomousWorkflowPortfolioRemoteJobReconciliationOptions, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  reclaimExpired(now?: number, limit?: number): Promise<AutonomousWorkflowPortfolioRemoteJob[]> | AutonomousWorkflowPortfolioRemoteJob[];
+  requeue(jobId: string, now?: number, options?: AutonomousWorkflowPortfolioRemoteJobRequeueOptions): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  cancel(jobId: string, now?: number): Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob;
+  snapshot(): Promise<AutonomousWorkflowPortfolioRemoteJobQueueSnapshot> | AutonomousWorkflowPortfolioRemoteJobQueueSnapshot;
+}
 export type AutonomousWorkflowPortfolioRemoteJobResolver = (job: AutonomousWorkflowPortfolioRemoteJob, context: { workerId: string; renew: (leaseMs?: number, now?: number) => Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob }) => Promise<AutonomousWorkflowPortfolioRemoteJobResolution> | AutonomousWorkflowPortfolioRemoteJobResolution;
 
 function executionStatus(status: AutonomousWorkflowPortfolioExecutionStatus): "completed" | "partial" | "blocked" | "approval_required" {
@@ -522,7 +705,7 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
     readonly workerId: string,
   ) {
     if (!agent || typeof agent.executeWorkflowPortfolioResumable !== "function") throw new ArgumentError("portfolio remote worker requires an AutonomousAgent");
-    if (!(queue instanceof InMemoryAutonomousWorkflowPortfolioRemoteJobQueue) && !(queue instanceof AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator)) throw new ArgumentError("portfolio remote worker requires a typed queue or CAS coordinator");
+    if (!isPortfolioRemoteJobQueueHandle(queue)) throw new ArgumentError("portfolio remote worker requires a queue handle implementing the remote portfolio contract");
     if (typeof resolver !== "function") throw new ArgumentError("portfolio remote worker resolver must be callable");
     identifier("portfolio remote worker workerId", workerId);
   }
@@ -537,7 +720,9 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
     const time = timestamp("portfolio remote worker now", requestedNow ?? (options.clock ?? (() => Date.now()))());
     const clock = options.clock ?? (requestedNow === undefined ? (() => Date.now()) : (() => time));
     const rows: AutonomousWorkflowPortfolioRemoteWorkerRow[] = [];
-    for (const expired of await this.queue.reclaimExpired(time, limit)) rows.push({ job_id: expired.job_id, outcome: "reconciliation_required", attempts: expired.attempts, result_digest: expired.result_digest, trace_digest: expired.trace_digest, failure_class: expired.failure_class, lease_retained: false });
+    for (const expired of await this.queue.reclaimExpired(time, limit)) {
+      if (expired.status === "reconciliation_required") rows.push({ job_id: expired.job_id, outcome: "reconciliation_required", attempts: expired.attempts, result_digest: expired.result_digest, trace_digest: expired.trace_digest, reconciliation_digest: expired.reconciliation_digest, failure_class: expired.failure_class, lease_retained: false });
+    }
     const remaining = Math.max(0, limit - rows.length);
     const candidates = remaining > 0 ? await this.queue.pending(remaining, time) : [];
     for (const candidate of candidates) {
@@ -545,7 +730,7 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
       const claimed = await this.queue.claim(candidate.job_id, this.workerId, leaseMs, time);
       if (!claimed) {
         const current = await this.queue.get(candidate.job_id);
-        rows.push({ job_id: candidate.job_id, outcome: current?.status === "reconciliation_required" ? "reconciliation_required" : "leased_elsewhere", attempts: current?.attempts ?? candidate.attempts, result_digest: current?.result_digest ?? null, trace_digest: current?.trace_digest ?? null, failure_class: current?.failure_class ?? null, lease_retained: false });
+        rows.push({ job_id: candidate.job_id, outcome: current?.status === "reconciliation_required" ? "reconciliation_required" : "leased_elsewhere", attempts: current?.attempts ?? candidate.attempts, result_digest: current?.result_digest ?? null, trace_digest: current?.trace_digest ?? null, reconciliation_digest: current?.reconciliation_digest ?? null, failure_class: current?.failure_class ?? null, lease_retained: false });
         continue;
       }
       let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -570,6 +755,10 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
         if (!resolved || !Array.isArray(resolved.requests) || !resolved.plan) throw new ProviderRuntimeError("portfolio remote worker resolver returned no private execution binding", { code: "configuration", retryable: false });
         const plan = await validateAutonomousWorkflowPortfolioPlan(resolved.plan);
         if (plan.portfolio_digest !== claimed.plan_digest || canonicalJson(plan.items.map((item) => item.item_id)) !== canonicalJson(claimed.item_ids) || canonicalJson(plan.items.map((item) => item.request_digest)) !== canonicalJson(claimed.request_digests)) throw new ProviderRuntimeError("portfolio remote worker plan or request identity drifted", { code: "protocol", retryable: false });
+        const observedRequestIdentities = await computePrivateRequestDigests(resolved.requests);
+        const observedById = new Map(observedRequestIdentities.map((entry) => [entry.itemId, entry.digest]));
+        const observedRequestDigests = claimed.item_ids.map((itemId) => observedById.get(itemId) ?? null);
+        if (observedRequestDigests.some((entry) => entry === null) || canonicalJson(observedRequestDigests) !== canonicalJson(claimed.request_digests)) throw new ProviderRuntimeError("portfolio remote worker private request identity drifted", { code: "protocol", retryable: false });
         const admission = resolved.admission === undefined || resolved.admission === null ? null : await validateAutonomousWorkflowPortfolioAdmission(resolved.admission);
         if (claimed.require_admission && admission === null) throw new ProviderRuntimeError("portfolio remote worker requires a reviewed admission", { code: "protocol", retryable: false });
         if ((admission?.admission_digest ?? null) !== claimed.admission_digest) throw new ProviderRuntimeError("portfolio remote worker admission identity drifted", { code: "protocol", retryable: false });
@@ -583,19 +772,20 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
         } as AutonomousWorkflowPortfolioResumableExecutionOptions;
         if (claimed.trace_id !== null && executionOptions.traceId !== claimed.trace_id) throw new ProviderRuntimeError("portfolio remote worker trace identity drifted", { code: "protocol", retryable: false });
         if (heartbeatError !== null) throw new ProviderRuntimeError("portfolio remote worker lease heartbeat failed before dispatch", { code: "transport", retryable: true });
+        await this.queue.beginExecution(claimed.job_id, this.workerId, clock());
         const execution = await this.agent.executeWorkflowPortfolioResumable(resolved.requests, executionOptions);
         if (!(execution instanceof AutonomousWorkflowPortfolioExecutionResult)) throw new ProviderRuntimeError("portfolio remote worker execution result is malformed", { code: "protocol", retryable: false });
         if (heartbeatError !== null) throw new ProviderRuntimeError("portfolio remote worker lease heartbeat failed after dispatch", { code: "transport", retryable: true });
         const completed = await this.queue.complete(claimed.job_id, this.workerId, { status: executionStatus(execution.status), resultDigest: execution.executionDigest, traceDigest: execution.traceDigest }, clock());
-        rows.push({ job_id: completed.job_id, outcome: completed.status as "completed" | "partial" | "blocked" | "approval_required", attempts: completed.attempts, result_digest: completed.result_digest, trace_digest: completed.trace_digest, failure_class: completed.failure_class, lease_retained: false });
+        rows.push({ job_id: completed.job_id, outcome: completed.status as "completed" | "partial" | "blocked" | "approval_required", attempts: completed.attempts, result_digest: completed.result_digest, trace_digest: completed.trace_digest, reconciliation_digest: completed.reconciliation_digest, failure_class: completed.failure_class, lease_retained: false });
       } catch (error) {
         const failure = errorForWorker(error);
         try {
           const failed = await this.queue.fail(claimed.job_id, this.workerId, failure.failureClass, failure.retryable, failure.failureCode, clock());
-          rows.push({ job_id: failed.job_id, outcome: failed.status === "queued" ? "retry_scheduled" : "failed", attempts: failed.attempts, result_digest: failed.result_digest, trace_digest: failed.trace_digest, failure_class: failed.failure_class ?? failed.failure_class, lease_retained: false });
+          rows.push({ job_id: failed.job_id, outcome: failed.status === "queued" ? "retry_scheduled" : failed.status === "reconciliation_required" ? "reconciliation_required" : "failed", attempts: failed.attempts, result_digest: failed.result_digest, trace_digest: failed.trace_digest, reconciliation_digest: failed.reconciliation_digest, failure_class: failed.failure_class ?? failed.failure_class, lease_retained: false });
         } catch {
           const current = await this.queue.get(claimed.job_id);
-          rows.push({ job_id: claimed.job_id, outcome: current?.status === "reconciliation_required" ? "reconciliation_required" : "leased_elsewhere", attempts: current?.attempts ?? claimed.attempts, result_digest: current?.result_digest ?? null, trace_digest: current?.trace_digest ?? null, failure_class: current?.failure_class ?? failure.failureClass, lease_retained: false });
+          rows.push({ job_id: claimed.job_id, outcome: current?.status === "reconciliation_required" ? "reconciliation_required" : "leased_elsewhere", attempts: current?.attempts ?? claimed.attempts, result_digest: current?.result_digest ?? null, trace_digest: current?.trace_digest ?? null, reconciliation_digest: current?.reconciliation_digest ?? null, failure_class: current?.failure_class ?? failure.failureClass, lease_retained: false });
         }
       } finally {
         if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
@@ -684,6 +874,10 @@ export class AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator {
     return this.transact((queue) => queue.renew(jobId, workerId, leaseMs, now));
   }
 
+  async beginExecution(jobId: string, workerId: string, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
+    return this.transact((queue) => queue.beginExecution(jobId, workerId, now));
+  }
+
   async checkpoint(jobId: string, workerId: string, checkpointDigest: string, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
     return this.transact((queue) => queue.checkpoint(jobId, workerId, checkpointDigest, now));
   }
@@ -700,8 +894,12 @@ export class AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator {
     return this.transact((queue) => queue.reconcile(jobId, workerId, now));
   }
 
-  async requeue(jobId: string, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
-    return this.transact((queue) => queue.requeue(jobId, now));
+  async settleReconciliation(jobId: string, options: AutonomousWorkflowPortfolioRemoteJobReconciliationOptions, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
+    return this.transact((queue) => queue.settleReconciliation(jobId, options, now));
+  }
+
+  async requeue(jobId: string, now = Date.now(), options: AutonomousWorkflowPortfolioRemoteJobRequeueOptions = {}): Promise<AutonomousWorkflowPortfolioRemoteJob> {
+    return this.transact((queue) => queue.requeue(jobId, now, options));
   }
 
   async cancel(jobId: string, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {

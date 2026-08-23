@@ -2376,14 +2376,26 @@ For a remote deployment, `admitAutonomousWorkflowPortfolioRemoteJob()` places on
 plan digest, admission digest, item/request digests, trace identity, and resumable job identity on
 `InMemoryAutonomousWorkflowPortfolioRemoteJobQueue`. `AutonomousWorkflowPortfolioRemoteWorker`
 claims with a lease, asks a caller-owned resolver for the private requests and reviewed artifacts,
-revalidates every digest before provider dispatch, persists checkpoint/result/trace digests, and
-settles retry, failure, expiry, reconciliation, and `approval_required` states explicitly. An
+revalidates every plan, item, and private request digest before provider dispatch, records an
+explicit `not_started` → `running` → `settled` execution phase, persists checkpoint/result/trace
+digests, and settles retry, failure, expiry, reconciliation, and `approval_required` states explicitly. An
 approval pause is a durable terminal handoff—not a partial success—and must be explicitly requeued
 after the caller supplies provider approval. The worker renews its lease heartbeat during resolver
 and provider execution, with heartbeat failure treated as a transport/reconciliation boundary.
 Its JSON, transactional CAS, and browser-storage persistence adapters are metadata-only. Resolver
 state is never written to the queue, and queue restore or trace restore cannot itself authorize a
 provider call.
+
+Portfolio jobs use the same evidence-bound reconciliation posture as mission jobs. An expired lease
+before `beginExecution()` is returned to `queued`; an expired lease after that boundary is
+quarantined as `reconciliation_required`. `settleReconciliation()` stores only an evidence digest,
+bounded evidence/operator labels, and the outcome. `unknown` remains quarantined, `succeeded` or
+`failed` settles without replay, and only `not_executed` with `effectAbsent: true` plus the exact
+receipt digest can authorize `requeue()`. Active or uncertain jobs cannot be cancelled. These
+execution-phase and receipt fields are part of the remote portfolio `0.2` schemas, so older queue
+snapshots fail closed rather than losing side-effect guarantees. The worker accepts any structural
+queue adapter implementing the exported contract, allowing a deployment-owned database or queue
+transport to replace the in-memory reference.
 
 Portfolio execution can also close the evaluator-to-bandit loop for every item, but reward is
 never inferred from a provider response or from `status: "completed"`. The caller supplies the
