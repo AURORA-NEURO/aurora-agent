@@ -15813,6 +15813,70 @@ class AutonomousAgent:
             raise BrainRunError("run_auto chooses the domain; pass routing hints instead")
         cycle_learning = explicit_learning or learning_mode != "off"
 
+        def finalize_rehydrated_cycle(
+            cycle: AutonomousDecisionCycle,
+            rehydrated: AutonomousAutoResult,
+        ) -> None:
+            """Seal a non-terminal cursor after a caller rehydrates a verified private result."""
+
+            if cycle.state.terminal_status is not None:
+                return
+            route_digest = cycle.state.route_digest or rehydrated.route.route_digest
+            plan_digest = cycle.state.plan_refinement_digest
+            if rehydrated.planning is not None:
+                plan_digest = content_digest(rehydrated.planning.to_dict())
+            if rehydrated.status == "planning_review_required":
+                cycle.advance(
+                    phase="planning_pending",
+                    route_digest=route_digest,
+                    plan_refinement_digest=plan_digest,
+                )
+                return
+            if rehydrated.status == "route_review_required":
+                if cycle.state.route_digest is None:
+                    cycle.advance(phase="route_pending", route_digest=route_digest)
+                cycle.terminal(
+                    "route_review_required",
+                    outcome_digest=content_digest(rehydrated.to_dict()),
+                )
+                return
+
+            outcome_digest = content_digest(rehydrated.to_dict())
+            selection_digest = _decision_cycle_selection_digest(rehydrated)
+            if selection_digest is None:
+                selection_digest = cycle.state.selection_digest
+            evaluation_digest = _decision_cycle_evaluation_digest(rehydrated.result)
+            if evaluation_digest is None:
+                evaluation_digest = cycle.state.evaluation_digest
+            derived_episode_ids, derived_settlement_digests = _decision_cycle_learning_metadata(rehydrated.result)
+            episode_ids = tuple(dict.fromkeys((*cycle.state.learning_episode_ids, *derived_episode_ids)))
+            settlement_digests = tuple(dict.fromkeys((*cycle.state.settlement_digests, *derived_settlement_digests)))
+            if evaluation_digest is None:
+                episode_ids = ()
+                settlement_digests = ()
+            elif episode_ids and not settlement_digests:
+                settlement_digests = (evaluation_digest,)
+            cycle.advance(
+                phase=("settlement_pending" if evaluation_digest is not None else "evaluation_pending")
+                if cycle.evaluation_enabled
+                else "execution_pending",
+                route_digest=route_digest,
+                plan_refinement_digest=plan_digest,
+                selection_digest=selection_digest,
+                outcome_digest=outcome_digest,
+                learning_episode_ids=episode_ids,
+                evaluation_digest=evaluation_digest,
+                settlement_digests=settlement_digests,
+            )
+            if evaluation_digest is not None:
+                cycle.terminal(
+                    rehydrated.execution_status,
+                    outcome_digest=outcome_digest,
+                    settlement_digests=settlement_digests,
+                )
+            else:
+                cycle.terminal(rehydrated.execution_status, outcome_digest=outcome_digest)
+
         def rehydrate_restored_cycle(cycle: AutonomousDecisionCycle) -> AutonomousAutoResult:
             if not resume_decision_cycle:
                 raise BrainRunError("persisted decision cycle requires resume_decision_cycle=True")
@@ -15854,6 +15918,7 @@ class AutonomousAgent:
                 legacy_completed = cycle.state.terminal_status == "completed" and rehydrated.status == "completed"
                 if not legacy_completed and observed_terminal_status != cycle.state.terminal_status:
                     raise BrainRunError("rehydrated decision result does not match the persisted terminal status")
+            finalize_rehydrated_cycle(cycle, rehydrated)
             return rehydrated
 
         if resume_decision_cycle and decision_cycle_store is not None:
@@ -16003,6 +16068,11 @@ class AutonomousAgent:
             else:  # pragma: no cover - AutonomousAutoBlueprint invariants make this unreachable
                 raise BrainRunError("provider planning requires an executable automatic blueprint")
             if planning_result.status != "completed" or planning_result.review_required:
+                if decision_cycle is not None:
+                    decision_cycle.advance(
+                        phase="planning_pending",
+                        plan_refinement_digest=content_digest(planning_result.to_dict()),
+                    )
                 return AutonomousAutoResult(
                     status="planning_review_required",
                     route=blueprint.route,

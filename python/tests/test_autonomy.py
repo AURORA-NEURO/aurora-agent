@@ -1721,6 +1721,7 @@ def test_agent_prepare_auto_and_run_auto_reuse_explicit_runtime_boundaries():
 
 def test_run_auto_provider_planning_is_approval_gated_and_never_dispatches_without_consent():
     runtime, store, server, thread = _runtime()
+    cycle_store = InMemoryAutonomousDecisionCycleStateStore()
     try:
         agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
         with agent.onboarding.start_session(session_id="auto-provider-planning-approval") as session:
@@ -1729,12 +1730,17 @@ def test_run_auto_provider_planning_is_approval_gated_and_never_dispatches_witho
                 task="fix the Rust tests in the repository",
                 credentials=session,
                 planning_mode="provider",
+                decision_cycle_id="planning-review-cycle",
+                decision_cycle_store=cycle_store,
             )
             assert result.status == "planning_review_required"
             assert result.result is None
             assert result.planning_mode == "provider"
             assert result.planning is not None
             assert result.planning.status == "approval_required"
+            persisted = cycle_store.load("planning-review-cycle")
+            assert persisted is not None and persisted.phase == "planning_pending"
+            assert persisted.plan_refinement_digest == content_digest(result.planning.to_dict())
             public = json.dumps(result.to_dict())
             assert "auto-provider-planning-secret" not in public
             assert "fix the Rust tests" not in public
@@ -4238,6 +4244,61 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_run_auto_rehydration_seals_an_interrupted_execution_boundary():
+    agent = AutonomousAgent(_Workspace(), LLMRuntime(), model_catalogue=ModelCatalogue(_model()))
+    selection_digest = "f" * 64
+
+    def successful_run(**kwargs: object) -> BrainRunResult:
+        return BrainRunResult(
+            run_id=str(kwargs.get("run_id") or "rehydrated-execution"),
+            status="completed_provider_call",
+            selection={"decision_digest": selection_digest},
+            prompt={},
+            plan={},
+            response=None,
+            outcome_digest="1" * 64,
+        )
+
+    cycle_store = InMemoryAutonomousDecisionCycleStateStore()
+
+    def interrupted_run(**_kwargs: object) -> BrainRunResult:
+        raise BrainRunError("provider boundary became uncertain")
+
+    agent.run = interrupted_run  # type: ignore[method-assign]
+    with pytest.raises(BrainRunError, match="provider boundary"):
+        agent.run_auto(
+            task="recover this interrupted coding decision",
+            credentials={},
+            model_candidates=_model(),
+            decision_cycle_id="interrupted-cycle",
+            decision_cycle_store=cycle_store,
+        )
+    pending = cycle_store.load("interrupted-cycle")
+    assert pending is not None and pending.phase == "execution_pending"
+    assert pending.terminal_status is None
+
+    agent.run = successful_run  # type: ignore[method-assign]
+    private_result = agent.run_auto(
+        task="recover this interrupted coding decision",
+        credentials={},
+        model_candidates=_model(),
+    )
+    resumed = agent.run_auto(
+        task="recover this interrupted coding decision",
+        credentials={},
+        model_candidates=_model(),
+        decision_cycle_id="interrupted-cycle",
+        decision_cycle_store=cycle_store,
+        resume_decision_cycle=True,
+        decision_cycle_rehydrate_result=lambda _context: private_result,
+    )
+    sealed = cycle_store.load("interrupted-cycle")
+    assert resumed.to_dict() == private_result.to_dict()
+    assert sealed is not None and sealed.phase == "terminal"
+    assert sealed.terminal_status == "completed_provider_call"
+    assert sealed.selection_digest == selection_digest
 
 
 def test_run_auto_provider_planning_cycle_rehydrates_the_combined_selection_identity():
