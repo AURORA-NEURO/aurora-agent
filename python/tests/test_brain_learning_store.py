@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import threading
 
@@ -14,7 +15,13 @@ from prism_sdk import (
     BrainRunError,
     SQLiteBrainLearningLedger,
     TransactionalJsonBrainLearningSnapshotPersistence,
+    validate_brain_learning_snapshot,
 )
+
+
+def _digest(value: object) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _report(index: int = 1) -> dict[str, object]:
@@ -82,6 +89,8 @@ def test_learning_snapshot_rehydrates_all_domains_and_fences_stale_writers(tmp_p
         )
     source_coordinator = BrainLearningPersistenceCoordinator(source, persistence)
     flushed = source_coordinator.flush()
+    assert flushed["snapshot_generation"] == 1
+    assert flushed["previous_snapshot_digest"] is None
     assert flushed["head_digest"] == flushed["record_digests"][-1]
 
     restored = BrainLearningLedger(tmp_path / "restored-learning.jsonl")
@@ -96,9 +105,37 @@ def test_learning_snapshot_rehydrates_all_domains_and_fences_stale_writers(tmp_p
     stale_coordinator = BrainLearningPersistenceCoordinator(stale, persistence)
     stale_coordinator.restore()
     source.append(_report(99), context_digest="f" * 64, replay={"run_id": "new-run", "domain": "engineering"})
-    source_coordinator.flush()
+    advanced = source_coordinator.flush()
+    assert advanced["snapshot_generation"] == 2
+    assert advanced["previous_snapshot_digest"] == flushed["snapshot_digest"]
     with pytest.raises(BrainRunError, match="compare-and-swap conflict"):
         stale_coordinator.flush()
+
+    forged = dict(flushed)
+    forged["snapshot_generation"] = 2
+    forged["previous_snapshot_digest"] = None
+    forged.pop("snapshot_digest")
+    forged["snapshot_digest"] = _digest(forged)
+    with pytest.raises(BrainRunError, match="generation and previous_snapshot_digest"):
+        validate_brain_learning_snapshot(forged)
+
+    legacy = dict(flushed)
+    legacy["schema"] = "bioprism-brain-learning-snapshot/0.1"
+    legacy.pop("snapshot_generation")
+    legacy.pop("previous_snapshot_digest")
+    legacy.pop("snapshot_digest")
+    legacy["snapshot_digest"] = _digest(legacy)
+    legacy_backend = _CasTextStore()
+    legacy_backend.value = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    legacy_coordinator = BrainLearningPersistenceCoordinator(
+        BrainLearningLedger(tmp_path / "legacy-learning.jsonl"),
+        TransactionalJsonBrainLearningSnapshotPersistence(legacy_backend),
+    )
+    assert legacy_coordinator.restore()["schema"] == "bioprism-brain-learning-snapshot/0.1"
+    upgraded = legacy_coordinator.flush()
+    assert upgraded["schema"] == "bioprism-brain-learning-snapshot/0.2"
+    assert upgraded["snapshot_generation"] == 1
+    assert upgraded["previous_snapshot_digest"] is None
 
     tampered = json.loads(backend.value)
     tampered["records"][0]["record"]["replay"]["domain"] = "tampered"

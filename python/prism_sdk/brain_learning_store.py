@@ -25,12 +25,12 @@ import time
 from typing import Any, Iterator, Mapping
 
 from .brain import (
+    BRAIN_LEARNING_SNAPSHOT_SCHEMA,
     MAX_BRAIN_LEARNING_EPISODE_BYTES,
     MAX_BRAIN_REPLAY_BYTES,
     BrainLearningEpisode,
     BrainLearningLedger,
     BrainRunError,
-    _build_learning_snapshot,
     _normalize_learning_snapshot,
     _validate_learning_ledger_row,
 )
@@ -247,6 +247,7 @@ class SQLiteBrainLearningLedger(BrainLearningLedger):
                 digest,
                 context_digest=context_digest,
             )
+        self._invalidate_snapshot_cache()
         return {
             "schema": self._SCHEMA,
             **receipt,
@@ -293,6 +294,7 @@ class SQLiteBrainLearningLedger(BrainLearningLedger):
                 record_type="pending_episode",
                 episode_id=normalized.episode_id,
             )
+        self._invalidate_snapshot_cache()
         return {
             "schema": self._SCHEMA,
             **receipt,
@@ -335,11 +337,8 @@ class SQLiteBrainLearningLedger(BrainLearningLedger):
     def snapshot(self) -> dict[str, Any]:
         """Export the same portable projection as the JSONL ledger."""
 
-        return _build_learning_snapshot(
-            self.records(),
-            max_records=self.max_records,
-            max_bytes=self.max_bytes,
-        )
+        with self._sqlite_lock:
+            return self._snapshot_for_rows(self.records())
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
         """Atomically replace SQLite rows while preserving portable record indices."""
@@ -384,6 +383,13 @@ class SQLiteBrainLearningLedger(BrainLearningLedger):
                             float(self._clock()),
                         ),
                     )
+                self._snapshot_generation = int(normalized.get("snapshot_generation", 0))
+                self._previous_snapshot_digest = normalized["snapshot_digest"] if self._snapshot_generation else None
+                if normalized.get("schema") == BRAIN_LEARNING_SNAPSHOT_SCHEMA:
+                    self._snapshot_cache = normalized
+                    self._snapshot_cache_record_digests = tuple(normalized["record_digests"])
+                else:
+                    self._invalidate_snapshot_cache()
             except sqlite3.Error as error:
                 raise BrainRunError("SQLite learning snapshot could not be restored") from error
 

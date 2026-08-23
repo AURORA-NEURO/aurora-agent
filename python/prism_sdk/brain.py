@@ -119,7 +119,8 @@ AUTONOMOUS_EVALUATOR_MESH_SCHEMA = BRAIN_EVALUATOR_MESH_SCHEMA
 BRAIN_LEARNING_EPISODE_SCHEMA = "bioprism-brain-learning-episode/0.1"
 BRAIN_LEARNING_TRAJECTORY_SCHEMA = "bioprism-brain-learning-trajectory/0.1"
 BRAIN_CONTEXT_LEARNING_STATE_SCHEMA = "bioprism-brain-context-learning-state/0.1"
-BRAIN_LEARNING_SNAPSHOT_SCHEMA = "bioprism-brain-learning-snapshot/0.1"
+_LEGACY_BRAIN_LEARNING_SNAPSHOT_SCHEMA = "bioprism-brain-learning-snapshot/0.1"
+BRAIN_LEARNING_SNAPSHOT_SCHEMA = "bioprism-brain-learning-snapshot/0.2"
 _REPLAN_SECRET_PATTERNS = (
     re.compile(
         r"(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|authorization|secret)\b\s*[:=]\s*\S+"
@@ -336,6 +337,35 @@ class BrainLearningLedger:
         self.max_records = max_records
         self.max_bytes = max_bytes
         self._lock = threading.RLock()
+        self._snapshot_generation = 0
+        self._previous_snapshot_digest: str | None = None
+        self._snapshot_cache: dict[str, Any] | None = None
+        self._snapshot_cache_record_digests: tuple[str, ...] | None = None
+
+    def _invalidate_snapshot_cache(self) -> None:
+        self._snapshot_cache = None
+        self._snapshot_cache_record_digests = None
+
+    def _snapshot_for_rows(self, rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        normalized_rows = [_validate_learning_ledger_row(row) for row in rows]
+        record_digests = tuple(
+            hashlib.sha256(_canonical_learning_json(row).encode("utf-8")).hexdigest()
+            for row in normalized_rows
+        )
+        if self._snapshot_cache is not None and self._snapshot_cache_record_digests == record_digests:
+            return json.loads(_canonical_learning_json(self._snapshot_cache))
+        snapshot = _build_learning_snapshot(
+            normalized_rows,
+            max_records=self.max_records,
+            max_bytes=self.max_bytes,
+            snapshot_generation=self._snapshot_generation + 1,
+            previous_snapshot_digest=self._previous_snapshot_digest if self._snapshot_generation else None,
+        )
+        self._snapshot_generation = snapshot["snapshot_generation"]
+        self._previous_snapshot_digest = snapshot["snapshot_digest"]
+        self._snapshot_cache = snapshot
+        self._snapshot_cache_record_digests = record_digests
+        return json.loads(_canonical_learning_json(snapshot))
 
     def append(
         self,
@@ -408,6 +438,7 @@ class BrainLearningLedger:
                 handle.write(line)
                 handle.flush()
                 os.fsync(handle.fileno())
+            self._invalidate_snapshot_cache()
             record_digest = hashlib.sha256(line.rstrip(b"\n")).hexdigest()
             return {
                 "schema": self._SCHEMA,
@@ -477,6 +508,7 @@ class BrainLearningLedger:
                 handle.write(line)
                 handle.flush()
                 os.fsync(handle.fileno())
+            self._invalidate_snapshot_cache()
             record_digest = hashlib.sha256(line.rstrip(b"\n")).hexdigest()
             return {
                 "schema": self._SCHEMA,
@@ -501,7 +533,7 @@ class BrainLearningLedger:
 
         with self._lock:
             rows = self._read_records_locked()
-        return _build_learning_snapshot(rows, max_records=self.max_records, max_bytes=self.max_bytes)
+            return self._snapshot_for_rows(rows)
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
         """Atomically replace the JSONL ledger with a strictly validated snapshot."""
@@ -524,6 +556,15 @@ class BrainLearningLedger:
                     handle.flush()
                     os.fsync(handle.fileno())
                 os.replace(temporary, self.path)
+                self._snapshot_generation = int(normalized.get("snapshot_generation", 0))
+                self._previous_snapshot_digest = normalized["snapshot_digest"] if self._snapshot_generation else None
+                if normalized.get("schema") == BRAIN_LEARNING_SNAPSHOT_SCHEMA:
+                    self._snapshot_cache = normalized
+                    self._snapshot_cache_record_digests = tuple(normalized["record_digests"])
+                else:
+                    # A legacy image is a migration input, not a new chain link. The next
+                    # snapshot write emits a current-schema generation-one root.
+                    self._invalidate_snapshot_cache()
             except (OSError, ValueError) as error:
                 try:
                     temporary.unlink(missing_ok=True)
@@ -756,7 +797,15 @@ def _build_learning_snapshot(
     *,
     max_records: int,
     max_bytes: int,
+    snapshot_generation: int = 1,
+    previous_snapshot_digest: str | None = None,
 ) -> dict[str, Any]:
+    if isinstance(snapshot_generation, bool) or not isinstance(snapshot_generation, int) or snapshot_generation < 1:
+        raise BrainRunError("learning snapshot_generation must start at one")
+    if snapshot_generation == 1 and previous_snapshot_digest is not None:
+        raise BrainRunError("learning snapshot generation and previous_snapshot_digest are inconsistent")
+    if snapshot_generation > 1 and not _valid_digest(previous_snapshot_digest):
+        raise BrainRunError("learning previous_snapshot_digest is required after generation one")
     if len(rows) > max_records:
         raise BrainRunError("learning ledger snapshot exceeds max_records")
     normalized_rows = [_validate_learning_ledger_row(row) for row in rows]
@@ -766,6 +815,8 @@ def _build_learning_snapshot(
     record_digests = [hashlib.sha256(row).hexdigest() for row in encoded_rows]
     descriptor = {
         "schema": BRAIN_LEARNING_SNAPSHOT_SCHEMA,
+        "snapshot_generation": snapshot_generation,
+        "previous_snapshot_digest": previous_snapshot_digest,
         "records": normalized_rows,
         "record_digests": record_digests,
         "head_digest": record_digests[-1] if record_digests else "",
@@ -784,6 +835,9 @@ def _normalize_learning_snapshot(
     max_records: int,
     max_bytes: int,
 ) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise BrainRunError("learning ledger snapshot is malformed")
+    legacy = value.get("schema") == _LEGACY_BRAIN_LEARNING_SNAPSHOT_SCHEMA
     expected_keys = {
         "schema",
         "records",
@@ -793,9 +847,11 @@ def _normalize_learning_snapshot(
         "secret_material",
         "snapshot_digest",
     }
-    if not isinstance(value, Mapping) or set(value) != expected_keys:
+    if not legacy:
+        expected_keys.update({"snapshot_generation", "previous_snapshot_digest"})
+    if set(value) != expected_keys:
         raise BrainRunError("learning ledger snapshot is malformed")
-    if value.get("schema") != BRAIN_LEARNING_SNAPSHOT_SCHEMA:
+    if value.get("schema") not in {_LEGACY_BRAIN_LEARNING_SNAPSHOT_SCHEMA, BRAIN_LEARNING_SNAPSHOT_SCHEMA}:
         raise BrainRunError("learning ledger snapshot schema is unsupported")
     if (
         value.get("retention") != "value_only_evaluator_bandit_and_replay_metadata"
@@ -825,14 +881,29 @@ def _normalize_learning_snapshot(
     expected_head = digests[-1] if digests else ""
     if not isinstance(head_digest, str) or (head_digest and not _valid_digest(head_digest)) or head_digest != expected_head:
         raise BrainRunError("learning ledger snapshot head_digest is invalid")
+    snapshot_generation = value.get("snapshot_generation")
+    previous_snapshot_digest = value.get("previous_snapshot_digest")
+    if not legacy:
+        if isinstance(snapshot_generation, bool) or not isinstance(snapshot_generation, int) or snapshot_generation < 1:
+            raise BrainRunError("learning snapshot_generation must start at one")
+        if previous_snapshot_digest is not None and not _valid_digest(previous_snapshot_digest):
+            raise BrainRunError("learning previous_snapshot_digest is invalid")
+        if (snapshot_generation == 1) != (previous_snapshot_digest is None):
+            raise BrainRunError("learning snapshot generation and previous_snapshot_digest are inconsistent")
     descriptor = {
-        "schema": BRAIN_LEARNING_SNAPSHOT_SCHEMA,
+        "schema": value["schema"],
         "records": rows,
         "record_digests": digests,
         "head_digest": head_digest,
         "retention": "value_only_evaluator_bandit_and_replay_metadata",
         "secret_material": "never_returned",
     }
+    if not legacy:
+        descriptor = {
+            **descriptor,
+            "snapshot_generation": snapshot_generation,
+            "previous_snapshot_digest": previous_snapshot_digest,
+        }
     snapshot_digest = value.get("snapshot_digest")
     if not isinstance(snapshot_digest, str) or not _valid_digest(snapshot_digest) or _json_digest(descriptor) != snapshot_digest:
         raise BrainRunError("learning ledger snapshot digest does not match its metadata")

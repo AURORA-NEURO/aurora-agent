@@ -1375,8 +1375,12 @@ snapshot = coordinator.flush()  # binds row digests, head_digest, and snapshot_d
 ```
 
 The snapshot is canonical JSON with a strict envelope, per-record digests, a head digest, and a
-CAS-ready `snapshot_digest`. Restore rejects schema drift, non-canonical rows, malformed episodes,
-invalid context identities, oversized replay metadata, secret-shaped fields, and tampered records.
+CAS-ready `snapshot_digest`. Current `0.2` snapshots also carry an independent
+`snapshot_generation` and `previous_snapshot_digest`: generation one is the only root, and every
+later image must extend the exact prior snapshot. The `0.1` envelope remains readable and is
+rewritten as a generation-one `0.2` root on the next coordinated flush. Restore rejects schema
+drift, non-canonical rows, malformed episodes, invalid context identities, oversized replay
+metadata, secret-shaped fields, and tampered records.
 The projection remains value-only evaluator/bandit/replay metadata, so a stale worker cannot
 overwrite a newer reward update and no provider prompt, response, credential, header, tool
 argument, or raw evidence is transported by this boundary.
