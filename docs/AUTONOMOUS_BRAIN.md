@@ -2728,11 +2728,12 @@ result = agent.run_auto(
 )
 ```
 
-The outer result remains `status="completed"` at the intake envelope while the nested workflow
-may be `paused`, `approval_required`, or `stage_blocked`. Pass its caller-owned checkpoint back
-through `workflow_checkpoint` to continue without replaying completed stages. Cross-domain routes
-keep their specialist fan-out/synthesis path; they are never silently coerced into a
-single-domain workflow. A provider planning proposal becomes executable only when the caller
+The outer result remains `status="completed"` at the intake envelope for backward compatibility,
+while `result.execution_status` exposes the nested workflow state (`paused`, `approval_required`,
+`stage_blocked`, and so on) without requiring callers to inspect the transient result shape. Pass
+its caller-owned checkpoint back through `workflow_checkpoint` to continue without replaying
+completed stages. Cross-domain routes keep their specialist fan-out/synthesis path; they are never
+silently coerced into a single-domain workflow. A provider planning proposal becomes executable only when the caller
 passes a completed, non-review `AutonomousPlanRefinementResult` as `accepted_plan_refinement`.
 The runner verifies its task, base-plan, workflow, and dependency digests, uses it only to choose
 among currently-ready stages, and binds its digest into every checkpoint so a different plan

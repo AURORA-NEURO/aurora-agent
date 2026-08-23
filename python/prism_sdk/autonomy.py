@@ -2995,6 +2995,15 @@ class AutonomousAutoResult:
     planning: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | None = None
     semantic_route: AutonomousSemanticRouteResult | None = None
 
+    @property
+    def execution_status(self) -> str:
+        """Expose the underlying routed execution status without changing the outer contract."""
+
+        if self.result is None:
+            return self.status
+        status = getattr(self.result, "status", None)
+        return status if isinstance(status, str) and status else self.status
+
     def __post_init__(self) -> None:
         if self.status not in {"completed", "route_review_required", "planning_review_required"}:
             raise BrainRunError("automatic result status is invalid")
@@ -15827,8 +15836,11 @@ class AutonomousAgent:
                 observed_evaluation_digest = _decision_cycle_evaluation_digest(rehydrated.result)
                 if observed_evaluation_digest != cycle.state.evaluation_digest:
                     raise BrainRunError("rehydrated decision result does not match the persisted evaluation digest")
-            if cycle.state.terminal_status is not None and rehydrated.status != cycle.state.terminal_status:
-                raise BrainRunError("rehydrated decision result does not match the persisted terminal status")
+            if cycle.state.terminal_status is not None:
+                observed_terminal_status = rehydrated.execution_status
+                legacy_completed = cycle.state.terminal_status == "completed" and rehydrated.status == "completed"
+                if not legacy_completed and observed_terminal_status != cycle.state.terminal_status:
+                    raise BrainRunError("rehydrated decision result does not match the persisted terminal status")
             return rehydrated
 
         if resume_decision_cycle and decision_cycle_store is not None:
@@ -16272,7 +16284,7 @@ class AutonomousAgent:
                     settlement_digests=settlement_digests,
                 )
             decision_cycle.terminal(
-                "completed",
+                automatic_result.execution_status,
                 outcome_digest=cycle_outcome_digest,
                 settlement_digests=settlement_digests,
             )

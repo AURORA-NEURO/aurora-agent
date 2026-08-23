@@ -4206,9 +4206,10 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                 decision_cycle_store=cycle_store,
             )
             assert result.status == "completed"
+            assert result.execution_status == "completed_provider_call"
             persisted = cycle_store.load("decision-cycle-1")
             assert persisted is not None and persisted.phase == "terminal"
-            assert persisted.terminal_status == "completed"
+            assert persisted.terminal_status == result.execution_status
             assert persisted.selection_digest is not None
             public_state = json.dumps(persisted.to_dict())
             assert "decision-cycle-secret" not in public_state
