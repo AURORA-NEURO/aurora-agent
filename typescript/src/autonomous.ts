@@ -164,6 +164,7 @@ import {
   evaluateAutonomousDomainPolicy,
   type AutonomousDomainPolicy,
   type AutonomousDomainPolicyAdmission,
+  type AutonomousDomainPolicyExecutionMode,
   type AutonomousDomainPolicyOverrides,
 } from "./autonomous-domain-policy.js";
 import type {
@@ -835,7 +836,7 @@ export interface AutonomousCapabilityPlan extends JsonObject {
   plan_digest: string;
 }
 
-export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "reconciliation_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed";
+export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed";
 
 export type AutonomousToolLoopStatus = "completed" | "authorization_required" | "reconciliation_required" | "turn_limit_reached";
 
@@ -864,6 +865,8 @@ export interface AutonomousRunResult {
   learning_episode_id?: string | null;
   learning_episode_status?: "prepared" | "not_eligible" | "failed";
   learning_error_class?: string | null;
+  /** Strict-mode provider-free admission; absent for ordinary audit-mode runs. */
+  domain_policy_admission?: AutonomousDomainPolicyAdmission | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_response_local; value_only_learning_projection";
 }
@@ -1040,7 +1043,7 @@ export interface AutonomousCrossDomainChildRun {
   output_bytes: number;
 }
 
-export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "reconciliation_required" | "turn_limit_reached" | "child_failed" | "route_review_required";
+export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "child_failed" | "route_review_required";
 
 export type AutonomousCrossDomainExecutionNextAction = "review_route" | "approve_child" | "reconcile_child" | "retry_child" | "synthesize" | "approve_synthesis" | "reconcile_synthesis" | "inspect_synthesis_failure" | "inspect_partial_synthesis" | "complete";
 
@@ -1091,6 +1094,8 @@ export interface AutonomousCrossDomainRunResult {
   retention: "provider_responses_local; child_digests_only_in_synthesis_metadata";
   /** Value-only execution/recovery projection; provider payloads never enter this receipt. */
   execution_receipt?: AutonomousCrossDomainExecutionReceipt;
+  /** Per-domain strict-mode admissions; absent for ordinary audit-mode runs. */
+  domain_policy_admissions?: Record<string, AutonomousDomainPolicyAdmission>;
 }
 
 export interface AutonomousAgentOptions {
@@ -1333,6 +1338,20 @@ export interface AutonomousRunOptions {
   toolSelectionState?: AutonomousToolSelectionState | null;
   /** Deterministic UCB exploration weight for tool-arm ranking. */
   toolSelectionExploration?: number;
+  /** Audit records policy posture; strict blocks before provider/tool dispatch until every gate passes. */
+  domainPolicyMode?: AutonomousDomainPolicyExecutionMode;
+  /** Explicit evidence acceptance required by strict policies before provider invocation. */
+  domainPolicyEvidenceReady?: boolean;
+  /** Explicit evaluator configuration required by strict policies before provider invocation. */
+  domainPolicyEvaluatorConfigured?: boolean;
+  /** Explicit plan acceptance for a caller-owned plan not represented by a refinement object. */
+  domainPolicyPlanAccepted?: boolean;
+  /** Explicitly declare whether this invocation intends to request effectful work. */
+  domainPolicyEffectsRequested?: boolean;
+  /** Approval state for effectful work when the selected domain permits it. */
+  domainPolicyEffectsApproved?: boolean;
+  /** Strict-mode upper bound for provider tool-loop turns. */
+  maxToolTurns?: number;
 }
 
 export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
@@ -1448,7 +1467,7 @@ function memoryErrorClass(error: unknown): string {
 
 function memoryRunStatus(status: string): AutonomousMemoryEpisode["status"] {
   if (status === "completed") return "completed";
-  if (status === "approval_required" || status === "route_review_required") return "approval_required";
+  if (status === "approval_required" || status === "policy_review_required" || status === "policy_blocked" || status === "route_review_required") return "approval_required";
   if (status === "cross_domain_partial" || status === "children_partial" || status === "children_completed") return "partial";
   return "failed";
 }
@@ -1897,6 +1916,8 @@ const AUTONOMOUS_CROSS_DOMAIN_CHILD_STATUSES = new Set<string>([
   "completed",
   "route_review_required",
   "approval_required",
+  "policy_review_required",
+  "policy_blocked",
   "reconciliation_required",
   "turn_limit_reached",
   "abstained",
@@ -1909,6 +1930,8 @@ const AUTONOMOUS_CROSS_DOMAIN_RECEIPT_STATUSES = new Set<AutonomousCrossDomainRu
   "children_completed",
   "children_partial",
   "approval_required",
+  "policy_review_required",
+  "policy_blocked",
   "reconciliation_required",
   "turn_limit_reached",
   "child_failed",
@@ -2039,7 +2062,7 @@ export async function autonomousCrossDomainExecutionReceipt(result: AutonomousCr
   const reconciliationRequired = result.status === "reconciliation_required"
     || Object.values(childStatuses).some((status) => status === "reconciliation_required")
     || synthesisStatus === "reconciliation_required";
-  const nextAction: AutonomousCrossDomainExecutionNextAction = result.status === "route_review_required"
+  const nextAction: AutonomousCrossDomainExecutionNextAction = result.status === "route_review_required" || result.status === "policy_review_required" || result.status === "policy_blocked"
     ? "review_route"
     : synthesisStatus === "completed" && incompleteChildIds.length === 0
       ? "complete"
@@ -2063,7 +2086,9 @@ export async function autonomousCrossDomainExecutionReceipt(result: AutonomousCr
   const safeToSynthesize = incompleteChildIds.length === 0
     && result.synthesis === null
     && result.status !== "route_review_required"
-    && result.status !== "approval_required";
+    && result.status !== "approval_required"
+    && result.status !== "policy_review_required"
+    && result.status !== "policy_blocked";
   const completedUnits = completedChildIds.length + (synthesisStatus === "completed" ? 1 : 0);
   const totalUnits = Math.max(1, executionChildIds.length + (result.synthesis ? 1 : 0));
   const fields: AutonomousCrossDomainExecutionReceiptFields = {
@@ -2125,7 +2150,7 @@ export async function validateAutonomousCrossDomainExecutionReceipt(value: unkno
   if (typeof value.total_units !== "number" || !Number.isSafeInteger(value.total_units) || value.total_units !== expectedTotalUnits) throw new ArgumentError("total_units is inconsistent with the receipt");
   if (typeof value.progress !== "number" || !Number.isFinite(value.progress) || value.progress < 0 || value.progress > 1 || value.progress !== value.completed_units / value.total_units) throw new ArgumentError("progress is inconsistent with the receipt");
   if (typeof value.next_action !== "string" || !AUTONOMOUS_CROSS_DOMAIN_RECEIPT_ACTIONS.has(value.next_action as AutonomousCrossDomainExecutionNextAction)) throw new ArgumentError("next_action is invalid");
-  const safeToSynthesize = incompleteChildIds.length === 0 && synthesisStatus === null && value.status !== "route_review_required" && value.status !== "approval_required";
+  const safeToSynthesize = incompleteChildIds.length === 0 && synthesisStatus === null && value.status !== "route_review_required" && value.status !== "approval_required" && value.status !== "policy_review_required" && value.status !== "policy_blocked";
   if (value.safe_to_synthesize !== safeToSynthesize) throw new ArgumentError("safe_to_synthesize is inconsistent with the receipt");
   const reconciliationRequired = value.status === "reconciliation_required" || Object.values(childStatuses).some((status) => status === "reconciliation_required") || synthesisStatus === "reconciliation_required";
   if (value.reconciliation_required !== reconciliationRequired) throw new ArgumentError("reconciliation_required is inconsistent with the receipt");
@@ -2167,6 +2192,38 @@ function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOp
     try { encoded = JSON.stringify(options.responseSchema); } catch { throw new ArgumentError("autonomous responseSchema must be JSON-serializable"); }
     if (!encoded || bytes(encoded) > 1_000_000) throw new ArgumentError("autonomous responseSchema exceeds its bounded size");
   }
+}
+
+function normalizeAutonomousDomainPolicyMode(value: AutonomousDomainPolicyExecutionMode | undefined): AutonomousDomainPolicyExecutionMode {
+  if (value === undefined) return "audit";
+  if (value !== "audit" && value !== "strict") throw new ArgumentError("domainPolicyMode must be audit or strict");
+  return value;
+}
+
+function domainPolicyAdmissionForBlueprint(
+  route: AutonomousRouteProposal,
+  blueprint: AutonomousTaskBlueprint,
+  options: AutonomousRunOptions,
+  acceptedPlan: boolean,
+): AutonomousDomainPolicyAdmission | null {
+  if (normalizeAutonomousDomainPolicyMode(options.domainPolicyMode) !== "strict") return null;
+  return evaluateAutonomousDomainPolicy(blueprint.domain_policy, {
+    route_confidence: route.confidence,
+    route_abstained: route.abstained,
+    estimated_input_tokens: blueprint.prompt.estimated_input_tokens,
+    requested_output_tokens: options.maxOutputTokens ?? 1_024,
+    estimated_cost_units: options.maxTotalCostUnits,
+    structured_response: options.structuredDomainResponse === true,
+    evidence_ready: options.domainPolicyEvidenceReady,
+    evaluator_configured: options.domainPolicyEvaluatorConfigured ?? options.learning !== undefined,
+    plan_accepted: options.domainPolicyPlanAccepted ?? acceptedPlan,
+    effects_requested: options.domainPolicyEffectsRequested,
+    effects_approved: options.domainPolicyEffectsApproved ?? options.approveEffects,
+  });
+}
+
+function domainPolicyStatus(admission: AutonomousDomainPolicyAdmission): "policy_review_required" | "policy_blocked" {
+  return admission.decision === "blocked" ? "policy_blocked" : "policy_review_required";
 }
 
 function validateAutonomousDomainResponseOrThrow(
@@ -6033,10 +6090,11 @@ export class AutonomousAgent {
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
     const taskText = boundedText("autonomous task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
+    const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
     const contentParts = options.contentParts === undefined
       ? undefined
       : normalizeProviderContentParts(options.contentParts);
-    const costBudget = resolveAutonomousCostBudget(options);
+    let costBudget = resolveAutonomousCostBudget(options);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     if (route.cross_domain && options.domain === undefined) {
       if (options.acceptedSingleDomainPlanRefinement !== undefined) throw new ArgumentError("single-domain plan refinement cannot be applied to a cross-domain route");
@@ -6070,7 +6128,22 @@ export class AutonomousAgent {
     if (!blueprint) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     const acceptedPlan = await acceptedAutonomousPlan(blueprint, options.acceptedSingleDomainPlanRefinement);
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? null;
-    if (options.approveProviderCall !== true) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "approval_required", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    const domainPolicyAdmission = domainPolicyAdmissionForBlueprint(route, blueprint, options, acceptedPlan !== null);
+    if (domainPolicyMode === "strict" && domainPolicyAdmission && domainPolicyAdmission.decision !== "admitted") {
+      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: domainPolicyStatus(domainPolicyAdmission), route, blueprint, plan_refinement_digest: planRefinementDigest, selection: null, response: null, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    }
+    const domainPolicy = blueprint.domain_policy;
+    const effectiveMaxProviderFailovers = domainPolicyMode === "strict"
+      ? Math.min(options.maxProviderFailovers ?? Math.max(0, domainPolicy.max_provider_attempts - 1), Math.max(0, domainPolicy.max_provider_attempts - 1))
+      : options.maxProviderFailovers;
+    const effectiveMaxToolTurns = domainPolicyMode === "strict"
+      ? Math.min(options.maxToolTurns ?? domainPolicy.max_tool_turns, domainPolicy.max_tool_turns)
+      : options.maxToolTurns;
+    const effectiveMinSelectionConfidence = domainPolicyMode === "strict"
+      ? Math.max(options.minSelectionConfidence ?? 0, domainPolicy.min_selection_confidence)
+      : options.minSelectionConfidence;
+    if (domainPolicyMode === "strict" && costBudget === undefined) costBudget = new AutonomousCostBudget(domainPolicy.max_total_cost_units);
+    if (options.approveProviderCall !== true) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "approval_required", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: null, response: null, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("autonomous run requires at least one registered model candidate");
     const selectedDomains = route.selected_domains.length ? route.selected_domains : [route.primary_domain];
@@ -6109,7 +6182,7 @@ export class AutonomousAgent {
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     };
-    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: options.minSelectionConfidence, candidates, request };
+    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
@@ -6121,28 +6194,29 @@ export class AutonomousAgent {
           ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext }))
           : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
-      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
+      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly });
       const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
       const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
         ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
         : null;
-      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
-    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
+    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;
-    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
   }
 
   /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */
   async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
     const taskText = boundedText("cross-domain task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
+    const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
     const contentParts = options.contentParts === undefined
       ? undefined
       : normalizeProviderContentParts(options.contentParts);
-    const costBudget = resolveAutonomousCostBudget(options);
+    let costBudget = resolveAutonomousCostBudget(options);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
@@ -6167,8 +6241,22 @@ export class AutonomousAgent {
     });
     const acceptedPlan = await acceptedCrossDomainPlan(blueprint, options.acceptedCrossDomainPlanRefinement);
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? null;
+    const domainPolicyAdmissions = domainPolicyMode === "strict"
+      ? Object.fromEntries([
+        ...blueprint.child_blueprints.map((child) => [child.domain_profile.domain, domainPolicyAdmissionForBlueprint(route, child, options, acceptedPlan !== null)] as const),
+        ["cross_domain", domainPolicyAdmissionForBlueprint(route, blueprint.synthesis_blueprint, options, acceptedPlan !== null)] as const,
+      ]) as Record<string, AutonomousDomainPolicyAdmission>
+      : undefined;
+    const failedPolicyAdmissions = domainPolicyAdmissions === undefined
+      ? []
+      : Object.values(domainPolicyAdmissions).filter((admission) => admission.decision !== "admitted");
+    if (failedPolicyAdmissions.length > 0) {
+      const status = failedPolicyAdmissions.some((admission) => admission.decision === "blocked") ? "policy_blocked" : "policy_review_required";
+      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: [], synthesis: null, completed_children: 0, total_children: blueprint.child_blueprints.length, partial: false, plan_refinement_digest: planRefinementDigest, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+    }
+    if (domainPolicyMode === "strict" && costBudget === undefined) costBudget = new AutonomousCostBudget(autonomousDomainPolicy("cross_domain").max_total_cost_units);
     if (options.approveProviderCall !== true) {
-      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "approval_required", route, blueprint, child_runs: [], synthesis: null, completed_children: 0, total_children: blueprint.child_blueprints.length, partial: false, plan_refinement_digest: planRefinementDigest, learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "approval_required", route, blueprint, child_runs: [], synthesis: null, completed_children: 0, total_children: blueprint.child_blueprints.length, partial: false, plan_refinement_digest: planRefinementDigest, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
     }
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("cross-domain run requires at least one registered model candidate");
@@ -6216,6 +6304,13 @@ export class AutonomousAgent {
         requireJson: options.requireJson,
         responseSchema: options.responseSchema,
         structuredDomainResponse: options.structuredDomainResponse,
+        domainPolicyMode: options.domainPolicyMode,
+        domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
+        domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,
+        domainPolicyPlanAccepted: options.domainPolicyPlanAccepted ?? acceptedPlan !== null,
+        domainPolicyEffectsRequested: options.domainPolicyEffectsRequested,
+        domainPolicyEffectsApproved: options.domainPolicyEffectsApproved,
+        maxToolTurns: options.maxToolTurns,
         temperature: options.temperature,
         tools: options.tools,
         authorizeAndExecute: options.authorizeAndExecute,
@@ -6282,10 +6377,10 @@ export class AutonomousAgent {
     const hasTurnLimit = childRuns.some((child) => child.result.status === "turn_limit_reached");
     if (!allChildrenCompleted && !options.allowPartial) {
       const hasReconciliation = childRuns.some((child) => child.result.status === "reconciliation_required");
-      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasReconciliation ? "reconciliation_required" : hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasReconciliation ? "reconciliation_required" : hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, plan_refinement_digest: planRefinementDigest, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
     }
     if (options.synthesize === false) {
-      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
     }
     const synthesisTaskMessage = blueprint.synthesis_blueprint.prompt.messages.find((message) => message.source_id === "task");
     if (!synthesisTaskMessage) throw new ProviderRuntimeError("cross-domain synthesis has no bounded task message");
@@ -6320,6 +6415,13 @@ export class AutonomousAgent {
       requireJson: options.requireJson,
       responseSchema: options.responseSchema,
       structuredDomainResponse: options.structuredDomainResponse,
+      domainPolicyMode: options.domainPolicyMode,
+      domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,
+      domainPolicyPlanAccepted: options.domainPolicyPlanAccepted ?? acceptedPlan !== null,
+      domainPolicyEffectsRequested: options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: options.domainPolicyEffectsApproved,
+      maxToolTurns: options.maxToolTurns,
       temperature: options.temperature,
       tools: options.tools,
       authorizeAndExecute: options.authorizeAndExecute,
@@ -6344,7 +6446,7 @@ export class AutonomousAgent {
       learningEpisodeIds.push(episode.episode_id);
     }
     const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : synthesis.status === "reconciliation_required" ? "reconciliation_required" : synthesis.status === "turn_limit_reached" ? "turn_limit_reached" : "child_failed";
-    return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+    return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
   }
 
   private memoryStoreForRun(options: Pick<AutonomousRunOptions, "memoryStore">): AutonomousEpisodicMemoryStore | undefined {

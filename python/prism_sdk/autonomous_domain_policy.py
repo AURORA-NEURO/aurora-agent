@@ -18,6 +18,7 @@ from .errors import ArgumentError
 AUTONOMOUS_DOMAIN_POLICY_SCHEMA = "bioprism-autonomous-domain-policy/0.1"
 AUTONOMOUS_DOMAIN_POLICY_ADMISSION_SCHEMA = "bioprism-autonomous-domain-policy-admission/0.1"
 AUTONOMOUS_DOMAIN_POLICY_VERSION = "0.1"
+AUTONOMOUS_DOMAIN_POLICY_MODES = ("audit", "strict")
 AUTONOMOUS_DOMAIN_POLICY_DOMAINS = (
     "coding",
     "browser",

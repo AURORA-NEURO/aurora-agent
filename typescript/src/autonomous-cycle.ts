@@ -65,6 +65,8 @@ export const AUTONOMOUS_DECISION_CYCLE_SCHEMA = "bioprism-typescript-autonomous-
 export type AutonomousDecisionCycleStatus =
   | "completed"
   | "approval_required"
+  | "policy_review_required"
+  | "policy_blocked"
   | "reconciliation_required"
   | "turn_limit_reached"
   | "route_review_required"

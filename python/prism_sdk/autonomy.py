@@ -42,8 +42,10 @@ from .autonomous_evidence_runtime import (
     AutonomousEvidenceRuntimeResult,
 )
 from .autonomous_domain_policy import (
+    AUTONOMOUS_DOMAIN_POLICY_MODES,
     AutonomousDomainPolicy,
     AutonomousDomainPolicyAdmission,
+    AutonomousDomainPolicyError,
     autonomous_domain_policy,
     evaluate_autonomous_domain_policy,
 )
@@ -9434,6 +9436,12 @@ class AutonomousTaskOrchestrator:
         require_json: bool = False,
         response_schema: Mapping[str, Any] | None = None,
         execution_mode: str = "provider",
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_plan_accepted: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
         required_model_capabilities: Sequence[str] = (),
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
@@ -9519,6 +9527,63 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("trace_event_callback must be callable or None")
         route_context = blueprint.selection_context.get("autonomous_route")
         route_digest = route_context.get("route_digest") if isinstance(route_context, Mapping) else None
+        if domain_policy_mode not in AUTONOMOUS_DOMAIN_POLICY_MODES:
+            raise AutonomousDomainPolicyError(
+                "domain_policy_mode must be one of: " + ", ".join(AUTONOMOUS_DOMAIN_POLICY_MODES)
+            )
+        if not all(
+            value is None or isinstance(value, bool)
+            for value in (
+                domain_policy_evidence_ready,
+                domain_policy_evaluator_configured,
+                domain_policy_plan_accepted,
+                domain_policy_effects_requested,
+                domain_policy_effects_approved,
+            )
+        ):
+            raise AutonomousDomainPolicyError("strict domain policy gate values must be booleans or None")
+        strict_policy = autonomous_domain_policy(blueprint.domain_pack.domain)
+        policy_admission = None
+        if domain_policy_mode == "strict":
+            policy_admission = evaluate_autonomous_domain_policy(
+                strict_policy,
+                route_confidence=(
+                    float(route_context.get("confidence", 1.0))
+                    if isinstance(route_context, Mapping) and isinstance(route_context.get("confidence", 1.0), (int, float))
+                    else 1.0
+                ),
+                estimated_input_tokens=input_tokens,
+                requested_output_tokens=max_output_tokens,
+                structured_response=bool(require_json or response_schema),
+                evidence_ready=domain_policy_evidence_ready,
+                evaluator_configured=(
+                    domain_policy_evaluator_configured
+                    if domain_policy_evaluator_configured is not None
+                    else bool(learn or evaluator or evaluator_registry)
+                ),
+                plan_accepted=domain_policy_plan_accepted,
+                effects_requested=domain_policy_effects_requested,
+                effects_approved=(
+                    domain_policy_effects_approved
+                    if domain_policy_effects_approved is not None
+                    else approve_provider_call
+                ),
+            )
+            if policy_admission.decision != "admitted":
+                raise AutonomousDomainPolicyError(
+                    "strict autonomous domain policy admission failed: "
+                    + ", ".join(policy_admission.reasons)
+                )
+            max_provider_failovers = min(
+                max_provider_failovers,
+                max(0, strict_policy.max_provider_attempts - 1),
+            )
+            loop_options = {} if tool_loop_options is None else dict(tool_loop_options)
+            loop_options["max_turns"] = min(
+                int(loop_options.get("max_turns", strict_policy.max_tool_turns)),
+                strict_policy.max_tool_turns,
+            )
+            tool_loop_options = loop_options
         _emit_trace_event(
             trace_event_callback,
             phase="plan_compiled",

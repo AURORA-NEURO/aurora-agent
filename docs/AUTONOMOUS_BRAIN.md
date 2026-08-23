@@ -64,6 +64,39 @@ The Python API exposes the same contract through `autonomous_domain_policy(...)`
 Policy metadata is value-only and digest-addressed; prompts, credentials, evidence values, and
 provider responses remain transient caller-owned data.
 
+### Audit versus strict execution
+
+The default `domainPolicyMode: "audit"` (or Python `domain_policy_mode="audit"`) preserves
+backward-compatible execution while attaching policy metadata to the run. Set the mode to
+`"strict"` when a deployment needs a fail-closed boundary before any provider or tool dispatch.
+Strict admission checks the selected route, prompt and output budgets, aggregate cost, structured
+response posture, evidence readiness, evaluator configuration, explicit plan acceptance, and
+effect approval. It also clamps provider failovers and tool turns to the domain policy. A strict
+run returns `policy_review_required` or `policy_blocked` in TypeScript, while the Python
+orchestrator raises `AutonomousDomainPolicyError` with stable reason codes; neither path invokes a
+provider when admission fails.
+
+```typescript
+const held = await agent.run("review a bounded biomedical hypothesis", {
+  domain: "biomedical",
+  domainPolicyMode: "strict",
+  structuredDomainResponse: true,
+  domainPolicyEvidenceReady: true,
+  domainPolicyEvaluatorConfigured: true,
+  domainPolicyPlanAccepted: true,
+});
+
+if (held.status === "policy_review_required" || held.status === "policy_blocked") {
+  // Present held.domain_policy_admission.reasons to an operator or workflow queue.
+}
+```
+
+The Python equivalent supplies the same explicit booleans to `AutonomousTaskOrchestrator.run`
+using snake_case names and catches `AutonomousDomainPolicyError`. Cross-domain TypeScript runs
+evaluate every child domain and the synthesis domain independently, so one unsafe child holds the
+whole run before dispatch. Strict mode is an admission layer, not a secret manager: callers still
+own credentials, provider registration, and the final effect approval.
+
 ## Credential lifecycle
 
 Applications collect provider keys themselves. The SDK supports four caller-owned entry points:

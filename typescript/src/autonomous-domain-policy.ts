@@ -7,6 +7,7 @@ import type { JsonObject } from "./types.js";
 export const AUTONOMOUS_DOMAIN_POLICY_SCHEMA = "bioprism-autonomous-domain-policy/0.1" as const;
 export const AUTONOMOUS_DOMAIN_POLICY_ADMISSION_SCHEMA = "bioprism-autonomous-domain-policy-admission/0.1" as const;
 export const AUTONOMOUS_DOMAIN_POLICY_VERSION = "0.1" as const;
+export const AUTONOMOUS_DOMAIN_POLICY_MODES = ["audit", "strict"] as const;
 
 const POLICY_DOMAINS: readonly AutonomousDomainName[] = [
   "coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise",
@@ -17,6 +18,7 @@ export type AutonomousDomainPolicyResponseMode = "freeform_allowed" | "structure
 export type AutonomousDomainPolicyEvidenceMode = "optional" | "required_before_provider";
 export type AutonomousDomainPolicyEffectMode = "read_only" | "approval_gated" | "forbidden";
 export type AutonomousDomainPolicyLearningMode = "health_only" | "evaluator_credit" | "evaluator_credit_and_trajectory";
+export type AutonomousDomainPolicyExecutionMode = typeof AUTONOMOUS_DOMAIN_POLICY_MODES[number];
 
 export interface AutonomousDomainPolicy extends JsonObject {
   schema: typeof AUTONOMOUS_DOMAIN_POLICY_SCHEMA;

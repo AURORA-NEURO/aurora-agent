@@ -70,3 +70,54 @@ test("every generated blueprint binds the same domain policy into its plan", asy
     assert.equal(envelope.blueprint.domain_policy.policy_digest, envelope.blueprint.plan.domain_policy_digest);
   }
 });
+
+test("strict policy mode blocks every domain before provider dispatch until all gates are explicit", async () => {
+  let providerCalls = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("strict policy test must not contact HTTP"); } });
+  runtime.registerInMemoryProvider("local", async () => {
+    providerCalls += 1;
+    return { output_text: "unexpected provider dispatch" };
+  });
+  const agent = new AutonomousAgent(runtime);
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    agent.registerModel({
+      provider: "local",
+      model: `local-${domain}`,
+      capabilities: ["reasoning", "structured_output", "code", "web", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "coordination", "multimodal", "evaluation"],
+      context_window_tokens: 32_000,
+      max_output_tokens: 4_000,
+      quality: 0.95,
+      latency_ms: 10,
+      cost_per_million_tokens: 0,
+      reliability: 0.99,
+    });
+    const result = await agent.run(`strictly review a bounded ${domain} task`, {
+      domain,
+      candidates: agent.models().filter((candidate) => candidate.model === `local-${domain}`),
+      approveProviderCall: true,
+      domainPolicyMode: "strict",
+    });
+    assert.equal(result.status, "policy_review_required");
+    assert.equal(result.domain_policy_admission?.domain, domain);
+    assert.ok(result.domain_policy_admission?.reasons.includes("structured_response_required"));
+    assert.ok(result.domain_policy_admission?.reasons.includes("plan_acceptance_required"));
+  }
+  assert.equal(providerCalls, 0);
+});
+
+test("strict policy mode admits an explicitly reviewed, evidence-backed, evaluator-bound plan", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("strict admission test must not contact HTTP"); } });
+  const agent = new AutonomousAgent(runtime);
+  const result = await agent.run("prepare a reviewed coding plan", {
+    domain: "coding",
+    domainPolicyMode: "strict",
+    domainPolicyEvidenceReady: true,
+    domainPolicyEvaluatorConfigured: true,
+    domainPolicyPlanAccepted: true,
+    structuredDomainResponse: true,
+    approveProviderCall: false,
+  });
+  assert.equal(result.status, "approval_required");
+  assert.equal(result.domain_policy_admission?.decision, "admitted");
+  assert.equal(result.domain_policy_admission?.domain, "coding");
+});

@@ -4,7 +4,9 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAIN_POLICY_DOMAINS,
+    AutonomousBrain,
     AutonomousDomainPolicyError,
+    AutonomousTaskOrchestrator,
     AutonomousPlanBuilder,
     AutonomousPromptBuilder,
     AutonomousTaskSpec,
@@ -12,6 +14,7 @@ from prism_sdk import (
     builtin_autonomous_domain_profiles,
     builtin_autonomous_domain_policies,
     evaluate_autonomous_domain_policy,
+    LLMRuntime,
 )
 
 
@@ -88,3 +91,17 @@ def test_prompt_and_plan_bind_policy_metadata_for_every_domain():
 def test_policy_rejects_unknown_override():
     with pytest.raises(AutonomousDomainPolicyError):
         autonomous_domain_policy("coding", {"unknown": 1})
+
+
+def test_strict_orchestrator_policy_blocks_every_domain_before_provider_dispatch():
+    orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(object(), LLMRuntime()))
+    for domain in AUTONOMOUS_DOMAIN_POLICY_DOMAINS:
+        with pytest.raises(AutonomousDomainPolicyError, match="strict autonomous domain policy"):
+            orchestrator.run(
+                task=f"strictly review a bounded {domain} task",
+                domain=domain,
+                model_candidates=(),
+                credentials={},
+                domain_policy_mode="strict",
+                approve_provider_call=True,
+            )

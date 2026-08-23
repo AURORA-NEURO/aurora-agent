@@ -72,6 +72,7 @@ export {
   AUTONOMOUS_DOMAIN_POLICY_SCHEMA,
   AUTONOMOUS_DOMAIN_POLICY_ADMISSION_SCHEMA,
   AUTONOMOUS_DOMAIN_POLICY_VERSION,
+  AUTONOMOUS_DOMAIN_POLICY_MODES,
   autonomousDomainPolicy,
   builtinAutonomousDomainPolicies,
   evaluateAutonomousDomainPolicy,
@@ -86,6 +87,7 @@ export type {
   AutonomousDomainPolicyEvidenceMode,
   AutonomousDomainPolicyEffectMode,
   AutonomousDomainPolicyLearningMode,
+  AutonomousDomainPolicyExecutionMode,
 } from "./autonomous-domain-policy.js";
 export { parseSse } from "./sse.js";
 export {
