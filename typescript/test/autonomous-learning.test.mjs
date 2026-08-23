@@ -319,6 +319,97 @@ test("high-level runLearning evaluates and settles every built-in domain with re
   assert.equal(replay.settlement.episode.settlement.settlement_digest, settled[0].settlement.episode.settlement.settlement_digest);
 });
 
+test("provider-planned learning settles planner quality and execution as one replay-safe transaction", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (planningMessage) {
+        const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+        const ids = contract.stage_catalogue.map((row) => row.id);
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, focus_stage_ids: ids.slice(0, 1), review_required: false, confidence: 0.96, abstain: false }) }, finish_reason: "stop" }] });
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: "planned learning execution" }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("planned-learning", "https://planned-learning.test", { requiresCredential: false }));
+  const health = new InMemoryAutonomousModelHealthStore();
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  agent.registerModel({ ...candidate(), provider: "planned-learning", model: "planner-executor", capabilities: ["reasoning", "code", "structured_output", "planning"] });
+  const controller = new AutonomousLearningController(agent);
+  const planned = await agent.planAndRun("Plan and verify a coding change.", {
+    domain: "coding",
+    planning: { approveProviderCall: true },
+    acceptPlan: true,
+    approveProviderCall: true,
+    learning: controller,
+    learningEpisodeId: "planned-learning-episode",
+  });
+  assert.equal(planned.status, "completed");
+  const settled = await controller.evaluateAndSettlePlanAndRun(planned, {
+    evaluator: async (run) => ({ evaluator_id: "execution-reviewer", evaluator_version: "1", reward: run.status === "completed" ? 0.72 : 0, passed: run.status === "completed", evidence_digest: "a".repeat(64) }),
+    plannerEvaluator: async (plan) => ({ evaluator_id: "planner-reviewer", evaluator_version: "1", reward: plan.status === "completed" ? 0.88 : 0, passed: plan.status === "completed", evidence_digest: "b".repeat(64) }),
+  });
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.planner_settlement?.status, "settled");
+  assert.equal(settled.execution_settlement?.episode.status, "settled");
+  assert.equal(settled.planner_settlement?.model_quality?.reward, 0.88);
+  assert.equal(health.health({ model: "planner-executor" })[0]?.quality_observations, 2);
+  const beforeReplay = agent.learner.snapshot();
+  const replay = await controller.evaluateAndSettlePlanAndRun(planned, {
+    evaluator: async () => ({ evaluator_id: "execution-reviewer", evaluator_version: "1", reward: 0.72, passed: true, evidence_digest: "a".repeat(64) }),
+    plannerEvaluator: async () => ({ evaluator_id: "planner-reviewer", evaluator_version: "1", reward: 0.88, passed: true, evidence_digest: "b".repeat(64) }),
+  });
+  assert.equal(replay.status, "settled");
+  assert.deepEqual(agent.learner.snapshot(), beforeReplay);
+  assert.equal(health.health({ model: "planner-executor" })[0]?.quality_observations, 2);
+  assert.equal(JSON.stringify(settled.planner_settlement).includes("planned learning execution"), false);
+  assert.equal(JSON.stringify(settled.execution_settlement).includes("planned learning execution"), false);
+});
+
+test("provider-planned cross-domain learning settles planner, specialists, and synthesis together", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (planningMessage) {
+        const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+        const ids = (contract.child_catalogue ?? contract.stage_catalogue).map((row) => row.id);
+        const focusField = contract.child_catalogue ? "focus_child_ids" : "focus_stage_ids";
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, [focusField]: ids.slice(0, 1), review_required: false, confidence: 0.91, abstain: false }) }, finish_reason: "stop" }] });
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: "cross-domain planned execution" }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("cross-planned-learning", "https://cross-planned-learning.test", { requiresCredential: false }));
+  const health = new InMemoryAutonomousModelHealthStore();
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  agent.registerModel({ ...candidate(), provider: "cross-planned-learning", model: "cross-planner", capabilities: ["reasoning", "code", "science", "biomedical", "coordination", "structured_output"] });
+  const controller = new AutonomousLearningController(agent);
+  const planned = await agent.planAndRun("Research a biomedical neuroscience experiment with EEG patient evidence.", {
+    allowCrossDomain: true,
+    planning: { approveProviderCall: true },
+    acceptPlan: true,
+    approveProviderCall: true,
+    learning: controller,
+    maxParallelChildren: 1,
+  });
+  assert.equal(planned.status, "completed");
+  assert.equal(planned.result.child_runs.length, 2);
+  const settled = await controller.evaluateAndSettlePlanAndRun(planned, {
+    trajectoryId: "cross-planned-learning-trajectory",
+    evaluator: async () => ({ evaluator_id: "cross-execution-reviewer", evaluator_version: "1", reward: 0.74, passed: true, evidence_digest: "c".repeat(64) }),
+    plannerEvaluator: async () => ({ evaluator_id: "cross-planner-reviewer", evaluator_version: "1", reward: 0.83, passed: true, evidence_digest: "d".repeat(64) }),
+  });
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.planner_settlement?.status, "settled");
+  assert.equal(settled.execution_settlement?.trajectory.status, "settled");
+  assert.equal(Object.keys(settled.rewards).length, planned.result.learning_episode_ids.length);
+  assert.equal(health.health({ model: "cross-planner" })[0]?.quality_observations, planned.result.learning_episode_ids.length + 1);
+});
+
 test("high-level cross-domain learning evaluates every specialist and synthesis episode as one trajectory", async () => {
   const agent = await learningAgent();
   const controller = new AutonomousLearningController(agent, {

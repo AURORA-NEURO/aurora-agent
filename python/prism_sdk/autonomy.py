@@ -57,6 +57,8 @@ from .brain import (
     BrainRunResult,
     BrainToolLoopResult,
     _context_identity_digest,
+    _ensure_bandit_arm,
+    _json_digest,
     build_model_selection_audit,
 )
 from .domain_tools import (
@@ -267,6 +269,7 @@ MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TASK_BYTES = 32_000
 MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES = 64_000
 AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
 AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1"
+AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA = "bioprism-python-autonomous-planning-quality-settlement/0.1"
 AUTONOMOUS_ROUTE_EVIDENCE = {
     "fixed_catalogue_term_matches_only",
     "hybrid_deterministic_and_provider_semantic_scores",
@@ -15503,6 +15506,238 @@ class AutonomousAgent:
 
         return BrainLearningEpisode.from_mapping(value)
 
+    def settle_planning_quality(
+        self,
+        plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult,
+        *,
+        domain: str,
+        evaluator_id: str,
+        evaluator_version: str,
+        reward: float,
+        passed: bool,
+        failed: bool | None = None,
+        evidence_digest: str | None = None,
+        feedback_digest: str | None = None,
+        capability: str = "planning",
+        risk_class: str = "planning_review",
+        task_family: str | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> dict[str, Any]:
+        """Credit a completed provider planning proposal independently from execution quality.
+
+        Planning has no provider episode of its own, so this method creates a metadata-only
+        planning identity and submits it through the same Rust bandit outcome boundary used by
+        executions. The plan proposal is projected by digest and stage/child ids only. Model
+        transport health is never incremented; the optional health ledger receives an evaluator
+        quality observation keyed by the planning outcome digest.
+        """
+
+        if not isinstance(plan, (AutonomousPlanRefinementResult, AutonomousCrossDomainPlanRefinementResult)):
+            raise BrainRunError("planning quality requires a plan refinement result")
+        if plan.status != "completed":
+            return {
+                "schema": AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA,
+                "status": "not_eligible",
+                "plan_refinement": plan.to_dict(),
+                "evaluation": None,
+                "next_state": None,
+                "model_quality": None,
+                "reason": "planning_proposal_not_completed",
+                "retention": "value_only_planning_quality_no_payloads",
+                "secret_material": "never_returned",
+            }
+        if not isinstance(domain, str) or domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError("planning quality domain must be a built-in autonomous domain")
+        for name, value in (("capability", capability), ("risk_class", risk_class)):
+            if not isinstance(value, str) or not value.strip():
+                raise BrainRunError(f"planning quality {name} must be a non-empty string")
+        if task_family is not None and (not isinstance(task_family, str) or not task_family.strip()):
+            raise BrainRunError("planning quality task_family must be a non-empty string or None")
+        if not isinstance(evaluator_id, str) or not evaluator_id.strip() or not isinstance(evaluator_version, str) or not evaluator_version.strip():
+            raise BrainRunError("planning quality evaluator identity must be non-empty")
+        if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not -1.0 <= float(reward) <= 1.0:
+            raise BrainRunError("planning quality reward must be finite and within [-1, 1]")
+        if not isinstance(passed, bool):
+            raise BrainRunError("planning quality passed must be boolean")
+        effective_failed = not passed if failed is None else failed
+        if not isinstance(effective_failed, bool) or (passed and effective_failed):
+            raise BrainRunError("planning quality failed must be boolean and cannot conflict with passed")
+        decision = BrainEvaluatorDecision(
+            evaluator_id=evaluator_id,
+            evaluator_version=evaluator_version,
+            reward=float(reward),
+            passed=passed,
+            failed=effective_failed,
+            feedback_digest=feedback_digest,
+            failure_class=None,
+            evidence_digest=evidence_digest,
+            replan_requested=False,
+            replan_instruction=None,
+        )
+        selected = plan.selected_model
+        if not isinstance(selected, Mapping):
+            raise BrainRunError("completed planning quality result is missing selected_model")
+        provider = selected.get("provider")
+        model = selected.get("model")
+        if not isinstance(provider, str) or not provider.strip() or not isinstance(model, str) or not model.strip():
+            raise BrainRunError("planning quality selected_model is malformed")
+        required_digests = {
+            "selection_digest": plan.selection_digest,
+            "planner_prompt_digest": plan.planner_prompt_digest,
+            "planner_plan_digest": plan.planner_plan_digest,
+            "outcome_digest": plan.outcome_digest,
+        }
+        if any(not isinstance(value, str) or len(value) != 64 for value in required_digests.values()):
+            raise BrainRunError("completed planning quality result is missing a planning digest")
+        context = {"domain": domain, "capability": capability, "risk_class": risk_class, "task_family": task_family}
+        context_digest = _context_identity_digest(context)
+        planning_outcome_digest = _json_digest({
+            "kind": "planning_quality",
+            "plan_outcome_digest": plan.outcome_digest,
+            "selection_digest": plan.selection_digest,
+            "planner_plan_digest": plan.planner_plan_digest,
+        })
+        current_state = self.learning_state() if bandit_state is None else dict(bandit_state)
+        normalized_state = _ensure_bandit_arm(
+            current_state,
+            f"{provider}/{model}",
+            context_digest=context_digest,
+            context=context,
+        )
+        replay = {
+            "schema": "bioprism-python-autonomous-planning-quality-replay/0.1",
+            "plan_outcome_digest": plan.outcome_digest,
+            "planning_outcome_digest": planning_outcome_digest,
+            "selection_digest": plan.selection_digest,
+            "evaluator_id": evaluator_id,
+            "evaluator_version": evaluator_version,
+            "retention": "metadata_and_digests_only",
+        }
+        report = self.brain.workspace.tool(
+            "brain_outcome_record",
+            {
+                "run": {
+                    "run_id": f"planning:{planning_outcome_digest}",
+                    "selection_digest": plan.selection_digest,
+                    "prompt_digest": plan.planner_prompt_digest,
+                    "plan_digest": plan.planner_plan_digest,
+                    "provider": provider,
+                    "model": model,
+                    "outcome_digest": planning_outcome_digest,
+                    "request_id": None,
+                },
+                "assessment": decision.to_dict(),
+                "bandit_state": normalized_state,
+                "arm_id": f"{provider}/{model}",
+                "context_digest": context_digest,
+                "context": context,
+                "idempotency_key": f"planning:{plan.outcome_digest}",
+            },
+        )
+        if not isinstance(report, Mapping) or not report.get("ok"):
+            raise BrainRunError("brain planning quality recording returned a refusal")
+        if ledger is not None:
+            ledger.append(report, context_digest=context_digest, replay=replay)
+        next_state = report.get("next_state")
+        if not isinstance(next_state, Mapping):
+            raise BrainRunError("brain planning quality recording returned no next_state")
+
+        quality_base = {
+            "provider": provider,
+            "model": model,
+            "domain": domain,
+            "capability": capability,
+            "risk_class": risk_class,
+            "evaluator_id": evaluator_id,
+            "evaluator_version": evaluator_version,
+            "reward": max(0.0, min(1.0, float(reward))),
+            "passed": passed,
+            "outcome_digest": planning_outcome_digest,
+            "evidence_digest": evidence_digest,
+            "feedback_digest": feedback_digest,
+            "retention": "metadata_only_model_quality_no_payloads",
+            "secret_material": "never_returned",
+        }
+        if self.health_ledger is None:
+            model_quality = {"status": "not_configured", **quality_base}
+        else:
+            try:
+                receipt = self.health_ledger.record_evaluation(
+                    provider=provider,
+                    model=model,
+                    domain=domain,
+                    capability=capability,
+                    risk_class=risk_class,
+                    evaluator_id=evaluator_id,
+                    evaluator_version=evaluator_version,
+                    reward=quality_base["reward"],
+                    passed=passed,
+                    outcome_digest=planning_outcome_digest,
+                    evidence_digest=evidence_digest,
+                    feedback_digest=feedback_digest,
+                )
+                model_quality = {"status": "recorded", **quality_base, "health_record_digest": receipt["record_digest"], "replayed": bool(receipt.get("replayed", False))}
+            except Exception as error:
+                model_quality = {"status": "failed", **quality_base, "error_class": type(error).__name__}
+        return {
+            "schema": AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA,
+            "status": "settled",
+            "plan_refinement": plan.to_dict(),
+            "evaluation": decision.to_dict(),
+            "next_state": dict(next_state),
+            "model_quality": model_quality,
+            "reason": None,
+            "retention": "value_only_planning_quality_no_payloads",
+            "secret_material": "never_returned",
+        }
+
+    def settle_auto_planning_quality(
+        self,
+        result: AutonomousAutoResult,
+        *,
+        evaluator_id: str,
+        evaluator_version: str,
+        reward: float,
+        passed: bool,
+        domain: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Settle the provider planner attached to an automatic route result.
+
+        This convenience boundary accepts the result returned by ``run_auto`` and refuses when
+        routing or provider planning paused before a completed proposal. Cross-domain planning is
+        scoped to the explicit ``cross_domain`` context unless the caller supplies another reviewed
+        domain identity.
+        """
+
+        if not isinstance(result, AutonomousAutoResult):
+            raise BrainRunError("automatic planning quality requires an AutonomousAutoResult")
+        if result.planning is None:
+            return {
+                "schema": AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA,
+                "status": "not_eligible",
+                "plan_refinement": None,
+                "evaluation": None,
+                "next_state": None,
+                "model_quality": None,
+                "reason": "planning_proposal_not_completed",
+                "retention": "value_only_planning_quality_no_payloads",
+                "secret_material": "never_returned",
+            }
+        resolved_domain = domain or ("cross_domain" if result.route.cross_domain else result.route.primary_domain)
+        if not isinstance(resolved_domain, str) or not resolved_domain:
+            raise BrainRunError("automatic planning quality cannot infer a planner domain")
+        return self.settle_planning_quality(
+            result.planning,
+            domain=resolved_domain,
+            evaluator_id=evaluator_id,
+            evaluator_version=evaluator_version,
+            reward=reward,
+            passed=passed,
+            **kwargs,
+        )
+
     def _record_model_quality_feedback(
         self,
         episode: BrainLearningEpisode,
@@ -18334,6 +18569,7 @@ __all__ = [
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",
+    "AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA",
     "AUTONOMOUS_PROVISIONED_RUN_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA",

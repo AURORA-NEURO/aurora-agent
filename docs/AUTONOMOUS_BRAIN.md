@@ -2561,6 +2561,16 @@ and evaluator packet returns the same bandit state and health receipt; a changed
 same planning digest is refused. A valid plan proposal still proves only plan structure—it does
 not authorize tools, effects, provider calls, or task correctness.
 
+The complete two-phase handoff is available through
+`AutonomousLearningController.evaluateAndSettlePlanAndRun(planAndRun, options)`. It requires an
+explicit planner evaluator, evaluates every completed specialist and synthesis result for a
+cross-domain run, settles one discounted trajectory, then settles planner quality under the same
+replay identity. Its returned envelope keeps the plan-and-run result caller-owned while exposing
+only value-only planner/execution settlements. Python exposes the equivalent
+`AutonomousAgent.settle_planning_quality()` and `settle_auto_planning_quality()` boundaries; both
+write the planning arm through `brain_outcome_record` and route quality-only observations through
+`ProviderHealthLedger.record_evaluation()` without incrementing transport attempts or circuits.
+
 `ProviderHealthLedger` also supports `snapshot()`/`restore()` and
 `ProviderHealthPersistenceCoordinator`. `TransactionalJsonProviderHealthSnapshotPersistence`
 exports canonical value-only observations with per-record, head, and outer snapshot digests and

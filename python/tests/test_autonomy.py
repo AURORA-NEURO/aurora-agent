@@ -2431,6 +2431,55 @@ def test_run_autonomous_learning_records_explicit_reward_and_only_metadata_in_me
         server.server_close()
 
 
+def test_agent_settles_provider_planning_quality_into_bandit_and_model_health(tmp_path: Path):
+    health_ledger = ProviderHealthLedger(tmp_path / "planning-quality-health.jsonl")
+    agent = AutonomousAgent(_Workspace(), LLMRuntime(), health_ledger=health_ledger)
+    plan = AutonomousPlanRefinementResult(
+        status="completed",
+        task_digest="a" * 64,
+        base_plan_digest="b" * 64,
+        workflow_digest="c" * 64,
+        priority_stage_ids=("scope",),
+        focus_stage_ids=("scope",),
+        review_required=False,
+        confidence=0.9,
+        selected_model={"provider": "openai", "model": "test-model"},
+        selection_digest="d" * 64,
+        planner_prompt_digest="e" * 64,
+        planner_plan_digest="f" * 64,
+        outcome_digest="1" * 64,
+    )
+    bandit_state = {"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []}
+    first = agent.settle_planning_quality(
+        plan,
+        domain="coding",
+        evaluator_id="planner-reviewer",
+        evaluator_version="1",
+        reward=0.85,
+        passed=True,
+        evidence_digest="2" * 64,
+        bandit_state=bandit_state,
+    )
+    assert first["status"] == "settled"
+    assert first["next_state"]["generation"] == 1
+    assert first["model_quality"]["status"] == "recorded"
+    assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 1
+    replay = agent.settle_planning_quality(
+        plan,
+        domain="coding",
+        evaluator_id="planner-reviewer",
+        evaluator_version="1",
+        reward=0.85,
+        passed=True,
+        evidence_digest="2" * 64,
+        bandit_state=bandit_state,
+    )
+    assert replay["status"] == "settled"
+    assert replay["model_quality"]["replayed"] is True
+    assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 1
+    assert "Original task" not in json.dumps(first["plan_refinement"])
+
+
 def test_agent_run_learning_is_the_explicit_facade_for_evaluator_backed_online_learning(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()

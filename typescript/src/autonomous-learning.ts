@@ -2,6 +2,7 @@ import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ApiClient } from "./client.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  AUTONOMOUS_PLAN_AND_RUN_SCHEMA,
   builtinAutonomousDomainProfiles,
   type AutonomousAgent,
   type AutonomousCrossDomainRunOptions,
@@ -44,6 +45,7 @@ export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SNAPSHOT_SCHEMA = "bioprism-typ
 export const AUTONOMOUS_EVALUATOR_MESH_SCHEMA = "bioprism-typescript-autonomous-evaluator-mesh/0.1" as const;
 export const AUTONOMOUS_EVALUATED_RUN_SCHEMA = "bioprism-typescript-autonomous-evaluated-run/0.1" as const;
 export const AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA = "bioprism-typescript-autonomous-evaluated-cross-domain-run/0.1" as const;
+export const AUTONOMOUS_EVALUATED_PLAN_AND_RUN_SCHEMA = "bioprism-typescript-autonomous-evaluated-plan-and-run/0.1" as const;
 export const AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA = "bioprism-typescript-autonomous-planning-quality-settlement/0.1" as const;
 export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
@@ -524,6 +526,27 @@ export interface AutonomousEvaluatedCrossDomainRunResult {
   retention: "run_caller_owned; rewards_and_settlement_value_only";
 }
 
+/**
+ * One explicit provider-planning -> execution -> evaluator transaction.
+ *
+ * `plan_and_run` remains caller-owned because it may contain transient provider responses. The
+ * planner and execution projections are independently value-only so a durable worker can replay
+ * either boundary without retaining prompts, responses, tools, credentials, or evaluator evidence.
+ */
+export interface AutonomousEvaluatedPlanAndRunResult {
+  schema: typeof AUTONOMOUS_EVALUATED_PLAN_AND_RUN_SCHEMA;
+  status: "settled" | "partially_settled" | "not_eligible";
+  plan_and_run: AutonomousPlanAndRunResult;
+  planner_evaluation: AutonomousEvaluatorRewardInput | null;
+  planner_settlement: AutonomousPlanningQualitySettlement | null;
+  execution_evaluation: AutonomousEvaluatorRewardInput | null;
+  /** Single-domain settlement or the value-only cross-domain trajectory settlement. */
+  execution_settlement: AutonomousLearningSettlement | AutonomousTrajectorySettlement | null;
+  rewards: Record<string, AutonomousEvaluatorRewardInput>;
+  reason: "plan_not_completed" | "execution_not_completed" | "learning_episode_not_prepared" | "trajectory_id_required" | "planner_evaluator_not_provided" | "planner_sink_not_configured" | null;
+  retention: "plan_and_run_caller_owned; planner_and_execution_settlements_value_only";
+}
+
 /** One high-level single-domain execution/evaluation/settlement transaction. */
 export interface AutonomousRunLearningOptions {
   run?: Omit<AutonomousRunOptions, "learning" | "learningEpisodeId">;
@@ -544,6 +567,27 @@ export interface AutonomousCrossDomainRunLearningOptions {
   evaluator?: (result: AutonomousRunResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   remote?: boolean;
   idempotencyKey?: string;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
+}
+
+/** One-call learning options for a provider-planned autonomous invocation. */
+export interface AutonomousPlanAndRunLearningOptions {
+  /** The evaluator used for each completed execution run. */
+  evaluator?: (result: AutonomousRunResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+  /** Explicit planner evaluator; planner quality must not be inferred from transport success. */
+  plannerEvaluator?: (plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+  /** Rehydrated planner decision from a remote evaluator worker. */
+  plannerEvaluation?: AutonomousEvaluatorRewardInput;
+  plannerDomain?: AutonomousDomainName;
+  plannerCapability?: string;
+  plannerRiskClass?: string;
+  plannerTaskFamily?: string | null;
+  trajectoryId?: string;
+  discount?: number;
+  creditedReward?: number;
+  remote?: boolean;
+  idempotencyKey?: string;
+  memoryStore?: AutonomousEpisodicMemoryStore;
   outbox?: AutonomousLearningOutboxSettlementOptions;
 }
 
@@ -1937,6 +1981,113 @@ export class AutonomousLearningController {
       outbox: options.outbox,
     });
     return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "settled", run: result, evaluation, settlement, reason: null, retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+  }
+
+  /**
+   * Evaluate and settle a complete provider-planned invocation as one explicit transaction.
+   *
+   * The planner is credited only by `plannerEvaluator` or a rehydrated `plannerEvaluation`; it is
+   * never trained from provider transport success. Single-domain execution settles its prepared
+   * episode, while cross-domain execution settles the specialist/synthesis episodes as one
+   * discounted trajectory. The derived idempotency keys and outcome digests make a worker retry a
+   * no-op after either settlement has already been durably committed.
+   */
+  async evaluateAndSettlePlanAndRun(
+    planAndRun: AutonomousPlanAndRunResult,
+    options: AutonomousPlanAndRunLearningOptions = {},
+  ): Promise<AutonomousEvaluatedPlanAndRunResult> {
+    if (!isObject(planAndRun) || planAndRun.schema !== AUTONOMOUS_PLAN_AND_RUN_SCHEMA) throw new ArgumentError("plan-and-run learning requires an AutonomousPlanAndRunResult");
+    if (options === null || typeof options !== "object" || Array.isArray(options)) throw new ArgumentError("plan-and-run learning options must be an object");
+    const retention = "plan_and_run_caller_owned; planner_and_execution_settlements_value_only" as const;
+    const empty = (status: AutonomousEvaluatedPlanAndRunResult["status"], reason: AutonomousEvaluatedPlanAndRunResult["reason"]): AutonomousEvaluatedPlanAndRunResult => ({
+      schema: AUTONOMOUS_EVALUATED_PLAN_AND_RUN_SCHEMA,
+      status,
+      plan_and_run: planAndRun,
+      planner_evaluation: null,
+      planner_settlement: null,
+      execution_evaluation: null,
+      execution_settlement: null,
+      rewards: {},
+      reason,
+      retention,
+    });
+    if (planAndRun.status !== "completed" || !planAndRun.plan_refinement || planAndRun.plan_refinement.status !== "completed") return empty("not_eligible", "plan_not_completed");
+    if (!planAndRun.result || planAndRun.result.status !== "completed") return empty("not_eligible", "execution_not_completed");
+
+    const plan = planAndRun.plan_refinement;
+    const plannerEvaluation = options.plannerEvaluation
+      ? normalizeRewardInput(options.plannerEvaluation)
+      : options.plannerEvaluator
+        ? normalizeRewardInput(await options.plannerEvaluator(plan))
+        : null;
+    if (!plannerEvaluation) return empty("not_eligible", "planner_evaluator_not_provided");
+    const execution = planAndRun.result;
+    const isCrossDomain = "child_runs" in execution;
+    let executionEvaluation: AutonomousEvaluatorRewardInput | null = null;
+    let executionSettlement: AutonomousLearningSettlement | AutonomousTrajectorySettlement | null = null;
+    const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
+
+    if (isCrossDomain) {
+      if (!options.trajectoryId) return { ...empty("not_eligible", "trajectory_id_required"), planner_evaluation: plannerEvaluation };
+      const crossDomain = execution as AutonomousCrossDomainRunResult;
+      if (!crossDomain.learning_episode_ids.length) return { ...empty("not_eligible", "learning_episode_not_prepared"), planner_evaluation: plannerEvaluation };
+      const evaluate = options.evaluator ?? (this.runEvaluator ? (candidate: AutonomousRunResult) => this.runEvaluator!.evaluate(candidate) : undefined);
+      if (!evaluate) throw new ArgumentError("plan-and-run learning requires an execution evaluator callback or configured runEvaluator");
+      const candidates = [...crossDomain.child_runs.map((child) => child.result), ...(crossDomain.synthesis ? [crossDomain.synthesis] : [])].filter((candidate) => candidate.status === "completed");
+      if (candidates.length !== crossDomain.learning_episode_ids.length) throw new ArgumentError("plan-and-run learning episode order does not match completed specialist and synthesis results");
+      for (const [index, candidate] of candidates.entries()) rewards[crossDomain.learning_episode_ids[index]!] = normalizeRewardInput(await evaluate(candidate));
+      executionSettlement = (await this.settleCrossDomain(crossDomain, rewards, {
+        trajectoryId: options.trajectoryId,
+        discount: options.discount,
+        remote: options.remote,
+        idempotencyKey: options.idempotencyKey ?? `plan-and-run:${options.trajectoryId}`,
+        outbox: options.outbox,
+      })).trajectory;
+    } else {
+      const single = execution as AutonomousRunResult;
+      if (!single.learning_episode_id) return { ...empty("not_eligible", "learning_episode_not_prepared"), planner_evaluation: plannerEvaluation };
+      executionEvaluation = await this.evaluateRun(single, options.evaluator);
+      executionSettlement = await this.settleRun(single.learning_episode_id, executionEvaluation, {
+        creditedReward: options.creditedReward,
+        remote: options.remote,
+        idempotencyKey: options.idempotencyKey ?? `plan-and-run:${single.learning_episode_id}`,
+        memoryStore: options.memoryStore,
+        outbox: options.outbox,
+      });
+    }
+
+    const plannerSettlement = await this.settlePlanningQuality(plan, {
+      domain: options.plannerDomain ?? (planAndRun.route.primary_domain ?? "cross_domain"),
+      capability: options.plannerCapability,
+      riskClass: options.plannerRiskClass,
+      taskFamily: options.plannerTaskFamily,
+      evaluator: plannerEvaluation,
+      remote: options.remote,
+    });
+    if (plannerSettlement.status !== "settled") return {
+      schema: AUTONOMOUS_EVALUATED_PLAN_AND_RUN_SCHEMA,
+      status: "partially_settled",
+      plan_and_run: planAndRun,
+      planner_evaluation: plannerEvaluation,
+      planner_settlement: plannerSettlement,
+      execution_evaluation: executionEvaluation,
+      execution_settlement: executionSettlement,
+      rewards,
+      reason: "planner_sink_not_configured",
+      retention,
+    };
+    return {
+      schema: AUTONOMOUS_EVALUATED_PLAN_AND_RUN_SCHEMA,
+      status: "settled",
+      plan_and_run: planAndRun,
+      planner_evaluation: plannerEvaluation,
+      planner_settlement: plannerSettlement,
+      execution_evaluation: executionEvaluation,
+      execution_settlement: executionSettlement,
+      rewards,
+      reason: null,
+      retention,
+    };
   }
 
   /**
