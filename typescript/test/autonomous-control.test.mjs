@@ -80,6 +80,8 @@ test("health snapshots restore through a caller adapter and refuse tampering", a
   const source = new InMemoryAutonomousModelHealthStore({ clock: () => 101 });
   await source.recordInvocation(invocation("coding"));
   const snapshot = await source.snapshot();
+  assert.equal(snapshot.snapshot_generation, 1);
+  assert.equal(snapshot.previous_snapshot_digest, null);
   let persisted = null;
   await new AutonomousModelHealthPersistenceCoordinator(source, { read: () => persisted, write: (next) => { persisted = next; } }).flush();
   const restored = new InMemoryAutonomousModelHealthStore({ clock: () => 102 });
@@ -88,6 +90,26 @@ test("health snapshots restore through a caller adapter and refuse tampering", a
   const tampered = structuredClone(snapshot);
   tampered.events[0].observation.status = "tampered";
   await assert.rejects(restored.restore(tampered), /snapshot digest mismatch/);
+
+  const forged = structuredClone(snapshot);
+  forged.snapshot_generation = 2;
+  forged.previous_snapshot_digest = null;
+  const { snapshot_digest: _ignored, ...forgedDescriptor } = forged;
+  forged.snapshot_digest = await digestJson(forgedDescriptor);
+  await assert.rejects(validateAutonomousModelHealthSnapshot(forged), /generation and previous_snapshot_digest/);
+
+  const legacy = structuredClone(snapshot);
+  legacy.schema = "bioprism-typescript-autonomous-model-health-snapshot/0.1";
+  delete legacy.snapshot_generation;
+  delete legacy.previous_snapshot_digest;
+  const { snapshot_digest: _legacyIgnored, ...legacyDescriptor } = legacy;
+  legacy.snapshot_digest = await digestJson(legacyDescriptor);
+  const legacyStore = new InMemoryAutonomousModelHealthStore({ clock: () => 103 });
+  await legacyStore.restore(legacy);
+  const upgraded = await legacyStore.snapshot();
+  assert.equal(upgraded.schema, "bioprism-typescript-autonomous-model-health-snapshot/0.2");
+  assert.equal(upgraded.snapshot_generation, 1);
+  assert.equal(upgraded.previous_snapshot_digest, null);
 });
 
 test("health JSON persistence is canonical, restart-safe, serialized, and CAS-fenced", async () => {
@@ -109,7 +131,9 @@ test("health JSON persistence is canonical, restart-safe, serialized, and CAS-fe
   const stale = new AutonomousModelHealthPersistenceCoordinator(staleStore, persistence);
   await stale.restore();
   await source.recordInvocation(invocation("science", "model-b"));
-  await coordinator.flush();
+  const second = await coordinator.flush();
+  assert.equal(second.snapshot_generation, 2);
+  assert.equal(second.previous_snapshot_digest, first.snapshot_digest);
   await staleStore.recordInvocation(invocation("operations", "model-c"));
   await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
 

@@ -3991,6 +3991,19 @@ credential-shaped fields are rejected before they reach storage. The image conta
 bounded rewards, context labels, and evaluator/outcome digests only—never prompts, provider output,
 task text, credentials, or evidence bodies.
 
+The model-health event ledger has the same restart boundary. TypeScript
+`InMemoryAutonomousModelHealthStore` and Python `BrainModelHealthStore` emit current `0.2`
+snapshots with a strictly increasing `snapshot_generation` and an exact
+`previous_snapshot_digest`; generation one is the only root, and every later write must extend
+the digest that the store last committed. A repeated snapshot with no new health event is a
+stable read, while recording an event invalidates that cached image and advances the chain. The
+legacy `0.1` event envelope remains readable, but its next mutation or snapshot is upgraded to a
+generation-one `0.2` root. Restore validates the complete event hash chain and snapshot digest
+before replacing the in-memory or SQLite image, so a copied, reordered, forged-but-rehashed, or
+stale health image cannot be accepted as a new generation. Only bounded provider/model labels,
+status, latency, failure, and circuit metadata cross this boundary; credentials and provider
+responses remain excluded.
+
 `provider_health` is a value-only map generated from the live runtime. For each registered provider
 it carries circuit state, consecutive failure count, credential readiness, and (when observed)
 bounded attempts, success rate, and latency evidence. `model_health` carries the same bounded

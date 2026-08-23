@@ -27,6 +27,7 @@ from prism_sdk import (
     openai_provider,
     ProviderError,
     ProviderRequest,
+    validate_model_health_snapshot,
 )
 from prism_sdk.brain import BrainRunError
 
@@ -293,6 +294,8 @@ def test_model_health_snapshot_rehydrates_all_domains_and_fences_stale_selection
             )
         source_coordinator = BrainModelHealthPersistenceCoordinator(source, persistence)
         snapshot = source_coordinator.flush()
+        assert snapshot["snapshot_generation"] == 1
+        assert snapshot["previous_snapshot_digest"] is None
         assert {row["payload"]["domain"] for row in snapshot["events"]} == set(AUTONOMOUS_DOMAINS)
 
         restored = BrainModelHealthStore(tmp_path / "restored-health.sqlite3")
@@ -319,7 +322,9 @@ def test_model_health_snapshot_rehydrates_all_domains_and_fences_stale_selection
                         latency_ms=5,
                     )
                 )
-                source_coordinator.flush()
+                advanced = source_coordinator.flush()
+                assert advanced["snapshot_generation"] == 2
+                assert advanced["previous_snapshot_digest"] == snapshot["snapshot_digest"]
                 with pytest.raises(BrainRunError, match="compare-and-swap conflict"):
                     stale_coordinator.flush()
             finally:
@@ -333,6 +338,33 @@ def test_model_health_snapshot_rehydrates_all_domains_and_fences_stale_selection
     with BrainModelHealthStore(tmp_path / "tampered-health.sqlite3") as tampered_store:
         with pytest.raises(BrainRunError):
             BrainModelHealthPersistenceCoordinator(tampered_store, persistence).restore()
+
+    forged = dict(snapshot)
+    forged["snapshot_generation"] = 2
+    forged["previous_snapshot_digest"] = None
+    forged.pop("snapshot_digest")
+    forged["snapshot_digest"] = _digest(forged)
+    with pytest.raises(BrainRunError, match="generation and previous_snapshot_digest"):
+        validate_model_health_snapshot(forged)
+
+    legacy = dict(snapshot)
+    legacy["schema"] = "bioprism-brain-model-health-snapshot/0.1"
+    legacy.pop("snapshot_generation")
+    legacy.pop("previous_snapshot_digest")
+    legacy.pop("snapshot_digest")
+    legacy["snapshot_digest"] = _digest(legacy)
+    legacy_backend = _CasTextStore()
+    legacy_backend.value = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    with BrainModelHealthStore(tmp_path / "legacy-health.sqlite3") as legacy_store:
+        legacy_coordinator = BrainModelHealthPersistenceCoordinator(
+            legacy_store,
+            TransactionalJsonBrainModelHealthSnapshotPersistence(legacy_backend),
+        )
+        assert legacy_coordinator.restore()["schema"] == "bioprism-brain-model-health-snapshot/0.1"
+        upgraded = legacy_coordinator.flush()
+        assert upgraded["schema"] == "bioprism-brain-model-health-snapshot/0.2"
+        assert upgraded["snapshot_generation"] == 1
+        assert upgraded["previous_snapshot_digest"] is None
 
 
 def test_replay_engine_runs_all_builtin_domains_and_updates_bandit_without_evidence_leak():

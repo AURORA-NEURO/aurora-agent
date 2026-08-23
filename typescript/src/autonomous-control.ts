@@ -24,7 +24,8 @@ import type {
 export const AUTONOMOUS_MODEL_OBSERVATION_SCHEMA = "bioprism-typescript-autonomous-model-observation/0.1" as const;
 export const AUTONOMOUS_MODEL_HEALTH_SCHEMA = "bioprism-typescript-autonomous-model-health/0.1" as const;
 export const AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA = "bioprism-typescript-autonomous-model-health-event/0.1" as const;
-export const AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-model-health-snapshot/0.1" as const;
+const LEGACY_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-model-health-snapshot/0.1" as const;
+export const AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-model-health-snapshot/0.2" as const;
 export const AUTONOMOUS_REPLAY_CASE_SCHEMA = "bioprism-typescript-autonomous-replay-case/0.1" as const;
 export const AUTONOMOUS_REPLAY_REPORT_SCHEMA = "bioprism-typescript-autonomous-replay-report/0.1" as const;
 export const BRAIN_DOMAIN_EVALUATOR_SCHEMA = "bioprism-brain-domain-evaluator/0.1" as const;
@@ -145,7 +146,10 @@ export interface AutonomousModelHealthReceipt extends JsonObject {
 }
 
 export interface AutonomousModelHealthSnapshot extends JsonObject {
-  schema: typeof AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA;
+  /** 0.1 remains readable; current snapshots carry independent image lineage in 0.2. */
+  schema: typeof AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA;
+  snapshot_generation?: number;
+  previous_snapshot_digest?: string | null;
   sequence: number;
   head_digest: string;
   events: AutonomousModelHealthEvent[];
@@ -457,6 +461,10 @@ function healthProjection(entry: Aggregate, minAttempts: number, failureThreshol
 
 export class InMemoryAutonomousModelHealthStore implements AutonomousModelHealthStore {
   private readonly events: AutonomousModelHealthEvent[] = [];
+  private snapshotGeneration = 0;
+  private previousSnapshotDigest: string | null = null;
+  private cachedSnapshot: AutonomousModelHealthSnapshot | null = null;
+  private cachedEventSignature: string | null = null;
   readonly maxEvents: number;
   private readonly clock: () => number;
 
@@ -472,6 +480,8 @@ export class InMemoryAutonomousModelHealthStore implements AutonomousModelHealth
     const base = { schema: AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA, sequence: this.events.length + 1, observation, previous_digest: this.events.at(-1)?.event_digest ?? "", created_at: finite("model health clock", this.clock(), 0, Number.MAX_SAFE_INTEGER), retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
     const event: AutonomousModelHealthEvent = { ...base, event_digest: await digestJson(base) };
     this.events.push(event);
+    this.cachedSnapshot = null;
+    this.cachedEventSignature = null;
     return { schema: AUTONOMOUS_MODEL_HEALTH_SCHEMA, sequence: event.sequence, event_digest: event.event_digest, provider: observation.provider, model: observation.model, observation_kind: observation.observation_kind, retention: PRIVATE_RETENTION };
   }
 
@@ -572,13 +582,24 @@ export class InMemoryAutonomousModelHealthStore implements AutonomousModelHealth
   }
 
   async snapshot(): Promise<AutonomousModelHealthSnapshot> {
-    const body = { schema: AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA, sequence: this.events.length, head_digest: this.events.at(-1)?.event_digest ?? "", events: this.events.map(clone), retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
-    return validateAutonomousModelHealthSnapshot({ ...body, snapshot_digest: await digestJson(body) }, { maxEvents: this.maxEvents });
+    const signature = this.events.map((event) => event.event_digest).join(":");
+    if (this.cachedSnapshot !== null && this.cachedEventSignature === signature) return clone(this.cachedSnapshot);
+    const body = { schema: AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA, snapshot_generation: this.snapshotGeneration + 1, previous_snapshot_digest: this.snapshotGeneration === 0 ? null : this.previousSnapshotDigest, sequence: this.events.length, head_digest: this.events.at(-1)?.event_digest ?? "", events: this.events.map(clone), retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
+    const snapshot = await validateAutonomousModelHealthSnapshot({ ...body, snapshot_digest: await digestJson(body) }, { maxEvents: this.maxEvents });
+    this.snapshotGeneration = snapshot.snapshot_generation!;
+    this.previousSnapshotDigest = snapshot.snapshot_digest;
+    this.cachedSnapshot = clone(snapshot);
+    this.cachedEventSignature = signature;
+    return clone(snapshot);
   }
 
   async restore(snapshot: AutonomousModelHealthSnapshot): Promise<void> {
     const validated = await validateAutonomousModelHealthSnapshot(snapshot, { maxEvents: this.maxEvents });
     this.events.splice(0, this.events.length, ...validated.events.map(clone));
+    this.snapshotGeneration = validated.snapshot_generation ?? 0;
+    this.previousSnapshotDigest = this.snapshotGeneration === 0 ? null : validated.snapshot_digest;
+    this.cachedSnapshot = validated.schema === AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA ? clone(validated) : null;
+    this.cachedEventSignature = this.cachedSnapshot === null ? null : this.events.map((event) => event.event_digest).join(":");
   }
 
   async verifyIntegrity(): Promise<{ verified: true; events: number; head_digest: string }> {
@@ -608,12 +629,21 @@ export async function validateAutonomousModelHealthSnapshot(
   const maxBytes = options.maxBytes ?? MAX_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_BYTES;
   if (!Number.isSafeInteger(maxEvents) || maxEvents < 1 || maxEvents > AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS) throw new ArgumentError("model health snapshot maxEvents is outside its bound");
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_BYTES) throw new ArgumentError("model health snapshot maxBytes is outside its bound");
-  if (!isObject(raw) || raw.schema !== AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA || !Array.isArray(raw.events)) throw new ArgumentError("model health snapshot is malformed");
+  if (!isObject(raw) || !Array.isArray(raw.events)) throw new ArgumentError("model health snapshot is malformed");
+  const legacy = raw.schema === LEGACY_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA;
+  if (raw.schema !== AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_SCHEMA && !legacy) throw new ArgumentError("model health snapshot schema is unsupported");
   const snapshotValue = raw as unknown as Record<string, unknown>;
   const rawEvents = snapshotValue.events as unknown[];
-  const allowedSnapshotKeys = new Set(["schema", "sequence", "head_digest", "events", "snapshot_digest", "retention", "secret_material"]);
+  const allowedSnapshotKeys = new Set(legacy
+    ? ["schema", "sequence", "head_digest", "events", "snapshot_digest", "retention", "secret_material"]
+    : ["schema", "snapshot_generation", "previous_snapshot_digest", "sequence", "head_digest", "events", "snapshot_digest", "retention", "secret_material"]);
   for (const key of Object.keys(raw)) if (!allowedSnapshotKeys.has(key)) throw new ArgumentError("model health snapshot contains unsupported metadata");
   if (raw.retention !== PRIVATE_RETENTION || raw.secret_material !== "never_returned") throw new ArgumentError("model health snapshot retention is invalid");
+  if (!legacy) {
+    if (!Number.isSafeInteger(snapshotValue.snapshot_generation) || (snapshotValue.snapshot_generation as number) < 1) throw new ArgumentError("model health snapshot generation is outside its bounds");
+    if (snapshotValue.previous_snapshot_digest !== null && !DIGEST.test(String(snapshotValue.previous_snapshot_digest))) throw new ArgumentError("model health previous_snapshot_digest is invalid");
+    if (((snapshotValue.snapshot_generation as number) === 1) !== (snapshotValue.previous_snapshot_digest === null)) throw new ArgumentError("model health snapshot generation and previous_snapshot_digest are inconsistent");
+  }
   if (!Number.isSafeInteger(snapshotValue.sequence) || (snapshotValue.sequence as number) < 0 || snapshotValue.sequence !== rawEvents.length || rawEvents.length > maxEvents) throw new ArgumentError("model health snapshot sequence is outside its bound");
   if (raw.head_digest !== "") digest("model health snapshot head_digest", raw.head_digest);
   digest("model health snapshot snapshot_digest", raw.snapshot_digest);

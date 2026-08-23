@@ -44,7 +44,8 @@ CONTROL_PLANE_SCHEMA = "bioprism-brain-control-plane/0.1"
 RECONCILIATION_SCHEMA = JOB_RECONCILIATION_SCHEMA
 MODEL_OBSERVATION_SCHEMA = "bioprism-brain-model-observation/0.1"
 MODEL_HEALTH_SCHEMA = "bioprism-brain-model-health/0.1"
-MODEL_HEALTH_SNAPSHOT_SCHEMA = "bioprism-brain-model-health-snapshot/0.1"
+_LEGACY_MODEL_HEALTH_SNAPSHOT_SCHEMA = "bioprism-brain-model-health-snapshot/0.1"
+MODEL_HEALTH_SNAPSHOT_SCHEMA = "bioprism-brain-model-health-snapshot/0.2"
 REPLAY_CASE_SCHEMA = "bioprism-brain-replay-case/0.1"
 REPLAY_REPORT_SCHEMA = "bioprism-brain-replay-report/0.1"
 MAX_CONTROL_PAGE = 256
@@ -679,6 +680,10 @@ class BrainModelHealthStore:
         self.max_bytes = max_bytes
         self._clock = clock
         self._lock = threading.RLock()
+        self._snapshot_generation = 0
+        self._previous_snapshot_digest: str | None = None
+        self._snapshot_cache: dict[str, Any] | None = None
+        self._snapshot_cache_event_signature: tuple[str, ...] | None = None
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
@@ -732,6 +737,8 @@ class BrainModelHealthStore:
                 )
                 self._ensure_capacity_locked()
                 self._connection.execute("COMMIT")
+                self._snapshot_cache = None
+                self._snapshot_cache_event_signature = None
                 return {
                     "schema": MODEL_HEALTH_SCHEMA,
                     "sequence": count + 1,
@@ -861,6 +868,9 @@ class BrainModelHealthStore:
         with self._lock:
             integrity = self.verify_integrity()
             rows = self._connection.execute("SELECT * FROM brain_model_health_events ORDER BY sequence ASC").fetchall()
+            signature = tuple(str(row["event_digest"]) for row in rows)
+            if self._snapshot_cache is not None and self._snapshot_cache_event_signature == signature:
+                return json.loads(_canonical(self._snapshot_cache))
             events: list[dict[str, Any]] = []
             previous = ""
             for row in rows:
@@ -878,6 +888,8 @@ class BrainModelHealthStore:
                 previous = event["event_digest"]
             descriptor = {
                 "schema": MODEL_HEALTH_SNAPSHOT_SCHEMA,
+                "snapshot_generation": self._snapshot_generation + 1,
+                "previous_snapshot_digest": self._previous_snapshot_digest if self._snapshot_generation else None,
                 "events": events,
                 "head_digest": integrity["head_digest"],
                 "retention": "aggregated_metadata_only_hash_chained",
@@ -886,7 +898,11 @@ class BrainModelHealthStore:
             snapshot = {**descriptor, "snapshot_digest": _digest(descriptor)}
             if len(_canonical(snapshot).encode("utf-8")) > MAX_MODEL_HEALTH_SNAPSHOT_BYTES:
                 raise BrainRunError("model health snapshot exceeds its byte capacity")
-            return snapshot
+            self._snapshot_generation = snapshot["snapshot_generation"]
+            self._previous_snapshot_digest = snapshot["snapshot_digest"]
+            self._snapshot_cache = snapshot
+            self._snapshot_cache_event_signature = signature
+            return json.loads(_canonical(snapshot))
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
         """Atomically replace the SQLite health ledger with a validated snapshot."""
@@ -913,6 +929,14 @@ class BrainModelHealthStore:
                     )
                 self._ensure_capacity_locked()
                 self._connection.execute("COMMIT")
+                self._snapshot_generation = int(normalized.get("snapshot_generation", 0))
+                self._previous_snapshot_digest = normalized["snapshot_digest"] if self._snapshot_generation else None
+                if normalized.get("schema") == MODEL_HEALTH_SNAPSHOT_SCHEMA:
+                    self._snapshot_cache = normalized
+                    self._snapshot_cache_event_signature = tuple(event["event_digest"] for event in normalized["events"])
+                else:
+                    self._snapshot_cache = None
+                    self._snapshot_cache_event_signature = None
             except Exception:
                 self._connection.execute("ROLLBACK")
                 raise
@@ -943,10 +967,15 @@ def _normalize_model_health_snapshot(
     max_events: int = MAX_MODEL_HEALTH_EVENTS,
     max_bytes: int = MAX_MODEL_HEALTH_BYTES,
 ) -> dict[str, Any]:
-    expected_keys = {"schema", "events", "head_digest", "retention", "secret_material", "snapshot_digest"}
-    if not isinstance(value, Mapping) or set(value) != expected_keys:
+    if not isinstance(value, Mapping):
         raise BrainRunError("model health snapshot is malformed")
-    if value.get("schema") != MODEL_HEALTH_SNAPSHOT_SCHEMA:
+    legacy = value.get("schema") == _LEGACY_MODEL_HEALTH_SNAPSHOT_SCHEMA
+    expected_keys = {"schema", "events", "head_digest", "retention", "secret_material", "snapshot_digest"}
+    if not legacy:
+        expected_keys.update({"snapshot_generation", "previous_snapshot_digest"})
+    if set(value) != expected_keys:
+        raise BrainRunError("model health snapshot is malformed")
+    if value.get("schema") not in {_LEGACY_MODEL_HEALTH_SNAPSHOT_SCHEMA, MODEL_HEALTH_SNAPSHOT_SCHEMA}:
         raise BrainRunError("model health snapshot schema is unsupported")
     if value.get("retention") != "aggregated_metadata_only_hash_chained" or value.get("secret_material") != "never_returned":
         raise BrainRunError("model health snapshot retention is invalid")
@@ -986,13 +1015,28 @@ def _normalize_model_health_snapshot(
     head_digest = value.get("head_digest")
     if not isinstance(head_digest, str) or (head_digest and not _valid_digest(head_digest)) or head_digest != previous:
         raise BrainRunError("model health snapshot head_digest is invalid")
+    snapshot_generation = value.get("snapshot_generation")
+    previous_snapshot_digest = value.get("previous_snapshot_digest")
+    if not legacy:
+        if isinstance(snapshot_generation, bool) or not isinstance(snapshot_generation, int) or snapshot_generation < 1:
+            raise BrainRunError("model health snapshot generation is outside its bounds")
+        if previous_snapshot_digest is not None and not _valid_digest(previous_snapshot_digest):
+            raise BrainRunError("model health previous_snapshot_digest is invalid")
+        if (snapshot_generation == 1) != (previous_snapshot_digest is None):
+            raise BrainRunError("model health snapshot generation and previous_snapshot_digest are inconsistent")
     descriptor = {
-        "schema": MODEL_HEALTH_SNAPSHOT_SCHEMA,
+        "schema": value["schema"],
         "events": events,
         "head_digest": head_digest,
         "retention": "aggregated_metadata_only_hash_chained",
         "secret_material": "never_returned",
     }
+    if not legacy:
+        descriptor = {
+            **descriptor,
+            "snapshot_generation": snapshot_generation,
+            "previous_snapshot_digest": previous_snapshot_digest,
+        }
     snapshot_digest = value.get("snapshot_digest")
     if not isinstance(snapshot_digest, str) or not _valid_digest(snapshot_digest) or _digest(descriptor) != snapshot_digest:
         raise BrainRunError("model health snapshot digest does not match its metadata")
