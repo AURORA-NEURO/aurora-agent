@@ -2231,6 +2231,7 @@ def test_agent_exposes_restart_safe_delayed_learning_settlement(tmp_path: Path):
         runtime,
         model_catalogue=ModelCatalogue(_model()),
         ledger=ledger,
+        health_ledger=ProviderHealthLedger(tmp_path / "delayed-provider-health.jsonl"),
     )
     handle = store.register("openai", "delayed-learning-secret")
     bandit_state = {"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []}
@@ -2267,6 +2268,11 @@ def test_agent_exposes_restart_safe_delayed_learning_settlement(tmp_path: Path):
         )
         assert decision.passed is True
         assert report["next_state"]["generation"] == 1
+        assert report["model_quality"]["status"] == "recorded"
+        assert report["model_quality"]["reward"] == 0.8
+        quality_health = agent.health_ledger.model_health_snapshot()["openai/test-model"]  # type: ignore[union-attr]
+        assert quality_health["quality_observations"] == 1
+        assert quality_health["quality_mean"] == 0.8
         assert ledger.pending_episodes() == []
         with pytest.raises(BrainRunError, match="already settled"):
             agent.settle_learning_episode(
@@ -2430,7 +2436,8 @@ def test_agent_run_learning_is_the_explicit_facade_for_evaluator_backed_online_l
     workspace = _Workspace()
     handle = store.register("openai", "facade-learning-secret")
     memory = BrainEpisodicMemory(tmp_path / "facade-learning.sqlite3")
-    agent = AutonomousAgent(workspace, runtime, model_catalogue=ModelCatalogue(_model()), memory=memory)
+    health_ledger = ProviderHealthLedger(tmp_path / "facade-learning-provider-health.jsonl")
+    agent = AutonomousAgent(workspace, runtime, model_catalogue=ModelCatalogue(_model()), memory=memory, health_ledger=health_ledger)
     evaluator = BrainOutcomeEvaluator(
         lambda _input: {"reward": 0.7, "passed": True, "failed": False},
         evaluator_id="facade-learning-evaluator",
@@ -2450,6 +2457,8 @@ def test_agent_run_learning_is_the_explicit_facade_for_evaluator_backed_online_l
         assert len(result.evaluations) == 1
         assert result.evaluations[0]["decision"]["reward"] == 0.7
         assert result.bandit_state["generation"] == 1
+        assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 1
+        assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_mean"] == 0.7
         assert "facade-learning-secret" not in json.dumps(result.to_dict())
         assert "run the explicit facade learning path" not in json.dumps(result.evaluations)
     finally:

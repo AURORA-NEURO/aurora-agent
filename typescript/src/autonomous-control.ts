@@ -478,8 +478,32 @@ export class InMemoryAutonomousModelHealthStore implements AutonomousModelHealth
     return this.record({ ...input, observation_kind: "invocation" });
   }
 
-  recordEvaluation(input: Omit<AutonomousModelObservationInput, "observation_kind" | "outcome" | "latency_ms"> & { quality_reward: number; quality_passed: boolean }): Promise<AutonomousModelHealthReceipt> {
-    return this.record({ ...input, observation_kind: "evaluation", outcome: "unknown", latency_ms: 0 });
+  async recordEvaluation(input: Omit<AutonomousModelObservationInput, "observation_kind" | "outcome" | "latency_ms"> & { quality_reward: number; quality_passed: boolean }): Promise<AutonomousModelHealthReceipt> {
+    const normalized = normalizeObservation({ ...input, observation_kind: "evaluation", outcome: "unknown", latency_ms: 0 });
+    if (normalized.outcome_digest !== null) {
+      const prior = this.events.find((event) => event.observation.observation_kind === "evaluation"
+        && event.observation.outcome_digest === normalized.outcome_digest
+        && event.observation.provider === normalized.provider
+        && event.observation.model === normalized.model
+        && event.observation.domain === normalized.domain
+        && event.observation.capability === normalized.capability
+        && event.observation.risk_class === normalized.risk_class);
+      if (prior) {
+        const same = prior.observation.provider === normalized.provider
+          && prior.observation.model === normalized.model
+          && prior.observation.domain === normalized.domain
+          && prior.observation.capability === normalized.capability
+          && prior.observation.risk_class === normalized.risk_class
+          && prior.observation.quality_reward === normalized.quality_reward
+          && prior.observation.quality_passed === normalized.quality_passed
+          && prior.observation.evidence_digest === normalized.evidence_digest
+          && prior.observation.evaluator_id === normalized.evaluator_id
+          && prior.observation.evaluator_version === normalized.evaluator_version;
+        if (!same) throw new ArgumentError("model health evaluation outcome_digest conflicts with an existing evaluation");
+        return { schema: AUTONOMOUS_MODEL_HEALTH_SCHEMA, sequence: prior.sequence, event_digest: prior.event_digest, provider: prior.observation.provider, model: prior.observation.model, observation_kind: "evaluation", retention: PRIVATE_RETENTION };
+      }
+    }
+    return this.record(normalized);
   }
 
   health(query: AutonomousModelHealthQuery = {}): AutonomousModelHealth[] {
@@ -766,10 +790,10 @@ export class AutonomousModelHealthController {
     };
   }
 
-  async recordEvaluation(input: { provider: string; model: string; domain: string; capability: string; riskClass: string; evaluatorId: string; evaluatorVersion: string; reward: number; passed: boolean; evidenceDigest?: string | null }): Promise<AutonomousModelHealthReceipt> {
+  async recordEvaluation(input: { provider: string; model: string; domain: string; capability: string; riskClass: string; evaluatorId: string; evaluatorVersion: string; reward: number; passed: boolean; evidenceDigest?: string | null; outcomeDigest?: string | null }): Promise<AutonomousModelHealthReceipt> {
     identifier("health evaluation evaluatorId", input.evaluatorId);
     identifier("health evaluation evaluatorVersion", input.evaluatorVersion);
-    return this.store.recordEvaluation({ provider: input.provider, model: input.model, domain: input.domain, capability: input.capability, risk_class: input.riskClass, status: "evaluated", quality_reward: input.reward, quality_passed: input.passed, evidence_digest: input.evidenceDigest ?? null, evaluator_id: input.evaluatorId, evaluator_version: input.evaluatorVersion });
+    return this.store.recordEvaluation({ provider: input.provider, model: input.model, domain: input.domain, capability: input.capability, risk_class: input.riskClass, status: "evaluated", quality_reward: input.reward, quality_passed: input.passed, evidence_digest: input.evidenceDigest ?? null, outcome_digest: input.outcomeDigest ?? null, evaluator_id: input.evaluatorId, evaluator_version: input.evaluatorVersion });
   }
 }
 

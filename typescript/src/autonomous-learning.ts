@@ -7,6 +7,7 @@ import {
   type AutonomousCrossDomainRunOptions,
   type AutonomousCrossDomainRunResult,
   type AutonomousDomainName,
+  type AutonomousPlanAndRunResult,
   type AutonomousRunOptions,
   type AutonomousRunResult,
 } from "./autonomous.js";
@@ -18,7 +19,7 @@ import {
   validateAutonomousEvaluatorCalibrationReport,
   type AutonomousEvaluatorCalibrationReport,
 } from "./autonomous-evaluator-calibration.js";
-import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestCanonicalJsonText, digestJson, digestJsonSync } from "./tooling.js";
 import type {
   BrainBanditState,
   BrainBanditContext,
@@ -28,6 +29,8 @@ import type {
   BrainRunIdentity,
   JsonObject,
   RestToolResponse,
+  AutonomousCrossDomainPlanRefinementResult,
+  AutonomousPlanRefinementResult,
 } from "./types.js";
 
 export const AUTONOMOUS_EVALUATION_SCHEMA = "bioprism-typescript-autonomous-workflow-evaluation/0.1" as const;
@@ -41,6 +44,7 @@ export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SNAPSHOT_SCHEMA = "bioprism-typ
 export const AUTONOMOUS_EVALUATOR_MESH_SCHEMA = "bioprism-typescript-autonomous-evaluator-mesh/0.1" as const;
 export const AUTONOMOUS_EVALUATED_RUN_SCHEMA = "bioprism-typescript-autonomous-evaluated-run/0.1" as const;
 export const AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA = "bioprism-typescript-autonomous-evaluated-cross-domain-run/0.1" as const;
+export const AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA = "bioprism-typescript-autonomous-planning-quality-settlement/0.1" as const;
 export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
 export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX = 8_192;
@@ -417,9 +421,49 @@ export interface AutonomousLearningSettlement extends JsonObject {
   assessment: BrainEvaluatorAssessment;
   next_state: BrainBanditState;
   learning_evidence: BrainLearningEvidence | null;
+  /** Metadata-only quality projection written to the optional model-health ledger. */
+  model_quality?: AutonomousLearningModelQualityProjection;
   memory_evaluation?: AutonomousLearningMemoryEvaluationProjection;
   remote: boolean;
   retention: typeof PRIVATE_RETENTION;
+}
+
+/**
+ * The evaluator-to-model-health bridge is deliberately separate from transport health and
+ * bandit state. A provider can return HTTP-success while producing a poor task result; only an
+ * explicit evaluator packet may populate this projection. The receipt contains no prompt,
+ * response, credential, tool payload, or raw evidence.
+ */
+export interface AutonomousLearningModelQualityProjection extends JsonObject {
+  status: "recorded" | "not_configured" | "failed";
+  provider: string;
+  model: string;
+  domain: AutonomousDomainName;
+  capability: string;
+  risk_class: string;
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number;
+  passed: boolean;
+  evidence_digest: Digest | null;
+  health_event_digest: Digest | null;
+  error_class: string | null;
+  retention: "metadata_only_model_quality_no_payloads";
+  secret_material: "never_returned";
+}
+
+/** Explicit evaluator credit for the provider that proposed a reviewed plan ordering. */
+export interface AutonomousPlanningQualitySettlement extends JsonObject {
+  schema: typeof AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA;
+  status: "settled" | "not_eligible";
+  plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | null;
+  evaluation: AutonomousEvaluatorRewardInput | null;
+  next_state: BrainBanditState | null;
+  model_quality: AutonomousLearningModelQualityProjection | null;
+  reason: string | null;
+  remote: boolean;
+  retention: typeof PRIVATE_RETENTION;
+  secret_material: "never_returned";
 }
 
 export interface AutonomousLearningMemoryEvaluationProjection extends JsonObject {
@@ -1896,6 +1940,81 @@ export class AutonomousLearningController {
   }
 
   /**
+   * Credit a reviewed provider planning proposal independently from the execution model.
+   * Planning is a real model-selection decision, but it has no execution episode of its own;
+   * this explicit method binds a caller evaluator to the planner's digest, updates the same
+   * contextual bandit when configured, and records a separate model-quality observation. It
+   * never re-invokes the planner or treats a syntactically valid proposal as task success.
+   */
+  async settlePlanningQuality(
+    plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult,
+    options: {
+      domain: AutonomousDomainName;
+      capability?: string;
+      riskClass?: string;
+      taskFamily?: string | null;
+      evaluator: AutonomousEvaluatorRewardInput;
+      remote?: boolean;
+    },
+  ): Promise<AutonomousPlanningQualitySettlement> {
+    if (!isObject(plan) || plan.status !== "completed" || !isObject(plan.selected_model) || typeof plan.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(plan.outcome_digest)) {
+      return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: isObject(plan) ? plan : null, evaluation: null, next_state: null, model_quality: null, reason: "planning_proposal_not_completed", remote: false, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+    }
+    if (!options || typeof options !== "object" || !AUTONOMOUS_DOMAIN_NAMES.includes(options.domain)) throw new ArgumentError("planning quality settlement requires a built-in domain");
+    const evaluation = normalizeRewardInput(options.evaluator);
+    const selected = plan.selected_model;
+    const provider = selected.provider;
+    const model = selected.model;
+    const capability = options.capability ?? "planning";
+    const riskClass = options.riskClass ?? "planning_review";
+    if (typeof capability !== "string" || !capability.trim() || typeof riskClass !== "string" || !riskClass.trim()) throw new ArgumentError("planning quality capability and riskClass must be non-empty");
+    const context: BrainBanditContext = { domain: options.domain, capability, risk_class: riskClass, task_family: options.taskFamily ?? null };
+    const contextDigest = await digestCanonicalJsonText(JSON.stringify(context));
+    const planningOutcomeDigest = await digestJson({ kind: "planning_quality", plan_outcome_digest: plan.outcome_digest, selection_digest: plan.selection_digest ?? null, planner_plan_digest: plan.planner_plan_digest ?? null });
+    let nextState: BrainBanditState | null = null;
+    const remote = options.remote === true;
+    if (this.agent.learner) {
+      nextState = await this.agent.recordEvaluatorReward(`${provider}/${model}`, evaluation.reward, {
+        failed: evaluation.failed,
+        outcomeDigest: planningOutcomeDigest,
+        remote,
+        contextDigest,
+        context,
+      });
+    }
+    let modelQuality: AutonomousLearningModelQualityProjection;
+    const healthController = this.agent.modelHealthController;
+    const qualityBase = {
+      provider,
+      model,
+      domain: options.domain,
+      capability,
+      risk_class: riskClass,
+      evaluator_id: evaluation.evaluator_id,
+      evaluator_version: evaluation.evaluator_version,
+      reward: evaluation.reward,
+      passed: evaluation.passed,
+      evidence_digest: evaluation.evidence_digest ?? null,
+      health_event_digest: null,
+      error_class: null,
+      retention: "metadata_only_model_quality_no_payloads" as const,
+      secret_material: "never_returned" as const,
+    };
+    if (!healthController) {
+      modelQuality = { status: "not_configured", ...qualityBase };
+    } else {
+      try {
+        const receipt = await healthController.recordEvaluation({ provider, model, domain: options.domain, capability, riskClass, evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evidenceDigest: evaluation.evidence_digest ?? null, outcomeDigest: planningOutcomeDigest });
+        modelQuality = { status: "recorded", ...qualityBase, health_event_digest: receipt.event_digest };
+      } catch (error) {
+        modelQuality = { status: "failed", ...qualityBase, error_class: error instanceof Error && error.constructor.name.trim() ? error.constructor.name : "ModelHealthError" };
+      }
+    }
+    if (!nextState && modelQuality.status === "not_configured") return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: plan, evaluation: null, next_state: null, model_quality: null, reason: "no_learning_or_health_sink", remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "settled", plan_refinement: plan, evaluation, next_state: nextState, model_quality: modelQuality, reason: null, remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+  }
+
+  /**
    * Execute, evaluate, and settle one routed run. The helper forces a single-domain route so a
    * cross-domain task cannot silently create orphaned child episodes; use
    * `runCrossDomainLearning` for fan-out/fan-in trajectory credit.
@@ -2080,6 +2199,64 @@ export class AutonomousLearningController {
         memory_episode_id: episode.memory_episode_id,
         evaluation_digest: null,
         error_class: error instanceof Error && error.constructor.name.trim() ? error.constructor.name : "MemoryError",
+      };
+    }
+  }
+
+  /**
+   * Feed the same explicit evaluator packet into the optional model-health ledger. Transport
+   * observers already record invocation success/failure there; this second channel is quality
+   * feedback and must never be inferred from an invocation outcome. Failures are returned as a
+   * value-only projection so a full health ledger cannot turn a valid bandit settlement into a
+   * provider replay or a fabricated task failure.
+   */
+  private async recordModelQuality(
+    episode: AutonomousLearningEpisode,
+    input: AutonomousEvaluatorRewardInput,
+  ): Promise<AutonomousLearningModelQualityProjection> {
+    const selected = episode.run;
+    const learningContext = isObject(episode.learning_context) ? episode.learning_context as Record<string, unknown> : {};
+    const riskClass = typeof learningContext.risk_class === "string" && learningContext.risk_class.trim()
+      ? learningContext.risk_class
+      : `${episode.domain}_risk`;
+    const base = {
+      provider: selected.provider,
+      model: selected.model,
+      domain: episode.domain,
+      capability: episode.capability,
+      risk_class: riskClass,
+      evaluator_id: input.evaluator_id,
+      evaluator_version: input.evaluator_version,
+      reward: input.reward,
+      passed: input.passed,
+      evidence_digest: input.evidence_digest ?? null,
+      health_event_digest: null,
+      error_class: null,
+      retention: "metadata_only_model_quality_no_payloads" as const,
+      secret_material: "never_returned" as const,
+    };
+    const controller = this.agent.modelHealthController;
+    if (!controller) return { status: "not_configured", ...base };
+    try {
+      const receipt = await controller.recordEvaluation({
+        provider: selected.provider,
+        model: selected.model,
+        domain: episode.domain,
+        capability: episode.capability,
+        riskClass,
+        evaluatorId: input.evaluator_id,
+        evaluatorVersion: input.evaluator_version,
+        reward: input.reward,
+        passed: input.passed,
+        evidenceDigest: input.evidence_digest ?? null,
+        outcomeDigest: selected.outcome_digest,
+      });
+      return { status: "recorded", ...base, health_event_digest: receipt.event_digest };
+    } catch (error) {
+      return {
+        status: "failed",
+        ...base,
+        error_class: error instanceof Error && error.constructor.name.trim() ? error.constructor.name : "ModelHealthError",
       };
     }
   }
@@ -2283,8 +2460,9 @@ export class AutonomousLearningController {
     const settlementBase = { evaluation_digest: normalizedInput.evidence_digest ?? null, reward: normalizedInput.reward, credited_reward: creditedReward, next_generation: boundedGeneration(nextState.generation ?? 0), settled_at: Date.now() };
     const settlement: AutonomousLearningSettlementMetadata = { ...settlementBase, settlement_digest: await digestJson(settlementBase) };
     const projectedEpisode = { ...episode, status: "settled" as const, settlement };
+    const modelQuality = await this.recordModelQuality(episode, normalizedInput);
     const memoryEvaluation = await this.recordMemoryEvaluation(episode, input, options.memoryStore ?? this.memoryStore);
-    const result = { schema: AUTONOMOUS_LEARNING_EPISODE_SCHEMA, episode: projectedEpisode, assessment, next_state: clone(nextState), learning_evidence: learningEvidence, memory_evaluation: memoryEvaluation, remote, retention: PRIVATE_RETENTION } satisfies AutonomousLearningSettlement;
+    const result = { schema: AUTONOMOUS_LEARNING_EPISODE_SCHEMA, episode: projectedEpisode, assessment, next_state: clone(nextState), learning_evidence: learningEvidence, model_quality: modelQuality, memory_evaluation: memoryEvaluation, remote, retention: PRIVATE_RETENTION } satisfies AutonomousLearningSettlement;
     await this.saveReceipt("single_run", idempotencyKey, id, episode.episode_digest, requestDigest, result);
     let settledEpisode: AutonomousLearningEpisode;
     try {

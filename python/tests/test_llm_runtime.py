@@ -1052,6 +1052,60 @@ class LlmRuntimeTests(unittest.TestCase):
                     }
                 )
 
+    def test_provider_health_quality_feedback_is_separate_replay_safe_model_prior(self) -> None:
+        with TemporaryDirectory() as directory:
+            ledger = ProviderHealthLedger(Path(directory) / "provider-health.jsonl")
+            outcome_digest = "a" * 64
+            receipt = ledger.record_evaluation(
+                provider="openai",
+                model="test-model",
+                domain="coding",
+                capability="debugging",
+                risk_class="software_change",
+                evaluator_id="coding-reviewer",
+                evaluator_version="1",
+                reward=0.2,
+                passed=False,
+                outcome_digest=outcome_digest,
+                evidence_digest="b" * 64,
+            )
+            replay = ledger.record_evaluation(
+                provider="openai",
+                model="test-model",
+                domain="coding",
+                capability="debugging",
+                risk_class="software_change",
+                evaluator_id="coding-reviewer",
+                evaluator_version="1",
+                reward=0.2,
+                passed=False,
+                outcome_digest=outcome_digest,
+                evidence_digest="b" * 64,
+            )
+            self.assertTrue(replay["replayed"])
+            self.assertEqual(replay["record_digest"], receipt["record_digest"])
+            health = ledger.model_health_snapshot()["openai/test-model"]
+            self.assertEqual(health["attempts"], 0)
+            self.assertEqual(health["successes"], 0)
+            self.assertEqual(health["quality_observations"], 1)
+            self.assertEqual(health["quality_mean"], 0.2)
+            self.assertEqual(health["quality_pass_rate"], 0.0)
+            with self.assertRaises(ProviderError):
+                ledger.record_evaluation(
+                    provider="openai",
+                    model="test-model",
+                    domain="coding",
+                    capability="debugging",
+                    risk_class="software_change",
+                    evaluator_id="coding-reviewer",
+                    evaluator_version="1",
+                    reward=0.9,
+                    passed=True,
+                    outcome_digest=outcome_digest,
+                    evidence_digest="b" * 64,
+                )
+            self.assertEqual(ledger.selection_overrides()["model_health"]["openai/test-model"]["quality_mean"], 0.2)
+
     def test_provider_health_snapshot_rehydrates_and_fences_stale_runtime_workers(self) -> None:
         class CasTextStore:
             def __init__(self) -> None:

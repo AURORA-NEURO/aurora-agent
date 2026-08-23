@@ -1403,6 +1403,7 @@ class ProviderHealthLedger:
             "schema",
             "provider",
             "model",
+            "observation_kind",
             "status",
             "outcome",
             "latency_ms",
@@ -1414,6 +1415,16 @@ class ProviderHealthLedger:
             "opened_until",
             "input_tokens",
             "output_tokens",
+            "domain",
+            "capability",
+            "risk_class",
+            "quality_reward",
+            "quality_passed",
+            "evaluator_id",
+            "evaluator_version",
+            "feedback_digest",
+            "evidence_digest",
+            "outcome_digest",
             "retention",
         }
     )
@@ -1472,8 +1483,111 @@ class ProviderHealthLedger:
                 "record_index": len(rows),
                 "record_digest": digest,
                 "provider": normalized["provider"],
+                "model": normalized["model"],
+                "observation_kind": normalized.get("observation_kind", "invocation"),
                 "outcome": normalized["outcome"],
             }
+
+    def record_evaluation(
+        self,
+        *,
+        provider: str,
+        model: str,
+        domain: str,
+        capability: str,
+        risk_class: str,
+        evaluator_id: str,
+        evaluator_version: str,
+        reward: float,
+        passed: bool,
+        outcome_digest: str,
+        evidence_digest: str | None = None,
+        feedback_digest: str | None = None,
+        observed_at: float | None = None,
+    ) -> dict[str, Any]:
+        """Append explicit task-quality feedback for one model arm.
+
+        Evaluation observations are intentionally a different kind from transport observations:
+        they never increment attempts, successes, failures, or circuit state. Only an explicit
+        evaluator can populate ``quality_mean`` in model selection overlays. ``outcome_digest``
+        is the replay barrier; an identical evaluation is a no-op and a contradictory reuse is
+        refused before the ledger is mutated.
+        """
+
+        if not isinstance(domain, str) or not domain.strip() or len(domain.encode("utf-8")) > 256:
+            raise ProviderError("provider quality domain is invalid")
+        if not isinstance(capability, str) or not capability.strip() or len(capability.encode("utf-8")) > 256:
+            raise ProviderError("provider quality capability is invalid")
+        if not isinstance(risk_class, str) or not risk_class.strip() or len(risk_class.encode("utf-8")) > 256:
+            raise ProviderError("provider quality risk_class is invalid")
+        for field_name, value in (("evaluator_id", evaluator_id), ("evaluator_version", evaluator_version)):
+            if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > 256:
+                raise ProviderError(f"provider quality {field_name} is invalid")
+        if not isinstance(passed, bool):
+            raise ProviderError("provider quality passed must be boolean")
+        if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not 0.0 <= float(reward) <= 1.0:
+            raise ProviderError("provider quality reward must be within [0, 1]")
+        for field_name, value in (("outcome_digest", outcome_digest), ("evidence_digest", evidence_digest), ("feedback_digest", feedback_digest)):
+            if value is not None and (not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value)):
+                raise ProviderError(f"provider quality {field_name} must be a lowercase SHA-256 digest or None")
+        observation: dict[str, Any] = {
+            "schema": PROVIDER_OBSERVATION_SCHEMA,
+            "provider": provider,
+            "model": model,
+            "observation_kind": "evaluation",
+            "status": "evaluated",
+            "outcome": "unknown",
+            "latency_ms": 0.0,
+            "domain": domain,
+            "capability": capability,
+            "risk_class": risk_class,
+            "quality_reward": float(reward),
+            "quality_passed": passed,
+            "evaluator_id": evaluator_id,
+            "evaluator_version": evaluator_version,
+            "outcome_digest": outcome_digest,
+        }
+        if evidence_digest is not None:
+            observation["evidence_digest"] = evidence_digest
+        if feedback_digest is not None:
+            observation["feedback_digest"] = feedback_digest
+        if observed_at is not None:
+            observation["observed_at"] = observed_at
+        normalized = self._normalize_observation(observation, clock=self._clock)
+        with self._lock:
+            rows = self._read_records_locked()
+            for row in rows:
+                prior = row["observation"]
+                if (
+                    prior.get("observation_kind", "invocation") != "evaluation"
+                    or prior.get("outcome_digest") != outcome_digest
+                    or prior.get("provider") != provider
+                    or prior.get("model") != model
+                    or prior.get("domain") != domain
+                    or prior.get("capability") != capability
+                    or prior.get("risk_class") != risk_class
+                ):
+                    continue
+                identity = ("provider", "model", "domain", "capability", "risk_class", "evaluator_id", "evaluator_version")
+                if any(prior.get(field_name) != normalized.get(field_name) for field_name in identity) or prior.get("quality_reward") != normalized.get("quality_reward") or prior.get("quality_passed") != normalized.get("quality_passed") or prior.get("evidence_digest") != normalized.get("evidence_digest") or prior.get("feedback_digest") != normalized.get("feedback_digest"):
+                    raise ProviderError("provider quality outcome_digest conflicts with an existing evaluation")
+                line = _canonical_provider_health_json({"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "observation": prior}).encode("utf-8")
+                return {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "record_index": rows.index(row), "record_digest": hashlib.sha256(line).hexdigest(), "provider": prior["provider"], "model": prior["model"], "observation_kind": "evaluation", "outcome": "unknown", "replayed": True}
+            line = json.dumps(
+                {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "observation": normalized},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8") + b"\n"
+            if len(rows) >= self.max_records or (self.path.stat().st_size if self.path.exists() else 0) + len(line) > self.max_bytes:
+                raise ProviderError("provider health ledger capacity is exhausted")
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("ab") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            return {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "record_index": len(rows), "record_digest": hashlib.sha256(line.rstrip(b"\n")).hexdigest(), "provider": normalized["provider"], "model": normalized["model"], "observation_kind": "evaluation", "outcome": "unknown", "replayed": False}
 
     def records(self, *, provider: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
         """Read bounded observations in append order, optionally filtered by provider."""
@@ -1554,32 +1668,46 @@ class ProviderHealthLedger:
                     "attempts": 0,
                     "successes": 0,
                     "failures": 0,
+                    "quality_observations": 0,
+                    "quality_total": 0.0,
+                    "quality_passed": 0,
                     "total_input_tokens": 0,
                     "total_output_tokens": 0,
                 },
             )
-            state["attempts"] += 1
-            state["successes"] += int(observation["outcome"] == "success")
-            state["failures"] += int(observation["outcome"] == "failure")
-            state["total_input_tokens"] += int(observation.get("input_tokens", 0))
-            state["total_output_tokens"] += int(observation.get("output_tokens", 0))
-            state.update(
-                {
-                    "last_model": observation["model"],
-                    "circuit": observation.get("circuit", "closed"),
-                    "consecutive_failures": observation.get("consecutive_failures", 0),
-                    "opened_until": observation.get("opened_until"),
-                    "last_outcome": observation["outcome"],
-                    "last_status": observation["status"],
-                    "last_latency_ms": observation["latency_ms"],
-                    "observed_at": observation["observed_at"],
-                }
-            )
-            if "status_code" in observation:
-                state["last_status_code"] = observation["status_code"]
+            if observation.get("observation_kind", "invocation") == "invocation":
+                state["attempts"] += 1
+                state["successes"] += int(observation["outcome"] == "success")
+                state["failures"] += int(observation["outcome"] == "failure")
+                state["total_input_tokens"] += int(observation.get("input_tokens", 0))
+                state["total_output_tokens"] += int(observation.get("output_tokens", 0))
+                state.update(
+                    {
+                        "last_model": observation["model"],
+                        "circuit": observation.get("circuit", "closed"),
+                        "consecutive_failures": observation.get("consecutive_failures", 0),
+                        "opened_until": observation.get("opened_until"),
+                        "last_outcome": observation["outcome"],
+                        "last_status": observation["status"],
+                        "last_latency_ms": observation["latency_ms"],
+                        "observed_at": observation["observed_at"],
+                    }
+                )
+                if "status_code" in observation:
+                    state["last_status_code"] = observation["status_code"]
+            if observation.get("quality_reward") is not None:
+                state["quality_observations"] += 1
+                state["quality_total"] += float(observation["quality_reward"])
+                state["quality_passed"] += int(observation.get("quality_passed") is True)
         for state in aggregate.values():
             attempts = state["attempts"]
             state["success_rate"] = state["successes"] / attempts if attempts else 0.0
+            quality_observations = state.pop("quality_observations")
+            quality_total = state.pop("quality_total")
+            quality_passed = state.pop("quality_passed")
+            state["quality_observations"] = quality_observations
+            state["quality_mean"] = quality_total / quality_observations if quality_observations else None
+            state["quality_pass_rate"] = quality_passed / quality_observations if quality_observations else None
             opened_until = state.get("opened_until")
             if state.get("circuit") == "open" and (
                 opened_until is None or float(opened_until) > float(current_time)
@@ -1620,34 +1748,48 @@ class ProviderHealthLedger:
                     "attempts": 0,
                     "successes": 0,
                     "failures": 0,
+                    "quality_observations": 0,
+                    "quality_total": 0.0,
+                    "quality_passed": 0,
                     "total_latency_ms": 0.0,
                     "total_input_tokens": 0,
                     "total_output_tokens": 0,
                 },
             )
-            state["attempts"] += 1
-            state["successes"] += int(observation["outcome"] == "success")
-            state["failures"] += int(observation["outcome"] == "failure")
-            state["total_latency_ms"] += float(observation["latency_ms"])
-            state["total_input_tokens"] += int(observation.get("input_tokens", 0))
-            state["total_output_tokens"] += int(observation.get("output_tokens", 0))
-            state.update(
-                {
-                    "last_outcome": observation["outcome"],
-                    "last_status": observation["status"],
-                    "last_latency_ms": observation["latency_ms"],
-                    "circuit": observation.get("circuit", "closed"),
-                    "consecutive_failures": observation.get("consecutive_failures", 0),
-                    "opened_until": observation.get("opened_until"),
-                    "observed_at": observation["observed_at"],
-                }
-            )
-            if "status_code" in observation:
-                state["last_status_code"] = observation["status_code"]
+            if observation.get("observation_kind", "invocation") == "invocation":
+                state["attempts"] += 1
+                state["successes"] += int(observation["outcome"] == "success")
+                state["failures"] += int(observation["outcome"] == "failure")
+                state["total_latency_ms"] += float(observation["latency_ms"])
+                state["total_input_tokens"] += int(observation.get("input_tokens", 0))
+                state["total_output_tokens"] += int(observation.get("output_tokens", 0))
+                state.update(
+                    {
+                        "last_outcome": observation["outcome"],
+                        "last_status": observation["status"],
+                        "last_latency_ms": observation["latency_ms"],
+                        "circuit": observation.get("circuit", "closed"),
+                        "consecutive_failures": observation.get("consecutive_failures", 0),
+                        "opened_until": observation.get("opened_until"),
+                        "observed_at": observation["observed_at"],
+                    }
+                )
+                if "status_code" in observation:
+                    state["last_status_code"] = observation["status_code"]
+            if observation.get("quality_reward") is not None:
+                state["quality_observations"] += 1
+                state["quality_total"] += float(observation["quality_reward"])
+                state["quality_passed"] += int(observation.get("quality_passed") is True)
         for state in aggregate.values():
             attempts = state["attempts"]
             state["success_rate"] = state["successes"] / attempts if attempts else 0.0
             state["mean_latency_ms"] = state["total_latency_ms"] / attempts if attempts else None
+            quality_observations = state.pop("quality_observations")
+            quality_total = state.pop("quality_total")
+            quality_passed = state.pop("quality_passed")
+            state["quality_observations"] = quality_observations
+            state["quality_mean"] = quality_total / quality_observations if quality_observations else None
+            state["quality_pass_rate"] = quality_passed / quality_observations if quality_observations else None
             state.pop("total_latency_ms", None)
             opened_until = state.get("opened_until")
             if state.get("circuit") == "open" and (
@@ -1706,9 +1848,14 @@ class ProviderHealthLedger:
         model = observation.get("model")
         if not isinstance(model, str) or not model.strip() or len(model.encode("utf-8")) > 512:
             raise ProviderError("provider health observation model is invalid")
+        observation_kind = observation.get("observation_kind", "invocation")
+        if observation_kind not in {"invocation", "evaluation"}:
+            raise ProviderError("provider health observation_kind is invalid")
         status = observation.get("status")
         outcome = observation.get("outcome")
-        if status not in {"completed", "provider_refused"} or outcome not in {"success", "failure"}:
+        if observation_kind == "invocation" and (status not in {"completed", "provider_refused"} or outcome not in {"success", "failure"}):
+            raise ProviderError("provider health observation status or outcome is invalid")
+        if observation_kind == "evaluation" and (status != "evaluated" or outcome != "unknown"):
             raise ProviderError("provider health observation status or outcome is invalid")
         latency = observation.get("latency_ms")
         if not isinstance(latency, (int, float)) or isinstance(latency, bool) or not math.isfinite(float(latency)) or latency < 0:
@@ -1725,6 +1872,8 @@ class ProviderHealthLedger:
             "latency_ms": float(latency),
             "observed_at": float(observed_at),
         }
+        if "observation_kind" in observation or observation_kind == "evaluation":
+            result["observation_kind"] = observation_kind
         for field_name in ("status_code", "consecutive_failures", "input_tokens", "output_tokens"):
             value = observation.get(field_name)
             if value is not None:
@@ -1745,6 +1894,31 @@ class ProviderHealthLedger:
             if not isinstance(opened_until, (int, float)) or isinstance(opened_until, bool) or not math.isfinite(float(opened_until)):
                 raise ProviderError("provider health observation opened_until is invalid")
             result["opened_until"] = float(opened_until)
+        for field_name in ("domain", "capability", "risk_class", "evaluator_id", "evaluator_version"):
+            value = observation.get(field_name)
+            if value is not None:
+                if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > 256:
+                    raise ProviderError(f"provider health observation {field_name} is invalid")
+                result[field_name] = value
+        quality_reward = observation.get("quality_reward")
+        if quality_reward is not None:
+            if isinstance(quality_reward, bool) or not isinstance(quality_reward, (int, float)) or not math.isfinite(float(quality_reward)) or not 0.0 <= float(quality_reward) <= 1.0:
+                raise ProviderError("provider health observation quality_reward must be within [0, 1]")
+            result["quality_reward"] = float(quality_reward)
+        quality_passed = observation.get("quality_passed")
+        if quality_passed is not None:
+            if not isinstance(quality_passed, bool):
+                raise ProviderError("provider health observation quality_passed must be boolean")
+            result["quality_passed"] = quality_passed
+        for field_name in ("feedback_digest", "evidence_digest", "outcome_digest"):
+            value = observation.get(field_name)
+            if value is not None:
+                if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+                    raise ProviderError(f"provider health observation {field_name} must be a lowercase SHA-256 digest")
+                result[field_name] = value
+        if observation_kind == "evaluation":
+            if result.get("quality_reward") is None or result.get("quality_passed") is None or result.get("outcome_digest") is None:
+                raise ProviderError("evaluation observations require quality_reward, quality_passed, and outcome_digest")
         return result
 
     def _read_records_locked(self) -> list[dict[str, Any]]:

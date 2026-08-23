@@ -15503,6 +15503,80 @@ class AutonomousAgent:
 
         return BrainLearningEpisode.from_mapping(value)
 
+    def _record_model_quality_feedback(
+        self,
+        episode: BrainLearningEpisode,
+        decision: BrainEvaluatorDecision,
+        *,
+        credited_reward: float | None = None,
+    ) -> dict[str, Any]:
+        """Project explicit evaluator credit into model-health without touching transport health.
+
+        The Python health ledger is intentionally append-only and value-only. A quality record
+        never increments provider attempts or changes a circuit; it only contributes to the
+        model arm's quality prior. The raw evaluator decision may use the wider ``[-1, 1]``
+        learning range, while the routing prior is bounded to ``[0, 1]`` by clamping.
+        """
+
+        selected = episode.evaluation_input.get("selected_model")
+        context = episode.evaluation_input.get("context")
+        context_map = context if isinstance(context, Mapping) else {}
+        if not isinstance(selected, Mapping):
+            return {
+                "status": "failed",
+                "error_class": "missing_selected_model",
+                "retention": "metadata_only_model_quality_no_payloads",
+                "secret_material": "never_returned",
+            }
+        provider = selected.get("provider")
+        model = selected.get("model")
+        if not isinstance(provider, str) or not isinstance(model, str) or not provider.strip() or not model.strip():
+            return {
+                "status": "failed",
+                "error_class": "malformed_selected_model",
+                "retention": "metadata_only_model_quality_no_payloads",
+                "secret_material": "never_returned",
+            }
+        base = {
+            "provider": provider,
+            "model": model,
+            "domain": str(context_map.get("domain") or "unknown_domain"),
+            "capability": str(context_map.get("capability") or "unknown_capability"),
+            "risk_class": str(context_map.get("risk_class") or "unknown_risk"),
+            "evaluator_id": decision.evaluator_id,
+            "evaluator_version": decision.evaluator_version,
+            "reward": max(0.0, min(1.0, float(decision.reward))),
+            "passed": decision.passed,
+            "outcome_digest": episode.evaluation_input.get("outcome_digest"),
+            "evidence_digest": decision.evidence_digest,
+            "feedback_digest": decision.feedback_digest,
+            "retention": "metadata_only_model_quality_no_payloads",
+            "secret_material": "never_returned",
+        }
+        if self.health_ledger is None:
+            return {"status": "not_configured", **base}
+        outcome_digest = base["outcome_digest"]
+        if not isinstance(outcome_digest, str):
+            return {"status": "failed", **base, "error_class": "missing_outcome_digest"}
+        try:
+            receipt = self.health_ledger.record_evaluation(
+                provider=provider,
+                model=model,
+                domain=base["domain"],
+                capability=base["capability"],
+                risk_class=base["risk_class"],
+                evaluator_id=decision.evaluator_id,
+                evaluator_version=decision.evaluator_version,
+                reward=base["reward"],
+                passed=decision.passed,
+                outcome_digest=outcome_digest,
+                evidence_digest=decision.evidence_digest,
+                feedback_digest=decision.feedback_digest,
+            )
+            return {"status": "recorded", **base, "health_record_digest": receipt["record_digest"], "replayed": bool(receipt.get("replayed", False))}
+        except Exception as error:
+            return {"status": "failed", **base, "error_class": type(error).__name__}
+
     def settle_learning_episode(
         self,
         episode: BrainLearningEpisode | Mapping[str, Any],
@@ -15532,13 +15606,14 @@ class AutonomousAgent:
             )
         if not isinstance(evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("evaluator must be a BrainOutcomeEvaluator or None")
-        return evaluator.evaluate_episode(
+        decision, report = evaluator.evaluate_episode(
             self.brain,
             episode,
             bandit_state=self.learning_state() if bandit_state is None else bandit_state,
             evidence=evidence,
             ledger=self.ledger if ledger is None else ledger,
         )
+        return decision, {**report, "model_quality": self._record_model_quality_feedback(episode, decision)}
 
     def settle_learning_decision(
         self,
@@ -15560,13 +15635,15 @@ class AutonomousAgent:
             raise BrainRunError("decision must be a BrainEvaluatorDecision")
         if not isinstance(evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
-        return evaluator.settle_episode(
+        result = evaluator.settle_episode(
             self.brain,
             episode,
             decision=decision,
             bandit_state=self.learning_state() if bandit_state is None else bandit_state,
             ledger=self.ledger if ledger is None else ledger,
         )
+        settled_decision, report = result
+        return settled_decision, {**report, "model_quality": self._record_model_quality_feedback(episode, settled_decision)}
 
     def prepare_learning_trajectory(
         self,
@@ -15610,13 +15687,16 @@ class AutonomousAgent:
 
         if not isinstance(evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("evaluator must be a BrainOutcomeEvaluator")
-        return evaluator.evaluate_trajectory(
+        result = evaluator.evaluate_trajectory(
             self.brain,
             trajectory,
             bandit_state=self.learning_state() if bandit_state is None else bandit_state,
             evidence_by_step=evidence_by_step,
             ledger=self.ledger if ledger is None else ledger,
         )
+        for episode, decision, credited in zip(result.trajectory.episodes, result.decisions, result.credited_rewards):
+            self._record_model_quality_feedback(episode, decision, credited_reward=credited)
+        return result
 
     def execution_state(self, execution_id: str) -> dict[str, Any] | None:
         """Read one restart-safe execution state without returning task or provider content."""
@@ -15986,6 +16066,86 @@ class AutonomousAgent:
         else:
             controller.fail(reason="execution_failed")
 
+    def _record_model_quality_from_learning_result(self, result: Any) -> None:
+        """Persist quality feedback emitted by any learning orchestration shape.
+
+        Lower-level delayed settlement uses :meth:`_record_model_quality_feedback`; the
+        high-level online-learning orchestrator settles directly inside the brain for sequential
+        replanning and cross-domain fan-out. This adapter closes that seam so every domain and
+        every specialist/synthesis arm receives the same quality prior without requiring a
+        provider replay. All failures remain diagnostic-only because the bandit settlement has
+        already completed and provider execution must not be repeated.
+        """
+
+        if self.health_ledger is None:
+            return
+
+        def decision_mapping(value: Any) -> Mapping[str, Any] | None:
+            candidate = value.get("decision") if isinstance(value, Mapping) else getattr(value, "decision", value)
+            if hasattr(candidate, "to_dict"):
+                candidate = candidate.to_dict()
+            return candidate if isinstance(candidate, Mapping) else None
+
+        pairs: list[tuple[BrainRunResult, Mapping[str, Any]]] = []
+        if isinstance(result, AutonomousLearningResult):
+            for brain_result, evaluation in zip(result.attempts, result.evaluations):
+                if isinstance(brain_result, (BrainRunResult, BrainToolLoopResult)):
+                    decision = decision_mapping(evaluation)
+                    if decision is not None:
+                        pairs.append((brain_result.brain_run if isinstance(brain_result, BrainToolLoopResult) else brain_result, decision))
+        elif hasattr(result, "cross_domain") and hasattr(result, "evaluations"):
+            cross_domain = getattr(result, "cross_domain")
+            evaluations = getattr(result, "evaluations")
+            brain_results = self._trace_brain_results(cross_domain)
+            for brain_result, evaluation in zip(brain_results, evaluations):
+                decision = decision_mapping(evaluation)
+                if decision is not None:
+                    pairs.append((brain_result, decision))
+        elif hasattr(result, "attempts"):
+            # Replan-cycle envelopes contain nested cross-domain attempts. Keep this walker
+            # structural and bounded; it never scans arbitrary provider payload mappings.
+            for attempt in getattr(result, "attempts", ()):
+                nested = getattr(attempt, "cross_domain", None)
+                evaluations = getattr(attempt, "evaluations", ())
+                if nested is None:
+                    continue
+                for brain_result, evaluation in zip(self._trace_brain_results(nested), evaluations):
+                    decision = decision_mapping(evaluation)
+                    if decision is not None:
+                        pairs.append((brain_result, decision))
+
+        for brain_result, decision in pairs:
+            selected = brain_result.selection.get("selected_model")
+            context = brain_result.selection.get("context")
+            if not isinstance(selected, Mapping) or not isinstance(context, Mapping):
+                continue
+            provider = selected.get("provider")
+            model = selected.get("model")
+            outcome_digest = brain_result.outcome_digest
+            reward = decision.get("reward")
+            passed = decision.get("passed")
+            if not isinstance(provider, str) or not isinstance(model, str) or not isinstance(outcome_digest, str):
+                continue
+            if not isinstance(reward, (int, float)) or isinstance(reward, bool) or not math.isfinite(float(reward)) or not isinstance(passed, bool):
+                continue
+            try:
+                self.health_ledger.record_evaluation(
+                    provider=provider,
+                    model=model,
+                    domain=str(context.get("domain") or "unknown_domain"),
+                    capability=str(context.get("capability") or "unknown_capability"),
+                    risk_class=str(context.get("risk_class") or "unknown_risk"),
+                    evaluator_id=str(decision.get("evaluator_id") or "unknown_evaluator"),
+                    evaluator_version=str(decision.get("evaluator_version") or "unknown_version"),
+                    reward=max(0.0, min(1.0, float(reward))),
+                    passed=passed,
+                    outcome_digest=outcome_digest,
+                    evidence_digest=decision.get("evidence_digest"),
+                    feedback_digest=decision.get("feedback_digest"),
+                )
+            except Exception:
+                continue
+
     def run(
         self,
         *,
@@ -16025,6 +16185,7 @@ class AutonomousAgent:
         except Exception as error:
             self._finish_execution(execution_controller, error=error)
             raise
+        self._record_model_quality_from_learning_result(result)
         self._finish_execution(execution_controller, result=result)
         return result
 

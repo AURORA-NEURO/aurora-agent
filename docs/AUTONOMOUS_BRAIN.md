@@ -2540,6 +2540,27 @@ fields and never stores API keys, request messages, response text, headers, cred
 model prompts. This is complementary to `BrainLearningLedger`: provider health describes
 transport reliability, while evaluator rewards describe task quality and drive bandit adaptation.
 
+The quality channel is now wired into both SDKs rather than being an application-side convention.
+When a delayed or immediate evaluator settlement is accepted, TypeScript writes a separate
+`evaluation` observation through `AutonomousModelHealthController.recordEvaluation()` and Python
+uses `ProviderHealthLedger.record_evaluation()`. These records contribute `quality_mean`, quality
+observation count, and quality pass rate to the model-arm selection overlay, but never increment
+transport attempts, successes, failures, or circuit state. The feedback identity is bound to the
+run/outcome digest: an exact replay is a no-op and a contradictory reuse is refused. High-level
+online, trajectory, cross-domain, and replanning paths all use this bridge, so specialists,
+synthesis, and retry attempts learn from the same explicit evaluator contract without replaying a
+provider call. Negative learning rewards remain valid for the bandit; the routing quality prior is
+clamped to its separate `[0, 1]` quality scale.
+
+Provider planning has its own explicit settlement seam because a planner and an execution model
+may be different arms. TypeScript callers can pass a completed `planWithProvider()` proposal to
+`AutonomousLearningController.settlePlanningQuality(plan, { domain, evaluator })`. The method
+binds the evaluator packet to the proposal's planning outcome digest, updates the contextual
+bandit arm, and writes a separate model-quality health observation. Replaying the same proposal
+and evaluator packet returns the same bandit state and health receipt; a changed reward for the
+same planning digest is refused. A valid plan proposal still proves only plan structure—it does
+not authorize tools, effects, provider calls, or task correctness.
+
 `ProviderHealthLedger` also supports `snapshot()`/`restore()` and
 `ProviderHealthPersistenceCoordinator`. `TransactionalJsonProviderHealthSnapshotPersistence`
 exports canonical value-only observations with per-record, head, and outer snapshot digests and

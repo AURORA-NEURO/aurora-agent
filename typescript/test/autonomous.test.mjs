@@ -23,6 +23,7 @@ import {
   AutonomousDomainToolRuntime,
   AutonomousLearningController,
   AutonomousOnlineLearner,
+  InMemoryAutonomousModelHealthStore,
   InMemoryAutonomousEpisodicMemory,
   AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
   AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
@@ -413,6 +414,40 @@ test("planAndRun requires explicit planning acceptance and binds the accepted pr
     /accepted plan violates workflow dependencies/,
   );
   assert.equal(calls.length, 3, "dependency-invalid accepted plans fail before a second provider dispatch");
+});
+
+test("provider planning quality settles the planner arm separately and replays without double credit", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (planningMessage) {
+        const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+        const ids = contract.stage_catalogue.map((row) => row.id);
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, focus_stage_ids: ids.slice(0, 1), review_required: false, confidence: 0.93, abstain: false }) }, finish_reason: "stop" }] });
+      }
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ answer: "planned" }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("planning-quality", "https://planning-quality.test", { requiresCredential: false }));
+  const health = new InMemoryAutonomousModelHealthStore();
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  agent.registerModel(candidate("planning-quality", "planner", ["reasoning", "code", "structured_output"]));
+  const blueprint = await agent.blueprint("Debug this coding repository and report verified tests.", { domain: "coding" });
+  const plan = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true });
+  const controller = new AutonomousLearningController(agent);
+  const input = { evaluator_id: "planning-reviewer", evaluator_version: "1", reward: 0.8, passed: true, evidence_digest: "c".repeat(64) };
+  const first = await controller.settlePlanningQuality(plan, { domain: "coding", evaluator: input });
+  assert.equal(first.status, "settled");
+  assert.equal(first.model_quality?.status, "recorded");
+  assert.equal(agent.learner.snapshot().generation, 1);
+  assert.equal(health.health({ model: "planner" })[0]?.quality_observations, 1);
+  const before = agent.learner.snapshot();
+  const replay = await controller.settlePlanningQuality(plan, { domain: "coding", evaluator: input });
+  assert.deepEqual(agent.learner.snapshot(), before);
+  assert.equal(replay.model_quality?.health_event_digest, first.model_quality?.health_event_digest);
+  assert.equal(health.health({ model: "planner" })[0]?.quality_observations, 1);
 });
 
 test("planAndRun applies the same accepted planning contract to cross-domain fan-out and synthesis", async () => {

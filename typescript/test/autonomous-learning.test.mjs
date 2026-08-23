@@ -29,6 +29,7 @@ import {
   LLMRuntime,
   AutonomousWorkflowExecutor,
   InMemoryAutonomousEpisodicMemory,
+  InMemoryAutonomousModelHealthStore,
   builtinAutonomousDomainEvaluatorProfiles,
   builtinAutonomousDomainProfiles,
   builtinAutonomousValueEvaluatorProfiles,
@@ -240,6 +241,37 @@ test("learning episodes rehydrate by digest and settle through the local bandit"
   assert.equal(agent.learner.snapshot().generation, 1);
   assert.equal(episodes.pending().length, 0);
   await assert.rejects(() => controller.settleRun("episode-local-1", { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 0.8, passed: true }), /already been settled/);
+});
+
+test("explicit evaluator settlement feeds model quality health without confusing transport success", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload(init)) }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("learning-provider", "https://learning.test", { requiresCredential: false }));
+  const health = new InMemoryAutonomousModelHealthStore();
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  agent.registerModel(candidate());
+  const controller = new AutonomousLearningController(agent);
+  const run = await agent.run("Evaluate quality feedback separately from transport.", { domain: "coding", approveProviderCall: true });
+  const episode = await controller.prepareRun(run, { episodeId: "quality-health-1" });
+  const settlement = await controller.settleRun(episode.episode_id, {
+    evaluator_id: "quality-reviewer",
+    evaluator_version: "1",
+    reward: 0.2,
+    passed: false,
+    failure_class: "answer_quality",
+    evidence_digest: "b".repeat(64),
+  });
+  assert.equal(settlement.model_quality?.status, "recorded");
+  assert.equal(settlement.model_quality?.reward, 0.2);
+  assert.equal(settlement.model_quality?.provider, "learning-provider");
+  const model = health.health({ model: "learning-model" })[0];
+  assert.equal(model?.attempts, 1);
+  assert.equal(model?.successes, 1);
+  assert.equal(model?.quality_observations, 1);
+  assert.equal(model?.quality_mean, 0.2);
+  assert.equal(JSON.stringify(settlement).includes("Evaluate quality feedback"), false);
 });
 
 test("high-level runLearning evaluates and settles every built-in domain with replay-safe model credit", async () => {
