@@ -104,6 +104,38 @@ test("remote mission replan worker rehydrates accepted plans without provider re
   assert.equal((await validateAutonomousMissionReplanRemoteJobQueueSnapshot(await queue.snapshot())).snapshot_digest.length, 64);
 });
 
+test("remote mission worker accepts a structural queue adapter for external persistence", async () => {
+  const root = mission();
+  const baseline = await runAutonomousMissionReplanCycle(new AutonomousMissionExecutor({ catalogue: await catalogue(), executeStep: async () => ({ status: "succeeded", value: {} }) }), root, { evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }) });
+  const backing = new InMemoryAutonomousMissionReplanRemoteJobQueue();
+  await backing.enqueue({ jobId: "adapter-job", rootMissionId: root.mission_id, protectedContractDigest: baseline.protected_contract_digest });
+  const queue = {
+    enqueue: backing.enqueue.bind(backing),
+    load: backing.load.bind(backing),
+    claimNext: backing.claimNext.bind(backing),
+    renew: backing.renew.bind(backing),
+    beginExecution: backing.beginExecution.bind(backing),
+    complete: backing.complete.bind(backing),
+    fail: backing.fail.bind(backing),
+    reconcile: backing.reconcile.bind(backing),
+    cancel: backing.cancel.bind(backing),
+    requeue: backing.requeue.bind(backing),
+    snapshot: backing.snapshot.bind(backing),
+  };
+  const worker = new AutonomousMissionReplanRemoteWorker({
+    queue,
+    workerId: "adapter-worker",
+    resolve: async () => ({
+      executor: new AutonomousMissionExecutor({ catalogue: await catalogue(), executeStep: async () => ({ status: "succeeded", value: { transient: true } }) }),
+      mission: root,
+      options: { evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }) },
+    }),
+  });
+  const run = await worker.run();
+  assert.equal(run.completed, 1);
+  assert.equal((await backing.load("adapter-job")).status, "completed");
+});
+
 test("remote mission replan queue snapshots round-trip through canonical text persistence and reject tampering", async () => {
   const queue = new InMemoryAutonomousMissionReplanRemoteJobQueue();
   await queue.enqueue({ jobId: "persistence-job", rootMissionId: "persistence-root", protectedContractDigest: "a".repeat(64) });

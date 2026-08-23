@@ -176,6 +176,11 @@ const RECONCILIATION_OUTCOMES: readonly AutonomousMissionReplanRemoteJobReconcil
 
 function clone<T>(value: T): T { return structuredClone(value); }
 
+function isRemoteMissionQueueHandle(value: unknown): value is AutonomousMissionReplanRemoteJobQueueHandle {
+  if (!isObject(value)) return false;
+  return ["enqueue", "load", "claimNext", "renew", "beginExecution", "complete", "fail", "reconcile", "cancel", "requeue", "snapshot"].every((method) => typeof (value as Record<string, unknown>)[method] === "function");
+}
+
 function identifier(name: string, value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 256 || !/^[A-Za-z0-9_.:+-]+$/.test(value)) throw new ArgumentError(`${name} must be a bounded identifier`);
   return value;
@@ -703,7 +708,7 @@ export class AutonomousMissionReplanRemoteWorker {
   readonly leaseMs: number;
 
   constructor(options: AutonomousMissionReplanRemoteWorkerOptions) {
-    if (!options || (!(options.queue instanceof InMemoryAutonomousMissionReplanRemoteJobQueue) && !(options.queue instanceof AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator))) throw new ArgumentError("mission remote worker requires a typed queue or CAS coordinator");
+    if (!options || !isRemoteMissionQueueHandle(options.queue)) throw new ArgumentError("mission remote worker requires a queue handle implementing the remote queue contract");
     this.queue = options.queue;
     this.workerId = identifier("mission remote workerId", options.workerId);
     if (typeof options.resolve !== "function") throw new ArgumentError("mission remote worker resolver must be callable");
