@@ -672,6 +672,12 @@ host/scheme/method admission, transient header resolution, no redirects, bounded
 bytes, timeout classification, and digest-only non-JSON/oversized projections. It closes the
 generic transport seam without claiming provider-specific auth, pagination, source validation, or
 multi-host delivery.
+TypeScript now adds `AutonomousHttpMetadataEventSink` on top of that connector: a bounded,
+allow-listed, recursively secret-free POST exporter for run/portfolio trace metadata with event-
+digest idempotency, bounded transient retries, explicit 4xx refusal, and `409` duplicate receipts.
+It closes the operational event handoff without claiming collector durability, OTLP semantics,
+distributed queue consensus, tenant authorization, or evaluator truth; the deployment still owns
+the transient header resolver and collector service.
 The TypeScript autonomous runtime now also provides an explicit metadata-only run trace boundary:
 `InMemoryAutonomousRunTraceStore`, hash-chained snapshots, bounded queries, provider invocation
 observation, and `runWithTrace()`/`runCrossDomainWithTrace()` across all twelve domains. It makes

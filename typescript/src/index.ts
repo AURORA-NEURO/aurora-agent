@@ -192,6 +192,23 @@ export type {
   AutonomousHttpSnapshotTextStoreDescription,
 } from "./autonomous-http-snapshot-store.js";
 export {
+  AUTONOMOUS_HTTP_METADATA_SINK_SCHEMA,
+  AUTONOMOUS_HTTP_METADATA_SINK_REQUEST_SCHEMA,
+  AUTONOMOUS_HTTP_METADATA_SINK_RECEIPT_SCHEMA,
+  MAX_AUTONOMOUS_HTTP_METADATA_EVENT_BYTES,
+  MAX_AUTONOMOUS_HTTP_METADATA_BATCH,
+  MAX_AUTONOMOUS_HTTP_METADATA_RETRY_ATTEMPTS,
+  MAX_AUTONOMOUS_HTTP_METADATA_RETRY_DELAY_MS,
+  AutonomousHttpMetadataEventSink,
+} from "./autonomous-http-metadata-sink.js";
+export type {
+  AutonomousHttpMetadataSinkReceiptStatus,
+  AutonomousHttpMetadataSinkOptions,
+  AutonomousHttpMetadataSinkReceipt,
+  AutonomousHttpMetadataSinkDescription,
+  AutonomousHttpMetadataSinkBatchResult,
+} from "./autonomous-http-metadata-sink.js";
+export {
   PROVIDER_PROTOCOL_CONFORMANCE_SCHEMA,
   PROVIDER_PROTOCOL_CONFORMANCE_MODE,
   MAX_PROVIDER_CONFORMANCE_PROVIDERS,

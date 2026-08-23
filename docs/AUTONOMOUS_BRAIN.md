@@ -6613,6 +6613,32 @@ The trace validator rechecks every event digest, sequence, retention marker, and
 restore. Persistence retains only the bounded metadata trace; the remote service still owns
 atomic CAS, access control, encryption, retention, and operational export policy.
 
+For deployments that need to forward those already-redacted events to an operational collector,
+`AutonomousHttpMetadataEventSink` provides a separate bounded delivery adapter. It accepts only
+an explicit allow-list of event schemas (the default covers the run-trace and portfolio execution
+trace events), rejects credential-shaped or payload-shaped fields recursively, caps each event and
+batch, and uses the event digest as the collector idempotency key. `emit()` retries only rate-limit,
+timeout, transport, and 5xx failures; a collector `409` is returned as `already_exported`, while
+authorization and other 4xx responses remain explicit refusals. `asSink()` adapts the same contract
+to trace/event callbacks without changing the journal schema:
+
+```typescript
+const metadataSink = new AutonomousHttpMetadataEventSink({
+  endpoint: "https://telemetry.example.internal/v1/autonomous-events",
+  policy: new AutonomousHttpConnectorPolicy({
+    allowedHosts: ["telemetry.example.internal"],
+    allowedMethods: ["POST"],
+  }),
+  headerResolver: (_manifest, request) => deploymentHeadersForCollector(request),
+});
+const exportEvent = metadataSink.asSink();
+```
+
+The sink never returns or retains resolved headers, HTTP response bodies, prompts, task text,
+provider responses, evidence values, tool arguments, or credentials. The caller-owned collector
+still owns authentication, durable ingestion, tenant isolation, encryption, retention, alerting,
+and any OTLP/queue translation; HTTP delivery success is not evaluator truth or domain correctness.
+
 `AutonomousConnectorRegistry.select_for_domains()` is the explicit decision stage for connector
 routing. It produces a deterministic, digest-bound selection plan for every requested
 domain/capability, preserves all candidate connector and manifest digests for review, and never
