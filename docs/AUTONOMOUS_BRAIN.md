@@ -4465,6 +4465,37 @@ facade, while still requiring explicit source-dispatch approval. This is a provi
 semantic gate, not a provider client: production callers still supply the credential/session,
 protocol implementation, source interpretation, and domain-truth evaluator.
 
+For callers that want one explicit source-to-brain operation, TypeScript also exposes
+`agent.runWithReviewedEvidence(task, options)`. It composes evidence-plan compilation, adapter
+selection, readiness, source approval, acquisition, projection/evaluation, and ordinary provider
+invocation while preserving separate gates. The default prompt bridge sends only evidence
+receipts, observation labels/status/confidence, source/value digests, evaluator verdict metadata,
+missing IDs, and next-stage IDs. A caller may supply `promptBuilder` to project transient,
+caller-owned values into prompt chunks; that callback receives raw values only in memory, and the
+result's `toJSON()` excludes them along with the provider response. Source approval false returns
+`evidence_review_required` without dispatch; blocked readiness returns `evidence_blocked`; partial,
+failed, or unsettled evidence prevents provider invocation unless
+`allowIncompleteEvidence: true` is explicit. Provider approval remains the normal
+`AutonomousRunOptions.approveProviderCall` gate:
+
+```typescript
+const result = await agent.runWithReviewedEvidence(task, {
+  registry: adapters,
+  domains: ["science"],
+  requests,
+  prepare: { readinessPolicy, allowDegradedDispatch: true },
+  execute: { approveSourceDispatch: true, projector, evaluator, journal },
+  run: { domain: "science", candidates, approveProviderCall: true },
+  promptBuilder: ({ values }) => callerOwnedTransientEvidencePrompt(values),
+});
+```
+
+The returned in-memory object exposes the exact execution plan, transient evidence values, prompt
+context, and provider run to the initiating caller. Its metadata projection binds task, evidence,
+execution-plan, prompt, selection, response, and result digests without retaining payloads. This
+is the intended high-level composition for all twelve domains; it still does not infer that source
+retrieval, evaluator acceptance, model completion, or HTTP success proves task correctness.
+
 ```typescript
 const contracts = new AutonomousEvidenceProviderContractRegistry(adapters);
 contracts.register({

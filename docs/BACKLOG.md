@@ -99,6 +99,15 @@ offline tests exercise the bridge across all twelve autonomous domains. This clo
 evidence invocation without claiming source retrieval, model discovery, source truth, or domain
 evaluation; those remain explicit caller-owned boundaries.
 
+The high-level TypeScript facade now exposes `runWithReviewedEvidence()` as an explicit
+source-to-brain composition for all twelve domains. It binds the reviewed evidence plan and
+readiness digest to source approval, acquisition, projection/evaluation, transient prompt
+assembly, model selection, and ordinary provider invocation while retaining independent source
+and provider approval gates. The default prompt is metadata-only; a caller-owned callback may
+project raw values transiently, and the returned digest projection excludes those values and the
+provider response. Unsettled evidence blocks invocation unless the caller opts into the bounded
+incomplete-evidence mode; offline tests cover the default, refusal, and all-domain paths.
+
 The TypeScript autonomous agent now also has an opt-in `structuredDomainResponse` contract for every
 built-in domain. It derives a digest-bound JSON Schema and prompt contract from the reviewed workflow,
 requires ordered stage results and domain-specific answer fields, and semantically revalidates the

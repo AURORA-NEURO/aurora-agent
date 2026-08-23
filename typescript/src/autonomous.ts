@@ -174,6 +174,10 @@ export const AUTONOMOUS_PLAN_SCHEMA = "bioprism-python-autonomous-plan/0.1" as c
 export const AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" as const;
 export const AUTONOMOUS_PLAN_AND_RUN_SCHEMA = "bioprism-typescript-autonomous-plan-and-run/0.1" as const;
+export const AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA = "bioprism-typescript-autonomous-evidence-backed-run/0.1" as const;
+export const MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_CHUNKS = 32;
+export const MAX_AUTONOMOUS_EVIDENCE_BACKED_CONTEXT_BYTES = 48_000;
+export const MAX_AUTONOMOUS_EVIDENCE_BACKED_RESULT_BYTES = 512_000;
 export const AUTONOMOUS_DOMAIN_TOOL_SCHEMA = "bioprism-typescript-autonomous-domain-tool/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-domain-tool-registry/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_STAGE_CONTRACT_SCHEMA = "bioprism-typescript-autonomous-workflow-stage-contract/0.1" as const;
@@ -788,6 +792,74 @@ export interface AutonomousMemoryRunProjection extends JsonObject {
   error_class: string | null;
   retention: "value_only_episode_metadata;transient_task_and_provider_payloads_not_retained";
   secret_material: "never_returned";
+}
+
+export type AutonomousEvidenceBackedRunStatus =
+  | "evidence_review_required"
+  | "evidence_blocked"
+  | "evidence_failed"
+  | "evidence_incomplete"
+  | AutonomousRunStatus;
+
+/** Explicit transient bridge input for callers that want to project raw evidence into a prompt. */
+export interface AutonomousEvidencePromptProjection {
+  executionPlan: AutonomousEvidenceExecutionPlan;
+  evidence: AutonomousEvidenceExecutionResult;
+  values: Readonly<Record<string, JsonValue | null>>;
+}
+
+export type AutonomousEvidencePromptBuilder = (
+  projection: AutonomousEvidencePromptProjection,
+) => readonly AutonomousPromptChunk[] | Promise<readonly AutonomousPromptChunk[]>;
+
+export interface AutonomousEvidenceBackedRunOptions {
+  registry: AutonomousEvidenceAdapterRegistry;
+  domains?: readonly AutonomousDomainName[];
+  requests: readonly AutonomousEvidenceAcquisitionRequest[];
+  availableEvidence?: readonly string[];
+  completedStages?: Readonly<Record<string, readonly string[]>>;
+  prepare?: AutonomousReviewedEvidencePreparationOptions;
+  execute?: AutonomousEvidenceExecutionOptions;
+  /** Normal agent options; provider approval remains separate from source approval. */
+  run?: AutonomousRunOptions;
+  /** Defaults to a metadata-only context. This callback is the explicit transient value bridge. */
+  promptBuilder?: AutonomousEvidencePromptBuilder;
+  /** Permit a provider run when evidence is partial or awaiting evaluator settlement. */
+  allowIncompleteEvidence?: boolean;
+}
+
+export interface AutonomousEvidenceBackedRunProjection extends JsonObject {
+  schema: typeof AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA;
+  status: AutonomousEvidenceBackedRunStatus;
+  task_digest: string;
+  evidence_plan_digest: string;
+  execution_plan_digest: string;
+  evidence_result_digest: string | null;
+  prompt_projection_digest: string | null;
+  run_status: AutonomousRunStatus | null;
+  selection_digest: string | null;
+  response_digest: string | null;
+  retention: "metadata_only;raw_evidence_prompt_values_and_provider_response_caller_owned";
+  secret_material: "never_returned";
+  result_digest: string;
+}
+
+/**
+ * End-to-end evidence-backed execution. The execution plan is always returned for review;
+ * source dispatch requires `execute.approveSourceDispatch`, evidence must complete unless the
+ * caller explicitly opts into incomplete evidence, and provider invocation still uses the
+ * ordinary model/credential/tool/effect approval gates. `toJSON()` excludes raw values and the
+ * provider response even though both remain available transiently to the caller.
+ */
+export interface AutonomousEvidenceBackedRunResult {
+  schema: typeof AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA;
+  status: AutonomousEvidenceBackedRunStatus;
+  task_digest: string;
+  execution_plan: AutonomousEvidenceExecutionPlan;
+  evidence: AutonomousEvidenceExecutionResult | null;
+  prompt_context: readonly AutonomousPromptChunk[];
+  run: AutonomousRunResult | null;
+  toJSON(): AutonomousEvidenceBackedRunProjection;
 }
 
 /** One bounded autonomous attempt plus its durable, value-only objective projection. */
@@ -2152,6 +2224,79 @@ function assertSafeTransientValue(value: unknown, depth = 0): void {
     return;
   }
   if (typeof value === "number" && !Number.isFinite(value)) throw new ArgumentError("autonomous transient context contains a non-finite number");
+}
+
+function defaultEvidenceBackedPromptContext(execution: AutonomousEvidenceExecutionResult): AutonomousPromptChunk[] {
+  const runtime = execution.runtime.toJSON();
+  const receipts = runtime.receipts.map((receipt) => ({
+    requirement_id: receipt.requirement_id,
+    domain: receipt.domain,
+    workflow_id: receipt.workflow_id,
+    workflow_digest: receipt.workflow_digest,
+    stage_id: receipt.stage_id,
+    source_id: receipt.source_id,
+    source_digest: receipt.source_digest,
+    status: receipt.status,
+    replay: receipt.replay,
+    value_digest: receipt.value_digest,
+    observations: receipt.observations.map((observation) => ({
+      label: observation.label,
+      kind: observation.kind,
+      status: observation.status,
+      confidence: observation.confidence,
+      limitations: observation.limitations,
+    })),
+    evaluator_status: receipt.evaluator_status,
+    assessment_digest: receipt.assessment_digest,
+    limitations: receipt.limitations,
+  }));
+  const content = JSON.stringify({
+    schema: "bioprism-typescript-autonomous-evidence-backed-context/0.1",
+    execution_plan_digest: execution.plan.plan_digest,
+    evidence_result_digest: execution.result_digest,
+    status: runtime.status,
+    completed_requirement_ids: runtime.completed_requirement_ids,
+    pending_evaluation_requirement_ids: runtime.pending_evaluation_requirement_ids,
+    missing_requirement_ids: runtime.missing_requirement_ids,
+    next_stage_ids: runtime.next_stage_ids,
+    receipts,
+    assessments: runtime.assessments.map((assessment) => ({
+      requirement_id: assessment.requirement_id,
+      evaluator_id: assessment.evaluator_id,
+      evaluator_version: assessment.evaluator_version,
+      verdict: assessment.verdict,
+      score: assessment.score,
+      feedback_digest: assessment.feedback_digest,
+      evidence_digest: assessment.evidence_digest,
+      failure_class: assessment.failure_class,
+      assessment_digest: assessment.assessment_digest,
+    })),
+    retention: "metadata_only;raw_evidence_values_caller_owned",
+    secret_material: "never_returned",
+  });
+  if (bytes(content) > MAX_AUTONOMOUS_EVIDENCE_BACKED_CONTEXT_BYTES) throw new ArgumentError("default evidence-backed prompt context exceeds its bound");
+  return [{ id: "reviewed-evidence-execution", content, required: true, priority: 960 }];
+}
+
+function normalizeEvidenceBackedPromptContext(value: readonly AutonomousPromptChunk[], maximum = MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_CHUNKS): AutonomousPromptChunk[] {
+  if (!Array.isArray(value) || value.length > maximum) throw new ArgumentError("evidence-backed prompt context is outside its bounds");
+  const result = value.map((chunk, index) => {
+    if (!isObject(chunk) || typeof chunk.id !== "string" || !chunk.id.trim() || typeof chunk.content !== "string" || bytes(chunk.content) > 64_000) throw new ArgumentError(`evidence-backed prompt context chunk ${index} is malformed`);
+    if (chunk.required !== undefined && typeof chunk.required !== "boolean") throw new ArgumentError(`evidence-backed prompt context chunk ${index}.required is malformed`);
+    if (chunk.priority !== undefined && (typeof chunk.priority !== "number" || !Number.isFinite(chunk.priority))) throw new ArgumentError(`evidence-backed prompt context chunk ${index}.priority is malformed`);
+    assertSafeTransientValue(chunk);
+    return structuredClone(chunk) as unknown as AutonomousPromptChunk;
+  });
+  if (new Set(result.map((chunk) => chunk.id)).size !== result.length) throw new ArgumentError("evidence-backed prompt context contains duplicate chunk IDs");
+  const encoded = JSON.stringify(result);
+  if (bytes(encoded) > MAX_AUTONOMOUS_EVIDENCE_BACKED_CONTEXT_BYTES) throw new ArgumentError("evidence-backed prompt context exceeds its bound");
+  return result;
+}
+
+function evidenceBackedStatus(status: ReturnType<AutonomousEvidenceExecutionResult["toJSON"]>["status"]): Exclude<AutonomousEvidenceBackedRunStatus, AutonomousRunStatus> {
+  if (status === "failed") return "evidence_failed";
+  if (status === "reconciliation_required") return "evidence_incomplete";
+  return "evidence_incomplete";
 }
 
 /** Assemble the bounded domain prompt locally, retaining exact inclusion/omission evidence. */
@@ -3994,6 +4139,93 @@ export class AutonomousAgent {
         : {}),
     };
     return controller.execute(executionPlan, plan, requests, executeOptions);
+  }
+
+  /**
+   * Compose reviewed evidence acquisition with the ordinary autonomous provider run.
+   * Source approval, evidence acceptance, and provider approval remain independently visible;
+   * this method never turns a successful source call into provider or task-level success.
+   */
+  async runWithReviewedEvidence(
+    task: string,
+    options: AutonomousEvidenceBackedRunOptions,
+  ): Promise<AutonomousEvidenceBackedRunResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("evidence-backed run options are malformed");
+    if (!(options.registry instanceof (await import("./autonomous-evidence-adapters.js")).AutonomousEvidenceAdapterRegistry)) throw new ArgumentError("evidence-backed run requires a typed adapter registry");
+    if (!Array.isArray(options.requests) || options.requests.length < 1) throw new ArgumentError("evidence-backed run requires acquisition requests");
+    const taskText = boundedText("evidence-backed autonomous task", task, 32_000);
+    const taskDigest = await digestJson({ task: taskText });
+    const domains = options.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    const plan = await this.evidencePlan(domains, {
+      availableEvidence: options.availableEvidence,
+      completedStages: options.completedStages,
+    });
+    const prepareOptions = options.prepare ?? {};
+    const { healthStore, ...controllerPrepareOptions } = prepareOptions;
+    const controller = await this.createEvidenceExecutionController(options.registry, healthStore);
+    const executionPlan = await controller.prepare(plan, controllerPrepareOptions);
+    const executeOptions: AutonomousEvidenceExecutionOptions = {
+      ...(options.execute ?? {}),
+      ...(controllerPrepareOptions.providerContracts !== undefined && options.execute?.providerContracts === undefined
+        ? { providerContracts: controllerPrepareOptions.providerContracts }
+        : {}),
+    };
+
+    const finish = async (
+      status: AutonomousEvidenceBackedRunStatus,
+      evidence: AutonomousEvidenceExecutionResult | null,
+      promptContext: readonly AutonomousPromptChunk[],
+      run: AutonomousRunResult | null,
+    ): Promise<AutonomousEvidenceBackedRunResult> => {
+      const evidenceResultDigest = evidence?.result_digest ?? null;
+      const selectionDigest = run?.selection ? await digestJson(run.selection) : null;
+      const responseDigest = run?.response ? await digestJson(run.response) : null;
+      const descriptor = {
+        schema: AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
+        status,
+        task_digest: taskDigest,
+        evidence_plan_digest: plan.plan_digest,
+        execution_plan_digest: executionPlan.plan_digest,
+        evidence_result_digest: evidenceResultDigest,
+        prompt_projection_digest: promptContext.length ? await digestJson(promptContext) : null,
+        run_status: run?.status ?? null,
+        selection_digest: selectionDigest,
+        response_digest: responseDigest,
+        retention: "metadata_only;raw_evidence_prompt_values_and_provider_response_caller_owned" as const,
+        secret_material: "never_returned" as const,
+      };
+      const projection = { ...descriptor, result_digest: await digestJson(descriptor) } satisfies AutonomousEvidenceBackedRunProjection;
+      if (bytes(JSON.stringify(projection)) > MAX_AUTONOMOUS_EVIDENCE_BACKED_RESULT_BYTES) throw new ProviderRuntimeError("evidence-backed run projection exceeds its bound");
+      return {
+        schema: AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
+        status,
+        task_digest: taskDigest,
+        execution_plan: executionPlan,
+        evidence,
+        prompt_context: structuredClone(promptContext),
+        run,
+        toJSON: () => structuredClone(projection),
+      };
+    };
+
+    if (executeOptions.approveSourceDispatch !== true) return finish("evidence_review_required", null, [], null);
+    if (executionPlan.status !== "ready_for_review") return finish("evidence_blocked", null, [], null);
+    const evidence = await controller.execute(executionPlan, plan, options.requests, executeOptions);
+    if (evidence.status !== "completed" && options.allowIncompleteEvidence !== true) {
+      return finish(evidenceBackedStatus(evidence.status), evidence, [], null);
+    }
+    const promptProjection: AutonomousEvidencePromptProjection = {
+      executionPlan,
+      evidence,
+      values: evidence.runtime.values,
+    };
+    const projectedContext = normalizeEvidenceBackedPromptContext(
+      options.promptBuilder ? await options.promptBuilder(promptProjection) : defaultEvidenceBackedPromptContext(evidence),
+    );
+    const runOptions = options.run ?? {};
+    const context = normalizeEvidenceBackedPromptContext([...(runOptions.context ?? []), ...projectedContext], 128);
+    const run = await this.run(taskText, { ...runOptions, context });
+    return finish(run.status, evidence, projectedContext, run);
   }
 
   async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean } = {}): Promise<AutonomousAutoBlueprint> {
