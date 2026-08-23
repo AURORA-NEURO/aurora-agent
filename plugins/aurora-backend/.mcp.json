@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "aurora-agent": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/aurora-mcp.mjs"],
+      "env": {}
+    }
+  }
+}
