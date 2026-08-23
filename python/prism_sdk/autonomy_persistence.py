@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 import uuid
 
 from .authoring import canonical_bytes, content_digest
@@ -32,6 +32,7 @@ AUTONOMY_POLICY_SCHEMA = "bioprism-python-autonomous-execution-policy/0.1"
 AUTONOMY_STATE_SCHEMA = "bioprism-python-autonomous-execution-state/0.1"
 AUTONOMY_EVENT_SCHEMA = "bioprism-python-autonomous-execution-event/0.1"
 AUTONOMY_JOURNAL_SCHEMA = "bioprism-python-autonomous-execution-journal/0.1"
+AUTONOMY_EXECUTION_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-execution-snapshot/0.1"
 AUTONOMY_EVENT_KINDS = (
     "started",
     "resumed",
@@ -50,6 +51,7 @@ MAX_AUTONOMY_EXECUTION_ID_BYTES = 256
 MAX_AUTONOMY_EVENT_BYTES = 256_000
 MAX_AUTONOMY_JOURNAL_BYTES = 64_000_000
 MAX_AUTONOMY_JOURNAL_EVENTS = 32_768
+MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES = MAX_AUTONOMY_JOURNAL_BYTES
 MAX_AUTONOMY_METADATA_DEPTH = 32
 MAX_AUTONOMY_STEPS = 4_096
 MAX_AUTONOMY_PROVIDER_CALLS = 1_024
@@ -90,6 +92,20 @@ class AutonomyPersistenceError(ArgumentError):
 
 class AutonomyPolicyError(AutonomyPersistenceError):
     """A proposed autonomous action exceeded its caller-owned execution policy."""
+
+
+class AutonomousExecutionSnapshotTextStore(Protocol):
+    """Portable text storage for metadata-only execution snapshots."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class AutonomousExecutionTransactionalSnapshotTextStore(AutonomousExecutionSnapshotTextStore, Protocol):
+    """Text storage that can fence stale snapshot writers with compare-and-swap."""
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
 
 
 def _text(name: str, value: Any, *, maximum: int = 512) -> str:
@@ -491,6 +507,50 @@ class AutonomousExecutionJournal:
             previous = expected
         return {"schema": AUTONOMY_JOURNAL_SCHEMA, "verified": True, "events": len(rows), "head_digest": previous, "retention": "metadata_only"}
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return an integrity-checked, provider-independent journal snapshot.
+
+        The snapshot contains only normalized event envelopes.  It is deliberately separate
+        from the JSONL file so callers can move the same journal through an object store,
+        database, or HTTP text store without teaching this module about transport details.
+        """
+
+        with self._lock:
+            rows = self._read_rows_locked()
+            descriptor = {
+                "schema": AUTONOMY_EXECUTION_SNAPSHOT_SCHEMA,
+                "rows": rows,
+                "head_digest": rows[-1]["event_digest"] if rows else "",
+                "retention": "metadata_only_hash_chained",
+                "secret_material": "never_returned",
+            }
+            snapshot = {**descriptor, "snapshot_digest": content_digest(descriptor)}
+            if len(canonical_bytes(snapshot)) > MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES:
+                raise AutonomyPersistenceError("execution journal snapshot exceeds max_bytes")
+            return snapshot
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace the local JSONL journal with a verified snapshot."""
+
+        normalized = _normalize_execution_snapshot(
+            snapshot,
+            max_events=self.max_events,
+            max_bytes=self.max_bytes,
+        )
+        encoded_rows = b"".join(canonical_bytes(row) + b"\n" for row in normalized["rows"])
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.restore")
+            try:
+                with temporary.open("wb") as handle:
+                    handle.write(encoded_rows)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, self.path)
+            finally:
+                if temporary.exists():
+                    temporary.unlink()
+
     def _read_rows(self) -> list[dict[str, Any]]:
         with self._lock:
             return self._read_rows_locked()
@@ -512,6 +572,8 @@ class AutonomousExecutionJournal:
                     raise AutonomyPersistenceError("execution journal contains invalid JSON") from error
                 if not isinstance(row, Mapping) or row.get("schema") != AUTONOMY_EVENT_SCHEMA:
                     raise AutonomyPersistenceError("execution journal contains an invalid event schema")
+                if set(row) != {"schema", "sequence", "event", "previous_digest", "created_ns", "event_digest"}:
+                    raise AutonomyPersistenceError("execution journal contains unsupported envelope fields")
                 expected_sequence = len(rows) + 1
                 if row.get("sequence") != expected_sequence:
                     raise AutonomyPersistenceError("execution journal contains an invalid sequence")
@@ -632,6 +694,176 @@ class AutonomousExecutionJournal:
         if len(encoded) > MAX_AUTONOMY_EVENT_BYTES:
             raise AutonomyPersistenceError("execution event exceeds max bytes")
         return normalized
+
+
+def _normalize_execution_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_events: int = MAX_AUTONOMY_JOURNAL_EVENTS,
+    max_bytes: int = MAX_AUTONOMY_JOURNAL_BYTES,
+) -> dict[str, Any]:
+    """Validate and canonicalize a complete execution journal snapshot."""
+
+    expected_keys = {"schema", "rows", "head_digest", "retention", "secret_material", "snapshot_digest"}
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise AutonomyPersistenceError("execution journal snapshot is malformed")
+    if value.get("schema") != AUTONOMY_EXECUTION_SNAPSHOT_SCHEMA:
+        raise AutonomyPersistenceError("execution journal snapshot schema is unsupported")
+    if value.get("retention") != "metadata_only_hash_chained" or value.get("secret_material") != "never_returned":
+        raise AutonomyPersistenceError("execution journal snapshot retention is invalid")
+    rows_raw = value.get("rows")
+    if not isinstance(rows_raw, Sequence) or isinstance(rows_raw, (str, bytes, bytearray)) or len(rows_raw) > max_events:
+        raise AutonomyPersistenceError("execution journal snapshot exceeds its event capacity")
+    rows: list[dict[str, Any]] = []
+    previous_digest = ""
+    total_bytes = 0
+    envelope_keys = {"schema", "sequence", "event", "previous_digest", "created_ns", "event_digest"}
+    for expected_sequence, raw_row in enumerate(rows_raw, start=1):
+        if not isinstance(raw_row, Mapping) or set(raw_row) != envelope_keys:
+            raise AutonomyPersistenceError("execution journal snapshot contains an invalid event envelope")
+        if raw_row.get("schema") != AUTONOMY_EVENT_SCHEMA or raw_row.get("sequence") != expected_sequence:
+            raise AutonomyPersistenceError("execution journal snapshot contains an invalid sequence")
+        if raw_row.get("previous_digest") != previous_digest:
+            raise AutonomyPersistenceError("execution journal snapshot hash chain is discontinuous")
+        created_ns = raw_row.get("created_ns")
+        if not isinstance(created_ns, int) or isinstance(created_ns, bool) or created_ns < 0:
+            raise AutonomyPersistenceError("execution journal snapshot contains an invalid timestamp")
+        event_digest = raw_row.get("event_digest")
+        if not isinstance(event_digest, str) or len(event_digest) != 64 or any(character not in "0123456789abcdef" for character in event_digest):
+            raise AutonomyPersistenceError("execution journal snapshot contains an invalid event digest")
+        normalized_event = AutonomousExecutionJournal._normalize_event(raw_row.get("event"))
+        descriptor = {
+            "schema": AUTONOMY_EVENT_SCHEMA,
+            "sequence": expected_sequence,
+            "event": normalized_event,
+            "previous_digest": previous_digest,
+            "created_ns": created_ns,
+        }
+        if content_digest(descriptor) != event_digest:
+            raise AutonomyPersistenceError("execution journal snapshot contains an invalid event digest")
+        normalized_row = {**descriptor, "event_digest": event_digest}
+        rows.append(normalized_row)
+        total_bytes += len(canonical_bytes(normalized_row)) + 1
+        if total_bytes > max_bytes:
+            raise AutonomyPersistenceError("execution journal snapshot exceeds max_bytes")
+        previous_digest = event_digest
+    head_digest = value.get("head_digest")
+    if not isinstance(head_digest, str) or (head_digest and (len(head_digest) != 64 or any(character not in "0123456789abcdef" for character in head_digest))):
+        raise AutonomyPersistenceError("execution journal snapshot head_digest is invalid")
+    if head_digest != previous_digest:
+        raise AutonomyPersistenceError("execution journal snapshot head_digest is inconsistent")
+    descriptor = {
+        "schema": AUTONOMY_EXECUTION_SNAPSHOT_SCHEMA,
+        "rows": rows,
+        "head_digest": head_digest,
+        "retention": "metadata_only_hash_chained",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = value.get("snapshot_digest")
+    if not isinstance(snapshot_digest, str) or len(snapshot_digest) != 64 or any(character not in "0123456789abcdef" for character in snapshot_digest):
+        raise AutonomyPersistenceError("execution journal snapshot_digest is invalid")
+    if content_digest(descriptor) != snapshot_digest:
+        raise AutonomyPersistenceError("execution journal snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if len(canonical_bytes(normalized)) > MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES:
+        raise AutonomyPersistenceError("execution journal snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_autonomous_execution_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public strict validator for metadata-only execution snapshots."""
+
+    return _normalize_execution_snapshot(value)
+
+
+class JsonAutonomousExecutionSnapshotPersistence:
+    """Canonical JSON persistence over any caller-owned text store."""
+
+    def __init__(self, store: AutonomousExecutionSnapshotTextStore, *, max_bytes: int = MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ArgumentError("execution JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES:
+            raise ArgumentError("execution JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("execution JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ArgumentError("execution JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("execution JSON snapshot must be an object")
+        return _normalize_execution_snapshot(raw)
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_execution_snapshot(snapshot)
+        encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("execution JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousExecutionSnapshotPersistence(JsonAutonomousExecutionSnapshotPersistence):
+    """Canonical JSON execution persistence with compare-and-swap fencing."""
+
+    def __init__(self, store: AutonomousExecutionTransactionalSnapshotTextStore, *, max_bytes: int = MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ArgumentError("transactional execution persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and (
+            not isinstance(expected_snapshot_digest, str)
+            or len(expected_snapshot_digest) != 64
+            or any(character not in "0123456789abcdef" for character in expected_snapshot_digest)
+        ):
+            raise ArgumentError("execution expected snapshot digest is invalid")
+        normalized = _normalize_execution_snapshot(snapshot)
+        encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("execution JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class AutonomousExecutionPersistenceCoordinator:
+    """Flush and restore a hash-checked execution journal through caller-owned storage."""
+
+    def __init__(self, journal: AutonomousExecutionJournal, persistence: Any) -> None:
+        if not isinstance(journal, AutonomousExecutionJournal):
+            raise ArgumentError("execution persistence requires an AutonomousExecutionJournal")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ArgumentError("execution persistence adapter is malformed")
+        self.journal = journal
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = _normalize_execution_snapshot(raw, max_events=self.journal.max_events, max_bytes=self.journal.max_bytes)
+        self.journal.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.journal.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise AutonomyPersistenceError("execution persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
 
 
 class AutonomousExecutionController:
@@ -896,14 +1128,22 @@ class AutonomousExecutionController:
 __all__ = [
     "AUTONOMY_EVENT_KINDS",
     "AUTONOMY_EVENT_SCHEMA",
+    "AUTONOMY_EXECUTION_SNAPSHOT_SCHEMA",
     "AUTONOMY_JOURNAL_SCHEMA",
     "AUTONOMY_POLICY_SCHEMA",
     "AUTONOMY_STATE_SCHEMA",
     "MAX_AUTONOMY_PROVIDER_FAILOVERS",
+    "MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES",
     "AutonomousExecutionController",
     "AutonomousExecutionJournal",
+    "AutonomousExecutionPersistenceCoordinator",
     "AutonomousExecutionPolicy",
+    "AutonomousExecutionSnapshotTextStore",
+    "AutonomousExecutionTransactionalSnapshotTextStore",
     "AutonomousExecutionState",
     "AutonomyPersistenceError",
     "AutonomyPolicyError",
+    "JsonAutonomousExecutionSnapshotPersistence",
+    "TransactionalJsonAutonomousExecutionSnapshotPersistence",
+    "validate_autonomous_execution_snapshot",
 ]

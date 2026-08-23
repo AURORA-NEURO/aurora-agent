@@ -8,8 +8,13 @@ from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousDecisionCycle,
     AutonomousDecisionCyclePersistenceCoordinator,
+    AutonomousExecutionController,
+    AutonomousExecutionJournal,
+    AutonomousExecutionPersistenceCoordinator,
+    AutonomousExecutionPolicy,
     AutonomousHttpSnapshotTextStore,
     InMemoryAutonomousDecisionCycleStateStore,
+    TransactionalJsonAutonomousExecutionSnapshotPersistence,
     TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
 )
 from prism_sdk.authoring import content_digest
@@ -184,3 +189,49 @@ def test_http_snapshot_store_plugs_into_decision_cycle_restart_and_cas() -> None
     restored = AutonomousDecisionCyclePersistenceCoordinator(restored_store, persistence)
     assert restored.restore().snapshot_digest == flushed.snapshot_digest
     assert restored_store.load("http-cycle").state_digest == source.load("http-cycle").state_digest
+
+
+def test_http_snapshot_store_plugs_into_execution_journal_restart_for_every_domain(tmp_path) -> None:
+    remote: str | None = None
+
+    def opener(request, _timeout):
+        nonlocal remote
+        if request.get_method() == "GET":
+            return _Response(remote.encode("utf-8")) if remote is not None else _Response(status=404)
+        current = None if remote is None else json.loads(remote)["snapshot_digest"]
+        expected = _header(request, "If-Match")
+        if _header(request, "If-None-Match") == "*" and current is not None:
+            return _Response(status=412)
+        if expected is not None and current != expected.strip('"'):
+            return _Response(status=412)
+        remote = request.data.decode("utf-8")
+        return _Response(status=204)
+
+    text_store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "all-domains/execution-journal",
+        allowed_hosts=("state.test",),
+        opener=opener,
+    )
+    persistence = TransactionalJsonAutonomousExecutionSnapshotPersistence(text_store)
+    journal = AutonomousExecutionJournal(tmp_path / "source.jsonl")
+    policy = AutonomousExecutionPolicy(max_steps=4)
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+        execution = AutonomousExecutionController(
+            execution_id=f"http-execution-{index}",
+            domain=domain,
+            capability="observability",
+            risk_class="read_only",
+            policy=policy,
+            journal=journal,
+        )
+        execution.checkpoint(status="paused", reason="http_restart_round_trip")
+    source_coordinator = AutonomousExecutionPersistenceCoordinator(journal, persistence)
+    snapshot = source_coordinator.flush()
+
+    restored_journal = AutonomousExecutionJournal(tmp_path / "restored.jsonl")
+    restored_snapshot = AutonomousExecutionPersistenceCoordinator(restored_journal, persistence).restore()
+    assert restored_snapshot is not None
+    assert restored_snapshot["snapshot_digest"] == snapshot["snapshot_digest"]
+    assert {row["event"]["domain"] for row in restored_journal.events()} == set(AUTONOMOUS_DOMAINS)
+    assert restored_journal.verify_integrity()["verified"] is True

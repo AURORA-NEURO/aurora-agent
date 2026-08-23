@@ -2932,6 +2932,44 @@ as if they were unfinished. `agent.execution_state(id)` and `agent.execution_eve
 the redacted state machine for an operator UI; they never expose provider content. A journal is
 not a transcript archive and cannot reconstruct a model conversation by itself.
 
+For remote restart and multi-process handoff, the Python journal also exposes an integrity-checked
+snapshot boundary. `AutonomousExecutionPersistenceCoordinator` serializes the complete hash chain
+as canonical JSON and can restore it into a fresh local journal before the provider context is
+rehydrated. `TransactionalJsonAutonomousExecutionSnapshotPersistence` adds compare-and-swap
+fencing, so two workers cannot both advance the same execution history. The adapter is transport
+neutral and can sit directly over `AutonomousHttpSnapshotTextStore`, a database-backed text store,
+or an object-store implementation:
+
+```python
+from prism_sdk import (
+    AutonomousExecutionJournal,
+    AutonomousExecutionPersistenceCoordinator,
+    AutonomousHttpSnapshotTextStore,
+    TransactionalJsonAutonomousExecutionSnapshotPersistence,
+)
+
+remote_store = AutonomousHttpSnapshotTextStore(
+    "https://state.example/snapshots",
+    "tenant-42/execution-journal",
+    allowed_hosts=("state.example",),
+    header_resolver=lambda _context: credential_manager.transient_headers(),
+)
+persistence = TransactionalJsonAutonomousExecutionSnapshotPersistence(remote_store)
+journal = AutonomousExecutionJournal("state/local-rehydration.jsonl")
+execution_persistence = AutonomousExecutionPersistenceCoordinator(journal, persistence)
+
+# Call once before constructing a resumable controller/agent.
+execution_persistence.restore()
+# After every bounded checkpoint or worker handoff:
+execution_persistence.flush()
+```
+
+The snapshot digest covers every normalized envelope, sequence number, previous digest, timestamp,
+and redacted event field. Extra envelope fields, malformed event digests, broken chains, invalid
+retention markers, tampered head digests, oversized JSON, and stale conditional writes are refused.
+The remote store receives only the metadata snapshot; credentials remain transient headers and
+the provider conversation remains caller-owned.
+
 The same policy controller is attached to every native domain-tool session. It admits bounded
 tool intents before execution, fails closed when a budget or effect posture is exceeded, records
 tool outcome digests, and shares metadata-only receipts across the agent's sessions. Read-only

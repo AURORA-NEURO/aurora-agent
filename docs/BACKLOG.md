@@ -1193,3 +1193,12 @@ The restart boundary is now also exposed as a single recovery matrix. It deliber
 mission terminal restoration, event rows, subscription metadata, pending outbox evidence,
 process-local secrets, and external delivery effects in separate rows; it does not turn local
 checkpoints into automatic execution resumption, distributed consensus, or receiver acceptance.
+
+The Python long-horizon execution journal now has the same remote handoff seam. Its complete
+hash-chained JSONL history can be snapshotted into strict canonical JSON, restored into a fresh
+local journal, and fenced with conditional writes through any text store, including the bounded
+HTTP snapshot transport. All twelve domains are covered by restart tests, and malformed envelopes,
+tampered chain/head digests, payload-shaped metadata, oversize snapshots, and stale writers fail
+closed. The provider conversation, prompts, credentials, tool arguments, and raw outputs remain
+outside the snapshot; distributed scheduling, storage encryption, and deployment authorization
+remain caller responsibilities.
