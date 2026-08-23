@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import threading
@@ -4720,6 +4721,12 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
             assert persisted is not None and persisted.phase == "terminal"
             assert persisted.terminal_status == result.execution_status
             assert persisted.selection_digest is not None
+            assert result.task_intent_digest is not None
+            assert result.task_decision_digest is not None
+            assert result.task_decision_posture in {"admitted", "review_required", "blocked"}
+            assert persisted.task_intent_digest == result.task_intent_digest
+            assert persisted.task_decision_digest == result.task_decision_digest
+            assert persisted.task_decision_posture == result.task_decision_posture
             public_state = json.dumps(persisted.to_dict())
             assert "decision-cycle-secret" not in public_state
             assert "fix the Rust tests" not in public_state
@@ -4742,6 +4749,16 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                 decision_cycle_rehydrate_result=lambda _context: result,
             )
             assert resumed.to_dict() == result.to_dict()
+            tampered_result = replace(result, task_decision_posture="blocked")
+            with pytest.raises(BrainRunError, match="task decision identity"):
+                agent.run_auto(
+                    task="fix the Rust tests in the repository",
+                    credentials=session,
+                    decision_cycle_id="decision-cycle-1",
+                    decision_cycle_store=cycle_store,
+                    resume_decision_cycle=True,
+                    decision_cycle_rehydrate_result=lambda _context: tampered_result,
+                )
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -5020,6 +5037,9 @@ def test_run_auto_persists_selection_identity_for_every_builtin_domain():
         assert persisted is not None
         assert persisted.phase == "terminal"
         assert persisted.selection_digest == selection_digest
+        assert persisted.task_intent_digest is not None
+        assert persisted.task_decision_digest is not None
+        assert persisted.task_decision_posture in {"admitted", "review_required", "blocked"}
         assert persisted.outcome_digest == content_digest(result.to_dict())
         assert persisted.generation >= 5
 

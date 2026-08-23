@@ -70,7 +70,13 @@ def test_decision_cycle_hash_chain_covers_all_phases_and_all_domains() -> None:
         settlement = _digest("f")
         assert cycle.state.schema == AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA
         assert cycle.state.phase == "route_pending"
-        cycle.advance(phase="route_pending", route_digest=route)
+        cycle.advance(
+            phase="route_pending",
+            route_digest=route,
+            task_intent_digest=_digest("1"),
+            task_decision_digest=_digest("2"),
+            task_decision_posture="admitted",
+        )
         cycle.advance(phase="planning_pending", plan_refinement_digest=plan)
         cycle.advance(phase="execution_pending", selection_digest=selection)
         cycle.advance(phase="evaluation_pending", outcome_digest=outcome, learning_episode_ids=(f"episode-{domain}",))
@@ -79,6 +85,9 @@ def test_decision_cycle_hash_chain_covers_all_phases_and_all_domains() -> None:
         assert terminal.phase == "terminal"
         assert terminal.generation == 7
         assert terminal.previous_state_digest is not None
+        assert terminal.task_intent_digest == _digest("1")
+        assert terminal.task_decision_digest == _digest("2")
+        assert terminal.task_decision_posture == "admitted"
         assert cycle.context().to_dict()["secret_material"] == "never_returned"
         assert "bounded task" not in json.dumps(cycle.context().to_dict())
     assert len(store.snapshot().states) == len(AUTONOMOUS_DOMAINS)
@@ -123,6 +132,12 @@ def test_decision_cycle_rejects_private_shape_contract_drift_and_noncontiguous_w
         store.save(state)
 
     malformed = cycle.state.to_dict()
+    malformed["task_decision_digest"] = _digest("1")
+    malformed["state_digest"] = ""
+    with pytest.raises(ArgumentError, match="task decision identity"):
+        store.save(malformed)
+
+    malformed = cycle.state.to_dict()
     malformed["generation"] = 3
     malformed["previous_state_digest"] = _digest("z")
     malformed["state_digest"] = ""
@@ -142,6 +157,9 @@ def test_decision_cycle_persistence_requires_complete_adapters_and_rehydration_c
     cycle = AutonomousDecisionCycle(store, cycle_id="context-cycle", task="rehydrate route", mode="single_domain")
     context = cycle.context().to_dict()
     assert context["phase"] == "route_pending"
+    assert context["task_intent_digest"] is None
+    assert context["task_decision_digest"] is None
+    assert context["task_decision_posture"] is None
     assert "rehydrate route" not in json.dumps(context)
     assert content_digest({"task": "rehydrate route"}) == context["task_digest"]
 

@@ -392,6 +392,10 @@ test("ordinary decision cycles persist a metadata-only restart barrier across ev
     const cycleId = `ordinary-${domain}`;
     const result = await runAutonomousDecisionCycle(first.agent, task, { domain, approveProviderCall: true, cycleId, decisionStateStore: store });
     assert.equal(result.status, "completed", domain);
+    const state = await store.load(cycleId);
+    assert.equal(state.task_intent_digest.length, 64, domain);
+    assert.equal(state.task_decision_digest.length, 64, domain);
+    assert.ok(["admitted", "review_required", "blocked"].includes(state.task_decision_posture), domain);
     privateResults.set(cycleId, result);
   }
   assert.equal(first.calls(), domains.length);
@@ -406,6 +410,10 @@ test("ordinary decision cycles persist a metadata-only restart barrier across ev
   const tampered = structuredClone(flushed);
   tampered.snapshot_digest = "0".repeat(64);
   await assert.rejects(() => validateAutonomousDecisionCycleSnapshot(tampered), /digest/);
+  const tamperedDecision = structuredClone(flushed);
+  const originalPosture = tamperedDecision.states[0].task_decision_posture;
+  tamperedDecision.states[0].task_decision_posture = originalPosture === "blocked" ? "admitted" : "blocked";
+  await assert.rejects(() => validateAutonomousDecisionCycleSnapshot(tamperedDecision), /digest/);
 
   const restoredStore = new InMemoryAutonomousDecisionCycleStateStore();
   const restoredCoordinator = new AutonomousDecisionCyclePersistenceCoordinator(restoredStore, {
@@ -960,11 +968,14 @@ test("decision cycle executes every built-in domain through the same reviewed pa
 
 test("cross-domain decision cycle settles specialist and synthesis credit as one trajectory", async () => {
   const { agent, calls } = cycleAgent();
+  const decisionStateStore = new InMemoryAutonomousDecisionCycleStateStore();
   const outbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
   const learning = new AutonomousLearningController(agent, { feedbackOutbox: outbox });
   const execution = await AutonomousExecutionController.create({ executionId: "cross-execution-1", domain: "cross_domain", capability: "cross_domain_synthesis", riskClass: "review_required", policy: { max_provider_calls: 4 }, journal: new InMemoryAutonomousExecutionJournal() });
   const result = await runAutonomousCrossDomainDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
     approveProviderCall: true,
+    cycleId: "cross-task-decision-binding",
+    decisionStateStore,
     execution,
     subtasks: [
       { id: "bio", domain: "biomedical", task: "Review biomedical evidence and safety boundaries." },
@@ -990,6 +1001,10 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
   assert.equal(execution.state.status, "completed");
   assert.equal(execution.state.provider_calls, 3);
   assert.equal(calls(), 3);
+  const persistedDecision = await decisionStateStore.load("cross-task-decision-binding");
+  assert.equal(persistedDecision.task_intent_digest.length, 64);
+  assert.equal(persistedDecision.task_decision_digest.length, 64);
+  assert.equal(persistedDecision.task_decision_posture, "review_required");
 });
 
 test("provider-planned cross-domain cycles settle planner quality separately from the execution trajectory", async () => {

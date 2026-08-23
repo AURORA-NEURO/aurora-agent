@@ -3405,6 +3405,9 @@ class AutonomousAutoResult:
     planning_mode: str = "deterministic"
     planning: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | None = None
     semantic_route: AutonomousSemanticRouteResult | None = None
+    task_intent_digest: str | None = None
+    task_decision_digest: str | None = None
+    task_decision_posture: str | None = None
 
     @property
     def execution_status(self) -> str:
@@ -3436,6 +3439,16 @@ class AutonomousAutoResult:
                 "automatic result planning_mode must be one of: "
                 + ", ".join(AUTONOMOUS_PLANNING_MODES)
             )
+        if self.task_intent_digest is not None:
+            _route_digest(self.task_intent_digest, "automatic result task_intent_digest")
+        if self.task_decision_digest is not None:
+            _route_digest(self.task_decision_digest, "automatic result task_decision_digest")
+        if self.task_decision_posture is not None and self.task_decision_posture not in {"admitted", "review_required", "blocked"}:
+            raise BrainRunError("automatic result task_decision_posture is invalid")
+        if self.task_decision_digest is None and (self.task_intent_digest is not None or self.task_decision_posture is not None):
+            raise BrainRunError("automatic result task decision identity is incomplete")
+        if self.task_decision_digest is not None and (self.task_intent_digest is None or self.task_decision_posture is None):
+            raise BrainRunError("automatic result task decision identity is incomplete")
         if self.planning is not None and not isinstance(
             self.planning,
             (AutonomousPlanRefinementResult, AutonomousCrossDomainPlanRefinementResult),
@@ -3490,6 +3503,9 @@ class AutonomousAutoResult:
             "planning_mode": self.planning_mode,
             "planning": None if self.planning is None else self.planning.to_dict(),
             "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
+            "task_intent_digest": self.task_intent_digest,
+            "task_decision_digest": self.task_decision_digest,
+            "task_decision_posture": self.task_decision_posture,
             "retention": "route_metadata_only; provider_result_caller_owned",
         }
 
@@ -7132,6 +7148,70 @@ def _decision_cycle_selection_digest(result: Any) -> str | None:
     if not digests:
         return None
     return digests[0] if len(digests) == 1 else content_digest({"selection_digests": digests})
+
+
+def _decision_cycle_task_metadata(blueprint: AutonomousAutoBlueprint) -> dict[str, str | None]:
+    """Project task interpretation into a bounded restart identity.
+
+    Cross-domain cycles cannot store one child decision as if it represented the whole fan-out.
+    They therefore bind an ordered digest of every specialist and synthesis decision, while the
+    posture is the most restrictive posture observed across that reviewed set.
+    """
+
+    def entry(identifier: str, item: AutonomousTaskBlueprint) -> dict[str, str] | None:
+        if item.task_intent is None or item.task_decision is None:
+            return None
+        return {
+            "id": identifier,
+            "task_intent_digest": item.task_intent.intent_digest,
+            "task_decision_digest": item.task_decision.decision_digest,
+            "task_decision_posture": item.task_decision.posture,
+        }
+
+    if blueprint.blueprint is not None:
+        item = entry("single", blueprint.blueprint)
+        return {} if item is None else {key: value for key, value in item.items() if key != "id"}
+    cross = blueprint.cross_domain_blueprint
+    if cross is None:
+        return {}
+    entries: list[dict[str, str]] = []
+    for child_id, item in zip(cross.child_ids, cross.child_blueprints):
+        child_entry = entry(child_id, item)
+        if child_entry is None:
+            return {}
+        entries.append(child_entry)
+    synthesis = entry("synthesis", cross.synthesis_blueprint)
+    if synthesis is None:
+        return {}
+    entries.append(synthesis)
+    posture = (
+        "blocked"
+        if any(item["task_decision_posture"] == "blocked" for item in entries)
+        else "review_required"
+        if any(item["task_decision_posture"] == "review_required" for item in entries)
+        else "admitted"
+    )
+    return {
+        "task_intent_digest": content_digest({"cross_domain_task_intent_digests": [item["task_intent_digest"] for item in entries]}),
+        "task_decision_digest": content_digest({"cross_domain_task_decisions": entries}),
+        "task_decision_posture": posture,
+    }
+
+
+def _decision_cycle_task_metadata_from_result(result: Any) -> dict[str, str] | None:
+    """Read the public value-only task decision identity from a rehydrated result."""
+
+    field = lambda name: result.get(name) if isinstance(result, Mapping) else getattr(result, name, None)
+    values = {
+        "task_intent_digest": field("task_intent_digest"),
+        "task_decision_digest": field("task_decision_digest"),
+        "task_decision_posture": field("task_decision_posture"),
+    }
+    if all(value is None for value in values.values()):
+        return None
+    if not all(isinstance(value, str) for value in values.values()):
+        return None
+    return values  # type: ignore[return-value]
 
 
 def _decision_cycle_evaluation_digest(result: Any) -> str | None:
@@ -18231,6 +18311,15 @@ class AutonomousAgent:
             rehydrated = decision_cycle_rehydrate_result(cycle.context())
             if not isinstance(rehydrated, AutonomousAutoResult):
                 raise BrainRunError("decision-cycle rehydrator must return an AutonomousAutoResult")
+            if cycle.state.task_decision_digest is not None:
+                observed_task_decision = _decision_cycle_task_metadata_from_result(rehydrated)
+                expected_task_decision = {
+                    "task_intent_digest": cycle.state.task_intent_digest,
+                    "task_decision_digest": cycle.state.task_decision_digest,
+                    "task_decision_posture": cycle.state.task_decision_posture,
+                }
+                if observed_task_decision != expected_task_decision:
+                    raise BrainRunError("rehydrated decision result does not match the persisted task decision identity")
             if cycle.state.route_digest is not None and rehydrated.route.route_digest != cycle.state.route_digest:
                 raise BrainRunError("rehydrated decision result does not match the persisted route digest")
             if cycle.state.plan_refinement_digest is not None:
@@ -18346,6 +18435,7 @@ class AutonomousAgent:
                 allow_cross_domain=allow_cross_domain,
                 **prepare_options,
             )
+        task_decision_metadata = _decision_cycle_task_metadata(blueprint)
         decision_cycle: AutonomousDecisionCycle | None = None
         if decision_cycle_store is not None:
             cycle_mode = "single_domain" if len(blueprint.route.selected_domains) == 1 else "cross_domain"
@@ -18375,6 +18465,7 @@ class AutonomousAgent:
                     )
                     else blueprint.route.route_digest
                 ),
+                **task_decision_metadata,
             )
 
         if (
@@ -18394,6 +18485,7 @@ class AutonomousAgent:
                 semantic_route=blueprint.semantic_route,
                 learning_mode=learning_mode,
                 planning_mode=planning_mode,
+                **task_decision_metadata,
             )
             if decision_cycle is not None:
                 decision_cycle.terminal(
@@ -18409,6 +18501,7 @@ class AutonomousAgent:
                 semantic_route=blueprint.semantic_route,
                 learning_mode=learning_mode,
                 planning_mode=planning_mode,
+                **task_decision_metadata,
             )
             if decision_cycle is not None:
                 decision_cycle.terminal(
@@ -18476,6 +18569,7 @@ class AutonomousAgent:
                     learning_mode=learning_mode,
                     planning_mode=planning_mode,
                     planning=planning_result,
+                    **task_decision_metadata,
                 )
             if decision_cycle is not None:
                 decision_cycle.advance(
@@ -18748,6 +18842,7 @@ class AutonomousAgent:
             learning_mode=learning_mode,
             planning_mode=planning_mode,
             planning=planning_result,
+            **task_decision_metadata,
         )
         if decision_cycle is not None:
             cycle_outcome_digest = content_digest(automatic_result.to_dict())
@@ -18763,6 +18858,7 @@ class AutonomousAgent:
                 settlement_digests = (evaluation_digest,)
             decision_cycle.advance(
                 phase="evaluation_pending" if cycle_learning else "execution_pending",
+                **task_decision_metadata,
                 selection_digest=selection_digest,
                 outcome_digest=cycle_outcome_digest,
                 learning_episode_ids=learning_episode_ids,

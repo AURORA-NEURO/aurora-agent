@@ -4332,8 +4332,13 @@ need replanning. `InMemoryAutonomousDecisionCycleStateStore` and
 `planning_pending`, `evaluation_pending`, `settlement_pending`, and `terminal` phases for both single-domain and
 cross-domain cycles. A stable `cycleId` is required when persistence is enabled. The cursor keeps
 only task/route/plan/selection/outcome/evaluator/episode/trajectory/settlement digests and bounded
-status metadata; it never stores the task, prompt, plan, provider response, tool arguments,
-credentials, evaluator evidence, or final private result.
+status metadata; it also binds the digest-only task-intent identity, task-decision identity, and
+aggregate posture (`admitted`, `review_required`, or `blocked`). The Python and TypeScript state
+schemas are versioned at `0.3` for this addition. A cross-domain cursor hashes every specialist
+decision plus synthesis in declaration order and records the most restrictive posture, so a
+restart cannot silently replace one reviewed action plan with another. It never stores the task,
+prompt, plan, provider response, tool arguments, credentials, evaluator evidence, or final private
+result.
 
 When a replan cycle pauses for plan review, its outer metadata ledger remains `execution_pending`
 and stores the proposal digest on the attempt. This is a resumable approval boundary, not a claim
@@ -4346,7 +4351,9 @@ Ordinary-cycle recovery is callback-driven as well: `rehydrateRoute` restores a 
 `rehydratePlanningEvaluation` supplies the separate planner packet when planning quality is
 enabled, and `rehydrateResult`
 supplies a terminal result. The TypeScript façade checks the callback's schema and content digests
-against the cursor and refuses to guess by dispatching a provider again. Evaluated learning commits
+against the cursor and refuses to guess by dispatching a provider again. Rehydrated runs and
+terminal results must also reproduce the persisted task-intent/decision digests and posture;
+interpretation drift fails closed before replay. Evaluated learning commits
 use stable cycle-scoped idempotency keys, while cross-domain cycles preserve the reviewed trajectory
 identity. This makes the same restart and privacy contract apply uniformly to coding, browser, data,
 science, biomedical, neuroscience, operations, enterprise, multi-agent, multimodal, evaluation,
@@ -4420,6 +4427,7 @@ resumed = agent.run_auto(
 
 The Python state schema is versioned separately for SDK diagnostics but has the same fields and
 invariants as TypeScript: exact keys, six phases, generation-linked SHA-256 state digests,
+digest-bound task-intent/decision metadata, posture coherence,
 aggregate snapshot digests, duplicate-cycle rejection, bounded metadata, and secret/payload-shaped
 field rejection. The transition handle is also useful for custom Python workers that need to
 persist `evaluation_pending` or `settlement_pending` around a domain-specific evaluator; it never

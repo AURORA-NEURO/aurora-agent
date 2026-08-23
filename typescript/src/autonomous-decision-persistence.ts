@@ -3,18 +3,22 @@ import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only state for a single provider decision cycle. */
-export const AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA = "bioprism-typescript-autonomous-decision-cycle-state/0.2" as const;
-export const AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-decision-cycle-snapshot/0.2" as const;
+export const AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA = "bioprism-typescript-autonomous-decision-cycle-state/0.3" as const;
+export const AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-decision-cycle-snapshot/0.3" as const;
 export const AUTONOMOUS_DECISION_CYCLE_MAX_STATES = 8_192;
 export const AUTONOMOUS_DECISION_CYCLE_MAX_SNAPSHOT_BYTES = 8_000_000;
 
 export type AutonomousDecisionCycleMode = "single_domain" | "cross_domain";
 export type AutonomousDecisionCyclePhase = "route_pending" | "planning_pending" | "execution_pending" | "evaluation_pending" | "settlement_pending" | "terminal";
+export type AutonomousDecisionCycleTaskDecisionPosture = "admitted" | "review_required" | "blocked";
 
 export interface AutonomousDecisionCycleState extends JsonObject {
   schema: typeof AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA;
   cycle_id: string;
   task_digest: string;
+  task_intent_digest: string | null;
+  task_decision_digest: string | null;
+  task_decision_posture: AutonomousDecisionCycleTaskDecisionPosture | null;
   mode: AutonomousDecisionCycleMode;
   learning_enabled: boolean;
   evaluation_enabled: boolean;
@@ -68,6 +72,9 @@ export interface AutonomousDecisionCycleTransactionalSnapshotTextStore extends A
 export interface AutonomousDecisionCycleRehydrationContext extends JsonObject {
   cycle_id: string;
   task_digest: string;
+  task_intent_digest: string | null;
+  task_decision_digest: string | null;
+  task_decision_posture: AutonomousDecisionCycleTaskDecisionPosture | null;
   mode: AutonomousDecisionCycleMode;
   learning_enabled: boolean;
   evaluation_enabled: boolean;
@@ -143,7 +150,7 @@ function assertNoPrivateShape(value: unknown, name: string): void {
 }
 
 const STATE_KEYS = [
-  "schema", "cycle_id", "task_digest", "mode", "learning_enabled", "evaluation_enabled", "phase", "route_digest", "plan_refinement_digest", "selection_digest",
+  "schema", "cycle_id", "task_digest", "task_intent_digest", "task_decision_digest", "task_decision_posture", "mode", "learning_enabled", "evaluation_enabled", "phase", "route_digest", "plan_refinement_digest", "selection_digest",
   "outcome_digest", "evaluation_digest", "learning_episode_ids", "trajectory_id", "settlement_digests", "terminal_status", "generation", "previous_state_digest",
   "state_digest", "retention", "secret_material",
 ] as const;
@@ -179,6 +186,12 @@ export async function validateAutonomousDecisionCycleState(value: unknown): Prom
   if (value.schema !== AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA || value.retention !== "metadata_only_hash_chained_no_private_payloads" || value.secret_material !== "never_returned") throw new ArgumentError("autonomous decision-cycle state markers are invalid");
   const cycleId = boundedIdentifier("autonomous decision-cycle state cycle_id", value.cycle_id);
   const taskDigest = boundedDigest("autonomous decision-cycle state task_digest", value.task_digest)!;
+  const taskIntentDigest = boundedDigest("autonomous decision-cycle state task_intent_digest", value.task_intent_digest, true);
+  const taskDecisionDigest = boundedDigest("autonomous decision-cycle state task_decision_digest", value.task_decision_digest, true);
+  const taskDecisionPosture = value.task_decision_posture === null || value.task_decision_posture === undefined ? null : value.task_decision_posture;
+  if (taskDecisionPosture !== null && (typeof taskDecisionPosture !== "string" || !["admitted", "review_required", "blocked"].includes(taskDecisionPosture))) throw new ArgumentError("autonomous decision-cycle state task_decision_posture is invalid");
+  if (taskDecisionDigest === null && (taskIntentDigest !== null || taskDecisionPosture !== null)) throw new ArgumentError("autonomous decision-cycle state task decision identity is incomplete");
+  if (taskDecisionDigest !== null && (taskIntentDigest === null || taskDecisionPosture === null)) throw new ArgumentError("autonomous decision-cycle state task decision identity is incomplete");
   if (value.mode !== "single_domain" && value.mode !== "cross_domain") throw new ArgumentError("autonomous decision-cycle state mode is invalid");
   if (typeof value.learning_enabled !== "boolean" || typeof value.evaluation_enabled !== "boolean") throw new ArgumentError("autonomous decision-cycle learning flags are invalid");
   if (!["route_pending", "planning_pending", "execution_pending", "evaluation_pending", "settlement_pending", "terminal"].includes(value.phase as string)) throw new ArgumentError("autonomous decision-cycle state phase is invalid");
@@ -214,6 +227,9 @@ export async function validateAutonomousDecisionCycleState(value: unknown): Prom
     ...value,
     cycle_id: cycleId,
     task_digest: taskDigest,
+    task_intent_digest: taskIntentDigest,
+    task_decision_digest: taskDecisionDigest,
+    task_decision_posture: taskDecisionPosture,
     mode: value.mode,
     phase,
     route_digest: routeDigest,

@@ -25,14 +25,15 @@ from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
 
 
-AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA = "bioprism-python-autonomous-decision-cycle-state/0.2"
-AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-decision-cycle-snapshot/0.2"
+AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA = "bioprism-python-autonomous-decision-cycle-state/0.3"
+AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-decision-cycle-snapshot/0.3"
 MAX_AUTONOMOUS_DECISION_CYCLE_STATES = 8_192
 MAX_AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_BYTES = 8_000_000
 MAX_AUTONOMOUS_DECISION_CYCLE_METADATA_BYTES = 1_000_000
 MAX_AUTONOMOUS_DECISION_CYCLE_LIST_ITEMS = 256
 
 AUTONOMOUS_DECISION_CYCLE_MODES = ("single_domain", "cross_domain")
+AUTONOMOUS_DECISION_CYCLE_TASK_DECISION_POSTURES = ("admitted", "review_required", "blocked")
 AUTONOMOUS_DECISION_CYCLE_PHASES = (
     "route_pending",
     "planning_pending",
@@ -43,7 +44,7 @@ AUTONOMOUS_DECISION_CYCLE_PHASES = (
 )
 
 _STATE_KEYS = frozenset({
-    "schema", "cycle_id", "task_digest", "mode", "learning_enabled", "evaluation_enabled", "phase",
+    "schema", "cycle_id", "task_digest", "task_intent_digest", "task_decision_digest", "task_decision_posture", "mode", "learning_enabled", "evaluation_enabled", "phase",
     "route_digest", "plan_refinement_digest", "selection_digest", "outcome_digest", "evaluation_digest",
     "learning_episode_ids", "trajectory_id", "settlement_digests", "terminal_status", "generation",
     "previous_state_digest", "state_digest", "retention", "secret_material",
@@ -113,6 +114,9 @@ class AutonomousDecisionCycleState:
     schema: str
     cycle_id: str
     task_digest: str
+    task_intent_digest: str | None
+    task_decision_digest: str | None
+    task_decision_posture: str | None
     mode: str
     learning_enabled: bool
     evaluation_enabled: bool
@@ -139,6 +143,14 @@ class AutonomousDecisionCycleState:
             raise ArgumentError("autonomous decision-cycle state retention markers are invalid")
         cycle_id = _identifier("autonomous decision-cycle state cycle_id", self.cycle_id)
         task_digest = _digest("autonomous decision-cycle state task_digest", self.task_digest)
+        task_intent_digest = _digest("autonomous decision-cycle state task_intent_digest", self.task_intent_digest, allow_none=True)
+        task_decision_digest = _digest("autonomous decision-cycle state task_decision_digest", self.task_decision_digest, allow_none=True)
+        if self.task_decision_posture is not None and self.task_decision_posture not in AUTONOMOUS_DECISION_CYCLE_TASK_DECISION_POSTURES:
+            raise ArgumentError("autonomous decision-cycle state task_decision_posture is invalid")
+        if task_decision_digest is None and (task_intent_digest is not None or self.task_decision_posture is not None):
+            raise ArgumentError("autonomous decision-cycle state task decision identity is incomplete")
+        if task_decision_digest is not None and (task_intent_digest is None or self.task_decision_posture is None):
+            raise ArgumentError("autonomous decision-cycle state task decision identity is incomplete")
         if self.mode not in AUTONOMOUS_DECISION_CYCLE_MODES:
             raise ArgumentError("autonomous decision-cycle state mode is invalid")
         if not isinstance(self.learning_enabled, bool) or not isinstance(self.evaluation_enabled, bool):
@@ -190,6 +202,8 @@ class AutonomousDecisionCycleState:
             raise ArgumentError("completed evaluated decision state requires a settlement digest")
         object.__setattr__(self, "cycle_id", cycle_id)
         object.__setattr__(self, "task_digest", task_digest)
+        object.__setattr__(self, "task_intent_digest", task_intent_digest)
+        object.__setattr__(self, "task_decision_digest", task_decision_digest)
         object.__setattr__(self, "route_digest", route_digest)
         object.__setattr__(self, "plan_refinement_digest", plan_refinement_digest)
         object.__setattr__(self, "selection_digest", selection_digest)
@@ -214,6 +228,9 @@ class AutonomousDecisionCycleState:
             "schema": self.schema,
             "cycle_id": self.cycle_id,
             "task_digest": self.task_digest,
+            "task_intent_digest": self.task_intent_digest,
+            "task_decision_digest": self.task_decision_digest,
+            "task_decision_posture": self.task_decision_posture,
             "mode": self.mode,
             "learning_enabled": self.learning_enabled,
             "evaluation_enabled": self.evaluation_enabled,
@@ -242,7 +259,9 @@ class AutonomousDecisionCycleState:
             raise ArgumentError("autonomous decision-cycle state must be a mapping")
         _exact_keys("autonomous decision-cycle state", value, _STATE_KEYS)
         return cls(
-            schema=value.get("schema"), cycle_id=value.get("cycle_id"), task_digest=value.get("task_digest"), mode=value.get("mode"),
+            schema=value.get("schema"), cycle_id=value.get("cycle_id"), task_digest=value.get("task_digest"),
+            task_intent_digest=value.get("task_intent_digest"), task_decision_digest=value.get("task_decision_digest"),
+            task_decision_posture=value.get("task_decision_posture"), mode=value.get("mode"),
             learning_enabled=value.get("learning_enabled"), evaluation_enabled=value.get("evaluation_enabled"), phase=value.get("phase"),
             route_digest=value.get("route_digest"), plan_refinement_digest=value.get("plan_refinement_digest"), selection_digest=value.get("selection_digest"),
             outcome_digest=value.get("outcome_digest"), evaluation_digest=value.get("evaluation_digest"), learning_episode_ids=tuple(value.get("learning_episode_ids")) if isinstance(value.get("learning_episode_ids"), Sequence) and not isinstance(value.get("learning_episode_ids"), (str, bytes)) else value.get("learning_episode_ids"),
@@ -487,6 +506,9 @@ class AutonomousDecisionCycleRehydrationContext:
 
     cycle_id: str
     task_digest: str
+    task_intent_digest: str | None
+    task_decision_digest: str | None
+    task_decision_posture: str | None
     mode: str
     learning_enabled: bool
     evaluation_enabled: bool
@@ -505,7 +527,9 @@ class AutonomousDecisionCycleRehydrationContext:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "cycle_id": self.cycle_id, "task_digest": self.task_digest, "mode": self.mode,
+            "cycle_id": self.cycle_id, "task_digest": self.task_digest,
+            "task_intent_digest": self.task_intent_digest, "task_decision_digest": self.task_decision_digest,
+            "task_decision_posture": self.task_decision_posture, "mode": self.mode,
             "learning_enabled": self.learning_enabled, "evaluation_enabled": self.evaluation_enabled,
             "phase": self.phase, "route_digest": self.route_digest, "plan_refinement_digest": self.plan_refinement_digest,
             "selection_digest": self.selection_digest, "outcome_digest": self.outcome_digest,
@@ -555,6 +579,9 @@ class AutonomousDecisionCycle:
                 "schema": AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA,
                 "cycle_id": cycle_id,
                 "task_digest": task_digest,
+                "task_intent_digest": None,
+                "task_decision_digest": None,
+                "task_decision_posture": None,
                 "mode": mode,
                 "learning_enabled": learning_enabled,
                 "evaluation_enabled": evaluation_enabled,
@@ -589,7 +616,7 @@ class AutonomousDecisionCycle:
         if phase not in AUTONOMOUS_DECISION_CYCLE_PHASES:
             raise ArgumentError("autonomous decision-cycle phase is invalid")
         allowed = {
-            "route_digest", "plan_refinement_digest", "selection_digest", "outcome_digest", "evaluation_digest",
+            "task_intent_digest", "task_decision_digest", "task_decision_posture", "route_digest", "plan_refinement_digest", "selection_digest", "outcome_digest", "evaluation_digest",
             "learning_episode_ids", "trajectory_id", "settlement_digests", "terminal_status",
         }
         unknown = set(changes).difference(allowed)
@@ -611,7 +638,9 @@ class AutonomousDecisionCycle:
     def context(self) -> AutonomousDecisionCycleRehydrationContext:
         state = self.state
         return AutonomousDecisionCycleRehydrationContext(
-            cycle_id=self.cycle_id, task_digest=self.task_digest, mode=self.mode,
+            cycle_id=self.cycle_id, task_digest=self.task_digest,
+            task_intent_digest=state.task_intent_digest, task_decision_digest=state.task_decision_digest,
+            task_decision_posture=state.task_decision_posture, mode=self.mode,
             learning_enabled=self.learning_enabled, evaluation_enabled=self.evaluation_enabled,
             phase=state.phase, route_digest=state.route_digest, plan_refinement_digest=state.plan_refinement_digest,
             selection_digest=state.selection_digest, outcome_digest=state.outcome_digest,
@@ -637,6 +666,7 @@ __all__ = [
     "MAX_AUTONOMOUS_DECISION_CYCLE_METADATA_BYTES",
     "MAX_AUTONOMOUS_DECISION_CYCLE_LIST_ITEMS",
     "AUTONOMOUS_DECISION_CYCLE_MODES",
+    "AUTONOMOUS_DECISION_CYCLE_TASK_DECISION_POSTURES",
     "AUTONOMOUS_DECISION_CYCLE_PHASES",
     "AutonomousDecisionCycleState",
     "AutonomousDecisionCycleSnapshot",

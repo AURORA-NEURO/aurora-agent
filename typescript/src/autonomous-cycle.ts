@@ -9,6 +9,9 @@ import {
   type AutonomousProviderPlanningOptions,
   type AutonomousCrossDomainRunOptions,
   type AutonomousCrossDomainRunResult,
+  type AutonomousAutoBlueprint,
+  type AutonomousCrossDomainBlueprint,
+  type AutonomousTaskBlueprint,
   type AutonomousPromptChunk,
   type AutonomousRunOptions,
   type AutonomousRunResult,
@@ -57,6 +60,7 @@ import {
   type AutonomousDecisionCycleRehydrationContext,
   type AutonomousDecisionCycleState,
   type AutonomousDecisionCycleStateStore,
+  type AutonomousDecisionCycleTaskDecisionPosture,
   sealAutonomousDecisionCycleState,
   validateAutonomousDecisionCycleState,
 } from "./autonomous-decision-persistence.js";
@@ -328,6 +332,54 @@ interface DecisionPersistenceRuntime {
   state: AutonomousDecisionCycleState;
 }
 
+type DecisionTaskMetadata = Pick<AutonomousDecisionCycleState, "task_intent_digest" | "task_decision_digest" | "task_decision_posture">;
+
+const emptyDecisionTaskMetadata = (): DecisionTaskMetadata => ({
+  task_intent_digest: null,
+  task_decision_digest: null,
+  task_decision_posture: null,
+});
+
+async function decisionTaskMetadataForBlueprintValue(
+  blueprint: AutonomousTaskBlueprint | AutonomousCrossDomainBlueprint | null | undefined,
+): Promise<DecisionTaskMetadata> {
+  if (!blueprint) return emptyDecisionTaskMetadata();
+  if ("task_decision" in blueprint) {
+    return {
+      task_intent_digest: blueprint.task_intent.intent_digest,
+      task_decision_digest: blueprint.task_decision.decision_digest,
+      task_decision_posture: blueprint.task_decision.posture,
+    };
+  }
+  const entries = [
+    ...blueprint.child_blueprints.map((child, index) => ({ id: blueprint.child_ids[index] ?? `child-${index + 1}`, blueprint: child })),
+    { id: "synthesis", blueprint: blueprint.synthesis_blueprint },
+  ].map(({ id, blueprint: child }) => ({
+    id,
+    task_intent_digest: child.task_intent.intent_digest,
+    task_decision_digest: child.task_decision.decision_digest,
+    task_decision_posture: child.task_decision.posture,
+  }));
+  const taskDecisionPosture: AutonomousDecisionCycleTaskDecisionPosture = entries.some((entry) => entry.task_decision_posture === "blocked")
+    ? "blocked"
+    : entries.some((entry) => entry.task_decision_posture === "review_required")
+      ? "review_required"
+      : "admitted";
+  return {
+    task_intent_digest: await digestJson({ cross_domain_task_intent_digests: entries.map((entry) => entry.task_intent_digest) }),
+    task_decision_digest: await digestJson({ cross_domain_task_decisions: entries }),
+    task_decision_posture: taskDecisionPosture,
+  };
+}
+
+async function decisionTaskMetadataForAutoBlueprint(blueprint: AutonomousAutoBlueprint): Promise<DecisionTaskMetadata> {
+  return decisionTaskMetadataForBlueprintValue(blueprint.blueprint ?? blueprint.cross_domain_blueprint ?? null);
+}
+
+async function decisionTaskMetadataForRun(run: AutonomousRunResult | AutonomousCrossDomainRunResult): Promise<DecisionTaskMetadata> {
+  return decisionTaskMetadataForBlueprintValue(run.blueprint);
+}
+
 function boundedDecisionCycleIdentifier(name: string, value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 256 || !/^[A-Za-z0-9_.:-]+$/.test(value)) throw new ArgumentError(`${name} must be a bounded identifier`);
   return value;
@@ -359,6 +411,9 @@ async function openDecisionPersistence(
     schema: AUTONOMOUS_DECISION_CYCLE_STATE_SCHEMA,
     cycle_id: cycleId,
     task_digest: taskDigest,
+    task_intent_digest: null,
+    task_decision_digest: null,
+    task_decision_posture: null,
     mode,
     learning_enabled: learningEnabled,
     evaluation_enabled: evaluationEnabled,
@@ -402,6 +457,9 @@ function decisionRehydrationContext(runtime: DecisionPersistenceRuntime): Autono
   return {
     cycle_id: runtime.cycleId,
     task_digest: runtime.taskDigest,
+    task_intent_digest: state.task_intent_digest,
+    task_decision_digest: state.task_decision_digest,
+    task_decision_posture: state.task_decision_posture,
     mode: runtime.mode,
     learning_enabled: runtime.learningEnabled,
     evaluation_enabled: runtime.evaluationEnabled,
@@ -439,6 +497,10 @@ async function rehydrateDecisionRun(
   if (!run || typeof run !== "object" || !run.route || typeof run.route.route_digest !== "string" || run.route.route_digest !== runtime.state.route_digest) throw new ArgumentError("rehydrated decision run does not match the persisted route digest");
   if (runtime.mode === "single_domain" && Array.isArray((run as AutonomousCrossDomainRunResult).child_runs)) throw new ArgumentError("single-domain decision cycle cannot rehydrate a cross-domain run");
   if (runtime.mode === "cross_domain" && !Array.isArray((run as AutonomousCrossDomainRunResult).child_runs)) throw new ArgumentError("cross-domain decision cycle requires a fan-out run during rehydration");
+  if (runtime.state.task_decision_digest !== null) {
+    const observedTaskDecision = await decisionTaskMetadataForRun(run);
+    if (observedTaskDecision.task_intent_digest !== runtime.state.task_intent_digest || observedTaskDecision.task_decision_digest !== runtime.state.task_decision_digest || observedTaskDecision.task_decision_posture !== runtime.state.task_decision_posture) throw new ArgumentError("rehydrated decision run does not match the persisted task decision identity");
+  }
   const outcome = runtime.mode === "single_domain"
     ? (await replanRunDigests(run as AutonomousRunResult)).outcome
     : await crossDomainReplanOutcomeDigest(run as AutonomousCrossDomainRunResult);
@@ -455,6 +517,10 @@ async function rehydrateDecisionResult(
   if (!result || typeof result !== "object" || !result.route || typeof result.route.route_digest !== "string" || result.route.route_digest !== runtime.state.route_digest || result.status !== runtime.state.terminal_status) throw new ArgumentError("rehydrated terminal decision result does not match persisted identity");
   const expectedSchema = runtime.mode === "single_domain" ? AUTONOMOUS_DECISION_CYCLE_SCHEMA : AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA;
   if (result.schema !== expectedSchema) throw new ArgumentError("rehydrated terminal decision result has the wrong cycle schema");
+  if (runtime.state.task_decision_digest !== null && result.run) {
+    const observedTaskDecision = await decisionTaskMetadataForRun(result.run);
+    if (observedTaskDecision.task_intent_digest !== runtime.state.task_intent_digest || observedTaskDecision.task_decision_digest !== runtime.state.task_decision_digest || observedTaskDecision.task_decision_posture !== runtime.state.task_decision_posture) throw new ArgumentError("rehydrated terminal result does not match the persisted task decision identity");
+  }
   if (result.run) {
     if (runtime.mode === "single_domain" && Array.isArray((result.run as AutonomousCrossDomainRunResult).child_runs)) throw new ArgumentError("single-domain terminal result cannot contain a cross-domain run");
     if (runtime.mode === "cross_domain" && !Array.isArray((result.run as AutonomousCrossDomainRunResult).child_runs)) throw new ArgumentError("cross-domain terminal result requires a fan-out run");
@@ -820,7 +886,18 @@ export async function runAutonomousDecisionCycle(
     route = await agent.route(task, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
   }
 
-  if (persistence && persistence.state.route_digest === null) await commitDecisionPersistence(persistence, { phase: "route_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: null, evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: null });
+  const decisionBlueprint = await agent.blueprint(task, {
+    domain: route.primary_domain ?? undefined,
+    routeOverride: route,
+    capability: options.capability,
+    context: options.context,
+    maxInputTokens: options.maxInputTokens,
+    tools: options.tools?.map((tool) => tool.name),
+    hints: options.hints,
+    structuredDomainResponse: options.structuredDomainResponse,
+  });
+  const taskDecisionMetadata = await decisionTaskMetadataForAutoBlueprint(decisionBlueprint);
+  if (persistence && persistence.state.route_digest === null) await commitDecisionPersistence(persistence, { phase: "route_pending", route_digest: route.route_digest, ...taskDecisionMetadata, selection_digest: null, outcome_digest: null, evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: null });
 
   if (route.abstained || !route.primary_domain || route.cross_domain || route.selected_domains.length !== 1) {
     if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "single_domain_route_review_required" });
@@ -1724,7 +1801,17 @@ export async function runAutonomousCrossDomainDecisionCycle(
   } else {
     route = await agent.route(task, { hints: options.hints, allowCrossDomain: options.allowCrossDomain ?? true });
   }
-  if (persistence && persistence.state.route_digest === null) await commitDecisionPersistence(persistence, { phase: "route_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: null, evaluation_digest: null, learning_episode_ids: [], trajectory_id: persistence?.trajectoryId ?? null, settlement_digests: [], terminal_status: null });
+  const decisionBlueprint = await agent.blueprint(task, {
+    routeOverride: route,
+    capability: options.capability,
+    context: options.context,
+    maxInputTokens: options.maxInputTokens,
+    tools: options.tools?.map((tool) => tool.name),
+    hints: options.hints,
+    subtasks: options.subtasks,
+  });
+  const taskDecisionMetadata = await decisionTaskMetadataForAutoBlueprint(decisionBlueprint);
+  if (persistence && persistence.state.route_digest === null) await commitDecisionPersistence(persistence, { phase: "route_pending", route_digest: route.route_digest, ...taskDecisionMetadata, selection_digest: null, outcome_digest: null, evaluation_digest: null, learning_episode_ids: [], trajectory_id: persistence?.trajectoryId ?? null, settlement_digests: [], terminal_status: null });
   if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
     if (options.executionLifecycle !== "observe_only") await options.execution?.checkpoint({ status: "route_review_required", reason: "cross_domain_route_review_required" });
     const reviewed = crossReviewResult("route_review_required", route, semanticRoute);
