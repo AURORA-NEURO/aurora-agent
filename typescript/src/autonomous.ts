@@ -727,6 +727,7 @@ export type AutonomousCapabilitySelectionStatus = "selected" | "activation_requi
 export const AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA = "bioprism-autonomous-tool-selection-state/0.1" as const;
 export const AUTONOMOUS_TOOL_SELECTION_POLICY = "stage_coverage_then_capability_then_ucb_value_then_task_relevance_then_read_only_then_name" as const;
 export const MAX_AUTONOMOUS_TOOL_SELECTION_ARMS = 512;
+export const MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS = 4096;
 
 export interface AutonomousToolSelectionArm extends JsonObject {
   arm_id: string;
@@ -737,10 +738,20 @@ export interface AutonomousToolSelectionArm extends JsonObject {
   disabled: boolean;
 }
 
+/** Idempotency metadata for one evaluator-approved value-only tool credit. */
+export interface AutonomousToolSelectionCredit extends JsonObject {
+  outcome_digest: string;
+  arm_id: string;
+  reward: number;
+  failed: boolean;
+  latency_ms: number | null;
+}
+
 export interface AutonomousToolSelectionState extends JsonObject {
   schema: typeof AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA;
   generation: number;
   arms: AutonomousToolSelectionArm[];
+  credited_outcomes: AutonomousToolSelectionCredit[];
 }
 
 export interface AutonomousToolSelectionOutcome {
@@ -750,6 +761,20 @@ export interface AutonomousToolSelectionOutcome {
   reward: number;
   failed?: boolean;
   latencyMs?: number | null;
+  /** Evaluator settlement identity; repeated identities are idempotent. */
+  outcomeDigest?: string | null;
+}
+
+/** Capability-learning result with the updated adaptive tool-selection state attached. */
+export interface AutonomousAgentCapabilityLearningResult extends AutonomousCapabilityLearningSettlement {
+  tool_selection_state: AutonomousToolSelectionState;
+  tool_selection_state_digest: string;
+}
+
+/** Ordered capability-learning batch with the updated adaptive tool-selection state attached. */
+export interface AutonomousAgentCapabilityLearningBatchResult extends AutonomousCapabilityLearningBatchResult {
+  tool_selection_state: AutonomousToolSelectionState;
+  tool_selection_state_digest: string;
 }
 
 export interface AutonomousCapabilityPlanCoverage extends JsonObject {
@@ -2828,8 +2853,9 @@ function boundedToolSelectionNumber(name: string, value: unknown, minimum: numbe
 
 /** Normalize caller-owned tool learning state without accepting transient payloads. */
 export function normalizeAutonomousToolSelectionState(value: unknown): AutonomousToolSelectionState {
-  if (value === undefined || value === null) return { schema: AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, generation: 0, arms: [] };
+  if (value === undefined || value === null) return { schema: AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, generation: 0, arms: [], credited_outcomes: [] };
   if (!isObject(value)) throw new ArgumentError("tool selection state must be an object");
+  if (Object.keys(value).some((key) => !["schema", "generation", "arms", "credited_outcomes"].includes(key))) throw new ArgumentError("tool selection state contains unsupported fields");
   if (value.schema !== undefined && value.schema !== AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA) throw new ArgumentError("tool selection state schema is unsupported");
   const generation = boundedToolSelectionNumber("tool selection generation", value.generation ?? 0, 0, 1_000_000_000, true);
   if (!Array.isArray(value.arms) || value.arms.length > MAX_AUTONOMOUS_TOOL_SELECTION_ARMS) throw new ArgumentError(`tool selection state arms must contain at most ${MAX_AUTONOMOUS_TOOL_SELECTION_ARMS} entries`);
@@ -2849,7 +2875,22 @@ export function normalizeAutonomousToolSelectionState(value: unknown): Autonomou
     if (raw.disabled !== undefined && typeof raw.disabled !== "boolean") throw new ArgumentError(`tool selection arm ${armId} disabled must be boolean`);
     return { arm_id: armId, pulls, reward_sum: rewardSum, failures, latency_ms: latencyMs, disabled: raw.disabled ?? false };
   }).sort((left, right) => left.arm_id.localeCompare(right.arm_id));
-  return { schema: AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, generation, arms };
+  const rawCredits = value.credited_outcomes ?? [];
+  if (!Array.isArray(rawCredits) || rawCredits.length > MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS) throw new ArgumentError(`tool selection state credits must contain at most ${MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS} entries`);
+  const creditIds = new Set<string>();
+  const creditedOutcomes = rawCredits.map((raw, index) => {
+    if (!isObject(raw)) throw new ArgumentError(`tool selection credit ${index} is malformed`);
+    if (Object.keys(raw).some((key) => !["outcome_digest", "arm_id", "reward", "failed", "latency_ms"].includes(key))) throw new ArgumentError("tool selection credit contains unsupported fields");
+    if (typeof raw.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(raw.outcome_digest)) throw new ArgumentError(`tool selection credit ${index} outcome_digest must be a lowercase SHA-256 digest`);
+    if (creditIds.has(raw.outcome_digest)) throw new ArgumentError(`tool selection state contains duplicate outcome ${raw.outcome_digest}`);
+    creditIds.add(raw.outcome_digest);
+    const armId = boundedIdentifier(`tool selection credit ${index} arm_id`, raw.arm_id);
+    const reward = boundedToolSelectionNumber(`tool selection credit ${index} reward`, raw.reward, -1, 1);
+    if (typeof raw.failed !== "boolean") throw new ArgumentError(`tool selection credit ${index} failed must be boolean`);
+    const latencyMs = raw.latency_ms === undefined || raw.latency_ms === null ? null : boundedToolSelectionNumber(`tool selection credit ${index} latency_ms`, raw.latency_ms, 0, 3_600_000);
+    return { outcome_digest: raw.outcome_digest, arm_id: armId, reward, failed: raw.failed, latency_ms: latencyMs };
+  }).sort((left, right) => left.outcome_digest.localeCompare(right.outcome_digest));
+  return { schema: AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, generation, arms, credited_outcomes: creditedOutcomes };
 }
 
 /** Stable contextual arm identity shared by the TypeScript and Python planners. */
@@ -2893,18 +2934,32 @@ export function settleAutonomousToolSelectionOutcome(
   const latencyMs = outcome.latencyMs === undefined || outcome.latencyMs === null ? null : boundedToolSelectionNumber("tool selection outcome latencyMs", outcome.latencyMs, 0, 3_600_000);
   const current = normalizeAutonomousToolSelectionState(state);
   const armId = autonomousToolSelectionArmId(outcome.domain, capability, tool);
+  const outcomeDigest = outcome.outcomeDigest ?? null;
+  if (outcomeDigest !== null && (typeof outcomeDigest !== "string" || !/^[0-9a-f]{64}$/.test(outcomeDigest))) throw new ArgumentError("tool selection outcome outcomeDigest must be a lowercase SHA-256 digest");
+  const failed = outcome.failed === true;
+  if (outcomeDigest !== null) {
+    const priorCredit = current.credited_outcomes.find((credit) => credit.outcome_digest === outcomeDigest);
+    if (priorCredit) {
+      if (priorCredit.arm_id !== armId || priorCredit.reward !== reward || priorCredit.failed !== failed || priorCredit.latency_ms !== latencyMs) throw new ArgumentError("tool selection outcome digest was reused with contradictory metadata");
+      return current;
+    }
+  }
   const prior = current.arms.find((arm) => arm.arm_id === armId);
   const nextArm: AutonomousToolSelectionArm = {
     arm_id: armId,
     pulls: (prior?.pulls ?? 0) + 1,
     reward_sum: Number(((prior?.reward_sum ?? 0) + reward).toFixed(12)),
-    failures: (prior?.failures ?? 0) + Number(outcome.failed === true),
+    failures: (prior?.failures ?? 0) + Number(failed),
     latency_ms: latencyMs === null ? prior?.latency_ms ?? null : Number((((prior?.latency_ms ?? latencyMs) * (prior?.pulls ?? 0) + latencyMs) / ((prior?.pulls ?? 0) + 1)).toFixed(6)),
     disabled: prior?.disabled ?? false,
   };
   const arms = [...current.arms.filter((arm) => arm.arm_id !== armId), nextArm].sort((left, right) => left.arm_id.localeCompare(right.arm_id));
   if (arms.length > MAX_AUTONOMOUS_TOOL_SELECTION_ARMS) throw new ArgumentError("tool selection state has reached its arm bound");
-  return { schema: AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, generation: current.generation + 1, arms };
+  const creditedOutcomes = outcomeDigest === null
+    ? current.credited_outcomes
+    : [...current.credited_outcomes, { outcome_digest: outcomeDigest, arm_id: armId, reward, failed, latency_ms: latencyMs }].sort((left, right) => left.outcome_digest.localeCompare(right.outcome_digest));
+  if (creditedOutcomes.length > MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS) throw new ArgumentError("tool selection credit ledger has reached its bound");
+  return { schema: AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, generation: current.generation + 1, arms, credited_outcomes: creditedOutcomes };
 }
 
 /** Digest the exact stage contract that a live adapter receipt is bound to. */
@@ -4065,12 +4120,13 @@ export class AutonomousAgent {
   /** Evaluate and settle one reviewed capability result; transport success never becomes reward. */
   async evaluateCapabilityExecution(
     result: AutonomousCapabilityExecutionResult | AutonomousCapabilityExecutionRecord,
-    options: Omit<AutonomousCapabilityLearningOptions, "recordEvaluatorReward">,
-  ): Promise<AutonomousCapabilityLearningSettlement> {
+    options: Omit<AutonomousCapabilityLearningOptions, "recordEvaluatorReward"> & { toolSelectionState?: AutonomousToolSelectionState | null },
+  ): Promise<AutonomousAgentCapabilityLearningResult> {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
+    const { toolSelectionState, ...learningOptions } = options;
     const settlement = await settleAutonomousCapabilityLearning(result, {
-      ...options,
-      settlementStore: options.settlementStore ?? this.capabilityLearningSettlementStore,
+      ...learningOptions,
+      settlementStore: learningOptions.settlementStore ?? this.capabilityLearningSettlementStore,
       recordEvaluatorReward: (armId, reward, update) => this.recordEvaluatorReward(armId, reward, {
         failed: update.failed,
         outcomeDigest: update.outcomeDigest,
@@ -4080,18 +4136,29 @@ export class AutonomousAgent {
       }),
     });
     this.learner.restore(settlement.next_state);
-    return settlement;
+    const record = ("record" in result ? (result as AutonomousCapabilityExecutionResult).record : result) as AutonomousCapabilityExecutionRecord;
+    const nextToolSelectionState = settleAutonomousToolSelectionOutcome(toolSelectionState, {
+      domain: record.domain as AutonomousDomainName,
+      capability: record.capability ?? "capability_execution",
+      tool: record.tool,
+      reward: settlement.reward,
+      failed: settlement.failed,
+      latencyMs: record.duration_ms,
+      outcomeDigest: settlement.outcome_digest,
+    });
+    return { ...settlement, tool_selection_state: nextToolSelectionState, tool_selection_state_digest: await digestJson(nextToolSelectionState) };
   }
 
   /** Evaluate and settle reviewed capability results in input order with one bandit stream. */
   async evaluateCapabilityExecutions(
     results: readonly (AutonomousCapabilityExecutionResult | AutonomousCapabilityExecutionRecord)[],
-    options: AutonomousCapabilityLearningBatchOptions,
-  ): Promise<AutonomousCapabilityLearningBatchResult> {
+    options: AutonomousCapabilityLearningBatchOptions & { toolSelectionState?: AutonomousToolSelectionState | null },
+  ): Promise<AutonomousAgentCapabilityLearningBatchResult> {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
+    const { toolSelectionState, ...learningOptions } = options;
     const settlement = await settleAutonomousCapabilityLearningBatch(results, {
-      ...options,
-      settlementStore: options.settlementStore ?? this.capabilityLearningSettlementStore,
+      ...learningOptions,
+      settlementStore: learningOptions.settlementStore ?? this.capabilityLearningSettlementStore,
       recordEvaluatorReward: (armId, reward, update) => this.recordEvaluatorReward(armId, reward, {
         failed: update.failed,
         outcomeDigest: update.outcomeDigest,
@@ -4101,7 +4168,20 @@ export class AutonomousAgent {
       }),
     });
     for (const item of settlement.settlements) this.learner.restore(item.next_state);
-    return settlement;
+    let nextToolSelectionState = normalizeAutonomousToolSelectionState(toolSelectionState);
+    for (const [index, item] of settlement.settlements.entries()) {
+      const record = ("record" in results[index]! ? (results[index] as AutonomousCapabilityExecutionResult).record : results[index]) as AutonomousCapabilityExecutionRecord;
+      nextToolSelectionState = settleAutonomousToolSelectionOutcome(nextToolSelectionState, {
+        domain: record.domain as AutonomousDomainName,
+        capability: record.capability ?? "capability_execution",
+        tool: record.tool,
+        reward: item.reward,
+        failed: item.failed,
+        latencyMs: record.duration_ms,
+        outcomeDigest: item.outcome_digest,
+      });
+    }
+    return { ...settlement, tool_selection_state: nextToolSelectionState, tool_selection_state_digest: await digestJson(nextToolSelectionState) };
   }
 
   /** Return metadata-only adapter evidence collected by this agent; raw arguments/results are never exposed here. */

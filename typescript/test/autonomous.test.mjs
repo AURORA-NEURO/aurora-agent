@@ -844,6 +844,7 @@ test("adaptive tool-arm selection is deterministic, value-only, and bounded acro
     tool: "repository_catalog",
     reward: 0.9,
     latencyMs: 40,
+    outcomeDigest: "1".repeat(64),
   });
   const repeatedState = settleAutonomousToolSelectionOutcome(state, {
     domain: "coding",
@@ -851,10 +852,13 @@ test("adaptive tool-arm selection is deterministic, value-only, and bounded acro
     tool: "repository_catalog",
     reward: 0.9,
     latencyMs: 40,
+    outcomeDigest: "2".repeat(64),
   });
   assert.equal(state.schema, AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA);
   assert.equal(state.arms[0].arm_id, autonomousToolSelectionArmId("coding", "repository_inspection", "repository_catalog"));
   assert.equal(repeatedState.generation, 2);
+  assert.equal(repeatedState.credited_outcomes.length, 2);
+  assert.equal(await digestJson(repeatedState), "d65dbc6bb505d90928e23590d6afc94b2ed5800bf056a5aef9eb7a4392b23ac7");
   const plan = await registry.planForTask("inspect the repository and verify the evidence", {
     domains: profiles.map((profile) => profile.domain),
     maxTools: 24,
@@ -874,6 +878,22 @@ test("adaptive tool-arm selection is deterministic, value-only, and bounded acro
   assert.equal(plan.selected_tool_order.length, plan.selected_tool_names.length);
   assert.equal(new Set(plan.coverage.map((row) => row.domain)).size, 12);
   assert.ok(plan.coverage.some((row) => row.selected_arm_id === state.arms[0].arm_id));
+  assert.deepEqual(settleAutonomousToolSelectionOutcome(repeatedState, {
+    domain: "coding",
+    capability: "repository_inspection",
+    tool: "repository_catalog",
+    reward: 0.9,
+    latencyMs: 40,
+    outcomeDigest: "2".repeat(64),
+  }), repeatedState);
+  assert.throws(() => settleAutonomousToolSelectionOutcome(repeatedState, {
+    domain: "coding",
+    capability: "repository_inspection",
+    tool: "repository_catalog",
+    reward: -0.9,
+    latencyMs: 40,
+    outcomeDigest: "2".repeat(64),
+  }), /contradictory metadata/);
   assert.doesNotMatch(JSON.stringify(plan), /inspect the repository/);
   assert.doesNotMatch(JSON.stringify(plan), /api[_ -]?key|authorization\s*:/i);
 
@@ -1077,6 +1097,8 @@ test("capability outcomes settle metadata-only evaluator credit across every dom
     armIdFor: (record) => `local-model:${record.domain}`,
   });
   assert.equal(settled.settlements.length, profiles.length);
+  assert.equal(settled.tool_selection_state.generation, profiles.length);
+  assert.equal(settled.tool_selection_state.credited_outcomes.length, profiles.length);
   assert.equal(learner.snapshot().generation, profiles.length);
   assert.equal(new Set(learner.snapshot().arms.map((arm) => arm.arm_id)).size, profiles.length);
   assert.equal(evaluatorCalls, profiles.length);
@@ -1123,6 +1145,8 @@ test("capability outcomes settle metadata-only evaluator credit across every dom
   assert.equal(evaluatorCalls, profiles.length);
   assert.equal(restartedLearner.snapshot().generation, profiles.length);
   assert.equal(replayed.settlements[0].next_state.arms[0].pulls, 1);
+  assert.equal(replayed.tool_selection_state.generation, profiles.length);
+  assert.deepEqual(replayed.tool_selection_state, settled.tool_selection_state);
 
   const uncertain = { ...results[0].record, status: "reconciliation_required", output_digest: null, output_bytes: 0, observations: [], evidence_digest: null, evidence_status: "not_evaluated", missing_evidence_outputs: [...results[0].record.required_evidence_outputs] };
   await assert.rejects(() => agent.evaluateCapabilityExecution(uncertain, { evaluator, callerEvidence: { quality_gate: "failed" }, armId: "local-model:reconciled" }), /reconciliation_required/);

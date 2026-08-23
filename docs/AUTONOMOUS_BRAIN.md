@@ -7399,6 +7399,7 @@ tool_state = settle_autonomous_tool_selection_outcome(
     tool="repository_catalog",
     reward=0.9,
     latency_ms=40,
+    outcome_digest="a" * 64,
 )
 portfolio = agent.capability_portfolio(
     "inspect the repository and verify the evidence",
@@ -7407,6 +7408,20 @@ portfolio = agent.capability_portfolio(
     exploration=0.2,
 )
 ```
+
+For replay-safe settlement, pass the evaluator's stable outcome digest. The state retains a bounded
+credit ledger (at most 4,096 digest/arm/value rows) in addition to the 512-arm catalogue. Reusing
+the same digest with the same metadata is an idempotent no-op; reusing it with a different arm,
+reward, failure flag, or latency is rejected as contradictory credit. The ledger retains no task,
+prompt, evidence body, arguments, outputs, provider message, or credential.
+
+The evaluator bridge can apply this automatically. Python `evaluate_tool_receipts()`,
+`evaluate_capability_execution()`, and `evaluate_capability_executions()` accept
+`tool_selection_state` and return `next_tool_selection_state`; TypeScript
+`evaluateCapabilityExecution()` and `evaluateCapabilityExecutions()` accept `toolSelectionState`
+and return the updated state plus its digest. This keeps the evaluator's explicit reward boundary
+and the selector's replay barrier in one caller-owned feedback loop without treating transport
+success as task quality.
 
 TypeScript exposes the same `bioprism-autonomous-tool-selection-state/0.1` contract through
 `settleAutonomousToolSelectionOutcome()` and accepts `toolSelectionState` plus

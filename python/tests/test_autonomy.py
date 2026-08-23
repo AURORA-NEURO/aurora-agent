@@ -1035,9 +1035,23 @@ def test_autonomous_agent_composes_domain_tools_into_native_tool_loop():
             evidence={call_id: {"quality_gate": "passed"}},
             bandit_state={"generation": 0},
             bandit_updater=lambda state, _decision, _outcome: {**state, "generation": state["generation"] + 1},
+            tool_selection_state=None,
         )
         assert learning.status == "completed"
         assert learning.next_bandit_state["generation"] == 1
+        assert learning.next_tool_selection_state is not None
+        assert learning.next_tool_selection_state["generation"] == 1
+        assert len(learning.next_tool_selection_state["credited_outcomes"]) == 1
+        replay_learning = agent.evaluate_tool_receipts(
+            evaluator=AutonomousToolOutcomeEvaluator(
+                lambda value: {"reward": 0.75 if value["status"] == "executed" else -0.5, "passed": value["status"] == "executed"},
+                evaluator_id="operations-tool-quality",
+                evaluator_version="v1",
+            ),
+            evidence={call_id: {"quality_gate": "passed"}},
+            tool_selection_state=learning.next_tool_selection_state,
+        )
+        assert replay_learning.next_tool_selection_state == learning.next_tool_selection_state
         assert learning.by_domain == {"operations": 1}
         cross = agent.run_cross_domain(
             task="inspect operations and coding workspace status",
@@ -1130,12 +1144,16 @@ def test_autonomous_agent_exposes_reviewed_capability_execution_and_journal_repl
             **state,
             "generation": state["generation"] + 1,
         },
+        tool_selection_state=None,
     )
     restored = agent.restore_capability_journal()
     replayed = agent.execute_capability(request)
 
     assert first.record.status == "completed"
     assert learning.next_bandit_state["generation"] == 1
+    assert learning.next_tool_selection_state is not None
+    assert learning.next_tool_selection_state["generation"] == 1
+    assert len(learning.next_tool_selection_state["credited_outcomes"]) == 1
     assert restored["replayable"] == 1
     assert replayed.record.replay == "replayed"
     assert replayed.value is None

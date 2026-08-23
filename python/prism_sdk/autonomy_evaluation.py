@@ -438,6 +438,11 @@ class AutonomousToolOutcomeEvaluator:
             "failed": decision.failed,
             "failure_class": decision.failure_class,
             "settlement_key": settlement_key,
+            "tool_selection_outcome_digest": content_digest({
+                "schema": "bioprism-autonomous-tool-selection-outcome/0.1",
+                "outcome": outcome.to_input(),
+                "decision_digest": decision.decision_digest,
+            }),
             "retention": "metadata_only_no_arguments_or_outputs",
         }
         report = {"learning_evidence": learning_evidence, "next_state": dict(next_state)}
@@ -504,6 +509,7 @@ class AutonomousToolOutcomeEvaluator:
             "failed": learning.get("failed"),
             "failure_class": learning.get("failure_class"),
             "settlement_key": learning.get("settlement_key"),
+            "tool_selection_outcome_digest": learning.get("tool_selection_outcome_digest"),
             "recording": report.get("recording"),
             "idempotent_replay": idempotent_replay,
         }
@@ -516,6 +522,7 @@ class AutonomousToolOutcomeEvaluator:
             by_status={record.status: 1},
             next_bandit_state=dict(next_state),
             learning_digest=content_digest(evaluations),
+            next_tool_selection_state=None if report.get("next_tool_selection_state") is None else dict(report["next_tool_selection_state"]),
         )
 
     def _stored_capability_settlement(
@@ -558,6 +565,8 @@ class AutonomousToolOutcomeEvaluator:
         bandit_state: Mapping[str, Any] | None = None,
         bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
         ledger: BrainLearningLedger | None = None,
+        tool_selection_state: Mapping[str, Any] | None = None,
+        tool_selection_updater: Callable[[Mapping[str, Any] | None, Mapping[str, Any]], Mapping[str, Any]] | None = None,
     ) -> "AutonomousToolLearningReport":
         """Evaluate one capability record through the existing value-only learning boundary.
 
@@ -607,6 +616,20 @@ class AutonomousToolOutcomeEvaluator:
         )
         existing = self._stored_capability_settlement(settlement_key, ledger=ledger)
         if existing is not None:
+            if tool_selection_updater is not None:
+                learning = existing.get("learning_evidence")
+                if not isinstance(learning, Mapping):
+                    raise ArgumentError("stored capability settlement is malformed")
+                tool_selection_state = tool_selection_updater(tool_selection_state, {
+                    "domain": record.domain,
+                    "capability": record.capability or "capability_execution",
+                    "tool": record.tool,
+                    "reward": learning.get("reward"),
+                    "failed": learning.get("failed"),
+                    "latency_ms": record.duration_ms,
+                    "outcome_digest": learning.get("tool_selection_outcome_digest"),
+                })
+                existing = {**existing, "next_tool_selection_state": None if tool_selection_state is None else dict(tool_selection_state)}
             return self._capability_settlement_report(record, existing, idempotent_replay=True)
         report = self.evaluate_and_record(
             outcome,
@@ -619,6 +642,17 @@ class AutonomousToolOutcomeEvaluator:
         self._capability_settlements[settlement_key] = report
         while len(self._capability_settlements) > MAX_TOOL_REPLAY_CASES:
             self._capability_settlements.pop(next(iter(self._capability_settlements)))
+        if tool_selection_updater is not None:
+            tool_selection_state = tool_selection_updater(tool_selection_state, {
+                "domain": record.domain,
+                "capability": record.capability or "capability_execution",
+                "tool": record.tool,
+                "reward": report["decision"]["reward"],
+                "failed": report["decision"]["failed"],
+                "latency_ms": record.duration_ms,
+                "outcome_digest": report["learning_evidence"]["tool_selection_outcome_digest"],
+            })
+        report["next_tool_selection_state"] = None if tool_selection_state is None else dict(tool_selection_state)
         return self._capability_settlement_report(record, report, idempotent_replay=False)
 
     def evaluate_capability_results(
@@ -631,6 +665,8 @@ class AutonomousToolOutcomeEvaluator:
         bandit_state: Mapping[str, Any] | None = None,
         bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
         ledger: BrainLearningLedger | None = None,
+        tool_selection_state: Mapping[str, Any] | None = None,
+        tool_selection_updater: Callable[[Mapping[str, Any] | None, Mapping[str, Any]], Mapping[str, Any]] | None = None,
     ) -> "AutonomousToolLearningReport":
         """Settle a bounded, ordered capability-result batch with one state stream."""
 
@@ -668,9 +704,12 @@ class AutonomousToolOutcomeEvaluator:
                 bandit_state=state,
                 bandit_updater=bandit_updater,
                 ledger=ledger,
+                tool_selection_state=tool_selection_state,
+                tool_selection_updater=tool_selection_updater,
             )
             evaluations.extend(report.evaluations)
             state = report.next_bandit_state
+            tool_selection_state = report.next_tool_selection_state
             by_domain[record.domain] = by_domain.get(record.domain, 0) + 1
             by_status[record.status] = by_status.get(record.status, 0) + 1
         normalized_state = {} if state is None else dict(state)
@@ -682,6 +721,7 @@ class AutonomousToolOutcomeEvaluator:
             by_status=dict(sorted(by_status.items())),
             next_bandit_state=normalized_state,
             learning_digest=content_digest(evaluations),
+            next_tool_selection_state=None if tool_selection_state is None else dict(tool_selection_state),
         )
 
     def evaluate_receipts(
@@ -693,6 +733,8 @@ class AutonomousToolOutcomeEvaluator:
         bandit_state: Mapping[str, Any] | None = None,
         bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
         ledger: BrainLearningLedger | None = None,
+        tool_selection_state: Mapping[str, Any] | None = None,
+        tool_selection_updater: Callable[[Mapping[str, Any] | None, Mapping[str, Any]], Mapping[str, Any]] | None = None,
     ) -> "AutonomousToolLearningReport":
         """Evaluate a bounded live receipt batch and advance caller-owned online state.
 
@@ -735,6 +777,7 @@ class AutonomousToolOutcomeEvaluator:
         state: Mapping[str, Any] = {} if bandit_state is None else _safe_json(
             "bandit_state", dict(bandit_state), maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES
         )
+        selection_state: Mapping[str, Any] | None = None if tool_selection_state is None else dict(tool_selection_state)
         evaluations: list[Mapping[str, Any]] = []
         by_domain: dict[str, int] = {}
         by_status: dict[str, int] = {}
@@ -778,6 +821,16 @@ class AutonomousToolOutcomeEvaluator:
             if not isinstance(next_state, Mapping):
                 raise ArgumentError("tool evaluator returned a malformed next bandit state")
             state = dict(next_state)
+            if tool_selection_updater is not None:
+                selection_state = tool_selection_updater(selection_state, {
+                    "domain": outcome.domain,
+                    "capability": outcome.capability,
+                    "tool": outcome.tool,
+                    "reward": decision.get("reward"),
+                    "failed": decision.get("failed"),
+                    "latency_ms": None,
+                    "outcome_digest": report["learning_evidence"]["tool_selection_outcome_digest"],
+                })
             by_domain[outcome.domain] = by_domain.get(outcome.domain, 0) + 1
             by_status[outcome.status] = by_status.get(outcome.status, 0) + 1
         return AutonomousToolLearningReport(
@@ -788,6 +841,7 @@ class AutonomousToolOutcomeEvaluator:
             by_status=dict(sorted(by_status.items())),
             next_bandit_state=dict(state),
             learning_digest=content_digest(evaluations),
+            next_tool_selection_state=None if selection_state is None else dict(selection_state),
         )
 
 
@@ -802,6 +856,7 @@ class AutonomousToolLearningReport:
     by_status: Mapping[str, int]
     next_bandit_state: Mapping[str, Any]
     learning_digest: str
+    next_tool_selection_state: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {"completed", "no_receipts"}:
@@ -815,6 +870,10 @@ class AutonomousToolLearningReport:
         _digest("tool learning digest", self.learning_digest)
         _safe_json("tool learning report evaluations", [dict(item) for item in self.evaluations], maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES)
         _safe_json("tool learning report bandit state", dict(self.next_bandit_state), maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES)
+        if self.next_tool_selection_state is not None:
+            if not isinstance(self.next_tool_selection_state, Mapping):
+                raise ArgumentError("tool learning report tool-selection state must be a mapping or None")
+            _safe_json("tool learning report tool-selection state", dict(self.next_tool_selection_state), maximum=MAX_TOOL_EVALUATION_EVIDENCE_BYTES)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -825,6 +884,7 @@ class AutonomousToolLearningReport:
             "by_domain": dict(self.by_domain),
             "by_status": dict(self.by_status),
             "next_bandit_state": dict(self.next_bandit_state),
+            "next_tool_selection_state": None if self.next_tool_selection_state is None else dict(self.next_tool_selection_state),
             "learning_digest": self.learning_digest,
             "retention": "metadata_and_digests_only",
         }

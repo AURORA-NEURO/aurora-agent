@@ -23,6 +23,7 @@ from prism_sdk import (
     autonomous_tool_selection_arm_id,
     settle_autonomous_tool_selection_outcome,
 )
+from prism_sdk.authoring import content_digest
 
 
 class _Workspace:
@@ -293,6 +294,7 @@ def test_adaptive_tool_arm_selection_is_deterministic_value_only_and_all_domain_
         tool="repository_catalog",
         reward=0.9,
         latency_ms=40,
+        outcome_digest="1" * 64,
     )
     state = settle_autonomous_tool_selection_outcome(
         state,
@@ -301,9 +303,12 @@ def test_adaptive_tool_arm_selection_is_deterministic_value_only_and_all_domain_
         tool="repository_catalog",
         reward=0.9,
         latency_ms=40,
+        outcome_digest="2" * 64,
     )
     assert state["schema"] == AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA
     assert state["generation"] == 2
+    assert len(state["credited_outcomes"]) == 2
+    assert content_digest(state) == "d65dbc6bb505d90928e23590d6afc94b2ed5800bf056a5aef9eb7a4392b23ac7"
     assert state["arms"][0]["arm_id"] == autonomous_tool_selection_arm_id(
         "coding", "repository_inspection", "repository_catalog"
     )
@@ -328,6 +333,26 @@ def test_adaptive_tool_arm_selection_is_deterministic_value_only_and_all_domain_
     assert len(portfolio["selected_tool_order"]) == len(portfolio["selected_tool_names"])
     assert {row["domain"] for row in portfolio["coverage"]} == set(AUTONOMOUS_DOMAINS)
     assert any(row["selected_arm_id"] == state["arms"][0]["arm_id"] for row in portfolio["coverage"])
+    replayed = settle_autonomous_tool_selection_outcome(
+        state,
+        domain="coding",
+        capability="repository_inspection",
+        tool="repository_catalog",
+        reward=0.9,
+        latency_ms=40,
+        outcome_digest="2" * 64,
+    )
+    assert replayed == state
+    with pytest.raises(BrainRunError, match="contradictory metadata"):
+        settle_autonomous_tool_selection_outcome(
+            state,
+            domain="coding",
+            capability="repository_inspection",
+            tool="repository_catalog",
+            reward=-0.9,
+            latency_ms=40,
+            outcome_digest="2" * 64,
+        )
     public = json.dumps(portfolio)
     assert "inspect the repository" not in public
     assert "api_key" not in public.lower()

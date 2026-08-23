@@ -223,6 +223,7 @@ AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA = "bioprism-python-autonomous-capability-
 AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA = "bioprism-autonomous-tool-selection-state/0.1"
 AUTONOMOUS_TOOL_SELECTION_POLICY = "stage_coverage_then_capability_then_ucb_value_then_task_relevance_then_read_only_then_name"
 MAX_AUTONOMOUS_TOOL_SELECTION_ARMS = 512
+MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS = 4096
 AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_STATUSES = (
     "ready",
@@ -435,9 +436,11 @@ def normalize_autonomous_tool_selection_state(value: Mapping[str, Any] | None) -
     """Normalize bounded value-only tool-arm state for deterministic portfolio planning."""
 
     if value is None:
-        return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": 0, "arms": []}
+        return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": 0, "arms": [], "credited_outcomes": []}
     if not isinstance(value, Mapping):
         raise BrainRunError("tool selection state must be a mapping")
+    if set(value).difference({"schema", "generation", "arms", "credited_outcomes"}):
+        raise BrainRunError("tool selection state contains unsupported fields")
     if value.get("schema") not in (None, AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA):
         raise BrainRunError("tool selection state schema is unsupported")
     generation = int(_tool_selection_number("tool selection generation", value.get("generation", 0), 0, 1_000_000_000, integer=True))
@@ -466,7 +469,32 @@ def normalize_autonomous_tool_selection_state(value: Mapping[str, Any] | None) -
             raise BrainRunError(f"tool selection arm {arm_id} disabled must be boolean")
         arms.append({"arm_id": arm_id, "pulls": pulls, "reward_sum": reward_sum, "failures": failures, "latency_ms": latency_ms, "disabled": disabled})
     arms.sort(key=lambda arm: arm["arm_id"])
-    return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": generation, "arms": arms}
+    raw_credits = value.get("credited_outcomes", [])
+    if not isinstance(raw_credits, Sequence) or isinstance(raw_credits, (str, bytes)) or len(raw_credits) > MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS:
+        raise BrainRunError(f"tool selection state credits must contain at most {MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS} entries")
+    credit_ids: set[str] = set()
+    credited_outcomes: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_credits):
+        if not isinstance(raw, Mapping):
+            raise BrainRunError(f"tool selection credit {index} is malformed")
+        if set(raw).difference({"outcome_digest", "arm_id", "reward", "failed", "latency_ms"}):
+            raise BrainRunError("tool selection credit contains unsupported fields")
+        outcome_digest = raw.get("outcome_digest")
+        if not isinstance(outcome_digest, str) or len(outcome_digest) != 64 or any(character not in "0123456789abcdef" for character in outcome_digest):
+            raise BrainRunError(f"tool selection credit {index} outcome_digest must be a lowercase SHA-256 digest")
+        if outcome_digest in credit_ids:
+            raise BrainRunError(f"tool selection state contains duplicate outcome {outcome_digest}")
+        credit_ids.add(outcome_digest)
+        arm_id = _identifier(f"tool selection credit {index} arm_id", raw.get("arm_id"))
+        reward = float(_tool_selection_number(f"tool selection credit {index} reward", raw.get("reward"), -1, 1))
+        failed = raw.get("failed")
+        if not isinstance(failed, bool):
+            raise BrainRunError(f"tool selection credit {index} failed must be boolean")
+        latency_raw = raw.get("latency_ms")
+        latency_ms = None if latency_raw is None else _tool_selection_json_number(float(_tool_selection_number(f"tool selection credit {index} latency_ms", latency_raw, 0, 3_600_000)))
+        credited_outcomes.append({"outcome_digest": outcome_digest, "arm_id": arm_id, "reward": _tool_selection_json_number(reward), "failed": failed, "latency_ms": latency_ms})
+    credited_outcomes.sort(key=lambda credit: credit["outcome_digest"])
+    return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": generation, "arms": arms, "credited_outcomes": credited_outcomes}
 
 
 def autonomous_tool_selection_arm_id(domain: str, capability: str, tool: str) -> str:
@@ -509,6 +537,7 @@ def settle_autonomous_tool_selection_outcome(
     reward: float,
     failed: bool = False,
     latency_ms: float | None = None,
+    outcome_digest: str | None = None,
 ) -> dict[str, Any]:
     """Apply one evaluator-approved value-only outcome to caller-owned tool-arm state."""
 
@@ -523,6 +552,15 @@ def settle_autonomous_tool_selection_outcome(
         latency_ms = float(_tool_selection_number("tool selection outcome latency_ms", latency_ms, 0, 3_600_000))
     current = normalize_autonomous_tool_selection_state(state)
     arm_id = autonomous_tool_selection_arm_id(domain, capability, tool)
+    if outcome_digest is not None and (not isinstance(outcome_digest, str) or len(outcome_digest) != 64 or any(character not in "0123456789abcdef" for character in outcome_digest)):
+        raise BrainRunError("tool selection outcome outcome_digest must be a lowercase SHA-256 digest")
+    if outcome_digest is not None:
+        prior_credit = next((credit for credit in current["credited_outcomes"] if credit["outcome_digest"] == outcome_digest), None)
+        if prior_credit is not None:
+            normalized_latency = _tool_selection_json_number(latency_ms)
+            if prior_credit["arm_id"] != arm_id or prior_credit["reward"] != _tool_selection_json_number(reward) or prior_credit["failed"] != failed or prior_credit["latency_ms"] != normalized_latency:
+                raise BrainRunError("tool selection outcome digest was reused with contradictory metadata")
+            return current
     prior = next((arm for arm in current["arms"] if arm["arm_id"] == arm_id), None)
     pulls = int(prior["pulls"] if prior else 0)
     prior_latency = prior.get("latency_ms") if prior else None
@@ -537,7 +575,32 @@ def settle_autonomous_tool_selection_outcome(
     arms = [arm for arm in current["arms"] if arm["arm_id"] != arm_id] + [next_arm]
     if len(arms) > MAX_AUTONOMOUS_TOOL_SELECTION_ARMS:
         raise BrainRunError("tool selection state has reached its arm bound")
-    return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": current["generation"] + 1, "arms": sorted(arms, key=lambda arm: arm["arm_id"])}
+    credited_outcomes = list(current["credited_outcomes"])
+    if outcome_digest is not None:
+        credited_outcomes.append({"outcome_digest": outcome_digest, "arm_id": arm_id, "reward": _tool_selection_json_number(reward), "failed": failed, "latency_ms": _tool_selection_json_number(latency_ms)})
+    if len(credited_outcomes) > MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS:
+        raise BrainRunError("tool selection credit ledger has reached its bound")
+    return {"schema": AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, "generation": current["generation"] + 1, "arms": sorted(arms, key=lambda arm: arm["arm_id"]), "credited_outcomes": sorted(credited_outcomes, key=lambda credit: credit["outcome_digest"])}
+
+
+def _update_autonomous_tool_selection_state(
+    state: Mapping[str, Any] | None,
+    outcome: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bridge metadata-only evaluator credit into the adaptive tool selector."""
+
+    if not isinstance(outcome, Mapping):
+        raise BrainRunError("tool selection evaluator outcome must be a mapping")
+    return settle_autonomous_tool_selection_outcome(
+        state,
+        domain=outcome.get("domain"),
+        capability=outcome.get("capability"),
+        tool=outcome.get("tool"),
+        reward=outcome.get("reward"),
+        failed=outcome.get("failed", False),
+        latency_ms=outcome.get("latency_ms"),
+        outcome_digest=outcome.get("outcome_digest"),
+    )
 
 
 # This is an intentionally small, reviewed routing vocabulary rather than a claim that a
@@ -14789,6 +14852,7 @@ class AutonomousAgent:
         bandit_state: Mapping[str, Any] | None = None,
         bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
         ledger: BrainLearningLedger | None = None,
+        tool_selection_state: Mapping[str, Any] | None = None,
     ) -> AutonomousToolLearningReport:
         """Settle one capability execution through independent evaluator evidence."""
 
@@ -14802,6 +14866,8 @@ class AutonomousAgent:
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
+                tool_selection_state=tool_selection_state,
+                tool_selection_updater=_update_autonomous_tool_selection_state,
             )
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability execution evaluation failed") from error
@@ -14816,6 +14882,7 @@ class AutonomousAgent:
         bandit_state: Mapping[str, Any] | None = None,
         bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
         ledger: BrainLearningLedger | None = None,
+        tool_selection_state: Mapping[str, Any] | None = None,
     ) -> AutonomousToolLearningReport:
         """Settle an ordered capability-result batch through one evaluator/state stream."""
 
@@ -14829,6 +14896,8 @@ class AutonomousAgent:
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
+                tool_selection_state=tool_selection_state,
+                tool_selection_updater=_update_autonomous_tool_selection_state,
             )
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability execution batch evaluation failed") from error
@@ -14842,6 +14911,7 @@ class AutonomousAgent:
         bandit_state: Mapping[str, Any] | None = None,
         bandit_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
         ledger: BrainLearningLedger | None = None,
+        tool_selection_state: Mapping[str, Any] | None = None,
     ) -> AutonomousToolLearningReport:
         """Score selected live tool receipts and return the next online-learning state.
 
@@ -14865,6 +14935,8 @@ class AutonomousAgent:
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
+                tool_selection_state=tool_selection_state,
+                tool_selection_updater=_update_autonomous_tool_selection_state,
             )
         except (ArgumentError, ValueError) as error:
             raise BrainRunError("domain tool receipt evaluation failed") from error
@@ -18080,6 +18152,10 @@ __all__ = [
     "AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PLAN_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA",
+    "AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA",
+    "AUTONOMOUS_TOOL_SELECTION_POLICY",
+    "MAX_AUTONOMOUS_TOOL_SELECTION_ARMS",
+    "MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS",
     "AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PLAN_STATUSES",
     "MAX_AUTONOMOUS_CAPABILITY_CONTRACTS",
@@ -18116,6 +18192,9 @@ __all__ = [
     "AutonomousDomainToolBinding",
     "AutonomousDomainToolRegistry",
     "AutonomousDomainToolRuntime",
+    "normalize_autonomous_tool_selection_state",
+    "autonomous_tool_selection_arm_id",
+    "settle_autonomous_tool_selection_outcome",
     "AutonomousCapabilityActivation",
     "AutonomousCapabilityActivationStore",
     "AutonomousCrossDomainBlueprint",
