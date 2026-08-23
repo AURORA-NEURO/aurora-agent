@@ -1038,6 +1038,7 @@ class AutonomousSemanticRouteResult:
     prompt_digest: str | None = None
     plan_digest: str | None = None
     outcome_digest: str | None = None
+    domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -1047,6 +1048,8 @@ class AutonomousSemanticRouteResult:
             "provider_abstained",
             "provider_invalid",
             "provider_disagreement",
+            "policy_review_required",
+            "policy_blocked",
         }:
             raise BrainRunError("semantic route result has an invalid status")
         if not isinstance(self.route, AutonomousRouteProposal) or not isinstance(
@@ -1089,12 +1092,16 @@ class AutonomousSemanticRouteResult:
         ):
             if value is not None:
                 _route_digest(value, f"semantic route {name}")
+        if self.domain_policy_admission is not None and not isinstance(
+            self.domain_policy_admission, AutonomousDomainPolicyAdmission
+        ):
+            raise BrainRunError("semantic route domain policy admission is invalid")
         object.__setattr__(self, "semantic_candidates", candidates)
         object.__setattr__(self, "semantic_selected_domains", selected)
         object.__setattr__(self, "semantic_confidence", float(self.semantic_confidence))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema": AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
             "status": self.status,
             "route": self.route.to_dict(),
@@ -1110,6 +1117,9 @@ class AutonomousSemanticRouteResult:
             "retention": "route_scores_and_digests_only; classifier_transcript_not_retained",
             "authorization": "routing_evidence_only; no tools_or_effects_authorized",
         }
+        if self.domain_policy_admission is not None:
+            result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -3283,7 +3293,13 @@ class AutonomousAutoResult:
         return status if isinstance(status, str) and status else self.status
 
     def __post_init__(self) -> None:
-        if self.status not in {"completed", "route_review_required", "planning_review_required"}:
+        if self.status not in {
+            "completed",
+            "route_review_required",
+            "planning_review_required",
+            "policy_review_required",
+            "policy_blocked",
+        }:
             raise BrainRunError("automatic result status is invalid")
         if not isinstance(self.route, AutonomousRouteProposal):
             raise BrainRunError("automatic result requires an AutonomousRouteProposal")
@@ -3321,6 +3337,15 @@ class AutonomousAutoResult:
         ):
             raise BrainRunError(
                 "planning review result must contain a non-abstained route and provider planning proposal"
+            )
+        if self.status in {"policy_review_required", "policy_blocked"} and (
+            self.route.abstained
+            or self.result is not None
+            or self.planning is not None
+            or self.semantic_route is None
+        ):
+            raise BrainRunError(
+                "policy review result must contain a non-abstained route and semantic policy outcome"
             )
         if self.status == "completed" and (self.route.abstained or self.result is None):
             raise BrainRunError("completed automatic result requires an executed routed task")
@@ -3433,6 +3458,7 @@ def _batch_result_classification(result: Any) -> tuple[str, str | None]:
         "route_review_required",
         "plan_review_required",
         "planning_review_required",
+        "policy_blocked",
         "connector_blocked",
         "provider_abstained",
         "provider_invalid",
@@ -7073,6 +7099,11 @@ class AutonomousTaskOrchestrator:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
     ) -> AutonomousSemanticRouteResult:
         """Use one approved provider call to improve routing, then reconcile it with the catalogue.
 
@@ -7145,6 +7176,34 @@ class AutonomousTaskOrchestrator:
             response_schema=route_schema,
             max_input_tokens=input_tokens,
         )
+        domain_policy_admission = _planning_domain_policy_admission(
+            domain="cross_domain",
+            mode=domain_policy_mode,
+            estimated_input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            evidence_ready=domain_policy_evidence_ready,
+            evaluator_configured=domain_policy_evaluator_configured,
+            effects_requested=domain_policy_effects_requested,
+            effects_approved=domain_policy_effects_approved,
+        )
+        if domain_policy_admission is not None and domain_policy_admission.decision != "admitted":
+            return AutonomousSemanticRouteResult(
+                status=(
+                    "policy_blocked"
+                    if domain_policy_admission.decision == "blocked"
+                    else "policy_review_required"
+                ),
+                route=deterministic,
+                deterministic_route=deterministic,
+                domain_policy_admission=domain_policy_admission,
+            )
+        if approve_provider_call is not True:
+            return AutonomousSemanticRouteResult(
+                status="approval_required",
+                route=deterministic,
+                deterministic_route=deterministic,
+                domain_policy_admission=domain_policy_admission,
+            )
         selection_request = self.brain.build_adaptive_model_selection(
             task=classifier_task,
             model_candidates=model_candidates,
@@ -7188,6 +7247,7 @@ class AutonomousTaskOrchestrator:
             "prompt_digest": run.prompt.get("prompt_digest"),
             "plan_digest": plan_digest,
             "outcome_digest": run.outcome_digest,
+            "domain_policy_admission": domain_policy_admission,
         }
         if run.status != "completed_provider_call" or run.response is None:
             return AutonomousSemanticRouteResult(
@@ -8341,6 +8401,11 @@ class AutonomousTaskOrchestrator:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
     ) -> AutonomousAutoBlueprint:
         """Use a caller-approved classifier, reconcile it, then build the executable blueprint."""
 
@@ -8367,6 +8432,11 @@ class AutonomousTaskOrchestrator:
             run_id=run_id,
             max_output_tokens=max_output_tokens,
             temperature=temperature,
+            domain_policy_mode=domain_policy_mode,
+            domain_policy_evidence_ready=domain_policy_evidence_ready,
+            domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+            domain_policy_effects_requested=domain_policy_effects_requested,
+            domain_policy_effects_approved=domain_policy_effects_approved,
         )
         return self._prepare_auto_from_route(
             task=task,
@@ -15512,11 +15582,19 @@ class AutonomousAgent:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
     ) -> AutonomousSemanticRouteResult:
         """Improve provider-free routing with a bounded, caller-approved semantic proposal."""
 
         self._assert_selection_promotion_admitted()
-        candidates = self._resolve_candidates(model_candidates)
+        candidates = self._resolve_candidates(
+            model_candidates,
+            allow_empty=domain_policy_mode == "strict",
+        )
         resolved_credentials = self._credential_mapping(credentials)
         resolved_overrides = None if selection_overrides is None else dict(selection_overrides)
         if self.health_ledger is not None:
@@ -15546,6 +15624,11 @@ class AutonomousAgent:
             run_id=run_id,
             max_output_tokens=max_output_tokens,
             temperature=temperature,
+            domain_policy_mode=domain_policy_mode,
+            domain_policy_evidence_ready=domain_policy_evidence_ready,
+            domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+            domain_policy_effects_requested=domain_policy_effects_requested,
+            domain_policy_effects_approved=domain_policy_effects_approved,
         )
 
     def prepare_auto(self, **kwargs: Any) -> AutonomousAutoBlueprint:
@@ -15564,7 +15647,10 @@ class AutonomousAgent:
         """Use BYOK semantic routing, then build a reconciled automatic blueprint."""
 
         self._assert_selection_promotion_admitted()
-        candidates = self._resolve_candidates(model_candidates)
+        candidates = self._resolve_candidates(
+            model_candidates,
+            allow_empty=kwargs.get("domain_policy_mode") == "strict",
+        )
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
         if self.health_ledger is not None:
@@ -17777,6 +17863,14 @@ class AutonomousAgent:
                     plan_refinement_digest=plan_digest,
                 )
                 return
+            if rehydrated.status in {"policy_review_required", "policy_blocked"}:
+                if cycle.state.route_digest is None:
+                    cycle.advance(phase="route_pending", route_digest=route_digest)
+                cycle.terminal(
+                    rehydrated.status,
+                    outcome_digest=content_digest(rehydrated.to_dict()),
+                )
+                return
             if rehydrated.status == "route_review_required":
                 if cycle.state.route_digest is None:
                     cycle.advance(phase="route_pending", route_digest=route_digest)
@@ -17928,6 +18022,11 @@ class AutonomousAgent:
                 run_id=semantic_run_id,
                 max_output_tokens=semantic_max_output_tokens,
                 temperature=semantic_temperature,
+                domain_policy_mode=domain_policy_mode,
+                domain_policy_evidence_ready=domain_policy_evidence_ready,
+                domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+                domain_policy_effects_requested=domain_policy_effects_requested,
+                domain_policy_effects_approved=domain_policy_effects_approved,
                 **prepare_options,
             )
         else:
@@ -17957,7 +18056,44 @@ class AutonomousAgent:
             )
             if decision_cycle.restored:
                 return rehydrate_restored_cycle(decision_cycle)
-            decision_cycle.advance(phase="route_pending", route_digest=blueprint.route.route_digest)
+            decision_cycle.advance(
+                phase="route_pending",
+                route_digest=(
+                    blueprint.semantic_route.route.route_digest
+                    if (
+                        domain_policy_mode == "strict"
+                        and blueprint.semantic_route is not None
+                        and blueprint.semantic_route.status
+                        in {"policy_review_required", "policy_blocked", "approval_required"}
+                    )
+                    else blueprint.route.route_digest
+                ),
+            )
+
+        if (
+            domain_policy_mode == "strict"
+            and blueprint.semantic_route is not None
+            and blueprint.semantic_route.route.abstained is False
+            and blueprint.semantic_route.status
+            in {"policy_review_required", "policy_blocked", "approval_required"}
+        ):
+            result = AutonomousAutoResult(
+                status=(
+                    "policy_blocked"
+                    if blueprint.semantic_route.status == "policy_blocked"
+                    else "policy_review_required"
+                ),
+                route=blueprint.semantic_route.route,
+                semantic_route=blueprint.semantic_route,
+                learning_mode=learning_mode,
+                planning_mode=planning_mode,
+            )
+            if decision_cycle is not None:
+                decision_cycle.terminal(
+                    result.status,
+                    outcome_digest=content_digest(result.to_dict()),
+                )
+            return result
 
         if blueprint.route.abstained:
             result = AutonomousAutoResult(

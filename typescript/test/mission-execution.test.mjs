@@ -418,6 +418,24 @@ test("durable mission semantic routing stays review-only until classifier approv
   assert.equal(calls(), 0);
 });
 
+test("durable mission strict semantic routing pauses at policy admission", async () => {
+  const { agent, calls } = semanticAgent({ selected_domains: [], confidence: 0, abstain: true, abstain_reason: "must not dispatch" });
+  const step = { id: "policy-review", domain: "coding", capability: "testing", objective: "wait for policy review", tool: "mission_probe", arguments: {} };
+  const executor = new AutonomousMissionExecutor({
+    agent,
+    catalogue: await catalogue(),
+    executeStep: async () => ({ status: "succeeded", value: { should_not_run: true } }),
+  });
+  const result = await executor.start(mission([step], {}, "Help with an unfamiliar coding task."), {
+    approveProviderCall: true,
+    semanticRouting: { enabled: true, approveProviderCall: true, domainPolicyMode: "strict" },
+  });
+  assert.equal(result.status, "policy_review_required");
+  assert.equal(result.semantic_route_status, "policy_review_required");
+  assert.equal(result.checkpoint, null);
+  assert.equal(calls(), 0, "policy admission must precede the mission classifier and steps");
+});
+
 test("mission step adapters receive one shared caller-owned cost budget", async () => {
   const budgets = [];
   const step = { id: "budgeted", domain: "coding", capability: "testing", objective: "exercise budget propagation", tool: "mission_probe", arguments: {} };

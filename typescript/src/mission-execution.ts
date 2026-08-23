@@ -54,6 +54,8 @@ export const AUTONOMOUS_MISSION_EVENT_TYPES = [
 export const AUTONOMOUS_MISSION_STATUSES = [
   "planned",
   "route_review_required",
+  "policy_review_required",
+  "policy_blocked",
   "running",
   "approval_required",
   "reconciliation_required",
@@ -342,9 +344,15 @@ export interface AutonomousMissionExecuteOptions {
   maxTotalCostUnits?: number;
   /** Caller-owned aggregate budget shared across routing and nested step provider calls. */
   costBudget?: AutonomousCostBudget;
+  /** Strict provider-free policy admission controls for semantic routing. */
+  domainPolicyMode?: AutonomousSemanticRouteOptions["domainPolicyMode"];
+  domainPolicyEvidenceReady?: boolean;
+  domainPolicyEvaluatorConfigured?: boolean;
+  domainPolicyEffectsRequested?: boolean;
+  domainPolicyEffectsApproved?: boolean;
 }
 
-export interface AutonomousMissionSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "candidates" | "credential" | "credentialFor" | "hints" | "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxCostPerMillionTokens" | "maxLatencyMs" | "minQuality" | "maxProviderFailovers"> {
+export interface AutonomousMissionSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "candidates" | "credential" | "credentialFor" | "hints" | "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxCostPerMillionTokens" | "maxLatencyMs" | "minQuality" | "maxProviderFailovers" | "domainPolicyMode" | "domainPolicyEvidenceReady" | "domainPolicyEvaluatorConfigured" | "domainPolicyEffectsRequested" | "domainPolicyEffectsApproved"> {
   enabled?: boolean;
 }
 
@@ -816,7 +824,8 @@ export class AutonomousMissionExecutor {
       : await this.resolveStartRoute(mission, normalizedOptions);
     const route = routeResolution.route;
     if (routeResolution.semantic_status !== null && routeResolution.semantic_status !== "completed") {
-      return this.result("route_review_required", preflight, existing, [], route, routeResolution.semantic_status);
+      const status = routeResolution.semantic_status === "policy_blocked" ? "policy_blocked" : routeResolution.semantic_status === "policy_review_required" ? "policy_review_required" : "route_review_required";
+      return this.result(status, preflight, existing, [], route, routeResolution.semantic_status);
     }
     const policy = policyOf(mission);
     if (policy.execute !== true) return this.result("planned", preflight, existing, [], route, routeResolution.semantic_status);
@@ -868,6 +877,11 @@ export class AutonomousMissionExecutor {
       maxTotalCostUnits: options.costBudget ? undefined : options.maxTotalCostUnits,
       costBudget: options.costBudget,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
+      domainPolicyMode: options.semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
+      domainPolicyEvidenceReady: options.semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: options.semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: options.semanticRouting.domainPolicyEffectsRequested ?? options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: options.semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
       signal: options.signal,
     });
     if (semantic.status === "completed" && !routeMatchesMission(semantic.route, mission)) return { route: semantic.route, semantic_status: "provider_disagreement" };

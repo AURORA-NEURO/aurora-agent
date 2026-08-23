@@ -61,9 +61,12 @@ _GOAL_PAUSED_RESULTS = frozenset(
         "stage_blocked",
         "children_partial",
         "child_incomplete",
+        "policy_review_required",
     }
 )
-_GOAL_BLOCKED_RESULTS = frozenset({"route_review_required", "planning_review_required", "provider_disagreement"})
+_GOAL_BLOCKED_RESULTS = frozenset(
+    {"route_review_required", "planning_review_required", "policy_blocked", "provider_disagreement"}
+)
 
 _ALLOWED_TRANSITIONS: dict[GoalStatus, frozenset[GoalStatus]] = {
     "ready": frozenset({"running", "blocked", "cancelled"}),

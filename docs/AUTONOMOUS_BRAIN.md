@@ -104,6 +104,14 @@ bounded proposal to be produced; the subsequent execution re-checks the caller's
 acceptance and effect posture. This prevents a planner call from becoming an unreviewed escape
 hatch around the execution policy.
 
+Semantic provider routing is covered by the same boundary. `route_with_provider`,
+`prepare_auto_with_provider`, and Python `run_auto(..., semantic_routing=True)` perform a
+provider-free cross-domain admission before model selection or classifier invocation. A strict
+route returns a typed policy admission with `policy_review_required` or `policy_blocked`; an
+explicit provider approval is still separate from evidence and evaluator readiness. Automatic
+execution preserves that semantic review result and cannot silently fall back to the deterministic
+route as an authorization bypass.
+
 ## Credential lifecycle
 
 Applications collect provider keys themselves. The SDK supports four caller-owned entry points:

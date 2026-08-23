@@ -141,6 +141,34 @@ def test_strict_provider_planning_is_gated_for_every_domain_before_model_selecti
         assert admitted.domain_policy_admission.decision == "admitted"
 
 
+def test_strict_semantic_routing_is_gated_before_model_selection():
+    orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(object(), LLMRuntime()))
+    held = orchestrator.route_with_provider(
+        task="route a bounded coding and science review",
+        model_candidates=(),
+        credentials={},
+        domain_policy_mode="strict",
+        approve_provider_call=True,
+    )
+    assert held.status == "policy_review_required"
+    assert held.domain_policy_admission is not None
+    assert held.domain_policy_admission.domain == "cross_domain"
+    assert "evaluator_required" in held.domain_policy_admission.reasons
+
+    approval = orchestrator.route_with_provider(
+        task="route a bounded coding and science review",
+        model_candidates=(),
+        credentials={},
+        domain_policy_mode="strict",
+        domain_policy_evidence_ready=True,
+        domain_policy_evaluator_configured=True,
+        approve_provider_call=False,
+    )
+    assert approval.status == "approval_required"
+    assert approval.domain_policy_admission is not None
+    assert approval.domain_policy_admission.decision == "admitted"
+
+
 def test_strict_automatic_provider_planning_stops_before_model_selection():
     agent = AutonomousAgent(object(), LLMRuntime())
     result = agent.run_auto(
@@ -156,6 +184,23 @@ def test_strict_automatic_provider_planning_stops_before_model_selection():
     assert result.planning.status == "policy_review_required"
     assert result.planning.domain_policy_admission is not None
     assert result.planning.domain_policy_admission.domain == "coding"
+
+
+def test_strict_automatic_semantic_routing_stops_before_model_selection():
+    agent = AutonomousAgent(object(), LLMRuntime())
+    result = agent.run_auto(
+        task="prepare a bounded coding plan",
+        credentials={},
+        model_candidates=(),
+        semantic_routing=True,
+        domain_policy_mode="strict",
+        approve_provider_call=True,
+    )
+    assert result.status == "policy_review_required"
+    assert result.semantic_route is not None
+    assert result.semantic_route.status == "policy_review_required"
+    assert result.semantic_route.domain_policy_admission is not None
+    assert result.semantic_route.domain_policy_admission.domain == "cross_domain"
 
 
 def test_strict_workflow_stage_rechecks_policy_before_provider_dispatch():

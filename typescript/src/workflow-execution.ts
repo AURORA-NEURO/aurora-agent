@@ -48,7 +48,7 @@ export const AUTONOMOUS_DURABLE_JOB_WORKER_SCHEMA = "bioprism-typescript-autonom
 export const AUTONOMOUS_DURABLE_JOB_WORKER_MAX_BATCH = 64;
 
 export type AutonomousWorkflowCheckpointStatus = "running" | "paused" | "completed" | "failed";
-export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "stage_blocked" | "stage_proposed" | "stage_not_attempted" | "route_review_required";
+export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "policy_review_required" | "policy_blocked" | "failed" | "stage_blocked" | "stage_proposed" | "stage_not_attempted" | "route_review_required";
 export type AutonomousWorkflowReceiptStageStatus = "not_started" | "completed" | "approval_required" | "reconciliation_required" | "failed" | "proposed" | "blocked" | "not_attempted";
 export type AutonomousWorkflowReceiptNextAction = "review_route" | "approve_provider_call" | "continue_workflow" | "retry_stage" | "reconcile_stage" | "complete" | "inspect_failure";
 export type AutonomousWorkflowSemanticRouteStatus = AutonomousSemanticRouteResult["status"];
@@ -247,7 +247,7 @@ export interface AutonomousWorkflowExecuteOptions extends AutonomousRunOptions {
   semanticRouting?: AutonomousWorkflowSemanticRoutingOptions;
 }
 
-export interface AutonomousWorkflowSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxProviderFailovers"> {
+export interface AutonomousWorkflowSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxProviderFailovers" | "domainPolicyMode" | "domainPolicyEvidenceReady" | "domainPolicyEvaluatorConfigured" | "domainPolicyEffectsRequested" | "domainPolicyEffectsApproved"> {
   enabled?: boolean;
 }
 
@@ -398,7 +398,7 @@ const AUTONOMOUS_WORKFLOW_RECEIPT_ACTIONS = new Set<AutonomousWorkflowReceiptNex
   "review_route", "approve_provider_call", "continue_workflow", "retry_stage", "reconcile_stage", "complete", "inspect_failure",
 ]);
 const AUTONOMOUS_WORKFLOW_RECEIPT_EXECUTION_STATUSES = new Set<AutonomousWorkflowExecutionStatus>([
-  "completed", "paused", "approval_required", "failed", "stage_blocked", "stage_proposed", "stage_not_attempted", "route_review_required",
+  "completed", "paused", "approval_required", "policy_review_required", "policy_blocked", "failed", "stage_blocked", "stage_proposed", "stage_not_attempted", "route_review_required",
 ]);
 
 function workflowReceiptDigestPayload(value: AutonomousWorkflowExecutionReceiptFields): JsonObject {
@@ -498,7 +498,7 @@ function workflowReceiptStageProjection(
 }
 
 function workflowReceiptNextActionFor(status: AutonomousWorkflowExecutionStatus, incomplete: readonly string[], reconciliation: boolean, statuses: Record<string, AutonomousWorkflowReceiptStageStatus>): AutonomousWorkflowReceiptNextAction {
-  if (status === "route_review_required") return "review_route";
+  if (status === "route_review_required" || status === "policy_review_required" || status === "policy_blocked") return "review_route";
   if (reconciliation) return "reconcile_stage";
   if (status === "approval_required") return "approve_provider_call";
   if (status === "completed") return "complete";
@@ -1246,6 +1246,11 @@ export class AutonomousWorkflowExecutor {
       executionAttempt: options.executionAttempt,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers ?? options.maxProviderFailovers,
       executionLifecycle: options.executionLifecycle,
+      domainPolicyMode: options.semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
+      domainPolicyEvidenceReady: options.semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: options.semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: options.semanticRouting.domainPolicyEffectsRequested ?? options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: options.semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
       signal: options.signal,
       observer: options.observer,
     });
@@ -1264,7 +1269,8 @@ export class AutonomousWorkflowExecutor {
   }
 
   private async routeReviewResult(route: AutonomousRouteProposal | null = null, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null = null): Promise<AutonomousWorkflowExecutionResult> {
-    const base: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, blueprint: null, checkpoint: null, route, semantic_route_status: semanticStatus, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+    const status: AutonomousWorkflowExecutionStatus = semanticStatus === "policy_blocked" ? "policy_blocked" : semanticStatus === "policy_review_required" ? "policy_review_required" : "route_review_required";
+    const base: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: null, blueprint: null, checkpoint: null, route, semantic_route_status: semanticStatus, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
     return { ...base, execution_receipt: await autonomousWorkflowExecutionReceipt(base) };
   }
 

@@ -267,6 +267,29 @@ test("durable semantic routing remains review-only until its separate approval i
   assert.equal(calls, 0);
 });
 
+test("durable workflow strict semantic routing pauses at policy admission", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => { calls += 1; return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] }); },
+  });
+  llm.registerProvider(openaiCompatibleProvider("semantic-workflow-policy", "https://semantic-workflow-policy.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "semantic-workflow-policy", model: "semantic-workflow-policy-model" };
+  agent.registerModel(candidate);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const result = await executor.start("Classify this unfamiliar coding migration.", {
+    jobId: "workflow-semantic-policy-1",
+    candidates: [candidate],
+    semanticRouting: { enabled: true, approveProviderCall: true, domainPolicyMode: "strict" },
+    approveProviderCall: true,
+  });
+  assert.equal(result.status, "policy_review_required");
+  assert.equal(result.semantic_route_status, "policy_review_required");
+  assert.equal(result.checkpoint, null);
+  assert.equal(calls, 0, "policy admission must precede workflow classifier and stages");
+});
+
 test("durable workflows honor route handoffs and reject a changed persisted route identity", async () => {
   let calls = 0;
   const llm = new LLMRuntime({

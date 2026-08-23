@@ -145,6 +145,22 @@ test("durable cross-domain semantic routing remains review-only until classifier
   assert.equal(calls, 0);
 });
 
+test("durable cross-domain strict semantic routing pauses at policy admission", async () => {
+  const { agent, calls } = makeAgent();
+  const executor = new AutonomousCrossDomainExecutor(agent, new InMemoryAutonomousCrossDomainCheckpointStore());
+  const result = await executor.start(task, {
+    jobId: "semantic-cross-policy-1",
+    candidates: [model()],
+    subtasks,
+    semanticRouting: { enabled: true, approveProviderCall: true, allowCrossDomain: true, domainPolicyMode: "strict" },
+    approveProviderCall: true,
+  });
+  assert.equal(result.status, "policy_review_required");
+  assert.equal(result.semantic_route_status, "policy_review_required");
+  assert.equal(result.checkpoint, null);
+  assert.equal(calls(), 0, "policy admission must precede classifier and fan-out dispatch");
+});
+
 test("durable cross-domain execution advances one bounded step and rehydrates caller-owned children", async () => {
   const { agent, calls } = makeAgent();
   const preview = await agent.blueprint(task, { subtasks });

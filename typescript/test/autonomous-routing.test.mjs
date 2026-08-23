@@ -87,6 +87,31 @@ test("semantic routing applies caller model-selection gates before classifier di
   assert.equal(calls(), 0, "semantic selection gates must run before classifier transport");
 });
 
+test("strict semantic routing admits policy before model selection or classifier dispatch", async () => {
+  const { agent, calls } = routerAgent([{ selected_domains: [{ domain: "coding", score: 0.91, rationale: "implementation" }], confidence: 0.92, abstain: false, abstain_reason: null }]);
+  const held = await semanticRouteAutonomousTask(agent, "Route this bounded coding task", {
+    candidates: [],
+    domainPolicyMode: "strict",
+    approveProviderCall: true,
+  });
+  assert.equal(held.status, "policy_review_required");
+  assert.equal(held.domain_policy_admission.domain, "cross_domain");
+  assert.equal(held.domain_policy_admission.decision, "review_required");
+  assert.ok(held.domain_policy_admission.reasons.includes("evidence_required_before_provider"));
+  assert.equal(calls(), 0);
+
+  const approval = await semanticRouteAutonomousTask(agent, "Route this bounded coding task", {
+    candidates: [],
+    domainPolicyMode: "strict",
+    domainPolicyEvidenceReady: true,
+    domainPolicyEvaluatorConfigured: true,
+    approveProviderCall: false,
+  });
+  assert.equal(approval.status, "approval_required");
+  assert.equal(approval.domain_policy_admission.decision, "admitted");
+  assert.equal(calls(), 0);
+});
+
 test("semantic routing fails the supplied execution when provider dispatch throws", async () => {
   const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("semantic provider offline"); } });
   llm.registerProvider(openaiCompatibleProvider("router-provider", "https://router.test", { requiresCredential: false }));

@@ -33,7 +33,7 @@ export const AUTONOMOUS_CROSS_DOMAIN_MAX_JOBS = 1_024;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
 export type AutonomousCrossDomainCheckpointStatus = "children_pending" | "synthesis_pending" | "paused" | "reconciliation_required" | "completed" | "failed";
-export type AutonomousCrossDomainExecutionStatus = "completed" | "paused" | "approval_required" | "reconciliation_required" | "failed" | "route_review_required";
+export type AutonomousCrossDomainExecutionStatus = "completed" | "paused" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "failed" | "route_review_required";
 export type AutonomousCrossDomainSemanticRouteStatus = AutonomousSemanticRouteResult["status"];
 export type AutonomousCrossDomainEventType = "started" | "child_completed" | "checkpointed" | "approval_required" | "reconciliation_required" | "reconciliation_retry_authorized" | "synthesis_completed" | "failed" | "completed";
 
@@ -175,7 +175,7 @@ export interface AutonomousCrossDomainExecuteOptions extends AutonomousCrossDoma
   semanticRouting?: AutonomousCrossDomainSemanticRoutingOptions;
 }
 
-export interface AutonomousCrossDomainSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxProviderFailovers"> {
+export interface AutonomousCrossDomainSemanticRoutingOptions extends Pick<AutonomousSemanticRouteOptions, "approveProviderCall" | "minSemanticConfidence" | "maxDomains" | "allowCrossDomain" | "maxOutputTokens" | "maxProviderFailovers" | "domainPolicyMode" | "domainPolicyEvidenceReady" | "domainPolicyEvaluatorConfigured" | "domainPolicyEffectsRequested" | "domainPolicyEffectsApproved"> {
   enabled?: boolean;
 }
 
@@ -666,6 +666,11 @@ export class AutonomousCrossDomainExecutor {
       executionAttempt: options.executionAttempt,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers ?? options.maxProviderFailovers,
       executionLifecycle: options.executionLifecycle,
+      domainPolicyMode: options.semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
+      domainPolicyEvidenceReady: options.semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: options.semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: options.semanticRouting.domainPolicyEffectsRequested ?? options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: options.semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
       signal: options.signal,
       observer: options.observer,
     });
@@ -740,7 +745,8 @@ export class AutonomousCrossDomainExecutor {
   }
 
   private routeReviewResult(route: AutonomousRouteProposal, semanticStatus: AutonomousCrossDomainSemanticRouteStatus | null = null): AutonomousCrossDomainExecutionResult {
-    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, route, semantic_route_status: semanticStatus, blueprint: null, checkpoint: null, events: [], step_results: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, plan_refinement_digest: null, error: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
+    const status: AutonomousCrossDomainExecutionStatus = semanticStatus === "policy_blocked" ? "policy_blocked" : semanticStatus === "policy_review_required" ? "policy_review_required" : "route_review_required";
+    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status, job_id: null, route, semantic_route_status: semanticStatus, blueprint: null, checkpoint: null, events: [], step_results: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, plan_refinement_digest: null, error: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
   }
 
   private async hydrateChildren(jobId: string, checkpoint: AutonomousCrossDomainCheckpoint, blueprint: AutonomousCrossDomainBlueprint, options: AutonomousCrossDomainExecuteOptions): Promise<Map<string, AutonomousRunResult>> {

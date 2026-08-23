@@ -35,6 +35,7 @@ import type {
 import { taskFacetDigests } from "./autonomous-memory.js";
 import { digestJson } from "./tooling.js";
 import type { AutonomousCrossDomainPlanRefinementResult, AutonomousPlanRefinementResult, BrainEvaluatorAssessment, JsonObject } from "./types.js";
+import type { AutonomousDomainPolicyExecutionMode } from "./autonomous-domain-policy.js";
 import {
   AUTONOMOUS_CYCLE_REPLAN_MAX_REPLANS,
   AUTONOMOUS_CYCLE_REPLAN_STATE_SCHEMA,
@@ -87,6 +88,13 @@ export interface AutonomousDecisionCycleSemanticOptions {
   executionAttempt?: number;
   maxProviderFailovers?: number;
   executionLifecycle?: "managed" | "observe_only";
+  /** Strict routing admission is provider-free and is evaluated before classifier selection. */
+  domainPolicyMode?: AutonomousDomainPolicyExecutionMode;
+  domainPolicyEvidenceReady?: boolean;
+  domainPolicyEvaluatorConfigured?: boolean;
+  /** Routing is a proposal, so plan acceptance is intentionally internal and true. */
+  domainPolicyEffectsRequested?: boolean;
+  domainPolicyEffectsApproved?: boolean;
 }
 
 export type AutonomousDecisionCycleEvaluator = (
@@ -791,6 +799,11 @@ export async function runAutonomousDecisionCycle(
       executionAttempt: options.executionAttempt,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
       executionLifecycle: options.executionLifecycle,
+      domainPolicyMode: options.semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
+      domainPolicyEvidenceReady: options.semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: options.semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: options.semanticRouting.domainPolicyEffectsRequested ?? options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: options.semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
       signal: options.signal,
       observer: options.observer,
     });
@@ -1691,6 +1704,11 @@ export async function runAutonomousCrossDomainDecisionCycle(
       executionAttempt: options.executionAttempt,
       maxProviderFailovers: options.semanticRouting.maxProviderFailovers,
       executionLifecycle: options.executionLifecycle,
+      domainPolicyMode: options.semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
+      domainPolicyEvidenceReady: options.semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: options.semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: options.semanticRouting.domainPolicyEffectsRequested ?? options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: options.semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
       signal: options.signal,
       observer: options.observer,
     });

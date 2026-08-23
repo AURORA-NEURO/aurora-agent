@@ -901,6 +901,19 @@ test("decision cycle requires both semantic and execution approvals before any p
   assert.equal(providerGate.calls(), 0);
 });
 
+test("decision cycle forwards strict semantic policy admission before classifier dispatch", async () => {
+  const gated = cycleAgent([{ route: { selected_domains: [{ domain: "coding", score: 0.9, rationale: "code" }], confidence: 0.9, abstain: false, abstain_reason: null } }]);
+  const result = await runAutonomousDecisionCycle(gated.agent, "an unfamiliar task", {
+    approveProviderCall: true,
+    semanticRouting: { enabled: true, approveProviderCall: true, domainPolicyMode: "strict" },
+  });
+  assert.equal(result.status, "policy_review_required");
+  assert.equal(result.semantic_route.status, "policy_review_required");
+  assert.equal(result.semantic_route.domain_policy_admission.domain, "cross_domain");
+  assert.ok(result.semantic_route.domain_policy_admission.reasons.includes("evidence_required_before_provider"));
+  assert.equal(gated.calls(), 0);
+});
+
 test("decision cycle forwards selection gates into semantic routing", async () => {
   const gated = cycleAgent([{ route: { selected_domains: [{ domain: "coding", score: 0.9, rationale: "code" }], confidence: 0.9, abstain: false, abstain_reason: null } }]);
   await assert.rejects(
