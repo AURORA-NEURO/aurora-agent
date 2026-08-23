@@ -108,6 +108,16 @@ project raw values transiently, and the returned digest projection excludes thos
 provider response. Unsettled evidence blocks invocation unless the caller opts into the bounded
 incomplete-evidence mode; offline tests cover the default, refusal, and all-domain paths.
 
+The evidence-backed brain operation now has a restart-safe controller and checkpoint boundary.
+`runAutonomousEvidenceBackedResumable()` and `AutonomousEvidenceBackedController` bind the task,
+request set, run policy, evidence plan, prompt projection, and provider result to a bounded
+metadata-only checkpoint. The shared execution controller hydrates append-only evidence journals
+before dispatch, replaying completed source work without reacquisition while requiring caller-owned
+value rehydration. Provider results are never replayed implicitly: a completed result must match a
+caller rehydration digest, and a pending provider boundary requires an explicit resume decision.
+In-memory, JSON, and CAS-fenced stores plus all-domain restart tests are included; production
+applications still own durable storage, transient values, and provider outcome reconciliation.
+
 The TypeScript autonomous agent now also has an opt-in `structuredDomainResponse` contract for every
 built-in domain. It derives a digest-bound JSON Schema and prompt contract from the reviewed workflow,
 requires ordered stage results and domain-specific answer fields, and semantically revalidates the

@@ -381,7 +381,7 @@ export class InMemoryAutonomousEvidenceRuntimeJournal implements AutonomousEvide
     for (const raw of snapshot.entries) {
       const receipt = await validateReceipt(raw.receipt);
       const assessment = raw.assessment === null ? null : await validateAssessment(raw.assessment);
-      const entry = structuredClone({ ...raw, receipt, assessment });
+      const entry = structuredClone({ ...raw, receipt, assessment }) as AutonomousEvidenceRuntimeJournalEntry;
       if (entry.sequence !== restored.length + 1 || entry.previous_entry_digest !== (restored.at(-1)?.entry_digest ?? null) || await digestJson(journalDescriptor(entry)) !== entry.entry_digest) throw new ArgumentError("evidence runtime snapshot journal chain is invalid");
       restored.push(entry);
     }
@@ -414,12 +414,18 @@ export class AutonomousEvidenceRuntime {
     if (!Array.isArray(records) || records.length > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS) throw new ProviderRuntimeError("evidence runtime journal returned too many records");
     this.recordsByRequest.clear();
     this.valuesByRequest.clear();
-    for (const raw of records) {
+    let previousEntryDigest: string | null = null;
+    for (const [index, raw] of records.entries()) {
+      if (!isObject(raw) || raw.schema !== AUTONOMOUS_EVIDENCE_RUNTIME_JOURNAL_SCHEMA || raw.sequence !== index + 1 || raw.previous_entry_digest !== previousEntryDigest || typeof raw.entry_digest !== "string" || !/^[0-9a-f]{64}$/.test(raw.entry_digest) || raw.retention !== "metadata_only;raw_acquisition_and_evaluator_values_excluded" || raw.secret_material !== "never_returned") throw new ProviderRuntimeError("evidence runtime journal chain metadata is invalid");
       const receipt = await validateReceipt(raw.receipt);
       if (receipt.plan_digest !== this.plan.plan_digest) throw new ProviderRuntimeError("evidence runtime journal belongs to a different evidence plan");
       const assessment = raw.assessment === null ? null : await validateAssessment(raw.assessment);
-      const entry = structuredClone({ ...raw, receipt, assessment });
+      const entry = structuredClone({ ...raw, receipt, assessment }) as AutonomousEvidenceRuntimeJournalEntry;
+      if (await digestJson(journalDescriptor(entry)) !== entry.entry_digest) throw new ProviderRuntimeError("evidence runtime journal entry digest is invalid");
+      // Journals may contain later evaluator revisions for the same request. The chain is
+      // validated above; the latest revision becomes the replay source for this runtime.
       this.recordsByRequest.set(receipt.request_digest, entry);
+      previousEntryDigest = entry.entry_digest;
     }
     return { restored: records.length, replayable: records.length, value_retention: "transient_caller_value_only" };
   }

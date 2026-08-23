@@ -4496,6 +4496,41 @@ execution-plan, prompt, selection, response, and result digests without retainin
 is the intended high-level composition for all twelve domains; it still does not infer that source
 retrieval, evaluator acceptance, model completion, or HTTP success proves task correctness.
 
+For process-restart recovery, use `runAutonomousEvidenceBackedResumable()` or the
+`AutonomousEvidenceBackedController`. The controller persists only task/request/policy/plan,
+evidence, prompt, and provider-result digests. The caller supplies the same evidence journal and
+`rehydrateValue` callback; the execution controller validates and hydrates the append-only journal
+before dispatch, so completed source requests are replayed without reacquisition and missing raw
+values become `reconciliation_required`. A `provider_pending` checkpoint is not an implicit retry:
+the caller must either provide `rehydrateProviderRun()` whose returned run matches the stored
+provider digest, or set `resumeProvider: true` as a new dispatch decision. A provider result that
+cannot be rehydrated produces `provider_reconciliation_required`, never a duplicate provider call:
+
+```typescript
+const controller = new AutonomousEvidenceBackedController(agent, "job-42", checkpointStore);
+const first = await controller.run(task, {
+  registry: adapters,
+  domains: ["science"],
+  requests,
+  execute: { approveSourceDispatch: true, journal, rehydrateValue },
+  run: { domain: "science", candidates, approveProviderCall: true },
+});
+
+const resumed = await controller.run(task, {
+  registry: adapters,
+  domains: ["science"],
+  requests,
+  execute: { approveSourceDispatch: true, journal, rehydrateValue },
+  run: { domain: "science", candidates, approveProviderCall: true },
+  rehydrateProviderRun: ({ checkpoint }) => loadProviderResult(checkpoint.provider_result_digest),
+});
+```
+
+`InMemoryAutonomousEvidenceBackedCheckpointStore`, the bounded JSON adapter, and its
+compare-and-swap variant are reference persistence seams; deployment code owns the actual durable
+store. Checkpoints and resumable projections never contain task text, evidence values, prompts,
+provider responses, credentials, or resolver references.
+
 ```typescript
 const contracts = new AutonomousEvidenceProviderContractRegistry(adapters);
 contracts.register({

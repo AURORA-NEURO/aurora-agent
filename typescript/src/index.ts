@@ -486,6 +486,8 @@ export type {
   AutonomousEvidenceBackedRunStatus,
   AutonomousEvidencePromptProjection,
   AutonomousEvidencePromptBuilder,
+  AutonomousEvidenceBackedRunPreflight,
+  AutonomousEvidenceBackedRunPreflightHook,
   AutonomousEvidenceBackedRunOptions,
   AutonomousEvidenceBackedRunProjection,
   AutonomousEvidenceBackedRunResult,
@@ -917,6 +919,34 @@ export type {
   AutonomousEvidenceExecutionOptions,
   AutonomousEvidenceExecutionResultJSON,
 } from "./autonomous-evidence-execution.js";
+export {
+  AUTONOMOUS_EVIDENCE_BACKED_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_EVIDENCE_BACKED_RESUMABLE_RESULT_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_BACKED_CHECKPOINT_BYTES,
+  validateAutonomousEvidenceBackedCheckpoint,
+  runAutonomousEvidenceBackedResumable,
+  runAutonomousEvidenceBackedResumableWithCheckpoint,
+  InMemoryAutonomousEvidenceBackedCheckpointStore,
+  JsonAutonomousEvidenceBackedCheckpointStore,
+  TransactionalJsonAutonomousEvidenceBackedCheckpointStore,
+  AutonomousEvidenceBackedController,
+} from "./autonomous-evidence-backed-resumable.js";
+export type {
+  AutonomousEvidenceBackedCheckpointStatus,
+  AutonomousEvidenceBackedCheckpointJSON,
+  AutonomousEvidenceBackedCheckpointStore,
+  AutonomousEvidenceBackedCheckpointTextStore,
+  AutonomousEvidenceBackedTransactionalCheckpointTextStore,
+  AutonomousEvidenceBackedProviderRehydrationContext,
+  AutonomousEvidenceBackedProviderRehydrator,
+  AutonomousEvidenceBackedResumableExecutionOptions,
+  AutonomousEvidenceBackedResumableStatus,
+  AutonomousEvidenceBackedResumableRunProjection,
+  AutonomousEvidenceBackedResumableRun,
+  AutonomousEvidenceBackedControllerProjection,
+  AutonomousEvidenceBackedControllerRun,
+  AutonomousEvidenceBackedControllerRunOptions,
+} from "./autonomous-evidence-backed-resumable.js";
 export {
   AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
   AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,

@@ -452,6 +452,10 @@ export class AutonomousEvidenceExecutionController {
     };
     const acquirer = createAutonomousEvidenceAdapterFailoverAcquirer(this.registry, executionPlan.selection_plan, failoverOptions);
     const runtime = new AutonomousEvidenceRuntime({ plan: evidencePlan, journal: options.journal });
+    // A restarted high-level execution must hydrate the journal before the runtime decides
+    // whether a request is fresh. Without this boundary, a valid journal would be mistaken for
+    // an empty runtime and the append-only chain would reject the second acquisition attempt.
+    await runtime.rehydrate();
     const result = await runtime.execute(requests, {
       acquirer,
       ...(options.projector === undefined ? {} : { projector: options.projector }),

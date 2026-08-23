@@ -812,6 +812,16 @@ export type AutonomousEvidencePromptBuilder = (
   projection: AutonomousEvidencePromptProjection,
 ) => readonly AutonomousPromptChunk[] | Promise<readonly AutonomousPromptChunk[]>;
 
+export interface AutonomousEvidenceBackedRunPreflight {
+  executionPlan: AutonomousEvidenceExecutionPlan;
+  evidence: AutonomousEvidenceExecutionResult;
+  promptContext: readonly AutonomousPromptChunk[];
+}
+
+export type AutonomousEvidenceBackedRunPreflightHook = (
+  preflight: AutonomousEvidenceBackedRunPreflight,
+) => void | Promise<void>;
+
 export interface AutonomousEvidenceBackedRunOptions {
   registry: AutonomousEvidenceAdapterRegistry;
   domains?: readonly AutonomousDomainName[];
@@ -824,6 +834,10 @@ export interface AutonomousEvidenceBackedRunOptions {
   run?: AutonomousRunOptions;
   /** Defaults to a metadata-only context. This callback is the explicit transient value bridge. */
   promptBuilder?: AutonomousEvidencePromptBuilder;
+  /** Persist a caller-owned checkpoint immediately before the provider boundary is entered. */
+  beforeProviderRun?: AutonomousEvidenceBackedRunPreflightHook;
+  /** Rehydrate an already-completed caller-owned provider result without invoking a provider. */
+  providerRunOverride?: AutonomousRunResult;
   /** Permit a provider run when evidence is partial or awaiting evaluator settlement. */
   allowIncompleteEvidence?: boolean;
 }
@@ -4224,7 +4238,15 @@ export class AutonomousAgent {
     );
     const runOptions = options.run ?? {};
     const context = normalizeEvidenceBackedPromptContext([...(runOptions.context ?? []), ...projectedContext], 128);
-    const run = await this.run(taskText, { ...runOptions, context });
+    let run: AutonomousRunResult;
+    if (options.providerRunOverride !== undefined) {
+      if (!isObject(options.providerRunOverride) || options.providerRunOverride.schema !== "bioprism-typescript-autonomous-run/0.1") throw new ArgumentError("evidence-backed provider run override is malformed");
+      if (runOptions.approveProviderCall !== true) throw new ArgumentError("evidence-backed provider run override requires provider approval in the reviewed run options");
+      run = options.providerRunOverride;
+    } else {
+      await options.beforeProviderRun?.({ executionPlan, evidence, promptContext: projectedContext });
+      run = await this.run(taskText, { ...runOptions, context });
+    }
     return finish(run.status, evidence, projectedContext, run);
   }
 
