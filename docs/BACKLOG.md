@@ -64,6 +64,13 @@ request, response, or header is persisted. This validates protocol wiring in CI 
 live quota, model availability, provider uptime, or user credential readiness, which remain
 deployment/runtime checks.
 
+Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
+bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
+the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson
+statistics plus credited evaluator outcome digests. This persists adaptation metadata without
+persisting prompts, provider output, credentials, or evidence; evaluator authority, reward quality,
+and multi-process storage ownership remain deployment concerns.
+
 The evidence handoff now preserves that same identity explicitly. Portfolio evidence checkpoints
 use schema `0.2` and carry the nullable provider admission digest; `requireAdmission: true`
 refuses resumable evidence execution without a reviewed admission before journal replay or

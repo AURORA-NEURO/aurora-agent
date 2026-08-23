@@ -168,6 +168,26 @@ export type {
   AutonomousCredentialScopeContext,
 } from "./autonomous-credential-scope.js";
 export {
+  AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_ONLINE_LEARNER_STATE_SCHEMA,
+  MAX_AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_BYTES,
+  MAX_AUTONOMOUS_ONLINE_LEARNER_ARMS,
+  MAX_AUTONOMOUS_ONLINE_LEARNER_CONTEXTS,
+  MAX_AUTONOMOUS_ONLINE_LEARNER_CREDITED_OUTCOMES,
+  validateAutonomousOnlineLearnerSnapshot,
+  snapshotAutonomousOnlineLearner,
+  AutonomousOnlineLearnerPersistenceCoordinator,
+  JsonAutonomousOnlineLearnerSnapshotPersistence,
+  TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence,
+  WebStorageAutonomousOnlineLearnerSnapshotTextStore,
+} from "./autonomous-online-learner-persistence.js";
+export type {
+  AutonomousOnlineLearnerSnapshot,
+  AutonomousOnlineLearnerSnapshotPersistence,
+  AutonomousOnlineLearnerSnapshotTextStore,
+  AutonomousOnlineLearnerTransactionalSnapshotTextStore,
+} from "./autonomous-online-learner-persistence.js";
+export {
   MAX_ALLOWED_TOOLS,
   MISSION_ASSEMBLY_SCHEMA,
   MISSION_TRACE_SCHEMA_VERSION,

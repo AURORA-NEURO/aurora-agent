@@ -3354,8 +3354,17 @@ reconciliation, health, and replay lifecycle:
   accepts provider response text, API keys, or credentials. A caller may provide an
   `idempotency_key`; the MCP transport replays the original projection for that key while the
   returned bandit state retains a bounded credited-outcome receipt. Identical retries are no-ops,
-  but a changed arm, context, reward, failure flag, or evaluator contract is refused. The
-  transport cache is process-scoped; callers must persist the returned state for restart safety.
+but a changed arm, context, reward, failure flag, or evaluator contract is refused. The
+transport cache is process-scoped; callers must persist the returned state for restart safety.
+
+TypeScript applications can now make that restart boundary explicit with
+`snapshotAutonomousOnlineLearner()` and `AutonomousOnlineLearnerPersistenceCoordinator`. The
+coordinator validates the learner policy, arm ledger, contextual rows, credited evaluator outcome
+digests, and a two-level state/snapshot hash before restore; JSON, transactional JSON/CAS, and Web
+Storage adapters are included. A stale coordinator cannot overwrite a newer learner state, and
+credential-shaped fields are rejected before they reach storage. The image contains arm statistics,
+bounded rewards, context labels, and evaluator/outcome digests only—never prompts, provider output,
+task text, credentials, or evidence bodies.
 
 `provider_health` is a value-only map generated from the live runtime. For each registered provider
 it carries circuit state, consecutive failure count, credential readiness, and (when observed)
