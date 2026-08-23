@@ -748,6 +748,10 @@ test("settlement receipts persist through browser JSON and fence stale workers",
   const persisted = await persistence.read();
   await browserPersistence.write(persisted);
   assert.deepEqual(await browserPersistence.read(), persisted);
+  const canonicalReceipt = values.get("aurora-receipts");
+  values.set("aurora-receipts", JSON.stringify(JSON.parse(canonicalReceipt), null, 2));
+  await assert.rejects(() => browserPersistence.read(), /not canonical/);
+  values.set("aurora-receipts", canonicalReceipt);
   const restored = new InMemoryAutonomousLearningSettlementReceiptStore();
   const recovered = new AutonomousLearningSettlementReceiptPersistenceCoordinator(restored, persistence);
   const recoverySnapshot = await recovered.restore();
@@ -802,6 +806,10 @@ test("learning episode and trajectory state persists through JSON/browser CAS re
   const persisted = await persistence.read();
   await browserPersistence.write(persisted);
   assert.deepEqual(await browserPersistence.read(), persisted);
+  const canonicalState = values.get("aurora-learning-state");
+  values.set("aurora-learning-state", JSON.stringify(JSON.parse(canonicalState), null, 2));
+  await assert.rejects(() => browserPersistence.read(), /not canonical/);
+  values.set("aurora-learning-state", canonicalState);
 
   const recoveredState = new InMemoryAutonomousLearningStateStore();
   const recovered = new AutonomousLearningPersistenceCoordinator(recoveredState, persistence);

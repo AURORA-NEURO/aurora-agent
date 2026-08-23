@@ -159,6 +159,10 @@ test("durable learning feedback outbox survives restart across every domain with
   const browserPersistence = new JsonAutonomousLearningFeedbackOutboxPersistence(textStore);
   await browserPersistence.write(persisted);
   assert.deepEqual(await browserPersistence.read(), persisted);
+  const canonicalOutbox = values.get("aurora-feedback-outbox");
+  values.set("aurora-feedback-outbox", JSON.stringify(JSON.parse(canonicalOutbox), null, 2));
+  await assert.rejects(() => browserPersistence.read(), /not canonical/);
+  values.set("aurora-feedback-outbox", canonicalOutbox);
 
   const staleOutbox = new AutonomousLearningFeedbackOutboxPersistenceCoordinator(new InMemoryAutonomousLearningFeedbackOutboxStore(), persistence);
   await staleOutbox.restore();

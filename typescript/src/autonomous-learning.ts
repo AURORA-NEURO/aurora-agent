@@ -1138,6 +1138,7 @@ export class JsonAutonomousLearningSettlementReceiptPersistence implements Auton
     if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_LEARNING_MAX_SETTLEMENT_RECEIPT_SNAPSHOT_BYTES) throw new ArgumentError("learning settlement receipt JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("learning settlement receipt JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("learning settlement receipt JSON is not canonical");
     return validateAutonomousLearningSettlementReceiptSnapshot(parsed);
   }
 
@@ -1377,6 +1378,7 @@ export class JsonAutonomousLearningFeedbackOutboxPersistence implements Autonomo
     if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX_SNAPSHOT_BYTES) throw new ArgumentError("feedback outbox JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("feedback outbox JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("feedback outbox JSON is not canonical");
     return validateAutonomousLearningFeedbackOutboxSnapshot(parsed);
   }
 
@@ -1594,6 +1596,7 @@ export class JsonAutonomousLearningStatePersistence implements AutonomousLearnin
     if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("learning state JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("learning state JSON is not canonical");
     return validateAutonomousLearningStateSnapshot(parsed);
   }
 
