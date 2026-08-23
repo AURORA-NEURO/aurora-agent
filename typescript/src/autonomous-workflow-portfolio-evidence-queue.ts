@@ -269,6 +269,7 @@ export class JsonAutonomousWorkflowPortfolioEvidenceWorkQueuePersistence impleme
     } catch {
       throw new ArgumentError("portfolio evidence work JSON persistence text is invalid JSON");
     }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("portfolio evidence work JSON persistence text is not canonical");
     return validateAutonomousWorkflowPortfolioEvidenceWorkQueueSnapshot(parsed, this.maxItems);
   }
 

@@ -571,6 +571,7 @@ export class JsonAutonomousEvidenceSourceLedgerPersistence implements Autonomous
     } catch {
       throw new ArgumentError("source ledger JSON persistence text is invalid JSON");
     }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("source ledger JSON persistence text is not canonical");
     const snapshot = validateLedgerSnapshot(parsed);
     if (bytes(canonicalJson(snapshot)) > this.maxBytes) throw new ArgumentError("source ledger JSON persistence snapshot exceeds its bound");
     return snapshot;

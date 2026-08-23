@@ -6,7 +6,7 @@ import {
   type AutonomousEvaluatorCalibrationStatus,
 } from "./autonomous-evaluator-calibration.js";
 import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous.js";
-import { digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Restart-safe metadata registry for validated evaluator calibration reports. */
@@ -157,12 +157,13 @@ export class JsonAutonomousEvaluatorCalibrationStore implements AutonomousEvalua
     } catch {
       throw new ArgumentError("evaluator calibration JSON store text is invalid JSON");
     }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("evaluator calibration JSON store text is not canonical");
     return validateSnapshot(parsed);
   }
 
   async write(snapshot: AutonomousEvaluatorCalibrationStoreSnapshot): Promise<void> {
     const validated = validateSnapshot(snapshot);
-    const encoded = JSON.stringify(validated);
+    const encoded = canonicalJson(validated);
     if (bytes(encoded) > MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_STORE_BYTES) throw new ArgumentError("evaluator calibration JSON store text exceeds its bound");
     await this.store.write(encoded);
   }
@@ -180,7 +181,7 @@ export class TransactionalJsonAutonomousEvaluatorCalibrationStore extends JsonAu
 
   async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousEvaluatorCalibrationStoreSnapshot): Promise<boolean> {
     const validated = validateSnapshot(snapshot);
-    const encoded = JSON.stringify(validated);
+    const encoded = canonicalJson(validated);
     const committed = await this.transactionalStore.writeIfUnchanged(expectedSnapshotDigest, encoded);
     if (typeof committed !== "boolean") throw new ArgumentError("transactional evaluator calibration store returned a non-boolean result");
     return committed;

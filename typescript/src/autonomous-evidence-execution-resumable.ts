@@ -280,6 +280,7 @@ export class JsonAutonomousEvidenceExecutionCheckpointStore implements Autonomou
     if (typeof value !== "string" || bytes(value) > MAX_AUTONOMOUS_EVIDENCE_EXECUTION_CHECKPOINT_BYTES) throw new ArgumentError("evidence execution checkpoint JSON exceeds its bound");
     let parsed: unknown;
     try { parsed = JSON.parse(value); } catch { throw new ArgumentError("evidence execution checkpoint JSON is invalid"); }
+    if (canonicalJson(parsed) !== value) throw new ArgumentError("evidence execution checkpoint JSON is not canonical");
     return validateCheckpoint(parsed);
   }
 

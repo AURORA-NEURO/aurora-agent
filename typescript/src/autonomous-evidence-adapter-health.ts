@@ -556,6 +556,7 @@ export class JsonAutonomousEvidenceAdapterHealthPersistence implements Autonomou
     } catch {
       throw new ArgumentError("adapter health JSON persistence text is invalid JSON");
     }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("adapter health JSON persistence text is not canonical for its digest-bound snapshot");
     const snapshot = validateAutonomousEvidenceAdapterHealthSnapshot(parsed, this.maxEvents);
     if (snapshotBytes(canonicalJson(snapshot)) > this.maxBytes) throw new ArgumentError("adapter health JSON persistence snapshot exceeds its bound");
     return snapshot;

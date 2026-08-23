@@ -1,6 +1,6 @@
 import { ArgumentError } from "./errors.js";
 import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousAgent, type AutonomousAutoBlueprint, type AutonomousDomainName, type AutonomousPromptChunk } from "./autonomous.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Digest-bound, non-executing composition of multiple reviewed domain workflows. */
@@ -318,9 +318,9 @@ export async function validateAutonomousWorkflowPortfolioPlan(value: unknown): P
   delete descriptor.portfolio_digest;
   if (await digestJson(descriptor) !== plan.portfolio_digest) throw new ArgumentError("workflow portfolio plan digest is invalid");
   const graphInput = items.map((item) => ({ id: item.item_id, task: "rehydrated", domain: item.domain, capability: item.capability ?? undefined, dependsOn: [...item.depends_on], hints: [], context: [] }));
-  if (JSON.stringify(dependencyGraph(graphInput)) !== JSON.stringify(plan.dependency_graph)) throw new ArgumentError("workflow portfolio dependency graph is inconsistent");
+  if (canonicalJson(dependencyGraph(graphInput)) !== canonicalJson(plan.dependency_graph)) throw new ArgumentError("workflow portfolio dependency graph is inconsistent");
   const expectedCoverage = coverage(items, graphInput, (plan.policy as Record<string, unknown>).require_all_domains === true);
-  if (JSON.stringify(expectedCoverage) !== JSON.stringify(plan.coverage)) throw new ArgumentError("workflow portfolio coverage is inconsistent");
+  if (canonicalJson(expectedCoverage) !== canonicalJson(plan.coverage)) throw new ArgumentError("workflow portfolio coverage is inconsistent");
   return structuredClone(value) as AutonomousWorkflowPortfolioPlan;
 }
 
@@ -460,13 +460,13 @@ export async function verifyAutonomousWorkflowPortfolio(
   for (const expectedItem of expected.items) {
     const actual = observedById.get(expectedItem.item_id);
     if (!actual) { mismatches.push({ item_id: expectedItem.item_id, codes: ["missing_item"] }); continue; }
-    const codes = ["domain", "capability", "depends_on", "task_digest", "request_digest", "route_digest", "workflow_id", "workflow_digest", "plan_digest", "evidence_plan_digest", "stage_ids", "required_capabilities", "status", "error_class"].filter((field) => JSON.stringify(actual[field]) !== JSON.stringify(expectedItem[field]));
+    const codes = ["domain", "capability", "depends_on", "task_digest", "request_digest", "route_digest", "workflow_id", "workflow_digest", "plan_digest", "evidence_plan_digest", "stage_ids", "required_capabilities", "status", "error_class"].filter((field) => canonicalJson(actual[field]) !== canonicalJson(expectedItem[field]));
     if (codes.length) mismatches.push({ item_id: expectedItem.item_id, codes });
   }
   for (const actual of observed.items) if (!expected.items.some((item) => item.item_id === actual.item_id)) mismatches.push({ item_id: actual.item_id, codes: ["unexpected_item"] });
-  if (JSON.stringify(observed.coverage) !== JSON.stringify(expected.coverage)) mismatches.push({ item_id: "portfolio", codes: ["coverage"] });
-  if (JSON.stringify(observed.dependency_graph) !== JSON.stringify(expected.dependency_graph)) mismatches.push({ item_id: "portfolio", codes: ["dependency_graph"] });
-  if (JSON.stringify(observed.policy) !== JSON.stringify(expected.policy)) mismatches.push({ item_id: "portfolio", codes: ["policy"] });
+  if (canonicalJson(observed.coverage) !== canonicalJson(expected.coverage)) mismatches.push({ item_id: "portfolio", codes: ["coverage"] });
+  if (canonicalJson(observed.dependency_graph) !== canonicalJson(expected.dependency_graph)) mismatches.push({ item_id: "portfolio", codes: ["dependency_graph"] });
+  if (canonicalJson(observed.policy) !== canonicalJson(expected.policy)) mismatches.push({ item_id: "portfolio", codes: ["policy"] });
   const verification = { schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_VERIFICATION_SCHEMA, status: mismatches.length ? "mismatch" as const : "verified" as const, expected_portfolio_digest: expected.portfolio_digest, observed_portfolio_digest: observed.portfolio_digest, mismatches, expected_item_count: expected.items.length, observed_item_count: observed.items.length, replayed_item_count: observed.items.filter((item) => item.status === "ready").length, execution: "planning_only;no_provider_or_tool_calls" as const, retention: "metadata_only_task_and_blueprint_values_not_retained" as const, secret_material: "never_returned" as const };
   return { ...verification, verification_digest: await digestJson(verification) };
 }

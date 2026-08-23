@@ -959,6 +959,7 @@ export class JsonAutonomousWorkflowPortfolioExecutionTracePersistence implements
     if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_BYTES) throw new ArgumentError("workflow portfolio trace JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("workflow portfolio trace JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("workflow portfolio trace JSON is not canonical");
     return validateAutonomousWorkflowPortfolioExecutionTraceSnapshot(parsed);
   }
 

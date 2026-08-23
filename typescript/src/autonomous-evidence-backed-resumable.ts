@@ -12,7 +12,7 @@ import type {
   AutonomousEvidenceExecutionPlan,
   AutonomousEvidenceExecutionResult,
 } from "./autonomous-evidence-execution.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only restart boundary for one reviewed evidence-to-provider operation. */
@@ -469,12 +469,13 @@ export class JsonAutonomousEvidenceBackedCheckpointStore implements AutonomousEv
     } catch {
       throw new ArgumentError("evidence-backed checkpoint text is invalid JSON");
     }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("evidence-backed checkpoint text is not canonical");
     return validateAutonomousEvidenceBackedCheckpoint(parsed);
   }
 
   async write(checkpoint: AutonomousEvidenceBackedCheckpointJSON): Promise<void> {
     const validated = await validateAutonomousEvidenceBackedCheckpoint(checkpoint);
-    const encoded = JSON.stringify(validated);
+    const encoded = canonicalJson(validated);
     if (bytes(encoded) > MAX_AUTONOMOUS_EVIDENCE_BACKED_CHECKPOINT_BYTES) throw new ArgumentError("evidence-backed checkpoint text exceeds its bound");
     await this.store.write(encoded);
   }
@@ -489,7 +490,7 @@ export class TransactionalJsonAutonomousEvidenceBackedCheckpointStore extends Js
 
   async writeIfUnchanged(expectedCheckpointDigest: string | null, checkpoint: AutonomousEvidenceBackedCheckpointJSON): Promise<boolean> {
     const validated = await validateAutonomousEvidenceBackedCheckpoint(checkpoint);
-    const encoded = JSON.stringify(validated);
+    const encoded = canonicalJson(validated);
     const committed = await this.transactionalStore.writeIfUnchanged(expectedCheckpointDigest, encoded);
     if (typeof committed !== "boolean") throw new ArgumentError("transactional evidence-backed checkpoint store returned a non-boolean result");
     return committed;

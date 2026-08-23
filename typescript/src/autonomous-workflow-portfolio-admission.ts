@@ -22,7 +22,7 @@ import {
   type AutonomousWorkflowPortfolioPlan,
   type AutonomousWorkflowPortfolioPlanOptions,
 } from "./autonomous-workflow-portfolio.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Schema for the provider-free admission decision over a reviewed workflow portfolio. */
@@ -400,7 +400,7 @@ export async function validateAutonomousWorkflowPortfolioAdmission(value: unknow
     seen.add(id);
     const planItem = planById.get(id)!;
     if (!AUTONOMOUS_DOMAIN_NAMES.includes(raw.domain as AutonomousDomainName) || raw.domain !== planItem.domain) throw new ArgumentError("workflow portfolio admission item domain is invalid");
-    if (!Array.isArray(raw.depends_on) || JSON.stringify([...raw.depends_on].sort()) !== JSON.stringify([...planItem.depends_on].sort())) throw new ArgumentError("workflow portfolio admission dependencies do not match the plan");
+    if (!Array.isArray(raw.depends_on) || canonicalJson([...raw.depends_on].sort()) !== canonicalJson([...planItem.depends_on].sort())) throw new ArgumentError("workflow portfolio admission dependencies do not match the plan");
     const dependsOn = sortedUniqueStrings("workflow portfolio admission depends_on", raw.depends_on, 16);
     if (!isObject(raw.dependency_statuses)) throw new ArgumentError("workflow portfolio admission dependency statuses are malformed");
     if (Object.keys(raw.dependency_statuses).sort().join("|") !== dependsOn.sort().join("|")) throw new ArgumentError("workflow portfolio admission dependency status keys do not match dependencies");
@@ -420,18 +420,18 @@ export async function validateAutonomousWorkflowPortfolioAdmission(value: unknow
     items.push({ schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_SCHEMA, item_id: id, domain: raw.domain as AutonomousDomainName, depends_on: dependsOn, dependency_statuses: Object.fromEntries(Object.entries(raw.dependency_statuses).map(([key, status]) => [key, status as AutonomousWorkflowPortfolioAdmissionItemStatus])), plan_status: raw.plan_status as AutonomousWorkflowPortfolioItemStatus, status: raw.status as AutonomousWorkflowPortfolioAdmissionItemStatus, readiness_state: readinessState as AutonomousWorkflowPortfolioAdmissionItem["readiness_state"], workflow_digest: raw.workflow_digest as string | null, plan_digest: raw.plan_digest as string | null, request_digest: raw.request_digest as string, required_model_capabilities: required, compatible_model_count: raw.compatible_model_count as number, eligible_model_count: raw.eligible_model_count as number, eligible_model_ids: eligibleIds, missing_tools: missingTools, blockers, next_actions: nextActions, approval: APPROVAL, selection: SELECTION, retention: RETENTION, secret_material: "never_returned" });
   }
   if (seen.size !== plan.items.length) throw new ArgumentError("workflow portfolio admission does not cover every plan item");
-  if (JSON.stringify(value.dependency_graph) !== JSON.stringify(plan.dependency_graph) || JSON.stringify(value.waves) !== JSON.stringify(plan.dependency_graph.waves)) throw new ArgumentError("workflow portfolio admission dependency projection is inconsistent");
+  if (canonicalJson(value.dependency_graph) !== canonicalJson(plan.dependency_graph) || canonicalJson(value.waves) !== canonicalJson(plan.dependency_graph.waves)) throw new ArgumentError("workflow portfolio admission dependency projection is inconsistent");
   if (!Array.isArray(value.next_actions)) throw new ArgumentError("workflow portfolio admission next actions are malformed");
   const nextActions = sortedUniqueStrings("workflow portfolio admission next_actions", value.next_actions, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ACTIONS);
   const counts = itemCounts(items);
-  if (!isObject(value.counts) || JSON.stringify(value.counts) !== JSON.stringify(counts)) throw new ArgumentError("workflow portfolio admission counts are inconsistent");
+  if (!isObject(value.counts) || canonicalJson(value.counts) !== canonicalJson(counts)) throw new ArgumentError("workflow portfolio admission counts are inconsistent");
   const status = admissionStatusFor(plan, items);
   if (value.status !== status) throw new ArgumentError("workflow portfolio admission status is inconsistent");
-  if (JSON.stringify(nextActions) !== JSON.stringify(nextActionsFor(status, items, plan))) throw new ArgumentError("workflow portfolio admission next actions are inconsistent");
+  if (canonicalJson(nextActions) !== canonicalJson(nextActionsFor(status, items, plan))) throw new ArgumentError("workflow portfolio admission next actions are inconsistent");
   const descriptor = { schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_SCHEMA, status, plan, policy, readiness_digest: readinessDigest, items, dependency_graph: plan.dependency_graph, waves: plan.dependency_graph.waves, counts, next_actions: nextActions, execution: EXECUTION, authorization: AUTHORIZATION, retention: RETENTION, secret_material: "never_returned" as const };
   const admissionDigest = boundedDigest("workflow portfolio admission admission_digest", value.admission_digest);
   if (await digestJson(descriptor) !== admissionDigest) throw new ArgumentError("workflow portfolio admission digest is invalid");
-  if (new TextEncoder().encode(JSON.stringify({ ...descriptor, admission_digest: admissionDigest })).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission exceeds its byte bound");
+  if (new TextEncoder().encode(canonicalJson({ ...descriptor, admission_digest: admissionDigest })).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission exceeds its byte bound");
   return { ...descriptor, admission_digest: admissionDigest };
 }
 
@@ -484,7 +484,7 @@ export async function admitAutonomousWorkflowPortfolio(
     secret_material: "never_returned" as const,
   };
   const admission = { ...descriptor, admission_digest: await digestJson(descriptor) };
-  if (new TextEncoder().encode(JSON.stringify(admission)).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission exceeds its byte bound");
+  if (new TextEncoder().encode(canonicalJson(admission)).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission exceeds its byte bound");
   return structuredClone(admission);
 }
 
@@ -519,12 +519,13 @@ export class JsonAutonomousWorkflowPortfolioAdmissionPersistence implements Auto
     if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission JSON exceeds its bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("workflow portfolio admission JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("workflow portfolio admission JSON is not canonical");
     return validateAutonomousWorkflowPortfolioAdmission(parsed);
   }
 
   async write(admission: AutonomousWorkflowPortfolioAdmission): Promise<void> {
     const validated = await validateAutonomousWorkflowPortfolioAdmission(admission);
-    const encoded = JSON.stringify(validated);
+    const encoded = canonicalJson(validated);
     if (new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission JSON exceeds its bound");
     await this.store.write(encoded);
   }
@@ -542,7 +543,7 @@ export class TransactionalJsonAutonomousWorkflowPortfolioAdmissionPersistence ex
 
   async writeIfUnchanged(expectedAdmissionDigest: string | null, admission: AutonomousWorkflowPortfolioAdmission): Promise<boolean> {
     const validated = await validateAutonomousWorkflowPortfolioAdmission(admission);
-    const encoded = JSON.stringify(validated);
+    const encoded = canonicalJson(validated);
     const committed = await this.transactionalStore.writeIfUnchanged(expectedAdmissionDigest, encoded);
     if (typeof committed !== "boolean") throw new ArgumentError("transactional workflow portfolio admission store returned a non-boolean result");
     return committed;

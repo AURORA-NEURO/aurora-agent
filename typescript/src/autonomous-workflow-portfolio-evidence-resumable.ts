@@ -18,7 +18,7 @@ import {
   validateAutonomousWorkflowPortfolioPlan,
   type AutonomousWorkflowPortfolioPlan,
 } from "./autonomous-workflow-portfolio.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Digest-bound metadata-only restart checkpoint for portfolio evidence waves. */
@@ -408,6 +408,7 @@ export class JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore implements A
     } catch {
       throw new ArgumentError("portfolio evidence JSON checkpoint text is invalid JSON");
     }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("portfolio evidence JSON checkpoint text is not canonical");
     return validateAutonomousWorkflowPortfolioEvidenceCheckpoint(parsed);
   }
 
@@ -416,7 +417,7 @@ export class JsonAutonomousWorkflowPortfolioEvidenceCheckpointStore implements A
   }
 
   protected encode(checkpoint: AutonomousWorkflowPortfolioEvidenceCheckpointJSON): string {
-    const encoded = JSON.stringify(checkpoint);
+    const encoded = canonicalJson(checkpoint);
     if (typeof encoded !== "string" || bytes(encoded) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_BYTES) throw new ArgumentError("portfolio evidence JSON checkpoint exceeds its bound");
     return encoded;
   }

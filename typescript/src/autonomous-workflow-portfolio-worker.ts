@@ -769,6 +769,7 @@ export class JsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence implements
     if (new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SNAPSHOT_BYTES) throw new ArgumentError("portfolio remote job JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("portfolio remote job JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("portfolio remote job JSON is not canonical");
     return validateAutonomousWorkflowPortfolioRemoteJobQueueSnapshot(parsed);
   }
 

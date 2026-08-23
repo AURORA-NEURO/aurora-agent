@@ -10,6 +10,7 @@ import {
   JsonAutonomousEvaluatorCalibrationStore,
   TransactionalJsonAutonomousEvaluatorCalibrationStore,
   builtinAutonomousValueEvaluatorProfiles,
+  canonicalJson,
 } from "../dist/index.js";
 
 function allDomainCases() {
@@ -76,7 +77,7 @@ test("calibration registry JSON persistence validates tampering and compare-and-
   assert.equal(memory.writeIfUnchanged("0".repeat(64), snapshot), false);
   assert.equal(memory.writeIfUnchanged(snapshot.snapshot_digest, snapshot), true);
 
-  let text = JSON.stringify(snapshot);
+  let text = canonicalJson(snapshot);
   const textStore = {
     read: () => text,
     write: (value) => { text = value; },
@@ -86,7 +87,7 @@ test("calibration registry JSON persistence validates tampering and compare-and-
   await resumed.restoreFrom(json);
   assert.equal(resumed.get(calibration.report_digest).status, "ready");
 
-  let transactionalText = JSON.stringify(snapshot);
+  let transactionalText = canonicalJson(snapshot);
   const transactional = new TransactionalJsonAutonomousEvaluatorCalibrationStore({
     read: () => transactionalText,
     write: (value) => { transactionalText = value; },
