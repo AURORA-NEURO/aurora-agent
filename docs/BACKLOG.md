@@ -1208,3 +1208,9 @@ tampered chain/head digests, payload-shaped metadata, oversize snapshots, and st
 closed. The provider conversation, prompts, credentials, tool arguments, and raw outputs remain
 outside the snapshot; distributed scheduling, storage encryption, and deployment authorization
 remain caller responsibilities.
+
+Python resumable batch checkpoints now close the same race at the controller layer. Strict JSON
+and transactional JSON adapters preserve the request/result digest image, and every controller
+progress flush uses the restored checkpoint digest as a CAS fence. This protects domain, automatic,
+and cross-domain batches from stale workers while retaining no task text, prompts, provider values,
+connector observations, tool arguments, or credentials.

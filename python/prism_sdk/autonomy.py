@@ -28,9 +28,9 @@ import json
 import math
 from threading import Lock
 import uuid
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from .authoring import content_digest
+from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
 from .autonomous_evidence import (
     AutonomousEvidencePlan,
@@ -3334,11 +3334,13 @@ class InMemoryAutonomousBatchCheckpointStore:
 
     def __init__(self, initial: AutonomousBatchCheckpoint | Mapping[str, Any] | None = None) -> None:
         self._checkpoint: dict[str, Any] | None = None
+        self._lock = Lock()
         if initial is not None:
             self.write(initial)
 
     def read(self) -> dict[str, Any] | None:
-        return None if self._checkpoint is None else json.loads(json.dumps(self._checkpoint))
+        with self._lock:
+            return None if self._checkpoint is None else json.loads(json.dumps(self._checkpoint))
 
     def write(self, checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any]) -> None:
         if isinstance(checkpoint, AutonomousBatchCheckpoint):
@@ -3347,7 +3349,102 @@ class InMemoryAutonomousBatchCheckpointStore:
             verified = AutonomousBatchCheckpoint.from_dict(checkpoint)
         else:
             raise BrainRunError("autonomous batch checkpoint store requires a typed checkpoint or mapping")
-        self._checkpoint = verified.to_dict()
+        with self._lock:
+            self._checkpoint = verified.to_dict()
+
+
+class AutonomousBatchCheckpointTextStore(Protocol):
+    """Portable text persistence for metadata-only batch checkpoints."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalAutonomousBatchCheckpointTextStore(AutonomousBatchCheckpointTextStore, Protocol):
+    """Batch checkpoint text persistence with compare-and-swap fencing."""
+
+    def write_if_unchanged(self, expected_checkpoint_digest: str | None, value: str) -> bool: ...
+
+
+def _normalize_batch_checkpoint(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise BrainRunError("autonomous batch checkpoint must be a mapping")
+    expected = {
+        "schema", "job_id", "mode", "batch_input_digest", "request_digests", "completed_indices",
+        "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest",
+        "retention", "secret_material",
+    }
+    if set(value) != expected:
+        raise BrainRunError("autonomous batch checkpoint contains unsupported or missing fields")
+    if value.get("retention") != "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted" or value.get("secret_material") != "never_returned":
+        raise BrainRunError("autonomous batch checkpoint retention markers are invalid")
+    try:
+        checkpoint = AutonomousBatchCheckpoint.from_dict(value)
+    except (BrainRunError, TypeError, ValueError) as error:
+        raise BrainRunError("autonomous batch checkpoint failed validation") from error
+    normalized = checkpoint.to_dict()
+    if len(canonical_json(normalized).encode("utf-8")) > MAX_AUTONOMOUS_BATCH_CHECKPOINT_BYTES:
+        raise BrainRunError("autonomous batch checkpoint exceeds its byte bound")
+    return normalized
+
+
+class JsonAutonomousBatchCheckpointPersistence:
+    """Strict canonical JSON persistence for resumable batch checkpoints."""
+
+    def __init__(self, store: AutonomousBatchCheckpointTextStore, *, max_bytes: int = MAX_AUTONOMOUS_BATCH_CHECKPOINT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise BrainRunError("autonomous batch JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMOUS_BATCH_CHECKPOINT_BYTES:
+            raise BrainRunError("autonomous batch JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("autonomous batch JSON checkpoint exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise BrainRunError("autonomous batch JSON checkpoint is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise BrainRunError("autonomous batch JSON checkpoint must be an object")
+        return _normalize_batch_checkpoint(raw)
+
+    def write(self, checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any]) -> None:
+        raw = checkpoint.to_dict() if isinstance(checkpoint, AutonomousBatchCheckpoint) else checkpoint
+        normalized = _normalize_batch_checkpoint(raw)
+        encoded = canonical_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("autonomous batch JSON checkpoint exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousBatchCheckpointPersistence(JsonAutonomousBatchCheckpointPersistence):
+    """Canonical JSON batch persistence with stale-worker fencing."""
+
+    def __init__(self, store: TransactionalAutonomousBatchCheckpointTextStore, *, max_bytes: int = MAX_AUTONOMOUS_BATCH_CHECKPOINT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise BrainRunError("transactional autonomous batch persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_checkpoint_digest: str | None, checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any]) -> bool:
+        if expected_checkpoint_digest is not None and (
+            not isinstance(expected_checkpoint_digest, str)
+            or len(expected_checkpoint_digest) != 64
+            or any(character not in "0123456789abcdef" for character in expected_checkpoint_digest)
+        ):
+            raise BrainRunError("autonomous batch expected checkpoint digest is invalid")
+        raw = checkpoint.to_dict() if isinstance(checkpoint, AutonomousBatchCheckpoint) else checkpoint
+        normalized = _normalize_batch_checkpoint(raw)
+        encoded = canonical_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("autonomous batch JSON checkpoint exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_checkpoint_digest, encoded)
 
 
 @dataclass(frozen=True, slots=True)
@@ -16104,6 +16201,7 @@ class AutonomousBrainBatchJobController:
         self.agent = agent
         self.persistence = persistence
         self._checkpoint: AutonomousBatchCheckpoint | None = None
+        self._expected_checkpoint_digest: str | None = None
         self._restored = False
         self._running = False
         self._lock = Lock()
@@ -16135,6 +16233,7 @@ class AutonomousBrainBatchJobController:
             raw = self.persistence.read()
             if raw is None:
                 self._checkpoint = None
+                self._expected_checkpoint_digest = None
                 self._restored = True
                 return self._projection("empty")
             if isinstance(raw, AutonomousBatchCheckpoint):
@@ -16144,6 +16243,7 @@ class AutonomousBrainBatchJobController:
             else:
                 raise BrainRunError("autonomous brain batch checkpoint store returned an invalid value")
             self._checkpoint = checkpoint
+            self._expected_checkpoint_digest = checkpoint.checkpoint_digest
             self._restored = True
             return self._projection("restored")
 
@@ -16156,14 +16256,23 @@ class AutonomousBrainBatchJobController:
             if self._checkpoint is None:
                 return self._projection("empty")
             verified = AutonomousBatchCheckpoint.from_dict(self._checkpoint.to_dict())
-            self.persistence.write(verified.to_dict())
+            self._write_checkpoint(verified)
             self._checkpoint = verified
             return self._projection("flushed")
 
     def _persist(self, checkpoint: AutonomousBatchCheckpoint) -> None:
         verified = AutonomousBatchCheckpoint.from_dict(checkpoint.to_dict())
-        self.persistence.write(verified.to_dict())
+        self._write_checkpoint(verified)
         self._checkpoint = verified
+
+    def _write_checkpoint(self, checkpoint: AutonomousBatchCheckpoint) -> None:
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_checkpoint_digest, checkpoint.to_dict()):
+                raise BrainRunError("autonomous batch checkpoint compare-and-swap conflict")
+        else:
+            self.persistence.write(checkpoint.to_dict())
+        self._expected_checkpoint_digest = checkpoint.checkpoint_digest
 
     def run(
         self,
@@ -16289,7 +16398,11 @@ __all__ = [
     "AutonomousBatchResult",
     "AutonomousBatchRehydrationContext",
     "AutonomousBatchCheckpoint",
+    "AutonomousBatchCheckpointTextStore",
     "InMemoryAutonomousBatchCheckpointStore",
+    "JsonAutonomousBatchCheckpointPersistence",
+    "TransactionalAutonomousBatchCheckpointTextStore",
+    "TransactionalJsonAutonomousBatchCheckpointPersistence",
     "AutonomousBrainBatchJobController",
     "AutonomousLearningResult",
     "AutonomousAgent",

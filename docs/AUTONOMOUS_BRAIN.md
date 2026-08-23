@@ -1450,6 +1450,15 @@ job, mode, control, checkpoint digest, or rehydrated result fails closed before 
 The sink is caller-owned and should write atomically; the SDK does not pretend that a metadata
 checkpoint can reconstruct a provider conversation.
 
+For remote batch workers, `JsonAutonomousBatchCheckpointPersistence` provides strict canonical
+JSON over any text store, and `TransactionalJsonAutonomousBatchCheckpointPersistence` adds a
+compare-and-swap write keyed by `checkpoint_digest`. `AutonomousBrainBatchJobController` detects
+that capability automatically: restore records the observed digest, every progress checkpoint is
+conditionally written, and a stale worker receives a typed `BrainRunError` instead of overwriting
+newer completed-item evidence. The adapters reject extra fields, invalid markers, reordered or
+duplicate indexes, malformed digest chains, oversized checkpoints, and any task/prompt/provider
+payload shape.
+
 The TypeScript façade exposes the same onboarding idea through a domain-wide readiness audit:
 
 ```typescript
@@ -7636,7 +7645,8 @@ result digests, bounded concurrency controls, status, and retention markers. It 
 task text, prompts, model output, connector requests or observations, tool arguments, or
 credentials. The in-memory stores are test/local wiring aids, not a claim of distributed
 durability; production callers must implement `read`/`write` with their own atomic persistence
-and fencing policy. Since the controller delegates to the same route, plan, provider, connector,
+and fencing policy. Transactional JSON persistence can be used directly when the deployment needs
+remote handoff or multi-process fencing. Since the controller delegates to the same route, plan, provider, connector,
 evaluator, and learning boundaries, the contract covers all twelve built-in domains without
 introducing domain-specific execution shortcuts.
 

@@ -14,6 +14,7 @@ from prism_sdk import (
     AutonomousBatchCheckpoint,
     AutonomousBrainBatchJobController,
     InMemoryAutonomousBatchCheckpointStore,
+    TransactionalJsonAutonomousBatchCheckpointPersistence,
     BrainRunError,
     AutonomousDomainRegistry,
     InMemoryProvider,
@@ -27,6 +28,24 @@ from prism_sdk import (
     ProviderTool,
     ProviderToolResult,
 )
+
+
+class _CasTextStore:
+    def __init__(self) -> None:
+        self.value: str | None = None
+
+    def read(self) -> str | None:
+        return self.value
+
+    def write(self, value: str) -> None:
+        self.value = value
+
+    def write_if_unchanged(self, expected_checkpoint_digest: str | None, value: str) -> bool:
+        observed = None if self.value is None else json.loads(self.value)["checkpoint_digest"]
+        if observed != expected_checkpoint_digest:
+            return False
+        self.value = value
+        return True
 
 
 def _request(
@@ -671,7 +690,7 @@ def test_autonomous_brain_batch_controller_owns_restore_persistence_restart_and_
     def options_factory(_request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
         return {"approve_provider_call": True, "max_steps": 0 if fail_second and index == 1 else 32}
 
-    store = InMemoryAutonomousBatchCheckpointStore()
+    store = TransactionalJsonAutonomousBatchCheckpointPersistence(_CasTextStore())
     controller = AutonomousBrainBatchJobController(agent, store)
     with pytest.raises(BrainRunError, match="restore"):
         controller.run(requests, job_id="python-controller-job", credentials={}, max_parallelism=1, options_factory=options_factory)
@@ -720,6 +739,34 @@ def test_autonomous_brain_batch_controller_owns_restore_persistence_restart_and_
     invalid = AutonomousBrainBatchJobController(agent, tampered_store)
     with pytest.raises(BrainRunError, match="digest|checkpoint"):
         invalid.restore()
+
+
+def test_batch_checkpoint_json_cas_is_bounded_and_tamper_evident_across_all_domains() -> None:
+    request_digests = tuple(hashlib.sha256(f"batch-{domain}".encode("utf-8")).hexdigest() for domain in AUTONOMOUS_DOMAINS)
+    checkpoint = AutonomousBatchCheckpoint(
+        job_id="all-domains-batch",
+        mode="domain",
+        batch_input_digest=hashlib.sha256(b"all-domain-batch-input").hexdigest(),
+        request_digests=request_digests,
+        completed_indices=tuple(range(0, len(request_digests), 2)),
+        completed_result_digests=tuple(hashlib.sha256(f"result-{index}".encode("utf-8")).hexdigest() for index in range(0, len(request_digests), 2)),
+        max_parallelism=4,
+        stop_on_error=True,
+        status="partial",
+    )
+    backend = _CasTextStore()
+    persistence = TransactionalJsonAutonomousBatchCheckpointPersistence(backend)
+    assert persistence.write_if_unchanged(None, checkpoint)
+    restored = persistence.read()
+    assert restored is not None
+    assert restored["checkpoint_digest"] == checkpoint.checkpoint_digest
+    assert len(restored["request_digests"]) == len(AUTONOMOUS_DOMAINS)
+    assert not persistence.write_if_unchanged(None, checkpoint)
+    tampered = json.loads(backend.value)
+    tampered["completed_indices"] = list(reversed(tampered["completed_indices"]))
+    backend.value = json.dumps(tampered)
+    with pytest.raises(BrainRunError, match="checkpoint|digest"):
+        persistence.read()
 
 
 def test_agent_run_resumable_batch_supports_route_first_and_cross_domain_modes() -> None:
