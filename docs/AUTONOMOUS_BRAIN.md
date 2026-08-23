@@ -7589,6 +7589,58 @@ inspecting the preflight result may the caller request the second dispatch with
 bindings, output budgets, refusal propagation, cancellation, execution traces, and retained
 workflow/evaluator lineage across every catalogued domain tool.
 
+## Deployment readiness composition
+
+`AutonomousAgent.readiness()` and `ProviderSetup.plan()` are intentionally separate low-level
+projections. The TypeScript `AutonomousDeploymentReadinessAuditor` composes them into one
+metadata-only onboarding/deployment audit, so an application can render a useful “what is left?”
+screen without opening a provider session or guessing from a partial health signal:
+
+```ts
+const report = new AutonomousDeploymentReadinessAuditor({
+  requireCredentials: true,
+  requirePersistence: true,
+  requireApprovalAuthority: true,
+  requireEvidence: false,
+}).audit({
+  agent: await agent.readiness(),
+  provider_plan: providerSetup.plan(),
+  capabilities: {
+    persistence: {
+      configured: true,
+      operational: true,
+      restart_safe: true,
+      integrity_fenced: true,
+      caller_owned: true,
+    },
+    approval_authority: {
+      configured: true,
+      operational: true,
+      restart_safe: true,
+      integrity_fenced: true,
+      caller_owned: true,
+    },
+  },
+});
+```
+
+The audit intersects provider setup with providers actually present in the reviewed model
+catalogue, then emits one row for each of the twelve built-in domains. Each row preserves the
+agent's model gate, tool coverage, evidence gate, learning/calibration gate, blockers, warnings,
+and remediation actions. Deployment-owned contracts can independently require durable
+persistence, a distributed queue, approval authority, external authentication, operational
+telemetry, a live tool catalogue, evidence adapters, or a persisted learner. Missing capability
+contracts are explicit blockers rather than inferred as available.
+
+The result is SHA-256 digest-bound and strict-validation friendly through
+`validateAutonomousDeploymentReadinessReport()`. Its execution posture is
+`audit_only;no_provider_source_tool_queue_or_credential_dispatch`: it does not collect a key,
+initialize a database, contact a source, run a model, or grant dispatch authority. A deployment
+owns the capability assertions and must still perform human/application approval, protected
+credential collection, live health checks, queue initialization, and source/evaluator policy
+configuration. The report is therefore an honest integration checklist and handoff identity, not
+a claim that production infrastructure exists.
+
 ## Safety boundary
 
 This is research/developer infrastructure. The brain does not diagnose, recommend treatment,

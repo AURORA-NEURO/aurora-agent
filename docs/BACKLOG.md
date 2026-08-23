@@ -103,6 +103,15 @@ worker cannot overwrite a newer goal lifecycle or evaluator/learning projection.
 goal state is persisted; prompts, provider outputs, tool arguments, evidence bodies, credentials,
 and approval authority remain outside the SDK, and deployment still owns the backing store.
 
+The new `AutonomousDeploymentReadinessAuditor` composes the agent's all-domain readiness report,
+the protected `ProviderSetup` plan, and caller-owned deployment capability assertions into a
+digest-bound onboarding/deployment audit. It explicitly reports model, provider, credential,
+tool, evidence, learning, persistence, queue, approval, external-auth, and telemetry gates for
+all twelve domains, while remaining provider/source/queue-free and never granting authority.
+This closes the local “what is missing before deployment?” projection seam; actual database,
+distributed queue, auth/session, telemetry, source truth, and approval implementations remain
+deployment work.
+
 The evidence handoff now preserves that same identity explicitly. Portfolio evidence checkpoints
 use schema `0.2` and carry the nullable provider admission digest; `requireAdmission: true`
 refuses resumable evidence execution without a reviewed admission before journal replay or

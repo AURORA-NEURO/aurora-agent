@@ -147,6 +147,31 @@ export type {
   SupportedProviderName,
 } from "./provider-setup.js";
 export {
+  AUTONOMOUS_DEPLOYMENT_READINESS_SCHEMA,
+  AUTONOMOUS_DEPLOYMENT_READINESS_DOMAIN_SCHEMA,
+  AUTONOMOUS_DEPLOYMENT_READINESS_CAPABILITY_SCHEMA,
+  MAX_AUTONOMOUS_DEPLOYMENT_READINESS_BYTES,
+  MAX_AUTONOMOUS_DEPLOYMENT_READINESS_BLOCKERS,
+  AUTONOMOUS_DEPLOYMENT_READINESS_STATES,
+  AUTONOMOUS_DEPLOYMENT_BLOCKER_CODES,
+  AUTONOMOUS_DEPLOYMENT_CAPABILITY_NAMES,
+  AutonomousDeploymentReadinessAuditor,
+  auditAutonomousDeploymentReadiness,
+  validateAutonomousDeploymentReadinessReport,
+} from "./autonomous-deployment-readiness.js";
+export type {
+  AutonomousDeploymentReadinessPolicy,
+  AutonomousDeploymentCapabilityInput,
+  AutonomousDeploymentReadinessInput,
+  AutonomousDeploymentCapabilityProjection,
+  AutonomousDeploymentBlocker,
+  AutonomousDeploymentReadinessDomain,
+  AutonomousDeploymentReadinessReport,
+  AutonomousDeploymentReadinessState,
+  AutonomousDeploymentBlockerCode,
+  AutonomousDeploymentCapabilityName,
+} from "./autonomous-deployment-readiness.js";
+export {
   PROVIDER_PROTOCOL_CONFORMANCE_SCHEMA,
   PROVIDER_PROTOCOL_CONFORMANCE_MODE,
   MAX_PROVIDER_CONFORMANCE_PROVIDERS,
