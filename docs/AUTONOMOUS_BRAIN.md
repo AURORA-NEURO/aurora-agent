@@ -2571,6 +2571,24 @@ only value-only planner/execution settlements. Python exposes the equivalent
 write the planning arm through `brain_outcome_record` and route quality-only observations through
 `ProviderHealthLedger.record_evaluation()` without incrementing transport attempts or circuits.
 
+The same boundary is now part of the durable TypeScript decision-cycle APIs. Supply
+`learning.evaluatePlanning` to `runAutonomousDecisionCycle()` or
+`runAutonomousCrossDomainDecisionCycle()` alongside the execution evaluator. The single-domain
+result exposes `planner_evaluation` and `planner_settlement`; the cross-domain result keeps that
+settlement separate from its discounted specialist/synthesis trajectory. Planner quality uses the
+reviewed route context and planning model arm, so it can change future model selection without
+pretending that a successful provider response proves the plan was good. The planner arm is
+settled only after the accepted proposal and execution boundary are known, and the planner and
+execution digests are bound together in the metadata-only settlement cursor.
+
+The bounded replan variants accept the same `evaluatePlanning` callback. Every accepted proposal
+in every attempt can therefore receive independent planner credit, while `planner_settlements`
+and `planner_evaluations` remain separate from attempt execution credit. If a worker restarts at a
+settlement boundary, it must provide both `rehydrateEvaluation` and
+`rehydratePlanningEvaluation`; the SDK compares the combined digest before replaying either
+value-only settlement. Planner settlement reuses the learner's outcome ledger and model-health
+quality ledger, so exact retries are no-ops and contradictory rewards are rejected.
+
 `ProviderHealthLedger` also supports `snapshot()`/`restore()` and
 `ProviderHealthPersistenceCoordinator`. `TransactionalJsonProviderHealthSnapshotPersistence`
 exports canonical value-only observations with per-record, head, and outer snapshot digests and
@@ -3903,7 +3921,8 @@ and the aggregate snapshot digest before replacing in-memory rows.
 Restart recovery is explicit rather than implicit. A worker provides `rehydrateRoute` to recover
 the previously reviewed route by digest, `rehydrateRun` for a private provider outcome retained in
 its own result store, `rehydrateEvaluation` when evaluation completed but learning settlement did
-not, and `rehydrateReplanInstruction` for transient evaluator guidance at a replan handoff. The
+not, `rehydratePlanningEvaluation` when an accepted provider plan also has a pending quality
+decision, and `rehydrateReplanInstruction` for transient evaluator guidance at a replan handoff. The
 SDK verifies every returned object against the durable digest before continuing, skips evaluator
 replay for a persisted settlement, and returns a terminal projection without dispatching a
 duplicate provider call. `InMemoryAutonomousCycleReplanStateStore` is a reference implementation;
@@ -3926,7 +3945,9 @@ accepted proposal before the cycle can dispatch; digest mismatches fail closed.
 
 Ordinary-cycle recovery is callback-driven as well: `rehydrateRoute` restores a reviewed route,
 `rehydrateRun` supplies a caller-owned provider result after an execution boundary,
-`rehydrateEvaluation` supplies an evaluator packet after evaluation began, and `rehydrateResult`
+`rehydrateEvaluation` supplies an evaluator packet after evaluation began,
+`rehydratePlanningEvaluation` supplies the separate planner packet when planning quality is
+enabled, and `rehydrateResult`
 supplies a terminal result. The TypeScript façade checks the callback's schema and content digests
 against the cursor and refuses to guess by dispatching a provider again. Evaluated learning commits
 use stable cycle-scoped idempotency keys, while cross-domain cycles preserve the reviewed trajectory

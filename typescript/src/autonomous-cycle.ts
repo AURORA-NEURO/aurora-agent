@@ -24,6 +24,7 @@ import type {
   AutonomousLearningController,
   AutonomousLearningSettlement,
   AutonomousLearningOutboxSettlementOptions,
+  AutonomousPlanningQualitySettlement,
 } from "./autonomous-learning.js";
 import type {
   AutonomousEpisodicMemoryStore,
@@ -40,6 +41,7 @@ import {
   type AutonomousCycleReplanEvaluationRehydrator,
   type AutonomousCycleReplanInstructionRehydrator,
   type AutonomousCycleReplanMode,
+  type AutonomousCycleReplanRehydrationContext,
   type AutonomousCycleReplanRouteRehydrator,
   type AutonomousCycleReplanRunRehydrator,
   type AutonomousCycleReplanState,
@@ -89,10 +91,17 @@ export type AutonomousDecisionCycleEvaluator = (
   result: AutonomousRunResult,
 ) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
 
+/** Explicit evaluator for the provider's accepted planning decision. */
+export type AutonomousDecisionCyclePlanningEvaluator = (
+  plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult,
+) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+
 export interface AutonomousDecisionCycleLearningOptions {
   controller: AutonomousLearningController;
   episodeId: string;
   evaluate?: AutonomousDecisionCycleEvaluator;
+  /** Planning quality is separate from execution quality and is never inferred from transport success. */
+  evaluatePlanning?: AutonomousDecisionCyclePlanningEvaluator;
   remote?: boolean;
   outbox?: AutonomousLearningOutboxSettlementOptions;
 }
@@ -129,6 +138,8 @@ export interface AutonomousDecisionCyclePersistenceOptions {
   rehydrateRun?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRunResult | AutonomousCrossDomainRunResult | Promise<AutonomousRunResult | AutonomousCrossDomainRunResult>;
   /** Rehydrate evaluator values after evaluation began; it must not return raw evidence. */
   rehydrateEvaluation?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput> | Promise<AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput>>;
+  /** Rehydrate the explicit planner evaluator value after a durable evaluation boundary. */
+  rehydratePlanningEvaluation?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   /** Rehydrate a terminal private result from caller-owned result storage. */
   rehydrateResult?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult | Promise<AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult>;
 }
@@ -153,6 +164,8 @@ export interface AutonomousDecisionCycleResult {
   learning_episode_id: string | null;
   evaluation: BrainEvaluatorAssessment | null;
   settlement: AutonomousLearningSettlement | null;
+  planner_evaluation: AutonomousEvaluatorRewardInput | null;
+  planner_settlement: AutonomousPlanningQualitySettlement | null;
   memory: AutonomousDecisionCycleMemoryProjection | null;
   retention: "provider_response_local; value_only_evaluation_and_learning_projection";
   authorization: "routing_and_provider_invocation_require_separate_explicit_approval";
@@ -266,6 +279,8 @@ function reviewResult(
     learning_episode_id: null,
     evaluation: null,
     settlement: null,
+    planner_evaluation: null,
+    planner_settlement: null,
     memory: null,
     retention: RETENTION,
     authorization: AUTHORIZATION,
@@ -470,6 +485,30 @@ async function decisionCrossEvaluationDigest(input: Record<string, AutonomousEva
   })));
 }
 
+/** Preserve the historical execution-only digest while binding planner and execution evidence together when both exist. */
+async function decisionCycleEvaluationDigest(
+  execution: AutonomousEvaluatorRewardInput | null,
+  planning: AutonomousEvaluatorRewardInput | null,
+): Promise<string | null> {
+  if (!execution && !planning) return null;
+  const executionDigest = execution ? await decisionEvaluationDigest(execution) : null;
+  if (!planning) return executionDigest;
+  return digestJson({ execution_digest: executionDigest, planning_digest: await decisionEvaluationDigest(planning) });
+}
+
+function projectCycleReward(input: AutonomousEvaluatorRewardInput): AutonomousEvaluatorRewardInput {
+  return {
+    evaluator_id: input.evaluator_id,
+    evaluator_version: input.evaluator_version,
+    reward: input.reward,
+    passed: input.passed,
+    failed: input.failed ?? !input.passed,
+    feedback_digest: input.feedback_digest ?? null,
+    failure_class: input.failure_class ?? null,
+    evidence_digest: input.evidence_digest ?? null,
+  };
+}
+
 interface CyclePersistenceOptions {
   cycleId?: string;
   stateStore?: AutonomousCycleReplanStateStore;
@@ -632,6 +671,8 @@ function rehydratedSingleCycle(route: AutonomousRouteProposal, run: AutonomousRu
     learning_episode_id: null,
     evaluation: null,
     settlement: null,
+    planner_evaluation: null,
+    planner_settlement: null,
     memory: null,
     retention: RETENTION,
     authorization: AUTHORIZATION,
@@ -649,6 +690,8 @@ function rehydratedCrossDomainCycle(route: AutonomousRouteProposal, run: Autonom
     learning_episode_ids: [...run.learning_episode_ids],
     evaluation: null,
     settlement: null,
+    planner_evaluation: null,
+    planner_settlement: null,
     memory: null,
     retention: CROSS_RETENTION,
     authorization: CROSS_AUTHORIZATION,
@@ -707,7 +750,7 @@ export async function runAutonomousDecisionCycle(
   if (!agent || typeof agent.run !== "function" || typeof agent.route !== "function") throw new ArgumentError("decision cycle requires an AutonomousAgent");
   if (options.semanticRouting?.enabled && options.domain !== undefined) throw new ArgumentError("semantic decision routing cannot replace an explicit caller domain");
   const costBudget = cyclePlanningBudget(options);
-  const persistence = await openDecisionPersistence(options, task, "single_domain", options.learning !== undefined, options.learning?.evaluate !== undefined, null);
+  const persistence = await openDecisionPersistence(options, task, "single_domain", options.learning !== undefined, Boolean(options.learning?.evaluate || options.learning?.evaluatePlanning), null);
   if (persistence?.state.phase === "terminal") {
     return await rehydrateDecisionResult(persistence, options.rehydrateResult) as AutonomousDecisionCycleResult;
   }
@@ -839,28 +882,56 @@ export async function runAutonomousDecisionCycle(
   try {
     let learningEpisodeId: string | null = null;
     let settlement: AutonomousLearningSettlement | null = null;
+    let plannerEvaluation: AutonomousEvaluatorRewardInput | null = null;
+    let plannerSettlement: AutonomousPlanningQualitySettlement | null = null;
+    let executionEvaluation: AutonomousEvaluatorRewardInput | null = null;
     if (persistence && (persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending")) {
       if (persistence.state.outcome_digest !== runDigests.outcome || persistence.state.selection_digest !== runDigests.selection) throw new ArgumentError("rehydrated decision run does not match the persisted selection or outcome digest");
     }
-    if (options.learning) {
+    const executionEvaluationEnabled = Boolean(options.learning?.evaluate);
+    const planningEvaluationEnabled = Boolean(options.learning?.evaluatePlanning && planRefinement?.status === "completed");
+    const cycleEvaluationEnabled = executionEvaluationEnabled || planningEvaluationEnabled;
+    if (options.learning && cycleEvaluationEnabled) {
       const controller = options.learning.controller;
-      if (!controller || typeof controller.prepareRun !== "function" || typeof controller.settleRun !== "function") throw new ArgumentError("decision cycle learning controller is malformed");
-      learningEpisodeId = persistence?.state.learning_episode_ids[0] ?? null;
-      if (!learningEpisodeId) {
-        const episode = await controller.prepareRun(run, { episodeId: options.learning.episodeId });
-        learningEpisodeId = episode.episode_id;
+      if (!controller) throw new ArgumentError("decision cycle learning controller is malformed");
+      if (executionEvaluationEnabled) {
+        if (typeof controller.prepareRun !== "function" || typeof controller.settleRun !== "function") throw new ArgumentError("decision cycle execution learning controller is malformed");
+        learningEpisodeId = persistence?.state.learning_episode_ids[0] ?? null;
+        if (!learningEpisodeId) {
+          const episode = await controller.prepareRun(run, { episodeId: options.learning.episodeId });
+          learningEpisodeId = episode.episode_id;
+        }
       }
-      if (options.learning.evaluate) {
-        const resumedEvaluation = persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending";
-        const persistedEvaluationDigest = persistence?.state.evaluation_digest ?? null;
-        if (persistence && !resumedEvaluation) await commitDecisionPersistence(persistence, { phase: "evaluation_pending", route_digest: route.route_digest, selection_digest: runDigests.selection, outcome_digest: runDigests.outcome, evaluation_digest: null, learning_episode_ids: [learningEpisodeId], settlement_digests: [], terminal_status: null });
+      const resumedEvaluation = persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending";
+      const persistedEvaluationDigest = persistence?.state.evaluation_digest ?? null;
+      if (persistence && !resumedEvaluation) await commitDecisionPersistence(persistence, { phase: "evaluation_pending", route_digest: route.route_digest, selection_digest: runDigests.selection, outcome_digest: runDigests.outcome, evaluation_digest: null, learning_episode_ids: learningEpisodeId ? [learningEpisodeId] : [], settlement_digests: [], terminal_status: null });
+      if (executionEvaluationEnabled) {
         const reward = resumedEvaluation
           ? await (options.rehydrateEvaluation ? options.rehydrateEvaluation(decisionRehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydrateEvaluation for the persisted evaluator boundary"))) as AutonomousEvaluatorRewardInput
-          : await options.learning.evaluate(run);
-        const evaluationDigest = await decisionEvaluationDigest(reward);
-        if (persistedPhase === "settlement_pending" && persistedEvaluationDigest !== evaluationDigest) throw new ArgumentError("rehydrated decision evaluation does not match the persisted evaluation digest");
-        await commitDecisionPersistence(persistence, { phase: "settlement_pending", route_digest: route.route_digest, selection_digest: runDigests.selection, outcome_digest: runDigests.outcome, evaluation_digest: evaluationDigest, learning_episode_ids: [learningEpisodeId], settlement_digests: [], terminal_status: null });
-        settlement = await controller.settleRun(learningEpisodeId, reward, { remote: options.learning.remote, outbox: options.learning.outbox, ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learningEpisodeId}` } : {}) });
+          : await options.learning.evaluate!(run);
+        executionEvaluation = projectCycleReward(reward);
+      }
+      if (planningEvaluationEnabled) {
+        const reward = resumedEvaluation
+          ? await (options.rehydratePlanningEvaluation ? options.rehydratePlanningEvaluation(decisionRehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydratePlanningEvaluation for the persisted planner evaluator boundary")))
+          : await options.learning.evaluatePlanning!(planRefinement!);
+        plannerEvaluation = projectCycleReward(reward);
+      }
+      const evaluationDigest = await decisionCycleEvaluationDigest(executionEvaluation, plannerEvaluation);
+      if (persistedPhase === "settlement_pending" && persistedEvaluationDigest !== evaluationDigest) throw new ArgumentError("rehydrated decision evaluation does not match the persisted evaluation digest");
+      await commitDecisionPersistence(persistence, { phase: "settlement_pending", route_digest: route.route_digest, selection_digest: runDigests.selection, outcome_digest: runDigests.outcome, evaluation_digest: evaluationDigest, learning_episode_ids: learningEpisodeId ? [learningEpisodeId] : [], settlement_digests: [], terminal_status: null });
+      if (executionEvaluation && learningEpisodeId) {
+        settlement = await controller.settleRun(learningEpisodeId, executionEvaluation, { remote: options.learning.remote, outbox: options.learning.outbox, ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learningEpisodeId}` } : {}) });
+      }
+      if (plannerEvaluation && planRefinement) {
+        plannerSettlement = await controller.settlePlanningQuality(planRefinement, {
+          domain: route.primary_domain ?? "cross_domain",
+          capability: options.capability,
+          riskClass: run.blueprint?.domain_profile.risk_class ?? "planning_review",
+          taskFamily: run.blueprint?.selection_context.task_family ?? null,
+          evaluator: plannerEvaluation,
+          remote: options.learning.remote,
+        });
       }
     }
 
@@ -877,15 +948,18 @@ export async function runAutonomousDecisionCycle(
       }
     }
 
-    const settlementDigest = settlement?.episode.settlement?.settlement_digest ?? null;
+    const settlementDigests = [
+      settlement?.episode.settlement?.settlement_digest ?? null,
+      plannerSettlement?.status === "settled" ? await digestJson(plannerSettlement) : null,
+    ].filter((digest): digest is string => digest !== null);
     await commitDecisionPersistence(persistence, {
       phase: "terminal",
       route_digest: route.route_digest,
       selection_digest: runDigests.selection,
       outcome_digest: runDigests.outcome,
-      evaluation_digest: settlement ? await decisionEvaluationDigest(settlement.assessment) : null,
+      evaluation_digest: await decisionCycleEvaluationDigest(executionEvaluation, plannerEvaluation),
       learning_episode_ids: learningEpisodeId ? [learningEpisodeId] : [],
-      settlement_digests: settlementDigest ? [settlementDigest] : [],
+      settlement_digests: settlementDigests,
       terminal_status: "completed",
     });
     if (options.executionLifecycle !== "observe_only") await options.execution?.complete("completed");
@@ -900,6 +974,8 @@ export async function runAutonomousDecisionCycle(
       learning_episode_id: learningEpisodeId,
       evaluation: settlement?.assessment ?? null,
       settlement,
+      planner_evaluation: plannerEvaluation,
+      planner_settlement: plannerSettlement,
       memory: memoryProjection,
       retention: RETENTION,
       authorization: AUTHORIZATION,
@@ -936,6 +1012,17 @@ export interface AutonomousReplanLearningOptions {
   outbox?: AutonomousLearningOutboxSettlementOptions;
 }
 
+export interface AutonomousReplanPlanningEvaluationProjection extends JsonObject {
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number;
+  passed: boolean;
+  failed: boolean;
+  feedback_digest: string | null;
+  failure_class: string | null;
+  evidence_digest: string | null;
+}
+
 export interface AutonomousReplanEvaluationProjection extends JsonObject {
   evaluator_id: string;
   evaluator_version: string;
@@ -962,8 +1049,10 @@ export interface AutonomousReplanAttempt extends JsonObject {
   learning_episode_id: string | null;
 }
 
-export interface AutonomousReplanCycleOptions extends Omit<AutonomousDecisionCycleOptions, "learning" | "memory" | "cycleId" | "decisionStateStore" | "rehydrateRoute" | "rehydrateRun" | "rehydrateEvaluation" | "rehydrateResult"> {
+export interface AutonomousReplanCycleOptions extends Omit<AutonomousDecisionCycleOptions, "learning" | "memory" | "cycleId" | "decisionStateStore" | "rehydrateRoute" | "rehydrateRun" | "rehydrateEvaluation" | "rehydratePlanningEvaluation" | "rehydrateResult"> {
   evaluate: AutonomousReplanEvaluator;
+  /** Explicit evaluator for each accepted provider planning proposal. */
+  evaluatePlanning?: AutonomousDecisionCyclePlanningEvaluator;
   /** Additional evaluator-requested attempts. The SDK caps this at three. */
   maxReplans?: number;
   learning?: AutonomousReplanLearningOptions;
@@ -977,6 +1066,8 @@ export interface AutonomousReplanCycleOptions extends Omit<AutonomousDecisionCyc
   rehydrateRoute?: AutonomousCycleReplanRouteRehydrator<AutonomousRouteProposal>;
   /** Rehydrate the private evaluator packet when settlement was interrupted. */
   rehydrateEvaluation?: AutonomousCycleReplanEvaluationRehydrator;
+  /** Rehydrate planner quality values after a settlement boundary. */
+  rehydratePlanningEvaluation?: (context: AutonomousCycleReplanRehydrationContext) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   /** Rehydrate transient evaluator guidance from caller-owned storage. */
   rehydrateReplanInstruction?: AutonomousCycleReplanInstructionRehydrator;
 }
@@ -988,8 +1079,10 @@ export interface AutonomousReplanCycleResult {
   attempts: AutonomousReplanAttempt[];
   replan_count: number;
   evaluations: AutonomousReplanEvaluationProjection[];
+  planner_evaluations: AutonomousReplanPlanningEvaluationProjection[];
   learning_episode_ids: string[];
   settlements: AutonomousLearningSettlement[];
+  planner_settlements: AutonomousPlanningQualitySettlement[];
   retention: "provider_response_local; replan_instructions_transient; value_only_evaluation_and_learning_projection";
   authorization: "routing_and_provider_invocation_require_separate_explicit_approval";
 }
@@ -1122,8 +1215,10 @@ function replanResult(
   final: AutonomousDecisionCycleResult | null,
   attempts: AutonomousReplanAttempt[],
   evaluations: AutonomousReplanEvaluationProjection[],
+  plannerEvaluations: AutonomousReplanPlanningEvaluationProjection[],
   learningEpisodeIds: string[],
   settlements: AutonomousLearningSettlement[],
+  plannerSettlements: AutonomousPlanningQualitySettlement[],
 ): AutonomousReplanCycleResult {
   return {
     schema: AUTONOMOUS_REPLAN_CYCLE_SCHEMA,
@@ -1132,8 +1227,10 @@ function replanResult(
     attempts,
     replan_count: Math.max(0, attempts.length - 1),
     evaluations,
+    planner_evaluations: plannerEvaluations,
     learning_episode_ids: learningEpisodeIds,
     settlements,
+    planner_settlements: plannerSettlements,
     retention: REPLAN_RETENTION,
     authorization: AUTHORIZATION,
   };
@@ -1154,17 +1251,21 @@ export async function runAutonomousReplanCycle(
   if (!agent || typeof agent.run !== "function" || typeof agent.route !== "function") throw new ArgumentError("replan cycle requires an AutonomousAgent");
   const maxReplans = boundedReplanCount(options.maxReplans);
   const episodePrefix = options.learning ? boundedReplanIdentifier("replan episodePrefix", options.learning.episodePrefix ?? "autonomous-replan") : null;
-  if (options.learning && (!options.learning.controller || typeof options.learning.controller.prepareRun !== "function" || typeof options.learning.controller.settleRun !== "function")) throw new ArgumentError("replan learning controller is malformed");
+  if (options.evaluatePlanning && !options.learning?.controller) throw new ArgumentError("replan planner evaluation requires a learning controller");
+  if (options.learning && (typeof options.learning.controller.prepareRun !== "function" || typeof options.learning.controller.settleRun !== "function")) throw new ArgumentError("replan learning controller is malformed");
+  if (options.evaluatePlanning && options.learning?.controller && typeof options.learning.controller.settlePlanningQuality !== "function") throw new ArgumentError("replan planner learning controller is malformed");
 
   const persistence = await openCyclePersistence(options, task, "single_domain", maxReplans);
   if (persistence?.state.phase === "terminal") {
-    return replanResult(persistence.state.terminal_status as AutonomousReplanCycleStatus, null, persistedSingleAttempts(persistence.state), persistence.state.evaluations as unknown as AutonomousReplanEvaluationProjection[], [...persistence.state.learning_episode_ids], []);
+    return replanResult(persistence.state.terminal_status as AutonomousReplanCycleStatus, null, persistedSingleAttempts(persistence.state), persistence.state.evaluations as unknown as AutonomousReplanEvaluationProjection[], [], [...persistence.state.learning_episode_ids], [], []);
   }
 
   const attempts: AutonomousReplanAttempt[] = [];
   const evaluations: AutonomousReplanEvaluationProjection[] = [];
+  const plannerEvaluations: AutonomousReplanPlanningEvaluationProjection[] = [];
   const learningEpisodeIds: string[] = [];
   const settlements: AutonomousLearningSettlement[] = [];
+  const plannerSettlements: AutonomousPlanningQualitySettlement[] = [];
   let context = [...(options.context ?? [])];
   let routeOverride = options.routeOverride;
   let final: AutonomousDecisionCycleResult | null = null;
@@ -1226,6 +1327,7 @@ export async function runAutonomousReplanCycle(
           rehydrateRoute: undefined,
           rehydrateRun: undefined,
           rehydrateEvaluation: undefined,
+          rehydratePlanningEvaluation: undefined,
           rehydrateResult: undefined,
         });
       }
@@ -1249,7 +1351,7 @@ export async function runAutonomousReplanCycle(
       const attemptRecord = { attempt: attempt + 1, status: cycle.status, run_status: null, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, selection_digest: null, outcome_digest: null, evaluation_digest: null, evaluation: null, learning_episode_id: null } satisfies AutonomousReplanAttempt;
       upsertResultAttempt(attempts, attemptRecord);
       if (persistence) await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "execution_pending", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: null, evaluation_digest: null, replan_instruction_digest: null, terminal_status: null, attempts: upsertCycleAttempt(persistence.state.attempts, cycleAttemptState(attempt + 1, cycle.status, null, cycle.route.route_digest, null, null, null, [], null, planRefinementDigest)) });
-      return replanResult("plan_review_required", final, attempts, evaluations, learningEpisodeIds, settlements);
+      return replanResult("plan_review_required", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
     }
     if (cycle.status !== "completed" || !cycle.run) {
       try {
@@ -1261,11 +1363,15 @@ export async function runAutonomousReplanCycle(
       const attemptRecord = { attempt: attempt + 1, status: cycle.status, run_status: cycle.run?.status ?? null, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, selection_digest: digests.selection, outcome_digest: digests.outcome, evaluation_digest: null, evaluation: null, learning_episode_id: null } satisfies AutonomousReplanAttempt;
       upsertResultAttempt(attempts, attemptRecord);
       if (persistence) await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "terminal", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: digests.outcome, evaluation_digest: null, replan_instruction_digest: null, terminal_status: cycle.status, attempts: upsertCycleAttempt(persistence.state.attempts, cycleAttemptState(attempt + 1, cycle.status, cycle.run?.status ?? null, cycle.route.route_digest, digests.selection, digests.outcome, null, [], null, planRefinementDigest)) });
-      return replanResult(cycle.status, final, attempts, evaluations, learningEpisodeIds, settlements);
+      return replanResult(cycle.status, final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
     }
 
     let evaluation: AutonomousReplanEvaluation;
     let projection: AutonomousReplanEvaluationProjection;
+    let plannerEvaluation: AutonomousEvaluatorRewardInput | null = null;
+    let plannerSettlement: AutonomousPlanningQualitySettlement | null = null;
+    const plannerPlan = cycle.plan_refinement ?? options.acceptedSingleDomainPlanRefinement ?? null;
+    const plannerEligible = Boolean(options.evaluatePlanning && plannerPlan?.status === "completed");
     let evaluationDigest: string;
     const resumedSettlement = persistedPhase === "settlement_pending";
     try {
@@ -1276,13 +1382,32 @@ export async function runAutonomousReplanCycle(
         evaluation = normalizeReplanEvaluation(await options.evaluate(cycle.run));
       }
       projection = await replanEvaluationProjection(evaluation);
-      evaluationDigest = await digestJson(projection);
+      const executionEvaluationDigest = await digestJson(projection);
+      if (plannerEligible) {
+        const reward = resumedSettlement
+          ? await (options.rehydratePlanningEvaluation ? options.rehydratePlanningEvaluation(rehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydratePlanningEvaluation after a planner settlement interruption")))
+          : await options.evaluatePlanning!(plannerPlan!);
+        plannerEvaluation = projectCycleReward(reward);
+        plannerEvaluations.push({
+          evaluator_id: plannerEvaluation.evaluator_id,
+          evaluator_version: plannerEvaluation.evaluator_version,
+          reward: plannerEvaluation.reward,
+          passed: plannerEvaluation.passed,
+          failed: plannerEvaluation.failed ?? !plannerEvaluation.passed,
+          feedback_digest: plannerEvaluation.feedback_digest ?? null,
+          failure_class: plannerEvaluation.failure_class ?? null,
+          evidence_digest: plannerEvaluation.evidence_digest ?? null,
+        });
+        evaluationDigest = await digestJson({ execution_evaluation_digest: executionEvaluationDigest, planning_evaluation_digest: await decisionEvaluationDigest(plannerEvaluation) });
+      } else {
+        evaluationDigest = executionEvaluationDigest;
+      }
       if (resumedSettlement && evaluationDigest !== persistence?.state.evaluation_digest) throw new ArgumentError("rehydrated evaluator packet does not match the persisted evaluation digest");
       if (persistence && !resumedSettlement) {
         const persistedAttempt = cycleAttemptState(attempt + 1, cycle.status, cycle.run.status, cycle.route.route_digest, digests.selection, digests.outcome, evaluationDigest, [], null, planRefinementDigest);
         await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "settlement_pending", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: digests.outcome, evaluation_digest: evaluationDigest, replan_instruction_digest: projection.replan_instruction_digest, evaluations: [...persistence.state.evaluations, projection], attempts: upsertCycleAttempt(persistence.state.attempts, persistedAttempt) });
       }
-      if (!resumedSettlement) await options.execution?.recordEvaluation({ evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evaluationDigest, failureClass: evaluation.failure_class });
+      if (!resumedSettlement) await options.execution?.recordEvaluation({ evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evaluationDigest: executionEvaluationDigest, failureClass: evaluation.failure_class });
     } catch (error) {
       await failExecutionIfActive(options.execution, error);
       throw error;
@@ -1297,6 +1422,17 @@ export async function runAutonomousReplanCycle(
         learningEpisodeIds.push(episode.episode_id);
         settlements.push(settlement);
       }
+      if (plannerEvaluation && plannerPlan) {
+        plannerSettlement = await options.learning!.controller.settlePlanningQuality(plannerPlan, {
+          domain: cycle.route.primary_domain ?? "cross_domain",
+          capability: options.capability,
+          riskClass: cycle.run.blueprint?.domain_profile.risk_class ?? "planning_review",
+          taskFamily: cycle.run.blueprint?.selection_context.task_family ?? null,
+          evaluator: plannerEvaluation,
+          remote: options.learning?.remote,
+        });
+        plannerSettlements.push(plannerSettlement);
+      }
     } catch (error) {
       await failExecutionIfActive(options.execution, error);
       throw error;
@@ -1304,6 +1440,7 @@ export async function runAutonomousReplanCycle(
     if (resumedSettlement && evaluations.length > 0) evaluations[evaluations.length - 1] = projection;
     else evaluations.push(projection);
     upsertResultAttempt(attempts, { attempt: attempt + 1, status: cycle.status, run_status: cycle.run.status, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, selection_digest: digests.selection, outcome_digest: digests.outcome, evaluation_digest: evaluationDigest, evaluation: projection, learning_episode_id: learningEpisodeId });
+    final = { ...cycle, planner_evaluation: plannerEvaluation, planner_settlement: plannerSettlement };
 
     const shouldReplan = evaluation.replan_requested && attempt < maxReplans;
     if (persistence) {
@@ -1314,6 +1451,8 @@ export async function runAutonomousReplanCycle(
       const stateSettlementDigests = settlementDigest && !persistence.state.settlement_digests.includes(settlementDigest)
         ? [...persistence.state.settlement_digests, settlementDigest]
         : [...persistence.state.settlement_digests];
+      const plannerSettlementDigest = plannerSettlement?.status === "settled" ? await digestJson(plannerSettlement) : null;
+      if (plannerSettlementDigest && !stateSettlementDigests.includes(plannerSettlementDigest)) stateSettlementDigests.push(plannerSettlementDigest);
       await commitCyclePersistence(persistence, {
         attempt: attempt + 1,
         phase: shouldReplan ? "replan_handoff" : "terminal",
@@ -1336,7 +1475,7 @@ export async function runAutonomousReplanCycle(
         await failExecutionIfActive(options.execution, error);
         throw error;
       }
-      return replanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, learningEpisodeIds, settlements);
+      return replanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
     }
     if (attempt >= maxReplans) {
       try {
@@ -1345,7 +1484,7 @@ export async function runAutonomousReplanCycle(
         await failExecutionIfActive(options.execution, error);
         throw error;
       }
-      return replanResult("replan_limit_reached", final, attempts, evaluations, learningEpisodeIds, settlements);
+      return replanResult("replan_limit_reached", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
     }
 
     let nextContext: AutonomousPromptChunk;
@@ -1382,6 +1521,8 @@ export interface AutonomousCrossDomainDecisionCycleLearningOptions {
   trajectoryId: string;
   discount?: number;
   evaluate?: AutonomousCrossDomainDecisionCycleEvaluator;
+  /** Explicit evaluator for the accepted provider fan-out ordering. */
+  evaluatePlanning?: AutonomousDecisionCyclePlanningEvaluator;
   remote?: boolean;
   outbox?: AutonomousLearningOutboxSettlementOptions;
 }
@@ -1393,6 +1534,7 @@ export interface AutonomousCrossDomainDecisionCycleOptions extends Omit<Autonomo
   rehydrateRoute?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRouteProposal | Promise<AutonomousRouteProposal>;
   rehydrateRun?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousRunResult | AutonomousCrossDomainRunResult | Promise<AutonomousRunResult | AutonomousCrossDomainRunResult>;
   rehydrateEvaluation?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput> | Promise<AutonomousEvaluatorRewardInput | Record<string, AutonomousEvaluatorRewardInput>>;
+  rehydratePlanningEvaluation?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   rehydrateResult?: (context: AutonomousDecisionCycleRehydrationContext) => AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult | Promise<AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult>;
   semanticRouting?: AutonomousDecisionCycleSemanticOptions;
   /** Optional provider proposal phase; it never executes unless acceptPlan is true. */
@@ -1413,6 +1555,8 @@ export interface AutonomousCrossDomainDecisionCycleResult {
   learning_episode_ids: string[];
   evaluation: Record<string, BrainEvaluatorAssessment> | null;
   settlement: AutonomousCrossDomainLearningSettlement | null;
+  planner_evaluation: AutonomousEvaluatorRewardInput | null;
+  planner_settlement: AutonomousPlanningQualitySettlement | null;
   memory: AutonomousDecisionCycleMemoryProjection | null;
   retention: "provider_responses_local; value_only_evaluation_and_learning_projection";
   authorization: "semantic_routing_and_fanout_require_separate_explicit_approval";
@@ -1437,6 +1581,8 @@ function crossReviewResult(
     learning_episode_ids: [],
     evaluation: null,
     settlement: null,
+    planner_evaluation: null,
+    planner_settlement: null,
     memory: null,
     retention: CROSS_RETENTION,
     authorization: CROSS_AUTHORIZATION,
@@ -1479,7 +1625,7 @@ function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, rou
     allowPartial: options.allowPartial,
     synthesize: options.synthesize,
     maxParallelChildren: options.maxParallelChildren,
-    learning: options.learning?.controller,
+    learning: options.learning?.evaluate ? options.learning.controller : undefined,
     acceptedCrossDomainPlanRefinement: options.acceptedCrossDomainPlanRefinement,
   };
 }
@@ -1500,9 +1646,11 @@ export async function runAutonomousCrossDomainDecisionCycle(
 ): Promise<AutonomousCrossDomainDecisionCycleResult> {
   if (!agent || typeof agent.runCrossDomain !== "function" || typeof agent.route !== "function") throw new ArgumentError("cross-domain decision cycle requires an AutonomousAgent");
   if (options.semanticRouting?.enabled && options.domain !== undefined) throw new ArgumentError("semantic decision routing cannot replace an explicit caller domain");
-  if (options.learning && (!options.learning.controller || typeof options.learning.controller.prepareCrossDomainTrajectory !== "function" || typeof options.learning.controller.settleCrossDomain !== "function")) throw new ArgumentError("cross-domain decision cycle learning controller is malformed");
+  if (options.learning && !options.learning.controller) throw new ArgumentError("cross-domain decision cycle learning controller is malformed");
+  if (options.learning?.evaluate && (typeof options.learning.controller.prepareCrossDomainTrajectory !== "function" || typeof options.learning.controller.settleCrossDomain !== "function")) throw new ArgumentError("cross-domain decision cycle execution learning controller is malformed");
+  if (options.learning?.evaluatePlanning && typeof options.learning.controller.settlePlanningQuality !== "function") throw new ArgumentError("cross-domain decision cycle planner learning controller is malformed");
   const costBudget = cyclePlanningBudget(options);
-  const persistence = await openDecisionPersistence(options, task, "cross_domain", options.learning !== undefined, options.learning?.evaluate !== undefined, options.learning?.trajectoryId ?? null);
+  const persistence = await openDecisionPersistence(options, task, "cross_domain", options.learning !== undefined, Boolean(options.learning?.evaluate || options.learning?.evaluatePlanning), options.learning?.trajectoryId ?? null);
   if (persistence?.state.phase === "terminal") {
     return await rehydrateDecisionResult(persistence, options.rehydrateResult) as AutonomousCrossDomainDecisionCycleResult;
   }
@@ -1626,28 +1774,55 @@ export async function runAutonomousCrossDomainDecisionCycle(
     const outcomeDigest = await crossDomainReplanOutcomeDigest(run);
     if (persistence && (persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") && persistence.state.outcome_digest !== outcomeDigest) throw new ArgumentError("rehydrated cross-domain run does not match the persisted outcome digest");
     let settlement: AutonomousCrossDomainLearningSettlement | null = null;
-    let evaluationDigest: string | null = null;
-    const canEvaluate = Boolean(options.learning?.evaluate && run.learning_episode_ids.length > 0);
-    if (persistence && (persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") && !canEvaluate) throw new ArgumentError("persisted cross-domain evaluator state has no learning episodes to settle");
-    if (canEvaluate) {
+    let plannerEvaluation: AutonomousEvaluatorRewardInput | null = null;
+    let plannerSettlement: AutonomousPlanningQualitySettlement | null = null;
+    let rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
+    const executionEvaluationEnabled = Boolean(options.learning?.evaluate && run.learning_episode_ids.length > 0);
+    const planningEvaluationEnabled = Boolean(options.learning?.evaluatePlanning && planRefinement?.status === "completed");
+    const cycleEvaluationEnabled = executionEvaluationEnabled || planningEvaluationEnabled;
+    if (persistence && (persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending") && !cycleEvaluationEnabled) throw new ArgumentError("persisted cross-domain evaluator state has no configured evaluator boundary");
+    if (options.learning && cycleEvaluationEnabled) {
       const learning = options.learning;
-      if (!learning || typeof learning.evaluate !== "function") throw new ArgumentError("cross-domain evaluator is missing");
       const resumedEvaluation = persistedPhase === "evaluation_pending" || persistedPhase === "settlement_pending";
       const persistedEvaluationDigest = persistence?.state.evaluation_digest ?? null;
       if (persistence && !resumedEvaluation) await commitDecisionPersistence(persistence, { phase: "evaluation_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: outcomeDigest, evaluation_digest: null, learning_episode_ids: [...run.learning_episode_ids], trajectory_id: persistence.trajectoryId, settlement_digests: [], terminal_status: null });
-      const rewards = resumedEvaluation
-        ? await (options.rehydrateEvaluation ? options.rehydrateEvaluation(decisionRehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydrateEvaluation for the persisted cross-domain evaluator boundary"))) as Record<string, AutonomousEvaluatorRewardInput>
-        : await learning.evaluate(run);
-      evaluationDigest = await decisionCrossEvaluationDigest(rewards);
+      if (executionEvaluationEnabled) {
+        const rawRewards = resumedEvaluation
+          ? await (options.rehydrateEvaluation ? options.rehydrateEvaluation(decisionRehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydrateEvaluation for the persisted cross-domain evaluator boundary"))) as Record<string, AutonomousEvaluatorRewardInput>
+          : await learning.evaluate!(run);
+        rewards = Object.fromEntries(Object.entries(rawRewards).map(([episodeId, reward]) => [episodeId, projectCycleReward(reward)]));
+      }
+      if (planningEvaluationEnabled) {
+        const reward = resumedEvaluation
+          ? await (options.rehydratePlanningEvaluation ? options.rehydratePlanningEvaluation(decisionRehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydratePlanningEvaluation for the persisted cross-domain planner evaluator boundary")))
+          : await learning.evaluatePlanning!(planRefinement!);
+        plannerEvaluation = projectCycleReward(reward);
+      }
+      const executionDigest = executionEvaluationEnabled ? await decisionCrossEvaluationDigest(rewards) : null;
+      const evaluationDigest = plannerEvaluation
+        ? await digestJson({ execution_digest: executionDigest, planning_digest: await decisionEvaluationDigest(plannerEvaluation) })
+        : executionDigest;
       if (persistedPhase === "settlement_pending" && persistedEvaluationDigest !== evaluationDigest) throw new ArgumentError("rehydrated cross-domain evaluation does not match the persisted evaluation digest");
       await commitDecisionPersistence(persistence, { phase: "settlement_pending", route_digest: route.route_digest, selection_digest: null, outcome_digest: outcomeDigest, evaluation_digest: evaluationDigest, learning_episode_ids: [...run.learning_episode_ids], trajectory_id: persistence?.trajectoryId ?? null, settlement_digests: [], terminal_status: null });
-      settlement = await learning.controller.settleCrossDomain(run, rewards, {
-        trajectoryId: learning.trajectoryId,
-        discount: learning.discount,
-        remote: learning.remote,
-        outbox: learning.outbox,
-        ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learning.trajectoryId}` } : {}),
-      });
+      if (executionEvaluationEnabled) {
+        settlement = await learning.controller.settleCrossDomain(run, rewards, {
+          trajectoryId: learning.trajectoryId,
+          discount: learning.discount,
+          remote: learning.remote,
+          outbox: learning.outbox,
+          ...(persistence ? { idempotencyKey: `decision:${persistence.cycleId}:${learning.trajectoryId}` } : {}),
+        });
+      }
+      if (plannerEvaluation && planRefinement) {
+        plannerSettlement = await learning.controller.settlePlanningQuality(planRefinement, {
+          domain: route.primary_domain ?? "cross_domain",
+          capability: options.capability,
+          riskClass: "cross_domain_integration",
+          taskFamily: "cross_domain_synthesis",
+          evaluator: plannerEvaluation,
+          remote: learning.remote,
+        });
+      }
     }
     const memoryProjection = recalledMemory.projection;
     if (options.memory) {
@@ -1671,16 +1846,21 @@ export async function runAutonomousCrossDomainDecisionCycle(
         }
       }
     }
-    const settlementDigest = settlement?.trajectory.settlement_digest ?? (settlement ? await digestJson(settlement.trajectory) : null);
+    const settlementDigests = [
+      settlement?.trajectory.settlement_digest ?? (settlement ? await digestJson(settlement.trajectory) : null),
+      plannerSettlement?.status === "settled" ? await digestJson(plannerSettlement) : null,
+    ].filter((digest): digest is string => digest !== null);
     await commitDecisionPersistence(persistence, {
       phase: "terminal",
       route_digest: route.route_digest,
       selection_digest: null,
       outcome_digest: outcomeDigest,
-      evaluation_digest: evaluationDigest,
+      evaluation_digest: plannerEvaluation
+        ? await digestJson({ execution_digest: executionEvaluationEnabled ? await decisionCrossEvaluationDigest(rewards) : null, planning_digest: await decisionEvaluationDigest(plannerEvaluation) })
+        : executionEvaluationEnabled ? await decisionCrossEvaluationDigest(rewards) : null,
       learning_episode_ids: [...run.learning_episode_ids],
       trajectory_id: persistence?.trajectoryId ?? null,
-      settlement_digests: settlementDigest ? [settlementDigest] : [],
+      settlement_digests: settlementDigests,
       terminal_status: run.status,
     });
     if (options.executionLifecycle !== "observe_only") {
@@ -1697,6 +1877,8 @@ export async function runAutonomousCrossDomainDecisionCycle(
       learning_episode_ids: [...run.learning_episode_ids],
       evaluation: settlement ? projectedEvaluations(settlement) : null,
       settlement,
+      planner_evaluation: plannerEvaluation,
+      planner_settlement: plannerSettlement,
       memory: memoryProjection,
       retention: CROSS_RETENTION,
       authorization: CROSS_AUTHORIZATION,
@@ -1771,8 +1953,10 @@ export type AutonomousCrossDomainReplanCycleStatus =
   | "completed_without_replan"
   | "replan_limit_reached";
 
-export interface AutonomousCrossDomainReplanCycleOptions extends Omit<AutonomousCrossDomainDecisionCycleOptions, "learning" | "cycleId" | "decisionStateStore" | "rehydrateRoute" | "rehydrateRun" | "rehydrateEvaluation" | "rehydrateResult"> {
+export interface AutonomousCrossDomainReplanCycleOptions extends Omit<AutonomousCrossDomainDecisionCycleOptions, "learning" | "cycleId" | "decisionStateStore" | "rehydrateRoute" | "rehydrateRun" | "rehydrateEvaluation" | "rehydratePlanningEvaluation" | "rehydrateResult"> {
   evaluate: AutonomousCrossDomainReplanEvaluator;
+  /** Explicit evaluator for each accepted provider fan-out ordering. */
+  evaluatePlanning?: AutonomousDecisionCyclePlanningEvaluator;
   /** Additional evaluator-requested fan-out/fan-in attempts. The SDK caps this at three. */
   maxReplans?: number;
   learning?: AutonomousCrossDomainReplanLearningOptions;
@@ -1786,6 +1970,8 @@ export interface AutonomousCrossDomainReplanCycleOptions extends Omit<Autonomous
   rehydrateRoute?: AutonomousCycleReplanRouteRehydrator<AutonomousRouteProposal>;
   /** Rehydrate the private evaluator packet when settlement was interrupted. */
   rehydrateEvaluation?: AutonomousCycleReplanEvaluationRehydrator;
+  /** Rehydrate planner quality values after a settlement boundary. */
+  rehydratePlanningEvaluation?: (context: AutonomousCycleReplanRehydrationContext) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   /** Rehydrate transient evaluator guidance from caller-owned storage. */
   rehydrateReplanInstruction?: AutonomousCycleReplanInstructionRehydrator;
 }
@@ -1797,8 +1983,10 @@ export interface AutonomousCrossDomainReplanCycleResult {
   attempts: AutonomousCrossDomainReplanAttempt[];
   replan_count: number;
   evaluations: AutonomousCrossDomainReplanEvaluationProjection[];
+  planner_evaluations: AutonomousReplanPlanningEvaluationProjection[];
   learning_episode_ids: string[];
   settlements: AutonomousCrossDomainLearningSettlement[];
+  planner_settlements: AutonomousPlanningQualitySettlement[];
   retention: "provider_responses_local; replan_instructions_transient; value_only_evaluation_and_learning_projection";
   authorization: "semantic_routing_and_fanout_require_separate_explicit_approval";
 }
@@ -1967,8 +2155,10 @@ function crossDomainReplanResult(
   final: AutonomousCrossDomainDecisionCycleResult | null,
   attempts: AutonomousCrossDomainReplanAttempt[],
   evaluations: AutonomousCrossDomainReplanEvaluationProjection[],
+  plannerEvaluations: AutonomousReplanPlanningEvaluationProjection[],
   learningEpisodeIds: string[],
   settlements: AutonomousCrossDomainLearningSettlement[],
+  plannerSettlements: AutonomousPlanningQualitySettlement[],
 ): AutonomousCrossDomainReplanCycleResult {
   return {
     schema: AUTONOMOUS_CROSS_DOMAIN_REPLAN_CYCLE_SCHEMA,
@@ -1977,8 +2167,10 @@ function crossDomainReplanResult(
     attempts,
     replan_count: Math.max(0, attempts.length - 1),
     evaluations,
+    planner_evaluations: plannerEvaluations,
     learning_episode_ids: learningEpisodeIds,
     settlements,
+    planner_settlements: plannerSettlements,
     retention: CROSS_REPLAN_RETENTION,
     authorization: CROSS_AUTHORIZATION,
   };
@@ -2000,16 +2192,20 @@ export async function runAutonomousCrossDomainReplanCycle(
   const maxReplans = boundedReplanCount(options.maxReplans);
   const episodePrefix = options.learning ? boundedReplanIdentifier("cross-domain replan episodePrefix", options.learning.episodePrefix ?? "autonomous-cross-domain-replan") : null;
   const trajectoryIdPrefix = options.learning ? boundedReplanIdentifier("cross-domain replan trajectoryIdPrefix", options.learning.trajectoryIdPrefix ?? "autonomous-cross-domain-replan") : null;
+  if (options.evaluatePlanning && !options.learning?.controller) throw new ArgumentError("cross-domain replan planner evaluation requires a learning controller");
   if (options.learning && (!options.learning.controller || typeof options.learning.controller.prepareRun !== "function" || typeof options.learning.controller.settleCrossDomain !== "function")) throw new ArgumentError("cross-domain replan learning controller is malformed");
+  if (options.evaluatePlanning && options.learning?.controller && typeof options.learning.controller.settlePlanningQuality !== "function") throw new ArgumentError("cross-domain replan planner learning controller is malformed");
   const costBudget = cycleCostBudget(options);
   const persistence = await openCyclePersistence(options, task, "cross_domain", maxReplans);
   if (persistence?.state.phase === "terminal") {
-    return crossDomainReplanResult(persistence.state.terminal_status as AutonomousCrossDomainReplanCycleStatus, null, persistedCrossAttempts(persistence.state), persistence.state.evaluations as unknown as AutonomousCrossDomainReplanEvaluationProjection[], [...persistence.state.learning_episode_ids], []);
+    return crossDomainReplanResult(persistence.state.terminal_status as AutonomousCrossDomainReplanCycleStatus, null, persistedCrossAttempts(persistence.state), persistence.state.evaluations as unknown as AutonomousCrossDomainReplanEvaluationProjection[], [], [...persistence.state.learning_episode_ids], [], []);
   }
   const attempts: AutonomousCrossDomainReplanAttempt[] = [];
   const evaluations: AutonomousCrossDomainReplanEvaluationProjection[] = [];
+  const plannerEvaluations: AutonomousReplanPlanningEvaluationProjection[] = [];
   const learningEpisodeIds: string[] = [];
   const settlements: AutonomousCrossDomainLearningSettlement[] = [];
+  const plannerSettlements: AutonomousPlanningQualitySettlement[] = [];
   let context = [...(options.context ?? [])];
   let routeOverride = options.routeOverride;
   let final: AutonomousCrossDomainDecisionCycleResult | null = null;
@@ -2067,6 +2263,7 @@ export async function runAutonomousCrossDomainReplanCycle(
           rehydrateRoute: undefined,
           rehydrateRun: undefined,
           rehydrateEvaluation: undefined,
+          rehydratePlanningEvaluation: undefined,
           rehydrateResult: undefined,
         });
       }
@@ -2092,7 +2289,7 @@ export async function runAutonomousCrossDomainReplanCycle(
       const attemptRecord = { attempt: attempt + 1, status: cycle.status, run_status: null, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: null, evaluation_digest: null, evaluation: null, learning_episode_ids: [], trajectory_id: null } satisfies AutonomousCrossDomainReplanAttempt;
       upsertResultAttempt(attempts, attemptRecord);
       if (persistence) await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "execution_pending", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: null, evaluation_digest: null, replan_instruction_digest: null, terminal_status: null, attempts: upsertCycleAttempt(persistence.state.attempts, cycleAttemptState(attempt + 1, cycle.status, null, cycle.route.route_digest, null, null, null, [], null, planRefinementDigest)) });
-      return crossDomainReplanResult("plan_review_required", final, attempts, evaluations, learningEpisodeIds, settlements);
+      return crossDomainReplanResult("plan_review_required", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
     }
     if (!terminalRun || !run) {
       try {
@@ -2104,7 +2301,7 @@ export async function runAutonomousCrossDomainReplanCycle(
       const attemptRecord = { attempt: attempt + 1, status: cycle.status, run_status: run?.status ?? null, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: null, evaluation: null, learning_episode_ids: [], trajectory_id: null } satisfies AutonomousCrossDomainReplanAttempt;
       upsertResultAttempt(attempts, attemptRecord);
       if (persistence) await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "terminal", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: null, replan_instruction_digest: null, terminal_status: cycle.status, attempts: upsertCycleAttempt(persistence.state.attempts, cycleAttemptState(attempt + 1, cycle.status, run?.status ?? null, cycle.route.route_digest, null, outcomeDigest, null, [], null, planRefinementDigest)) });
-      return crossDomainReplanResult(cycle.status, final, attempts, evaluations, learningEpisodeIds, settlements);
+      return crossDomainReplanResult(cycle.status, final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
     }
 
     let runForEvaluation = run;
@@ -2121,13 +2318,36 @@ export async function runAutonomousCrossDomainReplanCycle(
         ? normalizeCrossDomainReplanEvaluation(await (options.rehydrateEvaluation ? options.rehydrateEvaluation(rehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydrateEvaluation after a cross-domain settlement interruption"))), pendingEpisodeIds)
         : normalizeCrossDomainReplanEvaluation(await options.evaluate(runForEvaluation), pendingEpisodeIds);
       const projection = await crossDomainReplanEvaluationProjection(evaluation);
-      const evaluationDigest = await digestJson(projection);
+      const executionEvaluationDigest = await digestJson(projection);
+      const plannerPlan = cycle.plan_refinement ?? options.acceptedCrossDomainPlanRefinement ?? null;
+      const plannerEligible = Boolean(options.evaluatePlanning && plannerPlan?.status === "completed");
+      let plannerEvaluation: AutonomousEvaluatorRewardInput | null = null;
+      let plannerSettlement: AutonomousPlanningQualitySettlement | null = null;
+      if (plannerEligible) {
+        const reward = resumedSettlement
+          ? await (options.rehydratePlanningEvaluation ? options.rehydratePlanningEvaluation(rehydrationContext(persistence!)) : Promise.reject(new ArgumentError("restart resume requires rehydratePlanningEvaluation after a cross-domain planner settlement interruption")))
+          : await options.evaluatePlanning!(plannerPlan!);
+        plannerEvaluation = projectCycleReward(reward);
+        plannerEvaluations.push({
+          evaluator_id: plannerEvaluation.evaluator_id,
+          evaluator_version: plannerEvaluation.evaluator_version,
+          reward: plannerEvaluation.reward,
+          passed: plannerEvaluation.passed,
+          failed: plannerEvaluation.failed ?? !plannerEvaluation.passed,
+          feedback_digest: plannerEvaluation.feedback_digest ?? null,
+          failure_class: plannerEvaluation.failure_class ?? null,
+          evidence_digest: plannerEvaluation.evidence_digest ?? null,
+        });
+      }
+      const evaluationDigest = plannerEvaluation
+        ? await digestJson({ execution_evaluation_digest: executionEvaluationDigest, planning_evaluation_digest: await decisionEvaluationDigest(plannerEvaluation) })
+        : executionEvaluationDigest;
       if (resumedSettlement && evaluationDigest !== persistence?.state.evaluation_digest) throw new ArgumentError("rehydrated cross-domain evaluator packet does not match the persisted evaluation digest");
       if (persistence && !resumedSettlement) {
         const persistedAttempt = cycleAttemptState(attempt + 1, cycle.status, run.status, cycle.route.route_digest, null, outcomeDigest, evaluationDigest, pendingEpisodeIds, trajectoryId, planRefinementDigest);
         await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "settlement_pending", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: evaluationDigest, replan_instruction_digest: projection.replan_instruction_digest, evaluations: [...persistence.state.evaluations, projection], attempts: upsertCycleAttempt(persistence.state.attempts, persistedAttempt), learning_episode_ids: [...new Set([...persistence.state.learning_episode_ids, ...pendingEpisodeIds])] });
       }
-      if (!resumedSettlement) await options.execution?.recordEvaluation({ evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evaluationDigest, failureClass: evaluation.failure_class });
+      if (!resumedSettlement) await options.execution?.recordEvaluation({ evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evaluationDigest: executionEvaluationDigest, failureClass: evaluation.failure_class });
       let settlement: AutonomousCrossDomainLearningSettlement | null = null;
       if (options.learning) {
         settlement = await options.learning.controller.settleCrossDomain(runForEvaluation, evaluation.rewards, { trajectoryId: trajectoryId!, discount: options.learning.discount, remote: options.learning.remote, outbox: options.learning.outbox });
@@ -2145,8 +2365,19 @@ export async function runAutonomousCrossDomainReplanCycle(
             cycle.memory.evaluation_recorded_episode_ids.push(memoryEpisodeId);
           }
         }
-        final = { ...cycle, run: runForEvaluation, learning_episode_ids: pendingEpisodeIds, evaluation: projectedEvaluations(settlement), settlement };
       }
+      if (plannerEvaluation && plannerPlan) {
+        plannerSettlement = await options.learning!.controller.settlePlanningQuality(plannerPlan, {
+          domain: cycle.route.primary_domain ?? "cross_domain",
+          capability: options.capability,
+          riskClass: "cross_domain_integration",
+          taskFamily: "cross_domain_synthesis",
+          evaluator: plannerEvaluation,
+          remote: options.learning?.remote,
+        });
+        plannerSettlements.push(plannerSettlement);
+      }
+      final = { ...cycle, run: runForEvaluation, learning_episode_ids: pendingEpisodeIds, evaluation: settlement ? projectedEvaluations(settlement) : null, settlement, planner_evaluation: plannerEvaluation, planner_settlement: plannerSettlement };
       if (resumedSettlement && evaluations.length > 0) evaluations[evaluations.length - 1] = projection;
       else evaluations.push(projection);
       upsertResultAttempt(attempts, { attempt: attempt + 1, status: cycle.status, run_status: run.status, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: evaluationDigest, evaluation: projection, learning_episode_ids: pendingEpisodeIds, trajectory_id: trajectoryId });
@@ -2157,6 +2388,8 @@ export async function runAutonomousCrossDomainReplanCycle(
         const stateSettlementDigests = settlementDigest && !persistence.state.settlement_digests.includes(settlementDigest)
           ? [...persistence.state.settlement_digests, settlementDigest]
           : [...persistence.state.settlement_digests];
+        const plannerSettlementDigest = plannerSettlement?.status === "settled" ? await digestJson(plannerSettlement) : null;
+        if (plannerSettlementDigest && !stateSettlementDigests.includes(plannerSettlementDigest)) stateSettlementDigests.push(plannerSettlementDigest);
         await commitCyclePersistence(persistence, {
           attempt: attempt + 1,
           phase: shouldReplan ? "replan_handoff" : "terminal",
@@ -2175,11 +2408,11 @@ export async function runAutonomousCrossDomainReplanCycle(
 
       if (!evaluation.replan_requested) {
         await options.execution?.complete(evaluation.passed ? "completed" : "completed_without_replan");
-        return crossDomainReplanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, learningEpisodeIds, settlements);
+        return crossDomainReplanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
       }
       if (attempt >= maxReplans) {
         await options.execution?.complete("replan_limit_reached");
-        return crossDomainReplanResult("replan_limit_reached", final, attempts, evaluations, learningEpisodeIds, settlements);
+        return crossDomainReplanResult("replan_limit_reached", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
       }
       const nextContext = await crossDomainReplanContextChunk(attempt + 2, cycle.route.route_digest, outcomeDigest!, evaluation);
       await options.execution?.replan({ instructionDigest: projection.replan_instruction_digest, attempt: attempt + 2, reason: "cross_domain_evaluator_requested" });

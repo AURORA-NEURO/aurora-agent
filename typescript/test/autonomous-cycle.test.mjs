@@ -8,6 +8,7 @@ import {
   AutonomousLearningController,
   InMemoryAutonomousLearningFeedbackOutboxStore,
   AutonomousOnlineLearner,
+  InMemoryAutonomousModelHealthStore,
   AutonomousCostBudget,
   CredentialStore,
   AutonomousDecisionCyclePersistenceCoordinator,
@@ -24,7 +25,7 @@ import {
   validateAutonomousCycleReplanSnapshot,
 } from "../dist/index.js";
 
-function providerPlanningCycleAgent() {
+function providerPlanningCycleAgent(agentOptions = {}) {
   let calls = 0;
   const llm = new LLMRuntime({
     credentials: new CredentialStore(),
@@ -42,7 +43,7 @@ function providerPlanningCycleAgent() {
     },
   });
   llm.registerProvider(openaiCompatibleProvider("cycle-provider", "https://cycle-planner.test", { requiresCredential: false }));
-  const agent = new AutonomousAgent(llm);
+  const agent = new AutonomousAgent(llm, agentOptions);
   agent.registerModel(candidate());
   return { agent, calls: () => calls };
 }
@@ -253,6 +254,46 @@ test("provider-planned decision cycles apply the same reviewed contract to every
   }
 });
 
+test("provider-planned decision cycles settle planner and execution quality across every single-domain profile", async () => {
+  const health = new InMemoryAutonomousModelHealthStore();
+  const { agent } = providerPlanningCycleAgent({ learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  const learning = new AutonomousLearningController(agent);
+  const tasks = {
+    coding: "debug this repository and verify the tests",
+    browser: "research current sources and compare citations",
+    data: "validate dataset schema lineage and quality",
+    science: "design a reproducible hypothesis experiment",
+    biomedical: "review biomedical evidence with safety boundaries",
+    neuroscience: "analyze EEG preprocessing and signal confounds",
+    operations: "prepare an outage rollback runbook",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this specialist subtask and synthesize findings",
+    multimodal: "inspect this image transcript and evidence gaps",
+    evaluation: "run a benchmark holdout replay and report uncertainty",
+  };
+  for (const [domain, task] of Object.entries(tasks)) {
+    const result = await runAutonomousDecisionCycle(agent, task, {
+      domain,
+      providerPlanning: { approveProviderCall: true },
+      acceptPlan: true,
+      approveProviderCall: true,
+      learning: {
+        controller: learning,
+        episodeId: `planner-cycle-${domain}`,
+        evaluate: () => ({ evaluator_id: "execution-reviewer", evaluator_version: "1", reward: 0.74, passed: true }),
+        evaluatePlanning: () => ({ evaluator_id: "planner-reviewer", evaluator_version: "1", reward: 0.83, passed: true }),
+      },
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.planner_evaluation.reward, 0.83, domain);
+    assert.equal(result.planner_settlement.status, "settled", domain);
+    assert.equal(result.settlement.episode.status, "settled", domain);
+  }
+  const state = agent.learner.snapshot();
+  assert.equal(state.credited_outcomes.length, Object.keys(tasks).length * 2);
+  assert.equal(health.health({ model: "cycle-model" })[0]?.quality_observations, Object.keys(tasks).length * 2);
+});
+
 test("cross-domain decision-cycle planning persists and rehydrates the accepted fan-out proposal", async () => {
   const { agent, calls } = providerPlanningCycleAgent();
   const stateStore = new InMemoryAutonomousDecisionCycleStateStore();
@@ -316,6 +357,29 @@ test("replan-cycle planning review is resumable through its outer metadata-only 
   assert.equal(resumed.status, "completed");
   assert.equal(resumed.final.run.plan_refinement_digest, pending.plan_refinement_digest);
   assert.equal(calls(), 2, "replan restart resumes execution without replaying provider planning");
+});
+
+test("single-domain replanning settles each accepted planner proposal alongside attempt credit", async () => {
+  const health = new InMemoryAutonomousModelHealthStore();
+  const { agent } = providerPlanningCycleAgent({ learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  const learning = new AutonomousLearningController(agent);
+  const result = await runAutonomousReplanCycle(agent, "Debug this coding repository and report verified tests.", {
+    domain: "coding",
+    providerPlanning: { approveProviderCall: true },
+    acceptPlan: true,
+    approveProviderCall: true,
+    maxReplans: 0,
+    learning: { controller: learning, episodePrefix: "planner-replan" },
+    evaluate: () => ({ evaluator_id: "execution-reviewer", evaluator_version: "1", reward: 0.78, passed: true, replan_requested: false }),
+    evaluatePlanning: () => ({ evaluator_id: "planner-reviewer", evaluator_version: "1", reward: 0.86, passed: true }),
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.planner_evaluations.length, 1);
+  assert.equal(result.planner_evaluations[0].reward, 0.86);
+  assert.equal(result.planner_settlements.length, 1);
+  assert.equal(result.planner_settlements[0].status, "settled");
+  assert.equal(result.final.planner_settlement.status, "settled");
+  assert.equal(health.health({ model: "cycle-model" })[0]?.quality_observations, 2);
 });
 
 test("ordinary decision cycles persist a metadata-only restart barrier across every built-in domain", async () => {
@@ -913,6 +977,61 @@ test("cross-domain decision cycle settles specialist and synthesis credit as one
   assert.equal(execution.state.status, "completed");
   assert.equal(execution.state.provider_calls, 3);
   assert.equal(calls(), 3);
+});
+
+test("provider-planned cross-domain cycles settle planner quality separately from the execution trajectory", async () => {
+  const health = new InMemoryAutonomousModelHealthStore();
+  const { agent } = providerPlanningCycleAgent({ learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  const learning = new AutonomousLearningController(agent);
+  const result = await runAutonomousCrossDomainDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
+    allowCrossDomain: true,
+    providerPlanning: { approveProviderCall: true },
+    acceptPlan: true,
+    approveProviderCall: true,
+    maxParallelChildren: 1,
+    learning: {
+      controller: learning,
+      trajectoryId: "planned-cross-cycle-trajectory",
+      evaluate: (run) => Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "execution-reviewer", evaluator_version: "1", reward: 0.76, passed: true }])),
+      evaluatePlanning: () => ({ evaluator_id: "planner-reviewer", evaluator_version: "1", reward: 0.91, passed: true }),
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.planner_evaluation.reward, 0.91);
+  assert.equal(result.planner_settlement.status, "settled");
+  assert.equal(result.settlement.trajectory.settlements.length, 3);
+  assert.equal(result.learning_episode_ids.length, 3);
+  assert.equal(health.health({ model: "cycle-model" })[0]?.quality_observations, 4);
+});
+
+test("cross-domain replanning settles fan-out planner quality without merging it into child credit", async () => {
+  const health = new InMemoryAutonomousModelHealthStore();
+  const { agent } = providerPlanningCycleAgent({ learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  const learning = new AutonomousLearningController(agent);
+  const result = await runAutonomousCrossDomainReplanCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
+    allowCrossDomain: true,
+    providerPlanning: { approveProviderCall: true },
+    acceptPlan: true,
+    approveProviderCall: true,
+    maxReplans: 0,
+    maxParallelChildren: 1,
+    learning: { controller: learning, episodePrefix: "planner-cross-replan", trajectoryIdPrefix: "planner-cross-replan-trajectory" },
+    evaluate: (run) => ({
+      evaluator_id: "execution-reviewer",
+      evaluator_version: "1",
+      reward: 0.77,
+      passed: true,
+      replan_requested: false,
+      rewards: Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "execution-reviewer", evaluator_version: "1", reward: 0.77, passed: true }])),
+    }),
+    evaluatePlanning: () => ({ evaluator_id: "planner-reviewer", evaluator_version: "1", reward: 0.89, passed: true }),
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.planner_evaluations.length, 1);
+  assert.equal(result.planner_settlements[0].status, "settled");
+  assert.equal(result.final.planner_settlement.status, "settled");
+  assert.equal(result.final.settlement.trajectory.settlements.length, 3);
+  assert.equal(health.health({ model: "cycle-model" })[0]?.quality_observations, 4);
 });
 
 test("cross-domain replan cycle repeats bounded fan-out with unique trajectories and screened feedback", async () => {

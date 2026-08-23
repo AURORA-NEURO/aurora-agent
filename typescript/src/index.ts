@@ -2224,6 +2224,7 @@ export type {
   AutonomousCrossDomainReplanEvaluator,
   AutonomousCrossDomainReplanLearningOptions,
   AutonomousDecisionCycleEvaluator,
+  AutonomousDecisionCyclePlanningEvaluator,
   AutonomousDecisionCycleLearningOptions,
   AutonomousDecisionCycleMemoryOptions,
   AutonomousDecisionCycleMemoryProjection,
@@ -2240,6 +2241,7 @@ export type {
   AutonomousReplanEvaluationProjection,
   AutonomousReplanEvaluator,
   AutonomousReplanLearningOptions,
+  AutonomousReplanPlanningEvaluationProjection,
 } from "./autonomous-cycle.js";
 export type {
   AutonomousDomainEvaluatorProfile,
