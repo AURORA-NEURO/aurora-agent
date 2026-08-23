@@ -38,9 +38,9 @@ from .errors import ArgumentError
 
 AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA = "bioprism-python-autonomous-connector-operation-registry/0.1"
 AUTONOMOUS_CONNECTOR_OPERATION_SCHEMA = "bioprism-python-autonomous-connector-operation/0.1"
-AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-connector-work-item/0.1"
-AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-connector-work-queue/0.1"
-AUTONOMOUS_CONNECTOR_WORKER_SCHEMA = "bioprism-python-autonomous-connector-worker/0.1"
+AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-connector-work-item/0.2"
+AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-connector-work-queue/0.2"
+AUTONOMOUS_CONNECTOR_WORKER_SCHEMA = "bioprism-python-autonomous-connector-worker/0.2"
 AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA = "bioprism-python-autonomous-connector-feedback/0.1"
 AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA = "bioprism-python-autonomous-connector-feedback-ledger/0.1"
 
@@ -65,6 +65,8 @@ _WORK_FAILURE_CLASSES = frozenset({
     "approval_required",
     "domain_scope",
     "capability_scope",
+    "reconciliation_required",
+    "execution_in_flight",
     "executor_error",
     "transport_error",
     "unknown",
@@ -74,8 +76,12 @@ _WORK_ITEM_KEYS = frozenset({
     "selection_plan_digest", "request_digest", "dispatch_id", "execution_id", "call_id", "attempt_id",
     "parent_digests", "approved", "max_attempts", "attempts", "status", "available_at", "lease_owner",
     "lease_until", "receipt_digest", "payload_digest", "failure_class", "last_error_class", "created_at",
-    "updated_at", "item_digest", "retention", "secret_material",
+    "updated_at", "execution_phase", "reconciliation_digest", "reconciliation_observed_item_digest",
+    "reconciliation_outcome", "reconciliation_evidence_digest", "reconciliation_evidence_kind",
+    "reconciliation_operator", "reconciliation_effect_absent", "item_digest", "retention", "secret_material",
 })
+_EXECUTION_PHASES = frozenset({"not_started", "running", "settled"})
+_RECONCILIATION_OUTCOMES = frozenset({"succeeded", "failed", "not_executed", "unknown"})
 
 
 def _capability_identifier(name: str, value: Any) -> str:
@@ -133,6 +139,29 @@ def _digest_sequence(name: str, value: Any, *, maximum: int = 128) -> tuple[str,
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) > maximum:
         raise ArgumentError(f"{name} must contain at most {maximum} entries")
     return tuple(_digest(f"{name} entry", item) for item in value)  # type: ignore[misc]
+
+
+def _reconciliation_receipt_digest(
+    *,
+    item: "AutonomousConnectorWorkItem",
+    outcome: str,
+    evidence_digest: str,
+    evidence_kind: str,
+    operator: str,
+    effect_absent: bool | None,
+) -> str:
+    return content_digest({
+        "schema": f"{AUTONOMOUS_CONNECTOR_WORK_ITEM_SCHEMA}/reconciliation-receipt",
+        "work_id": item.work_id,
+        "operation_digest": item.operation_digest,
+        "selection_plan_digest": item.selection_plan_digest,
+        "observed_item_digest": item.reconciliation_observed_item_digest or item.item_digest,
+        "outcome": outcome,
+        "evidence_digest": evidence_digest,
+        "evidence_kind": evidence_kind,
+        "operator": operator,
+        "effect_absent": effect_absent,
+    })
 
 
 _FEEDBACK_ENTRY_KEYS = frozenset({
@@ -428,6 +457,14 @@ class AutonomousConnectorWorkItem:
     last_error_class: str | None
     created_at: int
     updated_at: int
+    execution_phase: str = "not_started"
+    reconciliation_digest: str | None = None
+    reconciliation_observed_item_digest: str | None = None
+    reconciliation_outcome: str | None = None
+    reconciliation_evidence_digest: str | None = None
+    reconciliation_evidence_kind: str | None = None
+    reconciliation_operator: str | None = None
+    reconciliation_effect_absent: bool | None = None
     item_digest: str = field(default="")
 
     def __post_init__(self) -> None:
@@ -438,8 +475,6 @@ class AutonomousConnectorWorkItem:
         _capability_identifier("autonomous connector work capability", self.capability)
         for name, value in (("operation_digest", self.operation_digest), ("selection_plan_digest", self.selection_plan_digest), ("request_digest", self.request_digest)):
             _digest(f"autonomous connector work {name}", value)
-        if self.item_digest:
-            _digest("autonomous connector work item_digest", self.item_digest)
         _digest("autonomous connector work receipt_digest", self.receipt_digest, allow_none=True)
         _digest("autonomous connector work payload_digest", self.payload_digest, allow_none=True)
         if self.attempt_id is not None:
@@ -465,11 +500,57 @@ class AutonomousConnectorWorkItem:
             raise ArgumentError("autonomous connector work non-leased state cannot retain a lease")
         if self.failure_class not in _WORK_FAILURE_CLASSES or self.last_error_class not in _WORK_FAILURE_CLASSES:
             raise ArgumentError("autonomous connector work failure class is invalid")
+        if self.execution_phase not in _EXECUTION_PHASES:
+            raise ArgumentError("autonomous connector work execution phase is invalid")
+        if self.status == "queued" and self.execution_phase != "not_started":
+            raise ArgumentError("queued connector work must not have crossed the execution boundary")
+        if self.status == "reconciliation_required" and self.execution_phase != "running":
+            raise ArgumentError("reconciliation-required connector work must retain a running execution phase")
+        if self.status == "completed" and self.execution_phase != "settled":
+            raise ArgumentError("completed connector work requires a settled execution phase")
+        receipt_values = (
+            self.reconciliation_observed_item_digest,
+            self.reconciliation_outcome,
+            self.reconciliation_evidence_digest,
+            self.reconciliation_evidence_kind,
+            self.reconciliation_operator,
+            self.reconciliation_effect_absent,
+        )
+        if self.reconciliation_digest is None:
+            if any(value is not None for value in receipt_values):
+                raise ArgumentError("connector reconciliation metadata requires a reconciliation digest")
+        else:
+            _digest("autonomous connector work reconciliation_digest", self.reconciliation_digest)
+            _digest("autonomous connector work reconciliation_observed_item_digest", self.reconciliation_observed_item_digest)
+            if self.reconciliation_outcome not in _RECONCILIATION_OUTCOMES:
+                raise ArgumentError("autonomous connector work reconciliation outcome is invalid")
+            _digest("autonomous connector work reconciliation_evidence_digest", self.reconciliation_evidence_digest)
+            _identifier("autonomous connector work reconciliation_evidence_kind", self.reconciliation_evidence_kind)
+            _identifier("autonomous connector work reconciliation_operator", self.reconciliation_operator)
+            if not isinstance(self.reconciliation_effect_absent, bool) and self.reconciliation_effect_absent is not None:
+                raise ArgumentError("autonomous connector work reconciliation effect_absent is invalid")
+            if self.reconciliation_outcome == "not_executed" and self.reconciliation_effect_absent is not True:
+                raise ArgumentError("not_executed connector reconciliation requires effect_absent=true")
+            if self.reconciliation_outcome in {"succeeded", "unknown"} and self.reconciliation_effect_absent is True:
+                raise ArgumentError("connector reconciliation effect_absent contradicts the selected outcome")
+            if self.reconciliation_digest != _reconciliation_receipt_digest(
+                item=self,
+                outcome=self.reconciliation_outcome,
+                evidence_digest=self.reconciliation_evidence_digest,
+                evidence_kind=self.reconciliation_evidence_kind,
+                operator=self.reconciliation_operator,
+                effect_absent=self.reconciliation_effect_absent,
+            ):
+                raise ArgumentError("autonomous connector work reconciliation digest is invalid")
         object.__setattr__(self, "parent_digests", parents)
         object.__setattr__(self, "available_at", available_at)
         object.__setattr__(self, "created_at", created_at)
         object.__setattr__(self, "updated_at", updated_at)
-        if not self.item_digest:
+        if self.item_digest:
+            _digest("autonomous connector work item_digest", self.item_digest)
+            if self.item_digest != self.computed_digest:
+                raise ArgumentError("autonomous connector work item digest is invalid")
+        else:
             object.__setattr__(self, "item_digest", self.computed_digest)
 
     def _payload(self) -> dict[str, Any]:
@@ -501,6 +582,14 @@ class AutonomousConnectorWorkItem:
             "last_error_class": self.last_error_class,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "execution_phase": self.execution_phase,
+            "reconciliation_digest": self.reconciliation_digest,
+            "reconciliation_observed_item_digest": self.reconciliation_observed_item_digest,
+            "reconciliation_outcome": self.reconciliation_outcome,
+            "reconciliation_evidence_digest": self.reconciliation_evidence_digest,
+            "reconciliation_evidence_kind": self.reconciliation_evidence_kind,
+            "reconciliation_operator": self.reconciliation_operator,
+            "reconciliation_effect_absent": self.reconciliation_effect_absent,
             "retention": "metadata_only_request_plan_and_payload_not_retained",
             "secret_material": "never_returned",
         }
@@ -522,7 +611,7 @@ def _work_item_from_mapping(value: Mapping[str, Any], operation_registry: Autono
     if not isinstance(raw_parent_digests, Sequence) or isinstance(raw_parent_digests, (str, bytes)):
         raise ArgumentError("autonomous connector work parent_digests must be a sequence")
     item = AutonomousConnectorWorkItem(
-        work_id=value.get("work_id"), operation_id=value.get("operation_id"), operation_digest=value.get("operation_digest"), domain=value.get("domain"), capability=value.get("capability"), connector_id=value.get("connector_id"), selection_plan_digest=value.get("selection_plan_digest"), request_digest=value.get("request_digest"), dispatch_id=value.get("dispatch_id"), execution_id=value.get("execution_id"), call_id=value.get("call_id"), attempt_id=value.get("attempt_id"), parent_digests=tuple(raw_parent_digests), approved=value.get("approved"), max_attempts=value.get("max_attempts"), attempts=value.get("attempts"), status=value.get("status"), available_at=value.get("available_at"), lease_owner=value.get("lease_owner"), lease_until=value.get("lease_until"), receipt_digest=value.get("receipt_digest"), payload_digest=value.get("payload_digest"), failure_class=value.get("failure_class"), last_error_class=value.get("last_error_class"), created_at=value.get("created_at"), updated_at=value.get("updated_at"), item_digest=value.get("item_digest"),
+        work_id=value.get("work_id"), operation_id=value.get("operation_id"), operation_digest=value.get("operation_digest"), domain=value.get("domain"), capability=value.get("capability"), connector_id=value.get("connector_id"), selection_plan_digest=value.get("selection_plan_digest"), request_digest=value.get("request_digest"), dispatch_id=value.get("dispatch_id"), execution_id=value.get("execution_id"), call_id=value.get("call_id"), attempt_id=value.get("attempt_id"), parent_digests=tuple(raw_parent_digests), approved=value.get("approved"), max_attempts=value.get("max_attempts"), attempts=value.get("attempts"), status=value.get("status"), available_at=value.get("available_at"), lease_owner=value.get("lease_owner"), lease_until=value.get("lease_until"), receipt_digest=value.get("receipt_digest"), payload_digest=value.get("payload_digest"), failure_class=value.get("failure_class"), last_error_class=value.get("last_error_class"), created_at=value.get("created_at"), updated_at=value.get("updated_at"), execution_phase=value.get("execution_phase"), reconciliation_digest=value.get("reconciliation_digest"), reconciliation_observed_item_digest=value.get("reconciliation_observed_item_digest"), reconciliation_outcome=value.get("reconciliation_outcome"), reconciliation_evidence_digest=value.get("reconciliation_evidence_digest"), reconciliation_evidence_kind=value.get("reconciliation_evidence_kind"), reconciliation_operator=value.get("reconciliation_operator"), reconciliation_effect_absent=value.get("reconciliation_effect_absent"), item_digest=value.get("item_digest"),
     )
     contract = operation_registry.resolve(item.operation_id)
     if contract.operation_digest != item.operation_digest or contract.domain != item.domain or not contract.supports(item.capability):
@@ -547,6 +636,10 @@ def _validated_connector_work_snapshot(
     raw_items = value.get("items")
     if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)) or len(raw_items) > max_items:
         raise ArgumentError("autonomous connector work queue snapshot exceeds max_items")
+    snapshot_digest = _digest("autonomous connector work queue snapshot digest", value.get("snapshot_digest"))
+    raw_descriptor = {key: child for key, child in value.items() if key != "snapshot_digest"}
+    if snapshot_digest != content_digest(raw_descriptor):
+        raise ArgumentError("autonomous connector work queue snapshot digest is invalid")
     restored: dict[str, AutonomousConnectorWorkItem] = {}
     for raw in raw_items:
         if not isinstance(raw, Mapping):
@@ -562,7 +655,6 @@ def _validated_connector_work_snapshot(
         "retention": "metadata_only_request_plan_and_payload_not_retained",
         "secret_material": "never_returned",
     }
-    snapshot_digest = _digest("autonomous connector work queue snapshot digest", value.get("snapshot_digest"))
     if snapshot_digest != content_digest(normalized_descriptor):
         raise ArgumentError("autonomous connector work queue snapshot digest is invalid")
     normalized = {**normalized_descriptor, "snapshot_digest": snapshot_digest}
@@ -646,11 +738,55 @@ class InMemoryAutonomousConnectorWorkQueue:
         with self._lock:
             return self._items.get(_identifier("autonomous connector work_id", work_id))
 
+    def reclaim_expired(self, *, limit: int | None = None, now: int | None = None) -> tuple[AutonomousConnectorWorkItem, ...]:
+        """Reclaim pre-dispatch leases while quarantining every in-flight expiry."""
+
+        current = _now_ms(now)
+        bounded_limit = self.max_items if limit is None else _bounded_integer(
+            "autonomous connector work reclaim limit", limit, minimum=1, maximum=min(MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, self.max_items)
+        )
+        with self._lock:
+            expired = sorted(
+                (
+                    item for item in self._items.values()
+                    if item.status == "leased" and item.lease_until is not None and item.lease_until <= current
+                ),
+                key=lambda item: (item.lease_until or 0, item.created_at, item.work_id),
+            )[:bounded_limit]
+            reclaimed: list[AutonomousConnectorWorkItem] = []
+            for item in expired:
+                if item.execution_phase == "running" or item.attempts >= item.max_attempts:
+                    next_item = self._refresh(
+                        item,
+                        current,
+                        status="reconciliation_required",
+                        execution_phase="running",
+                        lease_owner=None,
+                        lease_until=None,
+                        failure_class="lease_expired",
+                        last_error_class="lease_expired",
+                    )
+                else:
+                    next_item = self._refresh(
+                        item,
+                        current,
+                        status="queued",
+                        execution_phase="not_started",
+                        available_at=current,
+                        lease_owner=None,
+                        lease_until=None,
+                        failure_class=None,
+                        last_error_class="lease_expired",
+                    )
+                self._items[item.work_id] = next_item
+                reclaimed.append(next_item)
+            return tuple(reclaimed)
+
     def pending(self, *, limit: int = 64, now: int | None = None) -> tuple[AutonomousConnectorWorkItem, ...]:
         current = _now_ms(now)
         limit = _bounded_integer("autonomous connector work pending limit", limit, minimum=1, maximum=min(MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, self.max_items))
         with self._lock:
-            values = [item for item in self._items.values() if ((item.status == "queued" and item.available_at <= current and item.attempts < item.max_attempts) or (item.status == "leased" and item.lease_until is not None and item.lease_until <= current and item.attempts < item.max_attempts))]
+            values = [item for item in self._items.values() if item.status == "queued" and item.available_at <= current and item.attempts < item.max_attempts]
         return tuple(sorted(values, key=lambda item: (item.available_at, item.created_at, item.work_id))[:limit])
 
     def claim(self, work_id: str, worker_id: str, *, lease_ms: int = 30_000, now: int | None = None) -> AutonomousConnectorWorkItem | None:
@@ -662,13 +798,39 @@ class InMemoryAutonomousConnectorWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status in {"completed", "failed", "reconciliation_required", "cancelled"}:
                 return None
-            if item.status == "leased" and item.lease_until is not None and item.lease_until > current:
-                return None
+            if item.status == "leased":
+                if item.lease_until is not None and item.lease_until > current:
+                    return None
+                if item.execution_phase == "running":
+                    expired = self._refresh(
+                        item,
+                        current,
+                        status="reconciliation_required",
+                        execution_phase="running",
+                        failure_class="lease_expired",
+                        last_error_class="lease_expired",
+                        lease_owner=None,
+                        lease_until=None,
+                    )
+                    self._items[work_id] = expired
+                    return None
+                item = self._refresh(
+                    item,
+                    current,
+                    status="queued",
+                    execution_phase="not_started",
+                    available_at=current,
+                    lease_owner=None,
+                    lease_until=None,
+                    failure_class=None,
+                    last_error_class="lease_expired",
+                )
+                self._items[work_id] = item
             if item.attempts >= item.max_attempts:
-                expired = self._refresh(item, current, status="reconciliation_required", failure_class="lease_expired", last_error_class="lease_expired", lease_owner=None, lease_until=None)
+                expired = self._refresh(item, current, status="reconciliation_required", execution_phase="running", failure_class="lease_expired", last_error_class="lease_expired", lease_owner=None, lease_until=None)
                 self._items[work_id] = expired
                 return None
-            claimed = self._refresh(item, current, status="leased", attempts=item.attempts + 1, lease_owner=worker_id, lease_until=current + lease_ms, last_error_class=None)
+            claimed = self._refresh(item, current, status="leased", execution_phase="not_started", attempts=item.attempts + 1, lease_owner=worker_id, lease_until=current + lease_ms, failure_class=None, last_error_class=None)
             self._items[work_id] = claimed
             return claimed
 
@@ -685,6 +847,22 @@ class InMemoryAutonomousConnectorWorkQueue:
             self._items[work_id] = renewed
             return renewed
 
+    def begin_execution(self, work_id: str, worker_id: str, *, now: int | None = None) -> AutonomousConnectorWorkItem:
+        """Persist the connector dispatch boundary before invoking the caller executor."""
+
+        work_id = _identifier("autonomous connector work_id", work_id)
+        worker_id = _identifier("autonomous connector worker_id", worker_id)
+        current = _now_ms(now)
+        with self._lock:
+            item = self._items.get(work_id)
+            if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
+                raise ArgumentError("autonomous connector execution cannot begin across an expired or foreign lease")
+            if item.execution_phase != "not_started":
+                raise ArgumentError("autonomous connector execution boundary has already been crossed")
+            executing = self._refresh(item, current, execution_phase="running")
+            self._items[work_id] = executing
+            return executing
+
     def complete(self, work_id: str, worker_id: str, receipt: AutonomousConnectorDispatchReceipt, *, now: int | None = None) -> AutonomousConnectorWorkItem:
         work_id = _identifier("autonomous connector work_id", work_id)
         worker_id = _identifier("autonomous connector worker_id", worker_id)
@@ -695,9 +873,11 @@ class InMemoryAutonomousConnectorWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
                 raise ArgumentError("autonomous connector work completion is fenced by an expired or foreign lease")
+            if item.execution_phase != "running":
+                raise ArgumentError("autonomous connector work completion requires a crossed execution boundary")
             if (receipt.request_digest, receipt.dispatch_id, receipt.execution_id, receipt.call_id, receipt.connector_id) != (item.request_digest, item.dispatch_id, item.execution_id, item.call_id, item.connector_id):
                 raise ArgumentError("autonomous connector work receipt identity conflicts with the work item")
-            completed = self._refresh(item, current, status="completed", lease_owner=None, lease_until=None, receipt_digest=content_digest(receipt.to_dict()), payload_digest=receipt.payload_digest)
+            completed = self._refresh(item, current, status="completed", execution_phase="settled", lease_owner=None, lease_until=None, receipt_digest=content_digest(receipt.to_dict()), payload_digest=receipt.payload_digest)
             self._items[work_id] = completed
             return completed
 
@@ -713,9 +893,11 @@ class InMemoryAutonomousConnectorWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
                 raise ArgumentError("autonomous connector work failure is fenced by an expired or foreign lease")
+            if item.execution_phase != "not_started":
+                raise ArgumentError("post-dispatch connector failures require reconciliation")
             can_retry = retryable and item.attempts < item.max_attempts
             delay = min(3_600_000, 1_000 * (2 ** max(0, item.attempts - 1)))
-            failed = self._refresh(item, current, status="queued" if can_retry else "failed", available_at=current + delay if can_retry else item.available_at, lease_owner=None, lease_until=None, receipt_digest=item.receipt_digest if receipt is None else content_digest(receipt.to_dict()), payload_digest=item.payload_digest if receipt is None else receipt.payload_digest, failure_class=None if can_retry else error_class, last_error_class=error_class)
+            failed = self._refresh(item, current, status="queued" if can_retry else "failed", execution_phase="not_started", available_at=current + delay if can_retry else item.available_at, lease_owner=None, lease_until=None, receipt_digest=item.receipt_digest if receipt is None else content_digest(receipt.to_dict()), payload_digest=item.payload_digest if receipt is None else receipt.payload_digest, failure_class=None if can_retry else error_class, last_error_class=error_class)
             self._items[work_id] = failed
             return failed
 
@@ -729,9 +911,98 @@ class InMemoryAutonomousConnectorWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
                 raise ArgumentError("autonomous connector reconciliation is fenced by an expired or foreign lease")
-            reconciled = self._refresh(item, current, status="reconciliation_required", lease_owner=None, lease_until=None, failure_class=error_class, last_error_class=error_class)
+            reconciled = self._refresh(item, current, status="reconciliation_required", execution_phase="running", lease_owner=None, lease_until=None, failure_class=error_class, last_error_class=error_class)
             self._items[work_id] = reconciled
             return reconciled
+
+    def settle_reconciliation(
+        self,
+        work_id: str,
+        *,
+        outcome: str,
+        evidence_digest: str,
+        evidence_kind: str = "caller_observation",
+        operator: str = "caller",
+        effect_absent: bool | None = None,
+        now: int | None = None,
+    ) -> AutonomousConnectorWorkItem:
+        """Record a digest-only caller observation for uncertain connector execution."""
+
+        work_id = _identifier("autonomous connector work_id", work_id)
+        if not isinstance(outcome, str) or outcome not in _RECONCILIATION_OUTCOMES:
+            raise ArgumentError("autonomous connector reconciliation outcome is invalid")
+        evidence_digest = _digest("autonomous connector reconciliation evidence_digest", evidence_digest)
+        evidence_kind = _identifier("autonomous connector reconciliation evidence_kind", evidence_kind)
+        operator = _identifier("autonomous connector reconciliation operator", operator)
+        if effect_absent is None:
+            effect_absent = outcome == "not_executed"
+        if not isinstance(effect_absent, bool):
+            raise ArgumentError("autonomous connector reconciliation effect_absent must be boolean or omitted")
+        if outcome == "not_executed" and effect_absent is not True:
+            raise ArgumentError("not_executed connector reconciliation requires effect_absent=true")
+        if outcome in {"succeeded", "unknown"} and effect_absent is True:
+            raise ArgumentError("connector reconciliation effect_absent contradicts the selected outcome")
+        current = _now_ms(now)
+        with self._lock:
+            item = self._items.get(work_id)
+            if item is None:
+                raise ArgumentError("autonomous connector work was not found")
+            if item.reconciliation_digest is not None:
+                if (
+                    item.reconciliation_outcome == outcome
+                    and item.reconciliation_evidence_digest == evidence_digest
+                    and item.reconciliation_evidence_kind == evidence_kind
+                    and item.reconciliation_operator == operator
+                    and item.reconciliation_effect_absent == effect_absent
+                ):
+                    return item
+                raise ArgumentError("autonomous connector reconciliation receipt conflicts with the existing receipt")
+            if item.status != "reconciliation_required":
+                raise ArgumentError("autonomous connector work is not awaiting reconciliation")
+            receipt = _reconciliation_receipt_digest(
+                item=item,
+                outcome=outcome,
+                evidence_digest=evidence_digest,
+                evidence_kind=evidence_kind,
+                operator=operator,
+                effect_absent=effect_absent,
+            )
+            settled = self._refresh(
+                item,
+                current,
+                status="completed" if outcome == "succeeded" else "failed" if outcome == "failed" else "reconciliation_required",
+                execution_phase="settled" if outcome in {"succeeded", "failed"} else "running",
+                failure_class=None if outcome == "succeeded" else "reconciliation_required",
+                last_error_class=None if outcome == "succeeded" else item.last_error_class,
+                reconciliation_digest=receipt,
+                reconciliation_observed_item_digest=item.item_digest,
+                reconciliation_outcome=outcome,
+                reconciliation_evidence_digest=evidence_digest,
+                reconciliation_evidence_kind=evidence_kind,
+                reconciliation_operator=operator,
+                reconciliation_effect_absent=effect_absent,
+                lease_owner=None,
+                lease_until=None,
+            )
+            self._items[work_id] = settled
+            return settled
+
+    def requeue(self, work_id: str, *, reconciliation_digest: str | None = None, now: int | None = None) -> AutonomousConnectorWorkItem:
+        work_id = _identifier("autonomous connector work_id", work_id)
+        current = _now_ms(now)
+        with self._lock:
+            item = self._items.get(work_id)
+            if item is None or item.status != "reconciliation_required":
+                raise ArgumentError("autonomous connector work is not awaiting explicit reconciliation requeue")
+            if item.attempts >= item.max_attempts:
+                raise ArgumentError("autonomous connector work has exhausted its attempts")
+            if item.reconciliation_digest is None or item.reconciliation_outcome != "not_executed" or item.reconciliation_effect_absent is not True:
+                raise ArgumentError("connector requeue requires a matching no-effect reconciliation receipt")
+            if reconciliation_digest != item.reconciliation_digest:
+                raise ArgumentError("connector requeue requires the matching reconciliation digest")
+            queued = self._refresh(item, current, status="queued", execution_phase="not_started", available_at=current, failure_class=None, last_error_class=item.last_error_class)
+            self._items[work_id] = queued
+            return queued
 
     def cancel(self, work_id: str, reason: str = "unknown", *, now: int | None = None) -> AutonomousConnectorWorkItem:
         work_id = _identifier("autonomous connector work_id", work_id)
@@ -740,9 +1011,9 @@ class InMemoryAutonomousConnectorWorkQueue:
         current = _now_ms(now)
         with self._lock:
             item = self._items.get(work_id)
-            if item is None or item.status in {"completed", "failed", "reconciliation_required", "cancelled"}:
-                raise ArgumentError("autonomous connector work cannot be cancelled in its current state")
-            cancelled = self._refresh(item, current, status="cancelled", lease_owner=None, lease_until=None, failure_class=reason, last_error_class=reason)
+            if item is None or item.status in {"completed", "failed", "reconciliation_required", "cancelled"} or item.execution_phase == "running":
+                raise ArgumentError("autonomous connector work cannot be cancelled across an active or uncertain execution boundary")
+            cancelled = self._refresh(item, current, status="cancelled", execution_phase="settled", lease_owner=None, lease_until=None, failure_class=reason, last_error_class=reason)
             self._items[work_id] = cancelled
             return cancelled
 
@@ -903,9 +1174,10 @@ class AutonomousConnectorWorkerRow:
     value_retained: bool
     payload_digest: str | None
     error_class: str | None
+    reconciliation_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"work_id": self.work_id, "outcome": self.outcome, "attempts": self.attempts, "receipt": self.receipt, "value_retained": False, "payload_digest": self.payload_digest, "error_class": self.error_class}
+        return {"work_id": self.work_id, "outcome": self.outcome, "attempts": self.attempts, "receipt": self.receipt, "value_retained": False, "payload_digest": self.payload_digest, "error_class": self.error_class, "reconciliation_digest": self.reconciliation_digest}
 
 
 class AutonomousConnectorWorker:
@@ -936,6 +1208,7 @@ class AutonomousConnectorWorker:
             normalized_work_ids = None
         deterministic_now = now is not None
         current = _now_ms(now)
+        self.queue.reclaim_expired(limit=min(MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH, self.queue.max_items), now=current)
         pending_limit = MAX_AUTONOMOUS_CONNECTOR_WORK_BATCH if normalized_work_ids is not None else limit
         pending = self.queue.pending(limit=pending_limit, now=current)
         candidates = tuple(
@@ -950,6 +1223,7 @@ class AutonomousConnectorWorker:
             if claimed is None:
                 rows.append(AutonomousConnectorWorkerRow(candidate.work_id, "leased_elsewhere", candidate.attempts, None, False, candidate.payload_digest, None))
                 continue
+            execution_started = False
             def finish_now() -> int:
                 return current if deterministic_now else _now_ms()
             try:
@@ -964,17 +1238,19 @@ class AutonomousConnectorWorker:
                 if not isinstance(plan, AutonomousConnectorSelectionPlan):
                     raise ArgumentError("autonomous connector worker rehydrated plan is invalid")
                 self._assert_identity(claimed, plan, request)
+                self.queue.begin_execution(claimed.work_id, worker_id, now=finish_now())
+                execution_started = True
                 result = self.runtime.dispatch_from_plan(plan, request)
                 if result.receipt.status in {"observed", "partial"}:
                     completed = self.queue.complete(claimed.work_id, worker_id, result.receipt, now=finish_now())
                     rows.append(self._row(completed, "replayed" if result.replay == "replayed" else "completed", result.receipt, None))
                 else:
                     failure = result.receipt.failure_class if result.receipt.failure_class in _WORK_FAILURE_CLASSES else "unknown"
-                    failed = self.queue.fail(claimed.work_id, worker_id, failure or "unknown", retryable=result.receipt.status in {"error", "unknown"}, now=finish_now(), receipt=result.receipt)
-                    rows.append(self._row(failed, "retry_scheduled" if failed.status == "queued" else "failed", result.receipt, failure or "unknown"))
+                    reconciled = self.queue.reconcile(claimed.work_id, worker_id, failure or "unknown", now=finish_now())
+                    rows.append(self._row(reconciled, "reconciliation_required", result.receipt, failure or "unknown"))
             except Exception as error:
                 failure = self._classify(error)
-                if failure in {"rehydration_missing", "rehydration_invalid", "identity_conflict"}:
+                if execution_started or failure in {"rehydration_missing", "rehydration_invalid", "identity_conflict"}:
                     reconciled = self.queue.reconcile(claimed.work_id, worker_id, failure, now=finish_now())
                     rows.append(self._row(reconciled, "reconciliation_required", None, failure))
                 else:
@@ -1006,7 +1282,7 @@ class AutonomousConnectorWorker:
 
     @staticmethod
     def _row(item: AutonomousConnectorWorkItem, outcome: str, receipt: AutonomousConnectorDispatchReceipt | None, error_class: str | None) -> AutonomousConnectorWorkerRow:
-        return AutonomousConnectorWorkerRow(item.work_id, outcome, item.attempts, None if receipt is None else receipt.to_dict(), False, None if receipt is None else receipt.payload_digest or item.payload_digest, error_class)
+        return AutonomousConnectorWorkerRow(item.work_id, outcome, item.attempts, None if receipt is None else receipt.to_dict(), False, None if receipt is None else receipt.payload_digest or item.payload_digest, error_class, item.reconciliation_digest)
 
     @staticmethod
     def _classify(error: Exception) -> str:

@@ -173,6 +173,168 @@ def test_work_queue_is_metadata_only_fenced_retry_bounded_and_tamper_evident(tmp
         restarted_text_coordinator.flush()
 
 
+def test_connector_expired_leases_distinguish_pre_dispatch_from_in_flight(tmp_path) -> None:
+    operations, connector_registry, _runtime, _journal, _calls = _fixture(tmp_path)
+    plan = connector_registry.select_for_domains(("coding",), capability="review")
+    queue = InMemoryAutonomousConnectorWorkQueue(operations)
+
+    pre_dispatch = queue.enqueue(
+        work_id="pre-dispatch-connector",
+        operation_id="coding.repository_change_analysis",
+        request=_request(plan, dispatch_id="pre-dispatch"),
+        now=2_000,
+    )
+    queue.claim(pre_dispatch.work_id, "worker-a", lease_ms=10, now=2_000)
+    reclaimed = queue.reclaim_expired(now=2_010)
+    assert reclaimed[0].status == "queued"
+    assert reclaimed[0].execution_phase == "not_started"
+    assert pre_dispatch.work_id in {item.work_id for item in queue.pending(now=2_010)}
+
+    in_flight = queue.enqueue(
+        work_id="in-flight-connector",
+        operation_id="coding.repository_change_analysis",
+        request=_request(plan, dispatch_id="in-flight"),
+        now=2_000,
+    )
+    queue.claim(in_flight.work_id, "worker-a", lease_ms=10, now=2_000)
+    queue.begin_execution(in_flight.work_id, "worker-a", now=2_005)
+    expired = queue.reclaim_expired(now=2_015)
+    quarantined = next(item for item in expired if item.work_id == in_flight.work_id)
+    assert quarantined.status == "reconciliation_required"
+    assert quarantined.execution_phase == "running"
+    with pytest.raises(ArgumentError, match="no-effect reconciliation"):
+        queue.requeue(in_flight.work_id, now=2_020)
+    with pytest.raises(ArgumentError, match="active or uncertain"):
+        queue.cancel(in_flight.work_id, now=2_020)
+
+
+def test_connector_reconciliation_receipts_are_idempotent_and_gate_requeue(tmp_path) -> None:
+    operations, connector_registry, _runtime, _journal, _calls = _fixture(tmp_path)
+    plan = connector_registry.select_for_domains(("coding",), capability="review")
+    queue = InMemoryAutonomousConnectorWorkQueue(operations)
+
+    successful = queue.enqueue(
+        work_id="connector-reconcile-success",
+        operation_id="coding.repository_change_analysis",
+        request=_request(plan, dispatch_id="reconcile-success"),
+        now=2_100,
+    )
+    queue.claim(successful.work_id, "worker-a", lease_ms=100, now=2_100)
+    queue.begin_execution(successful.work_id, "worker-a", now=2_101)
+    queue.reclaim_expired(now=2_201)
+    settled = queue.settle_reconciliation(successful.work_id, outcome="succeeded", evidence_digest="a" * 64, now=2_202)
+    assert settled.status == "completed"
+    assert settled.execution_phase == "settled"
+    assert queue.settle_reconciliation(successful.work_id, outcome="succeeded", evidence_digest="a" * 64, now=2_203) == settled
+    with pytest.raises(ArgumentError, match="conflicts"):
+        queue.settle_reconciliation(successful.work_id, outcome="failed", evidence_digest="b" * 64, now=2_204)
+
+    no_effect = queue.enqueue(
+        work_id="connector-reconcile-no-effect",
+        operation_id="coding.repository_change_analysis",
+        request=_request(plan, dispatch_id="reconcile-no-effect"),
+        now=2_100,
+    )
+    queue.claim(no_effect.work_id, "worker-a", lease_ms=100, now=2_100)
+    queue.begin_execution(no_effect.work_id, "worker-a", now=2_101)
+    queue.reclaim_expired(now=2_201)
+    observed = queue.settle_reconciliation(no_effect.work_id, outcome="not_executed", evidence_digest="c" * 64, now=2_202)
+    assert observed.reconciliation_effect_absent is True
+    with pytest.raises(ArgumentError, match="matching reconciliation digest"):
+        queue.requeue(no_effect.work_id, reconciliation_digest="d" * 64, now=2_203)
+    queued = queue.requeue(no_effect.work_id, reconciliation_digest=observed.reconciliation_digest, now=2_204)
+    assert queued.status == "queued"
+    assert queued.execution_phase == "not_started"
+    restored = InMemoryAutonomousConnectorWorkQueue(operations)
+    restored.restore(queue.snapshot())
+    assert restored.get(no_effect.work_id).reconciliation_digest == queued.reconciliation_digest
+
+
+def test_connector_worker_quarantines_post_dispatch_executor_failure(tmp_path) -> None:
+    operations = AutonomousConnectorOperationRegistry()
+
+    def fail_after_dispatch(_manifest, _request):
+        raise RuntimeError("caller transport failed after dispatch")
+
+    manifest = DomainEvidenceProviderConnectorManifest(
+        connector_id="failing-worker-connector",
+        version="v1",
+        provider="caller-managed",
+        connector_kind="provider_api",
+        domains=tuple(AUTONOMOUS_DOMAINS),
+        capabilities=("review",),
+    )
+    registry = AutonomousConnectorRegistry([AutonomousConnectorRegistration(manifest, fail_after_dispatch)])
+    runtime = AutonomousConnectorRuntime(registry)
+    plan = registry.select_for_domains(("coding",), capability="review")
+    request = AutonomousConnectorDispatchRequest(
+        dispatch_id="post-dispatch-failure",
+        execution_id="post-dispatch-execution",
+        call_id="post-dispatch-call",
+        connector_id=manifest.connector_id,
+        domains=("coding",),
+        capability="review",
+        request={"operation_id": "coding.repository_change_analysis", "subject_digest": "a" * 64},
+        parent_digests=(),
+        selection_plan_digest=plan.plan_digest,
+        approved=True,
+    )
+    queue = InMemoryAutonomousConnectorWorkQueue(operations)
+    item = queue.enqueue(work_id="post-dispatch-failure", operation_id="coding.repository_change_analysis", request=request, now=2_300)
+    result = AutonomousConnectorWorker(runtime, queue, lambda _item: {"plan": plan, "request": request}).run(worker_id="worker-a", now=2_300)
+    assert result["reconciled"] == 1
+    assert result["retried"] == 0
+    assert queue.get(item.work_id).status == "reconciliation_required"
+    assert queue.get(item.work_id).execution_phase == "running"
+
+
+def test_connector_worker_executes_one_reviewed_operation_for_every_domain(tmp_path) -> None:
+    operations = AutonomousConnectorOperationRegistry()
+    capabilities = tuple(sorted({operation.capabilities[0] for operation in operations.operations()}))
+
+    def execute(_manifest, request):
+        return AutonomousConnectorObservation({"operation_id": request["operation_id"], "fixture": "transient"})
+
+    manifest = DomainEvidenceProviderConnectorManifest(
+        connector_id="all-domain-worker-connector",
+        version="v1",
+        provider="caller-managed",
+        connector_kind="provider_api",
+        domains=tuple(AUTONOMOUS_DOMAINS),
+        capabilities=capabilities,
+    )
+    registry = AutonomousConnectorRegistry([AutonomousConnectorRegistration(manifest, execute)])
+    runtime = AutonomousConnectorRuntime(registry)
+    queue = InMemoryAutonomousConnectorWorkQueue(operations)
+    contexts = {}
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+        operation = operations.for_domain(domain)[0]
+        capability = operation.capabilities[0]
+        plan = registry.select_for_domains((domain,), capability=capability)
+        request = AutonomousConnectorDispatchRequest(
+            dispatch_id=f"all-domain-dispatch-{index}",
+            execution_id=f"all-domain-execution-{index}",
+            call_id=f"all-domain-call-{index}",
+            connector_id=manifest.connector_id,
+            domains=(domain,),
+            capability=capability,
+            request={"operation_id": operation.operation_id},
+            parent_digests=(),
+            selection_plan_digest=plan.plan_digest,
+            approved=True,
+        )
+        item = queue.enqueue(work_id=f"all-domain-work-{domain}", operation_id=operation.operation_id, request=request, now=2_500)
+        contexts[item.work_id] = {"plan": plan, "request": request}
+
+    result = AutonomousConnectorWorker(runtime, queue, lambda item: contexts[item.work_id]).run(
+        worker_id="all-domain-worker", limit=len(AUTONOMOUS_DOMAINS), now=2_500
+    )
+    assert result["completed"] == len(AUTONOMOUS_DOMAINS)
+    assert result["reconciled"] == 0
+    assert all(item.status == "completed" and item.execution_phase == "settled" for item in queue.rows())
+    assert all(row["value_retained"] is False for row in result["rows"])
+
+
 def test_worker_rehydrates_once_replays_without_invocation_and_quarantines_missing_state(tmp_path) -> None:
     operations, connector_registry, runtime, journal, calls = _fixture(tmp_path)
     plan = connector_registry.select_for_domains(("coding",), capability="review")
