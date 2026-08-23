@@ -3,18 +3,22 @@ import type {
   AutonomousDomainName,
   AutonomousDomainProfile,
 } from "./autonomous.js";
-import { digestJson } from "./tooling.js";
+import { digestJson, digestJsonSync } from "./tooling.js";
+import type { AutonomousEvaluatorRewardInput } from "./autonomous-learning.js";
 import type { JsonObject } from "./types.js";
 
 /** Stable contract for opt-in structured answers emitted by every built-in domain workflow. */
 export const AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA = "bioprism-typescript-autonomous-domain-response/0.1" as const;
 export const AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_SCHEMA = "bioprism-typescript-autonomous-domain-response-contract/0.1" as const;
+export const AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA = "bioprism-typescript-autonomous-domain-response-evaluation/0.1" as const;
 export const AUTONOMOUS_DOMAIN_RESPONSE_STATUSES = ["complete", "partial", "blocked", "needs_review"] as const;
 export const AUTONOMOUS_DOMAIN_STAGE_RESPONSE_STATUSES = ["complete", "partial", "blocked", "not_attempted"] as const;
 export const MAX_AUTONOMOUS_DOMAIN_RESPONSE_ITEMS = 64;
 export const MAX_AUTONOMOUS_DOMAIN_RESPONSE_ITEM_BYTES = 8_192;
 export const MAX_AUTONOMOUS_DOMAIN_RESPONSE_ANSWER_BYTES = 64_000;
 export const MAX_AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_BYTES = 1_000_000;
+export const AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION = "1" as const;
+export const AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD = 0.8;
 
 export type AutonomousDomainResponseStatus = typeof AUTONOMOUS_DOMAIN_RESPONSE_STATUSES[number];
 export type AutonomousDomainStageResponseStatus = typeof AUTONOMOUS_DOMAIN_STAGE_RESPONSE_STATUSES[number];
@@ -74,6 +78,37 @@ export interface AutonomousDomainResponseContract extends JsonObject {
   contract_digest: string;
   retention: "contract_metadata_only;provider_response_remains_transient";
   secret_material: "never_returned";
+}
+
+/**
+ * Deterministic value-only feedback for response composition. It measures contract adherence,
+ * reporting coverage, and uncertainty disclosure; it is deliberately not a task-quality or
+ * external-world truth evaluator.
+ */
+export interface AutonomousDomainResponseEvaluation extends JsonObject {
+  schema: typeof AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA;
+  evaluator_id: string;
+  evaluator_version: typeof AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION;
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  workflow_digest: string;
+  contract_digest: string;
+  response_digest: string;
+  signals: Record<string, number>;
+  missing_signals: string[];
+  reward: number;
+  passed: boolean;
+  failed: boolean;
+  failure_class: string | null;
+  feedback_digest: string;
+  evidence_digest: string;
+  replan_requested: boolean;
+  replan_instruction: string | null;
+  reward_input: AutonomousEvaluatorRewardInput;
+  evaluator_authority: "structural_response_contract_only;not_external_truth";
+  retention: "value_only;response_and_credentials_not_retained";
+  secret_material: "never_returned";
+  evaluation_digest: string;
 }
 
 function bytes(value: string): number {
@@ -308,4 +343,109 @@ export function validateAutonomousProviderDomainResponse(
   if (!contract) return null;
   if (!response || response.structured === null || response.structured === undefined) throw new ArgumentError("structured domain response is missing");
   return validateAutonomousDomainResponse(response.structured, contract);
+}
+
+function fraction(total: number, satisfied: number): number {
+  if (total <= 0) return 0;
+  return Number(Math.max(0, Math.min(1, satisfied / total)).toFixed(12));
+}
+
+function hasEntries(values: readonly string[]): number {
+  return values.length > 0 ? 1 : 0;
+}
+
+/**
+ * Convert one validated domain response into a deterministic structural reward. The response body
+ * is reduced to a digest immediately; only signal scores and digests are returned or suitable for
+ * persistence. This signal is intentionally safe to use for format/composition adaptation only.
+ */
+export function evaluateAutonomousDomainResponse(
+  value: unknown,
+  contract: AutonomousDomainResponseContract,
+): AutonomousDomainResponseEvaluation {
+  const response = validateAutonomousDomainResponse(value, contract);
+  const responseDigest = digestJsonSync(response);
+  const stageReporting = response.stages.map((stage) => Number(
+    [stage.evidence, stage.findings, stage.uncertainty, stage.open_questions].some((items) => items.length > 0),
+  ));
+  const detailReporting = contract.domain_fields.map((field) => hasEntries(response.domain_details[field] as string[]));
+  const signals: Record<string, number> = {
+    answer_present: hasEntries([response.answer]),
+    stage_rows_complete: 1,
+    stage_reporting_coverage: fraction(stageReporting.length, stageReporting.reduce((sum, score) => sum + score, 0)),
+    domain_detail_coverage: fraction(detailReporting.length, detailReporting.reduce((sum, score) => sum + score, 0)),
+    observations_present: hasEntries(response.observations),
+    inferences_present: hasEntries(response.inferences),
+    uncertainty_disclosed: hasEntries(response.uncertainty),
+    evidence_gaps_disclosed: hasEntries(response.evidence_gaps),
+    next_actions_present: hasEntries(response.next_actions),
+  };
+  const weights: Record<string, number> = {
+    answer_present: 1,
+    stage_rows_complete: 2,
+    stage_reporting_coverage: 2,
+    domain_detail_coverage: 2,
+    observations_present: 1,
+    inferences_present: 1,
+    uncertainty_disclosed: 1.5,
+    evidence_gaps_disclosed: 1,
+    next_actions_present: 1,
+  };
+  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  const reward = Number((Object.entries(weights).reduce((sum, [signal, weight]) => sum + (signals[signal] ?? 0) * weight, 0) / totalWeight).toFixed(12));
+  const missingSignals = Object.entries(signals).filter(([, score]) => score < 1).map(([signal]) => signal);
+  const passed = reward >= AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD;
+  const evaluatorId = `autonomous-${contract.domain}-response-integrity`;
+  const feedbackDigest = digestJsonSync({ contract_digest: contract.contract_digest, response_digest: responseDigest, signals });
+  const failureClass = passed ? null : "response_integrity_gate";
+  const replanInstruction = passed
+    ? null
+    : `Improve bounded ${contract.domain} response composition: ${missingSignals.join(", ") || "the response integrity score"}.`;
+  const rewardInput: AutonomousEvaluatorRewardInput = {
+    evaluator_id: evaluatorId,
+    evaluator_version: AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION,
+    reward,
+    passed,
+    failed: !passed,
+    feedback_digest: feedbackDigest,
+    failure_class: failureClass,
+    evidence_digest: responseDigest,
+  };
+  const descriptor = {
+    schema: AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA,
+    evaluator_id: evaluatorId,
+    evaluator_version: AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION,
+    domain: contract.domain,
+    workflow_id: contract.workflow_id,
+    workflow_digest: contract.workflow_digest,
+    contract_digest: contract.contract_digest,
+    response_digest: responseDigest,
+    signals,
+    missing_signals: missingSignals,
+    reward,
+    passed,
+    failed: !passed,
+    failure_class: failureClass,
+    feedback_digest: feedbackDigest,
+    evidence_digest: responseDigest,
+    replan_requested: !passed,
+    replan_instruction: replanInstruction,
+    reward_input: rewardInput,
+    evaluator_authority: "structural_response_contract_only;not_external_truth" as const,
+    retention: "value_only;response_and_credentials_not_retained" as const,
+    secret_material: "never_returned" as const,
+  };
+  return { ...descriptor, evaluation_digest: digestJsonSync(descriptor) };
+}
+
+/** Re-run the deterministic structural evaluator and refuse replay drift. */
+export function replayAutonomousDomainResponseEvaluation(
+  value: unknown,
+  contract: AutonomousDomainResponseContract,
+  expected: AutonomousDomainResponseEvaluation,
+): AutonomousDomainResponseEvaluation {
+  if (!expected || typeof expected !== "object" || typeof expected.evaluation_digest !== "string") throw new ArgumentError("domain response replay requires an evaluation digest");
+  const replayed = evaluateAutonomousDomainResponse(value, contract);
+  if (replayed.evaluation_digest !== expected.evaluation_digest) throw new ArgumentError("domain response evaluator replay drifted from the recorded evaluation");
+  return replayed;
 }

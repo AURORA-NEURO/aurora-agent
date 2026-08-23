@@ -107,6 +107,12 @@ operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation pa
 offline. This closes the generic-answer-to-domain-evaluator composition gap while preserving the
 caller/evaluator distinction: structured model output is not external-world truth.
 
+The response contract now emits a deterministic, replayable composition evaluation and a safe
+`reward_input`. An explicit `AutonomousLearningController.settleStructuredResponse` helper routes
+that signal through the same idempotent bandit/outbox settlement boundary as other evaluator
+feedback. This makes response-format adaptation usable online while keeping the boundary honest:
+the reward covers reporting integrity only, never task correctness, source truth, or external effects.
+
 The TypeScript evidence boundary now also has a strict source-truth admission layer. A
 `createAutonomousEvidenceSourceAcquirer` route binds one provider contract to explicit source
 authority, status, observation/expiry timestamps, source/citation digests, and limitations. Its

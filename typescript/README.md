@@ -622,14 +622,26 @@ fields, and credential-shaped material fail closed. This is a response-shaping a
 contract, not proof that the model's claims or an external effect are true.
 
 ```typescript
+const learning = new AutonomousLearningController(agent);
 const result = await agent.run("Review this change and return a verifiable handoff.", {
   domain: "coding",
   structuredDomainResponse: true,
   approveProviderCall: true,
+  learning,
 });
 const answer = result.response?.structured; // transient, validated domain response
 const contract = result.blueprint?.response_contract; // safe digest-bound metadata
+const compositionReward = result.response_evaluation?.reward_input; // value-only format/composition signal
+await learning.settleStructuredResponse(result); // explicit bandit settlement; never task truth
 ```
+
+When a learning controller is supplied on the run, `response_evaluation` is a deterministic,
+replayable value-only assessment of answer presence, stage reporting, domain-field coverage,
+uncertainty/evidence-gap disclosure, and next-action coverage. It intentionally excludes the raw
+response from the evaluation projection. `AutonomousLearningController.settleStructuredResponse`
+can settle that signal through the normal idempotent learning/outbox boundary; this adapts response
+composition and model selection without treating formatting or self-reported findings as task
+correctness, source truth, or proof of an external effect.
 
 The composed execution wrappers preserve these options instead of rebuilding a weaker request:
 decision-cycle attempts and replans forward the cost, latency, quality, JSON, and schema policy;

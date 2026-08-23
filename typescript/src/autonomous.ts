@@ -139,9 +139,10 @@ import {
 } from "./llm.js";
 import {
   buildAutonomousDomainResponseContract,
+  evaluateAutonomousDomainResponse,
   validateAutonomousProviderDomainResponse,
 } from "./autonomous-domain-response.js";
-import type { AutonomousDomainResponseContract } from "./autonomous-domain-response.js";
+import type { AutonomousDomainResponseContract, AutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
 import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson, digestJsonSync } from "./tooling.js";
 import type {
   BrainBanditArm,
@@ -757,6 +758,8 @@ export interface AutonomousRunResult {
   plan_refinement_digest: string | null;
   selection: AutonomousSelectionDecision | null;
   response: ProviderResponse | null;
+  /** Deterministic value-only response composition signal; never task truth or effect evidence. */
+  response_evaluation?: AutonomousDomainResponseEvaluation | null;
   tool_loop?: AutonomousToolLoopSummary | null;
   cross_domain?: AutonomousCrossDomainRunResult | null;
   /** Optional value-only episodic-memory projection; absent when memory is not configured. */
@@ -1602,15 +1605,23 @@ function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOp
 function validateAutonomousDomainResponseOrThrow(
   response: { structured: unknown } | null,
   contract: AutonomousDomainResponseContract | null | undefined,
-): void {
-  if (!contract) return;
+): ReturnType<typeof validateAutonomousProviderDomainResponse> {
+  if (!contract) return null;
   try {
-    validateAutonomousProviderDomainResponse(response, contract);
+    return validateAutonomousProviderDomainResponse(response, contract);
   } catch {
     // Keep semantic response failures in the same redacted provider failure taxonomy as local
     // JSON-schema failures; the response body and validation detail remain caller-transient.
     throw new ProviderRuntimeError("provider returned an invalid reviewed domain response", { code: "invalid_response" });
   }
+}
+
+function evaluateAutonomousDomainResponseOrThrow(
+  response: { structured: unknown } | null,
+  contract: AutonomousDomainResponseContract | null | undefined,
+): AutonomousDomainResponseEvaluation | null {
+  const validated = validateAutonomousDomainResponseOrThrow(response, contract);
+  return validated && contract ? evaluateAutonomousDomainResponse(validated, contract) : null;
 }
 
 function normalizeAutonomousModelCandidate(candidate: AutonomousModelCandidate): AutonomousModelCandidate {
@@ -4769,6 +4780,7 @@ export class AutonomousAgent {
         plan_refinement_digest: cross.plan_refinement_digest,
         selection: cross.synthesis?.selection ?? null,
         response: cross.synthesis?.response ?? null,
+        response_evaluation: cross.synthesis?.response_evaluation ?? null,
         tool_loop: cross.synthesis?.tool_loop ?? null,
         cross_domain: cross,
         memory: cross.memory ?? null,
@@ -4842,12 +4854,16 @@ export class AutonomousAgent {
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
       const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
-      if (options.structuredDomainResponse === true && loop.loop.finalResponse) validateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract);
-      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+      const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
+        ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
+        : null;
+      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
-    if (options.structuredDomainResponse === true) validateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract);
-    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    const responseEvaluation = options.structuredDomainResponse === true
+      ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
+      : null;
+    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
   }
 
   /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */

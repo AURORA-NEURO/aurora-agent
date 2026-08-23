@@ -707,6 +707,7 @@ export type {
 export {
   AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA,
   AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_SCHEMA,
+  AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA,
   AUTONOMOUS_DOMAIN_RESPONSE_STATUSES,
   AUTONOMOUS_DOMAIN_STAGE_RESPONSE_STATUSES,
   AUTONOMOUS_DOMAIN_RESPONSE_FIELDS,
@@ -714,9 +715,13 @@ export {
   MAX_AUTONOMOUS_DOMAIN_RESPONSE_ITEM_BYTES,
   MAX_AUTONOMOUS_DOMAIN_RESPONSE_ANSWER_BYTES,
   MAX_AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_BYTES,
+  AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION,
+  AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD,
   buildAutonomousDomainResponseContract,
   validateAutonomousDomainResponse,
   validateAutonomousProviderDomainResponse,
+  evaluateAutonomousDomainResponse,
+  replayAutonomousDomainResponseEvaluation,
 } from "./autonomous-domain-response.js";
 export type {
   AutonomousDomainResponseStatus,
@@ -724,6 +729,7 @@ export type {
   AutonomousDomainStageResponse,
   AutonomousDomainResponse,
   AutonomousDomainResponseContract,
+  AutonomousDomainResponseEvaluation,
 } from "./autonomous-domain-response.js";
 export type {
   AutonomousEvidenceReconciliationStatus,

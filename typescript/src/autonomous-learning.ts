@@ -10,6 +10,7 @@ import {
 } from "./autonomous.js";
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
 import type { AutonomousEpisodicMemoryStore } from "./autonomous-memory.js";
+import type { AutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
 import { digestJson, digestJsonSync } from "./tooling.js";
 import type {
   BrainBanditState,
@@ -1596,6 +1597,21 @@ export class AutonomousLearningController {
     const row = dispatch.rows.find((candidate) => candidate.command_id === command.command_id);
     if (!row || row.status !== "applied") throw new ProviderRuntimeError(`feedback outbox settlement ${command.command_id} was not applied${row?.error_class ? ` (${row.error_class})` : ""}`);
     return this.settleRunInline(episodeId, input, { creditedReward: options.creditedReward, remote: options.remote, idempotencyKey: command.command_id });
+  }
+
+  /**
+   * Settle the deterministic structured-response composition signal emitted by an autonomous run.
+   * This is an explicit opt-in learning boundary: the signal can improve format/model adaptation,
+   * but it is never presented as task correctness or evidence of an external effect.
+   */
+  async settleStructuredResponse(
+    result: AutonomousRunResult,
+    options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string; memoryStore?: AutonomousEpisodicMemoryStore; outbox?: AutonomousLearningOutboxSettlementOptions } = {},
+  ): Promise<AutonomousLearningSettlement> {
+    const evaluation = result.response_evaluation as AutonomousDomainResponseEvaluation | null | undefined;
+    if (!evaluation) throw new ArgumentError("structured-response settlement requires a completed structured domain response evaluation");
+    if (!result.learning_episode_id) throw new ArgumentError("structured-response settlement requires a pending learning episode on the run result");
+    return this.settleRun(result.learning_episode_id, evaluation.reward_input, options);
   }
 
   async prepareTrajectory(episodeIds: readonly string[], options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {

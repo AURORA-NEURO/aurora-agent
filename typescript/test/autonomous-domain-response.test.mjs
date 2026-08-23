@@ -4,10 +4,14 @@ import test from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousLearningController,
+  AutonomousOnlineLearner,
   LLMRuntime,
   ProviderRuntimeError,
   buildAutonomousDomainResponseContract,
   builtinAutonomousDomainProfiles,
+  evaluateAutonomousDomainResponse,
+  replayAutonomousDomainResponseEvaluation,
   validateAutonomousDomainResponse,
 } from "../dist/index.js";
 
@@ -89,6 +93,9 @@ test("structured domain responses flow through real selection and invocation acr
     assert.equal(result.response.structured.domain, domain);
     assert.equal(result.response.structured.stages.length, contracts.get(domain).stage_ids.length);
     assert.deepEqual(result.response.structured.domain_details, responseFor(contracts.get(domain)).domain_details);
+    assert.equal(result.response_evaluation.domain, domain);
+    assert.equal(result.response_evaluation.reward, 1);
+    assert.equal(result.response_evaluation.reward_input.evidence_digest, result.response_evaluation.response_digest);
   }
   assert.equal(calls.length, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.ok(calls.every((call) => call.schema?.type === "object"));
@@ -147,4 +154,39 @@ test("domain response validation rejects stage drift, unknown fields, and creden
     () => agent.run("Return an invalid operations response.", { domain: "operations", structuredDomainResponse: true, approveProviderCall: true }),
     (error) => error instanceof ProviderRuntimeError && error.code === "invalid_response",
   );
+});
+
+test("structured response evaluation is deterministic, replayable, and explicitly settles bandit feedback", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((candidate) => candidate.domain === "coding");
+  const contract = await buildAutonomousDomainResponseContract(profile);
+  const response = responseFor(contract);
+  const evaluation = evaluateAutonomousDomainResponse(response, contract);
+  assert.equal(evaluation.evaluator_id, "autonomous-coding-response-integrity");
+  assert.equal(evaluation.passed, true);
+  assert.equal(evaluation.evaluator_authority, "structural_response_contract_only;not_external_truth");
+  assert.deepEqual(replayAutonomousDomainResponseEvaluation(response, contract, evaluation), evaluation);
+
+  const degraded = responseFor(contract);
+  degraded.domain_details.tests_and_verification = [];
+  degraded.domain_details.rollback_or_follow_up = [];
+  assert.notEqual(evaluateAutonomousDomainResponse(degraded, contract).evaluation_digest, evaluation.evaluation_digest);
+  assert.throws(() => replayAutonomousDomainResponseEvaluation(degraded, contract, evaluation), /replay drifted/);
+
+  const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  llm.registerInMemoryProvider("offline", () => ({ structured: responseFor(contract) }), { structuredOutputMode: "json_schema" });
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(model);
+  const learning = new AutonomousLearningController(agent);
+  const run = await agent.run("Return a learning-safe structured coding handoff.", {
+    domain: "coding",
+    structuredDomainResponse: true,
+    approveProviderCall: true,
+    learning,
+    learningEpisodeId: "structured-response-learning-1",
+  });
+  assert.equal(run.learning_episode_status, "prepared");
+  const settlement = await learning.settleStructuredResponse(run);
+  assert.equal(settlement.episode.status, "settled");
+  assert.equal(settlement.assessment.reward, run.response_evaluation.reward);
+  assert.equal(settlement.assessment.failure_class, null);
 });

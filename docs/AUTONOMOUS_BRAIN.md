@@ -5186,6 +5186,14 @@ local semantic validator run together: domain/workflow identity, exact stage ord
 and credential-shaped material are refused. This improves downstream evaluation and learning input;
 it never turns a model-generated field into external-world truth or effect evidence.
 
+Each validated response also exposes a deterministic `response_evaluation` projection. Its reward
+only scores response composition—stage/reporting coverage, domain-field coverage, uncertainty and
+evidence-gap disclosure, and next-action coverage—and is bound to the contract and response
+digests. With a caller-supplied learning controller, `settleStructuredResponse` sends that value
+through the existing idempotent bandit/outbox settlement path. Replay recomputes the same projection
+from caller-owned response material and refuses digest drift; the evaluator is explicitly not a
+task-quality oracle, source-truth oracle, or external-effect witness.
+
 `ProviderTool` and `ProviderToolCall` implement the provider-native tool boundary for both
 collected and streamed responses. MCP `tools/list` schemas can be converted into OpenAI Responses, OpenAI-
 compatible Chat Completions, or Anthropic Messages wire shapes. Returned calls are parsed into
