@@ -925,6 +925,26 @@ export type {
   AutonomousEvidenceExecutionResultJSON,
 } from "./autonomous-evidence-execution.js";
 export {
+  AUTONOMOUS_EVIDENCE_EXECUTION_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_EVIDENCE_EXECUTION_RESUMABLE_RESULT_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_EXECUTION_CHECKPOINT_BYTES,
+  validateAutonomousEvidenceExecutionCheckpoint,
+  InMemoryAutonomousEvidenceExecutionCheckpointStore,
+  JsonAutonomousEvidenceExecutionCheckpointStore,
+  TransactionalJsonAutonomousEvidenceExecutionCheckpointStore,
+  WebStorageAutonomousEvidenceExecutionCheckpointTextStore,
+  AutonomousEvidenceExecutionResumableController,
+} from "./autonomous-evidence-execution-resumable.js";
+export type {
+  AutonomousEvidenceExecutionCheckpointStatus,
+  AutonomousEvidenceExecutionCheckpointJSON,
+  AutonomousEvidenceExecutionCheckpointStore,
+  AutonomousEvidenceExecutionCheckpointTextStore,
+  AutonomousEvidenceExecutionTransactionalCheckpointTextStore,
+  AutonomousEvidenceExecutionResumableRunProjection,
+  AutonomousEvidenceExecutionResumableRun,
+} from "./autonomous-evidence-execution-resumable.js";
+export {
   AUTONOMOUS_EVIDENCE_BACKED_CHECKPOINT_SCHEMA,
   AUTONOMOUS_EVIDENCE_BACKED_RESUMABLE_RESULT_SCHEMA,
   MAX_AUTONOMOUS_EVIDENCE_BACKED_CHECKPOINT_BYTES,

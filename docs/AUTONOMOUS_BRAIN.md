@@ -4555,6 +4555,33 @@ provider payloads; durable callers can pass the existing journal and rehydration
 controller is therefore a useful end-to-end source lifecycle, not a claim that an external source
 is truthful, current, credentialed, or safe to use without caller review.
 
+For workers that may restart between source dispatch and evaluator settlement,
+`AutonomousEvidenceExecutionResumableController` adds a job-level checkpoint around the reviewed
+execution controller. Its content-addressed state moves through `approval_required`, `blocked`,
+`dispatch_pending`, `awaiting_evaluation`, `partial`, `failed`, `reconciliation_required`, and
+`completed`. The checkpoint retains only the job/plan/request/readiness digests, bounded counts,
+runtime status, and result digest; it never stores requests, source values, prompts, credentials,
+or provider payloads. A `dispatch_pending` or `reconciliation_required` restart pauses until the
+caller explicitly resolves the boundary. A completed restart requires a caller-rehydrated runtime
+journal, so replay can return the prior result without invoking the source again:
+
+```typescript
+const resumable = new AutonomousEvidenceExecutionResumableController(
+  reviewedController,
+  new TransactionalJsonAutonomousEvidenceExecutionCheckpointStore(textStore),
+  "evidence-job-42",
+);
+const outcome = await resumable.run(executionPlan, evidencePlan, requests, {
+  approveSourceDispatch: true,
+  journal: rehydratedJournal,
+  rehydrateValue: callerOwnedValueRehydrator,
+});
+```
+
+The checkpoint has in-memory, JSON, transactional JSON, and browser Web Storage seams. CAS
+failure is surfaced as a stale-worker refusal instead of silently merging two source histories;
+readiness and the exact reviewed execution plan remain bound across the restart.
+
 ### Provider-specific evidence contracts
 
 The generic adapter manifest is complemented by `AutonomousEvidenceProviderContractRegistry`.

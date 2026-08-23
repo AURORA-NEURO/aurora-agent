@@ -80,6 +80,14 @@ evidence routes as domain `partial`, and emits redacted remediation/digest metad
 integration preserves the no-dispatch guarantee and leaves source authorization to the reviewed
 evidence execution controller.
 
+The TypeScript evidence path now also has a job-level
+`AutonomousEvidenceExecutionResumableController`. It persists approval, dispatch-pending,
+evaluator-wait, partial/failure, reconciliation, and completion checkpoints as bounded metadata,
+requires an explicit resolution after an uncertain restart, and reuses caller-rehydrated runtime
+journals to replay completed source work without a second dispatch. JSON, transactional CAS, and
+browser storage adapters reject stale writers and tampered digests; source values, requests,
+credentials, and provider payloads remain caller-owned.
+
 Evidence routing now also has a reviewed execution controller. The TypeScript
 `AutonomousEvidenceExecutionController` binds the evidence plan, selection, readiness image,
 retry policy, and explicit failover budget into one reviewable plan; execution revalidates the
