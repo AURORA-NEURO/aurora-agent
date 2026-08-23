@@ -6,7 +6,8 @@ import { canonicalJson, digestJson } from "./tooling.js";
 import type { BrainBanditPolicy, BrainBanditState, JsonObject } from "./types.js";
 
 /** Digest-bound persistence contract for the local online bandit state. */
-export const AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-online-learner-snapshot/0.1" as const;
+const LEGACY_AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-online-learner-snapshot/0.1" as const;
+export const AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-online-learner-snapshot/0.2" as const;
 export const AUTONOMOUS_ONLINE_LEARNER_STATE_SCHEMA = "bioprism-brain-bandit-state/0.1" as const;
 export const MAX_AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_BYTES = 1_000_000;
 export const MAX_AUTONOMOUS_ONLINE_LEARNER_ARMS = 4_096;
@@ -14,7 +15,12 @@ export const MAX_AUTONOMOUS_ONLINE_LEARNER_CONTEXTS = 64;
 export const MAX_AUTONOMOUS_ONLINE_LEARNER_CREDITED_OUTCOMES = 4_096;
 
 export interface AutonomousOnlineLearnerSnapshot extends JsonObject {
-  schema: typeof AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA;
+  /** 0.1 remains readable for migration; new snapshots use the chained 0.2 envelope. */
+  schema: typeof AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA;
+  /** Monotonic snapshot image generation, independent from bandit reward generation. */
+  snapshot_generation?: number;
+  /** Digest of the immediately preceding persisted snapshot; required by 0.2. */
+  previous_snapshot_digest?: string | null;
   state: BrainBanditState;
   state_digest: string;
   snapshot_digest: string;
@@ -54,6 +60,11 @@ function clone<T>(value: T): T {
 function digest(value: unknown, name: string): string {
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
   return value;
+}
+
+function boundedGeneration(value: unknown, name: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new ArgumentError(`${name} must be a non-negative safe integer`);
+  return value as number;
 }
 
 function boundedText(name: string, value: unknown, maximum: number): string {
@@ -120,13 +131,25 @@ function normalizeState(raw: unknown): BrainBanditState {
 
 /** Validate a restart image before it can alter a live learner. */
 export async function validateAutonomousOnlineLearnerSnapshot(raw: unknown): Promise<AutonomousOnlineLearnerSnapshot> {
-  if (!isObject(raw) || raw.schema !== AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA) throw new ArgumentError("online learner snapshot schema is invalid");
-  safeKeys(raw, new Set(["schema", "state", "state_digest", "snapshot_digest", "retention", "secret_material"]), "online learner snapshot");
+  if (!isObject(raw)) throw new ArgumentError("online learner snapshot schema is invalid");
+  const legacy = raw.schema === LEGACY_AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA;
+  if (raw.schema !== AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA && !legacy) throw new ArgumentError("online learner snapshot schema is invalid");
+  safeKeys(raw, legacy
+    ? new Set(["schema", "state", "state_digest", "snapshot_digest", "retention", "secret_material"])
+    : new Set(["schema", "snapshot_generation", "previous_snapshot_digest", "state", "state_digest", "snapshot_digest", "retention", "secret_material"]), "online learner snapshot");
   if (raw.retention !== RETENTION || raw.secret_material !== SECRET_MATERIAL) throw new ArgumentError("online learner snapshot retention markers are invalid");
   const state = normalizeState(raw.state);
   const stateDigest = digest(raw.state_digest, "online learner snapshot state_digest");
   if (await digestJson(state) !== stateDigest) throw new ArgumentError("online learner snapshot state digest does not match");
-  const descriptor = { schema: AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA, state, state_digest: stateDigest, retention: RETENTION, secret_material: SECRET_MATERIAL } as const;
+  const snapshotGeneration = legacy ? undefined : boundedGeneration(raw.snapshot_generation, "online learner snapshot_generation");
+  if (!legacy) {
+    if (snapshotGeneration! < 1) throw new ArgumentError("online learner snapshot_generation must start at one");
+    if (raw.previous_snapshot_digest !== null) digest(raw.previous_snapshot_digest, "online learner previous_snapshot_digest");
+    if ((snapshotGeneration === 1) !== (raw.previous_snapshot_digest === null)) throw new ArgumentError("online learner snapshot generation and previous_snapshot_digest are inconsistent");
+  }
+  const descriptor = legacy
+    ? { schema: LEGACY_AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA, state, state_digest: stateDigest, retention: RETENTION, secret_material: SECRET_MATERIAL } as const
+    : { schema: AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA, snapshot_generation: snapshotGeneration!, previous_snapshot_digest: raw.previous_snapshot_digest as string | null, state, state_digest: stateDigest, retention: RETENTION, secret_material: SECRET_MATERIAL } as const;
   const snapshotDigest = digest(raw.snapshot_digest, "online learner snapshot snapshot_digest");
   if (await digestJson(descriptor) !== snapshotDigest) throw new ArgumentError("online learner snapshot digest does not match");
   const snapshot = { ...descriptor, snapshot_digest: snapshotDigest } satisfies AutonomousOnlineLearnerSnapshot;
@@ -135,17 +158,23 @@ export async function validateAutonomousOnlineLearnerSnapshot(raw: unknown): Pro
 }
 
 /** Seal the learner's current bandit state without retaining task or provider values. */
-export async function snapshotAutonomousOnlineLearner(learner: AutonomousOnlineLearner): Promise<AutonomousOnlineLearnerSnapshot> {
+export async function snapshotAutonomousOnlineLearner(learner: AutonomousOnlineLearner, options: { snapshotGeneration?: number; previousSnapshotDigest?: string | null } = {}): Promise<AutonomousOnlineLearnerSnapshot> {
   if (!(learner instanceof AutonomousOnlineLearner)) throw new ArgumentError("online learner snapshot requires an AutonomousOnlineLearner");
+  const snapshotGeneration = boundedGeneration(options.snapshotGeneration ?? 1, "online learner snapshot_generation");
+  if (snapshotGeneration < 1) throw new ArgumentError("online learner snapshot_generation must start at one");
+  const previousSnapshotDigest = options.previousSnapshotDigest ?? null;
+  if (previousSnapshotDigest !== null) digest(previousSnapshotDigest, "online learner previous_snapshot_digest");
+  if ((snapshotGeneration === 1) !== (previousSnapshotDigest === null)) throw new ArgumentError("online learner snapshot generation and previous_snapshot_digest are inconsistent");
   const state = normalizeState(learner.snapshot());
   const stateDigest = await digestJson(state);
-  const descriptor = { schema: AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA, state, state_digest: stateDigest, retention: RETENTION, secret_material: SECRET_MATERIAL } as const;
+  const descriptor = { schema: AUTONOMOUS_ONLINE_LEARNER_SNAPSHOT_SCHEMA, snapshot_generation: snapshotGeneration, previous_snapshot_digest: previousSnapshotDigest, state, state_digest: stateDigest, retention: RETENTION, secret_material: SECRET_MATERIAL } as const;
   return validateAutonomousOnlineLearnerSnapshot({ ...descriptor, snapshot_digest: await digestJson(descriptor) });
 }
 
 /** CAS-aware connection between a live learner and caller-owned storage. */
 export class AutonomousOnlineLearnerPersistenceCoordinator {
   private expectedSnapshotDigest: string | null = null;
+  private snapshotGeneration = 0;
   private operationTail: Promise<void> = Promise.resolve();
 
   constructor(readonly learner: AutonomousOnlineLearner, readonly persistence: AutonomousOnlineLearnerSnapshotPersistence) {
@@ -158,22 +187,30 @@ export class AutonomousOnlineLearnerPersistenceCoordinator {
       const raw = await this.persistence.read();
       if (raw === null) {
         this.expectedSnapshotDigest = null;
+        this.snapshotGeneration = 0;
         return null;
       }
       const snapshot = await validateAutonomousOnlineLearnerSnapshot(raw);
       this.learner.restore(snapshot.state);
       this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      // A legacy image has no chain metadata. Treat it as a migration root so the
+      // first 0.2 write is valid and future writes are continuous.
+      this.snapshotGeneration = snapshot.snapshot_generation ?? 0;
       return clone(snapshot);
     });
   }
 
   async flush(): Promise<AutonomousOnlineLearnerSnapshot> {
     return this.enqueue(async () => {
-      const snapshot = await snapshotAutonomousOnlineLearner(this.learner);
+      const snapshot = await snapshotAutonomousOnlineLearner(this.learner, {
+        snapshotGeneration: this.snapshotGeneration + 1,
+        previousSnapshotDigest: this.snapshotGeneration === 0 ? null : this.expectedSnapshotDigest,
+      });
       if (typeof this.persistence.writeIfUnchanged === "function") {
         if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("online learner persistence compare-and-swap conflict");
       } else await this.persistence.write(snapshot);
       this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      this.snapshotGeneration = snapshot.snapshot_generation!;
       return clone(snapshot);
     });
   }

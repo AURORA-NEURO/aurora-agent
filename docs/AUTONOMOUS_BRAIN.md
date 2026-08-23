@@ -3975,7 +3975,10 @@ TypeScript applications can now make that restart boundary explicit with
 `snapshotAutonomousOnlineLearner()` and `AutonomousOnlineLearnerPersistenceCoordinator`. The
 coordinator validates the learner policy, arm ledger, contextual rows, credited evaluator outcome
 digests, and a two-level state/snapshot hash before restore; JSON, transactional JSON/CAS, and Web
-Storage adapters are included. A stale coordinator cannot overwrite a newer learner state, and
+Storage adapters are included. Current `0.2` envelopes add an independent
+`snapshot_generation`/`previous_snapshot_digest` chain, so repeated flushes cannot silently
+reorder or replay learner images; the `0.1` envelope remains readable and is upgraded at the next
+coordinator write. A stale coordinator cannot overwrite a newer learner state, and
 credential-shaped fields are rejected before they reach storage. The image contains arm statistics,
 bounded rewards, context labels, and evaluator/outcome digests only—never prompts, provider output,
 task text, credentials, or evidence bodies.
