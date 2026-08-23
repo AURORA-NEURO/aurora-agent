@@ -100,6 +100,9 @@ jobs:
       - name: run stdio client contract tests
         working-directory: python
         run: python -W error::ResourceWarning -m pytest -q
+      - name: enforce autonomous selection promotion gate
+        working-directory: python
+        run: python -m pytest -q tests/test_autonomous_selection_promotion.py
       - name: test GitHub Actions evidence exporter
         run: python -m pytest -q tools/test_github_actions_evidence.py
       - name: exercise reusable GitHub Actions evidence action
@@ -232,3 +235,6 @@ jobs:
       - name: build and run contract tests
         working-directory: typescript
         run: npm test
+      - name: enforce autonomous selection promotion gate
+        working-directory: typescript
+        run: node --test test/autonomous-selection-promotion.test.mjs

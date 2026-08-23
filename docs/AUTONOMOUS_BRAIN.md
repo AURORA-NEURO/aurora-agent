@@ -1754,6 +1754,47 @@ from prism_sdk import evaluate_autonomous_selection_policy
 report = evaluate_autonomous_selection_policy(cases, require_all_domains=True)
 ```
 
+Replay quality and activation safety are separate decisions. Once a replay report exists, the
+caller can pass it through the promotion gate before allowing a learned selector to affect live
+routing:
+
+```typescript
+const admission = evaluateAutonomousSelectionPromotion(report, {
+  requireAllDomains: true,
+  minOracleAgreementRate: 0.75,
+  maxMeanRegret: 0.15,
+  maxNoEligibleModelRate: 0,
+});
+
+if (admission.decision !== "admit") {
+  throw new Error(`selection learner remains held: ${admission.reasons.join("; ")}`);
+}
+```
+
+The Python surface exposes the same thresholds as keyword arguments:
+
+```python
+from prism_sdk import evaluate_autonomous_selection_promotion
+
+admission = evaluate_autonomous_selection_promotion(
+    report,
+    require_all_domains=True,
+    min_oracle_agreement_rate=0.75,
+    max_mean_regret=0.15,
+    max_no_eligible_model_rate=0.0,
+)
+```
+
+Promotion requires complete replay evidence, configurable per-domain case and evaluated-case
+coverage, minimum evaluated coverage and oracle agreement, bounded mean regret, and explicit
+limits on abstention, missing selected rewards, unavailable models, and missing counterfactual
+rewards. Every domain receives an `admit`, `hold`, or `not_required` projection with stable
+reasons. The outer decision and source-report digest are canonical and tamper-evident. The gate
+does not mutate a learner, invoke a provider, open credentials, assign reward, or retain raw
+tasks, candidates, selector rankings, or reward values. Both SDK promotion tests run as explicit
+CI steps in addition to the full contract suites, making learner activation evidence a visible
+build boundary rather than an implicit caller convention.
+
 This is a policy-evaluation boundary, not a source of ground truth: the caller owns reward
 construction and must define what evaluator evidence means. It never invokes a provider, reads
 or requests a credential, mutates learner state, or treats selection confidence as answer

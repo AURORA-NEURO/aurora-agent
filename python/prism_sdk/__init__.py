@@ -348,6 +348,15 @@ from .autonomous_selection_lab import (
     rank_autonomous_models,
     validate_autonomous_selection_lab_report,
 )
+from .autonomous_selection_promotion import (
+    AUTONOMOUS_SELECTION_PROMOTION_POLICY_SCHEMA,
+    AUTONOMOUS_SELECTION_PROMOTION_DOMAIN_SCHEMA,
+    AUTONOMOUS_SELECTION_PROMOTION_SCHEMA,
+    MAX_AUTONOMOUS_SELECTION_PROMOTION_REASONS,
+    MAX_AUTONOMOUS_SELECTION_PROMOTION_BYTES,
+    evaluate_autonomous_selection_promotion,
+    validate_autonomous_selection_promotion_report,
+)
 from .autonomous_evidence import (
     AUTONOMOUS_EVIDENCE_PLAN_SCHEMA,
     AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA,
@@ -5245,6 +5254,13 @@ __all__ = [
     "evaluate_autonomous_selection_policy",
     "rank_autonomous_models",
     "validate_autonomous_selection_lab_report",
+    "AUTONOMOUS_SELECTION_PROMOTION_POLICY_SCHEMA",
+    "AUTONOMOUS_SELECTION_PROMOTION_DOMAIN_SCHEMA",
+    "AUTONOMOUS_SELECTION_PROMOTION_SCHEMA",
+    "MAX_AUTONOMOUS_SELECTION_PROMOTION_REASONS",
+    "MAX_AUTONOMOUS_SELECTION_PROMOTION_BYTES",
+    "evaluate_autonomous_selection_promotion",
+    "validate_autonomous_selection_promotion_report",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_LEARNING_MODES",

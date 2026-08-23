@@ -33,6 +33,23 @@ export type {
   AutonomousSelectionLabOptions,
   AutonomousSelectionLabStatus,
 } from "./autonomous-selection-lab.js";
+export {
+  AUTONOMOUS_SELECTION_PROMOTION_POLICY_SCHEMA,
+  AUTONOMOUS_SELECTION_PROMOTION_DOMAIN_SCHEMA,
+  AUTONOMOUS_SELECTION_PROMOTION_SCHEMA,
+  MAX_AUTONOMOUS_SELECTION_PROMOTION_REASONS,
+  MAX_AUTONOMOUS_SELECTION_PROMOTION_BYTES,
+  evaluateAutonomousSelectionPromotion,
+  validateAutonomousSelectionPromotionReport,
+} from "./autonomous-selection-promotion.js";
+export type {
+  AutonomousSelectionPromotionDecision,
+  AutonomousSelectionPromotionDomainDecision,
+  AutonomousSelectionPromotionPolicy,
+  AutonomousSelectionPromotionPolicyProjection,
+  AutonomousSelectionPromotionDomainReport,
+  AutonomousSelectionPromotionReport,
+} from "./autonomous-selection-promotion.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
