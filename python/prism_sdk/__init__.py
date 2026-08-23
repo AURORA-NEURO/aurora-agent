@@ -460,6 +460,17 @@ from .autonomous_http_connector import (
     create_autonomous_http_connector_executor,
     create_autonomous_http_paginated_connector_executor,
 )
+from .autonomous_http_metadata_sink import (
+    AUTONOMOUS_HTTP_METADATA_SINK_SCHEMA,
+    AUTONOMOUS_HTTP_METADATA_SINK_REQUEST_SCHEMA,
+    AUTONOMOUS_HTTP_METADATA_SINK_RECEIPT_SCHEMA,
+    MAX_AUTONOMOUS_HTTP_METADATA_EVENT_BYTES,
+    MAX_AUTONOMOUS_HTTP_METADATA_BATCH,
+    MAX_AUTONOMOUS_HTTP_METADATA_RETRY_ATTEMPTS,
+    MAX_AUTONOMOUS_HTTP_METADATA_RETRY_DELAY_SECONDS,
+    AutonomousHttpMetadataSinkReceipt,
+    AutonomousHttpMetadataEventSink,
+)
 from .autonomous_connector_worker import (
     AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA,
     AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA,
@@ -5303,6 +5314,15 @@ __all__ = [
     "default_autonomous_http_connector_page_parser",
     "create_autonomous_http_connector_executor",
     "create_autonomous_http_paginated_connector_executor",
+    "AUTONOMOUS_HTTP_METADATA_SINK_SCHEMA",
+    "AUTONOMOUS_HTTP_METADATA_SINK_REQUEST_SCHEMA",
+    "AUTONOMOUS_HTTP_METADATA_SINK_RECEIPT_SCHEMA",
+    "MAX_AUTONOMOUS_HTTP_METADATA_EVENT_BYTES",
+    "MAX_AUTONOMOUS_HTTP_METADATA_BATCH",
+    "MAX_AUTONOMOUS_HTTP_METADATA_RETRY_ATTEMPTS",
+    "MAX_AUTONOMOUS_HTTP_METADATA_RETRY_DELAY_SECONDS",
+    "AutonomousHttpMetadataSinkReceipt",
+    "AutonomousHttpMetadataEventSink",
     "AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA",
     "AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA",
     "AUTONOMOUS_CONNECTOR_OPERATION_REGISTRY_SCHEMA",

@@ -6614,7 +6614,8 @@ restore. Persistence retains only the bounded metadata trace; the remote service
 atomic CAS, access control, encryption, retention, and operational export policy.
 
 For deployments that need to forward those already-redacted events to an operational collector,
-`AutonomousHttpMetadataEventSink` provides a separate bounded delivery adapter. It accepts only
+the TypeScript and Python SDKs provide `AutonomousHttpMetadataEventSink` as a separate bounded
+delivery adapter. It accepts only
 an explicit allow-list of event schemas (the default covers the run-trace and portfolio execution
 trace events), rejects credential-shaped or payload-shaped fields recursively, caps each event and
 batch, and uses the event digest as the collector idempotency key. `emit()` retries only rate-limit,
@@ -6632,6 +6633,22 @@ const metadataSink = new AutonomousHttpMetadataEventSink({
   headerResolver: (_manifest, request) => deploymentHeadersForCollector(request),
 });
 const exportEvent = metadataSink.asSink();
+```
+
+The Python equivalent uses the same schema, digest, retry, and refusal contract while reusing its
+policy-gated standard-library connector:
+
+```python
+from prism_sdk import AutonomousHttpMetadataEventSink, AutonomousHttpConnectorPolicy
+
+metadata_sink = AutonomousHttpMetadataEventSink(
+    "https://telemetry.example.internal/v1/autonomous-events",
+    policy=AutonomousHttpConnectorPolicy(
+        allowed_hosts=("telemetry.example.internal",),
+        allowed_methods=("POST",),
+    ),
+)
+export_event = metadata_sink.as_sink()
 ```
 
 The sink never returns or retains resolved headers, HTTP response bodies, prompts, task text,
