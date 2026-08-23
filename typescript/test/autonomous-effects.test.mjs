@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import {
   AutonomousDomainToolRuntime,
   AutonomousEffectBoundary,
+  AutonomousEffectPersistenceCoordinator,
   AutonomousEffectReconciliationRequiredError,
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
   InMemoryAutonomousEffectJournal,
+  TransactionalJsonAutonomousEffectSnapshotPersistence,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
   AutonomousDomainToolRegistry,
@@ -48,6 +50,37 @@ test("effect boundary records an idempotent metadata-only lifecycle", async () =
   await restored.restore(snapshot);
   assert.equal((await restored.get(await boundary.effectId(request))).status, "completed");
   assert.equal((await effectJournal.verifyIntegrity()).verified, true);
+});
+
+test("effect journal persistence validates the chain and fences stale workers", async () => {
+  const source = new InMemoryAutonomousEffectJournal();
+  const boundary = new AutonomousEffectBoundary({ journal: source });
+  await boundary.execute({ tool: "external_write", call_id: "effect-persistence-1", risk_class: "side_effecting", arguments: { private_value: "not-retained" } }, async () => ({ committed: true }));
+
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (observed !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousEffectSnapshotPersistence(textStore);
+  const coordinator = new AutonomousEffectPersistenceCoordinator(source, persistence);
+  const first = await coordinator.flush();
+  assert.equal(JSON.parse(encoded).snapshot_digest, first.snapshot_digest);
+  assert.doesNotMatch(encoded, /not-retained/);
+
+  const stale = new AutonomousEffectPersistenceCoordinator(new InMemoryAutonomousEffectJournal(), persistence);
+  await assert.rejects(() => stale.flush(), /compare-and-swap/);
+  const restored = new AutonomousEffectPersistenceCoordinator(new InMemoryAutonomousEffectJournal(), persistence);
+  const recovered = await restored.restore();
+  assert.equal(recovered.snapshot_digest, first.snapshot_digest);
+  encoded = "{invalid";
+  await assert.rejects(() => persistence.read(), /invalid/);
 });
 
 test("uncertain effects refuse replay until a resolver confirms the external outcome", async () => {

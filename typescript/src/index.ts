@@ -1722,6 +1722,9 @@ export {
   AutonomousEffectPolicyError,
   AutonomousEffectReconciliationRequiredError,
   InMemoryAutonomousEffectJournal,
+  JsonAutonomousEffectSnapshotPersistence,
+  TransactionalJsonAutonomousEffectSnapshotPersistence,
+  validateAutonomousEffectJournalSnapshot,
 } from "./autonomous-effects.js";
 export type {
   AutonomousEffectBoundaryOptions,
@@ -1737,6 +1740,8 @@ export type {
   AutonomousEffectResolver,
   AutonomousEffectSnapshotJournal,
   AutonomousEffectSnapshotPersistence,
+  AutonomousEffectSnapshotTextStore,
+  AutonomousEffectTransactionalSnapshotTextStore,
   AutonomousEffectStatus,
   ProviderToolResultLike,
 } from "./autonomous-effects.js";

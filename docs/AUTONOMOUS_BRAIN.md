@@ -3079,6 +3079,12 @@ available for every built-in domain profile, including cross-domain specialist a
 but a durable job must still persist the effect ledger and result resolver in the embedding
 application.
 
+TypeScript applications can use `TransactionalJsonAutonomousEffectSnapshotPersistence` for the
+same boundary. It validates every event and chain digest before a restore or write, serializes
+overlapping persistence operations, and fences stale workers with the verified snapshot digest.
+An uncertain effect therefore cannot be replaced by a newer or empty local journal during restart;
+the caller must restore and reconcile explicitly before another dispatch is admitted.
+
 Provider calls use the same controller rather than a separate transport-only counter. Before a
 request is sent, the selected provider/model, failover attempt, estimated token cost, and
 invocation kind are admitted against `max_provider_calls`, `max_provider_failovers`, and
