@@ -1602,6 +1602,8 @@ export {
   AutonomousCapabilityActivation,
   AutonomousCapabilityActivationStore,
   AutonomousCapabilityActivationPersistenceCoordinator,
+  JsonAutonomousCapabilityActivationSnapshotPersistence,
+  TransactionalJsonAutonomousCapabilityActivationSnapshotPersistence,
   autonomousBindingPlanDigest,
   validateAutonomousCapabilityActivationState,
   validateAutonomousCapabilityActivationSnapshot,
@@ -1613,6 +1615,8 @@ export type {
   AutonomousCapabilityActivationState,
   AutonomousCapabilityActivationSnapshot,
   AutonomousCapabilityActivationPersistence,
+  AutonomousCapabilityActivationSnapshotTextStore,
+  AutonomousCapabilityActivationTransactionalSnapshotTextStore,
   AutonomousCapabilityActivationSnapshotStore,
 } from "./autonomous-activation.js";
 export {

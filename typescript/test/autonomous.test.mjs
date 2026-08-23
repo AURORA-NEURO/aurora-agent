@@ -7,6 +7,7 @@ import {
   AutonomousCapabilityActivation,
   AutonomousCapabilityActivationPersistenceCoordinator,
   AutonomousCapabilityActivationStore,
+  TransactionalJsonAutonomousCapabilityActivationSnapshotPersistence,
   AutonomousCapabilityPersistenceError,
   AutonomousCapabilityRuntime,
   InMemoryAutonomousCapabilityLearningSettlementStore,
@@ -2006,8 +2007,31 @@ test("activation is a redacted digest-bound lifecycle across all twelve domains"
   assert.deepEqual(restored.state.approved_tools, approved.approved_tools);
   await assert.rejects(() => restoredStore.restore({ ...snapshot, snapshot_digest: "0".repeat(64) }), /digest/);
 
+  let encodedActivation = null;
+  const transactionalTextStore = {
+    read: () => encodedActivation,
+    write: (value) => { encodedActivation = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = encodedActivation === null ? null : JSON.parse(encodedActivation).snapshot_digest;
+      if (observed !== expected) return false;
+      encodedActivation = value;
+      return true;
+    },
+  };
+  const transactionalPersistence = new TransactionalJsonAutonomousCapabilityActivationSnapshotPersistence(transactionalTextStore);
+  const casStore = new AutonomousCapabilityActivationStore();
+  await casStore.save(approved);
+  const casCoordinator = new AutonomousCapabilityActivationPersistenceCoordinator(casStore, transactionalPersistence);
+  await casCoordinator.flush();
+  activation.revoke("caller_revoked_for_cas_test");
+  const competingStore = new AutonomousCapabilityActivationStore();
+  const competingCoordinator = new AutonomousCapabilityActivationPersistenceCoordinator(competingStore, transactionalPersistence);
+  await competingCoordinator.restore();
+  await competingStore.save(activation.state);
+  await competingCoordinator.flush();
+  await assert.rejects(() => casCoordinator.flush(), /compare-and-swap/);
+
   now += 10;
-  activation.revoke("caller_revoked_for_test");
   assert.equal(activation.state.status, "revoked");
   assert.throws(() => activation.approveBindings(plan, [proposed[0]]), /revoked/);
 });

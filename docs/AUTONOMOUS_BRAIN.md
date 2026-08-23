@@ -6940,6 +6940,14 @@ await new AutonomousCapabilityActivationPersistenceCoordinator(
 ).flush();
 ```
 
+The TypeScript coordinator serializes overlapping restore/flush calls and uses
+`writeIfUnchanged(expectedSnapshotDigest, snapshot)` whenever the caller-owned persistence
+adapter supports it. `TransactionalJsonAutonomousCapabilityActivationSnapshotPersistence` adapts
+that contract to a canonical JSON text store; a stale approval or revocation worker receives a
+typed compare-and-swap conflict instead of silently overwriting newer activation state. The
+non-transactional `write` contract remains available for storage systems that provide their own
+single-writer guarantee.
+
 `refreshActivation()` projects opaque provider readiness, computes one exact plan across all twelve
 domains, and records only hashes, counts, statuses, and approved names. The runtime applies the
 resulting allow-list to registry tools, caller-supplied `tools`, custom authorizers, and direct

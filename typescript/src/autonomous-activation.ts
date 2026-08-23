@@ -1,5 +1,5 @@
 import { ArgumentError, isObject } from "./errors.js";
-import { digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Redacted, restart-safe capability activation shared with the Python autonomous façade. */
@@ -87,11 +87,22 @@ export interface AutonomousCapabilityActivationSnapshot extends JsonObject {
 export interface AutonomousCapabilityActivationPersistence {
   read(): Promise<AutonomousCapabilityActivationSnapshot | null> | AutonomousCapabilityActivationSnapshot | null;
   write(snapshot: AutonomousCapabilityActivationSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousCapabilityActivationSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousCapabilityActivationSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousCapabilityActivationTransactionalSnapshotTextStore extends AutonomousCapabilityActivationSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousCapabilityActivationSnapshotStore {
   load(): Promise<AutonomousCapabilityActivationState | null> | AutonomousCapabilityActivationState | null;
   save(state: AutonomousCapabilityActivationState): Promise<void> | void;
+  saveIfUnchanged?(expectedStateDigest: string | null, state: AutonomousCapabilityActivationState): Promise<boolean> | boolean;
   snapshot(): Promise<AutonomousCapabilityActivationSnapshot> | AutonomousCapabilityActivationSnapshot;
   restore(snapshot: AutonomousCapabilityActivationSnapshot): Promise<void> | void;
 }
@@ -485,6 +496,13 @@ export class AutonomousCapabilityActivationStore implements AutonomousCapability
     this.value = clone(state);
   }
 
+  async saveIfUnchanged(expectedStateDigest: string | null, raw: AutonomousCapabilityActivationState): Promise<boolean> {
+    if (expectedStateDigest !== null && !DIGEST.test(expectedStateDigest)) throw new AutonomousActivationError("activation expected state digest is invalid");
+    if ((this.value?.state_digest ?? null) !== expectedStateDigest) return false;
+    await this.save(raw);
+    return true;
+  }
+
   async snapshot(): Promise<AutonomousCapabilityActivationSnapshot> {
     const state = this.value ?? makeInitialState("activation-empty", 0);
     const descriptor = { schema: AUTONOMOUS_ACTIVATION_STORE_SCHEMA, state, state_digest: state.state_digest, retention: "metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
@@ -512,23 +530,79 @@ export function validateAutonomousCapabilityActivationSnapshot(value: unknown): 
 
 /** Flushes/restores activation metadata through caller-owned durable storage. */
 export class AutonomousCapabilityActivationPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly store: AutonomousCapabilityActivationSnapshotStore, readonly persistence: AutonomousCapabilityActivationPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new AutonomousActivationError("activation persistence requires a snapshot-capable store");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new AutonomousActivationError("activation persistence requires readable and writable storage");
   }
 
   async flush(): Promise<{ schema: typeof AUTONOMOUS_ACTIVATION_STORE_SCHEMA; bytes: number; state_digest: string; snapshot_digest: string; retention: "metadata_only" }> {
-    const snapshot = validateAutonomousCapabilityActivationSnapshot(await this.store.snapshot());
-    const bytes = jsonBytes(snapshot);
-    await this.persistence.write(snapshot);
-    return { schema: AUTONOMOUS_ACTIVATION_STORE_SCHEMA, bytes, state_digest: snapshot.state_digest, snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };
+    return this.enqueue(async () => {
+      const snapshot = validateAutonomousCapabilityActivationSnapshot(await this.store.snapshot());
+      const bytes = jsonBytes(snapshot);
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new AutonomousActivationError("activation persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return { schema: AUTONOMOUS_ACTIVATION_STORE_SCHEMA, bytes, state_digest: snapshot.state_digest, snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };
+    });
   }
 
   async restore(): Promise<{ schema: typeof AUTONOMOUS_ACTIVATION_STORE_SCHEMA; restored: boolean; state_digest: string | null; snapshot_digest: string | null; retention: "metadata_only" }> {
-    const raw = await this.persistence.read();
-    if (raw === null) return { schema: AUTONOMOUS_ACTIVATION_STORE_SCHEMA, restored: false, state_digest: null, snapshot_digest: null, retention: "metadata_only" };
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return { schema: AUTONOMOUS_ACTIVATION_STORE_SCHEMA, restored: false, state_digest: null, snapshot_digest: null, retention: "metadata_only" };
+      }
+      const snapshot = validateAutonomousCapabilityActivationSnapshot(raw);
+      await this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return { schema: AUTONOMOUS_ACTIVATION_STORE_SCHEMA, restored: true, state_digest: snapshot.state_digest, snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+export class JsonAutonomousCapabilityActivationSnapshotPersistence implements AutonomousCapabilityActivationPersistence {
+  constructor(readonly textStore: AutonomousCapabilityActivationSnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new AutonomousActivationError("activation text store is malformed");
+  }
+
+  async read(): Promise<AutonomousCapabilityActivationSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > MAX_ACTIVATION_STORE_BYTES) throw new AutonomousActivationError("activation JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new AutonomousActivationError("activation JSON is invalid"); }
+    return validateAutonomousCapabilityActivationSnapshot(parsed);
+  }
+
+  async write(raw: AutonomousCapabilityActivationSnapshot): Promise<void> {
     const snapshot = validateAutonomousCapabilityActivationSnapshot(raw);
-    await this.store.restore(snapshot);
-    return { schema: AUTONOMOUS_ACTIVATION_STORE_SCHEMA, restored: true, state_digest: snapshot.state_digest, snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };
+    await this.textStore.write(canonicalJson(snapshot));
+  }
+}
+
+export class TransactionalJsonAutonomousCapabilityActivationSnapshotPersistence extends JsonAutonomousCapabilityActivationSnapshotPersistence {
+  declare readonly textStore: AutonomousCapabilityActivationTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousCapabilityActivationTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new AutonomousActivationError("activation text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, raw: AutonomousCapabilityActivationSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !DIGEST.test(expectedSnapshotDigest)) throw new AutonomousActivationError("activation expected snapshot digest is invalid");
+    const snapshot = validateAutonomousCapabilityActivationSnapshot(raw);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(snapshot));
   }
 }
