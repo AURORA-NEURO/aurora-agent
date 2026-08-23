@@ -4207,6 +4207,7 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
             )
             assert result.status == "completed"
             assert result.execution_status == "completed_provider_call"
+            assert result.to_dict()["execution_status"] == "completed_provider_call"
             persisted = cycle_store.load("decision-cycle-1")
             assert persisted is not None and persisted.phase == "terminal"
             assert persisted.terminal_status == result.execution_status

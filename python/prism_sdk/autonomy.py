@@ -3057,6 +3057,7 @@ class AutonomousAutoResult:
         return {
             "schema": "bioprism-python-autonomous-auto-result/0.1",
             "status": self.status,
+            "execution_status": self.execution_status,
             "route": self.route.to_dict(),
             "result": result,
             "learning_mode": self.learning_mode,
@@ -15826,7 +15827,19 @@ class AutonomousAgent:
                 if rehydrated.planning is None or content_digest(rehydrated.planning.to_dict()) != cycle.state.plan_refinement_digest:
                     raise BrainRunError("rehydrated decision result does not match the persisted planning digest")
             if cycle.state.outcome_digest is not None:
-                if content_digest(rehydrated.to_dict()) != cycle.state.outcome_digest:
+                rehydrated_projection = rehydrated.to_dict()
+                outcome_matches = content_digest(rehydrated_projection) == cycle.state.outcome_digest
+                if not outcome_matches:
+                    # Accept snapshots written before execution_status and semantic_route were
+                    # added to the public automatic-result projection, while still rejecting
+                    # every other result mutation.
+                    legacy_projection = dict(rehydrated_projection)
+                    legacy_projection.pop("execution_status", None)
+                    outcome_matches = content_digest(legacy_projection) == cycle.state.outcome_digest
+                    if not outcome_matches:
+                        legacy_projection.pop("semantic_route", None)
+                        outcome_matches = content_digest(legacy_projection) == cycle.state.outcome_digest
+                if not outcome_matches:
                     raise BrainRunError("rehydrated decision result does not match the persisted outcome digest")
             if cycle.state.selection_digest is not None:
                 observed_selection_digest = _decision_cycle_selection_digest(rehydrated)
