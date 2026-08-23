@@ -16,6 +16,10 @@ import {
   InMemoryAutonomousLearningStateStore,
   InMemoryAutonomousLearningTrajectoryStore,
   AutonomousLearningPersistenceCoordinator,
+  JsonAutonomousLearningStatePersistence,
+  TransactionalJsonAutonomousLearningStatePersistence,
+  WebStorageAutonomousLearningSnapshotTextStore,
+  validateAutonomousLearningStateSnapshot,
   AutonomousLearningSettlementReceiptPersistenceCoordinator,
   JsonAutonomousLearningSettlementReceiptPersistence,
   TransactionalJsonAutonomousLearningSettlementReceiptPersistence,
@@ -753,4 +757,59 @@ test("settlement receipts persist through browser JSON and fence stale workers",
   const unsafe = structuredClone(recoverySnapshot);
   unsafe.authorization = "never retained";
   assert.throws(() => validateAutonomousLearningSettlementReceiptSnapshot(unsafe), /unsupported fields/);
+});
+
+test("learning episode and trajectory state persists through JSON/browser CAS recovery", async () => {
+  const agent = await learningAgent();
+  const state = new InMemoryAutonomousLearningStateStore();
+  const controller = new AutonomousLearningController(agent, { store: state });
+  const firstRun = await agent.run("Prepare a restart-safe coding trajectory.", { domain: "coding", approveProviderCall: true });
+  const secondRun = await agent.run("Prepare a restart-safe science trajectory.", { domain: "science", approveProviderCall: true });
+  await controller.prepareRun(firstRun, { episodeId: "state-episode-1" });
+  await controller.prepareRun(secondRun, { episodeId: "state-episode-2" });
+  await controller.prepareTrajectory(["state-episode-1", "state-episode-2"], { trajectoryId: "state-trajectory", discount: 0.9 });
+
+  let encoded = null;
+  const persistence = new TransactionalJsonAutonomousLearningStatePersistence({
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expectedDigest, value) => {
+      const observedDigest = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (observedDigest !== expectedDigest) return false;
+      encoded = value;
+      return true;
+    },
+  });
+  const primary = new AutonomousLearningPersistenceCoordinator(state, persistence);
+  const first = await primary.flush();
+  assert.equal(first.episodes.length, 2);
+  assert.equal(first.trajectories.length, 1);
+  assert.doesNotMatch(encoded, /restart-safe coding trajectory|restart-safe science trajectory/);
+
+  const staleState = new InMemoryAutonomousLearningStateStore();
+  const stale = new AutonomousLearningPersistenceCoordinator(staleState, persistence);
+  await stale.restore();
+  const thirdRun = await agent.run("Create another persisted operations episode.", { domain: "operations", approveProviderCall: true });
+  await controller.prepareRun(thirdRun, { episodeId: "state-episode-3" });
+  await primary.flush();
+  await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
+
+  const values = new Map();
+  const browserPersistence = new JsonAutonomousLearningStatePersistence(new WebStorageAutonomousLearningSnapshotTextStore({
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  }, "aurora-learning-state"));
+  const persisted = await persistence.read();
+  await browserPersistence.write(persisted);
+  assert.deepEqual(await browserPersistence.read(), persisted);
+
+  const recoveredState = new InMemoryAutonomousLearningStateStore();
+  const recovered = new AutonomousLearningPersistenceCoordinator(recoveredState, persistence);
+  const recoverySnapshot = await recovered.restore();
+  assert.equal(recoverySnapshot.episodes.length, 3);
+  assert.equal(recoveredState.loadTrajectory("state-trajectory").steps.length, 2);
+
+  const unsafe = structuredClone(recoverySnapshot);
+  unsafe.authorization = "never retained";
+  await assert.rejects(() => validateAutonomousLearningStateSnapshot(unsafe), /unsupported fields/);
 });

@@ -7203,6 +7203,16 @@ This makes the receipt adapter usable directly as `AutonomousLearningController`
 `settlementReceipts` store; it does not claim to persist private episodes, trajectories, or provider
 material, which remain separate caller-owned stores.
 
+Episode and trajectory state now has the same TypeScript restart contract. The state validator
+checks exact top-level keys, retention markers, duplicate identities, value-only rows, digest
+integrity, and a four-megabyte canonical limit before restore. `JsonAutonomousLearningStatePersistence`,
+`TransactionalJsonAutonomousLearningStatePersistence`, and
+`WebStorageAutonomousLearningSnapshotTextStore` provide canonical JSON, CAS, and browser seams;
+`AutonomousLearningPersistenceCoordinator` serializes restore/flush operations and refuses a stale
+state writer. This lets a caller rehydrate pending single-domain episodes and cross-domain
+trajectories without replaying provider work, while private task/prompt/output material remains
+outside the snapshot.
+
 The TypeScript façade also provides a caller-owned feedback outbox for deployments that need a
 worker/restart boundary across evaluator, learner, and memory stores. `enqueueRunSettlement()` and
 `enqueueTrajectorySettlement()` persist normalized evaluator values plus target/request digests;

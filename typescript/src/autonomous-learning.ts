@@ -43,6 +43,7 @@ export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX = 8_192;
 export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX_SNAPSHOT_BYTES = 4_000_000;
 export const AUTONOMOUS_LEARNING_MAX_SETTLEMENT_RECEIPTS = 8_192;
 export const AUTONOMOUS_LEARNING_MAX_SETTLEMENT_RECEIPT_SNAPSHOT_BYTES = 4_000_000;
+export const AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES = 4_000_000;
 
 type Digest = string;
 
@@ -177,6 +178,16 @@ export interface AutonomousLearningStateSnapshot extends JsonObject {
 export interface AutonomousLearningSnapshotPersistence {
   read(): Promise<AutonomousLearningStateSnapshot | null> | AutonomousLearningStateSnapshot | null;
   write(snapshot: AutonomousLearningStateSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: Digest | null, snapshot: AutonomousLearningStateSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousLearningSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousLearningTransactionalSnapshotTextStore extends AutonomousLearningSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: Digest | null, value: string): Promise<boolean> | boolean;
 }
 
 /**
@@ -1006,11 +1017,15 @@ export class InMemoryAutonomousLearningEpisodeStore implements AutonomousLearnin
 
   restoreRows(rows: readonly AutonomousLearningEpisode[]): void {
     if (!Array.isArray(rows) || rows.length > 4096) throw new ArgumentError("learning episode snapshot is outside its bounds");
+    const seen = new Set<string>();
     for (const episode of rows) {
-      if (!isObject(episode) || typeof episode.episode_id !== "string" || typeof episode.episode_digest !== "string" || typeof episode.status !== "string" || !["pending", "settled"].includes(episode.status)) throw new ArgumentError("learning episode snapshot row is malformed");
+      if (!isObject(episode) || typeof episode.episode_id !== "string" || typeof episode.episode_digest !== "string" || typeof episode.status !== "string" || !["pending", "settled"].includes(episode.status) || episode.retention !== PRIVATE_RETENTION || episode.secret_material !== "never_returned") throw new ArgumentError("learning episode snapshot row is malformed");
       const row = episode as unknown as AutonomousLearningEpisode;
       boundedIdentifier("episode_id", row.episode_id);
       boundedDigest("episode_digest", row.episode_digest);
+      assertValueOnlySettlement(row);
+      if (seen.has(row.episode_id)) throw new ArgumentError(`learning episode snapshot contains duplicate ${row.episode_id}`);
+      seen.add(row.episode_id);
       const prior = this.episodes.get(row.episode_id);
       if (prior && prior.episode_digest !== row.episode_digest) throw new ArgumentError(`learning episode ${row.episode_id} conflicts during restore`);
       this.episodes.set(row.episode_id, clone(row));
@@ -1051,11 +1066,16 @@ export class InMemoryAutonomousLearningTrajectoryStore implements AutonomousLear
 
   restoreRows(rows: readonly AutonomousLearningTrajectory[]): void {
     if (!Array.isArray(rows) || rows.length > 1024) throw new ArgumentError("learning trajectory snapshot is outside its bounds");
+    const seen = new Set<string>();
     for (const trajectory of rows) {
-      if (!isObject(trajectory) || typeof trajectory.trajectory_id !== "string" || typeof trajectory.trajectory_digest !== "string" || typeof trajectory.status !== "string" || !["pending", "settled"].includes(trajectory.status)) throw new ArgumentError("learning trajectory snapshot row is malformed");
+      if (!isObject(trajectory) || typeof trajectory.trajectory_id !== "string" || typeof trajectory.trajectory_digest !== "string" || typeof trajectory.status !== "string" || !["pending", "settled"].includes(trajectory.status) || trajectory.retention !== PRIVATE_RETENTION || trajectory.secret_material !== "never_returned") throw new ArgumentError("learning trajectory snapshot row is malformed");
       const row = trajectory as unknown as AutonomousLearningTrajectory;
       boundedIdentifier("trajectory_id", row.trajectory_id);
       boundedDigest("trajectory_digest", row.trajectory_digest);
+      boundedDigest("trajectory settlement_digest", row.settlement_digest, true);
+      assertValueOnlySettlement(row);
+      if (seen.has(row.trajectory_id)) throw new ArgumentError(`learning trajectory snapshot contains duplicate ${row.trajectory_id}`);
+      seen.add(row.trajectory_id);
       const prior = this.trajectories.get(row.trajectory_id);
       if (prior && prior.trajectory_digest !== row.trajectory_digest) throw new ArgumentError(`learning trajectory ${row.trajectory_id} conflicts during restore`);
       this.trajectories.set(row.trajectory_id, clone(row));
@@ -1524,28 +1544,98 @@ export class InMemoryAutonomousLearningStateStore implements AutonomousLearningS
       secret_material: "never_returned" as const,
     };
     const snapshot = { ...descriptor, snapshot_digest: await digestJson(descriptor) };
+    if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state snapshot exceeds its byte bound");
     this.generation = snapshot.generation;
     return clone(snapshot);
   }
 
   async restore(snapshot: AutonomousLearningStateSnapshot): Promise<void> {
     if (!isObject(snapshot) || snapshot.schema !== AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA || !Array.isArray(snapshot.episodes) || !Array.isArray(snapshot.trajectories)) throw new ArgumentError("learning state snapshot is malformed");
+    assertExactKeys(snapshot, ["schema", "generation", "episodes", "trajectories", "snapshot_digest", "retention", "secret_material"], "learning state snapshot");
+    if (snapshot.retention !== PRIVATE_RETENTION || snapshot.secret_material !== "never_returned") throw new ArgumentError("learning state snapshot retention contract is malformed");
     boundedGeneration(snapshot.generation);
     const { snapshot_digest: observed, ...descriptor } = snapshot;
     boundedDigest("snapshot_digest", observed);
     const expected = await digestJson(descriptor);
     if (expected !== observed) throw new ArgumentError("learning state snapshot digest does not match");
     if (snapshot.episodes.length > 4096 || snapshot.trajectories.length > 1024) throw new ArgumentError("learning state snapshot exceeds its bounds");
+    if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state snapshot exceeds its byte bound");
     this.episodeStore.restoreRows(snapshot.episodes);
     this.trajectoryStore.restoreRows(snapshot.trajectories);
     this.generation = snapshot.generation;
   }
 }
 
+/** Validate a learning episode/trajectory restart image before mutating a live state store. */
+export async function validateAutonomousLearningStateSnapshot(raw: unknown): Promise<AutonomousLearningStateSnapshot> {
+  if (!isObject(raw) || raw.schema !== AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA || !Array.isArray(raw.episodes) || !Array.isArray(raw.trajectories)) throw new ArgumentError("learning state snapshot is malformed");
+  assertExactKeys(raw, ["schema", "generation", "episodes", "trajectories", "snapshot_digest", "retention", "secret_material"], "learning state snapshot");
+  if (raw.retention !== PRIVATE_RETENTION || raw.secret_material !== "never_returned") throw new ArgumentError("learning state snapshot retention contract is malformed");
+  boundedGeneration(raw.generation);
+  if (raw.episodes.length > 4096 || raw.trajectories.length > 1024) throw new ArgumentError("learning state snapshot exceeds its bounds");
+  boundedDigest("learning state snapshot_digest", raw.snapshot_digest);
+  const { snapshot_digest: observed, ...descriptor } = raw;
+  if (await digestJson(descriptor) !== observed) throw new ArgumentError("learning state snapshot digest does not match");
+  if (new TextEncoder().encode(canonicalJson(raw)).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state snapshot exceeds its byte bound");
+  const probe = new InMemoryAutonomousLearningStateStore();
+  await probe.restore(raw as unknown as AutonomousLearningStateSnapshot);
+  return clone(raw as unknown as AutonomousLearningStateSnapshot);
+}
+
+/** Strict canonical JSON persistence for episodes and trajectories. */
+export class JsonAutonomousLearningStatePersistence implements AutonomousLearningSnapshotPersistence {
+  constructor(readonly textStore: AutonomousLearningSnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("learning state text store is malformed");
+  }
+
+  async read(): Promise<AutonomousLearningStateSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("learning state JSON is invalid"); }
+    return validateAutonomousLearningStateSnapshot(parsed);
+  }
+
+  async write(snapshot: AutonomousLearningStateSnapshot): Promise<void> {
+    const validated = await validateAutonomousLearningStateSnapshot(snapshot);
+    await this.textStore.write(canonicalJson(validated));
+  }
+}
+
+/** Learning state persistence with atomic compare-and-swap fencing for concurrent workers. */
+export class TransactionalJsonAutonomousLearningStatePersistence extends JsonAutonomousLearningStatePersistence {
+  declare readonly textStore: AutonomousLearningTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousLearningTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("learning state text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: Digest | null, snapshot: AutonomousLearningStateSnapshot): Promise<boolean> {
+    const validated = await validateAutonomousLearningStateSnapshot(snapshot);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(validated));
+  }
+}
+
+/** Browser-compatible learning state text storage; the host owns encryption and retention. */
+export class WebStorageAutonomousLearningSnapshotTextStore implements AutonomousLearningSnapshotTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("learning state Web Storage adapter is malformed");
+    boundedIdentifier("learning state storage key", key);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
+}
+
 /** Coordinates an integrity-checked state store with a caller-owned durable adapter. */
 export class AutonomousLearningPersistenceCoordinator {
   readonly store: AutonomousLearningStateStore;
   readonly persistence: AutonomousLearningSnapshotPersistence;
+  private expectedSnapshotDigest: Digest | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
 
   constructor(store: AutonomousLearningStateStore, persistence: AutonomousLearningSnapshotPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("learning persistence requires a state store");
@@ -1555,15 +1645,34 @@ export class AutonomousLearningPersistenceCoordinator {
   }
 
   async restore(): Promise<AutonomousLearningStateSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot) await this.store.restore(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = await validateAutonomousLearningStateSnapshot(raw);
+      await this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
   }
 
   async flush(): Promise<AutonomousLearningStateSnapshot> {
-    const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await validateAutonomousLearningStateSnapshot(await this.store.snapshot());
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("learning state persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }
 

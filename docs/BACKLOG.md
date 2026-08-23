@@ -87,6 +87,13 @@ writers, and rolls back local state after a failed durable write. Private episod
 material remains in its separate caller-owned state store, and production storage/replication
 remain deployment responsibilities.
 
+The companion episode/trajectory state store is now strict and restart-safe. Its JSON snapshot
+validator checks allow-listed metadata, duplicate identities, value-only rows, digest integrity,
+and byte bounds; canonical JSON, browser Web Storage, CAS, and serialized coordinator adapters are
+exported. Pending single-domain episodes and cross-domain trajectories can be restored without
+provider replay, while task text, prompts, responses, credentials, and raw evidence remain outside
+the state image. The deployment still owns the actual database, encryption, and replication.
+
 The objective layer now has the same restart discipline. Goal snapshots are strictly allow-listed,
 canonical-digest validated, hash-chain checked, retention checked, and bounded before restore;
 `JsonAutonomousGoalPersistence`, `TransactionalJsonAutonomousGoalPersistence`, and
