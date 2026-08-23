@@ -136,6 +136,13 @@ scenario `requireCalibratedLearning` option hold bandit settlement before provid
 holdout evidence is missing, miscalibrated, or incomplete. This is an evaluator-signal gate, not
 external truth, reward synthesis, or a substitute for domain validation.
 
+The calibration admission is also installed on `AutonomousLearningController`, not only the
+offline scenario harness. Direct episode settlement, delayed-credit trajectories, workflow and
+cross-domain settlement, and feedback-outbox dispatch recheck the admitted episode domain before
+bandit mutation; a blocked run cannot even enqueue a learning command. The controller therefore
+provides one opt-in gate for local, remote, and restart-replayed learning while preserving the
+same evaluator-signal-only boundary.
+
 The response contract now emits a deterministic, replayable composition evaluation and a safe
 `reward_input`. An explicit `AutonomousLearningController.settleStructuredResponse` helper routes
 that signal through the same idempotent bandit/outbox settlement boundary as other evaluator

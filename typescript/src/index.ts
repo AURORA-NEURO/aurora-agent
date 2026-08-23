@@ -1839,6 +1839,7 @@ export type {
   AutonomousEvaluatorMeshResult,
   AutonomousCrossDomainLearningSettlement,
   AutonomousEvaluatorRewardInput,
+  AutonomousLearningControllerOptions,
   AutonomousLearningEpisode,
   AutonomousLearningEpisodeStore,
   AutonomousLearningSettlement,

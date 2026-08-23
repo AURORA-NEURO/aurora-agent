@@ -11,6 +11,11 @@ import {
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
 import type { AutonomousEpisodicMemoryStore } from "./autonomous-memory.js";
 import type { AutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
+import {
+  assertAutonomousEvaluatorCalibrationReady,
+  validateAutonomousEvaluatorCalibrationReport,
+  type AutonomousEvaluatorCalibrationReport,
+} from "./autonomous-evaluator-calibration.js";
 import { digestJson, digestJsonSync } from "./tooling.js";
 import type {
   BrainBanditState,
@@ -368,6 +373,21 @@ export interface AutonomousCrossDomainLearningSettlement {
   result: AutonomousCrossDomainRunResult;
   trajectory: AutonomousTrajectorySettlement;
   retention: typeof PRIVATE_RETENTION;
+}
+
+export interface AutonomousLearningControllerOptions {
+  store?: AutonomousLearningStateStore;
+  episodes?: AutonomousLearningEpisodeStore;
+  trajectories?: AutonomousLearningTrajectoryStore;
+  settlementReceipts?: AutonomousLearningSettlementReceiptStore;
+  feedbackOutbox?: AutonomousLearningFeedbackOutboxStore;
+  evaluator?: AutonomousWorkflowEvaluator;
+  apiClient?: ApiClient;
+  memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Optional metadata-only evaluator calibration report used by the learning admission gate. */
+  calibrationReport?: AutonomousEvaluatorCalibrationReport;
+  /** When true, every settlement refuses before bandit mutation unless its domain is admitted. */
+  requireCalibratedLearning?: boolean;
 }
 
 function boundedIdentifier(name: string, value: unknown): string {
@@ -1171,9 +1191,13 @@ export class AutonomousLearningController {
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
   readonly evaluator: AutonomousWorkflowEvaluator;
   readonly apiClient?: ApiClient;
+  readonly calibrationReport?: AutonomousEvaluatorCalibrationReport;
+  readonly requireCalibratedLearning: boolean;
 
-  constructor(agent: AutonomousAgent, options: { store?: AutonomousLearningStateStore; episodes?: AutonomousLearningEpisodeStore; trajectories?: AutonomousLearningTrajectoryStore; settlementReceipts?: AutonomousLearningSettlementReceiptStore; feedbackOutbox?: AutonomousLearningFeedbackOutboxStore; evaluator?: AutonomousWorkflowEvaluator; apiClient?: ApiClient; memoryStore?: AutonomousEpisodicMemoryStore } = {}) {
+  constructor(agent: AutonomousAgent, options: AutonomousLearningControllerOptions = {}) {
     if (!agent || typeof agent.recordEvaluatorReward !== "function") throw new ArgumentError("learning controller requires an AutonomousAgent");
+    if (options.requireCalibratedLearning !== undefined && typeof options.requireCalibratedLearning !== "boolean") throw new ArgumentError("learning controller requireCalibratedLearning must be boolean");
+    if (options.requireCalibratedLearning === true && options.calibrationReport === undefined) throw new ArgumentError("learning controller requires a calibrationReport when requireCalibratedLearning is true");
     this.agent = agent;
     const stateStore = options.store;
     this.episodes = options.episodes ?? (stateStore ? {
@@ -1200,6 +1224,14 @@ export class AutonomousLearningController {
     this.memoryStore = options.memoryStore ?? agent.memoryStore;
     this.evaluator = options.evaluator ?? new AutonomousWorkflowEvaluator();
     this.apiClient = options.apiClient;
+    this.calibrationReport = options.calibrationReport === undefined ? undefined : validateAutonomousEvaluatorCalibrationReport(options.calibrationReport);
+    this.requireCalibratedLearning = options.requireCalibratedLearning === true;
+  }
+
+  private assertLearningAdmission(domain: AutonomousDomainName): void {
+    if (!this.requireCalibratedLearning) return;
+    if (!this.calibrationReport) throw new ProviderRuntimeError("learning settlement is missing its required evaluator calibration report");
+    assertAutonomousEvaluatorCalibrationReady(this.calibrationReport, domain);
   }
 
   private async loadReceipt(idempotencyKey: string, operation: AutonomousLearningSettlementReceipt["operation"], targetId: string, targetDigest: Digest, requestDigest: Digest): Promise<AutonomousLearningSettlementReceipt | null> {
@@ -1232,6 +1264,22 @@ export class AutonomousLearningController {
 
   private async episodeSettlementKey(trajectoryId: string, episodeId: string): Promise<string> {
     return `trajectory-episode:${await digestJson({ trajectory_id: trajectoryId, episode_id: episodeId })}`;
+  }
+
+  private async assertEpisodeLearningAdmission(episodeId: string): Promise<void> {
+    if (!this.requireCalibratedLearning) return;
+    const id = boundedIdentifier("episodeId", episodeId);
+    const episode = await this.episodes.load(id);
+    if (!episode) throw new ArgumentError(`learning episode ${episodeId} was not found`);
+    this.assertLearningAdmission(episode.domain);
+  }
+
+  private async assertTrajectoryLearningAdmission(trajectoryId: string): Promise<void> {
+    if (!this.requireCalibratedLearning) return;
+    const id = boundedIdentifier("trajectoryId", trajectoryId);
+    const trajectory = await this.trajectories.load(id);
+    if (!trajectory) throw new ArgumentError(`learning trajectory ${trajectoryId} was not found`);
+    for (const step of trajectory.steps) await this.assertEpisodeLearningAdmission(step.episode_id);
   }
 
   async evaluateWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput): Promise<AutonomousWorkflowEvaluation> {
@@ -1515,6 +1563,7 @@ export class AutonomousLearningController {
     const id = boundedIdentifier("episodeId", episodeId);
     const episode = await this.episodes.load(id);
     if (!episode) throw new ArgumentError(`learning episode ${episodeId} was not found`);
+    this.assertLearningAdmission(episode.domain);
     const normalizedInput = normalizeRewardInput(input);
     const creditedReward = boundedReward("credited reward", options.creditedReward ?? normalizedInput.reward);
     const idempotencyKey = boundedIdentifier("settlement idempotencyKey", options.idempotencyKey ?? `episode:${id}`);
@@ -1589,6 +1638,7 @@ export class AutonomousLearningController {
    * while a worker crash before dispatch leaves a durable command for `dispatchFeedback()`.
    */
   async settleRun(episodeId: string, input: AutonomousEvaluatorRewardInput, options: { creditedReward?: number; remote?: boolean; idempotencyKey?: string; memoryStore?: AutonomousEpisodicMemoryStore; outbox?: AutonomousLearningOutboxSettlementOptions } = {}): Promise<AutonomousLearningSettlement> {
+    await this.assertEpisodeLearningAdmission(episodeId);
     if (!options.outbox) return this.settleRunInline(episodeId, input, options);
     if (options.memoryStore !== undefined && options.memoryStore !== this.memoryStore) throw new ArgumentError("outbox settlement cannot use a per-call memoryStore override; configure the controller memoryStore");
     const command = await this.enqueueRunSettlement(episodeId, input, { creditedReward: options.creditedReward, remote: options.remote, idempotencyKey: options.idempotencyKey });
@@ -1700,6 +1750,7 @@ export class AutonomousLearningController {
 
   /** Settle a trajectory directly or through the durable feedback outbox boundary. */
   async settleTrajectory(trajectoryId: string, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { remote?: boolean; idempotencyKey?: string; outbox?: AutonomousLearningOutboxSettlementOptions } = {}): Promise<AutonomousTrajectorySettlement> {
+    await this.assertTrajectoryLearningAdmission(trajectoryId);
     if (!options.outbox) return this.settleTrajectoryInline(trajectoryId, rewards, options);
     const command = await this.enqueueTrajectorySettlement(trajectoryId, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey });
     if (command.status === "applied") return this.settleTrajectoryInline(trajectoryId, rewards, { remote: options.remote, idempotencyKey: command.command_id });

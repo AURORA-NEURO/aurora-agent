@@ -7,6 +7,8 @@ import {
   AutonomousLearningController,
   AutonomousOnlineLearner,
   AutonomousWorkflowEvaluator,
+  AutonomousEvaluatorCalibrationHarness,
+  AutonomousValueEvaluatorRegistry,
   CredentialStore,
   InMemoryAutonomousLearningEpisodeStore,
   InMemoryAutonomousLearningSettlementReceiptStore,
@@ -20,6 +22,7 @@ import {
   InMemoryAutonomousEpisodicMemory,
   builtinAutonomousDomainEvaluatorProfiles,
   builtinAutonomousDomainProfiles,
+  builtinAutonomousValueEvaluatorProfiles,
   openaiCompatibleProvider,
 } from "../dist/index.js";
 
@@ -80,6 +83,30 @@ function perfectEvidence(blueprint) {
     stage_id: stage.id,
     signals: Object.fromEntries(stage.evaluator_signals.map((signal) => [signal, 1])),
   }));
+}
+
+function codingCalibrationCases({ miscalibrated = false } = {}) {
+  const profile = builtinAutonomousValueEvaluatorProfiles().find((candidate) => candidate.domain === "coding");
+  const positiveSignals = Object.fromEntries(profile.required_signals.map((signal) => [signal, 1]));
+  const negativeSignals = Object.fromEntries(profile.required_signals.map((signal) => [signal, 0]));
+  return [
+    { case_id: "learning-calibration-positive", domain: "coding", evidence: { domain: "coding", capability: "code", risk_class: "review_required", signals: positiveSignals }, label: 1, split: "calibration" },
+    { case_id: "learning-calibration-negative", domain: "coding", evidence: { domain: "coding", capability: "code", risk_class: "review_required", signals: negativeSignals }, label: 0, split: "calibration" },
+    { case_id: "learning-holdout-positive", domain: "coding", evidence: { domain: "coding", capability: "code", risk_class: "review_required", signals: positiveSignals }, label: miscalibrated ? 0 : 1, split: "holdout" },
+    { case_id: "learning-holdout-negative", domain: "coding", evidence: { domain: "coding", capability: "code", risk_class: "review_required", signals: negativeSignals }, label: 0, split: "holdout" },
+  ];
+}
+
+function codingCalibrationReport(options = {}) {
+  return new AutonomousEvaluatorCalibrationHarness(AutonomousValueEvaluatorRegistry.withBuiltinProfiles()).run({
+    domains: ["coding"],
+    cases: codingCalibrationCases(options),
+    minCalibrationCasesPerDomain: 2,
+    minHoldoutCasesPerDomain: 2,
+    maxExpectedCalibrationError: 0.1,
+    maxBrierScore: 0.1,
+    requireAllDomains: false,
+  });
 }
 
 test("every built-in domain has an explicit evaluator signal contract", async () => {
@@ -204,6 +231,37 @@ test("learning episodes rehydrate by digest and settle through the local bandit"
   assert.equal(agent.learner.snapshot().generation, 1);
   assert.equal(episodes.pending().length, 0);
   await assert.rejects(() => controller.settleRun("episode-local-1", { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 0.8, passed: true }), /already been settled/);
+});
+
+test("the learning controller gates direct and outbox settlement on evaluator calibration", async () => {
+  const agent = await learningAgent();
+  const episodes = new InMemoryAutonomousLearningEpisodeStore();
+  const outbox = new InMemoryAutonomousLearningFeedbackOutboxStore();
+  const run = await agent.run("Implement and verify calibration-gated learning.", { domain: "coding", approveProviderCall: true });
+  const seedController = new AutonomousLearningController(agent, { episodes });
+  await seedController.prepareRun(run, { episodeId: "calibration-gated-episode" });
+  const blocked = new AutonomousLearningController(agent, {
+    episodes,
+    outbox,
+    calibrationReport: codingCalibrationReport({ miscalibrated: true }),
+    requireCalibratedLearning: true,
+  });
+  await assert.rejects(
+    () => blocked.settleRun("calibration-gated-episode", { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 1, passed: true }, { outbox: { workerId: "blocked-worker" } }),
+    /calibration holds learning/,
+  );
+  assert.equal(outbox.pending().length, 0);
+  assert.equal(agent.learner.snapshot().generation, 0);
+
+  const admitted = new AutonomousLearningController(agent, {
+    episodes,
+    outbox,
+    calibrationReport: codingCalibrationReport(),
+    requireCalibratedLearning: true,
+  });
+  const settlement = await admitted.settleRun("calibration-gated-episode", { evaluator_id: "coding-reviewer", evaluator_version: "1", reward: 1, passed: true }, { outbox: { workerId: "admitted-worker" } });
+  assert.equal(settlement.episode.status, "settled");
+  assert.equal(agent.learner.snapshot().generation, 1);
 });
 
 test("direct learning settlement annotates linked episodic memory and survives controller restart", async () => {

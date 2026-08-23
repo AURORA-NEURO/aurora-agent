@@ -1670,6 +1670,26 @@ evaluator is correct about the external world. Holdout failure, missing domain c
 abstention, evaluator refusal, or report drift keeps learning on hold while leaving provider
 execution and source truth as separate gates.
 
+The same admission boundary can be installed on the primary `AutonomousLearningController` so
+direct episode settlement, delayed-credit trajectories, workflow/cross-domain settlement, and
+the restart-safe feedback outbox share one policy. Set `requireCalibratedLearning: true` with the
+metadata-only report when constructing the controller. A blocked episode is refused before an
+outbox command is queued or the local/remote bandit is mutated; the controller rechecks the domain
+when a queued command is dispatched, so a worker cannot bypass the gate by replaying an older
+command. This still gates evaluator-signal learning only—it does not manufacture reward or claim
+that calibration establishes external-world correctness.
+
+```typescript
+const learning = new AutonomousLearningController(agent, {
+  calibrationReport: calibration,
+  requireCalibratedLearning: true,
+  feedbackOutbox,
+});
+await learning.settleRun(episodeId, evaluatorReward, {
+  outbox: { workerId: "learning-worker" },
+});
+```
+
 ### Reviewed capability packs for every domain
 
 The domain profile and workflow are joined by an `AutonomousDomainPack` for every built-in domain:
