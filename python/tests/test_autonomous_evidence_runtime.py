@@ -1,14 +1,36 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from prism_sdk import (
     ArgumentError,
     InMemoryAutonomousEvidenceRuntimeJournal,
+    AutonomousEvidenceRuntimePersistenceCoordinator,
     AutonomousEvidenceRuntime,
+    TransactionalJsonAutonomousEvidenceRuntimeSnapshotPersistence,
     build_autonomous_evidence_plan,
     builtin_autonomous_workflow_strategies,
 )
+
+
+class _CasTextStore:
+    def __init__(self) -> None:
+        self.value: str | None = None
+
+    def read(self) -> str | None:
+        return self.value
+
+    def write(self, value: str) -> None:
+        self.value = value
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+        if observed != expected_snapshot_digest:
+            return False
+        self.value = value
+        return True
 
 
 def _request(requirement, index: int = 0) -> dict[str, object]:
@@ -100,6 +122,22 @@ def test_evidence_runtime_replay_requires_value_reconciliation_after_journal_reh
     first = AutonomousEvidenceRuntime(plan, journal=journal).execute([request], acquirer=adapters, projector=adapters)
     assert first.receipts[0].replay == "fresh"
     snapshot = journal.snapshot(plan.plan_digest)
+    backend = _CasTextStore()
+    persistence = TransactionalJsonAutonomousEvidenceRuntimeSnapshotPersistence(backend)
+    source_coordinator = AutonomousEvidenceRuntimePersistenceCoordinator(journal, plan.plan_digest, persistence)
+    flushed = source_coordinator.flush()
+    assert flushed["snapshot_digest"] == snapshot.snapshot_digest
+    restarted_coordinator = AutonomousEvidenceRuntimePersistenceCoordinator(
+        InMemoryAutonomousEvidenceRuntimeJournal(), plan.plan_digest, persistence
+    )
+    assert restarted_coordinator.restore()["snapshot_digest"] == flushed["snapshot_digest"]
+    backend.value = json.dumps(json.loads(backend.value), indent=2)
+    with pytest.raises(ArgumentError, match="not canonical"):
+        persistence.read()
+    persistence.write(snapshot)
+    persistence.write(InMemoryAutonomousEvidenceRuntimeJournal().snapshot(plan.plan_digest))
+    with pytest.raises(ArgumentError, match="compare-and-swap conflict"):
+        restarted_coordinator.flush()
     restored_journal = InMemoryAutonomousEvidenceRuntimeJournal()
     restored_journal.restore(snapshot, plan.plan_digest)
     restored = AutonomousEvidenceRuntime(plan, journal=restored_journal)

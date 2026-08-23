@@ -418,6 +418,99 @@ def _assessment_from_payload(payload: Mapping[str, Any]) -> AutonomousEvidenceAs
     )
 
 
+_EVIDENCE_RECEIPT_KEYS = frozenset({
+    "schema", "request_digest", "plan_digest", "requirement_id", "domain", "workflow_id",
+    "workflow_digest", "stage_id", "source_id", "source_digest", "attempt", "status", "replay",
+    "value_digest", "value_bytes", "observations", "observed_requirement_ids",
+    "missing_requirement_ids", "evidence_status", "evaluator_status", "assessment_digest",
+    "limitations", "error_class", "duration_ms", "receipt_digest", "retention", "secret_material",
+})
+_EVIDENCE_ASSESSMENT_KEYS = frozenset({
+    "schema", "receipt_digest", "requirement_id", "evaluator_id", "evaluator_version", "verdict",
+    "score", "feedback_digest", "evidence_digest", "failure_class", "assessment_digest", "retention",
+    "secret_material",
+})
+_EVIDENCE_ENTRY_KEYS = frozenset({
+    "schema", "sequence", "previous_entry_digest", "receipt", "assessment", "entry_digest",
+    "retention", "secret_material",
+})
+_EVIDENCE_SNAPSHOT_KEYS = frozenset({
+    "schema", "plan_digest", "entries", "head_digest", "snapshot_digest", "retention", "secret_material",
+})
+
+
+def _evidence_entry_from_mapping(value: Mapping[str, Any]) -> AutonomousEvidenceRuntimeJournalEntry:
+    if not isinstance(value, Mapping) or set(value) != _EVIDENCE_ENTRY_KEYS:
+        raise ArgumentError("evidence runtime snapshot journal entry is malformed")
+    if value.get("schema") != AUTONOMOUS_EVIDENCE_RUNTIME_JOURNAL_SCHEMA or value.get("retention") != "metadata_only;raw_acquisition_and_evaluator_values_excluded" or value.get("secret_material") != "never_returned":
+        raise ArgumentError("evidence runtime snapshot journal entry retention is invalid")
+    receipt_payload = value.get("receipt")
+    assessment_payload = value.get("assessment")
+    if not isinstance(receipt_payload, Mapping) or set(receipt_payload) != _EVIDENCE_RECEIPT_KEYS:
+        raise ArgumentError("evidence runtime snapshot receipt is malformed")
+    receipt = _receipt_from_payload(receipt_payload)
+    if assessment_payload is not None and (not isinstance(assessment_payload, Mapping) or set(assessment_payload) != _EVIDENCE_ASSESSMENT_KEYS):
+        raise ArgumentError("evidence runtime snapshot assessment is malformed")
+    assessment = None if assessment_payload is None else _assessment_from_payload(assessment_payload)
+    if assessment is not None and receipt.assessment_digest != assessment.assessment_digest:
+        raise ArgumentError("evidence runtime snapshot receipt and assessment are inconsistent")
+    sequence = value.get("sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or not 1 <= sequence <= MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS:
+        raise ArgumentError("evidence runtime snapshot journal sequence is invalid")
+    previous = _digest("evidence runtime snapshot previous_entry_digest", value.get("previous_entry_digest"), allow_none=True)
+    entry_digest = _digest("evidence runtime snapshot entry_digest", value.get("entry_digest"))
+    entry = AutonomousEvidenceRuntimeJournalEntry(sequence, previous, receipt, assessment, entry_digest)  # type: ignore[arg-type]
+    if content_digest({key: item for key, item in entry.to_dict().items() if key != "entry_digest"}) != entry.entry_digest:
+        raise ArgumentError("evidence runtime snapshot entry digest is invalid")
+    return entry
+
+
+def validate_autonomous_evidence_runtime_snapshot(
+    value: Mapping[str, Any] | AutonomousEvidenceRuntimeSnapshot,
+    *,
+    expected_plan_digest: str | None = None,
+) -> AutonomousEvidenceRuntimeSnapshot:
+    """Strictly validate a plan-bound, metadata-only evidence runtime snapshot."""
+
+    raw = value.to_dict() if isinstance(value, AutonomousEvidenceRuntimeSnapshot) else value
+    if not isinstance(raw, Mapping) or set(raw) != _EVIDENCE_SNAPSHOT_KEYS:
+        raise ArgumentError("evidence runtime snapshot is malformed")
+    if raw.get("schema") != AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA or raw.get("retention") != "metadata_only_hash_bound" or raw.get("secret_material") != "never_returned":
+        raise ArgumentError("evidence runtime snapshot retention is invalid")
+    plan_digest = _digest("evidence runtime snapshot plan_digest", raw.get("plan_digest"))
+    if expected_plan_digest is not None and plan_digest != _digest("expected evidence runtime plan_digest", expected_plan_digest):
+        raise ArgumentError("evidence runtime snapshot belongs to a different plan")
+    raw_entries = raw.get("entries")
+    if not isinstance(raw_entries, Sequence) or isinstance(raw_entries, (str, bytes, bytearray)) or len(raw_entries) > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS:
+        raise ArgumentError("evidence runtime snapshot exceeds its receipt capacity")
+    entries = tuple(_evidence_entry_from_mapping(entry) for entry in raw_entries)
+    for index, entry in enumerate(entries):
+        if entry.sequence != index + 1 or entry.previous_entry_digest != (None if index == 0 else entries[index - 1].entry_digest):
+            raise ArgumentError("evidence runtime snapshot journal chain is invalid")
+        if entry.receipt.plan_digest != plan_digest:
+            raise ArgumentError("evidence runtime snapshot receipt belongs to a different plan")
+    head_digest = _digest("evidence runtime snapshot head_digest", raw.get("head_digest"), allow_none=True)
+    if head_digest != (entries[-1].entry_digest if entries else None):
+        raise ArgumentError("evidence runtime snapshot head digest is invalid")
+    descriptor = {
+        "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA,
+        "plan_digest": plan_digest,
+        "entries": [entry.to_dict() for entry in entries],
+        "head_digest": head_digest,
+        "retention": "metadata_only_hash_bound",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = _digest("evidence runtime snapshot snapshot_digest", raw.get("snapshot_digest"))
+    if snapshot_digest != content_digest(descriptor):
+        raise ArgumentError("evidence runtime snapshot digest is invalid")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if canonical_json(raw) != canonical_json(normalized):
+        raise ArgumentError("evidence runtime snapshot is not normalized")
+    if len(canonical_json(normalized).encode("utf-8")) > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_BYTES:
+        raise ArgumentError("evidence runtime snapshot exceeds its byte bound")
+    return AutonomousEvidenceRuntimeSnapshot(plan_digest, entries, head_digest, snapshot_digest)  # type: ignore[arg-type]
+
+
 class InMemoryAutonomousEvidenceRuntimeJournal:
     """Small reference journal; production applications can implement the same protocol."""
 
@@ -454,47 +547,150 @@ class InMemoryAutonomousEvidenceRuntimeJournal:
             "secret_material": "never_returned",
         }
         snapshot = AutonomousEvidenceRuntimeSnapshot(plan, self.records(), descriptor["head_digest"], content_digest(descriptor))
-        if _json_bytes(snapshot.to_dict(), "evidence runtime snapshot") > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_BYTES:
-            raise ArgumentError("evidence runtime snapshot exceeds its byte bound")
-        return snapshot
+        return validate_autonomous_evidence_runtime_snapshot(snapshot, expected_plan_digest=plan)
 
     def restore(self, snapshot: AutonomousEvidenceRuntimeSnapshot | Mapping[str, Any], plan_digest: str) -> None:
-        if isinstance(snapshot, Mapping):
-            if snapshot.get("schema") != AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA:
-                raise ArgumentError("evidence runtime snapshot schema is invalid")
-            raw_entries = snapshot.get("entries", ())
-            entries: list[AutonomousEvidenceRuntimeJournalEntry] = []
-            for raw in raw_entries:
-                if not isinstance(raw, Mapping):
-                    raise ArgumentError("evidence runtime snapshot journal entry is invalid")
-                receipt = _receipt_from_payload(raw.get("receipt", {}))
-                assessment_raw = raw.get("assessment")
-                assessment = None if assessment_raw is None else _assessment_from_payload(assessment_raw)
-                entries.append(AutonomousEvidenceRuntimeJournalEntry(raw.get("sequence"), raw.get("previous_entry_digest"), receipt, assessment, raw.get("entry_digest")))
-            snapshot = AutonomousEvidenceRuntimeSnapshot(snapshot.get("plan_digest"), tuple(entries), snapshot.get("head_digest"), snapshot.get("snapshot_digest"))
-        if not isinstance(snapshot, AutonomousEvidenceRuntimeSnapshot) or snapshot.plan_digest != plan_digest or snapshot.entries and snapshot.entries[0].receipt.plan_digest != plan_digest:
-            raise ArgumentError("evidence runtime snapshot belongs to a different plan")
-        descriptor = {
-            "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA,
-            "plan_digest": snapshot.plan_digest,
-            "entries": [entry.to_dict() for entry in snapshot.entries],
-            "head_digest": snapshot.head_digest,
-            "retention": "metadata_only_hash_bound",
-            "secret_material": "never_returned",
-        }
-        if content_digest(descriptor) != snapshot.snapshot_digest:
-            raise ArgumentError("evidence runtime snapshot digest is invalid")
+        validated = validate_autonomous_evidence_runtime_snapshot(
+            snapshot,
+            expected_plan_digest=plan_digest,
+        )
         with self._lock:
-            restored: list[AutonomousEvidenceRuntimeJournalEntry] = []
-            for entry in snapshot.entries:
-                if entry.sequence != len(restored) + 1 or entry.previous_entry_digest != (restored[-1].entry_digest if restored else None):
-                    raise ArgumentError("evidence runtime snapshot journal chain is invalid")
-                if content_digest({key: value for key, value in entry.to_dict().items() if key != "entry_digest"}) != entry.entry_digest:
-                    raise ArgumentError("evidence runtime snapshot entry digest is invalid")
-                restored.append(entry)
-            if snapshot.head_digest != (restored[-1].entry_digest if restored else None):
-                raise ArgumentError("evidence runtime snapshot head digest is invalid")
-            self._entries = restored
+            self._entries = list(validated.entries)
+
+
+def _canonical_evidence_runtime_snapshot_json(
+    value: Mapping[str, Any] | AutonomousEvidenceRuntimeSnapshot,
+) -> str:
+    return canonical_json(validate_autonomous_evidence_runtime_snapshot(value).to_dict())
+
+
+class AutonomousEvidenceRuntimeSnapshotTextStore(Protocol):
+    """Portable text persistence for plan-bound evidence runtime journals."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalAutonomousEvidenceRuntimeSnapshotTextStore(
+    AutonomousEvidenceRuntimeSnapshotTextStore,
+    Protocol,
+):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonAutonomousEvidenceRuntimeSnapshotPersistence:
+    """Strict canonical JSON persistence for plan-bound evidence runtime state."""
+
+    def __init__(
+        self,
+        store: AutonomousEvidenceRuntimeSnapshotTextStore,
+        *,
+        max_bytes: int = MAX_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_BYTES,
+    ) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ArgumentError("evidence runtime JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_BYTES:
+            raise ArgumentError("evidence runtime JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("evidence runtime JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ArgumentError("evidence runtime JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("evidence runtime JSON snapshot must be an object")
+        normalized = validate_autonomous_evidence_runtime_snapshot(raw).to_dict()
+        if encoded != canonical_json(normalized):
+            raise ArgumentError("evidence runtime JSON snapshot is not canonical")
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("evidence runtime JSON snapshot exceeds its byte bound")
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any] | AutonomousEvidenceRuntimeSnapshot) -> None:
+        encoded = _canonical_evidence_runtime_snapshot_json(snapshot)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("evidence runtime JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousEvidenceRuntimeSnapshotPersistence(
+    JsonAutonomousEvidenceRuntimeSnapshotPersistence,
+):
+    """Canonical evidence runtime persistence with stale-writer fencing."""
+
+    def __init__(
+        self,
+        store: TransactionalAutonomousEvidenceRuntimeSnapshotTextStore,
+        *,
+        max_bytes: int = MAX_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_BYTES,
+    ) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ArgumentError("transactional evidence runtime persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(
+        self,
+        expected_snapshot_digest: str | None,
+        snapshot: Mapping[str, Any] | AutonomousEvidenceRuntimeSnapshot,
+    ) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest("evidence runtime expected snapshot digest", expected_snapshot_digest)
+        encoded = _canonical_evidence_runtime_snapshot_json(snapshot)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("evidence runtime JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class AutonomousEvidenceRuntimePersistenceCoordinator:
+    """Flush and restore one evidence journal only for its exact plan digest."""
+
+    def __init__(
+        self,
+        journal: InMemoryAutonomousEvidenceRuntimeJournal,
+        plan_digest: str,
+        persistence: Any,
+    ) -> None:
+        if not isinstance(journal, InMemoryAutonomousEvidenceRuntimeJournal):
+            raise ArgumentError("evidence runtime persistence requires a typed journal")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ArgumentError("evidence runtime persistence adapter is malformed")
+        self.journal = journal
+        self.plan_digest = _digest("evidence runtime persistence plan_digest", plan_digest)
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = validate_autonomous_evidence_runtime_snapshot(
+            raw,
+            expected_plan_digest=self.plan_digest,
+        )
+        self.journal.restore(snapshot, self.plan_digest)
+        self._expected_snapshot_digest = snapshot.snapshot_digest
+        return snapshot.to_dict()
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.journal.snapshot(self.plan_digest)
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise ArgumentError("evidence runtime persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot.snapshot_digest
+        return snapshot.to_dict()
 
 
 def _request_mapping(value: Mapping[str, Any]) -> dict[str, Any]:

@@ -5219,6 +5219,16 @@ manifest, reconciliation plan, or catalogue projection. Approval and normalizer 
 still enforced by the catalogue/reconciler, so HTTP success remains transport evidence rather than
 evaluator success or source truth.
 
+The Python `InMemoryAutonomousEvidenceRuntimeJournal` now has the same strict restart contract as
+the other autonomous ledgers. `validate_autonomous_evidence_runtime_snapshot()` checks the exact
+receipt, assessment, and journal-entry schemas, recomputes every receipt/assessment/entry/head/
+snapshot digest, enforces deterministic sequence continuity, and binds every receipt to the
+expected evidence-plan digest. `JsonAutonomousEvidenceRuntimeSnapshotPersistence` provides
+canonical JSON over a caller-owned text store; its transactional variant and
+`AutonomousEvidenceRuntimePersistenceCoordinator` fence stale writers with the restored snapshot
+digest. A snapshot from a different plan, a non-canonical encoding, a receipt/assessment mismatch,
+or a tampered evaluator revision is rejected before the journal changes.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected
