@@ -117,6 +117,12 @@ def _digest(name: str, value: Any) -> str:
     return value
 
 
+def _valid_digest(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
 def _assert_safe(value: Any, *, depth: int = 0) -> None:
     if depth > 24:
         raise AutonomousActivationError("activation metadata is too deeply nested")
@@ -612,6 +618,27 @@ class AutonomousCapabilityActivationStore:
                 raise
         return {"schema": AUTONOMOUS_ACTIVATION_STORE_SCHEMA, "state_digest": state.state_digest, "bytes": len(encoded)}
 
+    def save_if_unchanged(
+        self,
+        value: AutonomousCapabilityActivation | AutonomousCapabilityActivationState | Mapping[str, Any],
+        expected_state_digest: str | None,
+    ) -> bool:
+        """Atomically persist activation only when the expected state is still current.
+
+        ``None`` means create-if-absent. This is the safe handoff for separate approval and
+        revocation workers that share one activation file.
+        """
+
+        if expected_state_digest is not None and not _valid_digest(expected_state_digest):
+            raise AutonomousActivationError("activation expected_state_digest is invalid")
+        with self._lock:
+            current = self.load()
+            observed = None if current is None else current.state_digest
+            if observed != expected_state_digest:
+                return False
+            self.save(value)
+            return True
+
     def load(self) -> AutonomousCapabilityActivationState | None:
         with self._lock:
             if not self.path.exists():
@@ -619,9 +646,12 @@ class AutonomousCapabilityActivationStore:
             if self.path.stat().st_size > self.max_bytes:
                 raise AutonomousActivationError("activation store exceeds its bound")
             try:
-                envelope = json.loads(self.path.read_text(encoding="utf-8"))
+                encoded = self.path.read_bytes()
+                envelope = json.loads(encoded.decode("utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError) as error:
                 raise AutonomousActivationError("activation store contains invalid JSON") from error
+        if canonical_bytes(envelope) != encoded:
+            raise AutonomousActivationError("activation store JSON is not canonical")
         if not isinstance(envelope, Mapping) or envelope.get("schema") != AUTONOMOUS_ACTIVATION_STORE_SCHEMA:
             raise AutonomousActivationError("activation store schema is invalid")
         state = AutonomousCapabilityActivationState.from_mapping(envelope.get("state"))

@@ -11,6 +11,7 @@ from prism_sdk import (
     AutonomousCapabilityActivation,
     AutonomousCapabilityActivationStore,
     ToolCatalogue,
+    canonical_bytes,
     plan_mcp_catalogue_bindings,
 )
 
@@ -131,6 +132,27 @@ def test_activation_store_round_trips_and_rejects_tampered_state(tmp_path) -> No
 
     payload = json.loads((tmp_path / "activation.json").read_text(encoding="utf-8"))
     payload["state_digest"] = "0" * 64
-    (tmp_path / "activation.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "activation.json").write_bytes(canonical_bytes(payload))
     with pytest.raises(AutonomousActivationError, match="digest"):
+        store.load()
+
+
+def test_activation_store_compare_and_swap_fences_stale_writers_and_noncanonical_json(tmp_path) -> None:
+    activation = AutonomousCapabilityActivation(activation_id="activation-cas", clock=lambda: 30.0)
+    store = AutonomousCapabilityActivationStore(tmp_path / "activation-cas.json")
+
+    assert store.save_if_unchanged(activation, None) is True
+    initial = store.load()
+    assert initial is not None
+    assert store.save_if_unchanged(initial, None) is False
+
+    activation.revoke(reason="operator_revoked_activation")
+    assert store.save_if_unchanged(activation, initial.state_digest) is True
+    assert store.save_if_unchanged(initial, initial.state_digest) is False
+    with pytest.raises(AutonomousActivationError, match="expected_state_digest"):
+        store.save_if_unchanged(initial, "not-a-digest")
+
+    payload = json.loads((tmp_path / "activation-cas.json").read_text(encoding="utf-8"))
+    (tmp_path / "activation-cas.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    with pytest.raises(AutonomousActivationError, match="canonical"):
         store.load()

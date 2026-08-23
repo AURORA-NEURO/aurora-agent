@@ -6895,6 +6895,14 @@ agent.register_workspace_bindings_from_plan(
 agent.save_activation(activation_store)
 ```
 
+When approval and revocation are handled by separate workers, use
+`activation_store.save_if_unchanged(next_state, expected_state_digest)` for the write handoff.
+It is a compare-and-swap operation: a `None` expectation means create-if-absent, while a stale
+digest returns `False` without overwriting the operator's newer decision. Loads also require the
+canonical JSON representation, so whitespace or key-order rewrites are rejected instead of being
+treated as an equivalent activation record. Callers should reload, reconcile the current status,
+and explicitly reapply their transition after a failed compare-and-swap.
+
 After a restart, the application recreates a protected `CredentialSession` and collects or
 resolves keys again; it never attempts to restore credentials from the activation file. A changed
 live catalogue moves the activation to `stale` and clears its prior approvals until the new plan
