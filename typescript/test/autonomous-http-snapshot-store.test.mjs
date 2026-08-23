@@ -17,6 +17,7 @@ import {
   ArgumentError,
   ResponseTooLargeError,
   TransportError,
+  canonicalJson,
 } from "../dist/index.js";
 
 function response(body, status = 200, headers = {}) {
@@ -24,7 +25,7 @@ function response(body, status = 200, headers = {}) {
 }
 
 function snapshot(domain, version) {
-  return JSON.stringify({ schema: "test-snapshot/0.1", domain, version, metadata_only: true });
+  return canonicalJson({ schema: "test-snapshot/0.1", domain, version, metadata_only: true });
 }
 
 test("HTTP snapshot text store supports all domains, protected transient headers, and CAS", async () => {
@@ -45,7 +46,7 @@ test("HTTP snapshot text store supports all domains, protected transient headers
     const body = String(init.body);
     const parsed = JSON.parse(body);
     parsed.version_digest = parsed.version_digest ?? "a".repeat(64);
-    values.set(resource, JSON.stringify(parsed));
+    values.set(resource, canonicalJson(parsed));
     return response(null, 204);
   };
   const seenContexts = [];

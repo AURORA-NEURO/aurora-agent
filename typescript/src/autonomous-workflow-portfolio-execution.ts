@@ -1047,7 +1047,7 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
   const planItemsById = new Map(plan.items.map((item) => [item.item_id, item]));
   for (const initial of initialItems) {
     const planItem = planItemsById.get(initial.itemId);
-    if (!planItem || planItem.status !== "ready" || executions.has(initial.itemId) || initial.domain !== planItem.domain || JSON.stringify(initial.dependsOn) !== JSON.stringify(planItem.depends_on)) {
+    if (!planItem || planItem.status !== "ready" || executions.has(initial.itemId) || initial.domain !== planItem.domain || canonicalJson(initial.dependsOn) !== canonicalJson(planItem.depends_on)) {
       throw new ProviderRuntimeError(`rehydrated workflow portfolio item ${initial.itemId} does not match the reviewed plan`, { code: "protocol", retryable: false, operation: "workflow_portfolio_rehydrate" });
     }
     const rehydrated = await applyRehydratedLearningSettlement(initial, options, plan.portfolio_digest, requestById.get(initial.itemId), planItem);

@@ -22,7 +22,7 @@ import {
   type AutonomousWorkflowPortfolioPlan,
 } from "./autonomous-workflow-portfolio.js";
 import { validateAutonomousWorkflowPortfolioAdmission, type AutonomousWorkflowPortfolioAdmission } from "./autonomous-workflow-portfolio-admission.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only restart checkpoint for a verified workflow portfolio. */
@@ -195,7 +195,7 @@ async function makeCheckpoint(input: {
     learning_policy_digest: input.learningPolicyDigest,
     status: checkpointStatusFor(input.progress.status),
   };
-  const encoded = JSON.stringify(payload);
+  const encoded = canonicalJson(payload);
   if (bytes(encoded) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_BYTES) throw new ArgumentError("workflow portfolio execution checkpoint exceeds its bounded size");
   return { ...payload, checkpoint_digest: await digestJson(payload), retention: CHECKPOINT_RETENTION, secret_material: CHECKPOINT_SECRET_MATERIAL };
 }
@@ -255,11 +255,11 @@ export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(val
 
 async function validatePlanBinding(plan: AutonomousWorkflowPortfolioPlan, checkpoint: AutonomousWorkflowPortfolioExecutionCheckpointJSON, controls: ReturnType<typeof boundedControls>, admissionDigest: string | null): Promise<void> {
   const inputDigest = await portfolioInputDigest(plan, admissionDigest);
-  if (checkpoint.plan_digest !== plan.portfolio_digest || checkpoint.admission_digest !== admissionDigest || checkpoint.portfolio_input_digest !== inputDigest || JSON.stringify(checkpoint.item_ids) !== JSON.stringify(plan.items.map((item) => item.item_id)) || JSON.stringify(checkpoint.request_digests) !== JSON.stringify(plan.items.map((item) => item.request_digest)) || JSON.stringify(checkpoint.task_digests) !== JSON.stringify(plan.items.map((item) => item.task_digest))) throw new ArgumentError("workflow portfolio execution checkpoint does not match the current reviewed plan or admission");
+  if (checkpoint.plan_digest !== plan.portfolio_digest || checkpoint.admission_digest !== admissionDigest || checkpoint.portfolio_input_digest !== inputDigest || canonicalJson(checkpoint.item_ids) !== canonicalJson(plan.items.map((item) => item.item_id)) || canonicalJson(checkpoint.request_digests) !== canonicalJson(plan.items.map((item) => item.request_digest)) || canonicalJson(checkpoint.task_digests) !== canonicalJson(plan.items.map((item) => item.task_digest))) throw new ArgumentError("workflow portfolio execution checkpoint does not match the current reviewed plan or admission");
   if (checkpoint.max_parallelism !== controls.maxParallelism || checkpoint.stop_on_error !== controls.stopOnError || checkpoint.include_dependency_outputs !== controls.includeDependencyOutputs || checkpoint.max_dependency_handoff_bytes !== controls.maxDependencyHandoffBytes || checkpoint.learning_policy_digest !== controls.learningPolicyDigest) throw new ArgumentError("workflow portfolio execution checkpoint controls do not match");
   const readyItemIds = plan.items.filter((item) => item.status === "ready").map((item) => item.item_id);
   if (checkpoint.settled_item_ids.some((itemId) => !readyItemIds.includes(itemId))) throw new ArgumentError("workflow portfolio execution checkpoint settles an item that was not executable in the reviewed plan");
-  if (checkpoint.status === "completed" && (plan.status === "blocked" || JSON.stringify(checkpoint.settled_item_ids) !== JSON.stringify(readyItemIds) || checkpoint.settled_item_statuses.some((status) => status !== "succeeded"))) throw new ArgumentError("completed workflow portfolio execution checkpoint is not complete");
+  if (checkpoint.status === "completed" && (plan.status === "blocked" || canonicalJson(checkpoint.settled_item_ids) !== canonicalJson(readyItemIds) || checkpoint.settled_item_statuses.some((status) => status !== "succeeded"))) throw new ArgumentError("completed workflow portfolio execution checkpoint is not complete");
   if (checkpoint.status === "blocked" && plan.status !== "blocked") throw new ArgumentError("blocked workflow portfolio execution checkpoint does not match the reviewed plan status");
 }
 
@@ -269,7 +269,7 @@ async function validateRehydratedItem(
   expectedDigest: string,
   item: AutonomousWorkflowPortfolioItemExecutionResult,
 ): Promise<void> {
-  if (!item || item.itemId !== planItem.item_id || item.domain !== planItem.domain || JSON.stringify(item.dependsOn) !== JSON.stringify(planItem.depends_on) || item.status !== expectedStatus || !checkpointable(item.status)) throw new ArgumentError(`rehydrated workflow portfolio item ${planItem.item_id} does not match its checkpoint`);
+  if (!item || item.itemId !== planItem.item_id || item.domain !== planItem.domain || canonicalJson(item.dependsOn) !== canonicalJson(planItem.depends_on) || item.status !== expectedStatus || !checkpointable(item.status)) throw new ArgumentError(`rehydrated workflow portfolio item ${planItem.item_id} does not match its checkpoint`);
   if (item.run) {
     const output = autonomousWorkflowPortfolioTransientOutput(item.run);
     const outputDigest = output.text ? await digestJson({ item_id: item.itemId, output: output.text }) : null;

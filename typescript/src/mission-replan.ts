@@ -11,7 +11,7 @@ import {
 } from "./mission-execution.js";
 import { AutonomousCostBudget, type AutonomousCostBudgetSnapshot } from "./llm.js";
 import type { AutonomousRouteProposal } from "./autonomous.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { AutonomousEvaluatorRewardInput } from "./autonomous-learning.js";
 import type { AgentMissionArgs, AgentMissionStep, JsonObject } from "./types.js";
 
@@ -245,7 +245,7 @@ function boundedCostBudgetSnapshot(name: string, value: unknown, allowNull = tru
   try {
     const budget = AutonomousCostBudget.fromSnapshot(value as unknown as AutonomousCostBudgetSnapshot);
     const normalized = budget.snapshot();
-    if (JSON.stringify(normalized) !== JSON.stringify(value)) throw new Error("snapshot normalization mismatch");
+    if (canonicalJson(normalized) !== canonicalJson(value)) throw new Error("snapshot normalization mismatch");
     return normalized;
   } catch {
     throw new AutonomousMissionReplanError(`${name} is malformed`);
@@ -806,7 +806,7 @@ export async function runAutonomousMissionReplanCycle(
   if (persisted?.cost_budget !== undefined && persisted.cost_budget !== null) {
     const persistedBudget = AutonomousCostBudget.fromSnapshot(boundedCostBudgetSnapshot("persisted mission replan cost_budget", persisted.cost_budget, false)!);
     if (sharedCostBudget !== undefined) {
-      if (JSON.stringify(sharedCostBudget.snapshot()) !== JSON.stringify(persistedBudget.snapshot())) throw new AutonomousMissionReplanContractError("supplied mission cost budget does not match the persisted accounting");
+      if (canonicalJson(sharedCostBudget.snapshot()) !== canonicalJson(persistedBudget.snapshot())) throw new AutonomousMissionReplanContractError("supplied mission cost budget does not match the persisted accounting");
     } else if (executeTemplate.maxTotalCostUnits !== undefined && executeTemplate.maxTotalCostUnits !== persistedBudget.maxCostUnits) {
       throw new AutonomousMissionReplanContractError("supplied mission maxTotalCostUnits does not match the persisted accounting");
     } else {

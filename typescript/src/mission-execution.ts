@@ -888,7 +888,7 @@ export class AutonomousMissionExecutor {
 
   private async assertExisting(checkpoint: AutonomousMissionCheckpoint, requestDigest: string, policyDigest: string, catalogueDigest: string, orderedSteps: readonly string[], waves: readonly string[][], routeDigest: string | null): Promise<AutonomousMissionCheckpoint> {
     const normalized = await validateCheckpoint(checkpoint);
-    if (normalized.request_digest !== requestDigest || normalized.policy_digest !== policyDigest || normalized.catalogue_digest !== catalogueDigest || JSON.stringify(normalized.ordered_steps) !== JSON.stringify(orderedSteps) || JSON.stringify(normalized.waves) !== JSON.stringify(waves)) throw new AutonomousMissionExecutionError("mission checkpoint does not match the supplied mission contract");
+    if (normalized.request_digest !== requestDigest || normalized.policy_digest !== policyDigest || normalized.catalogue_digest !== catalogueDigest || canonicalJson(normalized.ordered_steps) !== canonicalJson(orderedSteps) || canonicalJson(normalized.waves) !== canonicalJson(waves)) throw new AutonomousMissionExecutionError("mission checkpoint does not match the supplied mission contract");
     if (routeDigest !== null && normalized.route_digest !== routeDigest) throw new AutonomousMissionExecutionError("mission route override does not match the persisted route digest");
     return normalized;
   }

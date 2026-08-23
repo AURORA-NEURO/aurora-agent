@@ -1,4 +1,5 @@
 import { ArgumentError, ProtocolError, ResponseTooLargeError, TransportError, isObject } from "./errors.js";
+import { canonicalJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /**
@@ -168,6 +169,7 @@ function validateSnapshotText(value: string, maximum: number): string {
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { throw new ArgumentError("HTTP snapshot store snapshot must be valid JSON"); }
   if (!isObject(parsed)) throw new ArgumentError("HTTP snapshot store snapshot must be a JSON object");
+  if (canonicalJson(parsed) !== value) throw new ArgumentError("HTTP snapshot store snapshot must use canonical JSON");
   return value;
 }
 

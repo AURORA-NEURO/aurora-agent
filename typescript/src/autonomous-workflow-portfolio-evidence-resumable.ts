@@ -222,7 +222,7 @@ async function makeCheckpoint(input: {
     runtime_policy_digest: input.configuration.runtimePolicyDigest,
     status: checkpointStatusFor(input.progress.status),
   };
-  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_BYTES) throw new ArgumentError("portfolio evidence checkpoint exceeds its bounded size");
+  if (new TextEncoder().encode(canonicalJson(payload)).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EVIDENCE_CHECKPOINT_BYTES) throw new ArgumentError("portfolio evidence checkpoint exceeds its bounded size");
   return { ...payload, checkpoint_digest: await digestJson(payload), retention: CHECKPOINT_RETENTION, secret_material: CHECKPOINT_SECRET_MATERIAL };
 }
 
@@ -293,7 +293,7 @@ async function validateBinding(
   binding: Awaited<ReturnType<typeof inputBinding>>,
   configuration: ReturnType<typeof controls>,
 ): Promise<void> {
-  if (checkpoint.portfolio_plan_digest !== plan.portfolio_digest || checkpoint.admission_digest !== execution.admissionDigest || checkpoint.provider_execution_digest !== execution.executionDigest || checkpoint.evidence_plan_digest !== evidencePlan.plan_digest || checkpoint.evidence_input_digest !== binding.evidenceInputDigest || JSON.stringify(checkpoint.item_ids) !== JSON.stringify(binding.itemIds) || JSON.stringify(checkpoint.item_request_digests) !== JSON.stringify(binding.itemRequestDigests)) throw new ArgumentError("portfolio evidence checkpoint does not match the current reviewed execution or evidence input");
+  if (checkpoint.portfolio_plan_digest !== plan.portfolio_digest || checkpoint.admission_digest !== execution.admissionDigest || checkpoint.provider_execution_digest !== execution.executionDigest || checkpoint.evidence_plan_digest !== evidencePlan.plan_digest || checkpoint.evidence_input_digest !== binding.evidenceInputDigest || canonicalJson(checkpoint.item_ids) !== canonicalJson(binding.itemIds) || canonicalJson(checkpoint.item_request_digests) !== canonicalJson(binding.itemRequestDigests)) throw new ArgumentError("portfolio evidence checkpoint does not match the current reviewed execution or evidence input");
   if (checkpoint.max_parallelism !== configuration.maxParallelism || checkpoint.stop_on_failure !== configuration.stopOnFailure || checkpoint.reevaluate_pending !== configuration.reevaluatePending || checkpoint.evaluator_id !== configuration.evaluatorId || checkpoint.evaluator_version !== configuration.evaluatorVersion || checkpoint.runtime_policy_digest !== configuration.runtimePolicyDigest) throw new ArgumentError("portfolio evidence checkpoint controls do not match");
   if (checkpoint.status === "completed" && (checkpoint.settled_item_ids.length !== plan.items.length || checkpoint.settled_item_statuses.some((status) => status !== "completed"))) throw new ArgumentError("completed portfolio evidence checkpoint is not complete");
 }

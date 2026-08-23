@@ -272,7 +272,7 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const now = timestamp("portfolio remote job now", input.now ?? Date.now());
     const existing = this.jobs.get(jobId);
     if (existing) {
-      if (existing.plan_digest !== planDigest || existing.admission_digest !== admissionDigest || existing.require_admission !== requireAdmission || existing.trace_id !== traceId || JSON.stringify(existing.item_ids) !== JSON.stringify(itemIds) || JSON.stringify(existing.request_digests) !== JSON.stringify(requestDigests) || existing.max_attempts !== maxAttempts) throw new ArgumentError("portfolio remote job idempotency identity conflicts");
+      if (existing.plan_digest !== planDigest || existing.admission_digest !== admissionDigest || existing.require_admission !== requireAdmission || existing.trace_id !== traceId || canonicalJson(existing.item_ids) !== canonicalJson(itemIds) || canonicalJson(existing.request_digests) !== canonicalJson(requestDigests) || existing.max_attempts !== maxAttempts) throw new ArgumentError("portfolio remote job idempotency identity conflicts");
       return clone(existing);
     }
     if (this.jobs.size >= this.maxJobs) throw new ArgumentError("portfolio remote job queue is full");
@@ -569,7 +569,7 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
         const resolved = await this.resolver(claimed, { workerId: this.workerId, renew: (renewLeaseMs = leaseMs, renewAt = clock()) => this.queue.renew(claimed.job_id, this.workerId, renewLeaseMs, renewAt) });
         if (!resolved || !Array.isArray(resolved.requests) || !resolved.plan) throw new ProviderRuntimeError("portfolio remote worker resolver returned no private execution binding", { code: "configuration", retryable: false });
         const plan = await validateAutonomousWorkflowPortfolioPlan(resolved.plan);
-        if (plan.portfolio_digest !== claimed.plan_digest || JSON.stringify(plan.items.map((item) => item.item_id)) !== JSON.stringify(claimed.item_ids) || JSON.stringify(plan.items.map((item) => item.request_digest)) !== JSON.stringify(claimed.request_digests)) throw new ProviderRuntimeError("portfolio remote worker plan or request identity drifted", { code: "protocol", retryable: false });
+        if (plan.portfolio_digest !== claimed.plan_digest || canonicalJson(plan.items.map((item) => item.item_id)) !== canonicalJson(claimed.item_ids) || canonicalJson(plan.items.map((item) => item.request_digest)) !== canonicalJson(claimed.request_digests)) throw new ProviderRuntimeError("portfolio remote worker plan or request identity drifted", { code: "protocol", retryable: false });
         const admission = resolved.admission === undefined || resolved.admission === null ? null : await validateAutonomousWorkflowPortfolioAdmission(resolved.admission);
         if (claimed.require_admission && admission === null) throw new ProviderRuntimeError("portfolio remote worker requires a reviewed admission", { code: "protocol", retryable: false });
         if ((admission?.admission_digest ?? null) !== claimed.admission_digest) throw new ProviderRuntimeError("portfolio remote worker admission identity drifted", { code: "protocol", retryable: false });
