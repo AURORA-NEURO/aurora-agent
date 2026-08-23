@@ -5369,6 +5369,8 @@ class AutonomousBrain:
                     next_child_id=current.next_child_id,
                     plan_refinement_digest=current.plan_refinement_digest,
                     status="approval_required",
+                    generation=current.generation + 1,
+                    previous_checkpoint_digest=current.checkpoint_digest,
                 )
                 request_digest = _json_digest(
                     {
@@ -5417,6 +5419,8 @@ class AutonomousBrain:
                     last_item_phase=item_phase,
                     last_item_status=step_result.status,
                     failure_class="result_reconciliation_required",
+                    generation=current.generation + 1,
+                    previous_checkpoint_digest=current.checkpoint_digest,
                 )
                 store.checkpoint(
                     job.job_id,
@@ -5468,6 +5472,8 @@ class AutonomousBrain:
                     next_child_id=next_child,
                     plan_refinement_digest=current.plan_refinement_digest,
                     status="synthesis_pending" if is_last_child else "children_pending",
+                    generation=current.generation + 1,
+                    previous_checkpoint_digest=current.checkpoint_digest,
                 )
                 store.checkpoint(
                     job.job_id,
@@ -5494,6 +5500,8 @@ class AutonomousBrain:
                 plan_refinement_digest=current.plan_refinement_digest,
                 synthesis_result_digest=_autonomous_result_digest(step_result.result),
                 status="completed",
+                generation=current.generation + 1,
+                previous_checkpoint_digest=current.checkpoint_digest,
             )
             completed = store.complete(
                 job.job_id,
@@ -5530,6 +5538,8 @@ class AutonomousBrain:
                             last_item_phase=item_phase,
                             last_item_status="execution_uncertain",
                             failure_class=error_class,
+                            generation=current.generation + 1,
+                            previous_checkpoint_digest=current.checkpoint_digest,
                         )
                         reconciliation_metadata = checkpoint_metadata(
                             reconciliation_checkpoint,

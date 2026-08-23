@@ -4079,6 +4079,8 @@ def test_durable_cross_domain_worker_resumes_children_and_synthesis_across_resta
             checkpoint = AutonomousCrossDomainCheckpoint.from_dict(first_record.checkpoint["cross_domain_checkpoint"])
             assert checkpoint.next_child_id == "data"
             assert checkpoint.child_result_digests == {"engineering": first.workflow.child_result_digests["engineering"]}
+            assert checkpoint.generation == 2
+            assert checkpoint.previous_checkpoint_digest
             assert task not in json.dumps(first_record.to_dict())
             assert "durable-cross-domain-secret" not in json.dumps(first_record.to_dict())
 
@@ -4098,6 +4100,11 @@ def test_durable_cross_domain_worker_resumes_children_and_synthesis_across_resta
             assert second is not None and second.status == "queued"
             assert second.workflow is not None
             caller_results[second.workflow.item_id] = second.workflow.result
+            second_record = reopened.get(job.job_id)
+            assert second_record is not None
+            second_checkpoint = AutonomousCrossDomainCheckpoint.from_dict(second_record.checkpoint["cross_domain_checkpoint"])
+            assert second_checkpoint.generation == checkpoint.generation + 1
+            assert second_checkpoint.previous_checkpoint_digest == checkpoint.checkpoint_digest
             third = restarted.run_once(job.job_id)
             assert third is not None and third.status == "succeeded"
             assert third.workflow is not None
@@ -4107,6 +4114,9 @@ def test_durable_cross_domain_worker_resumes_children_and_synthesis_across_resta
             metadata = final.checkpoint["result_metadata"]
             assert metadata["completed_child_ids"] == ["engineering", "data"]
             assert metadata["synthesis_result_digest"] == third.workflow.result.outcome_digest
+            final_checkpoint = AutonomousCrossDomainCheckpoint.from_dict(metadata["cross_domain_checkpoint"])
+            assert final_checkpoint.generation == second_checkpoint.generation + 1
+            assert final_checkpoint.previous_checkpoint_digest == second_checkpoint.checkpoint_digest
             assert task not in json.dumps(final.to_dict())
             assert "durable-cross-domain-secret" not in json.dumps(final.to_dict())
             assert reopened.verify_integrity()["ok"] is True
@@ -4810,6 +4820,18 @@ def test_cross_domain_execution_receipt_is_truthful_and_covers_every_builtin_dom
     restored_checkpoint = AutonomousCrossDomainCheckpoint.from_dict(legacy_wire)
     assert restored_checkpoint.last_item_id is None
     assert restored_checkpoint.checkpoint_digest != legacy_wire["checkpoint_digest"]
+    assert restored_checkpoint.generation == 1
+    assert restored_checkpoint.previous_checkpoint_digest is None
+
+    with pytest.raises(BrainRunError, match="generation and predecessor"):
+        AutonomousCrossDomainCheckpoint(
+            run_id="forged-lineage",
+            task_digest="a" * 64,
+            base_plan_digest="b" * 64,
+            execution_child_ids=("receipt-child",),
+            next_child_id="receipt-child",
+            generation=2,
+        )
 
 
 def test_run_auto_provider_planning_cycle_rehydrates_the_combined_selection_identity():

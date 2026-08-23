@@ -4407,11 +4407,19 @@ class AutonomousCrossDomainCheckpoint:
     last_item_phase: str | None = None
     last_item_status: str | None = None
     failure_class: str | None = None
+    generation: int = 1
+    previous_checkpoint_digest: str | None = None
 
     def __post_init__(self) -> None:
         _identifier("cross-domain checkpoint run_id", self.run_id)
         _route_digest(self.task_digest, "cross-domain checkpoint task_digest")
         _route_digest(self.base_plan_digest, "cross-domain checkpoint base_plan_digest")
+        if isinstance(self.generation, bool) or not isinstance(self.generation, int) or not 1 <= self.generation <= 9_007_199_254_740_991:
+            raise BrainRunError("cross-domain checkpoint generation is outside its bound")
+        if self.previous_checkpoint_digest is not None:
+            _route_digest(self.previous_checkpoint_digest, "cross-domain checkpoint previous_checkpoint_digest")
+        if (self.generation == 1) != (self.previous_checkpoint_digest is None):
+            raise BrainRunError("cross-domain checkpoint generation and predecessor are inconsistent")
         execution = _sequence(
             "cross-domain checkpoint execution_child_ids",
             self.execution_child_ids,
@@ -4488,6 +4496,8 @@ class AutonomousCrossDomainCheckpoint:
                 "last_item_phase": self.last_item_phase,
                 "last_item_status": self.last_item_status,
                 "failure_class": self.failure_class,
+                "generation": self.generation,
+                "previous_checkpoint_digest": self.previous_checkpoint_digest,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -4519,6 +4529,8 @@ class AutonomousCrossDomainCheckpoint:
                 "last_item_phase": self.last_item_phase,
                 "last_item_status": self.last_item_status,
                 "failure_class": self.failure_class,
+                "generation": self.generation,
+                "previous_checkpoint_digest": self.previous_checkpoint_digest,
             }
         )
 
@@ -4539,6 +4551,8 @@ class AutonomousCrossDomainCheckpoint:
             "last_item_phase": self.last_item_phase,
             "last_item_status": self.last_item_status,
             "failure_class": self.failure_class,
+            "generation": self.generation,
+            "previous_checkpoint_digest": self.previous_checkpoint_digest,
             "checkpoint_digest": self.checkpoint_digest,
             "retention": "child_ids_and_outcome_digests_only; caller_owned_results",
         }
@@ -4562,6 +4576,8 @@ class AutonomousCrossDomainCheckpoint:
             last_item_phase=value.get("last_item_phase"),
             last_item_status=value.get("last_item_status"),
             failure_class=value.get("failure_class"),
+            generation=value.get("generation", 1),
+            previous_checkpoint_digest=value.get("previous_checkpoint_digest"),
         )
         supplied_digest = value.get("checkpoint_digest")
         if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:

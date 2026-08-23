@@ -3296,6 +3296,13 @@ completion cannot share one replay identity merely because they returned a typed
 `execution` summary is likewise truthful: the presence of a synthesis object alone no longer
 implies completion.
 
+Python durable cross-domain checkpoints now carry the same generation and predecessor digest
+identity as the TypeScript continuation boundary. Every approval, child, synthesis, and uncertain
+reconciliation transition links to the prior checkpoint; generation one must have no predecessor,
+and later generations must have one. Legacy checkpoint wires remain readable through an explicit
+digest-compatibility path, but newly persisted checkpoints cannot fabricate a restart lineage by
+recomputing only the outer content digest.
+
 The TypeScript façade now exposes the same operational boundary through
 `AutonomousCrossDomainExecutionReceipt`, `autonomousCrossDomainExecutionReceipt()`, and
 `validateAutonomousCrossDomainExecutionReceipt()`. Every `runCrossDomain()` exit path carries
