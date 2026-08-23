@@ -137,6 +137,11 @@ import {
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
 } from "./llm.js";
+import {
+  buildAutonomousDomainResponseContract,
+  validateAutonomousProviderDomainResponse,
+} from "./autonomous-domain-response.js";
+import type { AutonomousDomainResponseContract } from "./autonomous-domain-response.js";
 import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson, digestJsonSync } from "./tooling.js";
 import type {
   BrainBanditArm,
@@ -456,6 +461,8 @@ export interface AutonomousPlan extends JsonObject {
   estimated_cost: number;
   requires_approval: boolean;
   execution: "not_started";
+  /** Optional digest of the structured domain response contract bound to this plan. */
+  response_contract_digest?: string;
   plan_digest: string;
   does_not_claim: string[];
 }
@@ -623,6 +630,8 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   required_capabilities: string[];
   prompt: AutonomousPromptResult;
   plan: AutonomousPlan;
+  /** Present only when the caller explicitly enables the reviewed structured domain response. */
+  response_contract?: AutonomousDomainResponseContract;
   execution: "not_started";
   credential_posture: "caller_supplied_opaque_handle_not_returned";
 }
@@ -1042,6 +1051,8 @@ export interface AutonomousRunOptions {
   requireJson?: boolean;
   /** Optional JSON Schema checked locally and, when supported, enforced by the provider. */
   responseSchema?: JsonObject;
+  /** Opt into the reviewed domain-specific JSON response contract for this run. */
+  structuredDomainResponse?: boolean;
   temperature?: number;
   tools?: readonly ProviderTool[];
   authorizeAndExecute?: (calls: ProviderToolCall[]) => ProviderToolResult[] | Promise<ProviderToolResult[]>;
@@ -1575,14 +1586,30 @@ function boundedIdentifier(name: string, value: unknown): string {
   return text;
 }
 
-function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOptions, "requireJson" | "responseSchema">): void {
+function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOptions, "requireJson" | "responseSchema" | "structuredDomainResponse">): void {
   if (options.requireJson !== undefined && typeof options.requireJson !== "boolean") throw new ArgumentError("autonomous requireJson must be boolean");
+  if (options.structuredDomainResponse !== undefined && typeof options.structuredDomainResponse !== "boolean") throw new ArgumentError("autonomous structuredDomainResponse must be boolean");
+  if (options.structuredDomainResponse === true && options.responseSchema !== undefined) throw new ArgumentError("structuredDomainResponse cannot be combined with a custom responseSchema");
   if (options.responseSchema !== undefined) {
     if (!isObject(options.responseSchema)) throw new ArgumentError("autonomous responseSchema must be a JSON object");
     if (options.requireJson !== true) throw new ArgumentError("autonomous responseSchema requires requireJson: true");
     let encoded: string | undefined;
     try { encoded = JSON.stringify(options.responseSchema); } catch { throw new ArgumentError("autonomous responseSchema must be JSON-serializable"); }
     if (!encoded || bytes(encoded) > 1_000_000) throw new ArgumentError("autonomous responseSchema exceeds its bounded size");
+  }
+}
+
+function validateAutonomousDomainResponseOrThrow(
+  response: { structured: unknown } | null,
+  contract: AutonomousDomainResponseContract | null | undefined,
+): void {
+  if (!contract) return;
+  try {
+    validateAutonomousProviderDomainResponse(response, contract);
+  } catch {
+    // Keep semantic response failures in the same redacted provider failure taxonomy as local
+    // JSON-schema failures; the response body and validation detail remain caller-transient.
+    throw new ProviderRuntimeError("provider returned an invalid reviewed domain response", { code: "invalid_response" });
   }
 }
 
@@ -1876,6 +1903,7 @@ async function buildTaskBlueprint(
     maxInputTokens?: number;
     activeToolNames?: readonly string[];
     selectedToolNames?: readonly string[];
+    structuredDomainResponse?: boolean;
   } = {},
 ): Promise<AutonomousTaskBlueprint> {
   const taskText = boundedText("autonomous task blueprint objective", task, 32_000);
@@ -1885,16 +1913,21 @@ async function buildTaskBlueprint(
   const selectedToolNames = [...new Set(options.selectedToolNames ?? activeToolNames)].sort();
   const pack = await buildDomainPack(profile);
   const evidencePlan = await buildAutonomousEvidencePlan([profile.workflow]);
+  const responseContract = options.structuredDomainResponse === true
+    ? await buildAutonomousDomainResponseContract(profile)
+    : null;
   const prompt = await assembleAutonomousPrompt(profile, taskText, {
     context: options.context,
     maxInputTokens: options.maxInputTokens,
     stageIds: profile.workflow.stages.map((stage) => stage.id),
     evidencePlan,
+    outputContract: responseContract?.prompt_contract,
   });
   const plan = await compileAutonomousPlan(profile, taskText, {
     taskDigest,
     activeToolNames,
     selectedToolNames,
+    ...(responseContract ? { responseContractDigest: responseContract.contract_digest } : {}),
   });
   const selectionContext: BrainModelSelectionContext = {
     domain: profile.domain,
@@ -1918,6 +1951,7 @@ async function buildTaskBlueprint(
     required_capabilities: profile.required_model_capabilities,
     prompt,
     plan,
+    ...(responseContract ? { response_contract: responseContract } : {}),
     execution: "not_started",
     credential_posture: "caller_supplied_opaque_handle_not_returned",
   };
@@ -2223,7 +2257,7 @@ function compareCapabilityScores(left: readonly [number, number, number, number]
 export async function compileAutonomousPlan(
   profile: AutonomousDomainProfile,
   task: string,
-  options: { taskDigest?: string; activeToolNames?: readonly string[]; selectedToolNames?: readonly string[] } = {},
+  options: { taskDigest?: string; activeToolNames?: readonly string[]; selectedToolNames?: readonly string[]; responseContractDigest?: string } = {},
 ): Promise<AutonomousPlan> {
   const taskText = boundedText("autonomous plan objective", task, 32_000);
   const taskDigest = options.taskDigest ?? await digestJson({ task: taskText });
@@ -2256,6 +2290,7 @@ export async function compileAutonomousPlan(
     estimated_cost: steps.reduce((sum, step) => sum + step.estimated_cost, 0),
     requires_approval: true,
     execution: "not_started" as const,
+    ...(options.responseContractDigest === undefined ? {} : { response_contract_digest: boundedModelDigest("autonomous plan response contract digest", options.responseContractDigest) }),
     does_not_claim: ["the plan has not executed any provider or tool", "tool registration is not authorization", "a provider response is not external-effect evidence"],
   };
   return { ...descriptor, plan_digest: await digestJson(descriptor) };
@@ -3950,7 +3985,7 @@ export class AutonomousAgent {
     return controller.execute(executionPlan, plan, requests, executeOptions);
   }
 
-  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[] } = {}): Promise<AutonomousAutoBlueprint> {
+  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean } = {}): Promise<AutonomousAutoBlueprint> {
     const taskText = boundedText("autonomous task", task, 32_000);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints });
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: null, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
@@ -3960,7 +3995,7 @@ export class AutonomousAgent {
     }
     const profile = await profileFor(route.primary_domain);
     const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], options.capability);
-    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames });
+    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
     return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
   }
 
@@ -4164,6 +4199,7 @@ export class AutonomousAgent {
       maxInputTokens: options.maxInputTokens,
       tools: options.tools?.map((tool) => tool.name),
       hints: options.hints,
+      structuredDomainResponse: options.structuredDomainResponse,
     });
     if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
       return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "route_review_required", route, blueprint: envelope, plan_refinement: null, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
@@ -4208,7 +4244,7 @@ export class AutonomousAgent {
   private async buildCrossDomainBlueprint(
     taskText: string,
     route: AutonomousRouteProposal,
-    options: { capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[] } = {},
+    options: { capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean } = {},
   ): Promise<AutonomousCrossDomainBlueprint> {
     const selectedDomains = route.selected_domains.slice(0, AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN);
     if (selectedDomains.length < 2) throw new ProviderRuntimeError("cross-domain blueprint requires at least two routed domains");
@@ -4245,6 +4281,7 @@ export class AutonomousAgent {
         maxInputTokens: options.maxInputTokens,
         activeToolNames,
         selectedToolNames: activeToolNames,
+        structuredDomainResponse: options.structuredDomainResponse,
       });
       children.push(child);
       childMetadata.push({ id, domain: profile.domain, task_digest: child.task_digest, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest });
@@ -4268,6 +4305,7 @@ export class AutonomousAgent {
       maxInputTokens: options.maxInputTokens,
       activeToolNames: synthesisTools,
       selectedToolNames: synthesisTools,
+      structuredDomainResponse: options.structuredDomainResponse,
     });
     const descriptor = {
       schema: AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
@@ -4746,7 +4784,7 @@ export class AutonomousAgent {
       if (!options.learning) return withMemory;
       return { ...withMemory, ...(await this.prepareDirectLearning(withMemory, route, { ...options, memoryEpisodeId: memoryProjection?.recorded_episode_id ?? null })) };
     };
-    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints });
+    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, structuredDomainResponse: options.structuredDomainResponse });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     const acceptedPlan = await acceptedAutonomousPlan(blueprint, options.acceptedSingleDomainPlanRefinement);
@@ -4774,14 +4812,19 @@ export class AutonomousAgent {
     }
     if (acceptedPlan) messages.push({ role: "user", content: `Accepted provider plan refinement (digest ${acceptedPlan.refinement_digest}). Follow this existing workflow order and focus only; do not add tools, effects, permissions, credentials, or claims. Priority stages: ${acceptedPlan.priority_stage_ids.join(", ")}. Focus stages: ${acceptedPlan.focus_stage_ids.join(", ")}.` });
     const requiredCapabilities = [...blueprint.required_capabilities];
-    if (options.requireJson === true && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
+    const requireJson = options.structuredDomainResponse === true || options.requireJson === true;
+    const responseSchema = options.structuredDomainResponse === true
+      ? blueprint.response_contract?.response_schema
+      : options.responseSchema;
+    if (options.structuredDomainResponse === true && !responseSchema) throw new ProviderRuntimeError("structured domain response contract was not compiled into the blueprint");
+    if (requireJson && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
     const request: ProviderRequest = {
       model: "selection-delegated",
       messages,
       maxOutputTokens: options.maxOutputTokens ?? 1_024,
       temperature: options.temperature,
-      ...(options.requireJson !== undefined ? { requireJson: options.requireJson } : {}),
-      ...(options.responseSchema !== undefined ? { responseSchema: options.responseSchema } : {}),
+      ...(requireJson ? { requireJson: true } : options.requireJson === false ? { requireJson: false } : {}),
+      ...(responseSchema !== undefined ? { responseSchema } : {}),
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     };
@@ -4799,9 +4842,11 @@ export class AutonomousAgent {
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
       const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
+      if (options.structuredDomainResponse === true && loop.loop.finalResponse) validateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract);
       return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
+    if (options.structuredDomainResponse === true) validateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract);
     return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
   }
 
@@ -4829,6 +4874,7 @@ export class AutonomousAgent {
       maxInputTokens: options.maxInputTokens,
       tools: options.tools?.map((tool) => tool.name),
       subtasks: options.subtasks,
+      structuredDomainResponse: options.structuredDomainResponse,
     });
     const acceptedPlan = await acceptedCrossDomainPlan(blueprint, options.acceptedCrossDomainPlanRefinement);
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? null;
@@ -4880,6 +4926,7 @@ export class AutonomousAgent {
         minSelectionConfidence: options.minSelectionConfidence,
         requireJson: options.requireJson,
         responseSchema: options.responseSchema,
+        structuredDomainResponse: options.structuredDomainResponse,
         temperature: options.temperature,
         tools: options.tools,
         authorizeAndExecute: options.authorizeAndExecute,
@@ -4980,6 +5027,7 @@ export class AutonomousAgent {
       minSelectionConfidence: options.minSelectionConfidence,
       requireJson: options.requireJson,
       responseSchema: options.responseSchema,
+      structuredDomainResponse: options.structuredDomainResponse,
       temperature: options.temperature,
       tools: options.tools,
       authorizeAndExecute: options.authorizeAndExecute,

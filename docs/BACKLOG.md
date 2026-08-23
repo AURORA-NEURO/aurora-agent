@@ -99,6 +99,14 @@ offline tests exercise the bridge across all twelve autonomous domains. This clo
 evidence invocation without claiming source retrieval, model discovery, source truth, or domain
 evaluation; those remain explicit caller-owned boundaries.
 
+The TypeScript autonomous agent now also has an opt-in `structuredDomainResponse` contract for every
+built-in domain. It derives a digest-bound JSON Schema and prompt contract from the reviewed workflow,
+requires ordered stage results and domain-specific answer fields, and semantically revalidates the
+transient provider response after dispatch. Coding, browser, data, science, biomedical, neuroscience,
+operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation paths are covered
+offline. This closes the generic-answer-to-domain-evaluator composition gap while preserving the
+caller/evaluator distinction: structured model output is not external-world truth.
+
 The TypeScript evidence boundary now also has a strict source-truth admission layer. A
 `createAutonomousEvidenceSourceAcquirer` route binds one provider contract to explicit source
 authority, status, observation/expiry timestamps, source/citation digests, and limitations. Its

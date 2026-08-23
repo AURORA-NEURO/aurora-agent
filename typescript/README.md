@@ -610,6 +610,27 @@ metadata. The parsed value is returned as `response.structured`, and malformed o
 provider output is classified as `invalid_response`. Cross-domain children and synthesis inherit the
 same contract, preventing a partial structured run from being mistaken for a fully structured one.
 
+For a domain-aware answer rather than a caller-authored generic schema, set
+`structuredDomainResponse: true`. The SDK compiles a digest-bound response contract from the
+reviewed workflow for each of the twelve built-in domains. The contract requires a bounded answer,
+observations, inferences, uncertainty, evidence gaps, next actions, one ordered result for every
+workflow stage, and domain-specific detail fields—for example tests and rollback for coding,
+citations and freshness for browser research, lineage and quality metrics for data, or blast radius
+and rollback for operations. The generated schema is sent through the normal provider capability
+gate and locally revalidated after invocation; stage order, domain/workflow identity, unknown
+fields, and credential-shaped material fail closed. This is a response-shaping and evaluator-input
+contract, not proof that the model's claims or an external effect are true.
+
+```typescript
+const result = await agent.run("Review this change and return a verifiable handoff.", {
+  domain: "coding",
+  structuredDomainResponse: true,
+  approveProviderCall: true,
+});
+const answer = result.response?.structured; // transient, validated domain response
+const contract = result.blueprint?.response_contract; // safe digest-bound metadata
+```
+
 The composed execution wrappers preserve these options instead of rebuilding a weaker request:
 decision-cycle attempts and replans forward the cost, latency, quality, JSON, and schema policy;
 cross-domain cycles apply it to every specialist and synthesis call; and workflow stages apply it
