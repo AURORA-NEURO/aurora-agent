@@ -53,6 +53,8 @@ export interface AutonomousWorkflowCycleState extends JsonObject {
   workflow_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
+  /** Optional for compatibility with snapshots created before workflow plan ownership. */
+  plan_refinement_digest?: string | null;
   /** Optional for compatibility with pre-planner-quality cycle snapshots. */
   planning_evaluation_digest?: string | null;
   evidence_digest: string | null;
@@ -104,6 +106,7 @@ export interface AutonomousWorkflowCycleRehydrationContext {
   attempt: number;
   phase: AutonomousWorkflowCyclePersistencePhase;
   workflow_digest: string | null;
+  plan_refinement_digest: string | null;
   outcome_digest: string | null;
   evaluation_digest: string | null;
   planning_evaluation_digest: string | null;
@@ -175,7 +178,7 @@ function digestDescriptor(value: AutonomousWorkflowCycleState): JsonObject {
 }
 
 function nullableDigestFields(value: Record<string, unknown>, label: string): void {
-  for (const field of ["workflow_digest", "outcome_digest", "evaluation_digest", "planning_evaluation_digest", "evidence_digest", "settlement_digest", "planner_settlement_digest", "replan_instruction_digest"] as const) {
+  for (const field of ["workflow_digest", "outcome_digest", "evaluation_digest", "plan_refinement_digest", "planning_evaluation_digest", "evidence_digest", "settlement_digest", "planner_settlement_digest", "replan_instruction_digest"] as const) {
     boundedDigest(`${label}.${field}`, value[field], true);
   }
 }
@@ -255,12 +258,12 @@ export async function validateAutonomousWorkflowCycleState(value: unknown): Prom
   if (!isObject(value)) throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state must be an object");
   const keys = [
     "schema", "cycle_id", "task_digest", "domain", "root_job_id", "current_job_id", "max_replans", "attempt", "phase", "execution_status",
-    "workflow_digest", "outcome_digest", "evaluation_digest", "planning_evaluation_digest", "evidence_digest", "replan_instruction_digest", "terminal_status", "attempts",
+    "workflow_digest", "outcome_digest", "evaluation_digest", "plan_refinement_digest", "planning_evaluation_digest", "evidence_digest", "replan_instruction_digest", "terminal_status", "attempts",
     "evaluations", "planner_evaluations", "learning_episode_ids", "settlement_digests", "trajectory_ids", "context_digests", "generation", "previous_state_digest",
     "state_digest", "retention", "secret_material",
   ] as const;
   assertKeys("workflow cycle state", value, keys);
-  assertRequired("workflow cycle state", value, keys.filter((key) => key !== "planning_evaluation_digest" && key !== "planner_evaluations"));
+  assertRequired("workflow cycle state", value, keys.filter((key) => key !== "plan_refinement_digest" && key !== "planning_evaluation_digest" && key !== "planner_evaluations"));
   if (value.schema !== AUTONOMOUS_WORKFLOW_CYCLE_STATE_SCHEMA || value.retention !== "metadata_only_hash_chained_no_private_payloads" || value.secret_material !== "never_returned") throw new AutonomousWorkflowCyclePersistenceError("workflow cycle state retention markers are invalid");
   const cycleId = boundedIdentifier("workflow cycle state cycle_id", value.cycle_id);
   const taskDigest = boundedDigest("workflow cycle state task_digest", value.task_digest)!;

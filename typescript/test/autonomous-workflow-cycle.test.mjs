@@ -149,6 +149,61 @@ test("workflow cycles settle accepted planner quality separately across every bu
   assert.equal(plannerHealth[0]?.quality_observations, profiles.length);
 });
 
+test("workflow cycles own provider planning, keep acceptance explicit, and execute the accepted order", async () => {
+  let plannerCalls = 0;
+  let stageCalls = 0;
+  let plannedStageIds = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      let body = {};
+      try { body = JSON.parse(String(init?.body ?? "{}")); } catch { /* bounded fixture fallback */ }
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("priority_order") && prompt.includes("review_required")) {
+        plannerCalls += 1;
+        return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: plannedStageIds, focus_stage_ids: plannedStageIds.slice(0, 2), review_required: false, confidence: 0.94, abstain: false }) }, finish_reason: "stop" }] });
+      }
+      stageCalls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(stagePayload(init)) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow-planner", "https://workflow-planner.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { modelHealthStore: new InMemoryAutonomousModelHealthStore() });
+  const candidate = { ...model(), provider: "workflow-planner", model: "workflow-planner-model" };
+  agent.registerModel(candidate);
+  const learning = new AutonomousLearningController(agent);
+  const task = "Let the provider order this coding workflow and verify it.";
+  const preview = await agent.blueprint(task, { domain: "coding" });
+  plannedStageIds = preview.blueprint.workflow.stages.map((stage) => stage.id);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const review = await runAutonomousWorkflowCycle(task, executor, {
+    domain: "coding",
+    candidates: [candidate],
+    providerPlanning: { candidates: [candidate], approveProviderCall: true },
+    evaluate: async () => ({ evidence: { stages: [] } }),
+  });
+  assert.equal(review.status, "plan_review_required");
+  assert.equal(review.plan_refinement.status, "completed");
+  assert.equal(stageCalls, 0, "a proposal must not execute before acceptance");
+
+  const accepted = await runAutonomousWorkflowCycle(task, executor, {
+    domain: "coding",
+    candidates: [candidate],
+    approveProviderCall: true,
+    providerPlanning: { candidates: [candidate], approveProviderCall: true },
+    acceptPlan: true,
+    learning: { controller: learning },
+    evaluate: async (execution) => ({ evidence: perfectEvidence(execution) }),
+    evaluatePlanning: () => ({ evaluator_id: "workflow-planner-reviewer", evaluator_version: "1", reward: 0.93, passed: true }),
+  });
+  assert.equal(accepted.status, "completed");
+  assert.equal(accepted.plan_refinement.status, "completed");
+  assert.equal(accepted.final.plan_refinement_digest, await digestJson(accepted.plan_refinement));
+  assert.equal(accepted.planner_settlements.length, 1);
+  assert.equal(plannerCalls, 2);
+  assert.equal(stageCalls, 5);
+});
+
 test("automatic evaluator replanning recovers every built-in domain without granting new authority", async () => {
   const agent = await makeAgent();
   const profiles = await builtinAutonomousDomainProfiles();
@@ -367,6 +422,45 @@ test("workflow cycle persists the evaluator boundary and rehydrates without repl
   assert.equal(replayed.final, null);
   assert.equal(replayed.status, "completed");
   assert.equal(providerCalls, 5);
+});
+
+test("provider-planned workflow cycles rehydrate the accepted plan without invoking the planner again", async () => {
+  const agent = await makeAgent();
+  const checkpointStore = new InMemoryAutonomousWorkflowCheckpointStore();
+  const cycleStore = new InMemoryAutonomousWorkflowCycleStateStore();
+  const executor = new AutonomousWorkflowExecutor(agent, checkpointStore);
+  const task = "Persist and restore this accepted provider workflow plan.";
+  const acceptedPlan = await acceptedPlanFor(agent, task, "coding");
+  let capturedExecution;
+  await assert.rejects(
+    () => runAutonomousWorkflowCycle(task, executor, {
+      domain: "coding",
+      candidates: agent.models(),
+      approveProviderCall: true,
+      acceptedPlanRefinement: acceptedPlan,
+      cycleId: "provider-plan-rehydrate-1",
+      jobId: "provider-plan-rehydrate-job",
+      stateStore: cycleStore,
+      evaluate: async (execution) => { capturedExecution = execution; throw new Error("simulated planner-boundary interruption"); },
+    }),
+    /simulated planner-boundary interruption/,
+  );
+  const pending = await cycleStore.load("provider-plan-rehydrate-1");
+  assert.match(pending.plan_refinement_digest, /^[0-9a-f]{64}$/);
+  const resumed = await runAutonomousWorkflowCycle(task, executor, {
+    domain: "coding",
+    candidates: agent.models(),
+    approveProviderCall: true,
+    cycleId: "provider-plan-rehydrate-1",
+    jobId: "provider-plan-rehydrate-job",
+    stateStore: cycleStore,
+    rehydratePlanRefinement: (context) => { assert.equal(context.plan_refinement_digest, pending.plan_refinement_digest); return acceptedPlan; },
+    rehydrateExecution: () => capturedExecution,
+    rehydrateEvaluation: () => ({ evidence: perfectEvidence(capturedExecution) }),
+    evaluate: async (execution) => ({ evidence: perfectEvidence(execution) }),
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(await digestJson(resumed.plan_refinement), pending.plan_refinement_digest);
 });
 
 test("workflow cycle rehydrates planner quality independently at a settlement boundary", async () => {

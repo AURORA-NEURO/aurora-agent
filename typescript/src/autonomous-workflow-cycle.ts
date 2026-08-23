@@ -1,5 +1,5 @@
 import { ArgumentError, isObject, ProviderRuntimeError } from "./errors.js";
-import type { AutonomousPromptChunk } from "./autonomous.js";
+import type { AutonomousPromptChunk, AutonomousProviderPlanningOptions } from "./autonomous.js";
 import {
   AutonomousWorkflowEvaluator,
   type AutonomousLearningController,
@@ -43,7 +43,10 @@ export type AutonomousWorkflowCycleStatus =
   | "stage_proposed"
   | "stage_not_attempted"
   | "failed"
-  | "route_review_required";
+  | "route_review_required"
+  | "plan_review_required"
+  | "provider_invalid"
+  | "provider_disagreement";
 
 /** Explicit caller/evaluator evidence plus optional bounded guidance for a new attempt. */
 export interface AutonomousWorkflowCycleEvaluationInput extends JsonObject {
@@ -120,6 +123,10 @@ export interface AutonomousWorkflowCycleOptions extends Omit<AutonomousWorkflowE
   maxReplans?: number;
   context?: readonly AutonomousPromptChunk[];
   learning?: AutonomousWorkflowCycleLearningOptions;
+  /** Optional provider proposal phase; no proposal is applied until acceptPlan is explicit. */
+  providerPlanning?: AutonomousProviderPlanningOptions;
+  /** Explicitly accept a completed provider proposal produced by providerPlanning. */
+  acceptPlan?: boolean;
   /** Explicit quality evaluator for an accepted provider workflow plan. */
   evaluatePlanning?: AutonomousWorkflowCyclePlanningEvaluator;
   /** Optional metadata-only restart ledger for evaluator and settlement boundaries. */
@@ -140,6 +147,8 @@ export interface AutonomousWorkflowCycleOptions extends Omit<AutonomousWorkflowE
   rehydratePlanningEvaluation?: (context: AutonomousWorkflowCycleRehydrationContext) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   /** Rehydrate transient evaluator guidance after a process restart. */
   rehydrateReplanInstruction?: (context: AutonomousWorkflowCycleRehydrationContext) => string | Promise<string>;
+  /** Rehydrate the accepted metadata-only provider plan instead of invoking the planner again. */
+  rehydratePlanRefinement?: (context: AutonomousWorkflowCycleRehydrationContext) => AutonomousPlanRefinementResult | Promise<AutonomousPlanRefinementResult>;
   evaluate: (execution: AutonomousWorkflowExecutionResult) => AutonomousWorkflowCycleEvaluationInput | Promise<AutonomousWorkflowCycleEvaluationInput>;
 }
 
@@ -147,6 +156,7 @@ export interface AutonomousWorkflowCycleResult {
   schema: typeof AUTONOMOUS_WORKFLOW_CYCLE_SCHEMA;
   status: AutonomousWorkflowCycleStatus;
   final: AutonomousWorkflowExecutionResult | null;
+  plan_refinement: AutonomousPlanRefinementResult | null;
   attempts: AutonomousWorkflowCycleAttempt[];
   evaluations: AutonomousWorkflowCycleEvaluationProjection[];
   planner_evaluations: AutonomousWorkflowCyclePlanningEvaluationProjection[];
@@ -344,11 +354,12 @@ function toPlannerProjection(input: AutonomousEvaluatorRewardInput): AutonomousW
   };
 }
 
-function result(status: AutonomousWorkflowCycleStatus, final: AutonomousWorkflowExecutionResult | null, attempts: AutonomousWorkflowCycleAttempt[], evaluations: AutonomousWorkflowCycleEvaluationProjection[], plannerEvaluations: AutonomousWorkflowCyclePlanningEvaluationProjection[], settlements: AutonomousWorkflowLearningSettlement[], plannerSettlements: AutonomousPlanningQualitySettlement[], learningEpisodeIds: string[]): AutonomousWorkflowCycleResult {
+function result(status: AutonomousWorkflowCycleStatus, final: AutonomousWorkflowExecutionResult | null, attempts: AutonomousWorkflowCycleAttempt[], evaluations: AutonomousWorkflowCycleEvaluationProjection[], plannerEvaluations: AutonomousWorkflowCyclePlanningEvaluationProjection[], settlements: AutonomousWorkflowLearningSettlement[], plannerSettlements: AutonomousPlanningQualitySettlement[], learningEpisodeIds: string[], planRefinement: AutonomousPlanRefinementResult | null = null): AutonomousWorkflowCycleResult {
   return {
     schema: AUTONOMOUS_WORKFLOW_CYCLE_SCHEMA,
     status,
     final,
+    plan_refinement: planRefinement,
     attempts,
     evaluations,
     planner_evaluations: plannerEvaluations,
@@ -382,6 +393,7 @@ function rehydrationContext(runtime: CyclePersistenceRuntime): AutonomousWorkflo
     workflow_digest: state.workflow_digest,
     outcome_digest: state.outcome_digest,
     evaluation_digest: state.evaluation_digest,
+    plan_refinement_digest: state.plan_refinement_digest ?? null,
     planning_evaluation_digest: state.planning_evaluation_digest ?? null,
     evidence_digest: state.evidence_digest,
     replan_instruction_digest: state.replan_instruction_digest,
@@ -416,6 +428,7 @@ async function openCyclePersistence(options: AutonomousWorkflowCycleOptions, tas
     workflow_digest: null,
     outcome_digest: null,
     evaluation_digest: null,
+    plan_refinement_digest: null,
     planning_evaluation_digest: null,
     evidence_digest: null,
     replan_instruction_digest: null,
@@ -511,7 +524,7 @@ function persistedEvaluations(state: AutonomousWorkflowCycleState): AutonomousWo
 }
 
 function persistedResult(state: AutonomousWorkflowCycleState): AutonomousWorkflowCycleResult {
-  const status = state.terminal_status && ["completed", "completed_without_replan", "replan_limit_reached", "approval_required", "paused", "stage_blocked", "stage_proposed", "stage_not_attempted", "failed", "route_review_required"].includes(state.terminal_status)
+  const status = state.terminal_status && ["completed", "completed_without_replan", "replan_limit_reached", "approval_required", "paused", "stage_blocked", "stage_proposed", "stage_not_attempted", "failed", "route_review_required", "plan_review_required", "provider_invalid", "provider_disagreement"].includes(state.terminal_status)
     ? state.terminal_status as AutonomousWorkflowCycleStatus
     : "failed";
   return result(status, null, persistedAttempts(state), persistedEvaluations(state), (state.planner_evaluations ?? []) as unknown as AutonomousWorkflowCyclePlanningEvaluationProjection[], [], [], [...state.learning_episode_ids]);
@@ -540,6 +553,52 @@ function replanContextFromProjection(attempt: number, runtime: CyclePersistenceR
   return { id: `autonomous-workflow-replan-${attempt}`, content, required: true, priority: 95 };
 }
 
+function providerPlanCycleStatus(plan: AutonomousPlanRefinementResult): AutonomousWorkflowCycleStatus {
+  if (plan.status === "approval_required") return "approval_required";
+  if (plan.status === "provider_invalid") return "provider_invalid";
+  if (plan.status === "provider_disagreement") return "provider_disagreement";
+  return "plan_review_required";
+}
+
+async function providerWorkflowPlan(
+  task: string,
+  executor: AutonomousWorkflowExecutor,
+  options: AutonomousWorkflowCycleOptions,
+  domain: AutonomousWorkflowCycleOptions["domain"],
+): Promise<AutonomousPlanRefinementResult | null> {
+  if (options.semanticRouting?.enabled && domain === undefined && !options.routeOverride) throw new ArgumentError("workflow provider planning with semantic routing requires an explicit routeOverride or domain");
+  const preview = await executor.agent.blueprint(task, {
+    domain,
+    routeOverride: options.routeOverride,
+    capability: options.capability,
+    context: options.context,
+    hints: options.hints,
+    maxInputTokens: options.maxInputTokens,
+    tools: options.tools?.map((tool) => tool.name),
+  });
+  if (!preview.blueprint || preview.route.cross_domain || preview.route.abstained || !preview.route.primary_domain) return null;
+  const planning = options.providerPlanning!;
+  return executor.agent.planWithProvider(preview.blueprint, {
+    ...planning,
+    candidates: planning.candidates ?? options.candidates,
+    credential: planning.credential ?? options.credential,
+    credentialFor: planning.credentialFor ?? options.credentialFor,
+    context: planning.context ?? options.context,
+    maxInputTokens: planning.maxInputTokens ?? options.maxInputTokens,
+    maxOutputTokens: planning.maxOutputTokens ?? options.maxOutputTokens,
+    maxCostPerMillionTokens: planning.maxCostPerMillionTokens ?? options.maxCostPerMillionTokens,
+    maxLatencyMs: planning.maxLatencyMs ?? options.maxLatencyMs,
+    minQuality: planning.minQuality ?? options.minQuality,
+    minSelectionConfidence: planning.minSelectionConfidence ?? options.minSelectionConfidence,
+    maxProviderFailovers: planning.maxProviderFailovers ?? options.maxProviderFailovers,
+    execution: planning.execution ?? options.execution,
+    executionAttempt: planning.executionAttempt ?? options.executionAttempt,
+    signal: planning.signal ?? options.signal,
+    observer: planning.observer ?? options.observer,
+    selectionEventCallback: planning.selectionEventCallback ?? options.selectionEventCallback,
+  });
+}
+
 /**
  * Execute a durable workflow under an explicit evaluator and optional online-learning
  * settlement. Replans create fresh, bounded workflow checkpoints so the previous attempt's
@@ -556,11 +615,34 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
   if (maxReplans > 0 && rootJobId.length > 240) throw new ArgumentError("workflow cycle jobId is too long for bounded retry identities");
   const learning = options.learning?.controller ?? executor.learning;
   if (options.evaluator !== undefined && learning && options.evaluator !== learning.evaluator) throw new ArgumentError("workflow cycle evaluator override must match the learning controller evaluator");
+  if (options.providerPlanning && options.acceptedPlanRefinement !== undefined) throw new ArgumentError("workflow cycle cannot combine providerPlanning with an acceptedPlanRefinement");
   if (options.evaluatePlanning && !learning) throw new ArgumentError("workflow cycle planner evaluation requires a learning controller");
   if (options.evaluatePlanning && learning && typeof learning.settlePlanningQuality !== "function") throw new ArgumentError("workflow cycle planner learning controller is malformed");
   const trajectoryPrefix = boundedTrajectoryPrefix(options.learning?.trajectoryIdPrefix ?? `workflow-cycle:${rootJobId}`);
   const persistence = await openCyclePersistence(options, taskText, rootJobId, maxReplans);
   if (persistence?.state.phase === "terminal") return persistedResult(persistence.state);
+  let planRefinement = options.acceptedPlanRefinement ?? null;
+  if (persistence?.state.plan_refinement_digest !== null && persistence?.state.plan_refinement_digest !== undefined) {
+    if (!planRefinement) {
+      if (!options.rehydratePlanRefinement) throw new ArgumentError("workflow cycle restart requires rehydratePlanRefinement for the accepted provider plan");
+      planRefinement = await options.rehydratePlanRefinement(rehydrationContext(persistence));
+    }
+    if (!planRefinement || await digestJson(planRefinement) !== persistence.state.plan_refinement_digest) throw new ArgumentError("rehydrated workflow plan does not match the persisted plan digest");
+  } else if (options.providerPlanning) {
+    planRefinement = await providerWorkflowPlan(taskText, executor, options, options.domain);
+    if (!planRefinement) {
+      const empty = { attempts: [], evaluations: [], planner_evaluations: [], settlements: [], planner_settlements: [], learning_episode_ids: [] };
+      return result("route_review_required", null, empty.attempts, empty.evaluations, empty.planner_evaluations, empty.settlements, empty.planner_settlements, empty.learning_episode_ids);
+    }
+    if (planRefinement.status !== "completed" || planRefinement.review_required !== false || options.acceptPlan !== true) {
+      const empty = { attempts: [], evaluations: [], planner_evaluations: [], settlements: [], planner_settlements: [], learning_episode_ids: [] };
+      return result(providerPlanCycleStatus(planRefinement), null, empty.attempts, empty.evaluations, empty.planner_evaluations, empty.settlements, empty.planner_settlements, empty.learning_episode_ids, planRefinement);
+    }
+  }
+  if (planRefinement && planRefinement.status !== "completed") throw new ArgumentError("workflow cycle accepted plan refinement is not completed");
+  if (persistence && persistence.state.plan_refinement_digest === null && planRefinement) {
+    await commitCyclePersistence(persistence, { plan_refinement_digest: await digestJson(planRefinement) });
+  }
   const attempts: AutonomousWorkflowCycleAttempt[] = persistence ? persistedAttempts(persistence.state) : [];
   const evaluations: AutonomousWorkflowCycleEvaluationProjection[] = persistence ? persistedEvaluations(persistence.state) : [];
   const plannerEvaluations: AutonomousWorkflowCyclePlanningEvaluationProjection[] = persistence ? (persistence.state.planner_evaluations ?? []) as unknown as AutonomousWorkflowCyclePlanningEvaluationProjection[] : [];
@@ -606,6 +688,10 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     rehydrateEvaluation: _rehydrateEvaluation,
     rehydratePlanningEvaluation: _rehydratePlanningEvaluation,
     rehydrateReplanInstruction: _rehydrateReplanInstruction,
+    providerPlanning: _providerPlanning,
+    acceptPlan: _acceptPlan,
+    rehydratePlanRefinement: _rehydratePlanRefinement,
+    acceptedPlanRefinement: _acceptedPlanRefinement,
     ...workflowBaseOptions
   } = options;
 
@@ -633,6 +719,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
       ...workflowBaseOptions,
       semanticRouting,
       ...(domain === undefined ? {} : { domain }),
+      ...(planRefinement ? { acceptedPlanRefinement: planRefinement } : {}),
       jobId,
       context,
     };
@@ -689,7 +776,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
       const index = attempts.findIndex((attempt) => attempt.attempt === attemptNumber);
       if (index >= 0) attempts[index] = executionAttempt;
       else attempts.push(executionAttempt);
-      return result(executionStatus(execution.status), final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds);
+      return result(executionStatus(execution.status), final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds, planRefinement);
     }
 
     const outcomeDigest = await workflowExecutionDigest(execution);
@@ -717,7 +804,7 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
     }
 
     const resumedSettlement = phaseAtEntry === "settlement_pending";
-    const plannerPlan = options.acceptedPlanRefinement ?? null;
+    const plannerPlan = planRefinement;
     const plannerEligible = Boolean(options.evaluatePlanning && plannerPlan?.status === "completed");
     let input = normalizeCycleInput(resumedSettlement
       ? await (options.rehydrateEvaluation ? options.rehydrateEvaluation(rehydrationContext(persistence!)) : Promise.reject(new ArgumentError("workflow cycle restart requires rehydrateEvaluation after settlement interruption")))
@@ -858,9 +945,9 @@ export async function runAutonomousWorkflowCycle(task: string, executor: Autonom
       }
     }
     if (!wantsReplan) {
-      return result(terminal, final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds);
+      return result(terminal, final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds, planRefinement);
     }
-    if (attemptNumber > maxReplans) return result("replan_limit_reached", final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds);
+    if (attemptNumber > maxReplans) return result("replan_limit_reached", final, attempts, evaluations, plannerEvaluations, settlements, plannerSettlements, learningEpisodeIds, planRefinement);
 
     if (domain === undefined && execution.blueprint.domain_profile.domain) domain = execution.blueprint.domain_profile.domain;
     if (!persistence) context = [...context, await replanContext(attemptNumber + 1, execution, evaluation, input)];

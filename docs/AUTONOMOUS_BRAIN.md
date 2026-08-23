@@ -8347,6 +8347,14 @@ restarts after either evaluator boundary, it must provide `rehydrateEvaluation` 
 planner packet is pending, `rehydratePlanningEvaluation`; both value-only packets are digest
 checked before settlement. Older cycle snapshots without these planner fields remain readable.
 
+The cycle can own proposal creation as well: pass `providerPlanning` with its own
+`approveProviderCall: true`, then set `acceptPlan: true` before any workflow stage may execute.
+Without acceptance, the result is `plan_review_required` and `final` remains empty. Planning
+approval and execution approval are separate gates. Once accepted, the digest-only plan identity
+is stored in the cycle cursor; a restart must provide `rehydratePlanRefinement` for that digest
+instead of silently calling the planner again. Provider-invalid and provider-disagreement results
+remain explicit terminal review states and never dispatch a stage.
+
 The Python façade exposes the same boundary as `AutonomousEvaluatorMesh`, a
 `BrainOutcomeEvaluator` adapter that can be passed directly to `evaluate_and_record`, workflow or
 mission learning, trajectory settlement, and value-only replay. Its members receive the same
