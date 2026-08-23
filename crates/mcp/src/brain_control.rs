@@ -2189,10 +2189,15 @@ mod tests {
     fn claim_next_is_priority_ordered_and_cancel_preserves_effect_boundaries() {
         let mut state = BrainControlState::default();
         let submit = |state: &mut BrainControlState, key: &str, priority: u64| {
+            let spec_digest = match key {
+                "claim-low" => "a".repeat(64),
+                "claim-high" => "b".repeat(64),
+                _ => "c".repeat(64),
+            };
             state
                 .submit_job(&json!({
                     "idempotency_key": key,
-                    "spec_digest": format!("{:0<64}", key),
+                    "spec_digest": spec_digest,
                     "domain": "engineering",
                     "capability": "code_change",
                     "risk_class": "reversible",
