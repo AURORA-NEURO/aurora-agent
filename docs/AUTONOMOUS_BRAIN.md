@@ -4606,6 +4606,51 @@ This gives browser research, scientific comparison, biomedical review, data line
 alignment, multi-agent handoff, cross-domain synthesis, and evaluation workflows a common way to
 surface agreement and dissent without silently promoting majority vote into evidence truth.
 
+### Domain evidence source catalogue
+
+`AutonomousDomainEvidenceSourceCatalogue` closes the composition gap between a domain workflow's
+evidence requirement and caller-owned source adapters. The built-in catalogue declares one
+versioned, domain-scoped source profile for coding, browser, data, science, biomedical,
+neuroscience, operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation work.
+Each profile names its source kinds, capabilities, operations, freshness/auth/pagination posture,
+normalizer contract, default quorum, and limitations. These are contracts and routing metadata;
+they do not claim that a provider exists, that a credential is valid, or that a returned source is
+true.
+
+Routes are registered with an acquirer, source/contract/adapter digests, required operation
+metadata, and an opaque provider identity. Registration validates profile scope and rejects
+credential-shaped metadata. `prepare()` selects eligible routes for one typed evidence requirement
+without dispatch, binds the profile digest into the route metadata, and returns the existing
+reconciliation plan. `execute()` revalidates the profile and every route digest before delegating
+to bounded fan-out; it still requires explicit source-dispatch approval and a caller-owned
+normalizer. A changed profile, route, source contract, or adapter identity therefore cannot be
+silently reused after review.
+
+```typescript
+const catalogue = createBuiltinAutonomousDomainEvidenceSourceCatalogue();
+const profile = catalogue.profile("builtin.science.evidence");
+catalogue.registerRoute({
+  sourceId: "literature-primary",
+  profileId: profile.profile_id,
+  provider: "caller-literature-adapter",
+  metadata: { operation: "literature_search" },
+  acquirer: callerOwnedLiteratureAcquirer,
+});
+const prepared = catalogue.prepare(evidencePlan, requirementId, {
+  profileId: profile.profile_id,
+  quorum: 1,
+});
+const result = await catalogue.execute(evidencePlan, prepared, {
+  approveSourceDispatch: true,
+  normalizer: (value) => callerOwnedClaimProjection(value),
+});
+```
+
+The catalogue projection contains profile, route, capability, coverage, and digest metadata only;
+queries, source payloads, prompts, credentials, and normalized values remain transient. This gives
+every domain the same practical source-registration lifecycle while keeping domain evaluators,
+provider clients, secret storage, and truth authority in the embedding application.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected

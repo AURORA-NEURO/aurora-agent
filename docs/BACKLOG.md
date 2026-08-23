@@ -123,6 +123,17 @@ bounded concurrency and disagreement/secret-boundary tests. This closes the sour
 provider-disagreement composition gap while keeping evaluator authority and domain semantics
 caller-owned.
 
+The TypeScript SDK now also provides `AutonomousDomainEvidenceSourceCatalogue`, which supplies a
+versioned source profile and route-registration boundary for every autonomous domain. Profiles bind
+source kinds, capabilities, operations, freshness/auth/pagination posture, normalizer identity,
+quorum defaults, and explicit limitations; registered routes bind provider, source, contract, and
+adapter digests without retaining query metadata or credentials. Requirement preparation filters
+routes by domain and capability without dispatch, while approved execution revalidates route/profile
+drift and delegates to bounded reconciliation. Offline tests cover all twelve domains, custom
+profiles, required metadata, capability scope, approval, dissent, typed failures, secret rejection,
+and restart drift. This closes the practical domain-to-source composition gap while leaving source
+clients, credential sessions, evaluators, and truth authority caller-owned.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's
