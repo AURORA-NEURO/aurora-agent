@@ -3412,7 +3412,10 @@ class JsonAutonomousBatchCheckpointPersistence:
             raise BrainRunError("autonomous batch JSON checkpoint is invalid") from error
         if not isinstance(raw, Mapping):
             raise BrainRunError("autonomous batch JSON checkpoint must be an object")
-        return _normalize_batch_checkpoint(raw)
+        normalized = _normalize_batch_checkpoint(raw)
+        if encoded != canonical_json(normalized):
+            raise BrainRunError("autonomous batch JSON checkpoint is not canonical")
+        return normalized
 
     def write(self, checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any]) -> None:
         raw = checkpoint.to_dict() if isinstance(checkpoint, AutonomousBatchCheckpoint) else checkpoint

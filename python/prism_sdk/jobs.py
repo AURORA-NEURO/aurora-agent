@@ -1721,7 +1721,10 @@ class JsonBrainJobSnapshotPersistence:
             raise BrainJobError("brain job JSON snapshot is invalid") from error
         if not isinstance(raw, Mapping):
             raise BrainJobError("brain job JSON snapshot must be an object")
-        return _normalize_job_snapshot(raw, max_bytes=self.max_bytes)
+        normalized = _normalize_job_snapshot(raw, max_bytes=self.max_bytes)
+        if encoded != _canonical(normalized):
+            raise BrainJobError("brain job JSON snapshot is not canonical")
+        return normalized
 
     def write(self, snapshot: Mapping[str, Any]) -> None:
         normalized = _normalize_job_snapshot(snapshot, max_bytes=self.max_bytes)

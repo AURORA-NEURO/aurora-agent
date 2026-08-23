@@ -891,11 +891,14 @@ class JsonBrainLearningSnapshotPersistence:
             raise BrainRunError("learning JSON snapshot is invalid") from error
         if not isinstance(raw, Mapping):
             raise BrainRunError("learning JSON snapshot must be an object")
-        return _normalize_learning_snapshot(
+        normalized = _normalize_learning_snapshot(
             raw,
             max_records=4096,
             max_bytes=self.max_bytes,
         )
+        if encoded != _canonical_learning_json(normalized):
+            raise BrainRunError("learning JSON snapshot is not canonical")
+        return normalized
 
     def write(self, snapshot: Mapping[str, Any]) -> None:
         normalized = _normalize_learning_snapshot(

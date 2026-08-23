@@ -1343,12 +1343,15 @@ class JsonBrainMemorySnapshotPersistence:
             raise BrainMemoryError("memory JSON snapshot is invalid") from error
         if not isinstance(raw, Mapping):
             raise BrainMemoryError("memory JSON snapshot must be an object")
-        return _normalize_memory_snapshot(
+        normalized = _normalize_memory_snapshot(
             raw,
             max_events=MAX_MEMORY_SNAPSHOT_EVENTS,
             max_episodes=MAX_MEMORY_SNAPSHOT_EPISODES,
             max_bytes=self.max_bytes,
         )
+        if encoded != _canonical(normalized):
+            raise BrainMemoryError("memory JSON snapshot is not canonical")
+        return normalized
 
     def write(self, snapshot: Mapping[str, Any]) -> None:
         normalized = _normalize_memory_snapshot(

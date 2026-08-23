@@ -1898,7 +1898,10 @@ class JsonProviderHealthSnapshotPersistence:
             raise ProviderError("provider health JSON snapshot is invalid") from error
         if not isinstance(raw, Mapping):
             raise ProviderError("provider health JSON snapshot must be an object")
-        return _normalize_provider_health_snapshot(raw, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)
+        normalized = _normalize_provider_health_snapshot(raw, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)
+        if encoded != _canonical_provider_health_json(normalized):
+            raise ProviderError("provider health JSON snapshot is not canonical")
+        return normalized
 
     def write(self, snapshot: Mapping[str, Any]) -> None:
         normalized = _normalize_provider_health_snapshot(snapshot, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)

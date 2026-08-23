@@ -8108,14 +8108,14 @@ overlapping operations, carries the last verified `snapshot_digest`, and raises 
 compare-and-swap conflict when a route/plan/evaluation worker is stale. The plain `write` adapter
 remains supported for applications that already enforce single-writer ordering outside the SDK.
 
-Every TypeScript JSON snapshot adapter now applies the same canonical-text rule at both sides of
-the boundary: writers emit `canonicalJson(...)`, readers reject valid-but-noncanonical JSON before
-schema-specific validation, and digest-bound validators compare semantic projections with canonical
-serialization rather than insertion-order-sensitive `JSON.stringify(...)`. This covers learning,
-calibration, feedback, memory, goals, health, evidence, portfolio admission, execution traces, and
-remote worker metadata. Live provider and HTTP response parsers remain intentionally permissive
-where the payload is not a caller-owned durable snapshot; those responses still pass through their
-own typed contract and secret-redaction gates before any metadata can be retained.
+Every JSON snapshot adapter in both SDKs now applies the same canonical-text rule at both sides of
+the boundary: writers emit sorted, compact canonical JSON, readers reject valid-but-noncanonical
+JSON before schema-specific validation, and digest-bound validators compare semantic projections
+with canonical serialization rather than insertion-order-sensitive stringification. This covers
+learning, evaluator, feedback, memory, goals, health, evidence, portfolio admission, execution
+traces, and remote worker metadata. Live provider and HTTP response parsers remain intentionally
+permissive where the payload is not a caller-owned durable snapshot; those responses still pass
+through their own typed contract and secret-redaction gates before any metadata can be retained.
 
 `GET` returns `200` with a JSON object or `404` for an absent snapshot. Unconditional `PUT`
 accepts a successful 2xx response. Conditional writes send `If-Match: "<snapshot_digest>"`, or

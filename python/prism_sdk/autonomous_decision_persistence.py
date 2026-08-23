@@ -372,7 +372,10 @@ class JsonAutonomousDecisionCycleSnapshotPersistence:
             raise ArgumentError("decision-cycle JSON is invalid") from error
         if not isinstance(raw, Mapping):
             raise ArgumentError("decision-cycle JSON must be an object")
-        return AutonomousDecisionCycleSnapshot.from_mapping(raw)
+        normalized = AutonomousDecisionCycleSnapshot.from_mapping(raw)
+        if encoded != canonical_json(normalized.to_dict()):
+            raise ArgumentError("decision-cycle JSON is not canonical")
+        return normalized
 
     def write(self, snapshot: AutonomousDecisionCycleSnapshot | Mapping[str, Any]) -> None:
         normalized = snapshot if isinstance(snapshot, AutonomousDecisionCycleSnapshot) else AutonomousDecisionCycleSnapshot.from_mapping(snapshot)

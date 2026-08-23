@@ -16,6 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .authoring import canonical_json
 from .errors import ArgumentError, TransportError
 
 
@@ -69,6 +70,8 @@ def _validate_snapshot_text(value: str, maximum: int) -> str:
         raise ArgumentError("HTTP snapshot store snapshot must be valid JSON") from error
     if not isinstance(parsed, dict):
         raise ArgumentError("HTTP snapshot store snapshot must be a JSON object")
+    if canonical_json(parsed) != value:
+        raise ArgumentError("HTTP snapshot store snapshot must use canonical JSON")
     return value
 
 

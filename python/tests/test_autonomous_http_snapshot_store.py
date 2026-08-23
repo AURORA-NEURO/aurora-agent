@@ -176,6 +176,17 @@ def test_http_snapshot_store_separates_cas_conflicts_from_transport_failures_and
         unsafe.read()
 
 
+def test_http_snapshot_store_rejects_valid_but_noncanonical_json() -> None:
+    store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "state",
+        allowed_hosts=("state.test",),
+        opener=lambda _request, _timeout: _Response(status=204),
+    )
+    with pytest.raises(ArgumentError, match="canonical"):
+        store.write(json.dumps({"z": 1, "a": 2}))
+
+
 def test_http_snapshot_store_plugs_into_decision_cycle_restart_and_cas() -> None:
     remote: str | None = None
 

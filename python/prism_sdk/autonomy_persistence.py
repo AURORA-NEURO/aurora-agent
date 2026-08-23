@@ -799,7 +799,10 @@ class JsonAutonomousExecutionSnapshotPersistence:
             raise ArgumentError("execution JSON snapshot is invalid") from error
         if not isinstance(raw, Mapping):
             raise ArgumentError("execution JSON snapshot must be an object")
-        return _normalize_execution_snapshot(raw)
+        normalized = _normalize_execution_snapshot(raw)
+        if encoded != canonical_bytes(normalized).decode("utf-8"):
+            raise ArgumentError("execution JSON snapshot is not canonical")
+        return normalized
 
     def write(self, snapshot: Mapping[str, Any]) -> None:
         normalized = _normalize_execution_snapshot(snapshot)
