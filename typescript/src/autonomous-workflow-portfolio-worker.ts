@@ -26,6 +26,7 @@ export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ITEMS = 64;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS = 300_000;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS = 8;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SNAPSHOT_BYTES = 512_000;
+export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_REMOTE_WORKER_HEARTBEAT_MS = 300_000;
 
 export type AutonomousWorkflowPortfolioRemoteJobStatus =
   | "queued"
@@ -33,6 +34,7 @@ export type AutonomousWorkflowPortfolioRemoteJobStatus =
   | "completed"
   | "partial"
   | "blocked"
+  | "approval_required"
   | "failed"
   | "reconciliation_required"
   | "cancelled";
@@ -103,7 +105,7 @@ export interface AutonomousWorkflowPortfolioRemoteJobQueueTransactionalTextStore
 
 export interface AutonomousWorkflowPortfolioRemoteWorkerRow extends JsonObject {
   job_id: string;
-  outcome: "completed" | "partial" | "blocked" | "retry_scheduled" | "failed" | "reconciliation_required" | "leased_elsewhere";
+  outcome: "completed" | "partial" | "blocked" | "approval_required" | "retry_scheduled" | "failed" | "reconciliation_required" | "leased_elsewhere";
   attempts: number;
   result_digest: string | null;
   trace_digest: string | null;
@@ -118,6 +120,7 @@ export interface AutonomousWorkflowPortfolioRemoteWorkerRun extends JsonObject {
   completed: number;
   partial: number;
   blocked: number;
+  approval_required: number;
   retried: number;
   failed: number;
   reconciled: number;
@@ -129,7 +132,7 @@ export interface AutonomousWorkflowPortfolioRemoteWorkerRun extends JsonObject {
 
 const JOB_RETENTION = "metadata_only_plan_admission_request_and_result_digests;tasks_prompts_credentials_outputs_never_persisted" as const;
 const JOB_SECRET_MATERIAL = "never_returned" as const;
-const JOB_STATUSES: readonly AutonomousWorkflowPortfolioRemoteJobStatus[] = ["queued", "leased", "completed", "partial", "blocked", "failed", "reconciliation_required", "cancelled"];
+const JOB_STATUSES: readonly AutonomousWorkflowPortfolioRemoteJobStatus[] = ["queued", "leased", "completed", "partial", "blocked", "approval_required", "failed", "reconciliation_required", "cancelled"];
 const FAILURE_CLASSES: readonly AutonomousWorkflowPortfolioRemoteJobFailureClass[] = ["resolver_missing", "plan_mismatch", "admission_mismatch", "request_mismatch", "checkpoint_mismatch", "lease_expired", "provider_execution_failed", "approval_required", "transport_error", "rehydration_missing", "executor_error", "unknown"];
 
 function clone<T>(value: T): T {
@@ -215,6 +218,8 @@ function validateJob(raw: unknown): AutonomousWorkflowPortfolioRemoteJob {
   if (!JOB_STATUSES.includes(normalized.status)) throw new ArgumentError("portfolio remote job status is invalid");
   if (normalized.require_admission && normalized.admission_digest === null) throw new ArgumentError("required portfolio remote job admission is missing");
   if (normalized.failure_class !== null && !FAILURE_CLASSES.includes(normalized.failure_class)) throw new ArgumentError("portfolio remote job failure_class is invalid");
+  if (normalized.status === "approval_required" && normalized.failure_class !== "approval_required") throw new ArgumentError("approval-required portfolio remote job must retain its approval failure class");
+  if (normalized.status !== "approval_required" && normalized.failure_class === "approval_required") throw new ArgumentError("approval failure class is only valid for approval-required jobs");
   if (normalized.status === "leased" && (normalized.lease_owner === null || normalized.lease_until === null)) throw new ArgumentError("leased portfolio remote job requires a lease");
   if (normalized.status !== "leased" && (normalized.lease_owner !== null || normalized.lease_until !== null)) throw new ArgumentError("non-leased portfolio remote job cannot retain a lease");
   if (normalized.retention !== JOB_RETENTION || normalized.secret_material !== JOB_SECRET_MATERIAL) throw new ArgumentError("portfolio remote job retention contract is invalid");
@@ -320,7 +325,7 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const lease = boundedInteger("portfolio remote job leaseMs", leaseMs, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS);
     const time = timestamp("portfolio remote job claim now", now);
     const current = this.jobs.get(id);
-    if (!current || ["completed", "partial", "blocked", "failed", "cancelled", "reconciliation_required"].includes(current.status)) return null;
+    if (!current || ["completed", "partial", "blocked", "approval_required", "failed", "cancelled", "reconciliation_required"].includes(current.status)) return null;
     if (current.status === "leased") {
       if (current.lease_until !== null && current.lease_until > time) return null;
       this.jobs.set(id, refresh(current, { status: "reconciliation_required", lease_owner: null, lease_until: null, failure_class: "lease_expired", failure_code: "lease_expired" }, time));
@@ -356,7 +361,7 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     return clone(next);
   }
 
-  complete(jobId: string, workerId: string, input: { status: "completed" | "partial" | "blocked"; resultDigest: string; traceDigest?: string | null }, now = Date.now()): AutonomousWorkflowPortfolioRemoteJob {
+  complete(jobId: string, workerId: string, input: { status: "completed" | "partial" | "blocked" | "approval_required"; resultDigest: string; traceDigest?: string | null }, now = Date.now()): AutonomousWorkflowPortfolioRemoteJob {
     const id = identifier("portfolio remote job jobId", jobId);
     const worker = identifier("portfolio remote job workerId", workerId);
     const time = timestamp("portfolio remote job completion now", now);
@@ -364,7 +369,15 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const traceDigest = optionalDigest("portfolio remote job traceDigest", input.traceDigest);
     const current = this.jobs.get(id);
     if (!current || current.status !== "leased" || current.lease_owner !== worker || current.lease_until === null || current.lease_until <= time) throw new ArgumentError("portfolio remote job completion is fenced by its lease");
-    const next = refresh(current, { status: input.status, result_digest: resultDigest, trace_digest: traceDigest, lease_owner: null, lease_until: null, failure_class: null, failure_code: null }, time);
+    const next = refresh(current, {
+      status: input.status,
+      result_digest: resultDigest,
+      trace_digest: traceDigest,
+      lease_owner: null,
+      lease_until: null,
+      failure_class: input.status === "approval_required" ? "approval_required" : null,
+      failure_code: input.status === "approval_required" ? "approval_required" : null,
+    }, time);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -409,7 +422,7 @@ export class InMemoryAutonomousWorkflowPortfolioRemoteJobQueue {
     const id = identifier("portfolio remote job jobId", jobId);
     const time = timestamp("portfolio remote job requeue now", now);
     const current = this.jobs.get(id);
-    if (!current || current.status !== "reconciliation_required" || current.attempts >= current.max_attempts) throw new ArgumentError("portfolio remote job is not eligible for requeue");
+    if (!current || !["reconciliation_required", "approval_required"].includes(current.status) || current.attempts >= current.max_attempts) throw new ArgumentError("portfolio remote job is not eligible for requeue");
     const next = refresh(current, { status: "queued", available_at: time, failure_class: null, failure_code: null }, time);
     this.jobs.set(id, next);
     return clone(next);
@@ -483,9 +496,10 @@ export interface AutonomousWorkflowPortfolioRemoteJobResolution {
 export type AutonomousWorkflowPortfolioRemoteJobQueueHandle = InMemoryAutonomousWorkflowPortfolioRemoteJobQueue | AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator;
 export type AutonomousWorkflowPortfolioRemoteJobResolver = (job: AutonomousWorkflowPortfolioRemoteJob, context: { workerId: string; renew: (leaseMs?: number, now?: number) => Promise<AutonomousWorkflowPortfolioRemoteJob> | AutonomousWorkflowPortfolioRemoteJob }) => Promise<AutonomousWorkflowPortfolioRemoteJobResolution> | AutonomousWorkflowPortfolioRemoteJobResolution;
 
-function executionStatus(status: AutonomousWorkflowPortfolioExecutionStatus): "completed" | "partial" | "blocked" {
+function executionStatus(status: AutonomousWorkflowPortfolioExecutionStatus): "completed" | "partial" | "blocked" | "approval_required" {
   if (status === "completed") return "completed";
   if (status === "blocked") return "blocked";
+  if (status === "approval_required") return "approval_required";
   return "partial";
 }
 
@@ -513,10 +527,15 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
     identifier("portfolio remote worker workerId", workerId);
   }
 
-  async run(options: { limit?: number; leaseMs?: number; now?: number; signal?: { readonly aborted: boolean } } = {}): Promise<AutonomousWorkflowPortfolioRemoteWorkerRun> {
+  async run(options: { limit?: number; leaseMs?: number; heartbeatMs?: number; now?: number; clock?: () => number; signal?: { readonly aborted: boolean } } = {}): Promise<AutonomousWorkflowPortfolioRemoteWorkerRun> {
     const limit = boundedInteger("portfolio remote worker limit", options.limit, 1, this.queue.maxJobs, 1);
-    const leaseMs = boundedInteger("portfolio remote worker leaseMs", options.leaseMs, 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS, 30_000);
-    const time = timestamp("portfolio remote worker now", options.now ?? Date.now());
+    const leaseMs = boundedInteger("portfolio remote worker leaseMs", options.leaseMs, 100, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS, 30_000);
+    const heartbeatMs = boundedInteger("portfolio remote worker heartbeatMs", options.heartbeatMs ?? Math.min(30_000, Math.floor(leaseMs / 3)), 1, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_REMOTE_WORKER_HEARTBEAT_MS);
+    if (heartbeatMs >= leaseMs) throw new ArgumentError("portfolio remote worker heartbeatMs must be less than leaseMs");
+    if (options.clock !== undefined && typeof options.clock !== "function") throw new ArgumentError("portfolio remote worker clock must be callable");
+    const requestedNow = options.now;
+    const time = timestamp("portfolio remote worker now", requestedNow ?? (options.clock ?? (() => Date.now()))());
+    const clock = options.clock ?? (requestedNow === undefined ? (() => Date.now()) : (() => time));
     const rows: AutonomousWorkflowPortfolioRemoteWorkerRow[] = [];
     for (const expired of await this.queue.reclaimExpired(time, limit)) rows.push({ job_id: expired.job_id, outcome: "reconciliation_required", attempts: expired.attempts, result_digest: expired.result_digest, trace_digest: expired.trace_digest, failure_class: expired.failure_class, lease_retained: false });
     const remaining = Math.max(0, limit - rows.length);
@@ -529,8 +548,25 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
         rows.push({ job_id: candidate.job_id, outcome: current?.status === "reconciliation_required" ? "reconciliation_required" : "leased_elsewhere", attempts: current?.attempts ?? candidate.attempts, result_digest: current?.result_digest ?? null, trace_digest: current?.trace_digest ?? null, failure_class: current?.failure_class ?? null, lease_retained: false });
         continue;
       }
+      let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+      let heartbeatRunning = false;
+      let heartbeatError: unknown = null;
+      const heartbeat = async (): Promise<void> => {
+        if (heartbeatRunning || heartbeatError !== null) return;
+        heartbeatRunning = true;
+        try {
+          await this.queue.renew(claimed.job_id, this.workerId, leaseMs, clock());
+        } catch (error) {
+          heartbeatError = error;
+        } finally {
+          heartbeatRunning = false;
+        }
+      };
+      heartbeatTimer = setInterval(() => { void heartbeat(); }, heartbeatMs);
+      const unref = (heartbeatTimer as unknown as { unref?: () => void }).unref;
+      if (typeof unref === "function") unref.call(heartbeatTimer);
       try {
-        const resolved = await this.resolver(claimed, { workerId: this.workerId, renew: (renewLeaseMs = leaseMs, renewAt = options.now === undefined ? Date.now() : time) => this.queue.renew(claimed.job_id, this.workerId, renewLeaseMs, renewAt) });
+        const resolved = await this.resolver(claimed, { workerId: this.workerId, renew: (renewLeaseMs = leaseMs, renewAt = clock()) => this.queue.renew(claimed.job_id, this.workerId, renewLeaseMs, renewAt) });
         if (!resolved || !Array.isArray(resolved.requests) || !resolved.plan) throw new ProviderRuntimeError("portfolio remote worker resolver returned no private execution binding", { code: "configuration", retryable: false });
         const plan = await validateAutonomousWorkflowPortfolioPlan(resolved.plan);
         if (plan.portfolio_digest !== claimed.plan_digest || JSON.stringify(plan.items.map((item) => item.item_id)) !== JSON.stringify(claimed.item_ids) || JSON.stringify(plan.items.map((item) => item.request_digest)) !== JSON.stringify(claimed.request_digests)) throw new ProviderRuntimeError("portfolio remote worker plan or request identity drifted", { code: "protocol", retryable: false });
@@ -543,22 +579,26 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
           ...(admission === null ? {} : { admission }),
           jobId: claimed.job_id,
           requireAdmission: claimed.require_admission,
-          checkpointSink: async (checkpoint: { checkpoint_digest: string }) => { await this.queue.checkpoint(claimed.job_id, this.workerId, checkpoint.checkpoint_digest, options.now === undefined ? Date.now() : time); },
+          checkpointSink: async (checkpoint: { checkpoint_digest: string }) => { await this.queue.checkpoint(claimed.job_id, this.workerId, checkpoint.checkpoint_digest, clock()); },
         } as AutonomousWorkflowPortfolioResumableExecutionOptions;
         if (claimed.trace_id !== null && executionOptions.traceId !== claimed.trace_id) throw new ProviderRuntimeError("portfolio remote worker trace identity drifted", { code: "protocol", retryable: false });
+        if (heartbeatError !== null) throw new ProviderRuntimeError("portfolio remote worker lease heartbeat failed before dispatch", { code: "transport", retryable: true });
         const execution = await this.agent.executeWorkflowPortfolioResumable(resolved.requests, executionOptions);
         if (!(execution instanceof AutonomousWorkflowPortfolioExecutionResult)) throw new ProviderRuntimeError("portfolio remote worker execution result is malformed", { code: "protocol", retryable: false });
-        const completed = await this.queue.complete(claimed.job_id, this.workerId, { status: executionStatus(execution.status), resultDigest: execution.executionDigest, traceDigest: execution.traceDigest }, options.now === undefined ? Date.now() : time);
-        rows.push({ job_id: completed.job_id, outcome: completed.status as "completed" | "partial" | "blocked", attempts: completed.attempts, result_digest: completed.result_digest, trace_digest: completed.trace_digest, failure_class: completed.failure_class, lease_retained: false });
+        if (heartbeatError !== null) throw new ProviderRuntimeError("portfolio remote worker lease heartbeat failed after dispatch", { code: "transport", retryable: true });
+        const completed = await this.queue.complete(claimed.job_id, this.workerId, { status: executionStatus(execution.status), resultDigest: execution.executionDigest, traceDigest: execution.traceDigest }, clock());
+        rows.push({ job_id: completed.job_id, outcome: completed.status as "completed" | "partial" | "blocked" | "approval_required", attempts: completed.attempts, result_digest: completed.result_digest, trace_digest: completed.trace_digest, failure_class: completed.failure_class, lease_retained: false });
       } catch (error) {
         const failure = errorForWorker(error);
         try {
-          const failed = await this.queue.fail(claimed.job_id, this.workerId, failure.failureClass, failure.retryable, failure.failureCode, options.now === undefined ? Date.now() : time);
+          const failed = await this.queue.fail(claimed.job_id, this.workerId, failure.failureClass, failure.retryable, failure.failureCode, clock());
           rows.push({ job_id: failed.job_id, outcome: failed.status === "queued" ? "retry_scheduled" : "failed", attempts: failed.attempts, result_digest: failed.result_digest, trace_digest: failed.trace_digest, failure_class: failed.failure_class ?? failed.failure_class, lease_retained: false });
         } catch {
           const current = await this.queue.get(claimed.job_id);
           rows.push({ job_id: claimed.job_id, outcome: current?.status === "reconciliation_required" ? "reconciliation_required" : "leased_elsewhere", attempts: current?.attempts ?? claimed.attempts, result_digest: current?.result_digest ?? null, trace_digest: current?.trace_digest ?? null, failure_class: current?.failure_class ?? failure.failureClass, lease_retained: false });
         }
+      } finally {
+        if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
       }
     }
     return {
@@ -568,6 +608,7 @@ export class AutonomousWorkflowPortfolioRemoteWorker {
       completed: rows.filter((row) => row.outcome === "completed").length,
       partial: rows.filter((row) => row.outcome === "partial").length,
       blocked: rows.filter((row) => row.outcome === "blocked").length,
+      approval_required: rows.filter((row) => row.outcome === "approval_required").length,
       retried: rows.filter((row) => row.outcome === "retry_scheduled").length,
       failed: rows.filter((row) => row.outcome === "failed").length,
       reconciled: rows.filter((row) => row.outcome === "reconciliation_required").length,
@@ -647,12 +688,24 @@ export class AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator {
     return this.transact((queue) => queue.checkpoint(jobId, workerId, checkpointDigest, now));
   }
 
-  async complete(jobId: string, workerId: string, input: { status: "completed" | "partial" | "blocked"; resultDigest: string; traceDigest?: string | null }, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
+  async complete(jobId: string, workerId: string, input: { status: "completed" | "partial" | "blocked" | "approval_required"; resultDigest: string; traceDigest?: string | null }, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
     return this.transact((queue) => queue.complete(jobId, workerId, input, now));
   }
 
   async fail(jobId: string, workerId: string, failureClass: AutonomousWorkflowPortfolioRemoteJobFailureClass, retryable: boolean, failureCode: string = failureClass, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
     return this.transact((queue) => queue.fail(jobId, workerId, failureClass, retryable, failureCode, now));
+  }
+
+  async reconcile(jobId: string, workerId: string, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
+    return this.transact((queue) => queue.reconcile(jobId, workerId, now));
+  }
+
+  async requeue(jobId: string, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
+    return this.transact((queue) => queue.requeue(jobId, now));
+  }
+
+  async cancel(jobId: string, now = Date.now()): Promise<AutonomousWorkflowPortfolioRemoteJob> {
+    return this.transact((queue) => queue.cancel(jobId, now));
   }
 
   async snapshot(): Promise<AutonomousWorkflowPortfolioRemoteJobQueueSnapshot> {

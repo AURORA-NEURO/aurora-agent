@@ -50,6 +50,12 @@ validated before settled-item rehydration and held items cannot dispatch. This c
 restart/remote-handoff integrity seam while leaving storage encryption, transport, leases, and
 approval UX to the embedding deployment.
 
+Remote portfolio provider execution now has explicit `approval_required` job state and a caller
+controlled requeue transition. Approval pauses cannot be reported as partial completion, and the
+worker renews its lease while private resolution/provider execution is in flight; heartbeat loss
+falls into the existing typed transport/reconciliation path. Production deployments still own
+the actual queue transport, distributed lease clock, approval authorization, and secret manager.
+
 The TypeScript runtime now includes a keyless provider protocol conformance gate. It runs all seven
 built-in provider presets through the actual request, credential, response, model-discovery, and SSE
 stream boundaries using an intercepted fetch fixture, and refuses missing credentials before any

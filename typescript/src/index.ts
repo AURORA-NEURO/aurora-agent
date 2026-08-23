@@ -397,6 +397,7 @@ export {
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SNAPSHOT_BYTES,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_REMOTE_WORKER_HEARTBEAT_MS,
   validateAutonomousWorkflowPortfolioRemoteJobQueueSnapshot,
   InMemoryAutonomousWorkflowPortfolioRemoteJobQueue,
   admitAutonomousWorkflowPortfolioRemoteJob,
@@ -418,6 +419,7 @@ export type {
   AutonomousWorkflowPortfolioRemoteWorkerRun,
   AutonomousWorkflowPortfolioRemoteJobResolution,
   AutonomousWorkflowPortfolioRemoteJobResolver,
+  AutonomousWorkflowPortfolioRemoteJobQueueHandle,
 } from "./autonomous-workflow-portfolio-worker.js";
 export {
   AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA,

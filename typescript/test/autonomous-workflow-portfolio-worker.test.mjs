@@ -41,8 +41,8 @@ function requests() {
 
 function agentFor(onRequest = () => {}) {
   const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
-  runtime.registerInMemoryProvider("offline", (request) => {
-    onRequest(request);
+  runtime.registerInMemoryProvider("offline", async (request) => {
+    await onRequest(request);
     return { output_text: `offline result for ${request.model}` };
   });
   const agent = new AutonomousAgent(runtime);
@@ -90,6 +90,64 @@ test("remote portfolio worker executes every domain from private resolver state 
   assert.equal(queue.get(job.job_id).result_digest.length, 64);
   assert.equal(queue.get(job.job_id).trace_digest, traceEvents.at(-1).event_digest);
   assert.doesNotMatch(JSON.stringify(run), /private remote task|private remote hint|offline result/);
+});
+
+test("remote portfolio worker preserves approval-required pauses and resumes only after explicit requeue", async () => {
+  let providerCalls = 0;
+  const requestsForJob = requests();
+  const agent = agentFor(() => { providerCalls += 1; });
+  const plan = await agent.planWorkflowPortfolio(requestsForJob, { requireAllDomains: true });
+  const admission = await agent.admitWorkflowPortfolio(requestsForJob, { plan });
+  const queue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const job = await admitAutonomousWorkflowPortfolioRemoteJob(queue, { jobId: "approval-pause-job", plan, admission, now: 1_500 });
+  let approved = false;
+  const worker = new AutonomousWorkflowPortfolioRemoteWorker(agent, queue, () => ({
+    requests: requestsForJob,
+    plan,
+    admission,
+    executionOptions: { approveProviderCall: approved },
+  }), "approval-pause-worker");
+
+  const paused = await worker.run({ now: 1_501 });
+  assert.equal(paused.approval_required, 1);
+  assert.equal(paused.completed, 0);
+  assert.equal(providerCalls, 0);
+  assert.equal(queue.get(job.job_id).status, "approval_required");
+  assert.equal(queue.get(job.job_id).failure_class, "approval_required");
+  assert.ok(queue.get(job.job_id).result_digest);
+
+  approved = true;
+  const requeued = queue.requeue(job.job_id, 1_502);
+  assert.equal(requeued.status, "queued");
+  const resumed = await worker.run({ now: 1_503 });
+  assert.equal(resumed.completed, 1);
+  assert.equal(providerCalls, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(queue.get(job.job_id).status, "completed");
+});
+
+test("remote portfolio worker renews long-running leases and rejects an unsafe heartbeat", async () => {
+  let providerCalls = 0;
+  const agent = agentFor(async () => {
+    providerCalls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 35));
+  });
+  const privateRequests = [{ id: "heartbeat-coding", task: "private heartbeat task", domain: "coding" }];
+  const plan = await agent.planWorkflowPortfolio(privateRequests);
+  const admission = await agent.admitWorkflowPortfolio(privateRequests, { plan });
+  const queue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const job = await admitAutonomousWorkflowPortfolioRemoteJob(queue, { jobId: "heartbeat-job", plan, admission });
+  const worker = new AutonomousWorkflowPortfolioRemoteWorker(agent, queue, () => ({
+    requests: privateRequests,
+    plan,
+    admission,
+    executionOptions: { approveProviderCall: true },
+  }), "heartbeat-worker");
+
+  await assert.rejects(() => worker.run({ leaseMs: 100, heartbeatMs: 100 }), /heartbeatMs must be less than leaseMs/);
+  const run = await worker.run({ leaseMs: 100, heartbeatMs: 20 });
+  assert.equal(run.completed, 1);
+  assert.equal(providerCalls, 1);
+  assert.equal(queue.get(job.job_id).status, "completed");
 });
 
 test("remote portfolio worker refuses plan/admission drift before provider dispatch and fences leases", async () => {

@@ -1969,9 +1969,13 @@ plan digest, admission digest, item/request digests, trace identity, and resumab
 `InMemoryAutonomousWorkflowPortfolioRemoteJobQueue`. `AutonomousWorkflowPortfolioRemoteWorker`
 claims with a lease, asks a caller-owned resolver for the private requests and reviewed artifacts,
 revalidates every digest before provider dispatch, persists checkpoint/result/trace digests, and
-settles retry, failure, expiry, and reconciliation states explicitly. Its JSON, transactional
-CAS, and browser-storage persistence adapters are metadata-only. Resolver state is never written
-to the queue, and queue restore or trace restore cannot itself authorize a provider call.
+settles retry, failure, expiry, reconciliation, and `approval_required` states explicitly. An
+approval pause is a durable terminal handoff—not a partial success—and must be explicitly requeued
+after the caller supplies provider approval. The worker renews its lease heartbeat during resolver
+and provider execution, with heartbeat failure treated as a transport/reconciliation boundary.
+Its JSON, transactional CAS, and browser-storage persistence adapters are metadata-only. Resolver
+state is never written to the queue, and queue restore or trace restore cannot itself authorize a
+provider call.
 
 Portfolio execution can also close the evaluator-to-bandit loop for every item, but reward is
 never inferred from a provider response or from `status: "completed"`. The caller supplies the
