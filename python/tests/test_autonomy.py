@@ -4199,6 +4199,43 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
         server.server_close()
 
 
+def test_run_auto_provider_planning_cycle_rehydrates_the_combined_selection_identity():
+    runtime, store, server, thread = _structured_runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    cycle_store = InMemoryAutonomousDecisionCycleStateStore()
+    try:
+        handle = store.register("openai", "planning-cycle-secret")
+        result = agent.run_auto(
+            task="fix the Rust tests in the repository",
+            credentials={"openai": handle},
+            planning_mode="provider",
+            workflow_max_stage_calls=2,
+            approve_provider_call=True,
+            decision_cycle_id="planning-cycle-1",
+            decision_cycle_store=cycle_store,
+        )
+        persisted = cycle_store.load("planning-cycle-1")
+        assert result.status == "completed"
+        assert result.planning is not None
+        assert persisted is not None and persisted.selection_digest is not None
+
+        resumed = agent.run_auto(
+            task="fix the Rust tests in the repository",
+            credentials={"openai": handle},
+            planning_mode="provider",
+            workflow_max_stage_calls=2,
+            decision_cycle_id="planning-cycle-1",
+            decision_cycle_store=cycle_store,
+            resume_decision_cycle=True,
+            decision_cycle_rehydrate_result=lambda _context: result,
+        )
+        assert resumed.to_dict() == result.to_dict()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_run_auto_persists_selection_identity_for_every_builtin_domain():
     agent = AutonomousAgent(_Workspace(), LLMRuntime(), model_catalogue=ModelCatalogue(_model()))
     selection_digest = "a" * 64

@@ -15876,7 +15876,7 @@ class AutonomousAgent:
                     if content_digest(rehydrated.to_dict()) != decision_cycle.state.outcome_digest:
                         raise BrainRunError("rehydrated decision result does not match the persisted outcome digest")
                 if decision_cycle.state.selection_digest is not None:
-                    observed_selection_digest = _decision_cycle_selection_digest(rehydrated.result)
+                    observed_selection_digest = _decision_cycle_selection_digest(rehydrated)
                     if observed_selection_digest != decision_cycle.state.selection_digest:
                         raise BrainRunError(
                             "rehydrated decision result does not match the persisted selection digest"
