@@ -54,6 +54,11 @@ import type {
   AutonomousWorkflowPortfolioAdmissionOptions,
 } from "./autonomous-workflow-portfolio-admission.js";
 import type { AutonomousWorkflowPortfolioItemRequest } from "./autonomous-workflow-portfolio.js";
+import {
+  auditAutonomousDomainContracts,
+  type AutonomousDomainAuditOptions,
+  type AutonomousDomainAuditReport,
+} from "./autonomous-domain-audit.js";
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -889,6 +894,15 @@ export class AutonomousBrainFacade {
   /** Return the redacted provider/model/tool posture needed to render onboarding UI. */
   async readiness(options: AutonomousBrainReadinessOptions = {}): Promise<AutonomousBrainReadinessReport> {
     return this.agent.readiness(options);
+  }
+
+  /**
+   * Audit every reviewed domain contract and an optional caller-owned live surface.
+   * This is intentionally keyless and side-effect free; it never invokes a provider,
+   * acquires evidence, executes a tool, or treats registration as authorization.
+   */
+  async domainAudit(options: AutonomousDomainAuditOptions = {}): Promise<AutonomousDomainAuditReport> {
+    return auditAutonomousDomainContracts(options);
   }
 
   /** Project a portfolio-wide admission image before provider/tool/source dispatch. */

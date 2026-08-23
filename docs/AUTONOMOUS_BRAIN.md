@@ -1551,6 +1551,33 @@ contains only adapter/manifest, health, policy, and digest metadata; it excludes
 requests, prompts, errors, and acquired values. A caller must still use the reviewed evidence
 execution controller and explicit source-dispatch approval to acquire anything.
 
+For a deeper contract-level startup check, the TypeScript SDK also exposes
+`auditAutonomousDomainContracts()` and the same method through `AutonomousBrainFacade.domainAudit()`:
+
+```typescript
+const profiles = await builtinAutonomousDomainProfiles();
+const audit = await brain.domainAudit({
+  availableToolNames: profiles.flatMap((profile) =>
+    profile.tool_profile.bindings.map((binding) => binding.name),
+  ),
+  availableEvidence: profiles.flatMap((profile) =>
+    profile.workflow.stages.flatMap((stage) =>
+      stage.evidence_outputs.map((label) => `${profile.domain}:${stage.id}:${label}`),
+    ),
+  ),
+});
+```
+
+This audit is stricter than ordinary readiness. It validates every selected profile's default
+model capability, guardrail and instruction metadata, workflow dependency graph, stage evidence
+outputs, evaluator signals, effect approval gates, and domain tool binding consistency. If the
+caller supplies live tool names or caller-owned evidence identifiers, each row additionally
+reports exact missing tools, evidence coverage, next executable stages, and a runtime state of
+`ready_for_review`, `partial`, or `blocked`. Omitted inventories remain `unassessed`; the audit
+never treats a declared adapter as live, never invokes a provider/source/tool, and never consumes
+credentials. Both rows and the report are SHA-256 digest-bound, so a worker can persist the
+projection or require explicit re-audit when its profile or runtime surface changes.
+
 For restartable deployments, `AutonomousEvaluatorCalibrationRegistry` imports the validated
 report projection and exposes deterministic digest/status/domain queries. Its snapshot contains
 only calibration reports and registry generation metadata; `InMemoryAutonomousEvaluatorCalibrationStore`,

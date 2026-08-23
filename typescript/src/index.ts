@@ -1390,6 +1390,26 @@ export type {
   AutonomousBrainBatchControllerRunOptions,
 } from "./autonomous-brain-facade.js";
 export {
+  AUTONOMOUS_DOMAIN_AUDIT_SCHEMA,
+  AUTONOMOUS_DOMAIN_AUDIT_ROW_SCHEMA,
+  MAX_AUTONOMOUS_DOMAIN_AUDIT_BYTES,
+  MAX_AUTONOMOUS_DOMAIN_AUDIT_ISSUES,
+  auditAutonomousDomainContracts,
+  validateAutonomousDomainAuditReport,
+} from "./autonomous-domain-audit.js";
+export type {
+  AutonomousDomainAuditIssueSeverity,
+  AutonomousDomainAuditContractStatus,
+  AutonomousDomainAuditRuntimeStatus,
+  AutonomousDomainAuditIssue,
+  AutonomousDomainAuditToolSurface,
+  AutonomousDomainAuditEvidenceSurface,
+  AutonomousDomainAuditRow,
+  AutonomousDomainAuditSummary,
+  AutonomousDomainAuditReport,
+  AutonomousDomainAuditOptions,
+} from "./autonomous-domain-audit.js";
+export {
   AUTONOMOUS_BRAIN_JOB_SCHEMA,
   AUTONOMOUS_BRAIN_JOB_EVENT_SCHEMA,
   AUTONOMOUS_BRAIN_JOB_SNAPSHOT_SCHEMA,
