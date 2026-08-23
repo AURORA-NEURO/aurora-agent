@@ -1229,3 +1229,11 @@ The coordinator supports caller-owned text stores and transactional compare-and-
 restore is atomic for both local ledger implementations. All twelve autonomous domains are covered
 by restart and HTTP round-trip tests, with malformed envelopes, non-canonical rows, secret-shaped
 fields, oversized replay metadata, tampered row/snapshot digests, and stale writers failing closed.
+
+Python episodic memory now closes the adjacent restart gap. Its existing hash-chained SQLite
+events can be exported as a strict canonical snapshot and restored atomically while rebuilding the
+materialized query index from validated episode/evaluation events. The memory coordinator supports
+the same caller-owned JSON and conditional-write/HTTP adapters as the other autonomous state
+surfaces. All twelve domains are covered by local and HTTP restart tests; duplicate episode
+events, evaluations for unknown episodes, malformed normalized packets, broken chain/head/event
+digests, raw-content fields, and stale writers fail closed.

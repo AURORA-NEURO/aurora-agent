@@ -6,10 +6,11 @@ import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
+from prism_sdk import AUTONOMOUS_DOMAINS
+
 from prism_sdk.brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
-    BrainLearningLedger,
     BrainMissionResult,
     BrainOutcomeEvaluator,
     BrainRunError,
@@ -19,7 +20,9 @@ from prism_sdk.llm_runtime import LLMRuntime
 from prism_sdk.memory import (
     BrainEpisodicMemory,
     BrainMemoryError,
+    BrainMemoryPersistenceCoordinator,
     MemoryQuery,
+    TransactionalJsonBrainMemorySnapshotPersistence,
     task_facet_digests,
 )
 
@@ -54,6 +57,87 @@ def _packet(*, episode_id: str, domain: str = "engineering", status: str = "miss
 
 
 class BrainMemoryTests(unittest.TestCase):
+    def test_memory_snapshot_rehydrates_all_domains_and_fences_stale_writers(self) -> None:
+        class CasTextStore:
+            def __init__(self) -> None:
+                self.value: str | None = None
+
+            def read(self) -> str | None:
+                return self.value
+
+            def write(self, value: str) -> None:
+                self.value = value
+
+            def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+                observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+                if observed != expected_snapshot_digest:
+                    return False
+                self.value = value
+                return True
+
+        with TemporaryDirectory() as directory:
+            backend = CasTextStore()
+            persistence = TransactionalJsonBrainMemorySnapshotPersistence(backend)
+            source = BrainEpisodicMemory(f"{directory}/source-memory.sqlite3")
+            for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+                episode_id = f"memory-{index}"
+                source.record_episode(
+                    {
+                        **_packet(episode_id=episode_id, domain=domain, status="completed"),
+                        "task_digest": _digest(domain),
+                    }
+                )
+                source.record_evaluation(
+                    episode_id,
+                    {
+                        "evaluator_id": f"{domain}-evaluator",
+                        "evaluator_version": "1",
+                        "reward": 0.5 + index / 100,
+                        "passed": index % 2 == 0,
+                    },
+                )
+            source_coordinator = BrainMemoryPersistenceCoordinator(source, persistence)
+            flushed = source_coordinator.flush()
+            self.assertEqual(flushed["event_count"], len(AUTONOMOUS_DOMAINS) * 2)
+
+            restored = BrainEpisodicMemory(f"{directory}/restored-memory.sqlite3")
+            restored_coordinator = BrainMemoryPersistenceCoordinator(restored, persistence)
+            restored_snapshot = restored_coordinator.restore()
+            self.assertIsNotNone(restored_snapshot)
+            self.assertEqual(restored_snapshot["snapshot_digest"], flushed["snapshot_digest"])
+            self.assertEqual(
+                {row["context"]["domain"] for row in restored.retrieve(limit=128)},
+                set(AUTONOMOUS_DOMAINS),
+            )
+            self.assertTrue(restored.verify_integrity()["ok"])
+
+            stale = BrainEpisodicMemory(f"{directory}/stale-memory.sqlite3")
+            stale_coordinator = BrainMemoryPersistenceCoordinator(stale, persistence)
+            stale_coordinator.restore()
+            source.record_episode(
+                {
+                    **_packet(episode_id="memory-new", domain=AUTONOMOUS_DOMAINS[0], status="completed"),
+                    "task_digest": _digest("new-memory"),
+                }
+            )
+            source_coordinator.flush()
+            with self.assertRaisesRegex(BrainMemoryError, "compare-and-swap conflict"):
+                stale_coordinator.flush()
+
+            tampered = json.loads(backend.value)
+            tampered["events"][0]["event_digest"] = "0" * 64
+            backend.value = json.dumps(tampered)
+            tampered_memory = BrainEpisodicMemory(f"{directory}/tampered-memory.sqlite3")
+            with self.assertRaisesRegex(BrainMemoryError, "digest"):
+                BrainMemoryPersistenceCoordinator(
+                    tampered_memory,
+                    persistence,
+                ).restore()
+            tampered_memory.close()
+            source.close()
+            restored.close()
+            stale.close()
+
     def test_digest_only_task_facets_retrieve_related_work_without_retaining_vocabulary(self) -> None:
         related_task = "review the release evidence and validate the implementation contract"
         unrelated_task = "compare imaging modalities and quantify signal reproducibility"

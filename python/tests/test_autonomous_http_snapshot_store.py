@@ -6,7 +6,9 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    BrainEpisodicMemory,
     BrainLearningLedger,
+    BrainMemoryPersistenceCoordinator,
     BrainLearningPersistenceCoordinator,
     BrainJobPersistenceCoordinator,
     BrainJobStore,
@@ -23,6 +25,7 @@ from prism_sdk import (
     InMemoryAutonomousDecisionCycleStateStore,
     TransactionalJsonAutonomousExecutionSnapshotPersistence,
     TransactionalJsonBrainLearningSnapshotPersistence,
+    TransactionalJsonBrainMemorySnapshotPersistence,
     TransactionalJsonBrainJobSnapshotPersistence,
     TransactionalJsonBrainModelHealthSnapshotPersistence,
     TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
@@ -378,3 +381,50 @@ def test_http_snapshot_store_plugs_into_learning_restart_for_every_domain(tmp_pa
     assert restored_snapshot is not None
     assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
     assert {row["domain"] for row in restored.replays(limit=128)} == set(AUTONOMOUS_DOMAINS)
+
+
+def test_http_snapshot_store_plugs_into_episodic_memory_restart_for_every_domain(tmp_path) -> None:
+    remote: str | None = None
+
+    def opener(request, _timeout):
+        nonlocal remote
+        if request.get_method() == "GET":
+            return _Response(remote.encode("utf-8")) if remote is not None else _Response(status=404)
+        current = None if remote is None else json.loads(remote)["snapshot_digest"]
+        expected = _header(request, "If-Match")
+        if _header(request, "If-None-Match") == "*" and current is not None:
+            return _Response(status=412)
+        if expected is not None and current != expected.strip('"'):
+            return _Response(status=412)
+        remote = request.data.decode("utf-8")
+        return _Response(status=204)
+
+    text_store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "all-domains/episodic-memory",
+        allowed_hosts=("state.test",),
+        opener=opener,
+    )
+    persistence = TransactionalJsonBrainMemorySnapshotPersistence(text_store)
+    source = BrainEpisodicMemory(tmp_path / "source-memory.sqlite3")
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+        source.record_episode({
+            "episode_id": f"http-memory-{index}",
+            "run_id": f"http-run-{index}",
+            "result_kind": "provider",
+            "status": "completed",
+            "task_digest": content_digest({"domain": domain, "index": index}),
+            "context": {"domain": domain, "capability": "review", "risk_class": "read_only"},
+            "selected_model": {"provider": "offline", "model": "offline-model"},
+            "digests": {"outcome_digest": f"{index + 1:064x}"},
+            "tags": ["http", "restart"],
+        })
+    flushed = BrainMemoryPersistenceCoordinator(source, persistence).flush()
+    restored = BrainEpisodicMemory(tmp_path / "restored-memory.sqlite3")
+    restored_snapshot = BrainMemoryPersistenceCoordinator(restored, persistence).restore()
+    assert restored_snapshot is not None
+    assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
+    assert {row["context"]["domain"] for row in restored.retrieve(limit=128)} == set(AUTONOMOUS_DOMAINS)
+    assert restored.verify_integrity()["ok"] is True
+    source.close()
+    restored.close()

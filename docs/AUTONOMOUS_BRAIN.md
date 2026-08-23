@@ -4181,6 +4181,17 @@ multi-tenant isolation should place the database behind its own encrypted storag
 backup, and retention controls; the SDK supplies bounded append/retrieval and provenance, not a
 distributed database or an identity authority.
 
+The event chain has a portable restart boundary as well. `memory.snapshot()` exports the ordered
+episode/evaluation events with their sequence, previous digest, head digest, and outer
+`snapshot_digest`; `memory.restore(snapshot)` validates the chain and atomically rebuilds the
+materialized retrieval index without replaying providers or evaluators. For a caller-owned remote
+store, `BrainMemoryPersistenceCoordinator` and
+`TransactionalJsonBrainMemorySnapshotPersistence` provide the same compare-and-swap flow used by
+learning, health, jobs, and execution state. The snapshot carries only normalized memory packets
+and evaluator metadata—never task text, prompts, responses, tool arguments, credentials, headers,
+or raw evidence—and rejects malformed payloads, duplicate episodes, unknown evaluation targets,
+tampered event/head digests, and stale writers.
+
 ### Durable objective state across attempts
 
 `AutonomousGoalLedger` is the objective-level state boundary above episodic memory and below an

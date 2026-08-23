@@ -18,7 +18,7 @@ import re
 import sqlite3
 import threading
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 import uuid
 
 
@@ -33,6 +33,9 @@ MAX_MEMORY_TASK_FACETS = 32
 MAX_MEMORY_TASK_FACET_TOKEN_BYTES = 32
 MAX_MEMORY_CONTEXT_KEYS = 32
 MAX_MEMORY_PROVENANCE_BYTES = 16_000
+MAX_MEMORY_SNAPSHOT_EVENTS = 16_384
+MAX_MEMORY_SNAPSHOT_EPISODES = 16_384
+MAX_MEMORY_SNAPSHOT_BYTES = 64_000_000
 
 _TASK_FACET_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{2,31}", re.IGNORECASE)
 _TASK_FACET_STOPWORDS = frozenset(
@@ -762,6 +765,133 @@ class BrainEpisodicMemory:
                     "reason": str(error),
                 }
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return the verified event chain needed to rebuild memory after a process restart."""
+
+        with self._lock:
+            integrity = self.verify_integrity()
+            if not integrity["ok"]:
+                raise BrainMemoryError("cannot snapshot episodic memory with failed integrity")
+            rows = self._connection.execute(
+                "SELECT * FROM memory_events ORDER BY sequence ASC"
+            ).fetchall()
+            events: list[dict[str, Any]] = []
+            for row in rows:
+                try:
+                    payload = json.loads(row["payload_json"])
+                except (TypeError, ValueError, json.JSONDecodeError) as error:
+                    raise BrainMemoryError("episodic memory event contains invalid JSON") from error
+                events.append(
+                    {
+                        "schema": MEMORY_EVENT_SCHEMA,
+                        "sequence": int(row["sequence"]),
+                        "event_type": str(row["event_type"]),
+                        "episode_id": str(row["episode_id"]),
+                        "payload": payload,
+                        "previous_digest": str(row["previous_digest"]),
+                        "created_ns": int(row["created_ns"]),
+                        "event_digest": str(row["event_digest"]),
+                        "retention": "metadata_only_hash_chained",
+                    }
+                )
+            return _build_memory_snapshot(
+                events,
+                episode_count=int(integrity["episode_count"]),
+                max_events=MAX_MEMORY_SNAPSHOT_EVENTS,
+                max_bytes=self.max_bytes,
+            )
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace memory events and rebuild the materialized retrieval index."""
+
+        normalized = _normalize_memory_snapshot(
+            snapshot,
+            max_events=MAX_MEMORY_SNAPSHOT_EVENTS,
+            max_episodes=self.max_episodes,
+            max_bytes=self.max_bytes,
+        )
+        episodes: dict[str, dict[str, Any]] = {}
+        for event in normalized["events"]:
+            episode_id = event["episode_id"]
+            if event["event_type"] == "episode_recorded":
+                if episode_id in episodes:
+                    raise BrainMemoryError("memory snapshot contains a duplicate episode event")
+                packet = event["payload"]["episode"]
+                context = packet.get("context", {})
+                episodes[episode_id] = {
+                    "packet": packet,
+                    "evaluation": None,
+                    "record_sequence": event["sequence"],
+                    "record_digest": event["event_digest"],
+                    "created_ns": event["created_ns"],
+                    "updated_ns": event["created_ns"],
+                    "domain": context.get("domain") if isinstance(context, Mapping) else None,
+                    "capability": context.get("capability") if isinstance(context, Mapping) else None,
+                    "risk_class": context.get("risk_class") if isinstance(context, Mapping) else None,
+                }
+            else:
+                if episode_id not in episodes:
+                    raise BrainMemoryError("memory snapshot evaluates an unknown episode")
+                episodes[episode_id]["evaluation"] = event["payload"]["evaluation"]
+                episodes[episode_id]["updated_ns"] = event["created_ns"]
+
+        with self._lock:
+            self._begin_locked()
+            try:
+                self._connection.execute("DELETE FROM memory_events")
+                self._connection.execute("DELETE FROM memory_episodes")
+                self._connection.execute("DELETE FROM sqlite_sequence WHERE name IN ('memory_events')")
+                for event in normalized["events"]:
+                    self._connection.execute(
+                        "INSERT INTO memory_events "
+                        "(sequence, event_type, episode_id, payload_json, previous_digest, event_digest, created_ns) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            event["sequence"],
+                            event["event_type"],
+                            event["episode_id"],
+                            _canonical(event["payload"]),
+                            event["previous_digest"],
+                            event["event_digest"],
+                            event["created_ns"],
+                        ),
+                    )
+                for episode_id, state in episodes.items():
+                    packet = state["packet"]
+                    evaluation = state["evaluation"]
+                    self._connection.execute(
+                        """
+                        INSERT INTO memory_episodes (
+                            episode_id, run_id, result_kind, status, task_digest, domain, capability,
+                            risk_class, task_facets_json, tags_json, packet_json, evaluation_json, record_sequence,
+                            record_digest, created_ns, updated_ns
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            episode_id,
+                            packet["run_id"],
+                            packet["result_kind"],
+                            packet["status"],
+                            packet["task_digest"],
+                            state["domain"] if isinstance(state["domain"], str) else None,
+                            state["capability"] if isinstance(state["capability"], str) else None,
+                            state["risk_class"] if isinstance(state["risk_class"], str) else None,
+                            _canonical(packet["task_facets"]),
+                            _canonical(packet["tags"]),
+                            _canonical(packet),
+                            None if evaluation is None else _canonical(evaluation),
+                            state["record_sequence"],
+                            state["record_digest"],
+                            state["created_ns"],
+                            state["updated_ns"],
+                        ),
+                    )
+                self._ensure_capacity_locked()
+                self._connection.execute("COMMIT")
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+
     def stats(self) -> dict[str, Any]:
         with self._lock:
             event_count = int(self._connection.execute("SELECT COUNT(*) FROM memory_events").fetchone()[0])
@@ -781,12 +911,13 @@ class BrainEpisodicMemory:
                 "retention": "value_only_hash_chained",
             }
 
-    def _normalize_episode(self, packet: Mapping[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _normalize_episode(packet: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(packet, Mapping):
             raise BrainMemoryError("episode packet must be a mapping")
         if any(not isinstance(key, str) for key in packet):
             raise BrainMemoryError("episode packet keys must be strings")
-        unknown = sorted(set(packet).difference(self._EPISODE_FIELDS))
+        unknown = sorted(set(packet).difference(BrainEpisodicMemory._EPISODE_FIELDS))
         if unknown:
             raise BrainMemoryError("episode packet contains unsupported fields: " + ", ".join(unknown))
         episode_id = packet.get("episode_id") or f"episode-{uuid.uuid4().hex}"
@@ -840,12 +971,13 @@ class BrainEpisodicMemory:
             raise BrainMemoryError("episode packet exceeds the bounded size")
         return normalized
 
-    def _normalize_evaluation(self, evaluation: Mapping[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _normalize_evaluation(evaluation: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(evaluation, Mapping):
             raise BrainMemoryError("evaluation must be a mapping")
         if any(not isinstance(key, str) for key in evaluation):
             raise BrainMemoryError("evaluation keys must be strings")
-        unknown = sorted(set(evaluation).difference(self._EVALUATION_FIELDS))
+        unknown = sorted(set(evaluation).difference(BrainEpisodicMemory._EVALUATION_FIELDS))
         if unknown:
             raise BrainMemoryError("evaluation contains unsupported fields: " + ", ".join(unknown))
         normalized = _safe_value(dict(evaluation))
@@ -968,3 +1100,332 @@ class BrainEpisodicMemory:
         page_size = int(self._connection.execute("PRAGMA page_size").fetchone()[0])
         if page_count * page_size > self.max_bytes:
             raise BrainMemoryError("episodic memory byte capacity is exhausted")
+
+
+def _normalize_memory_event(
+    value: Any,
+    *,
+    expected_sequence: int,
+    previous_digest: str,
+) -> dict[str, Any]:
+    event_keys = {
+        "schema",
+        "sequence",
+        "event_type",
+        "episode_id",
+        "payload",
+        "previous_digest",
+        "created_ns",
+        "event_digest",
+        "retention",
+    }
+    if not isinstance(value, Mapping) or set(value) != event_keys:
+        raise BrainMemoryError("memory snapshot contains an invalid event envelope")
+    if value.get("schema") != MEMORY_EVENT_SCHEMA or value.get("retention") != "metadata_only_hash_chained":
+        raise BrainMemoryError("memory snapshot event schema or retention is invalid")
+    if value.get("sequence") != expected_sequence or value.get("previous_digest") != previous_digest:
+        raise BrainMemoryError("memory snapshot event sequence or chain is invalid")
+    episode_id = _bounded_string(value.get("episode_id"), name="memory event episode_id", maximum=MAX_MEMORY_ID_BYTES)
+    created_ns = value.get("created_ns")
+    if not isinstance(created_ns, int) or isinstance(created_ns, bool) or created_ns < 0:
+        raise BrainMemoryError("memory snapshot event timestamp is invalid")
+    event_digest = value.get("event_digest")
+    if not _valid_digest(event_digest):
+        raise BrainMemoryError("memory snapshot event digest is invalid")
+    event_type = value.get("event_type")
+    payload = value.get("payload")
+    if event_type == "episode_recorded":
+        if not isinstance(payload, Mapping) or set(payload) != {"schema", "event", "episode"}:
+            raise BrainMemoryError("memory snapshot episode event payload is malformed")
+        if payload.get("schema") != MEMORY_EVENT_SCHEMA or payload.get("event") != "episode_recorded":
+            raise BrainMemoryError("memory snapshot episode event payload schema is invalid")
+        episode = BrainEpisodicMemory._normalize_episode(payload.get("episode"))
+        if episode["episode_id"] != episode_id or episode != payload.get("episode"):
+            raise BrainMemoryError("memory snapshot episode payload identity is invalid")
+    elif event_type == "evaluation_recorded":
+        if not isinstance(payload, Mapping) or set(payload) != {"schema", "event", "episode_id", "evaluation"}:
+            raise BrainMemoryError("memory snapshot evaluation event payload is malformed")
+        if (
+            payload.get("schema") != MEMORY_EVENT_SCHEMA
+            or payload.get("event") != "evaluation_recorded"
+            or payload.get("episode_id") != episode_id
+        ):
+            raise BrainMemoryError("memory snapshot evaluation event payload identity is invalid")
+        evaluation = BrainEpisodicMemory._normalize_evaluation(payload.get("evaluation"))
+        if evaluation != payload.get("evaluation"):
+            raise BrainMemoryError("memory snapshot evaluation payload is not normalized")
+    else:
+        raise BrainMemoryError("memory snapshot event type is unsupported")
+    normalized_payload = json.loads(_canonical(dict(payload)))
+    envelope = {
+        "schema": MEMORY_EVENT_SCHEMA,
+        "event_type": event_type,
+        "episode_id": episode_id,
+        "payload": normalized_payload,
+        "previous_digest": previous_digest,
+        "sequence": expected_sequence,
+        "created_ns": created_ns,
+    }
+    if _digest(envelope) != event_digest:
+        raise BrainMemoryError("memory snapshot event digest does not match its metadata")
+    return {
+        **envelope,
+        "event_digest": event_digest,
+        "retention": "metadata_only_hash_chained",
+    }
+
+
+def _build_memory_snapshot(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    episode_count: int,
+    max_events: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    if not isinstance(episode_count, int) or isinstance(episode_count, bool) or episode_count < 0:
+        raise BrainMemoryError("memory snapshot episode_count is invalid")
+    if len(events) > max_events:
+        raise BrainMemoryError("memory snapshot event count exceeds its bound")
+    normalized_events: list[dict[str, Any]] = []
+    previous = ""
+    episode_ids: set[str] = set()
+    for expected_sequence, event in enumerate(events, start=1):
+        normalized = _normalize_memory_event(
+            event,
+            expected_sequence=expected_sequence,
+            previous_digest=previous,
+        )
+        if normalized["event_type"] == "episode_recorded":
+            if normalized["episode_id"] in episode_ids:
+                raise BrainMemoryError("memory snapshot contains a duplicate episode event")
+            episode_ids.add(normalized["episode_id"])
+        elif normalized["episode_id"] not in episode_ids:
+            raise BrainMemoryError("memory snapshot evaluates an unknown episode")
+        normalized_events.append(normalized)
+        previous = normalized["event_digest"]
+    if episode_count != len(episode_ids):
+        raise BrainMemoryError("memory snapshot episode_count does not match its events")
+    descriptor = {
+        "schema": MEMORY_SCHEMA,
+        "events": normalized_events,
+        "event_count": len(normalized_events),
+        "episode_count": episode_count,
+        "head_digest": previous,
+        "retention": "metadata_only_hash_chained",
+        "secret_material": "never_returned",
+    }
+    snapshot = {**descriptor, "snapshot_digest": _digest(descriptor)}
+    if len(_canonical(snapshot).encode("utf-8")) > min(max_bytes, MAX_MEMORY_SNAPSHOT_BYTES):
+        raise BrainMemoryError("memory snapshot exceeds its byte capacity")
+    return snapshot
+
+
+def _normalize_memory_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_events: int,
+    max_episodes: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    expected_keys = {
+        "schema",
+        "events",
+        "event_count",
+        "episode_count",
+        "head_digest",
+        "retention",
+        "secret_material",
+        "snapshot_digest",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise BrainMemoryError("memory snapshot is malformed")
+    if value.get("schema") != MEMORY_SCHEMA:
+        raise BrainMemoryError("memory snapshot schema is unsupported")
+    if value.get("retention") != "metadata_only_hash_chained" or value.get("secret_material") != "never_returned":
+        raise BrainMemoryError("memory snapshot retention is invalid")
+    raw_events = value.get("events")
+    if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes, bytearray)) or len(raw_events) > max_events:
+        raise BrainMemoryError("memory snapshot event count is outside its bound")
+    event_count = value.get("event_count")
+    episode_count = value.get("episode_count")
+    if not isinstance(event_count, int) or isinstance(event_count, bool) or event_count != len(raw_events):
+        raise BrainMemoryError("memory snapshot event_count is invalid")
+    if not isinstance(episode_count, int) or isinstance(episode_count, bool) or not 0 <= episode_count <= max_episodes:
+        raise BrainMemoryError("memory snapshot episode_count is outside its bound")
+    events: list[dict[str, Any]] = []
+    previous = ""
+    episode_ids: set[str] = set()
+    for expected_sequence, raw_event in enumerate(raw_events, start=1):
+        event = _normalize_memory_event(
+            raw_event,
+            expected_sequence=expected_sequence,
+            previous_digest=previous,
+        )
+        if event["event_type"] == "episode_recorded":
+            if event["episode_id"] in episode_ids:
+                raise BrainMemoryError("memory snapshot contains a duplicate episode event")
+            episode_ids.add(event["episode_id"])
+        elif event["episode_id"] not in episode_ids:
+            raise BrainMemoryError("memory snapshot evaluates an unknown episode")
+        events.append(event)
+        previous = event["event_digest"]
+    if episode_count != len(episode_ids):
+        raise BrainMemoryError("memory snapshot episode_count does not match its events")
+    head_digest = value.get("head_digest")
+    if not isinstance(head_digest, str) or (head_digest and not _valid_digest(head_digest)) or head_digest != previous:
+        raise BrainMemoryError("memory snapshot head_digest is invalid")
+    descriptor = {
+        "schema": MEMORY_SCHEMA,
+        "events": events,
+        "event_count": event_count,
+        "episode_count": episode_count,
+        "head_digest": head_digest,
+        "retention": "metadata_only_hash_chained",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = value.get("snapshot_digest")
+    if not isinstance(snapshot_digest, str) or not _valid_digest(snapshot_digest) or _digest(descriptor) != snapshot_digest:
+        raise BrainMemoryError("memory snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if len(_canonical(normalized).encode("utf-8")) > min(max_bytes, MAX_MEMORY_SNAPSHOT_BYTES):
+        raise BrainMemoryError("memory snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_memory_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public strict validator for metadata-only episodic-memory snapshots."""
+
+    return _normalize_memory_snapshot(
+        value,
+        max_events=MAX_MEMORY_SNAPSHOT_EVENTS,
+        max_episodes=MAX_MEMORY_SNAPSHOT_EPISODES,
+        max_bytes=MAX_MEMORY_SNAPSHOT_BYTES,
+    )
+
+
+class BrainMemorySnapshotTextStore(Protocol):
+    """Portable text persistence for hash-chained episodic-memory events."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalBrainMemorySnapshotTextStore(BrainMemorySnapshotTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonBrainMemorySnapshotPersistence:
+    """Canonical JSON memory persistence over a caller-owned text store."""
+
+    def __init__(
+        self,
+        store: BrainMemorySnapshotTextStore,
+        *,
+        max_bytes: int = MAX_MEMORY_SNAPSHOT_BYTES,
+    ) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise BrainMemoryError("memory JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_MEMORY_SNAPSHOT_BYTES:
+            raise BrainMemoryError("memory JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainMemoryError("memory JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise BrainMemoryError("memory JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise BrainMemoryError("memory JSON snapshot must be an object")
+        return _normalize_memory_snapshot(
+            raw,
+            max_events=MAX_MEMORY_SNAPSHOT_EVENTS,
+            max_episodes=MAX_MEMORY_SNAPSHOT_EPISODES,
+            max_bytes=self.max_bytes,
+        )
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_memory_snapshot(
+            snapshot,
+            max_events=MAX_MEMORY_SNAPSHOT_EVENTS,
+            max_episodes=MAX_MEMORY_SNAPSHOT_EPISODES,
+            max_bytes=self.max_bytes,
+        )
+        encoded = _canonical(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainMemoryError("memory JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonBrainMemorySnapshotPersistence(JsonBrainMemorySnapshotPersistence):
+    """Canonical JSON memory persistence with stale-writer fencing."""
+
+    def __init__(
+        self,
+        store: TransactionalBrainMemorySnapshotTextStore,
+        *,
+        max_bytes: int = MAX_MEMORY_SNAPSHOT_BYTES,
+    ) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise BrainMemoryError("transactional memory persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and not _valid_digest(expected_snapshot_digest):
+            raise BrainMemoryError("memory expected snapshot digest is invalid")
+        normalized = _normalize_memory_snapshot(
+            snapshot,
+            max_events=MAX_MEMORY_SNAPSHOT_EVENTS,
+            max_episodes=MAX_MEMORY_SNAPSHOT_EPISODES,
+            max_bytes=self.max_bytes,
+        )
+        encoded = _canonical(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainMemoryError("memory JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class BrainMemoryPersistenceCoordinator:
+    """Flush and restore episodic memory through caller-owned storage."""
+
+    def __init__(self, store: BrainEpisodicMemory, persistence: Any) -> None:
+        if not isinstance(store, BrainEpisodicMemory):
+            raise BrainMemoryError("memory persistence requires a BrainEpisodicMemory")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise BrainMemoryError("memory persistence adapter is malformed")
+        self.store = store
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = _normalize_memory_snapshot(
+            raw,
+            max_events=MAX_MEMORY_SNAPSHOT_EVENTS,
+            max_episodes=self.store.max_episodes,
+            max_bytes=self.store.max_bytes,
+        )
+        self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.store.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise BrainMemoryError("memory persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
