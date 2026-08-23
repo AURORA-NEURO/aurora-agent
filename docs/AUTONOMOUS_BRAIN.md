@@ -1724,13 +1724,14 @@ attempting transport.
 
 ### Offline selection-policy replay and regret lab
 
-The TypeScript SDK also exposes `evaluateAutonomousSelectionPolicy(...)` for measuring the
-decision policy itself before it is connected to a provider. A caller supplies bounded selection
-requests and caller-owned counterfactual evaluator rewards keyed by `provider/model` arm. The
-lab reuses the production deterministic health/utility ranker, or a supplied
-`AutonomousOnlineLearner`/selector, and reports selected arms, the best eligible rewarded arm,
-oracle agreement, regret, abstention, missing-reward coverage, and no-eligible-model counts for
-each of the twelve built-in domains.
+Both SDKs expose a provider-free selection-policy replay lab for measuring the decision policy
+itself before it is connected to a provider. TypeScript uses
+`evaluateAutonomousSelectionPolicy(...)`; Python uses
+`evaluate_autonomous_selection_policy(...)`. A caller supplies bounded selection requests and
+caller-owned counterfactual evaluator rewards keyed by `provider/model` arm. The lab reuses the
+deterministic health/utility ranker, or a supplied selector (and TypeScript online learner), and
+reports selected arms, the best eligible rewarded arm, oracle agreement, regret, abstention,
+missing-reward coverage, and no-eligible-model counts for each of the twelve built-in domains.
 
 ```typescript
 const report = await evaluateAutonomousSelectionPolicy(cases, {
@@ -1742,6 +1743,15 @@ if (report.status === "insufficient_coverage") {
   throw new Error(`selection coverage is missing: ${report.missing_domains.join(", ")}`);
 }
 console.log(report.oracle_agreement_rate, report.mean_regret);
+```
+
+The equivalent Python entrypoint accepts the same case fields and returns the same projection
+shape:
+
+```python
+from prism_sdk import evaluate_autonomous_selection_policy
+
+report = evaluate_autonomous_selection_policy(cases, require_all_domains=True)
 ```
 
 This is a policy-evaluation boundary, not a source of ground truth: the caller owns reward
