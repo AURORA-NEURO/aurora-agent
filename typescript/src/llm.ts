@@ -729,6 +729,24 @@ export interface AutonomousSelectionDecision extends JsonObject {
   exploration_taken?: boolean;
 }
 
+/** Metadata-only lifecycle emitted before and after each autonomous model-selection attempt. */
+export interface AutonomousModelSelectionTraceEvent extends JsonObject {
+  phase: "model_selection_started" | "model_selection_finished";
+  status: "running" | "selected" | "abstained" | "failed";
+  attempt: number | null;
+  failover: boolean;
+  candidate_count: number;
+  eligible_candidate_count: number;
+  strategy: AutonomousSelectionDecision["strategy"] | null;
+  selected_provider: string | null;
+  selected_model: string | null;
+  selection_digest: string | null;
+  detail_digest: string | null;
+  failure_code: string | null;
+}
+
+export type AutonomousModelSelectionTraceEventCallback = (event: AutonomousModelSelectionTraceEvent) => unknown | Promise<unknown>;
+
 export interface AutonomousExecutionPlan {
   task: string;
   domain?: string;
@@ -2884,31 +2902,114 @@ export class AutonomousRuntime {
     this.selector = options.selector;
   }
 
-  async select(plan: AutonomousExecutionPlan, options: { excludedProviders?: readonly string[]; excludedModels?: readonly string[] } = {}): Promise<AutonomousSelectionDecision> {
+  async select(
+    plan: AutonomousExecutionPlan,
+    options: {
+      excludedProviders?: readonly string[];
+      excludedModels?: readonly string[];
+      selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
+      attempt?: number;
+    } = {},
+  ): Promise<AutonomousSelectionDecision> {
+    if (options.selectionEventCallback !== undefined && typeof options.selectionEventCallback !== "function") throw new ProviderRuntimeError("autonomous model selection trace callback must be callable");
+    const selectionEventCallback = options.selectionEventCallback;
+    const traceEnabled = selectionEventCallback !== undefined;
     const request = this.selectionRequest(plan, options.excludedProviders, options.excludedModels);
     const ranking = this.rank(request);
     const selectionConfidence = autonomousSelectionConfidence(ranking);
     const minimumConfidence = request.min_selection_confidence ?? null;
-    if (!ranking.some((row) => row.eligible)) {
-      return { selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: ranking.flatMap((row) => row.reasons).join("; ") || "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence };
+    const attempt = options.attempt ?? null;
+    const failover = attempt !== null && attempt > 1;
+    const selectionEvent = async (
+      phase: AutonomousModelSelectionTraceEvent["phase"],
+      status: AutonomousModelSelectionTraceEvent["status"],
+      decision: AutonomousSelectionDecision | null,
+      detailDigest: string | null = null,
+      failureCode: string | null = null,
+    ): Promise<void> => {
+      if (!traceEnabled) return;
+      const selected = decision?.selected_model ?? null;
+      const event: AutonomousModelSelectionTraceEvent = {
+        phase,
+        status,
+        attempt,
+        failover,
+        candidate_count: request.candidates.length,
+        eligible_candidate_count: ranking.filter((row) => row.eligible).length,
+        strategy: decision?.strategy ?? (this.selector ? "caller_selector" : "deterministic_health_utility"),
+        selected_provider: selected?.provider ?? null,
+        selected_model: selected?.model ?? null,
+        selection_digest: decision === null ? null : await digestJson(decision),
+        detail_digest: detailDigest,
+        failure_code: failureCode,
+      };
+      await selectionEventCallback(event);
+    };
+    const startDetailDigest = traceEnabled ? await digestJson({
+      task: request.task,
+      domain: request.domain,
+      capability: request.capability,
+      risk_class: request.risk_class,
+      context_digest: request.context_digest ?? null,
+      candidate_count: request.candidates.length,
+      excluded_providers: [...(options.excludedProviders ?? [])].sort(),
+      excluded_models: [...(options.excludedModels ?? [])].sort(),
+    }) : null;
+    await selectionEvent("model_selection_started", "running", null, startDetailDigest);
+    const finishSelection = async (decision: AutonomousSelectionDecision): Promise<AutonomousSelectionDecision> => {
+      const status = decision.selected_model === null ? "abstained" as const : "selected" as const;
+      const failureCode = decision.selected_model === null ? "selection_abstained" : null;
+      const detailDigest = traceEnabled ? await digestJson({
+        candidate_count: request.candidates.length,
+        eligible_candidate_count: ranking.filter((row) => row.eligible).length,
+        strategy: decision.strategy,
+        abstention_reason: decision.abstention_reason,
+        selection_confidence: decision.selection_confidence ?? null,
+        min_selection_confidence: decision.min_selection_confidence ?? null,
+        exploration_taken: decision.exploration_taken ?? false,
+      }) : null;
+      await selectionEvent(
+        "model_selection_finished",
+        status,
+        decision,
+        detailDigest,
+        failureCode,
+      );
+      return decision;
+    };
+    try {
+      if (!ranking.some((row) => row.eligible)) {
+        return finishSelection({ selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: ranking.flatMap((row) => row.reasons).join("; ") || "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });
+      }
+      if (minimumConfidence !== null && selectionConfidence < minimumConfidence) {
+        return finishSelection({ selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: `selection confidence ${selectionConfidence.toFixed(6)} is below caller floor ${minimumConfidence.toFixed(6)}`, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });
+      }
+      if (this.selector) {
+        const selected = await this.selector(request);
+        if (!isObject(selected)) throw new ProviderRuntimeError("autonomous model selector returned a malformed decision");
+        const projectedRanking = selectorRankingProjection(selected.ranking, ranking);
+        const exploration = selectorExplorationProjection(selected);
+        const selectedModel = selected.selected_model;
+        if (selectedModel === null) return finishSelection({ selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration });
+        if (!isObject(selectedModel) || typeof selectedModel.provider !== "string" || typeof selectedModel.model !== "string") throw new ProviderRuntimeError("autonomous selector returned an invalid selected_model");
+        const chosen = ranking.find((row) => row.provider === selectedModel.provider && row.model === selectedModel.model);
+        if (!chosen || !chosen.eligible) throw new ProviderRuntimeError("autonomous selector chose an ineligible model");
+        return finishSelection({ selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration });
+      }
+      const chosen = ranking.find((row) => row.eligible);
+      return finishSelection({ selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "deterministic_health_utility", ranking, abstention_reason: chosen ? null : "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });
+    } catch (error) {
+      if (traceEnabled) {
+        await selectionEvent(
+          "model_selection_finished",
+          "failed",
+          null,
+          await digestJson({ error_class: error instanceof Error ? error.constructor.name : "UnknownError" }),
+          error instanceof ProviderRuntimeError ? error.code : "selection_error",
+        ).catch(() => undefined);
+      }
+      throw error;
     }
-    if (minimumConfidence !== null && selectionConfidence < minimumConfidence) {
-      return { selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: `selection confidence ${selectionConfidence.toFixed(6)} is below caller floor ${minimumConfidence.toFixed(6)}`, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence };
-    }
-    if (this.selector) {
-      const selected = await this.selector(request);
-      if (!isObject(selected)) throw new ProviderRuntimeError("autonomous model selector returned a malformed decision");
-      const projectedRanking = selectorRankingProjection(selected.ranking, ranking);
-      const exploration = selectorExplorationProjection(selected);
-      const selectedModel = selected.selected_model;
-      if (selectedModel === null) return { selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration };
-      if (!isObject(selectedModel) || typeof selectedModel.provider !== "string" || typeof selectedModel.model !== "string") throw new ProviderRuntimeError("autonomous selector returned an invalid selected_model");
-      const chosen = ranking.find((row) => row.provider === selectedModel.provider && row.model === selectedModel.model);
-      if (!chosen || !chosen.eligible) throw new ProviderRuntimeError("autonomous selector chose an ineligible model");
-      return { selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration };
-    }
-    const chosen = ranking.find((row) => row.eligible);
-    return { selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "deterministic_health_utility", ranking, abstention_reason: chosen ? null : "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence };
   }
 
   async invoke(
@@ -2919,6 +3020,7 @@ export class AutonomousRuntime {
       signal?: AbortSignal;
       observer?: ProviderInvocationObserver;
       feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
+      selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
       execution?: AutonomousExecutionController;
       executionAttempt?: number;
       maxProviderFailovers?: number;
@@ -2930,7 +3032,7 @@ export class AutonomousRuntime {
     const excludedModels = new Set<string>();
     let failovers = 0;
     while (true) {
-      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels] });
+      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels], selectionEventCallback: options.selectionEventCallback, attempt: failovers + 1 });
       if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
       const provider = selection.selected_model.provider;
       const credential = options.credential ?? options.credentialFor?.(provider);
@@ -2971,6 +3073,7 @@ export class AutonomousRuntime {
       signal?: AbortSignal;
       observer?: ProviderInvocationObserver;
       feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
+      selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
       execution?: AutonomousExecutionController;
       executionAttempt?: number;
       maxProviderFailovers?: number;
@@ -2984,7 +3087,7 @@ export class AutonomousRuntime {
     let failovers = 0;
     let toolActivity = false;
     while (true) {
-      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels] });
+      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels], selectionEventCallback: options.selectionEventCallback, attempt: failovers + 1 });
       if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
       const provider = selection.selected_model.provider;
       const credential = options.credential ?? options.credentialFor?.(provider);

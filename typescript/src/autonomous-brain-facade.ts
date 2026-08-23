@@ -1385,7 +1385,7 @@ export class AutonomousBrainFacade {
       ...(connector && options.includeConnectorObservation !== false ? [observationChunk(connector)] : []),
     ];
     const approved = options.approveProviderCall ?? options.run?.approveProviderCall ?? false;
-    const runOptions = { ...(options.run ?? {}), routeOverride: route, capability: request.capability, context, hints: request.hints, allowCrossDomain: request.allow_cross_domain, approveProviderCall: approved, observer: composeBrainObservers(options.run?.observer, trace?.providerObserver()) } as AutonomousRunOptions;
+    const runOptions = { ...(options.run ?? {}), routeOverride: route, capability: request.capability, context, hints: request.hints, allowCrossDomain: request.allow_cross_domain, approveProviderCall: approved, observer: composeBrainObservers(options.run?.observer, trace?.providerObserver()), selectionEventCallback: trace === undefined ? options.run?.selectionEventCallback : trace.selectionEventCallback(options.run?.selectionEventCallback) } as AutonomousRunOptions;
     const run = route.cross_domain
       ? await this.agent.runCrossDomain(request.task, runOptions as AutonomousCrossDomainRunOptions)
       : await this.agent.run(request.task, { ...runOptions, domain: route.primary_domain ?? undefined });
@@ -1433,6 +1433,7 @@ export class AutonomousBrainFacade {
       allowCrossDomain: request.allow_cross_domain,
       approveProviderCall: options.approveProviderCall ?? options.cycle?.approveProviderCall ?? false,
       observer: composeBrainObservers(options.cycle?.observer, trace?.providerObserver()),
+      selectionEventCallback: trace === undefined ? options.cycle?.selectionEventCallback : trace.selectionEventCallback(options.cycle?.selectionEventCallback),
     };
     const cycle = route.cross_domain
       ? await runAutonomousCrossDomainDecisionCycle(this.agent, request.task, cycleOptions as AutonomousCrossDomainDecisionCycleOptions)
@@ -1482,6 +1483,7 @@ export class AutonomousBrainFacade {
       allowCrossDomain: request.allow_cross_domain,
       approveProviderCall: options.approveProviderCall ?? options.adaptive.approveProviderCall ?? false,
       observer: composeBrainObservers(options.adaptive.observer, trace?.providerObserver()),
+      selectionEventCallback: trace === undefined ? options.adaptive?.selectionEventCallback : trace.selectionEventCallback(options.adaptive?.selectionEventCallback),
     };
     const adaptive = route.cross_domain
       ? await runAutonomousCrossDomainReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousCrossDomainReplanCycleOptions)

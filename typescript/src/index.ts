@@ -136,6 +136,8 @@ export type {
   AutonomousModelCandidateDefaults,
   AutonomousModelRanking,
   AutonomousModelSelector,
+  AutonomousModelSelectionTraceEvent,
+  AutonomousModelSelectionTraceEventCallback,
   AutonomousSelectionDecision,
   AutonomousSelectionRequest,
   CredentialStatus,

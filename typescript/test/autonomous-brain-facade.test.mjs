@@ -530,7 +530,7 @@ test("brain facade runs a connector observation before provider invocation and s
   assert.equal(traced.execution.status, "completed");
   assert.deepEqual(
     traceStore.events({ run_id: "connector-brain-trace" }).map((event) => event.phase),
-    ["started", "plan_compiled", "connector_started", "connector_finished", "provider_invocation_started", "provider_invocation_finished", "completed"],
+    ["started", "plan_compiled", "connector_started", "connector_finished", "model_selection_started", "model_selection_finished", "provider_invocation_started", "provider_invocation_finished", "completed"],
   );
 });
 

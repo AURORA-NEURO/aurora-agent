@@ -1,6 +1,6 @@
 import { ArgumentError, isObject } from "./errors.js";
 import type { AutonomousDomainName } from "./autonomous.js";
-import type { ProviderInvocationMetadata, ProviderInvocationObserver, ProviderInvocationOutcome } from "./llm.js";
+import type { AutonomousModelSelectionTraceEvent, ProviderInvocationMetadata, ProviderInvocationObserver, ProviderInvocationOutcome } from "./llm.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -13,6 +13,8 @@ export const AUTONOMOUS_RUN_TRACE_PHASES = [
   "plan_compiled",
   "connector_started",
   "connector_finished",
+  "model_selection_started",
+  "model_selection_finished",
   "provider_invocation_started",
   "provider_invocation_finished",
   "evaluation_settled",
@@ -572,6 +574,36 @@ export class AutonomousRunTraceSession {
           retryable: outcome.retryable ?? null,
         });
       },
+    };
+  }
+
+  /** Return a value-only callback for selection attempts, including abstentions and failovers. */
+  selectionEventCallback(existing?: (event: AutonomousModelSelectionTraceEvent) => unknown | Promise<unknown>): (event: AutonomousModelSelectionTraceEvent) => Promise<AutonomousRunTraceEvent> {
+    return async (event: AutonomousModelSelectionTraceEvent): Promise<AutonomousRunTraceEvent> => {
+      await existing?.(event);
+      const status: AutonomousRunTraceStatus = event.status === "running"
+        ? "running"
+        : event.status === "selected"
+          ? "completed"
+          : event.status === "abstained"
+            ? "refused"
+            : "failed";
+      const detailDigest = event.detail_digest ?? digestJsonSync({
+        candidate_count: event.candidate_count,
+        eligible_candidate_count: event.eligible_candidate_count,
+        strategy: event.strategy,
+        failover: event.failover,
+      });
+      return this.record({
+        phase: event.phase,
+        status,
+        provider: event.selected_provider,
+        model: event.selected_model,
+        selection_digest: event.selection_digest,
+        attempt: event.attempt,
+        detail_digest: detailDigest,
+        failure_code: event.failure_code,
+      });
     };
   }
 

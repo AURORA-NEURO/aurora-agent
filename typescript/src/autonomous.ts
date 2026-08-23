@@ -130,6 +130,7 @@ import {
   type AutonomousCostBudgetSnapshot,
   type AutonomousModelCandidate,
   type AutonomousModelSelector,
+  type AutonomousModelSelectionTraceEventCallback,
   type AutonomousSelectionDecision,
   type AutonomousSelectionRequest,
   type AutonomousExecutionPlan,
@@ -1092,6 +1093,8 @@ export interface AutonomousProviderPlanningOptions {
   maxProviderFailovers?: number;
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** Metadata-only lifecycle callback for each model-selection attempt. */
+  selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
 }
 
 export interface AutonomousModelRefreshResult {
@@ -1231,6 +1234,8 @@ export interface AutonomousRunOptions {
   executionLifecycle?: "managed" | "observe_only";
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** Metadata-only lifecycle callback for each model-selection attempt. */
+  selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
 }
 
 export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
@@ -4853,6 +4858,7 @@ export class AutonomousAgent {
         credentialFor: options.credentialFor,
         signal: options.signal,
         observer: options.observer,
+        selectionEventCallback: options.selectionEventCallback,
         execution: options.execution,
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: options.maxProviderFailovers,
@@ -4938,6 +4944,7 @@ export class AutonomousAgent {
         credentialFor: options.credentialFor,
         signal: options.signal,
         observer: options.observer,
+        selectionEventCallback: options.selectionEventCallback,
         execution: options.execution,
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: options.maxProviderFailovers,
@@ -5507,7 +5514,7 @@ export class AutonomousAgent {
     const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: initialDomains });
     await trace.started();
     try {
-      const result = await this.run(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()) });
+      const result = await this.run(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()), selectionEventCallback: trace.selectionEventCallback(runOptions.selectionEventCallback) });
       const routeDomains = result.route.selected_domains.length ? result.route.selected_domains : result.route.primary_domain ? [result.route.primary_domain] : initialDomains;
       const domains = [...new Set([...routeDomains, ...(result.route.cross_domain ? ["cross_domain" as const] : [])])] as AutonomousDomainName[];
       const planDigest = result.cross_domain?.blueprint?.plan_digest ?? result.blueprint?.plan.plan_digest ?? null;
@@ -5532,7 +5539,7 @@ export class AutonomousAgent {
     const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: ["cross_domain"] });
     await trace.started();
     try {
-      const result = await this.runCrossDomain(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()) });
+      const result = await this.runCrossDomain(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()), selectionEventCallback: trace.selectionEventCallback(runOptions.selectionEventCallback) });
       const domains = [...new Set([...result.route.selected_domains, "cross_domain"])] as AutonomousDomainName[];
       const planDigest = result.blueprint?.plan_digest ?? null;
       const selectionDigest = result.synthesis?.selection ? await digestJson(result.synthesis.selection) : null;
@@ -5637,14 +5644,14 @@ export class AutonomousAgent {
           ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext }))
           : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
-      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
+      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, toolReadOnly });
       const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
       const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
         ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
         : null;
       return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
-    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
+    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;
@@ -5744,6 +5751,7 @@ export class AutonomousAgent {
         maxProviderFailovers: options.maxProviderFailovers,
         signal: options.signal,
         observer: options.observer,
+        selectionEventCallback: options.selectionEventCallback,
       });
       const rawOutput = childResult.response?.text ?? (childResult.response?.structured === null || childResult.response?.structured === undefined ? "" : JSON.stringify(childResult.response.structured));
       const boundedOutput = rawOutput.length > 48_000 ? `${rawOutput.slice(0, 48_000)}\n[child output bounded locally]` : rawOutput;
@@ -5845,6 +5853,7 @@ export class AutonomousAgent {
       maxProviderFailovers: options.maxProviderFailovers,
       signal: options.signal,
       observer: options.observer,
+      selectionEventCallback: options.selectionEventCallback,
     });
     if (options.learning && synthesis.status === "completed") {
       const episodeId = `cross:${route.task_digest}:synthesis`;

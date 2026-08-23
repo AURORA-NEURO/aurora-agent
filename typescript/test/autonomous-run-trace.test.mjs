@@ -173,6 +173,9 @@ test("traced autonomous execution spans all domains and cross-domain fan-out wit
     assert.equal(execution.trace.provider_invocations, 1, domain);
     assert.ok(execution.trace.route_digest);
     assert.ok(execution.trace.plan_digest);
+    const phases = store.events({ run_id: `run-${domain}` }).map((event) => event.phase);
+    assert.ok(phases.includes("model_selection_started"), domain);
+    assert.ok(phases.includes("model_selection_finished"), domain);
     assert.equal(JSON.stringify(execution.trace).includes(taskFor(domain)), false);
   }
 
@@ -185,6 +188,7 @@ test("traced autonomous execution spans all domains and cross-domain fan-out wit
   assert.ok(cross.trace.domains.includes("cross_domain"));
   assert.ok(cross.trace.provider_invocations >= 2);
   assert.equal(cross.trace.provider_failures, 0);
+  assert.ok(store.events({ run_id: "run-cross-domain" }).some((event) => event.phase === "model_selection_finished"));
   assert.equal(JSON.stringify(cross.trace).includes("coordinate a biomedical neuroscience evidence review"), false);
   assert.equal(store.verifyIntegrity().verified, true);
 });

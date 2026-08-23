@@ -52,7 +52,7 @@ test("brain facade trace spans plan compilation and provider execution for every
     assert.equal(traced.trace.plan_digest, traced.execution.plan.plan_digest);
     const events = store.events({ run_id: `facade-${domain}` });
     assert.deepEqual(events.map((event) => event.phase), [
-      "started", "plan_compiled", "provider_invocation_started", "provider_invocation_finished", "completed",
+      "started", "plan_compiled", "model_selection_started", "model_selection_finished", "provider_invocation_started", "provider_invocation_finished", "completed",
     ], domain);
     assert.equal(JSON.stringify(traced.trace).includes(task), false);
   }

@@ -39,6 +39,8 @@ AUTONOMOUS_RUN_TRACE_PHASES = (
     "plan_compiled",
     "connector_started",
     "connector_finished",
+    "model_selection_started",
+    "model_selection_finished",
     "provider_invocation_started",
     "provider_invocation_finished",
     "evaluation_settled",

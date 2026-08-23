@@ -1453,6 +1453,15 @@ material into the observability store. Callbacks are synchronous and caller-owne
 deployments should keep them bounded and non-blocking or enqueue only the metadata projection for
 a separate trace writer.
 
+The TypeScript runtime also emits `model_selection_started` and
+`model_selection_finished` lifecycle events through `selectionEventCallback`. A finished event
+records only the selection digest, selected provider/model (when one exists), candidate and
+eligible counts, strategy, confidence/detail digest, attempt number, and whether the attempt was
+a failover. Selection abstentions are explicit `abstained`/`selection_abstained` events, so a
+confidence floor, unavailable credentials, disabled arms, or an exhausted failover set is visible
+before any provider request. A selected model is not treated as task success; provider health and
+evaluator rewards remain separate learning signals.
+
 The TypeScript SDK exposes the same boundary as `traceEventCallback` on
 `AutonomousConnectorRuntime.dispatch()`/`dispatchFromPlan()`, the operation and intent facades,
 durable connector workers, and the mission/workflow connector adapters. Its traced brain façade

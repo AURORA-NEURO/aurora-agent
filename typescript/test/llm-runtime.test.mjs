@@ -780,6 +780,62 @@ test("autonomous runtime gates candidates on provider readiness and feeds health
   await assert.rejects(gatedAgent.invoke({ ...plan, candidates: [{ ...candidates[0], provider: "openai", model: "gated-model", requires_credential: true }] }), ProviderRuntimeError);
 });
 
+test("autonomous runtime emits metadata-only selection lifecycle for selection and abstention", async () => {
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ output_text: "selection lifecycle answer" }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("selection", "https://selection.test", { requiresCredential: false }));
+  const candidate = { provider: "selection", model: "selection-1", context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.9, latency_ms: 25, cost_per_million_tokens: 5, reliability: 0.95 };
+  const events = [];
+  const agent = new AutonomousRuntime(runtime);
+  const result = await agent.invoke({
+    task: "Select one bounded model.",
+    domain: "evaluation",
+    capability: "reasoning",
+    candidates: [candidate],
+    request: request("selection-placeholder"),
+  }, { selectionEventCallback: (event) => events.push(event) });
+  assert.deepEqual(events.map((event) => event.phase), ["model_selection_started", "model_selection_finished"]);
+  assert.equal(events[0].status, "running");
+  assert.equal(events[0].selected_provider, null);
+  assert.equal(events[1].status, "selected");
+  assert.equal(events[1].selected_provider, "selection");
+  assert.equal(events[1].selected_model, "selection-1");
+  assert.equal(events[1].selection_digest.length, 64);
+  assert.equal(events[1].candidate_count, 1);
+  assert.equal(events[1].eligible_candidate_count, 1);
+  assert.equal(result.selection.selected_model.provider, "selection");
+  assert.ok(!JSON.stringify(events).includes("selection lifecycle answer"));
+
+  const abstentionEvents = [];
+  await assert.rejects(() => agent.invoke({
+    task: "Abstain when confidence is insufficient.",
+    domain: "evaluation",
+    capability: "reasoning",
+    minSelectionConfidence: 0.1,
+    candidates: [candidate, { ...candidate, model: "selection-2" }],
+    request: request("selection-placeholder"),
+  }, { selectionEventCallback: (event) => abstentionEvents.push(event) }), /autonomous selection abstained/);
+  assert.deepEqual(abstentionEvents.map((event) => event.status), ["running", "abstained"]);
+  assert.equal(abstentionEvents[1].failure_code, "selection_abstained");
+  assert.equal(abstentionEvents[1].selected_model, null);
+
+  const failureEvents = [];
+  const malformedSelector = new AutonomousRuntime(runtime, {
+    selector: async () => ({ selected_model: { provider: "missing", model: "missing" }, ranking: [], strategy: "caller_selector", abstention_reason: null }),
+  });
+  await assert.rejects(() => malformedSelector.invoke({
+    task: "Reject an invalid selector decision.",
+    domain: "evaluation",
+    capability: "reasoning",
+    candidates: [candidate],
+    request: request("selection-placeholder"),
+  }, { selectionEventCallback: (event) => failureEvents.push(event) }), /ineligible model/);
+  assert.deepEqual(failureEvents.map((event) => event.status), ["running", "failed"]);
+  assert.equal(failureEvents[1].failure_code, "provider_error");
+});
+
 test("autonomous selection applies caller budget, latency, and quality gates before dispatch", async () => {
   const runtime = new LLMRuntime({
     credentials: new CredentialStore(),
@@ -979,6 +1035,7 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   runtime.registerProvider(openaiCompatibleProvider("unstable", "https://unstable.test", { requiresCredential: false, maxAttempts: 1 }));
   runtime.registerProvider(openaiCompatibleProvider("stable", "https://stable.test", { requiresCredential: false, maxAttempts: 1 }));
   const journal = new InMemoryAutonomousExecutionJournal();
+  const selectionEvents = [];
   const execution = await AutonomousExecutionController.create({
     executionId: "autonomous-failover-1",
     domain: "general",
@@ -997,7 +1054,7 @@ test("autonomous runtime performs bounded provider failover and journals the adm
       { provider: "stable", model: "stable-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.6, latency_ms: 100, cost_per_million_tokens: 5, reliability: 0.7 },
     ],
     request: request("selection-placeholder"),
-  }, { execution });
+  }, { execution, selectionEventCallback: (event) => selectionEvents.push(event) });
   assert.equal(result.selection.selected_model.provider, "stable");
   assert.equal(result.response.text, "stable answer");
   assert.equal(calls.length, 2);
@@ -1005,6 +1062,8 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   assert.equal(calls[1], "https://stable.test/v1/chat/completions");
   assert.equal(execution.state.provider_calls, 2);
   assert.equal(execution.state.provider_failovers, 1);
+  assert.deepEqual(selectionEvents.map((event) => event.phase), ["model_selection_started", "model_selection_finished", "model_selection_started", "model_selection_finished"]);
+  assert.deepEqual(selectionEvents.filter((event) => event.phase === "model_selection_finished").map((event) => [event.status, event.selected_provider, event.failover]), [["selected", "unstable", false], ["selected", "stable", true]]);
   assert.equal((await journal.verifyIntegrity()).verified, true);
   await execution.complete();
 });
