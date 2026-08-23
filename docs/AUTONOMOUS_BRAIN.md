@@ -2151,7 +2151,8 @@ For service workers, `InMemoryAutonomousMissionReplanRemoteJobQueue` and
 `AutonomousMissionReplanRemoteWorker` provide a claim/lease/requeue boundary around the same
 cycle. A remote job contains only the root mission identity, protected-contract digest, planner
 status, plan-refinement digest, planner-quality settlement digest, lease/attempt metadata, and a
-result digest. The resolver owns
+result digest. It also records whether execution has not started, is in flight, or has settled.
+The resolver owns
 the mission payload, executor, credentials, evaluator, provider policy, and rehydration callback.
 `requeue()` is explicit for a `plan_review_required`, approval, reconciliation, or failed job;
 the caller can bind the accepted plan digest before a worker claims it again. Queue snapshots are
@@ -2160,6 +2161,11 @@ during private resolution and execution, expose a resolver-owned `renew()` hook,
 lost-lease settlement races as `leased_elsewhere` rather than fabricating completion. A worker therefore
 cannot reconstruct a missing mission from queue state and cannot silently replay a provider
 planner after a remote process restart.
+
+If a lease expires before the worker marks execution as running, the job can be safely reclaimed.
+If it expires after that boundary, the queue moves it to `reconciliation_required`; explicit caller
+review and `requeue()` are required before another attempt. This prevents a crashed worker from
+turning an uncertain external effect into an automatic duplicate dispatch.
 
 For applications that need one reviewed plan spanning several domain workflows, the TypeScript
 facade also exposes `planWorkflowPortfolio()`. Each item supplies an explicit domain and task,

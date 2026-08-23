@@ -215,3 +215,18 @@ test("remote mission worker rejects accepted-plan drift before dispatch", async 
   assert.equal(job.status, "failed");
   assert.equal(job.failure_class, "contract_mismatch");
 });
+
+test("remote mission queue quarantines expired in-flight execution until explicit reconciliation", async () => {
+  const queue = new InMemoryAutonomousMissionReplanRemoteJobQueue();
+  await queue.enqueue({ jobId: "in-flight-job", rootMissionId: "in-flight-root", protectedContractDigest: "e".repeat(64), availableAt: 0 });
+  const claimed = await queue.claimNext("worker-a", 10, 100);
+  await queue.beginExecution(claimed.job_id, "worker-a", 100);
+  assert.equal(await queue.claimNext("worker-b", 10, 200), null);
+  const quarantined = await queue.load("in-flight-job");
+  assert.equal(quarantined.status, "reconciliation_required");
+  assert.equal(quarantined.execution_phase, "running");
+  assert.equal(quarantined.failure_class, "lease_expired");
+  const reopened = await queue.requeue("in-flight-job", {}, 200);
+  assert.equal(reopened.status, "queued");
+  assert.equal(reopened.execution_phase, "not_started");
+});

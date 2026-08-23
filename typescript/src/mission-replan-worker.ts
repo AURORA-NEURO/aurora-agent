@@ -43,6 +43,8 @@ export type AutonomousMissionReplanRemoteJobFailureClass =
   | "transport_error"
   | "unknown";
 
+export type AutonomousMissionReplanRemoteJobExecutionPhase = "not_started" | "running" | "settled";
+
 export interface AutonomousMissionReplanRemoteJob extends JsonObject {
   schema: typeof AUTONOMOUS_MISSION_REPLAN_JOB_SCHEMA;
   job_id: string;
@@ -51,6 +53,7 @@ export interface AutonomousMissionReplanRemoteJob extends JsonObject {
   planning_status: "unknown" | "disabled" | "approval_required" | "plan_review_required" | "provider_invalid" | "provider_disagreement" | "accepted";
   plan_refinement_digest: string | null;
   status: AutonomousMissionReplanRemoteJobStatus;
+  execution_phase: AutonomousMissionReplanRemoteJobExecutionPhase;
   max_attempts: number;
   attempts: number;
   available_at: number;
@@ -110,6 +113,7 @@ export interface AutonomousMissionReplanRemoteJobQueueHandle {
   load(jobId: string): Promise<AutonomousMissionReplanRemoteJob | null>;
   claimNext(workerId: string, leaseMs?: number, now?: number): Promise<AutonomousMissionReplanRemoteJob | null>;
   renew(jobId: string, workerId: string, leaseMs?: number, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
+  beginExecution(jobId: string, workerId: string, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
   complete(jobId: string, workerId: string, result: AutonomousMissionReplanResult, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
   fail(jobId: string, workerId: string, failureClass: AutonomousMissionReplanRemoteJobFailureClass, failureCode: string, retryable: boolean, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
   cancel(jobId: string, now?: number): Promise<AutonomousMissionReplanRemoteJob>;
@@ -148,6 +152,7 @@ const JOB_RETENTION = "metadata_only_mission_and_plan_digests;mission_payloads_p
 const JOB_STATUSES: readonly AutonomousMissionReplanRemoteJobStatus[] = ["queued", "leased", "completed", "plan_review_required", "approval_required", "reconciliation_required", "failed", "dead_lettered", "cancelled"];
 const PLANNING_STATUSES: readonly AutonomousMissionReplanRemoteJob["planning_status"][] = ["unknown", "disabled", "approval_required", "plan_review_required", "provider_invalid", "provider_disagreement", "accepted"];
 const FAILURE_CLASSES: readonly AutonomousMissionReplanRemoteJobFailureClass[] = ["resolver_missing", "contract_mismatch", "plan_mismatch", "approval_required", "reconciliation_required", "lease_expired", "provider_error", "execution_error", "transport_error", "unknown"];
+const EXECUTION_PHASES: readonly AutonomousMissionReplanRemoteJobExecutionPhase[] = ["not_started", "running", "settled"];
 
 function clone<T>(value: T): T { return structuredClone(value); }
 
@@ -225,6 +230,7 @@ function validateJob(value: unknown): AutonomousMissionReplanRemoteJob {
   digest("mission remote protected_contract_digest", job.protected_contract_digest);
   planningStatus(job.planning_status);
   if (!JOB_STATUSES.includes(job.status)) throw new ArgumentError("mission remote job status is invalid");
+  if (!EXECUTION_PHASES.includes(job.execution_phase)) throw new ArgumentError("mission remote execution_phase is invalid");
   digest("mission remote plan_refinement_digest", job.plan_refinement_digest, true);
   integer("mission remote max_attempts", job.max_attempts, 1, MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS);
   integer("mission remote attempts", job.attempts, 0, job.max_attempts);
@@ -279,6 +285,7 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
       planning_status: admittedPlanningStatus,
       plan_refinement_digest: admittedPlanDigest,
       status: "queued",
+      execution_phase: "not_started",
       max_attempts: integer("mission remote maxAttempts", input.maxAttempts, 1, MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS, 3),
       attempts: 0,
       available_at: timestamp("mission remote availableAt", input.availableAt, now),
@@ -303,7 +310,13 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
   async claimNext(workerId: string, leaseMs = 60_000, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob | null> {
     const owner = identifier("mission remote workerId", workerId);
     const duration = integer("mission remote leaseMs", leaseMs, 1, MAX_AUTONOMOUS_MISSION_REPLAN_JOB_LEASE_MS);
-    const candidate = [...this.jobs.values()].filter((job) => (job.status === "queued" && job.available_at <= now) || (job.status === "leased" && (job.lease_until ?? 0) <= now)).sort((left, right) => left.available_at - right.available_at || left.job_id.localeCompare(right.job_id))[0];
+    for (const expired of this.jobs.values()) {
+      if (expired.status === "leased" && (expired.lease_until ?? 0) <= now && expired.execution_phase === "running") {
+        const reconciled = refresh(expired, { status: "reconciliation_required", failure_class: "lease_expired", failure_code: "execution_in_flight", lease_owner: null, lease_until: null }, now);
+        this.jobs.set(reconciled.job_id, reconciled);
+      }
+    }
+    const candidate = [...this.jobs.values()].filter((job) => (job.status === "queued" && job.available_at <= now) || (job.status === "leased" && job.execution_phase === "not_started" && (job.lease_until ?? 0) <= now)).sort((left, right) => left.available_at - right.available_at || left.job_id.localeCompare(right.job_id))[0];
     if (!candidate) return null;
     if (candidate.attempts >= candidate.max_attempts) {
       const dead = refresh(candidate, { status: "dead_lettered", failure_class: "lease_expired", failure_code: "attempt_limit" }, now);
@@ -323,21 +336,29 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
     return clone(renewed);
   }
 
+  async beginExecution(jobId: string, workerId: string, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> {
+    const job = this.assertLease(jobId, workerId, now);
+    const started = refresh(job, { execution_phase: "running" }, now);
+    this.jobs.set(started.job_id, started);
+    return clone(started);
+  }
+
   async complete(jobId: string, workerId: string, result: AutonomousMissionReplanResult, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> {
     const job = this.assertLease(jobId, workerId, now);
     const planDigest = result.plan_refinement ? digestJsonSync(result.plan_refinement) : null;
     if (job.protected_contract_digest !== result.protected_contract_digest) throw new ArgumentError("mission remote result protected contract does not match the job");
     if (job.plan_refinement_digest !== null && job.plan_refinement_digest !== planDigest) throw new ArgumentError("mission remote result plan digest does not match the job");
     const plannerSettlementDigest = result.planner_learning_settlement ? digestJsonSync(result.planner_learning_settlement) : null;
-    const next = refresh(job, { status: classifyResult(result), planning_status: result.planning_status, plan_refinement_digest: planDigest, planner_learning_settlement_digest: plannerSettlementDigest, result_digest: resultDigest(result), lease_owner: null, lease_until: null, failure_class: null, failure_code: null }, now);
+    const next = refresh(job, { status: classifyResult(result), execution_phase: "settled", planning_status: result.planning_status, plan_refinement_digest: planDigest, planner_learning_settlement_digest: plannerSettlementDigest, result_digest: resultDigest(result), lease_owner: null, lease_until: null, failure_class: null, failure_code: null }, now);
     this.jobs.set(next.job_id, next);
     return clone(next);
   }
 
   async fail(jobId: string, workerId: string, failureClass: AutonomousMissionReplanRemoteJobFailureClass, failureCode: string, retryable: boolean, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> {
     const job = this.assertLease(jobId, workerId, now);
+    const uncertainExecution = job.execution_phase === "running";
     const terminal = !retryable || job.attempts >= job.max_attempts;
-    const next = refresh(job, { status: terminal ? "failed" : "queued", available_at: terminal ? job.available_at : now + Math.min(60_000, 1_000 * 2 ** Math.max(0, job.attempts - 1)), lease_owner: null, lease_until: null, failure_class: failureClass, failure_code: identifier("mission remote failureCode", failureCode) }, now);
+    const next = refresh(job, { status: uncertainExecution ? "reconciliation_required" : terminal ? "failed" : "queued", execution_phase: uncertainExecution ? "running" : "not_started", available_at: terminal || uncertainExecution ? job.available_at : now + Math.min(60_000, 1_000 * 2 ** Math.max(0, job.attempts - 1)), lease_owner: null, lease_until: null, failure_class: uncertainExecution ? "reconciliation_required" : failureClass, failure_code: identifier("mission remote failureCode", uncertainExecution ? "execution_in_flight" : failureCode) }, now);
     this.jobs.set(next.job_id, next);
     return clone(next);
   }
@@ -346,7 +367,7 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
     const id = identifier("mission remote jobId", jobId);
     const job = this.jobs.get(id);
     if (!job) throw new ArgumentError("mission remote job was not found");
-    const next = refresh(job, { status: "cancelled", lease_owner: null, lease_until: null }, now);
+    const next = refresh(job, { status: "cancelled", execution_phase: "settled", lease_owner: null, lease_until: null }, now);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -359,7 +380,7 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
     const nextStatus = options.planningStatus === undefined ? job.planning_status : planningStatus(options.planningStatus);
     const nextPlanDigest = digest("mission remote requeue planRefinementDigest", options.planRefinementDigest ?? job.plan_refinement_digest, true);
     if (nextStatus === "accepted" && nextPlanDigest === null) throw new ArgumentError("accepted mission remote requeue requires a plan refinement digest");
-    const next = refresh(job, { status: "queued", planning_status: nextStatus, plan_refinement_digest: nextPlanDigest, planner_learning_settlement_digest: null, result_digest: null, failure_class: null, failure_code: null, lease_owner: null, lease_until: null, available_at: timestamp("mission remote requeue availableAt", options.availableAt, now) }, now);
+    const next = refresh(job, { status: "queued", execution_phase: "not_started", planning_status: nextStatus, plan_refinement_digest: nextPlanDigest, planner_learning_settlement_digest: null, result_digest: null, failure_class: null, failure_code: null, lease_owner: null, lease_until: null, available_at: timestamp("mission remote requeue availableAt", options.availableAt, now) }, now);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -467,6 +488,7 @@ export class AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator impleme
   async load(jobId: string): Promise<AutonomousMissionReplanRemoteJob | null> { return this.serialize(async () => { await this.loadLatest(); return this.queue.load(jobId); }); }
   async claimNext(workerId: string, leaseMs = 60_000, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob | null> { return this.transact((queue) => queue.claimNext(workerId, leaseMs, now)); }
   async renew(jobId: string, workerId: string, leaseMs = 60_000, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.renew(jobId, workerId, leaseMs, now)); }
+  async beginExecution(jobId: string, workerId: string, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.beginExecution(jobId, workerId, now)); }
   async complete(jobId: string, workerId: string, result: AutonomousMissionReplanResult, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.complete(jobId, workerId, result, now)); }
   async fail(jobId: string, workerId: string, failureClass: AutonomousMissionReplanRemoteJobFailureClass, failureCode: string, retryable: boolean, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.fail(jobId, workerId, failureClass, failureCode, retryable, now)); }
   async cancel(jobId: string, now = Date.now()): Promise<AutonomousMissionReplanRemoteJob> { return this.transact((queue) => queue.cancel(jobId, now)); }
@@ -614,6 +636,7 @@ export class AutonomousMissionReplanRemoteWorker {
           if (!privatePlan || digestJsonSync(privatePlan) !== job.plan_refinement_digest) throw new AutonomousMissionReplanContractError("private resolver plan does not match the queued plan refinement digest");
         }
         if (heartbeatError !== null) throw new ProviderRuntimeError("mission remote worker lease heartbeat failed before execution", { code: "transport", retryable: true });
+        await this.queue.beginExecution(job.job_id, this.workerId, clock());
         const result = await runAutonomousMissionReplanCycle(resolved.executor, resolved.mission, resolved.options);
         if (heartbeatError !== null) throw new ProviderRuntimeError("mission remote worker lease heartbeat failed after execution", { code: "transport", retryable: true });
         const completed = await this.queue.complete(job.job_id, this.workerId, result, clock());

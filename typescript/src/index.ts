@@ -2055,6 +2055,7 @@ export {
 export type {
   AutonomousMissionReplanRemoteJobStatus,
   AutonomousMissionReplanRemoteJobFailureClass,
+  AutonomousMissionReplanRemoteJobExecutionPhase,
   AutonomousMissionReplanRemoteJob,
   AutonomousMissionReplanRemoteJobQueueSnapshot,
   AutonomousMissionReplanRemoteJobQueuePersistence,
