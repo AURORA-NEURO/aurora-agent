@@ -13,6 +13,26 @@ export {
   ProviderRuntimeError,
 } from "./errors.js";
 export type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
+export {
+  AUTONOMOUS_SELECTION_LAB_CASE_SCHEMA,
+  AUTONOMOUS_SELECTION_LAB_REPORT_SCHEMA,
+  MAX_AUTONOMOUS_SELECTION_LAB_CASES,
+  MAX_AUTONOMOUS_SELECTION_LAB_CANDIDATES,
+  MAX_AUTONOMOUS_SELECTION_LAB_CAPABILITIES,
+  MAX_AUTONOMOUS_SELECTION_LAB_HEALTH_ROWS,
+  MAX_AUTONOMOUS_SELECTION_LAB_TASK_BYTES,
+  MAX_AUTONOMOUS_SELECTION_LAB_REPORT_BYTES,
+  evaluateAutonomousSelectionPolicy,
+  validateAutonomousSelectionLabReport,
+} from "./autonomous-selection-lab.js";
+export type {
+  AutonomousSelectionLabCase,
+  AutonomousSelectionLabCaseResult,
+  AutonomousSelectionLabDomainReport,
+  AutonomousSelectionLabReport,
+  AutonomousSelectionLabOptions,
+  AutonomousSelectionLabStatus,
+} from "./autonomous-selection-lab.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,

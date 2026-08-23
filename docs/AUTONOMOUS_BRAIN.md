@@ -1722,6 +1722,37 @@ and health/credential posture; a configured `in_memory` provider is eligible wit
 an unregistered or credential-gated provider returns the same reviewable refusal metadata without
 attempting transport.
 
+### Offline selection-policy replay and regret lab
+
+The TypeScript SDK also exposes `evaluateAutonomousSelectionPolicy(...)` for measuring the
+decision policy itself before it is connected to a provider. A caller supplies bounded selection
+requests and caller-owned counterfactual evaluator rewards keyed by `provider/model` arm. The
+lab reuses the production deterministic health/utility ranker, or a supplied
+`AutonomousOnlineLearner`/selector, and reports selected arms, the best eligible rewarded arm,
+oracle agreement, regret, abstention, missing-reward coverage, and no-eligible-model counts for
+each of the twelve built-in domains.
+
+```typescript
+const report = await evaluateAutonomousSelectionPolicy(cases, {
+  learner,
+  requireAllDomains: true,
+});
+
+if (report.status === "insufficient_coverage") {
+  throw new Error(`selection coverage is missing: ${report.missing_domains.join(", ")}`);
+}
+console.log(report.oracle_agreement_rate, report.mean_regret);
+```
+
+This is a policy-evaluation boundary, not a source of ground truth: the caller owns reward
+construction and must define what evaluator evidence means. It never invokes a provider, reads
+or requests a credential, mutates learner state, or treats selection confidence as answer
+correctness. Inputs are validated for bounded candidates, health, rewards, domains, and request
+identity. The returned report contains only task/request digests, arm identifiers, aggregate
+metrics, and explicit abstention statuses; raw task text, candidate metadata, rewards, and raw
+selector rankings are not retained. `requireAllDomains: true` turns the twelve-domain matrix
+into an explicit readiness gate instead of silently accepting a partial benchmark.
+
 ### Digest-bound approval handoff
 
 Preview output is intentionally not an authorization token. After an operator reviews a selected
