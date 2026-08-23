@@ -476,6 +476,7 @@ class AutonomousConnectorMissionAdapter:
         context: AutonomousConnectorMissionStepContext,
         *,
         request_payload: Mapping[str, Any] | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorMissionStepExecution:
         if not isinstance(context, AutonomousConnectorMissionStepContext):
             raise ArgumentError("connector mission execute_step requires typed context")
@@ -504,7 +505,11 @@ class AutonomousConnectorMissionAdapter:
             selection_plan_digest=plan.plan_digest,
             approved=self.approved,
         )
-        result = self.runtime.dispatch_from_plan(plan, request_obj)
+        result = self.runtime.dispatch_from_plan(
+            plan,
+            request_obj,
+            trace_event_callback=trace_event_callback,
+        )
         value, recovery_required = self._rehydrate(result)
         decision = {
             "selection_digest": plan.plan_digest,
@@ -754,6 +759,7 @@ def run_autonomous_connector_mission(
     selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
     feedback_ledger: InMemoryAutonomousConnectorFeedbackLedger | None = None,
     feedback_by_step: Mapping[str, Mapping[str, Any]] | None = None,
+    trace_event_callback: Callable[..., Any] | None = None,
 ) -> AutonomousConnectorMissionRun:
     """Execute a typed mission DAG through reviewed connectors without model credentials."""
 
@@ -765,6 +771,8 @@ def run_autonomous_connector_mission(
         raise ArgumentError("connector mission request_for_step must be callable")
     if rehydrate_payload is not None and not callable(rehydrate_payload):
         raise ArgumentError("connector mission rehydrate_payload must be callable")
+    if trace_event_callback is not None and not callable(trace_event_callback):
+        raise ArgumentError("connector mission trace_event_callback must be callable")
     if resume_outputs is not None:
         resume_outputs = _safe_object("connector mission resume_outputs", resume_outputs, maximum=2_000_000)
     if feedback_by_step is not None:
@@ -870,7 +878,11 @@ def run_autonomous_connector_mission(
             completed_step_ids=tuple(sorted(completed)),
         )
         payload = None if request_for_step is None else request_for_step(context)
-        execution = adapter.execute_step(context, request_payload=payload)
+        execution = adapter.execute_step(
+            context,
+            request_payload=payload,
+            trace_event_callback=trace_event_callback,
+        )
         executions.append(execution)
         if feedback_by_step is not None and ready.id in feedback_by_step:
             feedback_receipts.append(adapter.settle_evaluator_feedback(execution, feedback_by_step[ready.id]))

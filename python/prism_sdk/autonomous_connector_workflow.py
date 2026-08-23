@@ -515,6 +515,7 @@ class AutonomousConnectorWorkflowAdapter:
         context: AutonomousConnectorWorkflowStageContext,
         *,
         request_payload: Mapping[str, Any] | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorWorkflowStageExecution:
         if not isinstance(context, AutonomousConnectorWorkflowStageContext):
             raise ArgumentError("connector workflow execute_stage requires typed context")
@@ -557,7 +558,11 @@ class AutonomousConnectorWorkflowAdapter:
             selection_plan_digest=selection_plan.plan_digest,
             approved=self.approved,
         )
-        dispatch_result = self.runtime.dispatch_from_plan(selection_plan, dispatch_request)
+        dispatch_result = self.runtime.dispatch_from_plan(
+            selection_plan,
+            dispatch_request,
+            trace_event_callback=trace_event_callback,
+        )
         payload, recovery_required = self._rehydrate(dispatch_result)
         if recovery_required:
             stage_result = AutonomousWorkflowStageResult(
@@ -671,6 +676,7 @@ def run_autonomous_connector_workflow(
     evidence_evaluator: Any | None = None,
     require_evidence_acceptance: bool | None = None,
     parent_evidence_digests: Sequence[str] = (),
+    trace_event_callback: Callable[..., Any] | None = None,
 ) -> AutonomousWorkflowRun:
     """Execute every ready workflow stage through the connector adapter and checkpoint it."""
 
@@ -684,6 +690,8 @@ def run_autonomous_connector_workflow(
         raise ArgumentError("connector workflow request_for_stage must be callable")
     if rehydrate_payload is not None and not callable(rehydrate_payload):
         raise ArgumentError("connector workflow rehydrate_payload must be callable")
+    if trace_event_callback is not None and not callable(trace_event_callback):
+        raise ArgumentError("connector workflow trace_event_callback must be callable")
     if max_stage_calls is None:
         max_stage_calls = len(blueprint.workflow.stages)
     if isinstance(max_stage_calls, bool) or not isinstance(max_stage_calls, int) or not 1 <= max_stage_calls <= MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_CALLS:
@@ -797,7 +805,11 @@ def run_autonomous_connector_workflow(
             completed_stage_ids=tuple(sorted(completed)),
         )
         request_payload = None if request_for_stage is None else request_for_stage(context)
-        execution = adapter.execute_stage(context, request_payload=request_payload)
+        execution = adapter.execute_stage(
+            context,
+            request_payload=request_payload,
+            trace_event_callback=trace_event_callback,
+        )
         stage_result = execution.stage_result
         if stage_result.structured is not None:
             declared, evidence, uncertainty, errors = AutonomousTaskOrchestrator._validate_workflow_stage_output(

@@ -1272,18 +1272,55 @@ class AutonomousConnectorRuntime:
         self._lock = threading.RLock()
         self._inflight: dict[str, _AutonomousConnectorInFlight] = {}
 
-    def dispatch(self, request: AutonomousConnectorDispatchRequest) -> AutonomousConnectorDispatchResult:
+    def dispatch(
+        self,
+        request: AutonomousConnectorDispatchRequest,
+        *,
+        trace_event_callback: Callable[..., Any] | None = None,
+    ) -> AutonomousConnectorDispatchResult:
         if not isinstance(request, AutonomousConnectorDispatchRequest):
             raise ArgumentError("autonomous connector dispatch requires a typed request")
+        if trace_event_callback is not None and not callable(trace_event_callback):
+            raise ArgumentError("autonomous connector trace_event_callback must be callable or None")
         registration = self.registry.resolve(request.connector_id)
         request_digest = request.request_digest
         replay = self._find_replay(request, registration, request_digest)
         if replay is not None:
+            self._emit_trace(
+                trace_event_callback,
+                request=request,
+                registration=registration,
+                phase="connector_started",
+                status="running",
+            )
+            self._emit_trace(
+                trace_event_callback,
+                request=request,
+                registration=registration,
+                phase="connector_finished",
+                status=self._trace_status(replay.receipt.status),
+                receipt=replay.receipt,
+            )
             return replay
         identity = _connector_dispatch_identity_digest(request)
         with self._lock:
             replay = self._find_replay(request, registration, request_digest)
             if replay is not None:
+                self._emit_trace(
+                    trace_event_callback,
+                    request=request,
+                    registration=registration,
+                    phase="connector_started",
+                    status="running",
+                )
+                self._emit_trace(
+                    trace_event_callback,
+                    request=request,
+                    registration=registration,
+                    phase="connector_finished",
+                    status=self._trace_status(replay.receipt.status),
+                    receipt=replay.receipt,
+                )
                 return replay
             pending = self._inflight.get(identity)
             if pending is None:
@@ -1295,15 +1332,35 @@ class AutonomousConnectorRuntime:
                     raise ArgumentError("autonomous connector dispatch identity conflicts with request metadata")
                 owner = False
         if not owner:
+            self._emit_trace(
+                trace_event_callback,
+                request=request,
+                registration=registration,
+                phase="connector_started",
+                status="running",
+            )
             pending.event.wait()
             outcome = pending.outcome
             if isinstance(outcome, BaseException):
                 raise outcome
             if outcome is None:
                 raise ArgumentError("autonomous connector in-flight execution completed without an outcome")
+            self._emit_trace(
+                trace_event_callback,
+                request=request,
+                registration=registration,
+                phase="connector_finished",
+                status=self._trace_status(outcome.receipt.status),
+                receipt=outcome.receipt,
+            )
             return AutonomousConnectorDispatchResult(outcome.receipt, outcome.value, replay="replayed")
         try:
-            outcome = self._dispatch_fresh(request, registration, request_digest)
+            outcome = self._dispatch_fresh(
+                request,
+                registration,
+                request_digest,
+                trace_event_callback=trace_event_callback,
+            )
             with self._lock:
                 pending.outcome = outcome
             return outcome
@@ -1321,6 +1378,8 @@ class AutonomousConnectorRuntime:
         self,
         plan: AutonomousConnectorSelectionPlan | Mapping[str, Any],
         request: AutonomousConnectorDispatchRequest,
+        *,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorDispatchResult:
         """Dispatch only when a reviewed selection plan still matches the live registry."""
 
@@ -1340,15 +1399,24 @@ class AutonomousConnectorRuntime:
             row = rows.get(domain)
             if row is None or row.status != "selected" or row.connector_id != request.connector_id:
                 raise ArgumentError("autonomous connector planned dispatch does not select the requested connector")
-        return self.dispatch(request)
+        return self.dispatch(request, trace_event_callback=trace_event_callback)
 
     def _dispatch_fresh(
         self,
         request: AutonomousConnectorDispatchRequest,
         registration: AutonomousConnectorRegistration,
         request_digest: str,
+        *,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorDispatchResult:
         manifest = registration.manifest
+        self._emit_trace(
+            trace_event_callback,
+            request=request,
+            registration=registration,
+            phase="connector_started",
+            status="running",
+        )
         missing_domains = sorted(set(request.domains) - set(manifest.domains))
         if missing_domains:
             return self._finish(
@@ -1357,6 +1425,7 @@ class AutonomousConnectorRuntime:
                 status="refused",
                 failure_class="domain_scope",
                 request_digest=request_digest,
+                trace_event_callback=trace_event_callback,
             )
         if request.capability not in manifest.capabilities:
             return self._finish(
@@ -1365,6 +1434,7 @@ class AutonomousConnectorRuntime:
                 status="refused",
                 failure_class="capability_scope",
                 request_digest=request_digest,
+                trace_event_callback=trace_event_callback,
             )
         if registration.approval_required and not request.approved:
             return self._finish(
@@ -1373,6 +1443,7 @@ class AutonomousConnectorRuntime:
                 status="refused",
                 failure_class="approval_required",
                 request_digest=request_digest,
+                trace_event_callback=trace_event_callback,
             )
         try:
             raw = registration.executor(manifest, request.request)
@@ -1384,6 +1455,7 @@ class AutonomousConnectorRuntime:
                 status="error",
                 failure_class="executor_error",
                 request_digest=request_digest,
+                trace_event_callback=trace_event_callback,
             )
         payload_digest = None if observation.value is None else content_digest(observation.value)
         return self._finish(
@@ -1394,6 +1466,41 @@ class AutonomousConnectorRuntime:
             request_digest=request_digest,
             payload_digest=payload_digest,
             value=observation.value,
+            trace_event_callback=trace_event_callback,
+        )
+
+    @staticmethod
+    def _trace_status(status: str) -> str:
+        return {
+            "observed": "completed",
+            "partial": "partial",
+            "refused": "refused",
+            "error": "failed",
+            "unknown": "unknown",
+        }.get(status, "unknown")
+
+    @classmethod
+    def _emit_trace(
+        cls,
+        callback: Callable[..., Any] | None,
+        *,
+        request: AutonomousConnectorDispatchRequest,
+        registration: AutonomousConnectorRegistration,
+        phase: str,
+        status: str,
+        receipt: AutonomousConnectorDispatchReceipt | None = None,
+    ) -> None:
+        if callback is None:
+            return
+        callback(
+            phase=phase,
+            status=status,
+            domains=request.domains,
+            route_digest=request.selection_plan_digest,
+            detail_digest=request.request_digest if receipt is None else receipt.payload_digest,
+            provider=registration.manifest.provider,
+            failure_class=None if receipt is None else receipt.failure_class,
+            failure_code=None if receipt is None else receipt.failure_class,
         )
 
     def _find_replay(
@@ -1430,6 +1537,7 @@ class AutonomousConnectorRuntime:
         request_digest: str,
         payload_digest: str | None = None,
         value: Any = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorDispatchResult:
         manifest = registration.manifest
         receipt = AutonomousConnectorDispatchReceipt(
@@ -1467,6 +1575,14 @@ class AutonomousConnectorRuntime:
                 self.receipt_sink(persisted_receipt)
             except Exception as error:
                 raise ArgumentError("autonomous connector receipt sink failed") from error
+        self._emit_trace(
+            trace_event_callback,
+            request=request,
+            registration=registration,
+            phase="connector_finished",
+            status=self._trace_status(receipt.status),
+            receipt=persisted_receipt,
+        )
         return AutonomousConnectorDispatchResult(persisted_receipt, value, replay="fresh")
 
 

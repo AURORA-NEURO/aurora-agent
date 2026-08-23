@@ -806,6 +806,7 @@ from .autonomous_model_inventory import (
 )
 from .llm_runtime import (
     CredentialError,
+    CompositeProviderInvocationObserver,
     CredentialHandle,
     CredentialProvisioner,
     CredentialProvisioningReceipt,
@@ -5792,6 +5793,7 @@ __all__ = [
     "AutonomousToolReplayEngine",
     "AutonomousToolReplayReport",
     "CredentialError",
+    "CompositeProviderInvocationObserver",
     "CredentialHandle",
     "CredentialProvisioner",
     "CredentialProvisioningReceipt",

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from types import SimpleNamespace
+import threading
 
 import pytest
 
@@ -19,6 +21,8 @@ from prism_sdk import (
     AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
     AutonomousConnectorSelectionPlan,
+    AutonomousRunTraceSession,
+    InMemoryAutonomousRunTraceStore,
     ApiClient,
     DomainEvidenceSourceExecutionRequest,
     DomainEvidenceSourcePlanRequest,
@@ -103,6 +107,57 @@ def test_connector_registry_plans_and_dispatches_every_builtin_domain() -> None:
     encoded = json.dumps(results[0].to_dict())
     assert '"request":' not in encoded
     assert '"value":' not in encoded
+
+
+def test_connector_dispatch_trace_bridge_covers_every_builtin_domain() -> None:
+    registry = AutonomousConnectorRegistry()
+    for domain in AUTONOMOUS_DOMAINS:
+        registry.register(_registration(domain, lambda _manifest, request: {"domain": request["query"]}, approval_required=False))
+    runtime = AutonomousConnectorRuntime(registry)
+    store = InMemoryAutonomousRunTraceStore(clock=lambda: 1)
+    session = AutonomousRunTraceSession(
+        store,
+        run_id="connector-trace",
+        task_digest="a" * 64,
+        domains=AUTONOMOUS_DOMAINS,
+    )
+    session.started()
+    for domain in AUTONOMOUS_DOMAINS:
+        runtime.dispatch(_request(domain), trace_event_callback=session.record)
+    session.complete(status="completed")
+    events = store.events({"run_id": "connector-trace"})
+    assert sum(event.phase == "connector_started" for event in events) == len(AUTONOMOUS_DOMAINS)
+    assert sum(event.phase == "connector_finished" for event in events) == len(AUTONOMOUS_DOMAINS)
+    assert all(event.status == "completed" for event in events if event.phase == "connector_finished")
+    assert session.summary().domains == tuple(sorted(AUTONOMOUS_DOMAINS))
+
+
+def test_connector_dispatch_trace_bridge_covers_replay_and_inflight_waiters() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    events: list[dict[str, object]] = []
+
+    def execute(_manifest, _request):
+        entered.set()
+        assert release.wait(timeout=5)
+        return {"ok": True}
+
+    registry = AutonomousConnectorRegistry([_registration("coding", execute, approval_required=False)])
+    runtime = AutonomousConnectorRuntime(registry)
+    request = _request("coding")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        callback = lambda **event: events.append(event)
+        first = pool.submit(runtime.dispatch, request, trace_event_callback=callback)
+        assert entered.wait(timeout=5)
+        second = pool.submit(runtime.dispatch, request, trace_event_callback=callback)
+        release.set()
+        first_result = first.result(timeout=5)
+        second_result = second.result(timeout=5)
+
+    assert {first_result.replay, second_result.replay} == {"fresh", "replayed"}
+    assert [event["phase"] for event in events].count("connector_started") == 2
+    assert [event["phase"] for event in events].count("connector_finished") == 2
 
 
 def test_connector_selection_plan_is_deterministic_reviewable_and_bound_to_dispatch() -> None:

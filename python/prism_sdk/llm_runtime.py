@@ -240,6 +240,49 @@ class ProviderInvocationObserver(Protocol):
         ...
 
 
+class CompositeProviderInvocationObserver:
+    """Fan out value-only provider lifecycle notifications to multiple observers.
+
+    The execution-policy observer remains in the chain alongside telemetry observers. Each
+    observer receives the same metadata object, and no composite method accepts provider
+    messages, credentials, response text, or wire payloads.
+    """
+
+    __slots__ = ("_observers",)
+
+    def __init__(self, observers: Sequence[ProviderInvocationObserver | None]) -> None:
+        selected = tuple(observer for observer in observers if observer is not None)
+        if not selected:
+            raise ValueError("composite provider invocation observer requires at least one observer")
+        if any(not callable(getattr(observer, "before", None)) or not callable(getattr(observer, "after", None)) for observer in selected):
+            raise TypeError("composite provider invocation observers must implement before and after")
+        self._observers = selected
+
+    @property
+    def observers(self) -> tuple[ProviderInvocationObserver, ...]:
+        return self._observers
+
+    def before(self, metadata: ProviderInvocationMetadata) -> None:
+        for observer in self._observers:
+            observer.before(metadata)
+
+    def after(
+        self,
+        metadata: ProviderInvocationMetadata,
+        response: "ProviderResponse | None",
+        error: BaseException | None,
+        latency_ms: float,
+    ) -> None:
+        failures: list[BaseException] = []
+        for observer in self._observers:
+            try:
+                observer.after(metadata, response, error, latency_ms)
+            except BaseException as observer_error:
+                failures.append(observer_error)
+        if failures:
+            raise failures[0]
+
+
 class SecretValue:
     """A non-serializable secret wrapper whose display forms are always redacted."""
 

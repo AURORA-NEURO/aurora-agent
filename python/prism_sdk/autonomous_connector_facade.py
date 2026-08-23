@@ -18,7 +18,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import threading
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
 from .autonomous_connector_worker import (
@@ -379,16 +379,20 @@ class AutonomousConnectorOperationFacade:
     def execute(
         self,
         value: AutonomousConnectorOperationInput | Mapping[str, Any],
+        *,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorOperationExecution:
         prepared = self._prepare(self._coerce(value))
         if prepared.dispatch is None or prepared.plan.status != "ready":
             raise BrainRunError("connector operation has no eligible connector")
-        return self._dispatch(prepared)
+        return self._dispatch(prepared, trace_event_callback=trace_event_callback)
 
     def execute_planned(
         self,
         plan: AutonomousConnectorOperationPlan,
         value: AutonomousConnectorOperationInput | Mapping[str, Any],
+        *,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorOperationExecution:
         if not isinstance(plan, AutonomousConnectorOperationPlan):
             raise ArgumentError("connector operation execute_planned requires a typed plan")
@@ -397,7 +401,7 @@ class AutonomousConnectorOperationFacade:
             raise ArgumentError("connector operation plan does not match the supplied transient request")
         if prepared.dispatch is None:
             raise BrainRunError("connector operation plan has no eligible connector")
-        return self._dispatch(prepared)
+        return self._dispatch(prepared, trace_event_callback=trace_event_callback)
 
     def prepare_dispatch(
         self,
@@ -421,6 +425,7 @@ class AutonomousConnectorOperationFacade:
         *,
         max_parallelism: int = 4,
         stop_on_error: bool = False,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorOperationBatchResult:
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
             raise ArgumentError("connector operation batch must be a sequence")
@@ -452,7 +457,10 @@ class AutonomousConnectorOperationFacade:
                     items[index] = {"index": index, "status": "omitted", "plan_digest": None}
                     continue
                 try:
-                    execution = self.execute(values[index])
+                    execution = self.execute(
+                        values[index],
+                        trace_event_callback=trace_event_callback,
+                    )
                     succeeded = execution.status in {"observed", "partial"}
                     items[index] = {
                         "index": index,
@@ -634,10 +642,19 @@ class AutonomousConnectorOperationFacade:
         )
         return _PreparedOperation(operation, request, dispatch, plan)
 
-    def _dispatch(self, prepared: _PreparedOperation) -> AutonomousConnectorOperationExecution:
+    def _dispatch(
+        self,
+        prepared: _PreparedOperation,
+        *,
+        trace_event_callback: Callable[..., Any] | None = None,
+    ) -> AutonomousConnectorOperationExecution:
         if prepared.dispatch is None:
             raise BrainRunError("connector operation has no dispatch request")
-        result = self.runtime.dispatch_from_plan(prepared.plan.selection_plan, prepared.dispatch)
+        result = self.runtime.dispatch_from_plan(
+            prepared.plan.selection_plan,
+            prepared.dispatch,
+            trace_event_callback=trace_event_callback,
+        )
         return AutonomousConnectorOperationExecution(
             status=result.receipt.status,
             operation_plan=prepared.plan,
@@ -1069,6 +1086,7 @@ class AutonomousConnectorIntentFacade:
         selection_strategy: str = "lexicographic_connector_id",
         selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
         stop_on_error: bool = True,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorIntentExecution:
         if not isinstance(plan, AutonomousConnectorIntentPlan):
             raise ArgumentError("connector intent execute requires a typed plan")
@@ -1119,7 +1137,11 @@ class AutonomousConnectorIntentFacade:
                 selection_signals=selection_signals,
             )
             try:
-                execution = self.operation_facade.execute_planned(selection.operation_plan, operation_input)
+                execution = self.operation_facade.execute_planned(
+                    selection.operation_plan,
+                    operation_input,
+                    trace_event_callback=trace_event_callback,
+                )
                 succeeded = execution.status in {"observed", "partial"}
                 executions.append(execution)
                 items[index] = {

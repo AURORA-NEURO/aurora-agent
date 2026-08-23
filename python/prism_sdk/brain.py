@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 from .llm_runtime import (
     CredentialError,
     CredentialHandle,
+    CompositeProviderInvocationObserver,
     LLMRuntime,
     ProviderContentPart,
     ProviderRequest,
@@ -2537,6 +2538,20 @@ class MissionToolAuthorizer:
         )
 
 
+def _compose_provider_observers(
+    policy_observer: ProviderInvocationObserver | None,
+    external_observer: ProviderInvocationObserver | None,
+) -> ProviderInvocationObserver | None:
+    """Keep execution admission and caller telemetry attached to the same provider turn."""
+
+    observers = tuple(observer for observer in (policy_observer, external_observer) if observer is not None)
+    if not observers:
+        return None
+    if len(observers) == 1:
+        return observers[0]
+    return CompositeProviderInvocationObserver(observers)
+
+
 class AutonomousBrain:
     """Coordinate the value-only Rust kernel with a real caller-approved provider invocation."""
 
@@ -3317,6 +3332,7 @@ class AutonomousBrain:
         tool_choice: str | None = None,
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
     ) -> BrainRunResult:
         """Select, plan, and invoke from live providers using caller-persisted learning state."""
 
@@ -3379,9 +3395,9 @@ class AutonomousBrain:
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive selection returned malformed provider metadata")
             selected_id = f"{provider}/{model}"
-            invocation_observer = None
+            policy_observer = None
             if execution_controller is not None:
-                invocation_observer = AutonomousProviderInvocationSession(
+                policy_observer = AutonomousProviderInvocationSession(
                     controller=execution_controller,
                     provider=provider,
                     model=model,
@@ -3390,6 +3406,7 @@ class AutonomousBrain:
                     attempt=attempt,
                     kind="provider_call",
                 )
+            effective_observer = _compose_provider_observers(policy_observer, invocation_observer)
             try:
                 result = self.run(
                     task=task,
@@ -3409,10 +3426,10 @@ class AutonomousBrain:
                     contextual_observations=effective_contextual_observations,
                     tools=tools,
                     tool_choice=tool_choice,
-                    invocation_observer=invocation_observer,
+                    invocation_observer=effective_observer,
                 )
-                if invocation_observer is not None:
-                    result = replace(result, provider_invocations=invocation_observer.evidence())
+                if policy_observer is not None:
+                    result = replace(result, provider_invocations=policy_observer.evidence())
                 if not failover_attempts:
                     return result
                 invocation_receipts.extend(result.provider_invocations)
@@ -3437,8 +3454,8 @@ class AutonomousBrain:
                     provider_invocations=tuple(invocation_receipts),
                 )
             except ProviderError as error:
-                if invocation_observer is not None:
-                    invocation_receipts.extend(invocation_observer.evidence())
+                if policy_observer is not None:
+                    invocation_receipts.extend(policy_observer.evidence())
                 failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
@@ -3487,6 +3504,7 @@ class AutonomousBrain:
         tool_loop_options: Mapping[str, Any] | None = None,
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
     ) -> BrainToolLoopResult:
         """Select adaptively, then enter the bounded route-aware native tool loop.
 
@@ -3600,9 +3618,9 @@ class AutonomousBrain:
             attempt_state: dict[str, Any] = {}
             attempt_options = dict(options)
             attempt_options["attempt_state"] = attempt_state
-            invocation_observer = None
+            policy_observer = None
             if execution_controller is not None:
-                invocation_observer = AutonomousProviderInvocationSession(
+                policy_observer = AutonomousProviderInvocationSession(
                     controller=execution_controller,
                     provider=provider,
                     model=model,
@@ -3611,6 +3629,7 @@ class AutonomousBrain:
                     attempt=attempt,
                     kind="tool_loop_turn",
                 )
+            effective_observer = _compose_provider_observers(policy_observer, invocation_observer)
             try:
                 result = self.run_tool_loop(
                     task=task,
@@ -3621,15 +3640,15 @@ class AutonomousBrain:
                     context=effective_context,
                     content_parts=content_parts,
                     contextual_observations=effective_contextual_observations,
-                    invocation_observer=invocation_observer,
+                    invocation_observer=effective_observer,
                     **attempt_options,
                 )
-                if invocation_observer is not None:
+                if policy_observer is not None:
                     result = replace(
                         result,
                         brain_run=replace(
                             result.brain_run,
-                            provider_invocations=invocation_observer.evidence(),
+                            provider_invocations=policy_observer.evidence(),
                         ),
                     )
                 if not failover_attempts:
@@ -3661,8 +3680,8 @@ class AutonomousBrain:
             except ProviderError as error:
                 if attempt_state.get("tool_authorization_started"):
                     raise
-                if invocation_observer is not None:
-                    invocation_receipts.extend(invocation_observer.evidence())
+                if policy_observer is not None:
+                    invocation_receipts.extend(policy_observer.evidence())
                 failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
@@ -3728,6 +3747,7 @@ class AutonomousBrain:
         tool_choice: str | None = None,
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
     ) -> BrainMissionResult:
         """Select, route, plan, and execute one bounded cross-domain mission.
 
@@ -3812,9 +3832,9 @@ class AutonomousBrain:
                 raise BrainRunError("adaptive mission selection returned malformed provider metadata")
             selected_id = f"{provider}/{model}"
             attempt_state: dict[str, Any] = {}
-            invocation_observer = None
+            policy_observer = None
             if execution_controller is not None:
-                invocation_observer = AutonomousProviderInvocationSession(
+                policy_observer = AutonomousProviderInvocationSession(
                     controller=execution_controller,
                     provider=provider,
                     model=model,
@@ -3823,6 +3843,7 @@ class AutonomousBrain:
                     attempt=attempt,
                     kind="mission_proposal",
                 )
+            effective_observer = _compose_provider_observers(policy_observer, invocation_observer)
             try:
                 result = self.run_mission(
                     task=task,
@@ -3853,14 +3874,14 @@ class AutonomousBrain:
                     provider_tools=provider_tools,
                     tool_choice=tool_choice,
                     attempt_state=attempt_state,
-                    invocation_observer=invocation_observer,
+                    invocation_observer=effective_observer,
                 )
-                if invocation_observer is not None:
+                if policy_observer is not None:
                     result = replace(
                         result,
                         brain_run=replace(
                             result.brain_run,
-                            provider_invocations=invocation_observer.evidence(),
+                            provider_invocations=policy_observer.evidence(),
                         ),
                     )
                 if not failover_attempts:
@@ -3892,8 +3913,8 @@ class AutonomousBrain:
             except ProviderError as error:
                 if attempt_state.get("mission_dispatch_started"):
                     raise
-                if invocation_observer is not None:
-                    invocation_receipts.extend(invocation_observer.evidence())
+                if policy_observer is not None:
+                    invocation_receipts.extend(policy_observer.evidence())
                 failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
@@ -3943,6 +3964,7 @@ class AutonomousBrain:
         trajectory_terminal_reward: float | None = None,
         mission_options: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
     ) -> BrainLearningCycleResult:
         """Run, evaluate, remember, and boundedly replan a cross-domain mission.
 
@@ -4106,6 +4128,7 @@ class AutonomousBrain:
                 mission_policy=mission_policy,
                 bandit_state=current_bandit_state,
                 execution_controller=execution_controller,
+                invocation_observer=invocation_observer,
                 **options,
             )
             attempts.append(result)

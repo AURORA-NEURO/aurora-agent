@@ -273,10 +273,19 @@ def test_operation_facade_covers_every_domain_and_replays_without_request_values
     assert all(plan.status == "ready" for plan in plans)
     assert all("raw_note" not in json.dumps(plan.to_dict()) for plan in plans)
 
-    executions = tuple(facade.execute_planned(plan, value) for plan, value in zip(plans, inputs))
+    events: list[dict[str, object]] = []
+    executions = tuple(
+        facade.execute_planned(
+            plan,
+            value,
+            trace_event_callback=(lambda **event: events.append(event)) if index == 0 else None,
+        )
+        for index, (plan, value) in enumerate(zip(plans, inputs))
+    )
     assert {execution.operation_plan.domain for execution in executions} == set(AUTONOMOUS_DOMAINS)
     assert all(execution.status == "partial" for execution in executions)
     assert all(execution.replay == "fresh" for execution in executions)
+    assert [event["phase"] for event in events] == ["connector_started", "connector_finished"]
 
     replay = facade.execute(inputs[0])
     assert replay.replay == "replayed"
@@ -356,6 +365,7 @@ def test_intent_facade_routes_and_executes_single_and_cross_domain_tasks_without
     assert coding_plan.selected_domains == ("coding",)
     assert coding_plan.selections[0].operation_id == "coding.repository_change_analysis"
     assert "Review changed files" not in json.dumps(coding_plan.to_dict())
+    events: list[dict[str, object]] = []
     coding_result = intent.execute(
         coding_plan,
         task="Review changed files and verify testing results.",
@@ -363,9 +373,11 @@ def test_intent_facade_routes_and_executes_single_and_cross_domain_tasks_without
         allow_cross_domain=False,
         request_by_domain={"coding": {"repository_digest": "a" * 64}},
         approved=True,
+        trace_event_callback=lambda **event: events.append(event),
     )
     assert coding_result.status == "completed"
     assert coding_result.executions[0].status == "partial"
+    assert [event["phase"] for event in events] == ["connector_started", "connector_finished"]
     restored_coding_plan = AutonomousConnectorIntentPlan.from_mapping(coding_plan.to_dict())
     assert restored_coding_plan.plan_digest == coding_plan.plan_digest
 

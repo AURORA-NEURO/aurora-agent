@@ -58,6 +58,7 @@ from prism_sdk import (
     CredentialError,
     LLMRuntime,
     InMemoryAutonomousCapabilityJournalStore,
+    InMemoryAutonomousRunTraceStore,
     AutonomousCapabilityJournalPersistenceCoordinator,
     TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence,
     ModelCandidate,
@@ -447,6 +448,67 @@ def test_agent_bootstraps_a_live_workspace_catalogue_with_explicit_bindings():
         assert agent.tool_runtime is not None
         assert agent.tools("operations")[0]["capability"] == "observability"
         assert agent.domain_pack_tool_plan("operations")["covered_tool_capabilities"] == ["observability"]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_agent_trace_facade_emits_live_plan_and_provider_events() -> None:
+    runtime, store, server, thread = _structured_runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    handle = store.register("openai", "trace-live-secret")
+    trace_store = InMemoryAutonomousRunTraceStore(clock=lambda: 1)
+    try:
+        traced = agent.run_with_trace(
+            task="emit a live execution trace",
+            domain="coding",
+            credentials={"openai": handle},
+            trace_store=trace_store,
+            run_id="live-trace",
+            approve_provider_call=True,
+        )
+        events = trace_store.events({"run_id": "live-trace"})
+        phases = [event.phase for event in events]
+        assert phases[0] == "started"
+        assert phases[1] == "plan_compiled"
+        assert phases.count("provider_invocation_started") == 1
+        assert phases.count("provider_invocation_finished") == 1
+        assert phases[-1] == "completed"
+        assert traced.trace.provider_invocations == 1
+        assert traced.trace.event_count == len(events)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_workflow_trace_facade_emits_stage_and_provider_events() -> None:
+    runtime, store, server, thread = _structured_runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    handle = store.register("openai", "trace-workflow-secret")
+    blueprint = agent.prepare(
+        task="run the reviewed workflow with live tracing",
+        domain="coding",
+        require_json=True,
+    )
+    trace_store = InMemoryAutonomousRunTraceStore(clock=lambda: 1)
+    try:
+        traced = agent.run_workflow_with_trace(
+            blueprint=blueprint,
+            credentials={"openai": handle},
+            trace_store=trace_store,
+            run_id="workflow-live-trace",
+            approve_provider_call=True,
+        )
+        events = trace_store.events({"run_id": "workflow-live-trace"})
+        phases = [event.phase for event in events]
+        assert phases[0] == "started"
+        assert phases.count("plan_compiled") >= 2
+        assert phases.count("provider_invocation_finished") >= 1
+        assert phases.count("evaluation_settled") >= 1
+        assert phases[-1] == "completed"
+        assert traced.trace.status == "completed"
     finally:
         server.shutdown()
         thread.join(timeout=2)

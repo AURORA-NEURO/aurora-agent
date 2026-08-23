@@ -1438,6 +1438,21 @@ with a typed failure event. `JsonAutonomousRunTracePersistence`, its transaction
 `InMemoryAutonomousRunTraceTextStore`, and `FileAutonomousRunTraceTextStore` are adapters only;
 they do not resume provider work or grant effect authority during restore.
 
+The live bridge is also available when an application owns orchestration. Pass an
+`AutonomousRunTraceSession.record`-compatible callback as `trace_event_callback` to
+`run_connector_workflow()`, `run_connector_mission()`,
+`AutonomousConnectorOperationFacade.execute()`/`execute_batch()`, or the lower-level
+`AutonomousConnectorRuntime.dispatch()`. The `run_with_trace()`,
+`run_cross_domain_with_trace()`, and `run_workflow_with_trace()` helpers install that same
+callback internally. Provider turns are composed with the brain's adaptive policy observer
+rather than replacing it; connector starts, finishes, replayed receipts, and in-flight waiters
+use the same callback. This means a workflow stage, mission step, connector operation,
+evaluator/learning boundary, and provider invocation can be viewed in one ordered, hash-chained
+trace without copying prompts, responses, tool payloads, connector arguments, or credential
+material into the observability store. Callbacks are synchronous and caller-owned, so production
+deployments should keep them bounded and non-blocking or enqueue only the metadata projection for
+a separate trace writer.
+
 `ModelCatalogue` stores only deterministic model metadata and rejects credential-shaped metadata
 fields; it is safe to populate before a user has supplied any key. `agent.readiness()` projects
 provider registration, credential readiness, and model eligibility without exposing secret material.

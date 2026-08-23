@@ -874,11 +874,11 @@ def autonomous_run_trace_status(status: str) -> str:
         return "completed"
     if status in {"cross_domain_partial", "children_partial", "children_completed", "completed_without_replan", "replan_limit_reached"}:
         return "partial"
-    if status in {"route_review_required", "approval_required", "reconciliation_required", "turn_limit_reached", "plan_review_required", "connector_blocked"}:
+    if status in {"route_review_required", "approval_required", "reconciliation_required", "turn_limit_reached", "plan_review_required", "connector_blocked", "paused", "stage_blocked", "stage_proposed", "stage_not_attempted"}:
         return "paused"
     if status in {"abstained", "provider_abstained", "provider_invalid", "provider_disagreement"}:
         return "refused"
-    if status in {"child_failed", "execution_failed"}:
+    if status in {"child_failed", "execution_failed", "stage_failed", "provider_failed"}:
         return "failed"
     return "unknown"
 

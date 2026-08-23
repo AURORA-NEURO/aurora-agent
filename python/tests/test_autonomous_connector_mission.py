@@ -127,7 +127,6 @@ def test_connector_mission_approval_and_explicit_feedback_settlement(tmp_path) -
     signals = ledger.signals(domain="coding", capability=mission.steps[0].capability)
     assert signals["builtin.offline-evidence.coding"]["evaluator_reward"] == 0.75
     assert signals["builtin.offline-evidence.coding"]["success_rate"] == 1.0
-
     with pytest.raises(ArgumentError, match="caller_evaluator"):
         agent.run_connector_mission(
             mission=_mission("coding", mission_id="bad-feedback-mission"),
@@ -144,6 +143,18 @@ def test_connector_mission_approval_and_explicit_feedback_settlement(tmp_path) -
                 }
             },
         )
+
+
+def test_connector_mission_callback_flows_through_agent_facade(tmp_path) -> None:
+    agent, _journal = _agent(tmp_path)
+    events: list[dict[str, object]] = []
+    result = agent.run_connector_mission(
+        mission=_mission("coding", mission_id="callback-mission"),
+        approved=True,
+        trace_event_callback=lambda **event: events.append(event),
+    )
+    assert result.status == "completed"
+    assert [event["phase"] for event in events] == ["connector_started", "connector_finished"]
 
 
 def test_connector_mission_replay_requires_payload_rehydration(tmp_path) -> None:

@@ -147,6 +147,7 @@ from .llm_runtime import (
     ProviderOnboarding,
     ProviderConfig,
     ProviderContentPart,
+    ProviderInvocationObserver,
     ProviderTool,
     normalize_provider_content_parts,
 )
@@ -470,6 +471,19 @@ _BUILTIN_DOMAIN_ROUTE_TERMS: dict[str, tuple[str, ...]] = {
         "replay", "regression", "failure analysis", "test harness", "score", "quality assessment", "red team",
     ),
 }
+
+
+def _emit_trace_event(
+    callback: Callable[..., Any] | None,
+    *,
+    phase: str,
+    status: str,
+    **metadata: Any,
+) -> None:
+    """Send a bounded trace projection without ever passing transient execution values."""
+
+    if callback is not None:
+        callback(phase=phase, status=status, **metadata)
 
 
 def _text(name: str, value: Any, *, maximum: int = 512) -> str:
@@ -8305,6 +8319,7 @@ class AutonomousTaskOrchestrator:
         execution_mode: str,
         tool_loop_options: Mapping[str, Any] | None,
         execution_controller: AutonomousExecutionController | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
     ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         # Keep the legacy ``mission_policy`` shorthand while making the execution route
         # explicit for new callers.
@@ -8341,6 +8356,7 @@ class AutonomousTaskOrchestrator:
                 tool_choice=tool_choice,
                 max_provider_failovers=max_provider_failovers,
                 execution_controller=execution_controller,
+                invocation_observer=invocation_observer,
             )
         if effective_mode == "tool_loop":
             if tool_loop_options is not None and not isinstance(tool_loop_options, Mapping):
@@ -8398,6 +8414,7 @@ class AutonomousTaskOrchestrator:
                 tool_loop_options=loop_options,
                 max_provider_failovers=max_provider_failovers,
                 execution_controller=execution_controller,
+                invocation_observer=invocation_observer,
             )
         if effective_mode != "mission":
             raise BrainRunError(f"unsupported autonomous execution mode: {effective_mode!r}")
@@ -8439,6 +8456,7 @@ class AutonomousTaskOrchestrator:
             ledger=ledger,
             bandit_state=bandit_state,
             execution_controller=execution_controller,
+            invocation_observer=invocation_observer,
             **options,
         )
 
@@ -8548,7 +8566,7 @@ class AutonomousTaskOrchestrator:
             "mission_options", "route_request", "enforce_route_tools", "require_resolved_route",
             "provider_tools", "tool_choice", "max_provider_failovers", "prompt", "execution_mode",
             "tool_loop_options", "bandit_state",
-            "execution_controller",
+            "execution_controller", "invocation_observer",
         }
         unknown = sorted(set(kwargs).difference(allowed))
         if unknown:
@@ -9198,6 +9216,8 @@ class AutonomousTaskOrchestrator:
         evidence: Mapping[str, Any] | None = None,
         max_replans: int = 1,
         memory_tags: Sequence[str] = (),
+        invocation_observer: ProviderInvocationObserver | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> Any:
         """Run one domain-aware task through adaptive selection and bounded invocation.
 
@@ -9236,6 +9256,38 @@ class AutonomousTaskOrchestrator:
             required_model_capabilities=required_model_capabilities,
             memory_episodes=recalled,
         )
+        if invocation_observer is not None and not all(
+            callable(getattr(invocation_observer, name, None)) for name in ("before", "after")
+        ):
+            raise BrainRunError("invocation_observer must implement before and after")
+        if trace_event_callback is not None and not callable(trace_event_callback):
+            raise BrainRunError("trace_event_callback must be callable or None")
+        route_context = blueprint.selection_context.get("autonomous_route")
+        route_digest = route_context.get("route_digest") if isinstance(route_context, Mapping) else None
+        _emit_trace_event(
+            trace_event_callback,
+            phase="plan_compiled",
+            status="running",
+            route_digest=route_digest,
+            plan_digest=blueprint.plan.get("plan_digest"),
+        )
+
+        def finish_learning_trace(value: Any) -> Any:
+            result_status = getattr(value, "status", "unknown")
+            detail_digest = content_digest({"status": result_status, "task_digest": blueprint.spec.task_digest})
+            _emit_trace_event(
+                trace_event_callback,
+                phase="evaluation_settled",
+                status="running",
+                detail_digest=detail_digest,
+            )
+            _emit_trace_event(
+                trace_event_callback,
+                phase="learning_prepared",
+                status="running",
+                detail_digest=detail_digest,
+            )
+            return value
         if not isinstance(auto_route, bool):
             raise BrainRunError("auto_route must be a boolean")
         approved_stage_ids = _sequence(
@@ -9305,7 +9357,7 @@ class AutonomousTaskOrchestrator:
                         "max_provider_failovers": max_provider_failovers,
                     }
                 )
-                return self.brain.run_adaptive_mission_learning_cycle(
+                return finish_learning_trace(self.brain.run_adaptive_mission_learning_cycle(
                     task=blueprint.spec.task,
                     model_candidates=model_candidates,
                     prompt=blueprint.prompt,
@@ -9323,10 +9375,11 @@ class AutonomousTaskOrchestrator:
                     max_replans=max_replans,
                     mission_options=options,
                     execution_controller=execution_controller,
-                )
+                    invocation_observer=invocation_observer,
+                ))
             if bandit_state is None:
                 raise BrainRunError("bandit_state is required when learn=True")
-            return self._run_learning_from_blueprint(
+            return finish_learning_trace(self._run_learning_from_blueprint(
                 blueprint,
                 model_candidates=model_candidates,
                 credentials=credentials,
@@ -9366,8 +9419,9 @@ class AutonomousTaskOrchestrator:
                     "tool_loop_options": tool_loop_options,
                     "bandit_state": bandit_state,
                     "execution_controller": execution_controller,
+                    "invocation_observer": invocation_observer,
                 },
-            )
+            ))
         return self._execute(
             blueprint,
             model_candidates=model_candidates,
@@ -9400,6 +9454,7 @@ class AutonomousTaskOrchestrator:
             tool_loop_options=tool_loop_options,
             bandit_state=bandit_state,
             execution_controller=execution_controller,
+            invocation_observer=invocation_observer,
         )
 
     @staticmethod
@@ -9829,6 +9884,8 @@ class AutonomousTaskOrchestrator:
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         execution_plan_context: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousWorkflowRun:
         """Execute a prepared domain workflow as a resumable, dependency-checked stage DAG.
 
@@ -9840,6 +9897,12 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(blueprint, AutonomousTaskBlueprint):
             raise BrainRunError("workflow execution requires an AutonomousTaskBlueprint")
+        if invocation_observer is not None and not all(
+            callable(getattr(invocation_observer, name, None)) for name in ("before", "after")
+        ):
+            raise BrainRunError("workflow invocation_observer must implement before and after")
+        if trace_event_callback is not None and not callable(trace_event_callback):
+            raise BrainRunError("workflow trace_event_callback must be callable or None")
         if bandit_state is not None:
             if not isinstance(bandit_state, Mapping):
                 raise BrainRunError("workflow bandit_state must be a mapping or None")
@@ -9893,6 +9956,13 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("workflow checkpoint plan refinement does not match the requested execution")
         if current_checkpoint.run_id != workflow_run_id:
             raise BrainRunError("workflow checkpoint run_id does not match the requested run")
+        _emit_trace_event(
+            trace_event_callback,
+            phase="plan_compiled",
+            status="running",
+            plan_digest=blueprint.plan.get("plan_digest"),
+            detail_digest=content_digest({"workflow_digest": blueprint.workflow.workflow_digest}),
+        )
         stage_by_id = {stage.id: stage for stage in blueprint.workflow.stages}
         if any(row["stage_id"] not in stage_by_id for row in current_checkpoint.stages):
             raise BrainRunError("workflow checkpoint contains a stage outside the prepared workflow")
@@ -9956,6 +10026,13 @@ class AutonomousTaskOrchestrator:
                 ready,
                 execution_plan_context=execution_plan_context,
                 provider_tools=provider_tools,
+            )
+            _emit_trace_event(
+                trace_event_callback,
+                phase="plan_compiled",
+                status="running",
+                plan_digest=stage_execution_plan.stage_plan_digest,
+                detail_digest=content_digest({"stage_id": ready.id, "workflow_digest": blueprint.workflow.workflow_digest}),
             )
             if ready.approval_required and ready.id not in set(approved_stage_ids):
                 stage_report = AutonomousWorkflowStageResult(
@@ -10066,6 +10143,8 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 tool_loop_options=tool_loop_options,
                 execution_controller=execution_controller,
+                invocation_observer=invocation_observer,
+                trace_event_callback=trace_event_callback,
             )
             if not isinstance(stage_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("workflow stage returned an unsupported result")
@@ -10088,6 +10167,14 @@ class AutonomousTaskOrchestrator:
                 response_digest=response_digest,
                 attempt=1,
                 stage_execution_plan=stage_execution_plan.to_dict(),
+            )
+            _emit_trace_event(
+                trace_event_callback,
+                phase="evaluation_settled",
+                status="running",
+                plan_digest=stage_execution_plan.stage_plan_digest,
+                detail_digest=response_digest,
+                failure_code="workflow_stage_validation_failed" if errors else None,
             )
             stage_results.append(stage_report)
             snapshot = stage_report.checkpoint_snapshot()
@@ -10729,6 +10816,8 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
         execution_controller: AutonomousExecutionController | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousCrossDomainResult:
         """Execute bounded domain specialists, then optionally synthesize their outputs.
 
@@ -10837,6 +10926,8 @@ class AutonomousTaskOrchestrator:
                     domain=child.spec.domain,
                 ),
                 execution_controller=execution_controller,
+                invocation_observer=invocation_observer,
+                trace_event_callback=trace_event_callback,
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain child returned an unsupported result")
@@ -10934,6 +11025,8 @@ class AutonomousTaskOrchestrator:
                 domain=synthesis.spec.domain,
             ),
             execution_controller=execution_controller,
+            invocation_observer=invocation_observer,
+            trace_event_callback=trace_event_callback,
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain synthesis returned an unsupported result")
@@ -13173,6 +13266,7 @@ class AutonomousAgent:
         evidence_evaluator: Any | None = None,
         require_evidence_acceptance: bool | None = None,
         parent_evidence_digests: Sequence[str] = (),
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> Any:
         """Run a blueprint's workflow DAG through reviewed connectors without provider credentials.
 
@@ -13204,6 +13298,7 @@ class AutonomousAgent:
                 evidence_evaluator=evidence_evaluator,
                 require_evidence_acceptance=require_evidence_acceptance,
                 parent_evidence_digests=parent_evidence_digests,
+                trace_event_callback=trace_event_callback,
             )
         except (ArgumentError, BrainRunError):
             raise
@@ -13225,6 +13320,7 @@ class AutonomousAgent:
         selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
         feedback_ledger: Any | None = None,
         feedback_by_step: Mapping[str, Mapping[str, Any]] | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> Any:
         """Execute a typed mission DAG through reviewed connectors without model credentials.
 
@@ -13253,6 +13349,7 @@ class AutonomousAgent:
                 selection_signals=selection_signals,
                 feedback_ledger=feedback_ledger,
                 feedback_by_step=feedback_by_step,
+                trace_event_callback=trace_event_callback,
             )
         except (ArgumentError, BrainRunError):
             raise
@@ -13337,13 +13434,19 @@ class AutonomousAgent:
         self,
         plan: AutonomousConnectorSelectionPlan | Mapping[str, Any],
         request: AutonomousConnectorDispatchRequest,
+        *,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> AutonomousConnectorDispatchResult:
         """Dispatch one connector only through a configured, plan-verifying runtime."""
 
         if self.connector_runtime is None:
             raise BrainRunError("connector runtime is not configured")
         try:
-            return self.connector_runtime.dispatch_from_plan(plan, request)
+            return self.connector_runtime.dispatch_from_plan(
+                plan,
+                request,
+                trace_event_callback=trace_event_callback,
+            )
         except (ArgumentError, BrainRunError):
             raise
         except Exception as error:
@@ -15748,6 +15851,7 @@ class AutonomousAgent:
             domains=(domain,),
         )
         session.started()
+        live_observer = session.provider_observer()
         try:
             result = self.run(
                 task=task,
@@ -15755,17 +15859,21 @@ class AutonomousAgent:
                 credentials=credentials,
                 model_candidates=model_candidates,
                 execution_id=resolved_run_id,
+                invocation_observer=live_observer,
+                trace_event_callback=session.record,
                 **kwargs,
             )
             metadata = self._trace_execution_metadata(result)
-            session.record(
-                phase="plan_compiled",
-                status="running",
-                route_digest=metadata["route_digest"],
-                plan_digest=metadata["plan_digest"],
-                selection_digest=metadata["selection_digest"],
-            )
-            session.record_provider_receipts(metadata["receipts"])
+            if not trace_store.events({"run_id": resolved_run_id, "phase": "plan_compiled"}):
+                session.record(
+                    phase="plan_compiled",
+                    status="running",
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                )
+            if not trace_store.events({"run_id": resolved_run_id, "phase": "provider_invocation_finished"}):
+                session.record_provider_receipts(metadata["receipts"])
             session.complete(
                 status=autonomous_run_trace_status(getattr(result, "status", "unknown")),
                 route_digest=metadata["route_digest"],
@@ -15806,6 +15914,7 @@ class AutonomousAgent:
             domains=trace_domains,
         )
         session.started()
+        live_observer = session.provider_observer()
         try:
             result = self.run_cross_domain(
                 task=task,
@@ -15813,18 +15922,22 @@ class AutonomousAgent:
                 credentials=credentials,
                 model_candidates=model_candidates,
                 execution_id=resolved_run_id,
+                invocation_observer=live_observer,
+                trace_event_callback=session.record,
                 **kwargs,
             )
             metadata = self._trace_execution_metadata(result)
-            session.record(
-                phase="plan_compiled",
-                status="running",
-                domains=trace_domains,
-                route_digest=metadata["route_digest"],
-                plan_digest=metadata["plan_digest"],
-                selection_digest=metadata["selection_digest"],
-            )
-            session.record_provider_receipts(metadata["receipts"])
+            if not trace_store.events({"run_id": resolved_run_id, "phase": "plan_compiled"}):
+                session.record(
+                    phase="plan_compiled",
+                    status="running",
+                    domains=trace_domains,
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                )
+            if not trace_store.events({"run_id": resolved_run_id, "phase": "provider_invocation_finished"}):
+                session.record_provider_receipts(metadata["receipts"])
             session.complete(
                 status=autonomous_run_trace_status(result.status),
                 domains=trace_domains,
@@ -17391,6 +17504,56 @@ class AutonomousAgent:
             raise
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_workflow_with_trace(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Execute a staged workflow with live stage/provider trace events."""
+
+        self._trace_store(trace_store)
+        resolved_run_id = run_id or kwargs.pop("execution_id", None) or f"trace-{uuid.uuid4().hex}"
+        session = AutonomousRunTraceSession(
+            trace_store,
+            run_id=resolved_run_id,
+            task_digest=blueprint.spec.task_digest,
+            domains=(blueprint.spec.domain,),
+        )
+        session.started()
+        live_observer = session.provider_observer()
+        try:
+            result = self.run_workflow(
+                blueprint=blueprint,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                execution_id=resolved_run_id,
+                invocation_observer=live_observer,
+                trace_event_callback=session.record,
+                **kwargs,
+            )
+            receipts: list[Mapping[str, Any]] = []
+            for stage in result.stage_results:
+                if stage.result is not None:
+                    for brain_result in self._trace_brain_results(stage.result):
+                        receipts.extend(brain_result.provider_invocations)
+            if not trace_store.events({"run_id": resolved_run_id, "phase": "provider_invocation_finished"}):
+                session.record_provider_receipts(receipts)
+            checkpoint_digest = getattr(result.checkpoint, "checkpoint_digest", None)
+            session.complete(
+                status=autonomous_run_trace_status(result.status),
+                plan_digest=blueprint.plan.get("plan_digest"),
+                detail_digest=checkpoint_digest,
+            )
+        except Exception as error:
+            session.fail(failure_class=type(error).__name__, failure_code="execution_error")
+            raise
+        return AutonomousTracedRunResult(result=result, trace=session.summary())
 
     def run_workflow_learning(
         self,

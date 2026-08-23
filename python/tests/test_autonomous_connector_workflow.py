@@ -123,6 +123,21 @@ def test_connector_workflow_requires_approval_and_preserves_partial_evidence(tmp
     assert journal.verify_integrity()["entries"] == 3
 
 
+def test_connector_workflow_callback_flows_through_agent_facade(tmp_path) -> None:
+    agent, _registrations, _journal = _agent(tmp_path)
+    blueprint = agent.prepare(task="callback-bound offline coding review", domain="coding")
+    events: list[dict[str, object]] = []
+    result = agent.run_connector_workflow(
+        blueprint=blueprint,
+        approved=True,
+        request_for_stage=_request_for_stage,
+        trace_event_callback=lambda **event: events.append(event),
+    )
+    assert result.status == "completed"
+    assert [event["phase"] for event in events].count("connector_started") == len(result.stage_results)
+    assert [event["phase"] for event in events].count("connector_finished") == len(result.stage_results)
+
+
 def test_connector_workflow_evidence_binding_requires_explicit_acceptance_across_domains(tmp_path) -> None:
     agent, _registrations, journal = _agent(tmp_path)
     total_stages = 0
