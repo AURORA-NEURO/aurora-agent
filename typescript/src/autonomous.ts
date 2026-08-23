@@ -2393,10 +2393,15 @@ export async function assembleAutonomousPrompt(
   return { ...promptDescriptor, prompt_digest: await digestJson(promptDescriptor) };
 }
 
-function bindingSupportsStage(profile: AutonomousDomainProfile, stage: AutonomousWorkflowStage, binding: AutonomousDomainToolBinding): boolean {
+/** Shared reviewed capability predicate used by planning, stage admission, and domain audits. */
+export function autonomousDomainToolBindingSupportsStage(profile: AutonomousDomainProfile, stage: AutonomousWorkflowStage, binding: AutonomousDomainToolBinding): boolean {
   return stage.required_capabilities.some((capability) => (
     binding.capability === capability || (WORKFLOW_CAPABILITY_ALIASES[profile.domain][capability] ?? []).includes(binding.capability)
   ));
+}
+
+function bindingSupportsStage(profile: AutonomousDomainProfile, stage: AutonomousWorkflowStage, binding: AutonomousDomainToolBinding): boolean {
+  return autonomousDomainToolBindingSupportsStage(profile, stage, binding);
 }
 
 function workflowStageContractDescriptor(workflow: AutonomousWorkflow, stage: AutonomousWorkflowStage): JsonObject {

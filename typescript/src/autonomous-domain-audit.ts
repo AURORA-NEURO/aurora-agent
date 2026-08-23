@@ -1,6 +1,7 @@
 import { ArgumentError, isObject } from "./errors.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  autonomousDomainToolBindingSupportsStage,
   builtinAutonomousDomainProfiles,
   type AutonomousDomainName,
   type AutonomousDomainProfile,
@@ -237,8 +238,10 @@ function auditTools(profile: AutonomousDomainProfile, rows: AutonomousDomainAudi
     if (binding.read_only && binding.approval_required) rows.push(issue("tool_approval_inconsistency", "blocking", `read-only tool ${binding.name} is marked approval-required`, "make the binding metadata agree on whether it can cause effects"));
     if (!binding.read_only && !binding.approval_required) rows.push(issue("tool_effect_without_approval", "blocking", `effectful tool ${binding.name} has no approval requirement`, "require approval for every non-read-only tool binding"));
   }
-  const exactStageGaps = uniqueSorted(profile.workflow.stages.flatMap((stage) => stage.required_capabilities.filter((capability) => !bindings.some((binding) => binding.capability === capability))));
-  if (exactStageGaps.length) rows.push(issue("stage_exact_tool_gap", "warning", `some stage capabilities have no exact tool binding: ${exactStageGaps.join(", ")}`, "attach a reviewed tool adapter or explicitly accept provider-only stage execution; aliases may still cover some capabilities"));
+  const stageCapabilityGaps = uniqueSorted(
+    profile.workflow.stages.flatMap((stage) => stage.required_capabilities.filter((capability) => !bindings.some((binding) => autonomousDomainToolBindingSupportsStage(profile, stage, binding)))),
+  );
+  if (stageCapabilityGaps.length) rows.push(issue("stage_tool_capability_gap", "warning", `some workflow capabilities have no reviewed tool binding: ${stageCapabilityGaps.join(", ")}`, "attach a reviewed tool adapter or explicitly accept provider-only stage execution"));
   const missing = availableTools === undefined ? [] : names.filter((name) => !availableTools.includes(name));
   const readOnlyCount = bindings.filter((binding) => binding.read_only).length;
   const approvalCount = bindings.filter((binding) => binding.approval_required).length;
@@ -249,7 +252,7 @@ function auditTools(profile: AutonomousDomainProfile, rows: AutonomousDomainAudi
     missing_tool_names: missing,
     read_only_tool_count: readOnlyCount,
     approval_required_tool_count: approvalCount,
-    exact_stage_capability_gaps: exactStageGaps,
+    exact_stage_capability_gaps: stageCapabilityGaps,
   };
 }
 

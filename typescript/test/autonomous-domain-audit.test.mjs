@@ -34,6 +34,7 @@ test("domain audit validates every built-in profile, workflow graph, tool contra
   assert.equal(report.rows.every((row) => row.contract_status === "valid"), true);
   assert.equal(report.rows.every((row) => row.stage_count >= 4), true);
   assert.equal(report.rows.every((row) => row.evidence_surface.requirement_count > 0), true);
+  assert.equal(report.rows.every((row) => row.tool_surface.exact_stage_capability_gaps.length === 0), true);
   assert.equal(report.rows.every((row) => /^[0-9a-f]{64}$/.test(row.row_digest)), true);
   assert.equal(JSON.stringify(report).includes("unit-test-only-not-a-provider-key"), false);
   assert.deepEqual(await validateAutonomousDomainAuditReport(report), report);

@@ -323,6 +323,7 @@ export {
   AutonomousOnlineLearner,
   assembleAutonomousPrompt,
   builtinAutonomousDomainProfiles,
+  autonomousDomainToolBindingSupportsStage,
   compileAutonomousPlan,
   contextualSelector,
   routeAutonomousTask,
