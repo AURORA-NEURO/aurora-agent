@@ -40,6 +40,7 @@ from prism_sdk import (
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
     BrainRunError,
+    BrainRunResult,
     BrainEpisodicMemory,
     BrainLearningLedger,
     BrainOutcomeEvaluator,
@@ -4169,6 +4170,7 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
             persisted = cycle_store.load("decision-cycle-1")
             assert persisted is not None and persisted.phase == "terminal"
             assert persisted.terminal_status == "completed"
+            assert persisted.selection_digest is not None
             public_state = json.dumps(persisted.to_dict())
             assert "decision-cycle-secret" not in public_state
             assert "fix the Rust tests" not in public_state
@@ -4195,6 +4197,124 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_run_auto_persists_selection_identity_for_every_builtin_domain():
+    agent = AutonomousAgent(_Workspace(), LLMRuntime(), model_catalogue=ModelCatalogue(_model()))
+    selection_digest = "a" * 64
+
+    def fake_run(**kwargs: object) -> BrainRunResult:
+        return BrainRunResult(
+            run_id=str(kwargs.get("run_id") or "decision-cycle-domain"),
+            status="completed_provider_call",
+            selection={
+                "decision_digest": selection_digest,
+                "selected_model": {"provider": "openai", "model": "test-model"},
+            },
+            prompt={},
+            plan={},
+            response=None,
+            outcome_digest="b" * 64,
+        )
+
+    agent.run = fake_run  # type: ignore[method-assign]
+    tasks = {
+        "coding": "debug this repository implementation",
+        "browser": "compare browser research sources",
+        "data": "validate this dataset schema",
+        "science": "design a scientific experiment hypothesis",
+        "biomedical": "review biomedical clinical evidence",
+        "neuroscience": "analyze neuroscience neural signals",
+        "operations": "plan an operations incident rollback",
+        "enterprise": "review enterprise governance compliance",
+        "multi_agent": "delegate a multi agent specialist subtask",
+        "multimodal": "align multimodal image audio evidence",
+        "cross_domain": "synthesize cross domain evidence",
+        "evaluation": "run an evaluation benchmark holdout",
+    }
+    for domain in AUTONOMOUS_DOMAINS:
+        store = InMemoryAutonomousDecisionCycleStateStore()
+        result = agent.run_auto(
+            task=tasks[domain],
+            credentials={},
+            model_candidates=_model(),
+            decision_cycle_id=f"selection-cycle-{domain}",
+            decision_cycle_store=store,
+        )
+        persisted = store.load(f"selection-cycle-{domain}")
+        assert result.status == "completed"
+        assert persisted is not None
+        assert persisted.phase == "terminal"
+        assert persisted.selection_digest == selection_digest
+        assert persisted.outcome_digest == content_digest(result.to_dict())
+        assert persisted.generation >= 5
+
+
+def test_run_auto_records_evaluation_boundary_for_online_learning_cycles():
+    agent = AutonomousAgent(_Workspace(), LLMRuntime(), model_catalogue=ModelCatalogue(_model()))
+
+    class LearningResult:
+        status = "completed_provider_call"
+        selection = {"decision_digest": "c" * 64}
+        learning_episode_ids = ("episode-online-learning",)
+        memory_receipts = (
+            {"episode_id": "episode-online-learning", "event_digest": "e" * 64},
+        )
+        evaluations = (
+            {
+                "decision": {
+                    "evaluator_id": "coding-evaluator",
+                    "evaluator_version": "1.0.0",
+                    "reward": 0.8,
+                    "passed": True,
+                    "failed": False,
+                    "evidence_digest": "d" * 64,
+                }
+            },
+        )
+        bandit_state = {"schema": "bioprism-brain-bandit/0.1", "generation": 1, "arms": []}
+
+        def to_dict(self) -> dict[str, object]:
+            return {
+                "status": self.status,
+                "selection": dict(self.selection),
+                "learning_episode_ids": list(self.learning_episode_ids),
+                "memory_receipts": [dict(item) for item in self.memory_receipts],
+                "evaluations": [dict(item) for item in self.evaluations],
+                "bandit_state": dict(self.bandit_state),
+            }
+
+    agent.run = lambda **_kwargs: LearningResult()  # type: ignore[method-assign]
+    store = InMemoryAutonomousDecisionCycleStateStore()
+    result = agent.run_auto(
+        task="debug this repository implementation",
+        credentials={},
+        model_candidates=_model(),
+        learning_mode="online",
+        decision_cycle_id="online-learning-cycle",
+        decision_cycle_store=store,
+    )
+    persisted = store.load("online-learning-cycle")
+    assert result.status == "completed"
+    assert persisted is not None
+    assert persisted.selection_digest == "c" * 64
+    assert persisted.learning_episode_ids == ("episode-online-learning",)
+    assert persisted.settlement_digests == ("e" * 64,)
+    assert persisted.evaluation_digest == content_digest(
+        {
+            "evaluations": [
+                {
+                    "evaluator_id": "coding-evaluator",
+                    "evaluator_version": "1.0.0",
+                    "reward": 0.8,
+                    "passed": True,
+                    "failed": False,
+                    "evidence_digest": "d" * 64,
+                }
+            ]
+        }
+    )
+    assert persisted.phase == "terminal"
 
 
 def test_autonomous_facade_carries_transient_multimodal_evidence_through_every_domain_and_cross_domain():

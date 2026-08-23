@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousAgent,
     AutonomousSelectionPromotionLifecycle,
     AutonomousSelectionPromotionLifecycleStore,
+    BrainRunError,
     LLMRuntime,
     ModelCatalogue,
     evaluate_autonomous_selection_policy,
@@ -132,6 +135,18 @@ def test_selection_lifecycle_joins_all_domain_readiness() -> None:
     assert len(held["domains"]) == len(AUTONOMOUS_DOMAINS)
     assert all(row["selection_promotion"]["domain_decision"] == "admit" for row in held["domains"])
     assert all(row["selection_promotion"]["status"] == "uninitialized" for row in held["domains"])
+    with pytest.raises(BrainRunError, match="learned model selection is not admitted"):
+        agent.prepare_auto_with_provider(
+            task="route this browser research request",
+            credentials={},
+            model_candidates=agent.models(),
+        )
+    with pytest.raises(BrainRunError, match="learned model selection is not admitted"):
+        agent.route_with_provider(
+            task="route this browser research request",
+            credentials={},
+            model_candidates=agent.models(),
+        )
 
     agent.apply_selection_promotion(promotion)
     ready = agent.readiness(selection_promotion_report=promotion, require_promoted_selection=True)

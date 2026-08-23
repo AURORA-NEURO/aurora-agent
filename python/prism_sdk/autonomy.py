@@ -5850,6 +5850,152 @@ def _merge_goal_settlement_metadata(
     return merged
 
 
+def _decision_cycle_selection_digest(result: Any) -> str | None:
+    """Project selection identity from any automatic execution result without retaining payloads.
+
+    Automatic execution can return a direct brain result, a workflow-learning envelope, or a
+    cross-domain fan-out with child and synthesis results.  The durable decision-cycle state
+    needs one stable selection identity for all of those shapes, but must never serialize the
+    transient ranking, prompt, candidate metadata, or provider response.
+    """
+
+    seen: set[int] = set()
+    digests: list[str] = []
+
+    def add(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        try:
+            _route_digest(value, "decision-cycle selection digest")
+        except BrainRunError:
+            return
+        if value not in digests:
+            digests.append(value)
+
+    def visit(value: Any, depth: int = 0) -> None:
+        if value is None or depth > 8 or id(value) in seen:
+            return
+        seen.add(id(value))
+        direct = value.get("selection_digest") if isinstance(value, Mapping) else getattr(value, "selection_digest", None)
+        add(direct)
+        selection = value.get("selection") if isinstance(value, Mapping) else getattr(value, "selection", None)
+        if isinstance(selection, Mapping):
+            before = len(digests)
+            add(selection.get("decision_digest"))
+            if len(digests) == before:
+                safe = {
+                    key: selection.get(key)
+                    for key in (
+                        "selected_model",
+                        "strategy",
+                        "abstention_reason",
+                        "selection_confidence",
+                        "min_selection_confidence",
+                    )
+                    if key in selection
+                }
+                if safe:
+                    add(content_digest(safe))
+        for key in ("final_result", "final", "brain_run", "synthesis_result"):
+            nested = value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
+            visit(nested, depth + 1)
+        children = value.get("child_results") if isinstance(value, Mapping) else getattr(value, "child_results", None)
+        if isinstance(children, Sequence) and not isinstance(children, (str, bytes)):
+            for child in children:
+                visit(child, depth + 1)
+
+    visit(result)
+    if not digests:
+        return None
+    return digests[0] if len(digests) == 1 else content_digest({"selection_digests": digests})
+
+
+def _decision_cycle_evaluation_digest(result: Any) -> str | None:
+    """Return a digest of value-only evaluator projections, if a learning path settled any."""
+
+    projection = _goal_learning_value_projection(result)
+    evaluations = projection.get("evaluations")
+    if not isinstance(evaluations, Sequence) or isinstance(evaluations, (str, bytes)) or not evaluations:
+        return None
+    return content_digest({"evaluations": list(evaluations)})
+
+
+def _decision_cycle_learning_metadata(result: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Extract bounded learning episode and settlement identities from known result envelopes.
+
+    Learning results intentionally keep provider output transient, so this walker only follows
+    structural fields owned by the SDK's learning contracts.  It never searches arbitrary
+    mappings for identifiers, which prevents a provider response or evaluator payload from being
+    accidentally promoted into durable decision-cycle state.
+    """
+
+    seen: set[int] = set()
+    episode_ids: list[str] = []
+    settlement_digests: list[str] = []
+
+    def field(value: Any, name: str, default: Any = None) -> Any:
+        if isinstance(value, Mapping):
+            return value.get(name, default)
+        return getattr(value, name, default)
+
+    def add_episode(value: Any) -> None:
+        if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > 256:
+            return
+        if "\x00" in value or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-" for character in value):
+            return
+        if value not in episode_ids and len(episode_ids) < 256:
+            episode_ids.append(value)
+
+    def add_settlement(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        try:
+            _route_digest(value, "decision-cycle settlement digest")
+        except BrainRunError:
+            return
+        if value not in settlement_digests and len(settlement_digests) < 256:
+            settlement_digests.append(value)
+
+    def visit(value: Any, depth: int = 0) -> None:
+        if value is None or depth > 8 or id(value) in seen:
+            return
+        seen.add(id(value))
+        add_episode(field(value, "episode_id"))
+        add_settlement(field(value, "settlement_digest"))
+        raw_episode_ids = field(value, "learning_episode_ids")
+        if isinstance(raw_episode_ids, Sequence) and not isinstance(raw_episode_ids, (str, bytes)):
+            for item in raw_episode_ids:
+                add_episode(item)
+        raw_settlement_digests = field(value, "settlement_digests")
+        if isinstance(raw_settlement_digests, Sequence) and not isinstance(raw_settlement_digests, (str, bytes)):
+            for item in raw_settlement_digests:
+                add_settlement(item)
+        receipts = field(value, "memory_receipts")
+        if isinstance(receipts, Sequence) and not isinstance(receipts, (str, bytes)):
+            for receipt in receipts:
+                add_episode(field(receipt, "episode_id"))
+                add_settlement(field(receipt, "event_digest"))
+        for key in (
+            "final",
+            "attempts",
+            "trajectory_result",
+            "trajectory",
+            "workflow",
+            "cross_domain",
+            "child_results",
+            "episodes",
+        ):
+            nested = field(value, key)
+            if isinstance(nested, Sequence) and not isinstance(nested, (str, bytes)):
+                for item in nested:
+                    visit(item, depth + 1)
+            else:
+                visit(nested, depth + 1)
+
+    visit(result)
+    return tuple(episode_ids), tuple(settlement_digests)
+
+
 class AutonomousTaskOrchestrator:
     """Compose domain intake with adaptive execution and optional online learning."""
 
@@ -14089,6 +14235,7 @@ class AutonomousAgent:
     ) -> AutonomousAutoBlueprint:
         """Use BYOK semantic routing, then build a reconciled automatic blueprint."""
 
+        self._assert_selection_promotion_admitted()
         candidates = self._resolve_candidates(model_candidates)
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
@@ -14114,6 +14261,7 @@ class AutonomousAgent:
     ) -> AutonomousPlanRefinementResult:
         """Ask a BYOK provider to prioritize an existing blueprint's reviewed workflow stages."""
 
+        self._assert_selection_promotion_admitted()
         candidates = self._resolve_candidates(model_candidates)
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
@@ -14139,6 +14287,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainPlanRefinementResult:
         """Ask a BYOK provider to prioritize an existing cross-domain fan-out."""
 
+        self._assert_selection_promotion_admitted()
         candidates = self._resolve_candidates(model_candidates)
         resolved_credentials = self._credential_mapping(credentials)
         selection_overrides = kwargs.pop("selection_overrides", None)
@@ -15718,6 +15867,18 @@ class AutonomousAgent:
                 if decision_cycle.state.outcome_digest is not None:
                     if content_digest(rehydrated.to_dict()) != decision_cycle.state.outcome_digest:
                         raise BrainRunError("rehydrated decision result does not match the persisted outcome digest")
+                if decision_cycle.state.selection_digest is not None:
+                    observed_selection_digest = _decision_cycle_selection_digest(rehydrated.result)
+                    if observed_selection_digest != decision_cycle.state.selection_digest:
+                        raise BrainRunError(
+                            "rehydrated decision result does not match the persisted selection digest"
+                        )
+                if decision_cycle.state.evaluation_digest is not None:
+                    observed_evaluation_digest = _decision_cycle_evaluation_digest(rehydrated.result)
+                    if observed_evaluation_digest != decision_cycle.state.evaluation_digest:
+                        raise BrainRunError(
+                            "rehydrated decision result does not match the persisted evaluation digest"
+                        )
                 if decision_cycle.state.terminal_status is not None and rehydrated.status != decision_cycle.state.terminal_status:
                     raise BrainRunError("rehydrated decision result does not match the persisted terminal status")
                 return rehydrated
@@ -16041,9 +16202,36 @@ class AutonomousAgent:
             planning=planning_result,
         )
         if decision_cycle is not None:
+            cycle_outcome_digest = content_digest(automatic_result.to_dict())
+            selection_digest = _decision_cycle_selection_digest(result)
+            evaluation_digest = _decision_cycle_evaluation_digest(result)
+            learning_episode_ids, settlement_digests = _decision_cycle_learning_metadata(result)
+            if evaluation_digest is None:
+                learning_episode_ids = ()
+                settlement_digests = ()
+            elif learning_episode_ids and not settlement_digests:
+                # Python's in-process learner may settle through the bandit ledger without a
+                # memory adapter. The evaluator projection is still a stable settlement boundary.
+                settlement_digests = (evaluation_digest,)
+            decision_cycle.advance(
+                phase="evaluation_pending" if cycle_learning else "execution_pending",
+                selection_digest=selection_digest,
+                outcome_digest=cycle_outcome_digest,
+                learning_episode_ids=learning_episode_ids,
+            )
+            if evaluation_digest is not None:
+                decision_cycle.advance(
+                    phase="settlement_pending",
+                    selection_digest=selection_digest,
+                    outcome_digest=cycle_outcome_digest,
+                    evaluation_digest=evaluation_digest,
+                    learning_episode_ids=learning_episode_ids,
+                    settlement_digests=settlement_digests,
+                )
             decision_cycle.terminal(
                 "completed",
-                outcome_digest=content_digest(automatic_result.to_dict()),
+                outcome_digest=cycle_outcome_digest,
+                settlement_digests=settlement_digests,
             )
         return automatic_result
 

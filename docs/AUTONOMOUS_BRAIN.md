@@ -1806,6 +1806,11 @@ persisted and restored with revision and digest checks, but it never persists ba
 task text, provider values, credentials, or evaluator payloads. A new report must be applied after
 drift, so stale evidence cannot silently reactivate an older learner.
 
+The same admission check covers provider-assisted semantic routing and single- or cross-domain
+plan refinement in Python; those entry points cannot become a selector bypass while the lifecycle
+is held or rolled back. Provider-free route and blueprint inspection remains available so an
+operator can understand the requested domain and next action before approving promotion.
+
 This is a policy-evaluation boundary, not a source of ground truth: the caller owns reward
 construction and must define what evaluator evidence means. It never invokes a provider, reads
 or requests a credential, mutates learner state, or treats selection confidence as answer
@@ -3771,13 +3776,18 @@ The Python façade now exposes the same ordinary-cycle cursor through
 `AutonomousDecisionCycle`, `InMemoryAutonomousDecisionCycleStateStore`, and
 `AutonomousDecisionCyclePersistenceCoordinator`. `AutonomousAgent.run_auto(...)` can bind a
 caller-owned store with `decision_cycle_id="..."` and `decision_cycle_store=...`; it records the
-route, optional provider-planning, execution, and terminal boundaries without changing the normal
-provider or approval policy. A restart is never guessed: callers must set
+route, optional provider-planning, execution, selection, evaluation, settlement, and terminal
+boundaries without changing the normal provider or approval policy. Selection identities are
+derived from the bounded model-decision projection; evaluator identities are derived from
+value-only reward metadata. Learning episode IDs and settlement receipt digests are carried when
+the selected learning envelope exposes them; when an in-process learner has no receipt adapter,
+the evaluator projection itself is the bounded settlement identity. A restart is never guessed:
+callers must set
 `resume_decision_cycle=True` and provide `decision_cycle_rehydrate_result`, which returns the
 private `AutonomousAutoResult` from caller-owned storage. The SDK verifies the route digest,
-outcome digest, terminal status, task digest, mode, learning flags, and trajectory identity before
-returning it, so a rehydration callback cannot substitute a different result or trigger a duplicate
-provider call.
+outcome digest, selection digest, evaluation digest, terminal status, task digest, mode, learning
+flags, and trajectory identity before returning it, so a rehydration callback cannot substitute a
+different result or trigger a duplicate provider call.
 
 ```python
 from prism_sdk import (
