@@ -33,6 +33,7 @@ export const AUTONOMOUS_MODEL_HEALTH_MAX_QUERY_LIMIT = 256;
 export const MAX_AUTONOMOUS_MODEL_HEALTH_SNAPSHOT_BYTES = 16_000_000;
 export const AUTONOMOUS_REPLAY_MAX_CASES = 4_096;
 export const AUTONOMOUS_REPLAY_MAX_SIGNALS = 128;
+export const MAX_AUTONOMOUS_REPLAY_REPORT_BYTES = 8_000_000;
 
 const PRIVATE_RETENTION = "metadata_only;provider_payloads_prompts_tool_arguments_credentials_not_retained" as const;
 const IDENTIFIER = /^[A-Za-z0-9_.:-]+$/;
@@ -1017,11 +1018,64 @@ async function normalizeReplayCase(input: AutonomousReplayCaseInput): Promise<Au
   };
 }
 
+/** Validate a replay report before it is persisted, displayed, or used as promotion evidence. */
+export async function validateAutonomousReplayReport(raw: unknown): Promise<AutonomousReplayReport> {
+  if (!isObject(raw)) throw new ArgumentError("replay report must be an object");
+  safeMetadata(raw);
+  const allowed = new Set(["schema", "status", "case_count", "passed_count", "failed_count", "incomplete_count", "mismatch_count", "cases", "report_digest", "retention", "secret_material"]);
+  if (Object.keys(raw).some((key) => !allowed.has(key))) throw new ArgumentError("replay report contains unsupported fields");
+  if (raw.schema !== AUTONOMOUS_REPLAY_REPORT_SCHEMA || raw.retention !== "metadata_only;provider_calls_not_replayed" || raw.secret_material !== "never_returned") throw new ArgumentError("replay report retention markers are invalid");
+  if (raw.status !== "completed" && raw.status !== "mismatch" && raw.status !== "refused") throw new ArgumentError("replay report status is invalid");
+  const cases = raw.cases;
+  if (!Array.isArray(cases) || cases.length < 1 || cases.length > AUTONOMOUS_REPLAY_MAX_CASES) throw new ArgumentError("replay report cases are outside their bounds");
+  const runIds = new Set<string>();
+  const normalizedCases: AutonomousReplayCaseResult[] = [];
+  for (const [index, candidate] of cases.entries()) {
+    if (!isObject(candidate)) throw new ArgumentError(`replay report case ${index + 1} is malformed`);
+    const caseKeys = new Set(["run_id", "domain", "status", "reward", "passed", "missing_signals", "rejected_signals", "expected_reward", "expected_passed", "expected_evaluation_digest", "evaluation_digest", "mismatch_codes"]);
+    if (Object.keys(candidate).some((key) => !caseKeys.has(key))) throw new ArgumentError(`replay report case ${index + 1} contains unsupported fields`);
+    const runId = identifier(`replay report case ${index + 1} run_id`, candidate.run_id);
+    if (runIds.has(runId)) throw new ArgumentError("replay report run_id values must be unique");
+    runIds.add(runId);
+    if (typeof candidate.domain !== "string" || !candidate.domain.trim() || candidate.domain.length > 128) throw new ArgumentError(`replay report case ${index + 1} domain is invalid`);
+    if (candidate.status !== "passed" && candidate.status !== "failed" && candidate.status !== "incomplete" && candidate.status !== "refused") throw new ArgumentError(`replay report case ${index + 1} status is invalid`);
+    const reward = finite(`replay report case ${index + 1} reward`, candidate.reward, 0, 1);
+    if (typeof candidate.passed !== "boolean") throw new ArgumentError(`replay report case ${index + 1} passed must be boolean`);
+    const list = (name: string, value: unknown, maximum: number): string[] => {
+      if (!Array.isArray(value) || value.length > maximum || value.some((entry) => typeof entry !== "string" || !entry.trim() || entry.length > 128)) throw new ArgumentError(`replay report case ${index + 1} ${name} is invalid`);
+      const values = value as string[];
+      if (new Set(values).size !== values.length) throw new ArgumentError(`replay report case ${index + 1} ${name} must be unique`);
+      return [...values];
+    };
+    const missingSignals = list("missing_signals", candidate.missing_signals, AUTONOMOUS_REPLAY_MAX_SIGNALS);
+    const rejectedSignals = list("rejected_signals", candidate.rejected_signals, AUTONOMOUS_REPLAY_MAX_SIGNALS);
+    const mismatchCodes = list("mismatch_codes", candidate.mismatch_codes, 16);
+    const optionalReward = candidate.expected_reward === null ? null : finite(`replay report case ${index + 1} expected_reward`, candidate.expected_reward, 0, 1);
+    const optionalPassed = candidate.expected_passed === null ? null : candidate.expected_passed;
+    if (optionalPassed !== null && typeof optionalPassed !== "boolean") throw new ArgumentError(`replay report case ${index + 1} expected_passed must be boolean or null`);
+    const optionalDigest = (name: string, value: unknown): string | null => value === null ? null : digest(`replay report case ${index + 1} ${name}`, value);
+    normalizedCases.push({ run_id: runId, domain: candidate.domain as AutonomousDomainName, status: candidate.status, reward, passed: candidate.passed, missing_signals: missingSignals, rejected_signals: rejectedSignals, expected_reward: optionalReward, expected_passed: optionalPassed, expected_evaluation_digest: optionalDigest("expected_evaluation_digest", candidate.expected_evaluation_digest), evaluation_digest: optionalDigest("evaluation_digest", candidate.evaluation_digest), mismatch_codes: mismatchCodes });
+  }
+  const number = (name: string, value: unknown): number => {
+    if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > AUTONOMOUS_REPLAY_MAX_CASES) throw new ArgumentError(`replay report ${name} is outside its bounds`);
+    return value as number;
+  };
+  const counts = { case_count: number("case_count", raw.case_count), passed_count: number("passed_count", raw.passed_count), failed_count: number("failed_count", raw.failed_count), incomplete_count: number("incomplete_count", raw.incomplete_count), mismatch_count: number("mismatch_count", raw.mismatch_count) };
+  if (counts.case_count !== normalizedCases.length || counts.passed_count !== normalizedCases.filter((candidate) => candidate.status === "passed").length || counts.failed_count !== normalizedCases.filter((candidate) => candidate.status === "failed").length || counts.incomplete_count !== normalizedCases.filter((candidate) => candidate.status === "incomplete").length || counts.mismatch_count !== normalizedCases.filter((candidate) => candidate.mismatch_codes.length > 0).length) throw new ArgumentError("replay report counts do not match its cases");
+  if ((raw.status === "completed" && counts.mismatch_count !== 0) || (raw.status === "mismatch" && counts.mismatch_count === 0) || (raw.status === "refused" && counts.mismatch_count === 0)) throw new ArgumentError("replay report status does not match its mismatch count");
+  const status = raw.status as AutonomousReplayReport["status"];
+  const body = { schema: AUTONOMOUS_REPLAY_REPORT_SCHEMA, status, ...counts, cases: normalizedCases, retention: "metadata_only;provider_calls_not_replayed" as const, secret_material: "never_returned" as const };
+  if (typeof raw.report_digest !== "string" || raw.report_digest !== await digestJson(body)) throw new ArgumentError("replay report digest is invalid");
+  if (new TextEncoder().encode(canonicalJson({ ...body, report_digest: raw.report_digest })).byteLength > MAX_AUTONOMOUS_REPLAY_REPORT_BYTES) throw new ArgumentError("replay report exceeds its byte capacity");
+  return { ...body, report_digest: raw.report_digest };
+}
+
 /** Re-evaluate caller-rehydrated numeric evidence without replaying a provider or tool call. */
 export class AutonomousOfflineReplayEngine {
   async replay(inputs: readonly AutonomousReplayCaseInput[]): Promise<AutonomousReplayReport> {
-    if (!Array.isArray(inputs) || inputs.length > AUTONOMOUS_REPLAY_MAX_CASES) throw new ArgumentError("replay cases are outside their bounds");
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > AUTONOMOUS_REPLAY_MAX_CASES) throw new ArgumentError("replay cases must contain 1..4096 entries");
     const cases = await Promise.all(inputs.map(normalizeReplayCase));
+    if (new Set(cases.map((replayCase) => replayCase.run_id)).size !== cases.length) throw new ArgumentError("replay run_id values must be unique");
     const { builtinAutonomousDomainEvaluatorProfiles } = await import("./autonomous-learning.js");
     const profiles = await builtinAutonomousDomainEvaluatorProfiles();
     const profilesByDomain = new Map(profiles.map((profile) => [profile.domain, profile]));
@@ -1056,6 +1110,6 @@ export class AutonomousOfflineReplayEngine {
     }
     const mismatchCount = results.filter((result) => result.mismatch_codes.length > 0).length;
     const reportBody = { schema: AUTONOMOUS_REPLAY_REPORT_SCHEMA, status: mismatchCount ? "mismatch" as const : "completed" as const, case_count: results.length, passed_count: results.filter((result) => result.status === "passed").length, failed_count: results.filter((result) => result.status === "failed").length, incomplete_count: results.filter((result) => result.status === "incomplete").length, mismatch_count: mismatchCount, cases: results, retention: "metadata_only;provider_calls_not_replayed" as const, secret_material: "never_returned" as const };
-    return { ...reportBody, report_digest: await digestJson(reportBody) };
+    return await validateAutonomousReplayReport({ ...reportBody, report_digest: await digestJson(reportBody) });
   }
 }

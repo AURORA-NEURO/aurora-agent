@@ -14,8 +14,10 @@ import {
   LLMRuntime,
   builtinAutonomousDomainEvaluatorProfiles,
   autonomousReplayEvidenceDigest,
+  digestJson,
   openaiCompatibleProvider,
   validateAutonomousModelCatalogueSnapshot,
+  validateAutonomousReplayReport,
 } from "../dist/index.js";
 
 const digest = "a".repeat(64);
@@ -218,6 +220,13 @@ test("offline replay evaluates all twelve domains and detects expected-evidence 
   assert.equal(drifted.status, "mismatch");
   assert.equal(drifted.mismatch_count, 1);
   assert.equal(JSON.stringify(drifted).includes("bounded task"), false);
+  assert.equal((await validateAutonomousReplayReport(first)).report_digest, first.report_digest);
+  await assert.rejects(engine.replay([]), /1\.\.4096/);
+  await assert.rejects(engine.replay([cases[0], cases[0]]), /run_id values must be unique/);
+  const forged = { ...drifted, mismatch_count: 0 };
+  const { report_digest: _reportDigest, ...forgedBody } = forged;
+  forged.report_digest = await digestJson(forgedBody);
+  await assert.rejects(validateAutonomousReplayReport(forged), /counts do not match/);
 });
 
 test("replay evidence digest matches the Python and Rust canonical contract", async () => {

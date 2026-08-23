@@ -2454,6 +2454,7 @@ export {
   AUTONOMOUS_REPLAY_MAX_CASES,
   AUTONOMOUS_REPLAY_MAX_SIGNALS,
   AUTONOMOUS_REPLAY_REPORT_SCHEMA,
+  MAX_AUTONOMOUS_REPLAY_REPORT_BYTES,
   AutonomousModelHealthController,
   JsonAutonomousModelHealthSnapshotPersistence,
   AutonomousModelHealthPersistenceCoordinator,
@@ -2465,6 +2466,7 @@ export {
   autonomousReplayCaseToBrainArguments,
   autonomousReplayEvidenceDigest,
   validateAutonomousModelHealthSnapshot,
+  validateAutonomousReplayReport,
 } from "./autonomous-control.js";
 export type {
   AutonomousBrainControlTransport,

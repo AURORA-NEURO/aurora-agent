@@ -2644,6 +2644,14 @@ digests, and update a caller-owned bandit state. The evidence domain is allowed 
 legacy canonical alias, but the exact autonomous adapter remains the evaluator identity recorded
 in the learning and replay receipt.
 
+The TypeScript `AutonomousOfflineReplayEngine` now requires a non-empty batch with unique `run_id`
+identities and returns a digest-bound report that can be checked with
+`validateAutonomousReplayReport()`. The validator recomputes the report digest, rejects duplicate
+case identities, verifies passed/failed/incomplete and mismatch counts, checks bounded signal and
+evaluation metadata, and refuses a report status that contradicts its mismatch count. A caller can
+therefore persist or promote replay output only after the same structural and content checks used by
+the local engine; the validator still retains no raw evidence or provider material.
+
 `resolve()` remains canonical-first for compatibility with older control-plane code. Autonomous
 orchestration uses `resolve_for_autonomous_domain()` so overlapping names such as `data`,
 `operations`, and `biomedical` receive their exact specialized contracts rather than silently
