@@ -268,13 +268,16 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue implements Autonomous
     if (this.jobs.has(jobId)) throw new ArgumentError("mission remote jobId is already queued");
     if (this.jobs.size >= MAX_AUTONOMOUS_MISSION_REPLAN_JOBS) throw new ArgumentError("mission remote queue capacity is exhausted");
     const now = Date.now();
+    const admittedPlanningStatus = planningStatus(input.planningStatus ?? "unknown");
+    const admittedPlanDigest = digest("mission remote planRefinementDigest", input.planRefinementDigest ?? null, true);
+    if (admittedPlanningStatus === "accepted" && admittedPlanDigest === null) throw new ArgumentError("accepted mission remote admission requires a plan refinement digest");
     const job: AutonomousMissionReplanRemoteJob = {
       schema: AUTONOMOUS_MISSION_REPLAN_JOB_SCHEMA,
       job_id: jobId,
       root_mission_id: identifier("mission remote rootMissionId", input.rootMissionId),
       protected_contract_digest: digest("mission remote protectedContractDigest", input.protectedContractDigest)!,
-      planning_status: planningStatus(input.planningStatus ?? "unknown"),
-      plan_refinement_digest: digest("mission remote planRefinementDigest", input.planRefinementDigest ?? null, true),
+      planning_status: admittedPlanningStatus,
+      plan_refinement_digest: admittedPlanDigest,
       status: "queued",
       max_attempts: integer("mission remote maxAttempts", input.maxAttempts, 1, MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS, 3),
       attempts: 0,
@@ -605,6 +608,11 @@ export class AutonomousMissionReplanRemoteWorker {
       try {
         const resolved = await this.resolve({ job: clone(job), attempt: job.attempts, worker_id: this.workerId, renew: (renewLeaseMs = leaseMs, renewAt = clock()) => this.queue.renew(job.job_id, this.workerId, renewLeaseMs, renewAt) });
         if (!(resolved.executor instanceof AutonomousMissionExecutor) || !isObject(resolved.mission) || !isObject(resolved.options)) throw new ArgumentError("mission remote resolver returned malformed private execution state");
+        if (job.planning_status === "accepted" && resolved.options.acceptPlan !== true) throw new AutonomousMissionReplanContractError("accepted mission remote job requires acceptPlan=true in the private resolver binding");
+        if (job.plan_refinement_digest !== null) {
+          const privatePlan = resolved.options.acceptedPlanRefinement;
+          if (!privatePlan || digestJsonSync(privatePlan) !== job.plan_refinement_digest) throw new AutonomousMissionReplanContractError("private resolver plan does not match the queued plan refinement digest");
+        }
         if (heartbeatError !== null) throw new ProviderRuntimeError("mission remote worker lease heartbeat failed before execution", { code: "transport", retryable: true });
         const result = await runAutonomousMissionReplanCycle(resolved.executor, resolved.mission, resolved.options);
         if (heartbeatError !== null) throw new ProviderRuntimeError("mission remote worker lease heartbeat failed after execution", { code: "transport", retryable: true });

@@ -187,3 +187,31 @@ test("remote mission CAS coordinator serializes competing lease writers and rest
   await nonCas.enqueue({ jobId: "non-cas", rootMissionId: "non-cas-root", protectedContractDigest: "d".repeat(64), availableAt: 0 });
   assert.equal((await nonCas.load("non-cas")).status, "queued");
 });
+
+test("remote mission worker rejects accepted-plan drift before dispatch", async () => {
+  const root = mission();
+  const baselineExecutor = new AutonomousMissionExecutor({ catalogue: await catalogue(), executeStep: async () => ({ status: "succeeded", value: {} }) });
+  const baseline = await runAutonomousMissionReplanCycle(baselineExecutor, root, { evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }) });
+  const acceptedPlan = await planFor(root);
+  acceptedPlan.protected_contract_digest = baseline.protected_contract_digest;
+  const acceptedPlanDigest = await digestJson(acceptedPlan);
+  const driftedPlan = { ...acceptedPlan, focus_step_ids: ["first"] };
+  const queue = new InMemoryAutonomousMissionReplanRemoteJobQueue();
+  await queue.enqueue({ jobId: "drift-job", rootMissionId: root.mission_id, protectedContractDigest: baseline.protected_contract_digest, planningStatus: "accepted", planRefinementDigest: acceptedPlanDigest });
+  let dispatched = 0;
+  const worker = new AutonomousMissionReplanRemoteWorker({
+    queue,
+    workerId: "drift-worker",
+    resolve: async () => ({
+      executor: new AutonomousMissionExecutor({ catalogue: await catalogue(), executeStep: async () => { dispatched += 1; return { status: "succeeded", value: {} }; } }),
+      mission: root,
+      options: { acceptedPlanRefinement: driftedPlan, acceptPlan: true, evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }) },
+    }),
+  });
+  const run = await worker.run();
+  assert.equal(run.failed, 1);
+  assert.equal(dispatched, 0);
+  const job = await queue.load("drift-job");
+  assert.equal(job.status, "failed");
+  assert.equal(job.failure_class, "contract_mismatch");
+});
