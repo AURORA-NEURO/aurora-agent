@@ -3334,6 +3334,19 @@ def _memory_task_decision_digest(blueprint: AutonomousTaskBlueprint) -> str:
     ).decision_digest
 
 
+def _assert_task_decision_allows_provider(
+    decision: AutonomousTaskDecision | None,
+    *,
+    scope: str,
+) -> None:
+    """Fail closed before a blocked task can reach a provider or tool boundary."""
+
+    if decision is None or decision.posture != "blocked":
+        return
+    reasons = ", ".join(decision.blocking_reasons) or "unspecified_policy_block"
+    raise BrainRunError(f"{scope} is blocked by the task decision posture: {reasons}")
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousAutoBlueprint:
     """Provider-free automatic intake result: one blueprint, fan-out, or review request."""
@@ -9950,6 +9963,10 @@ class AutonomousTaskOrchestrator:
             required_model_capabilities=required_model_capabilities,
             memory_episodes=recalled,
         )
+        _assert_task_decision_allows_provider(
+            blueprint.task_decision,
+            scope="autonomous execution",
+        )
         if invocation_observer is not None and not all(
             callable(getattr(invocation_observer, name, None)) for name in ("before", "after")
         ):
@@ -10657,6 +10674,10 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(blueprint, AutonomousTaskBlueprint):
             raise BrainRunError("workflow execution requires an AutonomousTaskBlueprint")
+        _assert_task_decision_allows_provider(
+            blueprint.task_decision,
+            scope="workflow execution",
+        )
         if invocation_observer is not None and not all(
             callable(getattr(invocation_observer, name, None)) for name in ("before", "after")
         ):
@@ -11630,6 +11651,15 @@ class AutonomousTaskOrchestrator:
             require_json=require_json,
             response_schema=response_schema,
             max_input_tokens=input_tokens,
+        )
+        for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints):
+            _assert_task_decision_allows_provider(
+                child.task_decision,
+                scope=f"cross-domain child {child_id}",
+            )
+        _assert_task_decision_allows_provider(
+            blueprint.synthesis_blueprint.task_decision,
+            scope="cross-domain synthesis",
         )
         plan_priority, plan_refinement_digest, plan_focus_child_ids = self._accepted_cross_domain_plan(
             blueprint,

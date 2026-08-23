@@ -2320,6 +2320,13 @@ selection revalidation compares the decision digest and posture along with the e
 catalogue, policy, and ranking identities. This prevents a changed interpretation or policy from
 being treated as the same reviewed model choice after restart.
 
+Normal single-domain, workflow, cross-domain, and approved-selection execution rechecks the
+decision posture immediately before provider or domain-tool dispatch. A `blocked` posture fails
+closed with its bounded blocking reasons; `review_required` remains caller-owned approval and
+review state. Cross-domain execution preflights every specialist and synthesis blueprint before
+starting fan-out, so a later blocked child cannot be discovered after an earlier child has already
+invoked a provider.
+
 All twelve built-in domains use the same decision algorithm with domain policy and lens inputs;
 their evidence mode, effect posture, specialist boundaries, capability hints, and evaluator
 requirements remain domain-specific. The projection contains no task text, provider response,

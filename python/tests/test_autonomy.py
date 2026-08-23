@@ -1581,6 +1581,14 @@ def test_blocked_task_decision_changes_preview_and_prevents_provider_dispatch():
             selection_preview=preview,
             credentials={},
         )
+    with pytest.raises(BrainRunError, match="blocked by the task decision posture"):
+        agent.run(
+            task=task,
+            domain="biomedical",
+            credentials={},
+            model_candidates=[candidate],
+            approve_provider_call=True,
+        )
     assert calls == []
 
 

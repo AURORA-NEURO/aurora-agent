@@ -147,6 +147,11 @@ test("brain facade blocks approved provider dispatch when task posture is forbid
     /blocked by the task decision posture/,
   );
   assert.equal(runtime.providerStatus("offline").attempts, attempts);
+  await assert.rejects(
+    () => brain.execute({ task, domain: "biomedical" }, { approveProviderCall: true }),
+    /blocked by the task decision posture/,
+  );
+  assert.equal(runtime.providerStatus("offline").attempts, attempts);
 });
 
 test("brain facade revalidates approved model previews and invokes one exact local arm across every domain", async () => {

@@ -2706,6 +2706,17 @@ async function buildTaskBlueprint(
   };
 }
 
+function assertAutonomousTaskDecisionAllowsProvider(
+  decision: AutonomousTaskDecision,
+  scope: string,
+): void {
+  if (decision.posture !== "blocked") return;
+  const reasons = decision.blocking_reasons.length > 0
+    ? decision.blocking_reasons.join(", ")
+    : "unspecified_policy_block";
+  throw new ProviderRuntimeError(`${scope} is blocked by the task decision posture: ${reasons}`);
+}
+
 function planningResponseSchema(ids: readonly string[], focusField: "focus_stage_ids" | "focus_child_ids" | "focus_step_ids"): JsonObject {
   const enumValues = [...ids];
   return {
@@ -6316,6 +6327,7 @@ export class AutonomousAgent {
     const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    assertAutonomousTaskDecisionAllowsProvider(blueprint.task_decision, "autonomous execution");
     const acceptedPlan = await acceptedAutonomousPlan(blueprint, options.acceptedSingleDomainPlanRefinement);
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? null;
     const domainPolicyAdmission = domainPolicyAdmissionForBlueprint(route, blueprint, options, acceptedPlan !== null);
@@ -6429,6 +6441,10 @@ export class AutonomousAgent {
       toolSelectionState: options.toolSelectionState,
       toolSelectionExploration: options.toolSelectionExploration,
     });
+    for (const [index, child] of blueprint.child_blueprints.entries()) {
+      assertAutonomousTaskDecisionAllowsProvider(child.task_decision, `cross-domain child ${index + 1}`);
+    }
+    assertAutonomousTaskDecisionAllowsProvider(blueprint.synthesis_blueprint.task_decision, "cross-domain synthesis");
     const acceptedPlan = await acceptedCrossDomainPlan(blueprint, options.acceptedCrossDomainPlanRefinement);
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? null;
     const domainPolicyAdmissions = domainPolicyMode === "strict"
