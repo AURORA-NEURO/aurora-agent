@@ -87,6 +87,8 @@ requires an explicit resolution after an uncertain restart, and reuses caller-re
 journals to replay completed source work without a second dispatch. JSON, transactional CAS, and
 browser storage adapters reject stale writers and tampered digests; source values, requests,
 credentials, and provider payloads remain caller-owned.
+`AutonomousAgent.executeReviewedEvidenceResumable()` exposes this lifecycle without forcing
+applications to construct the lower-level controller themselves.
 
 Evidence routing now also has a reviewed execution controller. The TypeScript
 `AutonomousEvidenceExecutionController` binds the evidence plan, selection, readiness image,

@@ -483,6 +483,7 @@ export type {
   AutonomousAgentOptions,
   AutonomousReviewedEvidenceExecutionOptions,
   AutonomousReviewedEvidencePreparationOptions,
+  AutonomousReviewedEvidenceResumableExecutionOptions,
   AutonomousEvidenceBackedRunStatus,
   AutonomousEvidencePromptProjection,
   AutonomousEvidencePromptBuilder,

@@ -4581,6 +4581,9 @@ const outcome = await resumable.run(executionPlan, evidencePlan, requests, {
 The checkpoint has in-memory, JSON, transactional JSON, and browser Web Storage seams. CAS
 failure is surfaced as a stale-worker refusal instead of silently merging two source histories;
 readiness and the exact reviewed execution plan remain bound across the restart.
+The high-level facade exposes the same path as `agent.executeReviewedEvidenceResumable(...)`,
+carrying preparation-time provider contracts and health stores into the same digest-bound job
+without making credentials or source transport part of the SDK checkpoint.
 
 ### Provider-specific evidence contracts
 

@@ -88,6 +88,10 @@ import type {
   AutonomousEvidenceExecutionResult,
 } from "./autonomous-evidence-execution.js";
 import type {
+  AutonomousEvidenceExecutionCheckpointStore,
+  AutonomousEvidenceExecutionResumableRun,
+} from "./autonomous-evidence-execution-resumable.js";
+import type {
   AutonomousEpisodicMemoryStore,
   AutonomousMemoryEpisode,
   AutonomousMemoryQuery,
@@ -1000,6 +1004,12 @@ export interface AutonomousReviewedEvidenceExecutionOptions {
   completedStages?: Readonly<Record<string, readonly string[]>>;
   prepare?: AutonomousReviewedEvidencePreparationOptions;
   execute?: AutonomousEvidenceExecutionOptions;
+}
+
+/** Restart-safe reviewed evidence execution options for a caller-owned metadata checkpoint. */
+export interface AutonomousReviewedEvidenceResumableExecutionOptions extends AutonomousReviewedEvidenceExecutionOptions {
+  jobId: string;
+  checkpointStore: AutonomousEvidenceExecutionCheckpointStore;
 }
 
 /** Preparation options that keep the caller-owned evidence health ledger at the facade boundary. */
@@ -4188,6 +4198,36 @@ export class AutonomousAgent {
         : {}),
     };
     return controller.execute(executionPlan, plan, requests, executeOptions);
+  }
+
+  /**
+   * Execute reviewed evidence through a restart-safe job checkpoint. The caller still owns the
+   * runtime journal and transient values; only the approval/readiness/settlement metadata is
+   * persisted by the supplied checkpoint store.
+   */
+  async executeReviewedEvidenceResumable(
+    registry: AutonomousEvidenceAdapterRegistry,
+    domains: readonly AutonomousDomainName[],
+    requests: readonly AutonomousEvidenceAcquisitionRequest[],
+    options: AutonomousReviewedEvidenceResumableExecutionOptions,
+  ): Promise<AutonomousEvidenceExecutionResumableRun> {
+    if (!options || typeof options !== "object") throw new ArgumentError("resumable reviewed evidence options are malformed");
+    if (typeof options.jobId !== "string" || !options.jobId.trim()) throw new ArgumentError("resumable reviewed evidence jobId is required");
+    if (!options.checkpointStore || typeof options.checkpointStore.read !== "function" || typeof options.checkpointStore.write !== "function") throw new ArgumentError("resumable reviewed evidence checkpointStore is malformed");
+    const plan = await this.evidencePlan(domains, { availableEvidence: options.availableEvidence, completedStages: options.completedStages });
+    const prepareOptions = options.prepare ?? {};
+    const { healthStore, ...controllerPrepareOptions } = prepareOptions;
+    const controller = await this.createEvidenceExecutionController(registry, healthStore);
+    const executionPlan = await controller.prepare(plan, controllerPrepareOptions);
+    const { AutonomousEvidenceExecutionResumableController } = await import("./autonomous-evidence-execution-resumable.js");
+    const resumable = new AutonomousEvidenceExecutionResumableController(controller, options.checkpointStore, options.jobId);
+    const executeOptions: AutonomousEvidenceExecutionOptions = {
+      ...(options.execute ?? {}),
+      ...(controllerPrepareOptions.providerContracts !== undefined && options.execute?.providerContracts === undefined
+        ? { providerContracts: controllerPrepareOptions.providerContracts }
+        : {}),
+    };
+    return resumable.run(executionPlan, plan, requests, executeOptions);
   }
 
   /**

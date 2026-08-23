@@ -162,3 +162,42 @@ test("evidence execution checkpoint persistence is JSON-portable, browser-portab
   const stale = { ...checkpoint };
   assert.equal(await transactionalStore.writeIfUnchanged("0".repeat(64), stale), false);
 });
+
+test("AutonomousAgent exposes the restart-safe evidence lifecycle at the high-level facade", async () => {
+  const calls = { count: 0, values: new Map() };
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  registerAllDomains(registry, calls);
+  const agent = planAgent();
+  const plan = await agent.evidencePlan(["coding"]);
+  const requests = plan.requirements.map((requirement, index) => ({
+    requirement_id: requirement.requirement_id,
+    source_id: `facade-source-${index}`,
+    source_digest: "e".repeat(64),
+  }));
+  const checkpointStore = new InMemoryAutonomousEvidenceExecutionCheckpointStore();
+  const first = await agent.executeReviewedEvidenceResumable(registry, ["coding"], requests, {
+    jobId: "facade-resumable-job",
+    checkpointStore,
+    prepare: {
+      readinessPolicy: new AutonomousEvidenceReadinessPolicy({ requireHealth: false }),
+      allowDegradedDispatch: true,
+    },
+    execute: executionOptions(),
+  });
+  assert.equal(first.status, "approval_required");
+  assert.equal(calls.count, 0);
+
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const second = await agent.executeReviewedEvidenceResumable(registry, ["coding"], requests, {
+    jobId: "facade-resumable-job",
+    checkpointStore,
+    prepare: {
+      readinessPolicy: new AutonomousEvidenceReadinessPolicy({ requireHealth: false }),
+      allowDegradedDispatch: true,
+    },
+    execute: { ...executionOptions(), journal, approveSourceDispatch: true },
+  });
+  assert.equal(second.status, "completed");
+  assert.equal(second.checkpoint.completed_request_count, requests.length);
+  assert.equal(calls.count, requests.length);
+});
