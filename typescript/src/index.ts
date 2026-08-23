@@ -2037,6 +2037,36 @@ export type {
   AutonomousMissionPlannerLearningStatus,
 } from "./mission-replan.js";
 export {
+  AUTONOMOUS_MISSION_REPLAN_JOB_QUEUE_SCHEMA,
+  AUTONOMOUS_MISSION_REPLAN_JOB_SCHEMA,
+  AUTONOMOUS_MISSION_REPLAN_REMOTE_WORKER_SCHEMA,
+  MAX_AUTONOMOUS_MISSION_REPLAN_JOBS,
+  MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS,
+  MAX_AUTONOMOUS_MISSION_REPLAN_JOB_LEASE_MS,
+  MAX_AUTONOMOUS_MISSION_REPLAN_JOB_SNAPSHOT_BYTES,
+  InMemoryAutonomousMissionReplanRemoteJobQueue,
+  JsonAutonomousMissionReplanRemoteJobQueuePersistence,
+  JsonAutonomousMissionReplanRemoteJobQueueTextStore,
+  AutonomousMissionReplanRemoteWorker,
+  validateAutonomousMissionReplanRemoteJobQueueSnapshot,
+} from "./mission-replan-worker.js";
+export type {
+  AutonomousMissionReplanRemoteJobStatus,
+  AutonomousMissionReplanRemoteJobFailureClass,
+  AutonomousMissionReplanRemoteJob,
+  AutonomousMissionReplanRemoteJobQueueSnapshot,
+  AutonomousMissionReplanRemoteJobQueuePersistence,
+  AutonomousMissionReplanRemoteJobQueueTextStore,
+  AutonomousMissionReplanRemoteJobAdmission,
+  AutonomousMissionReplanRemoteJobRequeueOptions,
+  AutonomousMissionReplanRemoteJobResolution,
+  AutonomousMissionReplanRemoteJobResolverContext,
+  AutonomousMissionReplanRemoteJobResolver,
+  AutonomousMissionReplanRemoteWorkerOptions,
+  AutonomousMissionReplanRemoteWorkerRow,
+  AutonomousMissionReplanRemoteWorkerRun,
+} from "./mission-replan-worker.js";
+export {
   AUTONOMOUS_EVALUATION_SCHEMA,
   AUTONOMOUS_EVALUATOR_MESH_SCHEMA,
   AUTONOMOUS_LEARNING_EPISODE_SCHEMA,

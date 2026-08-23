@@ -2147,6 +2147,17 @@ reapplied without replaying the provider and review-only proposals cannot silent
 accepted. The same path is tested across all built-in domains, including cross-domain mission
 graphs.
 
+For service workers, `InMemoryAutonomousMissionReplanRemoteJobQueue` and
+`AutonomousMissionReplanRemoteWorker` provide a claim/lease/requeue boundary around the same
+cycle. A remote job contains only the root mission identity, protected-contract digest, planner
+status, plan-refinement digest, lease/attempt metadata, and a result digest. The resolver owns
+the mission payload, executor, credentials, evaluator, provider policy, and rehydration callback.
+`requeue()` is explicit for a `plan_review_required`, approval, reconciliation, or failed job;
+the caller can bind the accepted plan digest before a worker claims it again. Queue snapshots are
+canonical, hash-bound, capacity-limited, and persistence-adapter friendly. A worker therefore
+cannot reconstruct a missing mission from queue state and cannot silently replay a provider
+planner after a remote process restart.
+
 For applications that need one reviewed plan spanning several domain workflows, the TypeScript
 facade also exposes `planWorkflowPortfolio()`. Each item supplies an explicit domain and task,
 may depend on earlier items, and is compiled through the same route, workflow, evidence, and
