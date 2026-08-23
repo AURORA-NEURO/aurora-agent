@@ -49,6 +49,11 @@ from .autonomous_domain_policy import (
     autonomous_domain_policy,
     evaluate_autonomous_domain_policy,
 )
+from .autonomous_task_lens import (
+    AUTONOMOUS_TASK_LENS_SCHEMA,
+    AutonomousDomainTaskLens,
+    autonomous_domain_task_lens,
+)
 from .brain import (
     AutonomousBrain,
     BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
@@ -3175,6 +3180,8 @@ class AutonomousTaskBlueprint:
     required_capabilities: tuple[str, ...]
     # Provider-free bounded limits and approval posture for this domain.
     domain_policy: AutonomousDomainPolicy | None = None
+    # Domain-specific planning posture; this is guidance metadata, not authority.
+    task_lens: AutonomousDomainTaskLens | None = None
 
     def evidence_plan(self) -> AutonomousEvidencePlan:
         """Return the deterministic evidence contract for this blueprint's workflow."""
@@ -3217,11 +3224,26 @@ class AutonomousTaskBlueprint:
             "selection_context": dict(self.selection_context),
             "required_capabilities": list(self.required_capabilities),
             "domain_policy": (self.domain_policy or autonomous_domain_policy(self.profile.domain)).to_dict(),
+            "task_lens": (self.task_lens or autonomous_domain_task_lens(self.profile.domain)).to_dict(),
             "prompt": prompt_public,
             "plan": plan_public,
             "execution": "not_started",
             "credential_posture": "caller_handles_only",
         }
+
+
+def _memory_selection_context(blueprint: AutonomousTaskBlueprint) -> dict[str, Any]:
+    """Project live selector metadata into the smaller episodic-memory envelope."""
+
+    return {
+        key: value
+        for key, value in blueprint.selection_context.items()
+        if not key.startswith("task_lens_")
+    }
+
+
+def _memory_task_lens_digest(blueprint: AutonomousTaskBlueprint) -> str:
+    return (blueprint.task_lens or autonomous_domain_task_lens(blueprint.spec.domain)).lens_digest
 
 
 @dataclass(frozen=True, slots=True)
@@ -6391,6 +6413,7 @@ class AutonomousPromptBuilder:
         safe_memory = [_safe_json("memory episode", episode, maximum=200_000) for episode in memory_episodes]
         evidence_plan = build_autonomous_evidence_plan((workflow,))
         domain_policy = autonomous_domain_policy(profile.domain)
+        task_lens = autonomous_domain_task_lens(profile.domain)
         context: list[dict[str, Any]] = [
             {
                 "id": "autonomy-domain-policy",
@@ -6417,6 +6440,15 @@ class AutonomousPromptBuilder:
                 "priority": 1000,
             }
         ]
+        context.append(
+            {
+                "id": "autonomy-task-lens",
+                "role": "developer",
+                "content": _json_text(task_lens.prompt_contract()),
+                "required": True,
+                "priority": 998,
+            }
+        )
         if domain_pack is not None:
             context.append(
                 {
@@ -6631,6 +6663,7 @@ class AutonomousPlanBuilder:
     ) -> dict[str, Any]:
         workflow = workflow or _builtin_workflow_strategy(spec.domain)
         domain_policy = autonomous_domain_policy(spec.domain)
+        task_lens = autonomous_domain_task_lens(spec.domain)
         if domain_pack is not None:
             if not isinstance(domain_pack, AutonomousDomainPack):
                 raise BrainRunError("domain_pack must be an AutonomousDomainPack or None")
@@ -6666,6 +6699,10 @@ class AutonomousPlanBuilder:
                             "max_tool_turns": domain_policy.max_tool_turns,
                             "max_total_cost_units": domain_policy.max_total_cost_units,
                         },
+                        "task_lens_id": task_lens.lens_id,
+                        "task_lens_digest": task_lens.lens_digest,
+                        "task_lens_decision_checks": list(task_lens.decision_checks),
+                        "task_lens_evidence_priorities": list(task_lens.evidence_priorities),
                     },
                     "depends_on": [],
                     "effect": "provider_call",
@@ -6675,6 +6712,7 @@ class AutonomousPlanBuilder:
             "allowed_tools": ["provider.invoke"],
             "max_cost": min(max(1, spec.max_steps), domain_policy.max_total_cost_units),
             "domain_policy_digest": domain_policy.policy_digest,
+            "task_lens_digest": task_lens.lens_digest,
             "require_approval_for_effects": True,
         }
 
@@ -8052,12 +8090,18 @@ class AutonomousTaskOrchestrator:
             )
         )
         evidence_plan = build_autonomous_evidence_plan((workflow,))
+        task_lens = autonomous_domain_task_lens(spec.domain)
         selection_context = {
             "schema": AUTONOMY_SCHEMA,
             "workflow": "autonomous_task",
             "domain": spec.domain,
             "capability": spec.capability,
             "risk_class": spec.risk_class,
+            "task_lens_id": task_lens.lens_id,
+            "task_lens_digest": task_lens.lens_digest,
+            "task_lens_model_capability_hints": list(task_lens.model_capability_hints),
+            "task_lens_evaluator_signals": list(task_lens.evaluator_signals),
+            "task_lens_planning_dimensions": list(task_lens.planning_dimensions),
             "execution_mode": spec.execution_mode,
             "domain_capabilities": list(profile.capabilities),
             "domain_pack_id": domain_pack.pack_id,
@@ -8125,6 +8169,7 @@ class AutonomousTaskOrchestrator:
             plan=plan,
             required_capabilities=required,
             domain_policy=autonomous_domain_policy(spec.domain),
+            task_lens=task_lens,
         )
 
     def evidence_plan(
@@ -9033,6 +9078,7 @@ class AutonomousTaskOrchestrator:
                 plan=blueprint.plan,
                 required_capabilities=blueprint.required_capabilities,
                 domain_policy=blueprint.domain_policy,
+                task_lens=blueprint.task_lens,
             )
         else:
             replacement = blueprint
@@ -10975,7 +11021,7 @@ class AutonomousTaskOrchestrator:
                         stage_result.result,
                         task=blueprint.spec.task,
                         episode_id=episode_id,
-                        context=blueprint.selection_context,
+                        context=_memory_selection_context(blueprint),
                         tags=[
                             *normalized_tags,
                             f"domain:{blueprint.spec.domain}",
@@ -10989,6 +11035,7 @@ class AutonomousTaskOrchestrator:
                             "stage_id": stage_result.stage.id,
                             "evaluator_id": decision.evaluator_id,
                             "evaluator_version": decision.evaluator_version,
+                            "task_lens_digest": _memory_task_lens_digest(blueprint),
                         },
                         memory=memory_store,
                     )
@@ -11201,7 +11248,7 @@ class AutonomousTaskOrchestrator:
                         stage_result.result,
                         task=blueprint.spec.task,
                         episode_id=episode_id,
-                        context=blueprint.selection_context,
+                        context=_memory_selection_context(blueprint),
                         tags=[
                             *normalized_tags,
                             f"domain:{blueprint.spec.domain}",
@@ -11219,6 +11266,7 @@ class AutonomousTaskOrchestrator:
                             "credited_reward": trajectory_result.credited_rewards[index],
                             "evaluator_id": decision.evaluator_id,
                             "evaluator_version": decision.evaluator_version,
+                            "task_lens_digest": _memory_task_lens_digest(blueprint),
                         },
                         memory=memory_store,
                     )
@@ -11764,7 +11812,7 @@ class AutonomousTaskOrchestrator:
                 result,
                 task=blueprint_item.spec.task,
                 episode_id=episode_id,
-                context=blueprint_item.selection_context,
+                context=_memory_selection_context(blueprint_item),
                 tags=[
                     *normalized_tags,
                     f"domain:{blueprint_item.spec.domain}",
@@ -11777,6 +11825,7 @@ class AutonomousTaskOrchestrator:
                     "item_id": item_id,
                     "evaluator_id": decision.evaluator_id,
                     "evaluator_version": decision.evaluator_version,
+                    "task_lens_digest": _memory_task_lens_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12088,7 +12137,7 @@ class AutonomousTaskOrchestrator:
                 result,
                 task=blueprint_item.spec.task,
                 episode_id=episode_id,
-                context=blueprint_item.selection_context,
+                context=_memory_selection_context(blueprint_item),
                 tags=[
                     *normalized_tags,
                     f"domain:{blueprint_item.spec.domain}",
@@ -12106,6 +12155,7 @@ class AutonomousTaskOrchestrator:
                     "cross_domain_plan_refinement_digest": cross_domain.plan_refinement_digest,
                     "evaluator_id": decision.evaluator_id,
                     "evaluator_version": decision.evaluator_version,
+                    "task_lens_digest": _memory_task_lens_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12251,7 +12301,7 @@ class AutonomousTaskOrchestrator:
                 result,
                 task=blueprint_item.spec.task,
                 episode_id=episode_id,
-                context=blueprint_item.selection_context,
+                context=_memory_selection_context(blueprint_item),
                 tags=[
                     *normalized_tags,
                     f"domain:{blueprint_item.spec.domain}",
@@ -12268,6 +12318,7 @@ class AutonomousTaskOrchestrator:
                     "credited_reward": trajectory_result.credited_rewards[index],
                     "evaluator_id": decision.evaluator_id,
                     "evaluator_version": decision.evaluator_version,
+                    "task_lens_digest": _memory_task_lens_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12724,10 +12775,19 @@ class AutonomousTaskOrchestrator:
                 result,
                 task=blueprint.spec.task,
                 episode_id=episode_id,
-                context=blueprint.selection_context,
+                # The full selection context is intentionally rich for the
+                # live selector, but episodic memory has a tighter bounded
+                # context-key contract. Lens guidance is already retained by
+                # the blueprint/plan digests; keep the replay projection
+                # compact and carry the lens digest in provenance below.
+                context=_memory_selection_context(blueprint),
                 tags=[*memory_tags, f"domain:{blueprint.spec.domain}", f"attempt:{attempt}"],
                 lesson=decision.replan_instruction if decision.replan_requested else None,
-                provenance={"evaluator_id": decision.evaluator_id, "evaluator_version": decision.evaluator_version},
+                provenance={
+                    "evaluator_id": decision.evaluator_id,
+                    "evaluator_version": decision.evaluator_version,
+                    "task_lens_digest": _memory_task_lens_digest(blueprint),
+                },
                 memory=store,
             )
             try:
@@ -19039,6 +19099,7 @@ __all__ = [
     "AUTONOMOUS_DOMAIN_PACK_SCHEMA",
     "AUTONOMOUS_EXECUTION_PLAN_SCHEMA",
     "AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA",
+    "AUTONOMOUS_TASK_LENS_SCHEMA",
     "AUTONOMOUS_EXECUTION_PLAN_STATUSES",
     "MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES",
     "AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA",
@@ -19070,6 +19131,7 @@ __all__ = [
     "AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
+    "AutonomousDomainTaskLens",
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",

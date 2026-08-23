@@ -89,6 +89,16 @@ export type {
   AutonomousDomainPolicyLearningMode,
   AutonomousDomainPolicyExecutionMode,
 } from "./autonomous-domain-policy.js";
+export {
+  AUTONOMOUS_TASK_LENS_SCHEMA,
+  AUTONOMOUS_TASK_LENS_VERSION,
+  AUTONOMOUS_TASK_LENS_DOMAINS,
+  MAX_AUTONOMOUS_TASK_LENS_ITEMS,
+  builtinAutonomousDomainTaskLenses,
+  autonomousDomainTaskLens,
+  autonomousTaskLensPromptContract,
+} from "./autonomous-task-lens.js";
+export type { AutonomousDomainTaskLens } from "./autonomous-task-lens.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,

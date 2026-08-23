@@ -2192,6 +2192,66 @@ domain and cross-domain work; explicit caller tools remain compatibility input b
 subject to activation, catalogue, provider, and effect gates. This keeps model-visible tools
 small enough to be useful without converting discovery or selection into authority.
 
+### Domain task lenses: useful specialization without hidden authority
+
+The route, domain policy, workflow, and capability pack establish what the agent may consider;
+the domain task lens establishes how it should think about the work. Every built-in domain has a
+reviewed `bioprism-autonomous-domain-task-lens/0.1` contract. The twelve lenses are coding,
+browser, data, science, biomedical, neuroscience, operations, enterprise, multi-agent,
+multimodal, cross-domain, and evaluation. A lens is deterministic, versioned, and addressed by
+`lens_digest`; it contains no task text, provider output, credential, tool argument, or effect
+permission.
+
+Each lens supplies bounded planning dimensions, decision checks, evidence priorities, evaluator
+signals, model-capability hints, output sections, and known failure modes. The fields have
+different jobs:
+
+* Planning dimensions turn a generic objective into a domain-shaped checklist. For example,
+  coding emphasizes scope, dependency impact, implementation, and verification, while
+  biomedical work emphasizes population, endpoint, provenance, safety, and qualified review.
+* Evidence priorities tell the planner what should be collected or made explicit before a claim
+  is promoted. They do not assert that the evidence exists.
+* Evaluator signals give the value-learning and replay layers stable quality dimensions. They are
+  not rewards; only explicit evaluator feedback can settle a learning episode.
+* Model-capability hints are preferences only. They can improve candidate ranking and explain why
+  a model was considered, but they never bypass required capabilities, provider health,
+  credentials, caller approval, or effect policy.
+* Failure modes and output sections make uncertainty visible and give the caller a stable review
+  surface without retaining the underlying task or provider response.
+
+Python exposes the immutable built-ins directly:
+
+```python
+from prism_sdk import autonomous_domain_task_lens
+
+lens = autonomous_domain_task_lens("biomedical")
+print(lens.lens_id, lens.lens_digest)
+contract = lens.prompt_contract()  # bounded strategy metadata only
+```
+
+TypeScript exposes the same canonical contract and digest:
+
+```typescript
+const lens = autonomousDomainTaskLens("evaluation");
+const contract = autonomousTaskLensPromptContract(lens);
+```
+
+The normal prompt receives the full lens as a required developer contract. When the caller sets a
+very small input budget, the prompt uses a compact `lens_id`/`lens_digest` marker so the evidence
+contract still fits; the complete lens remains available in the provider-free blueprint and
+plan. Each compiled plan step carries the lens ID and digest, and selection context carries the
+digest plus the planning, evaluator, and capability-hint projections. The contextual bandit
+identity intentionally remains only `(domain, capability, risk_class, task_family)`, so adding or
+reviewing descriptive lens metadata cannot fragment historical learning or let task text become a
+bandit key.
+
+Replay and memory projections follow the same boundary. Lens digests may be retained as value-only
+provenance, while the larger live selection context is compacted before episodic-memory storage.
+Prompt and plan digests therefore identify the exact reviewed lens used for a run without storing
+the user objective, model response, credentials, tool arguments, or hidden authority. A changed
+lens version or digest is observable during review and replay, but cannot by itself authorize a
+provider invocation or external effect.
+
 ### Provider-assisted mission ordering with replay-safe acceptance
 
 Mission execution now has the same planner boundary as workflow and portfolio execution. The

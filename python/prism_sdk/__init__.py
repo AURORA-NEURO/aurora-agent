@@ -355,6 +355,15 @@ from .autonomous_domain_policy import (
     builtin_autonomous_domain_policies,
     evaluate_autonomous_domain_policy,
 )
+from .autonomous_task_lens import (
+    AUTONOMOUS_TASK_LENS_SCHEMA,
+    AUTONOMOUS_TASK_LENS_VERSION,
+    AUTONOMOUS_TASK_LENS_DOMAINS,
+    MAX_AUTONOMOUS_TASK_LENS_ITEMS,
+    AutonomousDomainTaskLens,
+    builtin_autonomous_domain_task_lenses,
+    autonomous_domain_task_lens,
+)
 from .autonomy_scenarios import (
     AUTONOMOUS_OFFLINE_SCENARIO_SCHEMA,
     AUTONOMOUS_OFFLINE_SCENARIO_REPLAY_SCHEMA,
@@ -5438,6 +5447,13 @@ __all__ = [
     "autonomous_domain_policy",
     "builtin_autonomous_domain_policies",
     "evaluate_autonomous_domain_policy",
+    "AUTONOMOUS_TASK_LENS_SCHEMA",
+    "AUTONOMOUS_TASK_LENS_VERSION",
+    "AUTONOMOUS_TASK_LENS_DOMAINS",
+    "MAX_AUTONOMOUS_TASK_LENS_ITEMS",
+    "AutonomousDomainTaskLens",
+    "builtin_autonomous_domain_task_lenses",
+    "autonomous_domain_task_lens",
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",

@@ -1327,6 +1327,7 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
         assert "private api key" not in json.dumps(public).lower()
         assert public["prompt"]["context_ids"] == [
             "autonomy-domain-policy",
+            "autonomy-task-lens",
             "autonomy-domain-pack",
             "autonomy-capability-contract",
             "autonomy-workflow-contract",
