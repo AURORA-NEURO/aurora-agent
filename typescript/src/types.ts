@@ -419,6 +419,38 @@ export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
   authorization: string;
 }
 
+/**
+ * Value-only provider proposal for an existing ordered-step graph.
+ *
+ * This is intentionally more general than workflow stages: mission executors, portfolio
+ * schedulers, and future domain runtimes can share the same planner contract while keeping
+ * tools, arguments, dependencies, permissions, claims, and effects outside the proposal.
+ */
+export interface AutonomousOrderedStepPlanRefinementResult extends JsonObject {
+  schema: "bioprism-typescript-autonomous-ordered-step-plan-refinement/0.1" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  task_digest: string;
+  base_plan_digest: string;
+  protected_contract_digest: string | null;
+  priority_step_ids: string[];
+  focus_step_ids: string[];
+  review_required: boolean;
+  confidence: number;
+  selected_model: { provider: string; model: string } | null;
+  selection_digest: string | null;
+  planner_prompt_digest: string | null;
+  planner_plan_digest: string | null;
+  outcome_digest: string | null;
+  /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
+  cost_budget?: {
+    max_cost_units: number;
+    consumed_cost_units: number;
+    remaining_cost_units: number;
+  } | null;
+  retention: string;
+  authorization: string;
+}
+
 export interface AutonomousRoutingHoldoutReport extends JsonObject {
   schema: "bioprism-python-autonomous-holdout-evaluation/0.1" | string;
   evaluator_id: string;

@@ -174,6 +174,7 @@ import type {
   JsonObject,
   JsonValue,
   AutonomousCrossDomainPlanRefinementResult,
+  AutonomousOrderedStepPlanRefinementResult,
   AutonomousPlanRefinementResult,
   RestToolResponse,
   ToolDefinition,
@@ -188,6 +189,7 @@ export const AUTONOMOUS_PROMPT_SCHEMA = "bioprism-python-autonomous-prompt/0.1" 
 export const AUTONOMOUS_PLAN_SCHEMA = "bioprism-python-autonomous-plan/0.1" as const;
 export const AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1" as const;
 export const AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" as const;
+export const AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA = "bioprism-typescript-autonomous-ordered-step-plan-refinement/0.1" as const;
 export const AUTONOMOUS_PLAN_AND_RUN_SCHEMA = "bioprism-typescript-autonomous-plan-and-run/0.1" as const;
 export const AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA = "bioprism-typescript-autonomous-evidence-backed-run/0.1" as const;
 export const MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_CHUNKS = 32;
@@ -1154,6 +1156,27 @@ export interface AutonomousProviderPlanningOptions {
   observer?: ProviderInvocationObserver;
   /** Metadata-only lifecycle callback for each model-selection attempt. */
   selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
+}
+
+/** Metadata-safe input for planning an existing dependency-closed step graph. */
+export interface AutonomousOrderedStepPlanStep extends JsonObject {
+  id: string;
+  domain: string;
+  capability: string;
+  objective: string;
+  depends_on?: string[];
+  required?: boolean;
+}
+
+/** Caller-owned mission/portfolio planning request; raw objectives are transient prompt input. */
+export interface AutonomousOrderedStepPlanRequest {
+  task: string;
+  steps: AutonomousOrderedStepPlanStep[];
+  domain?: AutonomousDomainName;
+  capability?: string;
+  basePlanDigest?: string;
+  protectedContractDigest?: string | null;
+  context?: AutonomousPromptChunk[];
 }
 
 export interface AutonomousModelRefreshResult {
@@ -2502,7 +2525,7 @@ async function buildTaskBlueprint(
   };
 }
 
-function planningResponseSchema(ids: readonly string[], focusField: "focus_stage_ids" | "focus_child_ids"): JsonObject {
+function planningResponseSchema(ids: readonly string[], focusField: "focus_stage_ids" | "focus_child_ids" | "focus_step_ids"): JsonObject {
   const enumValues = [...ids];
   return {
     type: "object",
@@ -2622,6 +2645,102 @@ async function planningProviderFailureDigest(error: ProviderRuntimeError): Promi
     provider: error.provider ?? null,
     status_code: error.statusCode ?? null,
   });
+}
+
+function validateOrderedStepPlanningGraph(steps: readonly AutonomousOrderedStepPlanStep[]): string[] {
+  if (!Array.isArray(steps) || steps.length === 0 || steps.length > 128) throw new ProviderRuntimeError("ordered-step provider planning steps are outside their bounds");
+  const ids = steps.map((step) => {
+    if (!isObject(step) || typeof step.id !== "string" || !/^[A-Za-z0-9_.:-]{1,256}$/.test(step.id)) throw new ProviderRuntimeError("ordered-step provider planning step is malformed");
+    if (typeof step.domain !== "string" || !step.domain.trim() || typeof step.capability !== "string" || !step.capability.trim() || typeof step.objective !== "string" || !step.objective.trim()) throw new ProviderRuntimeError("ordered-step provider planning step metadata is incomplete");
+    if (step.objective.length > 16_000) throw new ProviderRuntimeError("ordered-step provider planning objective is too large");
+    return step.id;
+  });
+  if (new Set(ids).size !== ids.length) throw new ProviderRuntimeError("ordered-step provider planning steps are duplicated");
+  const known = new Set(ids);
+  for (const step of steps) {
+    const dependencies = step.depends_on ?? [];
+    if (!Array.isArray(dependencies) || dependencies.some((dependency) => typeof dependency !== "string" || !known.has(dependency) || dependency === step.id)) throw new ProviderRuntimeError("ordered-step provider planning dependencies are not closed");
+    if (new Set(dependencies).size !== dependencies.length) throw new ProviderRuntimeError("ordered-step provider planning dependencies are duplicated");
+  }
+  return ids;
+}
+
+async function prepareOrderedStepPlanning(
+  request: AutonomousOrderedStepPlanRequest,
+  profile: AutonomousDomainProfile,
+  ids: readonly string[],
+  taskDigest: string,
+  basePlanDigest: string,
+  options: AutonomousProviderPlanningOptions,
+): Promise<PreparedProviderPlanning> {
+  const taskText = boundedText("ordered-step provider planning task", request.task, 32_000);
+  const plannerTask = boundedText(
+    "ordered-step provider planning prompt",
+    "Propose a bounded ordering and focus refinement for the reviewed step graph. Return only the required JSON object. "
+      + "Use every existing step identifier exactly once in priority_order. Preserve dependency order. Do not add, remove, "
+      + "rewrite, authorize, or execute tools, arguments, credentials, permissions, effects, claims, or external writes. "
+      + "Mark review_required when a human should inspect the proposal. Original task:\n\n" + taskText,
+    32_000,
+  );
+  const contract: JsonObject = {
+    schema: AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA,
+    task_digest: taskDigest,
+    base_plan_digest: basePlanDigest,
+    protected_contract_digest: request.protectedContractDigest ?? null,
+    step_catalogue: request.steps.map((step) => ({
+      id: step.id,
+      domain: step.domain,
+      capability: step.capability,
+      objective: step.objective,
+      depends_on: [...(step.depends_on ?? [])],
+      required: step.required ?? true,
+    })),
+    reconciliation: "priority_order_must_contain_each_existing_step_exactly_once_and_respect_dependencies",
+    does_not_authorize: ["tools", "arguments", "credentials", "permissions", "effects", "claims", "external_writes"],
+  };
+  const planningContext: AutonomousPromptChunk[] = [
+    { id: "planning-contract", content: JSON.stringify(contract), required: true, priority: 100 },
+    ...(request.context ?? []),
+    ...(options.context ?? []),
+  ];
+  const prompt = await assembleAutonomousPrompt(profile, plannerTask, {
+    context: planningContext,
+    maxInputTokens: options.maxInputTokens,
+    outputContract: "Return JSON with priority_order, focus_step_ids, review_required, confidence, and abstain. Use only identifiers from the planning contract.",
+  });
+  const responseSchema = planningResponseSchema(ids, "focus_step_ids");
+  const selectionContext: BrainModelSelectionContext = {
+    domain: profile.domain,
+    capability: request.capability ?? "planning",
+    risk_class: profile.risk_class,
+    task_family: "ordered_step_plan",
+  };
+  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(selectionContext));
+  const requiredCapabilities = [...new Set([...profile.required_model_capabilities, "structured_output"])]
+  const plan: AutonomousExecutionPlan = {
+    task: plannerTask,
+    domain: profile.domain,
+    capability: request.capability ?? "planning",
+    riskClass: profile.risk_class,
+    taskFamily: "ordered_step_plan",
+    learningContextDigest,
+    requiredCapabilities,
+    maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+    maxLatencyMs: options.maxLatencyMs,
+    minQuality: options.minQuality,
+    minSelectionConfidence: options.minSelectionConfidence,
+    candidates: options.candidates ?? [],
+    request: {
+      model: "selection-delegated",
+      messages: prompt.messages.map(({ role, content }) => ({ role, content })),
+      maxOutputTokens: options.maxOutputTokens ?? 1_024,
+      ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
+      requireJson: true,
+      responseSchema,
+      ...(options.runId === undefined ? {} : { idempotencyKey: boundedIdentifier("ordered-step planning run id", options.runId) }),
+    },
+  };
+  return { prompt, plan };
 }
 
 export interface AutonomousAcceptedCrossDomainPlan {
@@ -5037,6 +5156,98 @@ export class AutonomousAgent {
     const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], options.capability, options.toolSelectionState, options.toolSelectionExploration);
     const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
     return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+  }
+
+  /**
+   * Ask an approved provider to order an existing dependency-closed step graph.
+   *
+   * This is the shared planning primitive for mission execution and other schedulers that do
+   * not own an AutonomousWorkflow. The provider sees bounded step metadata only. The returned
+   * value is a proposal: callers must explicitly accept it and independently revalidate the
+   * graph before dispatching any step.
+   */
+  async planOrderedStepsWithProvider(
+    request: AutonomousOrderedStepPlanRequest,
+    options: AutonomousProviderPlanningOptions = {},
+  ): Promise<AutonomousOrderedStepPlanRefinementResult> {
+    if (!isObject(request) || typeof request.task !== "string" || !Array.isArray(request.steps)) throw new ArgumentError("ordered-step provider planning requires a task and step array");
+    const taskText = boundedText("ordered-step planning task", request.task, 32_000);
+    const steps = request.steps.map((step) => structuredClone(step));
+    const ids = validateOrderedStepPlanningGraph(steps);
+    const domains = [...new Set(steps.map((step) => step.domain))];
+    const domain = request.domain ?? (domains.length === 1 ? domains[0] ?? "cross_domain" : "cross_domain");
+    if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError(`ordered-step provider planning has an unsupported domain: ${domain}`);
+    const profile = await profileFor(domain);
+    const taskDigest = await digestJson({ task: taskText });
+    const derivedBasePlanDigest = await digestJson({ steps: steps.map((step) => ({ id: step.id, domain: step.domain, capability: step.capability, objective: step.objective, depends_on: [...(step.depends_on ?? [])], required: step.required ?? true })) });
+    const basePlanDigest = request.basePlanDigest ?? derivedBasePlanDigest;
+    if (typeof basePlanDigest !== "string" || !/^[0-9a-f]{64}$/.test(basePlanDigest)) throw new ArgumentError("ordered-step planning basePlanDigest must be a lowercase SHA-256 digest");
+    if (request.protectedContractDigest !== undefined && request.protectedContractDigest !== null && !/^[0-9a-f]{64}$/.test(request.protectedContractDigest)) throw new ArgumentError("ordered-step planning protectedContractDigest must be a lowercase SHA-256 digest or null");
+    const costBudget = resolveAutonomousCostBudget(options);
+    const budgetSnapshot = (): AutonomousCostBudgetSnapshot | null => costBudget?.snapshot() ?? null;
+    const prepared = await prepareOrderedStepPlanning({ ...request, task: taskText, steps }, profile, ids, taskDigest, basePlanDigest, options);
+    const base = {
+      schema: AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA,
+      status: "approval_required",
+      task_digest: taskDigest,
+      base_plan_digest: basePlanDigest,
+      protected_contract_digest: request.protectedContractDigest ?? null,
+      priority_step_ids: [],
+      focus_step_ids: [],
+      review_required: true,
+      confidence: 0,
+      selected_model: null,
+      selection_digest: null,
+      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_plan_digest: null,
+      outcome_digest: null,
+      cost_budget: null,
+      retention: "step_ids_and_digests_only; planner_transcript_not_retained",
+      authorization: "plan_proposal_only; no_tools_arguments_or_effects_authorized",
+    } satisfies AutonomousOrderedStepPlanRefinementResult;
+    if (options.approveProviderCall !== true) return { ...base, cost_budget: budgetSnapshot() };
+    const candidates = options.candidates ? [...options.candidates] : this.models();
+    if (!candidates.length) throw new ProviderRuntimeError("ordered-step provider planning requires at least one model candidate");
+    let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
+    try {
+      execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
+        credential: options.credential,
+        credentialFor: options.credentialFor,
+        signal: options.signal,
+        observer: options.observer,
+        selectionEventCallback: options.selectionEventCallback,
+        execution: options.execution,
+        executionAttempt: options.executionAttempt,
+        maxProviderFailovers: options.maxProviderFailovers,
+        reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
+      });
+    } catch (error) {
+      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
+      return { ...base, status: "provider_invalid", outcome_digest: await planningProviderFailureDigest(error), cost_budget: budgetSnapshot() };
+    }
+    const metadata = {
+      ...base,
+      status: "provider_invalid" as const,
+      selected_model: planningModelProjection(execution.selection),
+      selection_digest: await digestJson(execution.selection),
+      planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
+      outcome_digest: await planningOutcomeDigest(execution),
+      cost_budget: budgetSnapshot(),
+    };
+    const raw = execution.response.structured;
+    if (!isObject(raw)) return metadata;
+    const priority = raw.priority_order;
+    const focus = raw.focus_step_ids;
+    const reviewRequired = raw.review_required;
+    const confidence = raw.confidence;
+    const abstain = raw.abstain;
+    const priorityIds = Array.isArray(priority) ? priority.filter((id): id is string => typeof id === "string") : [];
+    const focusIds = Array.isArray(focus) ? focus.filter((id): id is string => typeof id === "string") : [];
+    if (!Array.isArray(priority) || !Array.isArray(focus) || typeof reviewRequired !== "boolean" || typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 || typeof abstain !== "boolean" || priorityIds.length !== priority.length || focusIds.length !== focus.length || priorityIds.length !== ids.length || new Set(priorityIds).size !== priorityIds.length || priorityIds.some((id) => !ids.includes(id)) || focusIds.some((id) => !ids.includes(id)) || new Set(focusIds).size !== focusIds.length) return metadata;
+    const positions = new Map(priorityIds.map((id, index) => [id, index]));
+    if (steps.some((step) => (step.depends_on ?? []).some((dependency) => (positions.get(dependency) ?? -1) > (positions.get(step.id) ?? -1)))) return { ...metadata, status: "provider_disagreement", priority_step_ids: [...priorityIds], focus_step_ids: [...focusIds], review_required: true, confidence };
+    if (abstain) return { ...metadata, status: "provider_disagreement", priority_step_ids: [...priorityIds], focus_step_ids: [...focusIds], review_required: true, confidence };
+    return { ...metadata, status: "completed", priority_step_ids: [...priorityIds], focus_step_ids: [...focusIds], review_required: reviewRequired, confidence };
   }
 
   /**

@@ -10,10 +10,11 @@ import {
   type AutonomousMissionStatus,
 } from "./mission-execution.js";
 import { AutonomousCostBudget, type AutonomousCostBudgetSnapshot } from "./llm.js";
-import type { AutonomousRouteProposal } from "./autonomous.js";
+import type { AutonomousDomainName, AutonomousOrderedStepPlanRequest, AutonomousProviderPlanningOptions, AutonomousRouteProposal } from "./autonomous.js";
+import type { AutonomousLearningController, AutonomousPlanningQualitySettlement } from "./autonomous-learning.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { AutonomousEvaluatorRewardInput } from "./autonomous-learning.js";
-import type { AgentMissionArgs, AgentMissionStep, JsonObject } from "./types.js";
+import type { AgentMissionArgs, AgentMissionStep, AutonomousOrderedStepPlanRefinementResult, JsonObject } from "./types.js";
 
 /** Durable mission-level evaluator/replanning metadata. Raw evaluator instructions stay transient. */
 export const AUTONOMOUS_MISSION_REPLAN_SCHEMA = "bioprism-typescript-autonomous-mission-replan/0.1" as const;
@@ -30,6 +31,10 @@ export type AutonomousMissionReplanStatus =
   | "completed"
   | "completed_without_replan"
   | "replan_limit_reached"
+  | "plan_review_required"
+  | "planning_approval_required"
+  | "planning_provider_invalid"
+  | "planning_provider_disagreement"
   | AutonomousMissionStatus;
 
 export class AutonomousMissionReplanError extends ArgumentError {
@@ -84,7 +89,27 @@ export interface AutonomousMissionReplanAttempt extends JsonObject {
   learning_trajectory_id: string | null;
   replan_instruction_digest: string | null;
   route_digest?: string | null;
+  planning_status?: AutonomousMissionPlanningStatus;
+  plan_refinement_digest?: string | null;
+  planner_learning_status?: AutonomousMissionPlannerLearningStatus;
+  planner_learning_settlement_digest?: string | null;
 }
+
+export type AutonomousMissionPlanningStatus =
+  | "disabled"
+  | "approval_required"
+  | "plan_review_required"
+  | "provider_invalid"
+  | "provider_disagreement"
+  | "accepted";
+
+export type AutonomousMissionPlannerLearningStatus =
+  | "disabled"
+  | "not_eligible"
+  | "pending_evaluation"
+  | "evaluation_failed"
+  | "settled"
+  | "settlement_failed";
 
 export interface AutonomousMissionReplanCheckpoint extends JsonObject {
   schema: typeof AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA;
@@ -100,6 +125,10 @@ export interface AutonomousMissionReplanCheckpoint extends JsonObject {
   learning_trajectory_id: string | null;
   route_digest?: string | null;
   cost_budget?: AutonomousCostBudgetSnapshot | null;
+  planning_status?: AutonomousMissionPlanningStatus;
+  plan_refinement_digest?: string | null;
+  planner_learning_status?: AutonomousMissionPlannerLearningStatus;
+  planner_learning_settlement_digest?: string | null;
   checkpoint_digest: string;
   retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material";
   secret_material: "never_returned";
@@ -123,6 +152,11 @@ export interface AutonomousMissionReplanState {
   route_digest?: string | null;
   /** Metadata-only aggregate accounting; provider payloads and credentials are excluded. */
   cost_budget?: AutonomousCostBudgetSnapshot | null;
+  /** Provider planner status is persisted separately from execution learning and route state. */
+  planning_status?: AutonomousMissionPlanningStatus;
+  plan_refinement_digest?: string | null;
+  planner_learning_status?: AutonomousMissionPlannerLearningStatus;
+  planner_learning_settlement_digest?: string | null;
   last_mission_checkpoint_digest: string | null;
   generation: number;
   previous_state_digest: string | null;
@@ -162,6 +196,10 @@ export interface AutonomousMissionReplanInstructionRehydrator {
   (context: { root_mission_id: string; mission_id: string; attempt: number; instruction_digest: string; evaluation: AutonomousMissionReplanEvaluationProjection }): Promise<string> | string;
 }
 
+export interface AutonomousMissionReplanPlanRehydrator {
+  (context: { root_mission_id: string; mission_id: string; attempt: number; protected_contract_digest: string; plan_refinement_digest: string; planning_status: AutonomousMissionPlanningStatus }): Promise<AutonomousOrderedStepPlanRefinementResult> | AutonomousOrderedStepPlanRefinementResult;
+}
+
 export interface AutonomousMissionReplanContext {
   mission: AgentMissionArgs;
   execution: AutonomousMissionExecutionResult;
@@ -184,6 +222,17 @@ export interface AutonomousMissionReplanOptions {
   evaluate: AutonomousMissionReplanEvaluator;
   /** Optional proposal callback. If omitted, bounded evaluator guidance is appended to objectives. */
   replan?: AutonomousMissionReplanner;
+  /** Optional provider proposal for ordering existing mission steps; execution remains separately gated. */
+  providerPlanning?: AutonomousProviderPlanningOptions;
+  /** Accept a completed, non-review provider ordering proposal. */
+  acceptPlan?: boolean;
+  /** Reuse a caller-owned reviewed proposal after restart without replaying the provider. */
+  acceptedPlanRefinement?: AutonomousOrderedStepPlanRefinementResult;
+  /** Explicit evaluator for planner quality; planner transport success is never used as reward. */
+  evaluatePlanning?: (plan: AutonomousOrderedStepPlanRefinementResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+  /** Independent model-quality/bandit controller for planner decisions. */
+  plannerLearning?: AutonomousLearningController;
+  plannerLearningRemote?: boolean;
   learning?: {
     adapter: AutonomousMissionLearningAdapter;
     trajectoryIdPrefix?: string;
@@ -200,6 +249,8 @@ export interface AutonomousMissionReplanOptions {
   rehydrateMission?: AutonomousMissionReplanMissionRehydrator;
   /** Rehydrate transient evaluator guidance from caller-owned storage for a replan handoff. */
   rehydrateReplanInstruction?: AutonomousMissionReplanInstructionRehydrator;
+  /** Rehydrate a value-only planner proposal; raw prompt/provider payloads remain caller-owned. */
+  rehydratePlanRefinement?: AutonomousMissionReplanPlanRehydrator;
 }
 
 export interface AutonomousMissionReplanResult {
@@ -212,6 +263,10 @@ export interface AutonomousMissionReplanResult {
   learning_settlements: AutonomousMissionLearningSettlement[];
   route_digest: string | null;
   cost_budget: AutonomousCostBudgetSnapshot | null;
+  planning_status: AutonomousMissionPlanningStatus;
+  plan_refinement: AutonomousOrderedStepPlanRefinementResult | null;
+  planner_learning_status: AutonomousMissionPlannerLearningStatus;
+  planner_learning_settlement: AutonomousPlanningQualitySettlement | null;
   replan_count: number;
   final_execution: AutonomousMissionExecutionResult;
   retention: "provider_responses_local;replan_instructions_transient;value_only_evaluation_and_learning_projection";
@@ -364,6 +419,69 @@ async function protectedMissionDigest(mission: AgentMissionArgs): Promise<string
   return digestJson(descriptor);
 }
 
+function missionPlannerSteps(mission: AgentMissionArgs): AutonomousOrderedStepPlanRequest["steps"] {
+  return mission.steps.map((step) => ({
+    id: step.id,
+    domain: step.domain,
+    capability: step.capability,
+    objective: step.objective,
+    depends_on: [...(step.depends_on ?? [])],
+    required: step.required ?? true,
+  }));
+}
+
+async function missionPlannerBaseDigest(mission: AgentMissionArgs): Promise<string> {
+  return digestJson({ steps: missionPlannerSteps(mission) });
+}
+
+async function validateMissionPlanRefinement(
+  mission: AgentMissionArgs,
+  protectedDigest: string,
+  refinement: AutonomousOrderedStepPlanRefinementResult,
+): Promise<string[]> {
+  if (!isObject(refinement) || refinement.status !== "completed" || refinement.review_required !== false) throw new AutonomousMissionReplanContractError("only a completed, non-review mission plan may be accepted");
+  const expectedTaskDigest = await digestJson({ task: mission.goal });
+  const expectedBasePlanDigest = await missionPlannerBaseDigest(mission);
+  if (refinement.task_digest !== expectedTaskDigest) throw new AutonomousMissionReplanContractError("accepted mission plan task does not match the mission goal");
+  if (refinement.base_plan_digest !== expectedBasePlanDigest) throw new AutonomousMissionReplanContractError("accepted mission plan base does not match the mission step graph");
+  if (refinement.protected_contract_digest !== null && refinement.protected_contract_digest !== protectedDigest) throw new AutonomousMissionReplanContractError("accepted mission plan protected contract does not match the mission");
+  const ids = mission.steps.map((step) => step.id);
+  const priority = refinement.priority_step_ids;
+  const focus = refinement.focus_step_ids;
+  if (!Array.isArray(priority) || !Array.isArray(focus) || priority.length !== ids.length || new Set(priority).size !== priority.length || priority.some((id) => !ids.includes(id)) || focus.some((id) => !ids.includes(id)) || new Set(focus).size !== focus.length) throw new AutonomousMissionReplanContractError("accepted mission plan must contain an exact step permutation and valid focus subset");
+  const positions = new Map(priority.map((id, index) => [id, index]));
+  if (mission.steps.some((step) => (step.depends_on ?? []).some((dependency) => (positions.get(dependency) ?? -1) > (positions.get(step.id) ?? -1)))) throw new AutonomousMissionReplanContractError("accepted mission plan violates mission dependencies");
+  return [...priority];
+}
+
+async function applyMissionPlan(
+  mission: AgentMissionArgs,
+  protectedDigest: string,
+  refinement: AutonomousOrderedStepPlanRefinementResult,
+): Promise<AgentMissionArgs> {
+  const priority = await validateMissionPlanRefinement(mission, protectedDigest, refinement);
+  const byId = new Map(mission.steps.map((step) => [step.id, step]));
+  const reordered: AgentMissionArgs = { ...structuredClone(mission), steps: priority.map((id) => structuredClone(byId.get(id) as AgentMissionStep)) };
+  if (await protectedMissionDigest(reordered) !== protectedDigest) throw new AutonomousMissionReplanContractError("accepted mission plan changed the protected contract");
+  return reordered;
+}
+
+function planningStatusFromResult(result: AutonomousOrderedStepPlanRefinementResult): AutonomousMissionPlanningStatus {
+  if (result.status === "approval_required") return "approval_required";
+  if (result.status === "provider_invalid") return "provider_invalid";
+  if (result.status === "provider_disagreement" || result.status === "plan_refused") return "provider_disagreement";
+  if (result.status === "completed" && result.review_required === false) return "accepted";
+  return "plan_review_required";
+}
+
+function missionPlanningResultStatus(status: AutonomousMissionPlanningStatus): AutonomousMissionReplanStatus | null {
+  if (status === "accepted" || status === "disabled") return null;
+  if (status === "approval_required") return "planning_approval_required";
+  if (status === "provider_invalid") return "planning_provider_invalid";
+  if (status === "provider_disagreement") return "planning_provider_disagreement";
+  return "plan_review_required";
+}
+
 async function evaluationProjection(value: AutonomousMissionReplanEvaluation): Promise<AutonomousMissionReplanEvaluationProjection> {
   const withoutDigest = {
     evaluator_id: value.evaluator_id,
@@ -395,6 +513,10 @@ async function checkpoint(
   learningTrajectoryId: string | null,
   routeDigest: string | null,
   costBudget: AutonomousCostBudgetSnapshot | null,
+  planningStatus: AutonomousMissionPlanningStatus,
+  planRefinementDigest: string | null,
+  plannerLearningStatus: AutonomousMissionPlannerLearningStatus,
+  plannerLearningSettlementDigest: string | null,
 ): Promise<AutonomousMissionReplanCheckpoint> {
   const descriptor = {
     schema: AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA,
@@ -410,6 +532,10 @@ async function checkpoint(
     learning_trajectory_id: learningTrajectoryId,
     route_digest: routeDigest,
     cost_budget: costBudget,
+    planning_status: planningStatus,
+    plan_refinement_digest: planRefinementDigest,
+    planner_learning_status: plannerLearningStatus,
+    planner_learning_settlement_digest: plannerLearningSettlementDigest,
     retention: CHECKPOINT_RETENTION,
     secret_material: "never_returned" as const,
   };
@@ -461,6 +587,10 @@ function result(
   finalExecution: AutonomousMissionExecutionResult,
   routeDigest: string | null,
   costBudget: AutonomousCostBudgetSnapshot | null,
+  planningStatus: AutonomousMissionPlanningStatus,
+  planRefinement: AutonomousOrderedStepPlanRefinementResult | null,
+  plannerLearningStatus: AutonomousMissionPlannerLearningStatus,
+  plannerLearningSettlement: AutonomousPlanningQualitySettlement | null,
 ): AutonomousMissionReplanResult {
   return {
     schema: AUTONOMOUS_MISSION_REPLAN_SCHEMA,
@@ -472,6 +602,10 @@ function result(
     learning_settlements: settlements,
     route_digest: routeDigest,
     cost_budget: costBudget,
+    planning_status: planningStatus,
+    plan_refinement: planRefinement,
+    planner_learning_status: plannerLearningStatus,
+    planner_learning_settlement: plannerLearningSettlement,
     replan_count: Math.max(0, attempts.length - 1),
     final_execution: finalExecution,
     retention: RETENTION,
@@ -497,6 +631,10 @@ export async function validateAutonomousMissionReplanCheckpoint(value: unknown):
   if (checkpoint.learning_trajectory_id !== null) boundedIdentifier("replan checkpoint learning_trajectory_id", checkpoint.learning_trajectory_id);
   if (checkpoint.route_digest !== undefined) boundedDigest("replan checkpoint route_digest", checkpoint.route_digest, true);
   if (checkpoint.cost_budget !== undefined) boundedCostBudgetSnapshot("replan checkpoint cost_budget", checkpoint.cost_budget, true);
+  if (checkpoint.planning_status !== undefined) validatePlanningStatus("replan checkpoint planning_status", checkpoint.planning_status);
+  if (checkpoint.plan_refinement_digest !== undefined) boundedDigest("replan checkpoint plan_refinement_digest", checkpoint.plan_refinement_digest, true);
+  if (checkpoint.planner_learning_status !== undefined) validatePlannerLearningStatus("replan checkpoint planner_learning_status", checkpoint.planner_learning_status);
+  if (checkpoint.planner_learning_settlement_digest !== undefined) boundedDigest("replan checkpoint planner_learning_settlement_digest", checkpoint.planner_learning_settlement_digest, true);
   boundedDigest("replan checkpoint checkpoint_digest", checkpoint.checkpoint_digest);
   const descriptor = {
     schema: checkpoint.schema,
@@ -512,6 +650,10 @@ export async function validateAutonomousMissionReplanCheckpoint(value: unknown):
     learning_trajectory_id: checkpoint.learning_trajectory_id,
     ...(checkpoint.route_digest === undefined ? {} : { route_digest: checkpoint.route_digest }),
     ...(checkpoint.cost_budget === undefined ? {} : { cost_budget: checkpoint.cost_budget }),
+    ...(checkpoint.planning_status === undefined ? {} : { planning_status: checkpoint.planning_status }),
+    ...(checkpoint.plan_refinement_digest === undefined ? {} : { plan_refinement_digest: checkpoint.plan_refinement_digest }),
+    ...(checkpoint.planner_learning_status === undefined ? {} : { planner_learning_status: checkpoint.planner_learning_status }),
+    ...(checkpoint.planner_learning_settlement_digest === undefined ? {} : { planner_learning_settlement_digest: checkpoint.planner_learning_settlement_digest }),
     retention: checkpoint.retention,
     secret_material: checkpoint.secret_material,
   };
@@ -533,6 +675,16 @@ function jsonBytes(value: unknown): number {
 function assertKnownKeys(name: string, value: Record<string, unknown>, keys: readonly string[]): void {
   const allowed = new Set(keys);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new AutonomousMissionReplanError(`${name} contains unsupported or non-metadata fields`);
+}
+
+function validatePlanningStatus(name: string, value: unknown): AutonomousMissionPlanningStatus {
+  if (!["disabled", "approval_required", "plan_review_required", "provider_invalid", "provider_disagreement", "accepted"].includes(value as string)) throw new AutonomousMissionReplanError(`${name} is invalid`);
+  return value as AutonomousMissionPlanningStatus;
+}
+
+function validatePlannerLearningStatus(name: string, value: unknown): AutonomousMissionPlannerLearningStatus {
+  if (!["disabled", "not_eligible", "pending_evaluation", "evaluation_failed", "settled", "settlement_failed"].includes(value as string)) throw new AutonomousMissionReplanError(`${name} is invalid`);
+  return value as AutonomousMissionPlannerLearningStatus;
 }
 
 function assertValueOnlySettlement(value: unknown, index: number): asserts value is AutonomousMissionLearningSettlement {
@@ -606,7 +758,7 @@ async function validateEvaluationProjection(value: unknown, index: number): Prom
 function validateAttempt(value: unknown, index: number): AutonomousMissionReplanAttempt {
   if (!isObject(value)) throw new AutonomousMissionReplanError(`mission replan attempt ${index} must be an object`);
   const attempt = value as unknown as AutonomousMissionReplanAttempt;
-  assertKnownKeys(`mission replan attempt ${index}`, attempt, ["attempt", "mission_id", "status", "next_wave", "completed_steps", "succeeded_steps", "failed_steps", "evaluation_digest", "learning_trajectory_id", "replan_instruction_digest", "route_digest"]);
+  assertKnownKeys(`mission replan attempt ${index}`, attempt, ["attempt", "mission_id", "status", "next_wave", "completed_steps", "succeeded_steps", "failed_steps", "evaluation_digest", "learning_trajectory_id", "replan_instruction_digest", "route_digest", "planning_status", "plan_refinement_digest", "planner_learning_status", "planner_learning_settlement_digest"]);
   boundedCount(`mission replan attempt ${index}.attempt`, attempt.attempt, AUTONOMOUS_MISSION_REPLAN_MAX_ATTEMPTS);
   boundedIdentifier(`mission replan attempt ${index}.mission_id`, attempt.mission_id);
   if (!AUTONOMOUS_MISSION_STATUSES.includes(attempt.status)) throw new AutonomousMissionReplanError(`mission replan attempt ${index}.status is invalid`);
@@ -619,7 +771,13 @@ function validateAttempt(value: unknown, index: number): AutonomousMissionReplan
   if (attempt.learning_trajectory_id !== null) boundedIdentifier(`mission replan attempt ${index}.learning_trajectory_id`, attempt.learning_trajectory_id);
   boundedDigest(`mission replan attempt ${index}.replan_instruction_digest`, attempt.replan_instruction_digest, true);
   if (attempt.route_digest !== undefined) boundedDigest(`mission replan attempt ${index}.route_digest`, attempt.route_digest, true);
-  if (attempt.succeeded_steps + attempt.failed_steps > attempt.completed_steps) throw new AutonomousMissionReplanError(`mission replan attempt ${index} step counts are inconsistent`);
+  if (attempt.planning_status !== undefined) validatePlanningStatus(`mission replan attempt ${index}.planning_status`, attempt.planning_status);
+  if (attempt.plan_refinement_digest !== undefined) boundedDigest(`mission replan attempt ${index}.plan_refinement_digest`, attempt.plan_refinement_digest, true);
+  if (attempt.planner_learning_status !== undefined) validatePlannerLearningStatus(`mission replan attempt ${index}.planner_learning_status`, attempt.planner_learning_status);
+  if (attempt.planner_learning_settlement_digest !== undefined) boundedDigest(`mission replan attempt ${index}.planner_learning_settlement_digest`, attempt.planner_learning_settlement_digest, true);
+  // `completed_steps` is the checkpoint's successfully completed set; failed terminal steps
+  // are tracked separately and therefore may legitimately exceed that count.
+  if (attempt.succeeded_steps > attempt.completed_steps) throw new AutonomousMissionReplanError(`mission replan attempt ${index} step counts are inconsistent`);
   return structuredClone(attempt);
 }
 
@@ -632,7 +790,7 @@ function stateDescriptor(state: AutonomousMissionReplanState): JsonObject {
 export async function validateAutonomousMissionReplanState(value: unknown): Promise<AutonomousMissionReplanState> {
   if (!isObject(value)) throw new AutonomousMissionReplanError("mission replan state must be an object");
   const state = value as unknown as AutonomousMissionReplanState;
-  assertKnownKeys("mission replan state", state as unknown as Record<string, unknown>, ["schema", "root_mission_id", "protected_contract_digest", "max_replans", "attempt", "current_mission_id", "mission_request_digest", "phase", "replan_instruction_digest", "terminal_status", "attempts", "evaluations", "learning_settlements", "route_digest", "cost_budget", "last_mission_checkpoint_digest", "generation", "previous_state_digest", "state_digest", "retention", "secret_material"]);
+  assertKnownKeys("mission replan state", state as unknown as Record<string, unknown>, ["schema", "root_mission_id", "protected_contract_digest", "max_replans", "attempt", "current_mission_id", "mission_request_digest", "phase", "replan_instruction_digest", "terminal_status", "attempts", "evaluations", "learning_settlements", "route_digest", "cost_budget", "planning_status", "plan_refinement_digest", "planner_learning_status", "planner_learning_settlement_digest", "last_mission_checkpoint_digest", "generation", "previous_state_digest", "state_digest", "retention", "secret_material"]);
   if (state.schema !== AUTONOMOUS_MISSION_REPLAN_STATE_SCHEMA || state.retention !== "metadata_only_no_arguments_outputs_credentials_provider_material_or_raw_instructions" || state.secret_material !== "never_returned") throw new AutonomousMissionReplanError("mission replan state retention markers are invalid");
   boundedIdentifier("mission replan state root_mission_id", state.root_mission_id);
   boundedDigest("mission replan state protected_contract_digest", state.protected_contract_digest);
@@ -646,6 +804,10 @@ export async function validateAutonomousMissionReplanState(value: unknown): Prom
   boundedDigest("mission replan state replan_instruction_digest", state.replan_instruction_digest, true);
   if (state.route_digest !== undefined) boundedDigest("mission replan state route_digest", state.route_digest, true);
   if (state.cost_budget !== undefined) boundedCostBudgetSnapshot("mission replan state cost_budget", state.cost_budget, true);
+  if (state.planning_status !== undefined) validatePlanningStatus("mission replan state planning_status", state.planning_status);
+  if (state.plan_refinement_digest !== undefined) boundedDigest("mission replan state plan_refinement_digest", state.plan_refinement_digest, true);
+  if (state.planner_learning_status !== undefined) validatePlannerLearningStatus("mission replan state planner_learning_status", state.planner_learning_status);
+  if (state.planner_learning_settlement_digest !== undefined) boundedDigest("mission replan state planner_learning_settlement_digest", state.planner_learning_settlement_digest, true);
   if (state.terminal_status !== null && !["completed", "completed_without_replan", "replan_limit_reached", ...AUTONOMOUS_MISSION_STATUSES].includes(state.terminal_status)) throw new AutonomousMissionReplanError("mission replan state terminal status is invalid");
   boundedDigest("mission replan state last_mission_checkpoint_digest", state.last_mission_checkpoint_digest, true);
   boundedCount("mission replan state generation", state.generation, Number.MAX_SAFE_INTEGER);
@@ -796,6 +958,14 @@ export async function runAutonomousMissionReplanCycle(
   let finalExecution: AutonomousMissionExecutionResult | null = null;
   let persistedState: AutonomousMissionReplanState | null = persisted;
   let routeDigest = persisted?.route_digest ?? null;
+  let planningStatus: AutonomousMissionPlanningStatus = persisted?.planning_status ?? "disabled";
+  let planRefinementDigest = persisted?.plan_refinement_digest ?? null;
+  let plannerLearningStatus: AutonomousMissionPlannerLearningStatus = persisted?.planner_learning_status ?? "disabled";
+  let plannerLearningSettlementDigest = persisted?.planner_learning_settlement_digest ?? null;
+  let planRefinement: AutonomousOrderedStepPlanRefinementResult | null = null;
+  let plannerLearningSettlement: AutonomousPlanningQualitySettlement | null = null;
+  let planningResolved = persisted?.planning_status !== undefined;
+  let restoredPlanningOutcome: AutonomousMissionReplanStatus | null = null;
   let routeOverride: AutonomousRouteProposal | null = options.execute?.routeOverride ?? null;
   if (routeDigest !== null && routeOverride !== null && routeOverride.route_digest !== routeDigest) throw new AutonomousMissionReplanContractError("supplied mission route override does not match the persisted route digest");
   if (routeDigest !== null && routeOverride === null) throw new AutonomousMissionReplanError("stored mission replan state requires caller-owned routeOverride for route recovery; semantic routing is never replayed implicitly");
@@ -818,6 +988,8 @@ export async function runAutonomousMissionReplanCycle(
   const executeBase: Omit<AutonomousMissionExecuteOptions, "signal" | "execution_attempt"> = sharedCostBudget === undefined
     ? executeTemplate
     : { ...executeTemplate, costBudget: sharedCostBudget, maxTotalCostUnits: undefined };
+  if (options.providerPlanning && sharedCostBudget && options.providerPlanning.costBudget !== undefined && options.providerPlanning.costBudget !== sharedCostBudget) throw new AutonomousMissionReplanContractError("mission planning and execution must share the same costBudget object when both phases are budget-bound");
+  if (options.providerPlanning && sharedCostBudget && options.providerPlanning.maxTotalCostUnits !== undefined) throw new AutonomousMissionReplanError("mission planning cannot define maxTotalCostUnits when the mission execution already owns a shared cost budget");
   const executeOptions = (attemptNumber: number): AutonomousMissionExecuteOptions => ({
     ...executeBase,
     ...(routeOverride === null ? {} : { routeOverride, semanticRouting: undefined }),
@@ -842,6 +1014,20 @@ export async function runAutonomousMissionReplanCycle(
     throw new AutonomousMissionReplanContractError("stored non-root attempt is missing its caller-owned mission rehydration");
   }
 
+  if (persisted && planningStatus !== "disabled") {
+    if (planRefinementDigest !== null) {
+      const restoredPlan = options.acceptedPlanRefinement ?? (options.rehydratePlanRefinement
+        ? await options.rehydratePlanRefinement({ root_mission_id: rootMissionId, mission_id: current.mission_id, attempt, protected_contract_digest: protectedContractDigest, plan_refinement_digest: planRefinementDigest, planning_status: planningStatus })
+        : null);
+      if (!restoredPlan) throw new AutonomousMissionReplanError("resume requires caller-owned plan refinement rehydration; planner payloads are never persisted");
+      if (await digestJson(restoredPlan) !== planRefinementDigest) throw new AutonomousMissionReplanContractError("rehydrated mission plan does not match its stored digest");
+      planRefinement = structuredClone(restoredPlan);
+      if (planningStatus === "accepted") current = await applyMissionPlan(current, protectedContractDigest, planRefinement);
+    }
+    planningResolved = true;
+    restoredPlanningOutcome = missionPlanningResultStatus(planningStatus);
+  }
+
   const upsertAttempt = (entry: AutonomousMissionReplanAttempt): void => {
     const index = attempts.findIndex((existing) => existing.attempt === entry.attempt);
     if (index === -1) attempts.push(entry);
@@ -856,10 +1042,18 @@ export async function runAutonomousMissionReplanCycle(
     lastMissionCheckpointDigest: string | null;
     routeDigest?: string | null;
     costBudget?: AutonomousCostBudgetSnapshot | null;
+    planningStatus?: AutonomousMissionPlanningStatus;
+    planRefinementDigest?: string | null;
+    plannerLearningStatus?: AutonomousMissionPlannerLearningStatus;
+    plannerLearningSettlementDigest?: string | null;
   }): Promise<void> => {
     if (!stateStore) return;
     const nextRouteDigest = Object.prototype.hasOwnProperty.call(next, "routeDigest") ? next.routeDigest ?? null : routeDigest;
     const nextCostBudget = Object.prototype.hasOwnProperty.call(next, "costBudget") ? next.costBudget ?? null : sharedCostBudget?.snapshot() ?? null;
+    const nextPlanningStatus = Object.prototype.hasOwnProperty.call(next, "planningStatus") ? next.planningStatus ?? "disabled" : planningStatus;
+    const nextPlanRefinementDigest = Object.prototype.hasOwnProperty.call(next, "planRefinementDigest") ? next.planRefinementDigest ?? null : planRefinementDigest;
+    const nextPlannerLearningStatus = Object.prototype.hasOwnProperty.call(next, "plannerLearningStatus") ? next.plannerLearningStatus ?? "disabled" : plannerLearningStatus;
+    const nextPlannerLearningSettlementDigest = Object.prototype.hasOwnProperty.call(next, "plannerLearningSettlementDigest") ? next.plannerLearningSettlementDigest ?? null : plannerLearningSettlementDigest;
     const descriptor = {
       schema: AUTONOMOUS_MISSION_REPLAN_STATE_SCHEMA,
       root_mission_id: rootMissionId,
@@ -876,6 +1070,10 @@ export async function runAutonomousMissionReplanCycle(
       learning_settlements: structuredClone(settlements),
       route_digest: nextRouteDigest,
       cost_budget: nextCostBudget,
+      planning_status: nextPlanningStatus,
+      plan_refinement_digest: nextPlanRefinementDigest,
+      planner_learning_status: nextPlannerLearningStatus,
+      planner_learning_settlement_digest: nextPlannerLearningSettlementDigest,
       last_mission_checkpoint_digest: next.lastMissionCheckpointDigest,
       generation: (persistedState?.generation ?? 0) + 1,
       previous_state_digest: persistedState?.state_digest ?? null,
@@ -890,6 +1088,10 @@ export async function runAutonomousMissionReplanCycle(
     missionRequestDigest = next.missionRequestDigest;
     replanInstructionDigest = next.replanInstructionDigest;
     routeDigest = nextRouteDigest;
+    planningStatus = nextPlanningStatus;
+    planRefinementDigest = nextPlanRefinementDigest;
+    plannerLearningStatus = nextPlannerLearningStatus;
+    plannerLearningSettlementDigest = nextPlannerLearningSettlementDigest;
     lastMissionCheckpointDigest = next.lastMissionCheckpointDigest;
   };
 
@@ -900,9 +1102,119 @@ export async function runAutonomousMissionReplanCycle(
     instructionDigest: string | null,
     trajectoryId: string | null,
   ): Promise<AutonomousMissionReplanCheckpoint> => {
-    const row = await checkpoint(rootMissionId, protectedContractDigest, attempt, current, execution, checkpointPhase, evaluationDigest, instructionDigest, trajectoryId, routeDigest, sharedCostBudget?.snapshot() ?? null);
+    const row = await checkpoint(rootMissionId, protectedContractDigest, attempt, current, execution, checkpointPhase, evaluationDigest, instructionDigest, trajectoryId, routeDigest, sharedCostBudget?.snapshot() ?? null, planningStatus, planRefinementDigest, plannerLearningStatus, plannerLearningSettlementDigest);
     if (options.checkpointSink) await options.checkpointSink(row);
     return row;
+  };
+
+  const planningDomain = (): string => {
+    const domains = [...new Set(current.steps.map((step) => step.domain))];
+    return domains.length === 1 ? domains[0]! : "cross_domain";
+  };
+
+  const settlePlannerQuality = async (): Promise<void> => {
+    if (!planRefinement || planRefinement.status !== "completed") {
+      plannerLearningStatus = "disabled";
+      return;
+    }
+    if (plannerLearningStatus === "settled" || plannerLearningStatus === "not_eligible" || plannerLearningStatus === "settlement_failed") return;
+    if (!options.evaluatePlanning) {
+      plannerLearningStatus = "not_eligible";
+      return;
+    }
+    if (!options.plannerLearning) {
+      plannerLearningStatus = "not_eligible";
+      return;
+    }
+    plannerLearningStatus = "pending_evaluation";
+    try {
+      const evaluation = await options.evaluatePlanning(structuredClone(planRefinement));
+      plannerLearningSettlement = await options.plannerLearning.settlePlanningQuality(planRefinement, {
+        domain: planningDomain() as AutonomousDomainName,
+        capability: "planning",
+        riskClass: "mission_planning",
+        taskFamily: "mission",
+        evaluator: evaluation,
+        remote: options.plannerLearningRemote,
+      });
+      plannerLearningSettlementDigest = await digestJson(plannerLearningSettlement);
+      plannerLearningStatus = plannerLearningSettlement.status === "settled" ? "settled" : "not_eligible";
+    } catch {
+      plannerLearningStatus = "settlement_failed";
+    }
+  };
+
+  const holdForPlanning = async (): Promise<AutonomousMissionExecutionResult> => {
+    const holdOptions: AutonomousMissionExecuteOptions = {
+      ...executeOptions(attempt),
+      approveProviderCall: false,
+      semanticRouting: undefined,
+    };
+    const held = await executor.start(current, holdOptions);
+    observeExecutionRoute(held);
+    return held;
+  };
+
+  const resolvePlanning = async (): Promise<AutonomousMissionReplanStatus | null> => {
+    if (planningResolved) return restoredPlanningOutcome;
+    if (options.acceptedPlanRefinement) {
+      planRefinement = structuredClone(options.acceptedPlanRefinement);
+      planRefinementDigest = await digestJson(planRefinement);
+      if (options.acceptPlan !== true) {
+        planningStatus = "plan_review_required";
+        plannerLearningStatus = "not_eligible";
+        planningResolved = true;
+        await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest, planningStatus, planRefinementDigest, plannerLearningStatus, plannerLearningSettlementDigest: null });
+        return "plan_review_required";
+      }
+      current = await applyMissionPlan(current, protectedContractDigest, planRefinement);
+      planningStatus = "accepted";
+      await settlePlannerQuality();
+      planningResolved = true;
+      await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest, planningStatus, planRefinementDigest, plannerLearningStatus, plannerLearningSettlementDigest });
+      return null;
+    }
+    if (!options.providerPlanning) {
+      planningStatus = "disabled";
+      plannerLearningStatus = "disabled";
+      planningResolved = true;
+      return null;
+    }
+    if (!executor.agent || typeof executor.agent.planOrderedStepsWithProvider !== "function") {
+      planningStatus = "provider_invalid";
+      plannerLearningStatus = "not_eligible";
+      planningResolved = true;
+      await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest, planningStatus, planRefinementDigest: null, plannerLearningStatus, plannerLearningSettlementDigest: null });
+      return "planning_provider_invalid";
+    }
+    const planningOptions: AutonomousProviderPlanningOptions = {
+      ...options.providerPlanning,
+      ...(sharedCostBudget ? { costBudget: sharedCostBudget, maxTotalCostUnits: undefined } : {}),
+      executionAttempt: attempt,
+      ...(options.providerPlanning.runId === undefined ? {} : { runId: `${options.providerPlanning.runId}:attempt-${attempt}` }),
+    };
+    const proposal = await executor.agent.planOrderedStepsWithProvider({
+      task: current.goal,
+      domain: planningDomain() as AutonomousDomainName,
+      capability: "planning",
+      steps: [...missionPlannerSteps(current)],
+      basePlanDigest: await missionPlannerBaseDigest(current),
+      protectedContractDigest,
+    }, planningOptions);
+    planRefinement = proposal;
+    planRefinementDigest = await digestJson(proposal);
+    planningStatus = planningStatusFromResult(proposal);
+    await settlePlannerQuality();
+    if (proposal.status === "completed" && proposal.review_required === false && options.acceptPlan === true) {
+      current = await applyMissionPlan(current, protectedContractDigest, proposal);
+      planningStatus = "accepted";
+    } else if (proposal.status === "completed") {
+      planningStatus = "plan_review_required";
+    }
+    planningResolved = true;
+    await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest, planningStatus, planRefinementDigest, plannerLearningStatus, plannerLearningSettlementDigest });
+    if (planningStatus === "accepted") return null;
+    return missionPlanningResultStatus(planningStatus) ?? "plan_review_required";
   };
 
   while (true) {
@@ -910,7 +1222,7 @@ export async function runAutonomousMissionReplanCycle(
       if (!terminalStatus) throw new AutonomousMissionReplanError("terminal mission replan state is missing its result status");
       finalExecution ??= await executor.start(current, executeOptions(attempt));
       observeExecutionRoute(finalExecution);
-      return result(terminalStatus, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, finalExecution, routeDigest, sharedCostBudget?.snapshot() ?? null);
+      return result(terminalStatus, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, finalExecution, routeDigest, sharedCostBudget?.snapshot() ?? null, planningStatus, planRefinement, plannerLearningStatus, plannerLearningSettlement);
     }
 
     if (phase === "replan_handoff") {
@@ -928,21 +1240,36 @@ export async function runAutonomousMissionReplanCycle(
         : await defaultReplan(rootMissionId, current, instruction, attempt);
       current = await validateProposal(rootMissionId, protectedContractDigest, current, proposal, attempt + 1, executor);
       attempt += 1;
+      planningResolved = false;
+      planningStatus = "disabled";
+      planRefinementDigest = null;
+      planRefinement = null;
+      plannerLearningStatus = "disabled";
+      plannerLearningSettlementDigest = null;
+      plannerLearningSettlement = null;
       await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest: null, replanInstructionDigest: null, lastMissionCheckpointDigest });
       continue;
     }
 
-    if (phase === "execution_pending") await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest });
+    const planningOutcome = await resolvePlanning();
+    if (planningOutcome !== null) {
+      const held = await holdForPlanning();
+      finalExecution = held;
+      const heldCheckpoint = await writeCheckpoint(held, "execution_pending", null, null, null);
+      await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest: held.preflight.request_digest ?? null, replanInstructionDigest: null, lastMissionCheckpointDigest: heldCheckpoint.checkpoint_digest, planningStatus, planRefinementDigest, plannerLearningStatus, plannerLearningSettlementDigest });
+      return result(planningOutcome, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, held, routeDigest, sharedCostBudget?.snapshot() ?? null, planningStatus, planRefinement, plannerLearningStatus, plannerLearningSettlement);
+    }
+    await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest, planningStatus, planRefinementDigest, plannerLearningStatus, plannerLearningSettlementDigest });
     const execution = await executor.start(current, executeOptions(attempt));
     finalExecution = execution;
     observeExecutionRoute(execution);
     missionRequestDigest = execution.preflight.request_digest ?? null;
     if (!isTerminalMission(execution.status)) {
-      const pendingAttempt = { attempt, mission_id: current.mission_id, status: execution.status, next_wave: execution.next_wave, completed_steps: execution.completed_steps, succeeded_steps: execution.succeeded_steps, failed_steps: execution.failed_steps, evaluation_digest: null, learning_trajectory_id: null, replan_instruction_digest: null, route_digest: routeDigest } satisfies AutonomousMissionReplanAttempt;
+      const pendingAttempt = { attempt, mission_id: current.mission_id, status: execution.status, next_wave: execution.next_wave, completed_steps: execution.completed_steps, succeeded_steps: execution.succeeded_steps, failed_steps: execution.failed_steps, evaluation_digest: null, learning_trajectory_id: null, replan_instruction_digest: null, route_digest: routeDigest, planning_status: planningStatus, plan_refinement_digest: planRefinementDigest, planner_learning_status: plannerLearningStatus, planner_learning_settlement_digest: plannerLearningSettlementDigest } satisfies AutonomousMissionReplanAttempt;
       upsertAttempt(pendingAttempt);
       const row = await writeCheckpoint(execution, "execution_pending", null, null, null);
       await persistState({ phase: "execution_pending", terminalStatus: null, missionRequestDigest, replanInstructionDigest: null, lastMissionCheckpointDigest: row.checkpoint_digest });
-      return result(execution.status, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null);
+      return result(execution.status, rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null, planningStatus, planRefinement, plannerLearningStatus, plannerLearningSettlement);
     }
     if (phase === "execution_pending") {
       const pendingIndex = attempts.findIndex((existing) => existing.attempt === attempt && existing.evaluation_digest === null);
@@ -970,18 +1297,18 @@ export async function runAutonomousMissionReplanCycle(
       throw new AutonomousMissionReplanError("mission evaluator returned learning rewards without a learning adapter");
     }
 
-    upsertAttempt({ attempt, mission_id: current.mission_id, status: execution.status, next_wave: execution.next_wave, completed_steps: execution.completed_steps, succeeded_steps: execution.succeeded_steps, failed_steps: execution.failed_steps, evaluation_digest: projection.evaluation_digest, learning_trajectory_id: trajectoryId, replan_instruction_digest: projection.replan_instruction_digest, route_digest: routeDigest });
+    upsertAttempt({ attempt, mission_id: current.mission_id, status: execution.status, next_wave: execution.next_wave, completed_steps: execution.completed_steps, succeeded_steps: execution.succeeded_steps, failed_steps: execution.failed_steps, evaluation_digest: projection.evaluation_digest, learning_trajectory_id: trajectoryId, replan_instruction_digest: projection.replan_instruction_digest, route_digest: routeDigest, planning_status: planningStatus, plan_refinement_digest: planRefinementDigest, planner_learning_status: plannerLearningStatus, planner_learning_settlement_digest: plannerLearningSettlementDigest });
     evaluations.push(projection);
     replanInstructionDigest = projection.replan_instruction_digest;
     if (!evaluation.replan_requested) {
       const row = await writeCheckpoint(execution, "terminal", projection.evaluation_digest, projection.replan_instruction_digest, trajectoryId);
       await persistState({ phase: "terminal", terminalStatus: evaluation.passed ? "completed" : "completed_without_replan", missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest: row.checkpoint_digest });
-      return result(evaluation.passed ? "completed" : "completed_without_replan", rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null);
+      return result(evaluation.passed ? "completed" : "completed_without_replan", rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null, planningStatus, planRefinement, plannerLearningStatus, plannerLearningSettlement);
     }
     if (attempt > maxReplans) {
       const row = await writeCheckpoint(execution, "terminal", projection.evaluation_digest, projection.replan_instruction_digest, trajectoryId);
       await persistState({ phase: "terminal", terminalStatus: "replan_limit_reached", missionRequestDigest, replanInstructionDigest, lastMissionCheckpointDigest: row.checkpoint_digest });
-      return result("replan_limit_reached", rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null);
+      return result("replan_limit_reached", rootMissionId, protectedContractDigest, attempts, evaluations, settlements, execution, routeDigest, sharedCostBudget?.snapshot() ?? null, planningStatus, planRefinement, plannerLearningStatus, plannerLearningSettlement);
     }
     const row = await writeCheckpoint(execution, "replan_scheduled", projection.evaluation_digest, projection.replan_instruction_digest, trajectoryId);
     await persistState({ phase: "replan_handoff", terminalStatus: null, missionRequestDigest, replanInstructionDigest: projection.replan_instruction_digest, lastMissionCheckpointDigest: row.checkpoint_digest });

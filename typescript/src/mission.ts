@@ -413,9 +413,12 @@ export async function preflightMission(
   if (policy.execute && policy.allowedTools.length === 0) issues.push("execution requires a non-empty explicit allowed_tools list");
 
   const waves: string[][] = [];
+  // Preserve the caller's reviewed order within each dependency wave. This keeps explicit
+  // provider-approved mission ordering meaningful while retaining deterministic graph closure.
+  const requestedOrder = new Map(steps.map((step, index) => [step.id, index]));
   const remaining = new Map<string, Set<string>>([...dependencies.entries()].map(([id, deps]) => [id, new Set(deps)]));
   while (remaining.size > 0) {
-    const ready = [...remaining.entries()].filter(([, deps]) => deps.size === 0).map(([id]) => id).sort();
+    const ready = [...remaining.entries()].filter(([, deps]) => deps.size === 0).map(([id]) => id).sort((left, right) => (requestedOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (requestedOrder.get(right) ?? Number.MAX_SAFE_INTEGER) || left.localeCompare(right));
     if (ready.length === 0) {
       const cycle = [...remaining.keys()].sort();
       const message = `dependency cycle contains: ${cycle.join(", ")}`;

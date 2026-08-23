@@ -374,6 +374,7 @@ export {
   AUTONOMOUS_PLAN_SCHEMA,
   AUTONOMOUS_PLAN_REFINEMENT_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA,
+  AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA,
   AUTONOMOUS_PLAN_AND_RUN_SCHEMA,
   AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
   MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_CHUNKS,
@@ -785,6 +786,8 @@ export type {
   AutonomousApprovedModelSelectionOptions,
   AutonomousModelSelectionPreview,
   AutonomousProviderPlanningOptions,
+  AutonomousOrderedStepPlanStep,
+  AutonomousOrderedStepPlanRequest,
   DomainToolApprover,
   DomainToolExecutor,
 } from "./autonomous.js";
@@ -2019,6 +2022,7 @@ export type {
   AutonomousMissionReplanEvaluationProjection,
   AutonomousMissionReplanEvaluator,
   AutonomousMissionReplanInstructionRehydrator,
+  AutonomousMissionReplanPlanRehydrator,
   AutonomousMissionReplanMissionRehydrator,
   AutonomousMissionReplanner,
   AutonomousMissionReplanOptions,
@@ -2029,6 +2033,8 @@ export type {
   AutonomousMissionReplanState,
   AutonomousMissionReplanStateStore,
   AutonomousMissionReplanStatus,
+  AutonomousMissionPlanningStatus,
+  AutonomousMissionPlannerLearningStatus,
 } from "./mission-replan.js";
 export {
   AUTONOMOUS_EVALUATION_SCHEMA,

@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousLearningController,
+  AutonomousOnlineLearner,
+  InMemoryAutonomousModelHealthStore,
   AutonomousMissionExecutor,
   AutonomousMissionReplanPersistenceCoordinator,
   AutonomousMissionReplanContractError,
@@ -46,6 +49,30 @@ function semanticAgent(payload) {
     reliability: 0.99,
   });
   return { agent, calls: () => calls };
+}
+
+function orderedPlannerAgent(onRequest = () => {}) {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      let body = {};
+      try { body = JSON.parse(String(init?.body ?? "{}")); } catch { /* bounded fixture fallback */ }
+      const messages = body.messages ?? [];
+      onRequest(messages);
+      const contractMessage = messages.find((message) => String(message.content ?? "").startsWith("Context planning-contract:\n"));
+      let contract = {};
+      try { contract = JSON.parse(String(contractMessage?.content ?? "").slice("Context planning-contract:\n".length)); } catch { /* bounded fixture fallback */ }
+      const ids = (contract.step_catalogue ?? []).map((step) => step.id);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: [...ids].reverse(), focus_step_ids: ids.slice(-1), review_required: false, confidence: 0.96, abstain: false }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("mission-planner", "https://mission-planner.test", { requiresCredential: false }));
+  const health = new InMemoryAutonomousModelHealthStore();
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner(), modelHealthStore: health });
+  agent.registerModel({ provider: "mission-planner", model: "mission-planner-model", capabilities: ["reasoning", "structured_output", "code", "web", "data", "science", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation"], context_window_tokens: 32_000, max_output_tokens: 2_000, quality: 0.9, latency_ms: 50, cost_per_million_tokens: 5, reliability: 0.99 });
+  return { agent, calls: () => calls, health };
 }
 
 async function catalogue() {
@@ -127,6 +154,151 @@ test("mission replan cycle covers every domain and retains only metadata at the 
   assert.ok(checkpoints.every((checkpoint) => checkpoint.checkpoint_digest.length === 64));
   assert.equal((await validateAutonomousMissionReplanCheckpoint(checkpoints[0])).checkpoint_digest, checkpoints[0].checkpoint_digest);
   await assert.rejects(() => validateAutonomousMissionReplanCheckpoint({ ...checkpoints[0], phase: "terminal" }), /digest/);
+});
+
+test("mission provider planning is review-gated, accepts only a dependency-safe order, and settles planner quality separately", async () => {
+  const requests = [];
+  const { agent, calls, health } = orderedPlannerAgent((messages) => requests.push(messages));
+  const root = mission([
+    { id: "first", domain: "coding", capability: "verification", objective: "verify the first independent artifact", tool: "mission_probe", arguments: {} },
+    { id: "second", domain: "coding", capability: "verification", objective: "verify the second independent artifact", tool: "mission_probe", arguments: {} },
+  ], "mission-provider-plan-root");
+  const executed = [];
+  // Keep the fixture catalogue creation explicit so no provider/tool payload is implicit.
+  const makeExecutor = async () => new AutonomousMissionExecutor({
+    agent,
+    catalogue: await catalogue(),
+    executeStep: async ({ step }) => {
+      executed.push(step.id);
+      return { status: "succeeded", value: { local: step.id } };
+    },
+  });
+  const executor = await makeExecutor();
+  const learning = new AutonomousLearningController(agent);
+  const review = await runAutonomousMissionReplanCycle(executor, root, {
+    providerPlanning: { candidates: agent.models(), approveProviderCall: true },
+    evaluatePlanning: () => ({ evaluator_id: "mission-planner-reviewer", evaluator_version: "1", reward: 0.91, passed: true }),
+    plannerLearning: learning,
+    evaluate: () => ({ evaluator_id: "mission-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(review.status, "plan_review_required");
+  assert.equal(review.final_execution.status, "approval_required");
+  assert.equal(review.planning_status, "plan_review_required");
+  assert.equal(review.plan_refinement.status, "completed");
+  assert.equal(review.plan_refinement.priority_step_ids[0], "second");
+  assert.equal(review.planner_learning_status, "settled");
+  assert.equal(health.health({ model: "mission-planner-model", capability: "planning" })[0]?.quality_observations, 1);
+  assert.equal(calls(), 1);
+  assert.equal(executed.length, 0);
+  assert.doesNotMatch(JSON.stringify(review), /verify the first independent artifact|planning-contract|mission-planner.test/);
+  assert.ok(requests[0].some((message) => String(message.content).includes("verify the first independent artifact")));
+
+  const accepted = await runAutonomousMissionReplanCycle(await makeExecutor(), root, {
+    acceptedPlanRefinement: review.plan_refinement,
+    acceptPlan: true,
+    evaluate: () => ({ evaluator_id: "mission-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(accepted.status, "completed");
+  assert.equal(accepted.planning_status, "accepted");
+  assert.deepEqual(executed, ["second", "first"]);
+  assert.equal(calls(), 1, "caller acceptance reuses the reviewed proposal without replaying the planner");
+});
+
+test("mission ordered-step planning reaches every built-in autonomous domain through the same provider contract", async () => {
+  const { agent, calls } = orderedPlannerAgent();
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await runAutonomousMissionReplanCycle(new AutonomousMissionExecutor({
+      agent,
+      catalogue: await catalogue(),
+      executeStep: async ({ step }) => ({ status: "succeeded", value: { domain: step.domain } }),
+    }), mission([{ id: `domain-${domain}`, domain, capability: "verification", objective: `verify ${domain}`, tool: "mission_probe", arguments: {} }], `mission-domain-${domain}`), {
+      providerPlanning: { candidates: agent.models(), approveProviderCall: true },
+      acceptPlan: true,
+      evaluate: () => ({ evaluator_id: "mission-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.planning_status, "accepted", domain);
+    assert.equal(result.plan_refinement.status, "completed", domain);
+  }
+  assert.equal(calls(), AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("mission provider planning rehydrates accepted ordering without planner replay after interruption", async () => {
+  const { agent, calls } = orderedPlannerAgent();
+  const stateStore = new InMemoryAutonomousMissionReplanStateStore();
+  const checkpointStore = new InMemoryAutonomousMissionCheckpointStore();
+  const root = mission([
+    { id: "alpha", domain: "coding", capability: "verification", objective: "verify alpha", tool: "mission_probe", arguments: {} },
+    { id: "beta", domain: "coding", capability: "verification", objective: "verify beta", tool: "mission_probe", arguments: {} },
+  ], "mission-provider-restart-root");
+  let plan;
+  let interrupted = true;
+  let evaluations = 0;
+  const makeExecutor = async () => new AutonomousMissionExecutor({
+    agent,
+    catalogue: await catalogue(),
+    checkpointStore,
+    executeStep: async ({ step }) => {
+      return { status: "succeeded", value: { step: step.id } };
+    },
+  });
+  await assert.rejects(() => makeExecutor().then((executor) => runAutonomousMissionReplanCycle(executor, root, {
+    stateStore,
+    providerPlanning: { candidates: agent.models(), approveProviderCall: true },
+    acceptPlan: true,
+    plannerLearning: new AutonomousLearningController(agent),
+    evaluatePlanning: (candidate) => { plan = candidate; return { evaluator_id: "mission-planner-reviewer", evaluator_version: "1", reward: 0.9, passed: true }; },
+    evaluate: () => {
+      evaluations += 1;
+      if (interrupted) { interrupted = false; throw new Error("simulated mission worker interruption"); }
+      return { evaluator_id: "mission-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false };
+    },
+    replan: () => { throw new Error("not reached"); },
+  }).then((result) => { plan = result.plan_refinement; return result; })), /simulated mission worker interruption/);
+  assert.equal(calls(), 1);
+  const persisted = await stateStore.load(root.mission_id);
+  assert.equal(persisted.planning_status, "accepted");
+  assert.equal(persisted.plan_refinement_digest.length, 64);
+  assert.doesNotMatch(JSON.stringify(persisted), /verify alpha|planner output|mission-planner/);
+
+  const resumed = await runAutonomousMissionReplanCycle(await makeExecutor(), root, {
+    stateStore,
+    rehydratePlanRefinement: ({ plan_refinement_digest }) => {
+      assert.equal(plan_refinement_digest, persisted.plan_refinement_digest);
+      return plan;
+    },
+    evaluate: () => ({ evaluator_id: "mission-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.planning_status, "accepted");
+  assert.equal(calls(), 1, "restart rehydrates the accepted plan instead of invoking a provider again");
+});
+
+test("mission review-only planning remains non-executable after restart", async () => {
+  const { agent, calls } = orderedPlannerAgent();
+  const stateStore = new InMemoryAutonomousMissionReplanStateStore();
+  const root = mission([{ id: "review", domain: "coding", capability: "verification", objective: "review without dispatch", tool: "mission_probe", arguments: {} }], "mission-provider-review-restart-root");
+  let dispatches = 0;
+  const makeExecutor = async () => new AutonomousMissionExecutor({
+    agent,
+    catalogue: await catalogue(),
+    executeStep: async () => { dispatches += 1; return { status: "succeeded", value: { should_not_dispatch: true } }; },
+  });
+  const first = await runAutonomousMissionReplanCycle(await makeExecutor(), root, {
+    stateStore,
+    providerPlanning: { candidates: agent.models(), approveProviderCall: true },
+    evaluate: () => ({ evaluator_id: "mission-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(first.status, "plan_review_required");
+  const resumed = await runAutonomousMissionReplanCycle(await makeExecutor(), root, {
+    stateStore,
+    rehydratePlanRefinement: () => first.plan_refinement,
+    evaluate: () => ({ evaluator_id: "mission-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(resumed.status, "plan_review_required");
+  assert.equal(resumed.final_execution.status, "approval_required");
+  assert.equal(dispatches, 0);
+  assert.equal(calls(), 1);
 });
 
 test("mission replanning refuses protected contract drift and credential-shaped guidance", async () => {

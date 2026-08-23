@@ -31,6 +31,7 @@ import type {
   JsonObject,
   RestToolResponse,
   AutonomousCrossDomainPlanRefinementResult,
+  AutonomousOrderedStepPlanRefinementResult,
   AutonomousPlanRefinementResult,
 } from "./types.js";
 
@@ -458,7 +459,7 @@ export interface AutonomousLearningModelQualityProjection extends JsonObject {
 export interface AutonomousPlanningQualitySettlement extends JsonObject {
   schema: typeof AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA;
   status: "settled" | "not_eligible";
-  plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | null;
+  plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | AutonomousOrderedStepPlanRefinementResult | null;
   evaluation: AutonomousEvaluatorRewardInput | null;
   next_state: BrainBanditState | null;
   model_quality: AutonomousLearningModelQualityProjection | null;
@@ -575,7 +576,7 @@ export interface AutonomousPlanAndRunLearningOptions {
   /** The evaluator used for each completed execution run. */
   evaluator?: (result: AutonomousRunResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   /** Explicit planner evaluator; planner quality must not be inferred from transport success. */
-  plannerEvaluator?: (plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
+  plannerEvaluator?: (plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | AutonomousOrderedStepPlanRefinementResult) => AutonomousEvaluatorRewardInput | Promise<AutonomousEvaluatorRewardInput>;
   /** Rehydrated planner decision from a remote evaluator worker. */
   plannerEvaluation?: AutonomousEvaluatorRewardInput;
   plannerDomain?: AutonomousDomainName;
@@ -2098,7 +2099,7 @@ export class AutonomousLearningController {
    * never re-invokes the planner or treats a syntactically valid proposal as task success.
    */
   async settlePlanningQuality(
-    plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult,
+    plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | AutonomousOrderedStepPlanRefinementResult,
     options: {
       domain: AutonomousDomainName;
       capability?: string;

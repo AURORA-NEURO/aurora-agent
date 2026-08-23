@@ -2106,6 +2106,47 @@ domain and cross-domain work; explicit caller tools remain compatibility input b
 subject to activation, catalogue, provider, and effect gates. This keeps model-visible tools
 small enough to be useful without converting discovery or selection into authority.
 
+### Provider-assisted mission ordering with replay-safe acceptance
+
+Mission execution now has the same planner boundary as workflow and portfolio execution. The
+reusable `agent.planOrderedStepsWithProvider()` primitive accepts an existing dependency-closed
+step graph and asks the selected model for two value-only fields: an exact `priority_order` and a
+bounded `focus_step_ids` subset. The transient prompt may include step objectives so the model can
+reason about priority, but the returned proposal never contains arguments, provider content,
+credentials, permissions, effects, claims, or new steps. The provider is therefore choosing among
+reviewed actions rather than authorizing new actions.
+
+`runAutonomousMissionReplanCycle()` can use this primitive through `providerPlanning`. Planning
+approval and mission dispatch approval are independent. `acceptPlan: true` is still insufficient
+when the provider sets `review_required`; a completed, non-review proposal must be explicitly
+accepted, then the mission executor revalidates the exact step permutation and dependency order.
+The protected mission digest is order-independent but binds every step contract, so reordering
+cannot change tools, arguments, bindings, policy, claims, route review, or effect authority.
+Mission preflight preserves the caller/provider-approved order within each dependency wave, making
+the accepted priority observable without weakening graph safety.
+
+```typescript
+const result = await runAutonomousMissionReplanCycle(executor, mission, {
+  providerPlanning: { candidates, approveProviderCall: true },
+  acceptPlan: true,
+  plannerLearning,
+  evaluatePlanning: (plan) => plannerEvaluator(plan),
+  evaluate: (execution) => missionEvaluator(execution),
+  stateStore,
+  rehydratePlanRefinement,
+});
+```
+
+The planner receives the same model-selection, structured-output, failover, cost-budget, health,
+and contextual-bandit machinery as ordinary autonomous calls. Planner quality is credited only
+from `evaluatePlanning`; provider transport success never becomes a reward and planner credit is
+kept separate from mission step trajectories. A restart persists only the planning status,
+proposal digest, planner-learning status, and settlement digest. It requires a caller-owned
+`rehydratePlanRefinement` callback to recover the value-only proposal, so accepted ordering can be
+reapplied without replaying the provider and review-only proposals cannot silently become
+accepted. The same path is tested across all built-in domains, including cross-domain mission
+graphs.
+
 For applications that need one reviewed plan spanning several domain workflows, the TypeScript
 facade also exposes `planWorkflowPortfolio()`. Each item supplies an explicit domain and task,
 may depend on earlier items, and is compiled through the same route, workflow, evidence, and
