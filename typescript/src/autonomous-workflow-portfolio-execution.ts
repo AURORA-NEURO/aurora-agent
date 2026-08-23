@@ -22,7 +22,7 @@ import type {
   AutonomousLearningOutboxSettlementOptions,
 } from "./autonomous-learning.js";
 import { validateAutonomousWorkflowPortfolioAdmission, type AutonomousWorkflowPortfolioAdmission } from "./autonomous-workflow-portfolio-admission.js";
-import { digestJson, digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Digest-bound execution result for a portfolio whose plan was reviewed separately. */
@@ -47,6 +47,10 @@ export type AutonomousWorkflowPortfolioExecutionStatus = "completed" | "partial"
 /** Metadata-only lifecycle phases for one dependency-aware portfolio execution. */
 export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-trace/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-trace-event/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-trace-snapshot/0.1" as const;
+export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENTS = 100_000;
+export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_BYTES = 16_000;
+export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_BYTES = 5_000_000;
 export type AutonomousWorkflowPortfolioExecutionTracePhase = "started" | "plan_verified" | "item_started" | "item_decided" | "progress" | "completed" | "paused" | "failed" | "blocked";
 export type AutonomousWorkflowPortfolioExecutionTraceStatus = AutonomousWorkflowPortfolioExecutionStatus | AutonomousWorkflowPortfolioExecutionItemStatus | "running";
 
@@ -92,6 +96,34 @@ export interface AutonomousWorkflowPortfolioExecutionTraceEmitter {
   flush(): Promise<void>;
   readonly traceId: string;
   readonly headDigest: string;
+}
+
+export interface AutonomousWorkflowPortfolioExecutionTraceSnapshot extends JsonObject {
+  schema: typeof AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_SCHEMA;
+  trace_id: string;
+  plan_digest: string;
+  admission_digest: string | null;
+  sequence: number;
+  head_digest: string;
+  events: AutonomousWorkflowPortfolioExecutionTraceEvent[];
+  snapshot_digest: string;
+  retention: "metadata_only_hash_chained_no_tasks_prompts_outputs_credentials_or_evidence";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousWorkflowPortfolioExecutionTracePersistence {
+  read(): Promise<AutonomousWorkflowPortfolioExecutionTraceSnapshot | null> | AutonomousWorkflowPortfolioExecutionTraceSnapshot | null;
+  write(snapshot: AutonomousWorkflowPortfolioExecutionTraceSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousWorkflowPortfolioExecutionTraceSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousWorkflowPortfolioExecutionTraceTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousWorkflowPortfolioExecutionTraceTransactionalTextStore extends AutonomousWorkflowPortfolioExecutionTraceTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 /** Explicit state of the optional evaluator-to-bandit handoff for one portfolio item. */
@@ -701,6 +733,269 @@ export function createAutonomousWorkflowPortfolioExecutionTraceEmitter(input: {
     get traceId() { return traceId; },
     get headDigest() { return previousDigest; },
   };
+}
+
+function traceEventBody(event: AutonomousWorkflowPortfolioExecutionTraceEvent): Omit<AutonomousWorkflowPortfolioExecutionTraceEvent, "event_digest"> {
+  const { event_digest: _eventDigest, ...body } = event;
+  return body;
+}
+
+function validateStoredTraceEvent(
+  raw: unknown,
+  expectedTraceId: string,
+  expectedPlanDigest: string,
+  expectedAdmissionDigest: string | null,
+  expectedSequence: number,
+  expectedPreviousDigest: string,
+): AutonomousWorkflowPortfolioExecutionTraceEvent {
+  if (!isObject(raw) || raw.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_SCHEMA) throw new ArgumentError("workflow portfolio trace event schema is invalid");
+  const allowed = new Set(["schema", "trace_id", "sequence", "plan_digest", "admission_digest", "phase", "status", "item_id", "domain", "wave_index", "provider_call", "result_digest", "failure_code", "learning_status", "detail_digest", "previous_digest", "event_digest", "retention", "secret_material"]);
+  if (Object.keys(raw).some((key) => !allowed.has(key))) throw new ArgumentError("workflow portfolio trace event contains unsupported fields");
+  const event = raw as unknown as AutonomousWorkflowPortfolioExecutionTraceEvent;
+  const traceId = traceIdentifier("workflow portfolio trace event trace_id", event.trace_id);
+  const planDigest = traceOptionalDigest("workflow portfolio trace event plan_digest", event.plan_digest);
+  const admissionDigest = traceOptionalDigest("workflow portfolio trace event admission_digest", event.admission_digest);
+  if (traceId !== expectedTraceId || planDigest !== expectedPlanDigest || admissionDigest !== expectedAdmissionDigest) throw new ArgumentError("workflow portfolio trace event identity does not match the trace");
+  if (!Number.isSafeInteger(event.sequence) || event.sequence !== expectedSequence) throw new ArgumentError("workflow portfolio trace event sequence is invalid");
+  if (!PORTFOLIO_TRACE_PHASES.includes(event.phase)) throw new ArgumentError("workflow portfolio trace event phase is invalid");
+  if (!PORTFOLIO_TRACE_STATUSES.includes(event.status)) throw new ArgumentError("workflow portfolio trace event status is invalid");
+  const itemId = event.item_id === null ? null : traceIdentifier("workflow portfolio trace event item_id", event.item_id);
+  const domain = event.domain === null ? null : (AUTONOMOUS_DOMAIN_NAMES.includes(event.domain) ? event.domain : (() => { throw new ArgumentError("workflow portfolio trace event domain is invalid"); })());
+  const waveIndex = event.wave_index === null ? null : boundedInteger("workflow portfolio trace event wave_index", event.wave_index, 0, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ITEMS, 0);
+  const providerCall = event.provider_call === null ? null : (PORTFOLIO_TRACE_PROVIDER_CALLS.includes(event.provider_call) ? event.provider_call : (() => { throw new ArgumentError("workflow portfolio trace event provider_call is invalid"); })());
+  const learningStatus = event.learning_status === null ? null : (PORTFOLIO_TRACE_LEARNING_STATUSES.includes(event.learning_status) ? event.learning_status : (() => { throw new ArgumentError("workflow portfolio trace event learning_status is invalid"); })());
+  const resultDigest = traceOptionalDigest("workflow portfolio trace event result_digest", event.result_digest);
+  const failureCode = traceOptionalText("workflow portfolio trace event failure_code", event.failure_code);
+  const detailDigest = traceOptionalDigest("workflow portfolio trace event detail_digest", event.detail_digest);
+  if (typeof event.previous_digest !== "string" || !/^$|^[0-9a-f]{64}$/.test(event.previous_digest) || event.previous_digest !== expectedPreviousDigest) throw new ArgumentError("workflow portfolio trace event previous digest is invalid");
+  if (event.retention !== PORTFOLIO_TRACE_RETENTION || event.secret_material !== PORTFOLIO_TRACE_SECRET_MATERIAL) throw new ArgumentError("workflow portfolio trace event retention contract is invalid");
+  const body = {
+    schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_SCHEMA,
+    trace_id: traceId,
+    sequence: expectedSequence,
+    plan_digest: planDigest,
+    admission_digest: admissionDigest,
+    phase: event.phase,
+    status: event.status,
+    item_id: itemId,
+    domain,
+    wave_index: waveIndex,
+    provider_call: providerCall,
+    result_digest: resultDigest,
+    failure_code: failureCode,
+    learning_status: learningStatus,
+    detail_digest: detailDigest,
+    previous_digest: expectedPreviousDigest,
+    retention: PORTFOLIO_TRACE_RETENTION,
+    secret_material: PORTFOLIO_TRACE_SECRET_MATERIAL,
+  } satisfies Omit<AutonomousWorkflowPortfolioExecutionTraceEvent, "event_digest">;
+  if (digestJsonSync(body) !== event.event_digest) throw new ArgumentError("workflow portfolio trace event digest is invalid");
+  return structuredClone({ ...body, event_digest: event.event_digest }) as AutonomousWorkflowPortfolioExecutionTraceEvent;
+}
+
+/** Validate a portable portfolio trace snapshot before it is restored or persisted. */
+export function validateAutonomousWorkflowPortfolioExecutionTraceSnapshot(value: unknown): AutonomousWorkflowPortfolioExecutionTraceSnapshot {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_SCHEMA || !Array.isArray(value.events)) throw new ArgumentError("workflow portfolio trace snapshot is malformed");
+  const traceId = traceIdentifier("workflow portfolio trace snapshot trace_id", value.trace_id);
+  const planDigest = traceOptionalDigest("workflow portfolio trace snapshot plan_digest", value.plan_digest);
+  if (planDigest === null) throw new ArgumentError("workflow portfolio trace snapshot plan_digest is required");
+  const admissionDigest = traceOptionalDigest("workflow portfolio trace snapshot admission_digest", value.admission_digest);
+  const sequenceValue = value.sequence;
+  if (!Number.isSafeInteger(sequenceValue) || (sequenceValue as number) < 0 || (sequenceValue as number) > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENTS) throw new ArgumentError("workflow portfolio trace snapshot sequence is invalid");
+  const sequence = sequenceValue as number;
+  if (!Array.isArray(value.events) || value.events.length !== sequence) throw new ArgumentError("workflow portfolio trace snapshot sequence does not match events");
+  let previousDigest = "";
+  const events = value.events.map((event, index) => {
+    const validated = validateStoredTraceEvent(event, traceId, planDigest, admissionDigest, index + 1, previousDigest);
+    previousDigest = validated.event_digest;
+    return validated;
+  });
+  if (typeof value.head_digest !== "string" || value.head_digest !== previousDigest) throw new ArgumentError("workflow portfolio trace snapshot head digest is invalid");
+  if (value.retention !== "metadata_only_hash_chained_no_tasks_prompts_outputs_credentials_or_evidence" || value.secret_material !== "never_returned") throw new ArgumentError("workflow portfolio trace snapshot retention contract is invalid");
+  const body = {
+    schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_SCHEMA,
+    trace_id: traceId,
+    plan_digest: planDigest,
+    admission_digest: admissionDigest,
+    sequence: events.length,
+    head_digest: previousDigest,
+    events,
+    retention: "metadata_only_hash_chained_no_tasks_prompts_outputs_credentials_or_evidence" as const,
+    secret_material: "never_returned" as const,
+  };
+  if (typeof value.snapshot_digest !== "string" || !/^[0-9a-f]{64}$/.test(value.snapshot_digest) || digestJsonSync(body) !== value.snapshot_digest) throw new ArgumentError("workflow portfolio trace snapshot digest is invalid");
+  const snapshot = { ...body, snapshot_digest: value.snapshot_digest } as AutonomousWorkflowPortfolioExecutionTraceSnapshot;
+  if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_BYTES) throw new ArgumentError("workflow portfolio trace snapshot exceeds its byte bound");
+  return structuredClone(snapshot);
+}
+
+/** In-memory validated trace store; pass `event => store.append(event)` as the execution trace sink. */
+export class InMemoryAutonomousWorkflowPortfolioExecutionTraceStore {
+  private readonly eventsValue: AutonomousWorkflowPortfolioExecutionTraceEvent[] = [];
+  readonly traceId: string;
+  readonly planDigest: string;
+  readonly admissionDigest: string | null;
+  readonly maxEvents: number;
+  readonly maxEventBytes: number;
+  readonly maxSnapshotBytes: number;
+
+  constructor(options: { traceId: string; planDigest: string; admissionDigest?: string | null; maxEvents?: number; maxEventBytes?: number; maxSnapshotBytes?: number }) {
+    this.traceId = traceIdentifier("workflow portfolio trace store traceId", options?.traceId);
+    const planDigest = traceOptionalDigest("workflow portfolio trace store planDigest", options?.planDigest);
+    if (planDigest === null) throw new ArgumentError("workflow portfolio trace store planDigest is required");
+    this.planDigest = planDigest;
+    this.admissionDigest = traceOptionalDigest("workflow portfolio trace store admissionDigest", options.admissionDigest);
+    this.maxEvents = options.maxEvents ?? MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENTS;
+    this.maxEventBytes = options.maxEventBytes ?? MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_BYTES;
+    this.maxSnapshotBytes = options.maxSnapshotBytes ?? MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_BYTES;
+    if (!Number.isSafeInteger(this.maxEvents) || this.maxEvents < 1 || this.maxEvents > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENTS) throw new ArgumentError("workflow portfolio trace store maxEvents is outside its bounds");
+    if (!Number.isSafeInteger(this.maxEventBytes) || this.maxEventBytes < 512 || this.maxEventBytes > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_BYTES) throw new ArgumentError("workflow portfolio trace store maxEventBytes is outside its bounds");
+    if (!Number.isSafeInteger(this.maxSnapshotBytes) || this.maxSnapshotBytes < this.maxEventBytes || this.maxSnapshotBytes > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_BYTES) throw new ArgumentError("workflow portfolio trace store maxSnapshotBytes is outside its bounds");
+  }
+
+  append(raw: AutonomousWorkflowPortfolioExecutionTraceEvent): AutonomousWorkflowPortfolioExecutionTraceEvent {
+    if (this.eventsValue.length >= this.maxEvents) throw new ArgumentError("workflow portfolio trace store event capacity is exhausted");
+    const event = validateStoredTraceEvent(raw, this.traceId, this.planDigest, this.admissionDigest, this.eventsValue.length + 1, this.eventsValue.at(-1)?.event_digest ?? "");
+    if (new TextEncoder().encode(canonicalJson(event)).byteLength > this.maxEventBytes) throw new ArgumentError("workflow portfolio trace event exceeds its byte bound");
+    this.eventsValue.push(event);
+    return structuredClone(event);
+  }
+
+  events(options: { afterSequence?: number; limit?: number } = {}): AutonomousWorkflowPortfolioExecutionTraceEvent[] {
+    const afterSequence = options.afterSequence ?? 0;
+    const limit = options.limit ?? Math.min(this.maxEvents, 10_000);
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) throw new ArgumentError("workflow portfolio trace afterSequence is invalid");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) throw new ArgumentError("workflow portfolio trace query limit is invalid");
+    return this.eventsValue.filter((event) => event.sequence > afterSequence).slice(0, limit).map((event) => structuredClone(event));
+  }
+
+  snapshot(): AutonomousWorkflowPortfolioExecutionTraceSnapshot {
+    const body = {
+      schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_SCHEMA,
+      trace_id: this.traceId,
+      plan_digest: this.planDigest,
+      admission_digest: this.admissionDigest,
+      sequence: this.eventsValue.length,
+      head_digest: this.eventsValue.at(-1)?.event_digest ?? "",
+      events: this.eventsValue.map((event) => structuredClone(event)),
+      retention: "metadata_only_hash_chained_no_tasks_prompts_outputs_credentials_or_evidence" as const,
+      secret_material: "never_returned" as const,
+    };
+    const snapshot = { ...body, snapshot_digest: digestJsonSync(body) } as AutonomousWorkflowPortfolioExecutionTraceSnapshot;
+    if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > this.maxSnapshotBytes) throw new ArgumentError("workflow portfolio trace snapshot exceeds its byte bound");
+    return structuredClone(snapshot);
+  }
+
+  restore(raw: unknown): void {
+    const snapshot = validateAutonomousWorkflowPortfolioExecutionTraceSnapshot(raw);
+    if (snapshot.trace_id !== this.traceId || snapshot.plan_digest !== this.planDigest || snapshot.admission_digest !== this.admissionDigest) throw new ArgumentError("workflow portfolio trace snapshot identity does not match the store");
+    if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > this.maxSnapshotBytes || snapshot.events.length > this.maxEvents) throw new ArgumentError("workflow portfolio trace snapshot exceeds the store bounds");
+    this.eventsValue.splice(0, this.eventsValue.length, ...snapshot.events.map((event) => structuredClone(event)));
+  }
+
+  verifyIntegrity(): { verified: true; events: number; head_digest: string } {
+    let previousDigest = "";
+    for (const [index, event] of this.eventsValue.entries()) {
+      const validated = validateStoredTraceEvent(event, this.traceId, this.planDigest, this.admissionDigest, index + 1, previousDigest);
+      previousDigest = validated.event_digest;
+    }
+    return { verified: true, events: this.eventsValue.length, head_digest: previousDigest };
+  }
+}
+
+/** Coordinates atomic caller-owned persistence for a portfolio trace snapshot. */
+export class AutonomousWorkflowPortfolioExecutionTracePersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
+  constructor(readonly store: InMemoryAutonomousWorkflowPortfolioExecutionTraceStore, readonly persistence: AutonomousWorkflowPortfolioExecutionTracePersistence) {
+    if (!(store instanceof InMemoryAutonomousWorkflowPortfolioExecutionTraceStore)) throw new ArgumentError("workflow portfolio trace persistence requires a typed store");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("workflow portfolio trace persistence adapter is malformed");
+  }
+
+  async restore(): Promise<AutonomousWorkflowPortfolioExecutionTraceSnapshot | null> {
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return structuredClone(snapshot);
+    });
+  }
+
+  async flush(): Promise<AutonomousWorkflowPortfolioExecutionTraceSnapshot> {
+    return this.enqueue(async () => {
+      const snapshot = this.store.snapshot();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        const committed = await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot);
+        if (!committed) throw new ArgumentError("workflow portfolio trace persistence compare-and-swap conflict");
+      } else {
+        await this.persistence.write(snapshot);
+      }
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return structuredClone(snapshot);
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+/** Strict bounded JSON adapter for a caller-owned portfolio trace text store. */
+export class JsonAutonomousWorkflowPortfolioExecutionTracePersistence implements AutonomousWorkflowPortfolioExecutionTracePersistence {
+  constructor(readonly textStore: AutonomousWorkflowPortfolioExecutionTraceTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("workflow portfolio trace text store is malformed");
+  }
+
+  async read(): Promise<AutonomousWorkflowPortfolioExecutionTraceSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_BYTES) throw new ArgumentError("workflow portfolio trace JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("workflow portfolio trace JSON is invalid"); }
+    return validateAutonomousWorkflowPortfolioExecutionTraceSnapshot(parsed);
+  }
+
+  async write(snapshot: AutonomousWorkflowPortfolioExecutionTraceSnapshot): Promise<void> {
+    const validated = validateAutonomousWorkflowPortfolioExecutionTraceSnapshot(snapshot);
+    const encoded = canonicalJson(validated);
+    if (new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SNAPSHOT_BYTES) throw new ArgumentError("workflow portfolio trace JSON exceeds its byte bound");
+    await this.textStore.write(encoded);
+  }
+}
+
+/** JSON adapter with an atomic text-store compare-and-swap fence. */
+export class TransactionalJsonAutonomousWorkflowPortfolioExecutionTracePersistence extends JsonAutonomousWorkflowPortfolioExecutionTracePersistence {
+  declare readonly textStore: AutonomousWorkflowPortfolioExecutionTraceTransactionalTextStore;
+
+  constructor(textStore: AutonomousWorkflowPortfolioExecutionTraceTransactionalTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("workflow portfolio trace text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousWorkflowPortfolioExecutionTraceSnapshot): Promise<boolean> {
+    const validated = validateAutonomousWorkflowPortfolioExecutionTraceSnapshot(snapshot);
+    const encoded = canonicalJson(validated);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, encoded);
+  }
+}
+
+/** Browser-compatible key/value adapter for a portfolio trace snapshot. */
+export class WebStorageAutonomousWorkflowPortfolioExecutionTraceTextStore implements AutonomousWorkflowPortfolioExecutionTraceTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("workflow portfolio trace Web Storage adapter is malformed");
+    traceIdentifier("workflow portfolio trace storage key", key);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
 }
 
 /** Execute a verified portfolio in deterministic dependency waves with bounded transient handoffs. */

@@ -4,6 +4,11 @@ import test from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousWorkflowPortfolioExecutionTracePersistenceCoordinator,
+  InMemoryAutonomousWorkflowPortfolioExecutionTraceStore,
+  JsonAutonomousWorkflowPortfolioExecutionTracePersistence,
+  TransactionalJsonAutonomousWorkflowPortfolioExecutionTracePersistence,
+  WebStorageAutonomousWorkflowPortfolioExecutionTraceTextStore,
   LLMRuntime,
 } from "../dist/index.js";
 
@@ -89,6 +94,62 @@ test("portfolio execution emits a hash-chained decision trace without transient 
   assert.equal(events.at(-1).phase, "completed");
   assert.equal(events.every((event, index) => event.sequence === index + 1 && (index === 0 ? event.previous_digest === "" : event.previous_digest === events[index - 1].event_digest)), true);
   assert.doesNotMatch(JSON.stringify(events), /private task payload|private hint|offline result/);
+});
+
+test("portfolio decision traces restore through bounded JSON and CAS persistence", async () => {
+  const agent = agentFor();
+  const requests = allDomainRequests();
+  const plan = await agent.planWorkflowPortfolio(requests, { requireAllDomains: true });
+  const sourceStore = new InMemoryAutonomousWorkflowPortfolioExecutionTraceStore({ traceId: "durable-portfolio-trace", planDigest: plan.portfolio_digest });
+  const execution = await agent.executeWorkflowPortfolio(requests, {
+    plan,
+    approveProviderCall: true,
+    traceId: "durable-portfolio-trace",
+    traceSink: (event) => sourceStore.append(event),
+  });
+  const snapshot = sourceStore.snapshot();
+  assert.equal(snapshot.head_digest, execution.traceDigest);
+  assert.equal(sourceStore.verifyIntegrity().verified, true);
+
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (current !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousWorkflowPortfolioExecutionTracePersistence(textStore);
+  const coordinator = new AutonomousWorkflowPortfolioExecutionTracePersistenceCoordinator(sourceStore, persistence);
+  await coordinator.flush();
+  const restoredStore = new InMemoryAutonomousWorkflowPortfolioExecutionTraceStore({ traceId: "durable-portfolio-trace", planDigest: plan.portfolio_digest });
+  const restoredCoordinator = new AutonomousWorkflowPortfolioExecutionTracePersistenceCoordinator(restoredStore, persistence);
+  const restored = await restoredCoordinator.restore();
+  assert.equal(restored.snapshot_digest, snapshot.snapshot_digest);
+  assert.deepEqual(restoredStore.snapshot(), snapshot);
+
+  const stale = new AutonomousWorkflowPortfolioExecutionTracePersistenceCoordinator(new InMemoryAutonomousWorkflowPortfolioExecutionTraceStore({ traceId: "durable-portfolio-trace", planDigest: plan.portfolio_digest }), persistence);
+  await stale.restore();
+  const competingStore = new InMemoryAutonomousWorkflowPortfolioExecutionTraceStore({ traceId: "competing-portfolio-trace", planDigest: plan.portfolio_digest });
+  await new JsonAutonomousWorkflowPortfolioExecutionTracePersistence(textStore).write(competingStore.snapshot());
+  await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
+
+  const tampered = structuredClone(snapshot);
+  tampered.events[0].status = "failed";
+  assert.throws(() => restoredStore.restore(tampered), /digest|hash chain|invalid/);
+  assert.deepEqual(restoredStore.snapshot(), snapshot);
+
+  const values = new Map();
+  const browserStore = new WebStorageAutonomousWorkflowPortfolioExecutionTraceTextStore({
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+  }, "portfolio-trace-key");
+  const browserPersistence = new JsonAutonomousWorkflowPortfolioExecutionTracePersistence(browserStore);
+  await browserPersistence.write(snapshot);
+  assert.equal((await browserPersistence.read()).snapshot_digest, snapshot.snapshot_digest);
 });
 
 test("portfolio execution fails closed at the provider approval boundary", async () => {

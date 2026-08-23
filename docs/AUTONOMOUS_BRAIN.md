@@ -1942,6 +1942,14 @@ prompts, provider output, evidence values, credentials, or tool payloads. The si
 feed a dashboard, append-only journal, or remote worker monitor without becoming an execution
 authority.
 
+For restart-safe storage, `InMemoryAutonomousWorkflowPortfolioExecutionTraceStore` validates
+every event and snapshot against the expected trace, plan, and admission identities. Wrap it in
+`AutonomousWorkflowPortfolioExecutionTracePersistenceCoordinator` with a caller-owned persistence
+adapter; strict JSON, transactional JSON/CAS, and browser Web Storage adapters are included. A
+stale coordinator cannot overwrite a newer snapshot, and failed restore leaves the live trace
+unchanged. The trace store is observability state only: restoring it never resumes provider work,
+releases approval, rehydrates credentials, or authorizes tools/effects.
+
 Portfolio execution can also close the evaluator-to-bandit loop for every item, but reward is
 never inferred from a provider response or from `status: "completed"`. The caller supplies the
 learning controller and an `evaluateItem` callback that returns one explicit bounded reward

@@ -317,6 +317,12 @@ identity. This provides a useful dashboard/remote-worker observability seam with
 tasks, prompts, outputs, evidence, credentials, or tool payloads and without granting the trace
 sink execution authority.
 
+The trace now has a durable seam as well: validated in-memory storage, digest-checked snapshots,
+strict JSON/text persistence, transactional CAS fencing, and browser storage are exported. Restore
+is identity-bound and atomic from the store's perspective; it cannot resume provider work or grant
+approval. This leaves database encryption, retention/rotation, access control, and distributed
+multi-region replication to the embedding deployment.
+
 The checkpoint seam now includes an optional atomic compare-and-swap contract plus bounded JSON
 and transactional-JSON adapters. The controller serializes local operations, fences every flush
 against the restored digest, and surfaces stale-writer conflicts instead of overwriting progress;
