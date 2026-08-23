@@ -621,6 +621,17 @@ export type {
   AutonomousHttpEvidenceAdapterOptions,
 } from "./autonomous-evidence-http-adapter.js";
 export {
+  AUTONOMOUS_LLM_EVIDENCE_ADAPTER_SCHEMA,
+  MAX_AUTONOMOUS_LLM_EVIDENCE_PROMPT_MESSAGES,
+  MAX_AUTONOMOUS_LLM_EVIDENCE_OUTPUT_TOKENS,
+  MAX_AUTONOMOUS_LLM_EVIDENCE_MODEL_BYTES,
+  createAutonomousLLMEvidenceAdapterRegistration,
+  registerAutonomousLLMEvidenceAdapter,
+} from "./autonomous-evidence-llm-adapter.js";
+export type {
+  AutonomousLLMEvidenceAdapterOptions,
+} from "./autonomous-evidence-llm-adapter.js";
+export {
   AUTONOMOUS_EVIDENCE_RETRY_POLICY_SCHEMA,
   AUTONOMOUS_EVIDENCE_RETRY_ATTEMPT_SCHEMA,
   MAX_AUTONOMOUS_EVIDENCE_RETRY_ATTEMPTS,

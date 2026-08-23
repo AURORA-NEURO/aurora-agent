@@ -90,6 +90,15 @@ carry the contract and caller-owned health store through the same boundary. This
 implement provider clients, credential storage, source truth interpretation, or external
 authentication/session resolution; those remain deployment-owned.
 
+The TypeScript evidence boundary now also has an LLM-backed adapter bridge. It invokes a registered
+provider through `LLMRuntime`, resolves only opaque caller-owned credential handles, preserves
+provider/model health and invocation observers, supports static or transient model resolution,
+schema-gated structured output, parser/projector hooks, and metadata-only idempotency keys. Parsed
+credential-shaped response fields are rejected before transient evidence enters the runtime, and
+offline tests exercise the bridge across all twelve autonomous domains. This closes provider-backed
+evidence invocation without claiming source retrieval, model discovery, source truth, or domain
+evaluation; those remain explicit caller-owned boundaries.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's

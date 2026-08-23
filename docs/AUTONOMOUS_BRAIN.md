@@ -4478,6 +4478,43 @@ const reviewed = await agent.prepareReviewedEvidence(
 );
 ```
 
+### LLM-backed evidence adapters
+
+`createAutonomousLLMEvidenceAdapterRegistration` and
+`registerAutonomousLLMEvidenceAdapter` close the provider invocation seam for evidence sources
+that are implemented by a configured LLM provider. The adapter uses `LLMRuntime.invoke`, so the
+same provider protocol translation, opaque credential handle checking, circuit state, retries,
+invocation observers, and provider/model health accounting apply to evidence acquisition. A
+caller supplies the model or a transient model resolver, a prompt builder, and an optional parser;
+the adapter derives a metadata-only idempotency key from the reviewed evidence identity and never
+persists the prompt or provider response. Structured output can be schema-gated before the parser
+sees it, and parsed objects reject credential-shaped fields before entering the transient evidence
+runtime.
+
+```typescript
+registerAutonomousLLMEvidenceAdapter(adapters, {
+  adapterId: "science-literature-summarizer",
+  version: "1",
+  domain: "science",
+  provider: "openai",
+  runtime,
+  modelForContext: () => "caller-selected-model",
+  capabilities: ["literature_search", "review"],
+  credentialFor: (provider) => session.handle(provider),
+  promptForContext: (context) => [{
+    role: "user",
+    content: `Review requirement ${context.requirement.requirement_id}: ${context.requirement.objective}`,
+  }],
+  requireJson: true,
+  responseSchema: callerEvidenceSchema,
+});
+```
+
+The bridge is provider-neutral and remains caller-owned at the source boundary: it does not
+discover models, collect keys, invent a source query, or decide whether a model-generated answer
+is true. `ProviderSetup`/`CredentialSession` owns protected key intake, and the evidence projector
+and evaluator remain responsible for provenance, source interpretation, and domain acceptance.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected
