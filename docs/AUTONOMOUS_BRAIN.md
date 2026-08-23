@@ -1670,6 +1670,12 @@ evaluator is correct about the external world. Holdout failure, missing domain c
 abstention, evaluator refusal, or report drift keeps learning on hold while leaving provider
 execution and source truth as separate gates.
 
+Report rehydration is also policy-checked, not merely hash-checked. The validator recomputes bin
+accounting, coverage/abstention denominators, per-domain status thresholds, aggregate counts,
+missing-domain coverage, admission decision, and gate reasons. Recomputing a digest over a forged
+`ready` report therefore does not make it admissible; the report must be internally consistent
+with its declared metrics and policy.
+
 The same admission boundary can be installed on the primary `AutonomousLearningController` so
 direct episode settlement, delayed-credit trajectories, workflow/cross-domain settlement, and
 the restart-safe feedback outbox share one policy. Set `requireCalibratedLearning: true` with the

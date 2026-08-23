@@ -8,6 +8,7 @@ import {
   assertAutonomousEvaluatorCalibrationReady,
   autonomousEvaluatorCalibrationAdmission,
   builtinAutonomousValueEvaluatorProfiles,
+  digestJsonSync,
   validateAutonomousEvaluatorCalibrationReport,
 } from "../dist/index.js";
 
@@ -82,6 +83,14 @@ test("calibration holds learning for missing coverage, weak holdouts, and change
   const weakReport = harness.run({ cases: weak, domains: ["coding"], minCalibrationCasesPerDomain: 2, minHoldoutCasesPerDomain: 2, maxExpectedCalibrationError: 0.01, maxBrierScore: 0.01 });
   assert.equal(weakReport.status, "miscalibrated");
   assert.equal(autonomousEvaluatorCalibrationAdmission(weakReport, "coding").decision, "hold_learning");
+  const forged = structuredClone(weakReport);
+  forged.status = "ready";
+  forged.domains[0].status = "ready";
+  forged.gate.decision = "admit_learning";
+  forged.gate.reasons = [];
+  const { report_digest: _reportDigest, ...forgedDescriptor } = forged;
+  forged.report_digest = digestJsonSync(forgedDescriptor);
+  assert.throws(() => validateAutonomousEvaluatorCalibrationReport(forged), /status is inconsistent/);
   const changed = [...sparse];
   changed[0] = { ...changed[0], label: 0 };
   const replay = harness.replay(harness.run({ cases: sparse, domains: ["coding"] }), { cases: changed });

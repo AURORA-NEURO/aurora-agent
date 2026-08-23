@@ -6,7 +6,7 @@ import {
   type AutonomousValueEvaluationEvidence,
 } from "./autonomous-domain-evaluators.js";
 import { digestJsonSync } from "./tooling.js";
-import type { JsonObject, JsonValue } from "./types.js";
+import type { JsonObject } from "./types.js";
 
 /** Deterministic evaluator reliability metrics over caller-labeled value-only cases. */
 export const AUTONOMOUS_EVALUATOR_CALIBRATION_SCHEMA = "bioprism-typescript-autonomous-evaluator-calibration/0.1" as const;
@@ -295,6 +295,138 @@ function assertReportDigest(report: AutonomousEvaluatorCalibrationReport): void 
   if (!encoded || new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_REPORT_BYTES) throw new ArgumentError("evaluator calibration report exceeds its bound");
 }
 
+function calibrationStatus(value: unknown): value is AutonomousEvaluatorCalibrationStatus {
+  return value === "ready" || value === "insufficient_coverage" || value === "insufficient_evidence" || value === "miscalibrated";
+}
+
+function domainStatus(value: unknown): value is AutonomousEvaluatorCalibrationDomainStatus {
+  return value === "ready" || value === "insufficient_calibration" || value === "insufficient_holdout" || value === "miscalibrated";
+}
+
+function boundedCount(name: string, value: unknown, maximum: number): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > maximum) throw new ArgumentError(`${name} must be a non-negative bounded integer`);
+  return value as number;
+}
+
+function probabilityOrNull(name: string, value: unknown): number | null {
+  if (value === null) return null;
+  return finiteUnit(name, value);
+}
+
+function closeEnough(name: string, actual: number, expected: number): void {
+  if (Math.abs(actual - expected) > 1e-9) throw new ArgumentError(`${name} is inconsistent with its calibration counts`);
+}
+
+function validateMetrics(name: string, metrics: AutonomousEvaluatorCalibrationMetrics, bins: number): void {
+  if (!isObject(metrics)) throw new ArgumentError(`${name} metrics are malformed`);
+  const total = boundedCount(`${name}.total_count`, metrics.total_count, MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_CASES);
+  const scored = boundedCount(`${name}.scored_count`, metrics.scored_count, total);
+  const unscored = boundedCount(`${name}.unscored_count`, metrics.unscored_count, total);
+  if (unscored !== total - scored) throw new ArgumentError(`${name}.unscored_count is inconsistent with its counts`);
+  if (!Number.isFinite(metrics.coverage) || metrics.coverage < 0 || metrics.coverage > 1) throw new ArgumentError(`${name}.coverage is invalid`);
+  if (!Number.isFinite(metrics.abstention_rate) || metrics.abstention_rate < 0 || metrics.abstention_rate > 1) throw new ArgumentError(`${name}.abstention_rate is invalid`);
+  closeEnough(`${name}.coverage`, metrics.coverage, total ? scored / total : 0);
+  closeEnough(`${name}.abstention_rate`, metrics.abstention_rate, total ? unscored / total : 0);
+  for (const [field, value] of Object.entries({
+    brier_score: metrics.brier_score,
+    expected_calibration_error: metrics.expected_calibration_error,
+    maximum_calibration_error: metrics.maximum_calibration_error,
+    threshold_accuracy: metrics.threshold_accuracy,
+    predicted_positive_rate: metrics.predicted_positive_rate,
+    observed_positive_rate: metrics.observed_positive_rate,
+  })) probabilityOrNull(`${name}.${field}`, value);
+  if (!Array.isArray(metrics.bins) || metrics.bins.length !== bins) throw new ArgumentError(`${name}.bins do not match the report bin count`);
+  let binCount = 0;
+  let population = 0;
+  metrics.bins.forEach((bin, index) => {
+    if (!isObject(bin)) throw new ArgumentError(`${name}.bins[${index}] is malformed`);
+    if (!Number.isFinite(bin.lower_bound) || !Number.isFinite(bin.upper_bound) || bin.lower_bound < 0 || bin.upper_bound > 1 || bin.lower_bound >= bin.upper_bound) throw new ArgumentError(`${name}.bins[${index}] bounds are invalid`);
+    const count = boundedCount(`${name}.bins[${index}].count`, bin.count, total);
+    binCount += count;
+    const fraction = finiteUnit(`${name}.bins[${index}].population_fraction`, bin.population_fraction);
+    population += fraction;
+    if (count === 0) {
+      if (bin.predicted_mean !== null || bin.observed_rate !== null || bin.absolute_gap !== null) throw new ArgumentError(`${name}.bins[${index}] has values for an empty bin`);
+    } else {
+      probabilityOrNull(`${name}.bins[${index}].predicted_mean`, bin.predicted_mean);
+      probabilityOrNull(`${name}.bins[${index}].observed_rate`, bin.observed_rate);
+      probabilityOrNull(`${name}.bins[${index}].absolute_gap`, bin.absolute_gap);
+    }
+    closeEnough(`${name}.bins[${index}].population_fraction`, fraction, scored ? count / scored : 0);
+  });
+  if (binCount !== scored) throw new ArgumentError(`${name}.bins do not account for scored_count`);
+  closeEnough(`${name}.bins population`, population, scored ? 1 : 0);
+  if (scored === 0 && (metrics.brier_score !== null || metrics.expected_calibration_error !== null || metrics.maximum_calibration_error !== null || metrics.threshold_accuracy !== null || metrics.predicted_positive_rate !== null || metrics.observed_positive_rate !== null)) throw new ArgumentError(`${name} reports scores without scored observations`);
+}
+
+function sameDomainSet(name: string, actual: readonly AutonomousDomainName[], expected: readonly AutonomousDomainName[]): void {
+  if (new Set(actual).size !== actual.length || actual.length !== expected.length || actual.some((domain) => !expected.includes(domain))) throw new ArgumentError(`${name} does not match the expected domain set`);
+}
+
+function validateCalibrationReportStructure(report: AutonomousEvaluatorCalibrationReport): void {
+  if (!calibrationStatus(report.status)) throw new ArgumentError("evaluator calibration report status is invalid");
+  if (!Array.isArray(report.target_domains) || report.target_domains.length < 1 || report.target_domains.length > MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_DOMAINS || report.target_domains.some((domain) => !AUTONOMOUS_DOMAIN_NAMES.includes(domain)) || new Set(report.target_domains).size !== report.target_domains.length) throw new ArgumentError("evaluator calibration report target domains are invalid");
+  boundedDigest("evaluator catalogue digest", report.evaluator_catalogue_digest);
+  boundedDigest("evaluator case-set digest", report.case_set_digest);
+  boundedText("evaluator calibration seed", report.seed, 256);
+  if (!Number.isSafeInteger(report.bins) || report.bins < 2 || report.bins > MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_BINS) throw new ArgumentError("evaluator calibration report bins are invalid");
+  if (typeof report.holdout_fraction !== "number" || !Number.isFinite(report.holdout_fraction) || report.holdout_fraction <= 0 || report.holdout_fraction >= 1) throw new ArgumentError("evaluator calibration report holdout_fraction is invalid");
+  if (report.split_policy !== "explicit_split_or_seeded_sha256") throw new ArgumentError("evaluator calibration report split policy is invalid");
+  if (report.execution !== "metadata_only;no_provider_or_learning_side_effects" || report.retention !== RETENTION || report.secret_material !== SECRET_MATERIAL) throw new ArgumentError("evaluator calibration report retention contract is invalid");
+  validateMetrics("calibration", report.calibration, report.bins);
+  validateMetrics("holdout", report.holdout, report.bins);
+  if (!Array.isArray(report.domains) || report.domains.length !== report.target_domains.length) throw new ArgumentError("evaluator calibration report domain rows are invalid");
+  const rowDomains = report.domains.map((row) => isObject(row) && typeof row.domain === "string" ? row.domain as AutonomousDomainName : "__invalid__" as AutonomousDomainName);
+  sameDomainSet("evaluator calibration domain rows", rowDomains, report.target_domains);
+  if (!isObject(report.gate)) throw new ArgumentError("evaluator calibration gate is malformed");
+  const gate = report.gate;
+  if (!Array.isArray(gate.required_domains) || !Array.isArray(gate.missing_domains)) throw new ArgumentError("evaluator calibration gate domains are malformed");
+  sameDomainSet("evaluator calibration required domains", gate.required_domains, report.target_domains);
+  if (gate.missing_domains.some((domain) => !report.target_domains.includes(domain)) || new Set(gate.missing_domains).size !== gate.missing_domains.length) throw new ArgumentError("evaluator calibration gate missing domains are invalid");
+  if (!Number.isSafeInteger(gate.min_calibration_cases_per_domain) || gate.min_calibration_cases_per_domain < 1 || gate.min_calibration_cases_per_domain > MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_CASES) throw new ArgumentError("evaluator calibration gate minimum calibration count is invalid");
+  if (!Number.isSafeInteger(gate.min_holdout_cases_per_domain) || gate.min_holdout_cases_per_domain < 1 || gate.min_holdout_cases_per_domain > MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_CASES) throw new ArgumentError("evaluator calibration gate minimum holdout count is invalid");
+  finiteUnit("evaluator calibration gate maximum ECE", gate.max_expected_calibration_error);
+  finiteUnit("evaluator calibration gate maximum Brier score", gate.max_brier_score);
+  if (typeof gate.require_all_domains !== "boolean" || (gate.decision !== "admit_learning" && gate.decision !== "hold_learning") || !Array.isArray(gate.reasons) || gate.reasons.some((reason) => typeof reason !== "string" || !reason.trim() || reason.length > 256)) throw new ArgumentError("evaluator calibration gate policy is invalid");
+  let calibrationTotal = 0;
+  let calibrationScored = 0;
+  let holdoutTotal = 0;
+  let holdoutScored = 0;
+  for (const row of report.domains) {
+    if (!isObject(row) || !AUTONOMOUS_DOMAIN_NAMES.includes(row.domain) || !domainStatus(row.status)) throw new ArgumentError("evaluator calibration domain row is malformed");
+    boundedIdentifier("evaluator calibration domain evaluator_id", row.evaluator_id);
+    boundedIdentifier("evaluator calibration domain evaluator_version", row.evaluator_version);
+    finiteUnit("evaluator calibration domain pass_threshold", row.pass_threshold);
+    const caseCount = boundedCount("evaluator calibration domain case_count", row.case_count, MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_CASES);
+    const calibrationCount = boundedCount("evaluator calibration domain calibration_case_count", row.calibration_case_count, caseCount);
+    const holdoutCount = boundedCount("evaluator calibration domain holdout_case_count", row.holdout_case_count, caseCount);
+    if (calibrationCount + holdoutCount !== caseCount) throw new ArgumentError("evaluator calibration domain case counts are inconsistent");
+    validateMetrics(`evaluator calibration domain ${row.domain} calibration`, row.calibration, report.bins);
+    validateMetrics(`evaluator calibration domain ${row.domain} holdout`, row.holdout, report.bins);
+    if (row.calibration.total_count !== calibrationCount || row.holdout.total_count !== holdoutCount) throw new ArgumentError("evaluator calibration domain metric totals do not match case counts");
+    boundedDigest("evaluator calibration domain case-set digest", row.case_set_digest);
+    boundedDigest("evaluator calibration domain evaluation digest", row.evaluation_digest);
+    const expectedStatus = statusForDomain(row.calibration, row.holdout, gate.min_calibration_cases_per_domain, gate.min_holdout_cases_per_domain, gate.max_expected_calibration_error, gate.max_brier_score);
+    if (row.status !== expectedStatus) throw new ArgumentError(`evaluator calibration domain ${row.domain} status is inconsistent with its metrics`);
+    calibrationTotal += calibrationCount;
+    calibrationScored += row.calibration.scored_count;
+    holdoutTotal += holdoutCount;
+    holdoutScored += row.holdout.scored_count;
+  }
+  const missingDomains = report.domains.filter((row) => row.case_count === 0).map((row) => row.domain);
+  if (JSON.stringify(missingDomains) !== JSON.stringify(gate.missing_domains)) throw new ArgumentError("evaluator calibration gate missing domains do not match its rows");
+  if (report.calibration.total_count !== calibrationTotal || report.calibration.scored_count !== calibrationScored || report.holdout.total_count !== holdoutTotal || report.holdout.scored_count !== holdoutScored) throw new ArgumentError("evaluator calibration aggregate metrics do not match domain rows");
+  const expectedStatus = overallStatus(report.domains, report.target_domains, gate.missing_domains, gate.require_all_domains);
+  if (report.status !== expectedStatus) throw new ArgumentError("evaluator calibration report status is inconsistent with its gate and domain rows");
+  const expectedDecision = expectedStatus === "ready" ? "admit_learning" : "hold_learning";
+  if (gate.decision !== expectedDecision) throw new ArgumentError("evaluator calibration gate decision is inconsistent with report status");
+  const expectedReasons = [
+    ...(gate.missing_domains.length ? [`missing evaluator calibration domains: ${gate.missing_domains.join(", ")}`] : []),
+    ...report.domains.filter((row) => row.status !== "ready").map((row) => `${row.domain}:${row.status}`),
+  ];
+  if (JSON.stringify(gate.reasons) !== JSON.stringify(expectedReasons)) throw new ArgumentError("evaluator calibration gate reasons are inconsistent with its rows");
+}
+
 function statusForDomain(calibration: AutonomousEvaluatorCalibrationMetrics, holdout: AutonomousEvaluatorCalibrationMetrics, minCalibration: number, minHoldout: number, maxEce: number, maxBrier: number): AutonomousEvaluatorCalibrationDomainStatus {
   if (calibration.scored_count < minCalibration) return "insufficient_calibration";
   if (holdout.scored_count < minHoldout) return "insufficient_holdout";
@@ -427,7 +559,7 @@ export class AutonomousEvaluatorCalibrationHarness {
   }
 
   replay(report: AutonomousEvaluatorCalibrationReport, options: { cases: readonly AutonomousEvaluatorCalibrationCase[] }): AutonomousEvaluatorCalibrationReplayResult {
-    assertReportDigest(report);
+    validateAutonomousEvaluatorCalibrationReport(report);
     const replayed = this.run({ cases: options.cases, domains: report.target_domains, seed: report.seed, bins: report.bins, holdoutFraction: report.holdout_fraction, minCalibrationCasesPerDomain: report.gate.min_calibration_cases_per_domain, minHoldoutCasesPerDomain: report.gate.min_holdout_cases_per_domain, maxExpectedCalibrationError: report.gate.max_expected_calibration_error, maxBrierScore: report.gate.max_brier_score, requireAllDomains: report.gate.require_all_domains });
     const evaluatorCatalogueMatch = report.evaluator_catalogue_digest === replayed.evaluator_catalogue_digest;
     const caseSetMatch = report.case_set_digest === replayed.case_set_digest;
@@ -439,7 +571,7 @@ export class AutonomousEvaluatorCalibrationHarness {
 
 /** Return an explicit learning-admission decision for one calibrated domain. */
 export function autonomousEvaluatorCalibrationAdmission(report: AutonomousEvaluatorCalibrationReport, domain: AutonomousDomainName): AutonomousEvaluatorCalibrationAdmission {
-  assertReportDigest(report);
+  validateAutonomousEvaluatorCalibrationReport(report);
   if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain)) throw new ArgumentError("evaluator calibration admission domain is unsupported");
   const row = report.domains.find((candidate) => candidate.domain === domain);
   const reasons = row && row.status === "ready" && report.gate.decision === "admit_learning" ? [] : [
@@ -459,8 +591,6 @@ export function assertAutonomousEvaluatorCalibrationReady(report: AutonomousEval
 
 export function validateAutonomousEvaluatorCalibrationReport(report: AutonomousEvaluatorCalibrationReport): AutonomousEvaluatorCalibrationReport {
   assertReportDigest(report);
-  if (!Array.isArray(report.target_domains) || !report.target_domains.length || report.target_domains.some((domain) => !AUTONOMOUS_DOMAIN_NAMES.includes(domain))) throw new ArgumentError("evaluator calibration report target domains are invalid");
-  if (!Array.isArray(report.domains) || report.domains.some((row) => !report.target_domains.includes(row.domain))) throw new ArgumentError("evaluator calibration report domain rows are invalid");
-  if (!["ready", "insufficient_coverage", "insufficient_evidence", "miscalibrated"].includes(report.status)) throw new ArgumentError("evaluator calibration report status is invalid");
+  validateCalibrationReportStructure(report);
   return structuredClone(report);
 }

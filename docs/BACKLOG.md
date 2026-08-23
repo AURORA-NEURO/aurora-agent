@@ -143,6 +143,12 @@ bandit mutation; a blocked run cannot even enqueue a learning command. The contr
 provides one opt-in gate for local, remote, and restart-replayed learning while preserving the
 same evaluator-signal-only boundary.
 
+Calibration report restore is policy-validated as well as digest-validated: bin counts,
+coverage/abstention rates, aggregate totals, per-domain thresholds, missing coverage, gate
+decision, and reason rows are recomputed from the retained projection. A caller can bind a new
+digest to a forged `ready` projection, but the learning admission still refuses the inconsistent
+report.
+
 The response contract now emits a deterministic, replayable composition evaluation and a safe
 `reward_input`. An explicit `AutonomousLearningController.settleStructuredResponse` helper routes
 that signal through the same idempotent bandit/outbox settlement boundary as other evaluator
