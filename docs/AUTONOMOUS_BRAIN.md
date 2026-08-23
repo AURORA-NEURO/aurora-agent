@@ -1950,6 +1950,15 @@ stale coordinator cannot overwrite a newer snapshot, and failed restore leaves t
 unchanged. The trace store is observability state only: restoring it never resumes provider work,
 releases approval, rehydrates credentials, or authorizes tools/effects.
 
+For a remote deployment, `admitAutonomousWorkflowPortfolioRemoteJob()` places only the reviewed
+plan digest, admission digest, item/request digests, trace identity, and resumable job identity on
+`InMemoryAutonomousWorkflowPortfolioRemoteJobQueue`. `AutonomousWorkflowPortfolioRemoteWorker`
+claims with a lease, asks a caller-owned resolver for the private requests and reviewed artifacts,
+revalidates every digest before provider dispatch, persists checkpoint/result/trace digests, and
+settles retry, failure, expiry, and reconciliation states explicitly. Its JSON, transactional
+CAS, and browser-storage persistence adapters are metadata-only. Resolver state is never written
+to the queue, and queue restore or trace restore cannot itself authorize a provider call.
+
 Portfolio execution can also close the evaluator-to-bandit loop for every item, but reward is
 never inferred from a provider response or from `status: "completed"`. The caller supplies the
 learning controller and an `evaluateItem` callback that returns one explicit bounded reward

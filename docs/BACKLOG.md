@@ -323,6 +323,14 @@ is identity-bound and atomic from the store's perspective; it cannot resume prov
 approval. This leaves database encryption, retention/rotation, access control, and distributed
 multi-region replication to the embedding deployment.
 
+Remote portfolio provider execution is now represented by a lease-fenced metadata queue and
+pull-based worker. Admission binds plan/item/request identities; the worker rehydrates private
+requests and reviewed artifacts through a resolver, requires admission by default, persists only
+checkpoint/result/trace digests, and fails closed on plan, admission, request, trace, or lease
+drift. JSON, CAS, browser-storage, retry, expiry, and reconciliation paths are covered offline;
+deployment still owns the API transport, resolver vault, tenant authorization, and distributed
+lease implementation.
+
 The checkpoint seam now includes an optional atomic compare-and-swap contract plus bounded JSON
 and transactional-JSON adapters. The controller serializes local operations, fences every flush
 against the restored digest, and surfaces stale-writer conflicts instead of overwriting progress;

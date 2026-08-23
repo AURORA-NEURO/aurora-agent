@@ -1,0 +1,199 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousAgent,
+  AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator,
+  AutonomousWorkflowPortfolioRemoteWorker,
+  InMemoryAutonomousWorkflowPortfolioRemoteJobQueue,
+  JsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence,
+  LLMRuntime,
+  TransactionalJsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence,
+  WebStorageAutonomousWorkflowPortfolioRemoteJobQueueTextStore,
+  admitAutonomousWorkflowPortfolioRemoteJob,
+} from "../dist/index.js";
+
+const model = {
+  provider: "offline",
+  model: "offline-model",
+  capabilities: [
+    "reasoning", "structured_output", "code", "web", "data", "science", "biomedical",
+    "operations", "enterprise", "coordination", "multimodal", "evaluation",
+  ],
+  context_window_tokens: 32_000,
+  max_output_tokens: 2_000,
+  quality: 0.9,
+  latency_ms: 10,
+  cost_per_million_tokens: 0,
+  reliability: 0.99,
+};
+
+function requests() {
+  return AUTONOMOUS_DOMAIN_NAMES.map((domain, index) => ({
+    id: `remote-${domain}`,
+    task: `private remote task payload for ${domain}`,
+    domain,
+    ...(index === 0 ? {} : { dependsOn: [`remote-${AUTONOMOUS_DOMAIN_NAMES[index - 1]}`] }),
+    hints: [`private remote hint for ${domain}`],
+  }));
+}
+
+function agentFor(onRequest = () => {}) {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("offline", (request) => {
+    onRequest(request);
+    return { output_text: `offline result for ${request.model}` };
+  });
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  return agent;
+}
+
+test("remote portfolio worker executes every domain from private resolver state and persists only digests", async () => {
+  const requestsForJob = requests();
+  const providerCalls = [];
+  const traceEvents = [];
+  const agent = agentFor((request) => providerCalls.push(request));
+  const plan = await agent.planWorkflowPortfolio(requestsForJob, { requireAllDomains: true });
+  const admission = await agent.admitWorkflowPortfolio(requestsForJob, { plan });
+  const queue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const job = await admitAutonomousWorkflowPortfolioRemoteJob(queue, {
+    jobId: "remote-portfolio-job",
+    plan,
+    admission,
+    traceId: "remote-portfolio-trace",
+    now: 1_000,
+  });
+  assert.equal(job.status, "queued");
+  assert.equal(job.admission_digest, admission.admission_digest);
+  assert.doesNotMatch(JSON.stringify(job), /private remote task|private remote hint/);
+
+  const worker = new AutonomousWorkflowPortfolioRemoteWorker(agent, queue, () => ({
+    requests: requestsForJob,
+    plan,
+    admission,
+    executionOptions: {
+      approveProviderCall: true,
+      traceId: "remote-portfolio-trace",
+      traceSink: (event) => { traceEvents.push(event); },
+    },
+  }), "remote-portfolio-worker");
+  const run = await worker.run({ now: 1_001 });
+
+  assert.equal(run.completed, 1);
+  assert.equal(run.failed, 0);
+  assert.equal(providerCalls.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(traceEvents.at(-1).phase, "completed");
+  assert.equal(queue.get(job.job_id).status, "completed");
+  assert.equal(queue.get(job.job_id).checkpoint_digest.length, 64);
+  assert.equal(queue.get(job.job_id).result_digest.length, 64);
+  assert.equal(queue.get(job.job_id).trace_digest, traceEvents.at(-1).event_digest);
+  assert.doesNotMatch(JSON.stringify(run), /private remote task|private remote hint|offline result/);
+});
+
+test("remote portfolio worker refuses plan/admission drift before provider dispatch and fences leases", async () => {
+  let providerCalls = 0;
+  const agent = agentFor(() => { providerCalls += 1; });
+  const original = requests();
+  const plan = await agent.planWorkflowPortfolio(original, { requireAllDomains: true });
+  const admission = await agent.admitWorkflowPortfolio(original, { plan });
+  const queue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const job = await admitAutonomousWorkflowPortfolioRemoteJob(queue, { jobId: "drift-job", plan, admission, now: 2_000 });
+  const claimed = queue.claim(job.job_id, "foreign-worker", 100, 2_000);
+  assert.ok(claimed);
+  assert.equal(queue.claim(job.job_id, "other-worker", 100, 2_050), null);
+  assert.throws(() => queue.renew(job.job_id, "other-worker", 100, 2_060), /cannot be renewed/);
+  queue.reclaimExpired(2_101);
+  assert.equal(queue.get(job.job_id).status, "reconciliation_required");
+
+  const retryableJob = await admitAutonomousWorkflowPortfolioRemoteJob(queue, { jobId: "drift-job-2", plan, admission, now: 2_000 });
+  const worker = new AutonomousWorkflowPortfolioRemoteWorker(agent, queue, () => ({
+    requests: original.map((request, index) => index === 1 ? { ...request, task: "tampered private task" } : request),
+    plan,
+    admission,
+    executionOptions: { approveProviderCall: true },
+  }), "drift-worker");
+  const result = await worker.run({ now: 2_001 });
+  assert.equal(result.failed, 1);
+  assert.equal(queue.get(retryableJob.job_id).status, "failed");
+  assert.equal(providerCalls, 0);
+  assert.doesNotMatch(JSON.stringify(queue.snapshot()), /tampered private task|private remote task/);
+});
+
+test("remote portfolio job snapshots are bounded, transactional, browser-portable, and CAS-fenced", async () => {
+  const agent = agentFor();
+  const plan = await agent.planWorkflowPortfolio([{ id: "remote-coding", task: "private coding task", domain: "coding" }]);
+  const admission = await agent.admitWorkflowPortfolio([{ id: "remote-coding", task: "private coding task", domain: "coding" }], { plan });
+  const queue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  await admitAutonomousWorkflowPortfolioRemoteJob(queue, { jobId: "persisted-job", plan, admission, now: 3_000 });
+  const snapshot = queue.snapshot();
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (current !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence(textStore);
+  const coordinator = new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(queue, persistence);
+  await coordinator.flush();
+  const restoredQueue = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const restored = new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(restoredQueue, persistence);
+  assert.equal((await restored.restore()).snapshot_digest, snapshot.snapshot_digest);
+  assert.deepEqual(restoredQueue.snapshot(), snapshot);
+
+  const stale = new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue(), persistence);
+  await stale.restore();
+  const competing = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const competingPlan = await agent.planWorkflowPortfolio([{ id: "other", task: "other private task", domain: "data" }]);
+  const competingAdmission = await agent.admitWorkflowPortfolio([{ id: "other", task: "other private task", domain: "data" }], { plan: competingPlan });
+  await admitAutonomousWorkflowPortfolioRemoteJob(competing, { jobId: "other-job", plan: competingPlan, admission: competingAdmission, now: 3_100 });
+  await new JsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence(textStore).write(competing.snapshot());
+  await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
+
+  const values = new Map();
+  const browserStore = new WebStorageAutonomousWorkflowPortfolioRemoteJobQueueTextStore({
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+  }, "remote-job-key");
+  const browserPersistence = new JsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence(browserStore);
+  await browserPersistence.write(snapshot);
+  assert.equal((await browserPersistence.read()).snapshot_digest, snapshot.snapshot_digest);
+});
+
+test("CAS remote portfolio coordinators prevent duplicate claims after two workers restore", async () => {
+  const agent = agentFor();
+  const plan = await agent.planWorkflowPortfolio([{ id: "cas-coding", task: "private CAS task", domain: "coding" }]);
+  const admission = await agent.admitWorkflowPortfolio([{ id: "cas-coding", task: "private CAS task", domain: "coding" }], { plan });
+  const seed = new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue();
+  const job = await admitAutonomousWorkflowPortfolioRemoteJob(seed, { jobId: "cas-job", plan, admission, now: 4_000 });
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (current !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence(textStore);
+  await new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(seed, persistence).flush();
+  const coordinatorA = new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue(), persistence);
+  const coordinatorB = new AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator(new InMemoryAutonomousWorkflowPortfolioRemoteJobQueue(), persistence);
+  await Promise.all([coordinatorA.restore(), coordinatorB.restore()]);
+  const claims = await Promise.all([
+    coordinatorA.claim(job.job_id, "cas-worker-a", 30_000, 4_001),
+    coordinatorB.claim(job.job_id, "cas-worker-b", 30_000, 4_001),
+  ]);
+  assert.equal(claims.filter(Boolean).length, 1);
+  const persisted = await persistence.read();
+  assert.equal(persisted.jobs[0].status, "leased");
+  assert.ok(["cas-worker-a", "cas-worker-b"].includes(persisted.jobs[0].lease_owner));
+});

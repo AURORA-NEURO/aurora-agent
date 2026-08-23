@@ -374,6 +374,37 @@ export type {
   AutonomousWorkflowPortfolioLearningSettlementOptions,
 } from "./autonomous-workflow-portfolio-execution.js";
 export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_QUEUE_SCHEMA,
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SCHEMA,
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_REMOTE_WORKER_SCHEMA,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOBS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ITEMS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_LEASE_MS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_ATTEMPTS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_JOB_SNAPSHOT_BYTES,
+  validateAutonomousWorkflowPortfolioRemoteJobQueueSnapshot,
+  InMemoryAutonomousWorkflowPortfolioRemoteJobQueue,
+  admitAutonomousWorkflowPortfolioRemoteJob,
+  AutonomousWorkflowPortfolioRemoteWorker,
+  AutonomousWorkflowPortfolioRemoteJobQueuePersistenceCoordinator,
+  JsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence,
+  TransactionalJsonAutonomousWorkflowPortfolioRemoteJobQueuePersistence,
+  WebStorageAutonomousWorkflowPortfolioRemoteJobQueueTextStore,
+} from "./autonomous-workflow-portfolio-worker.js";
+export type {
+  AutonomousWorkflowPortfolioRemoteJobStatus,
+  AutonomousWorkflowPortfolioRemoteJobFailureClass,
+  AutonomousWorkflowPortfolioRemoteJob,
+  AutonomousWorkflowPortfolioRemoteJobQueueSnapshot,
+  AutonomousWorkflowPortfolioRemoteJobQueuePersistence,
+  AutonomousWorkflowPortfolioRemoteJobQueueTextStore,
+  AutonomousWorkflowPortfolioRemoteJobQueueTransactionalTextStore,
+  AutonomousWorkflowPortfolioRemoteWorkerRow,
+  AutonomousWorkflowPortfolioRemoteWorkerRun,
+  AutonomousWorkflowPortfolioRemoteJobResolution,
+  AutonomousWorkflowPortfolioRemoteJobResolver,
+} from "./autonomous-workflow-portfolio-worker.js";
+export {
   AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_BYTES,
   validateAutonomousWorkflowPortfolioExecutionCheckpoint,
