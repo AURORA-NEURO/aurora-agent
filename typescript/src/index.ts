@@ -351,6 +351,7 @@ export {
   AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN,
   AUTONOMOUS_CROSS_DOMAIN_MAX_CONCURRENCY,
+  AUTONOMOUS_CROSS_DOMAIN_EXECUTION_RECEIPT_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_SCHEMA,
   AUTONOMOUS_MODEL_REFRESH_SCHEMA,
@@ -391,6 +392,8 @@ export {
   acceptedAutonomousPlan,
   acceptedCrossDomainPlan,
   autonomousWorkflowStageContractDigest,
+  autonomousCrossDomainExecutionReceipt,
+  validateAutonomousCrossDomainExecutionReceipt,
   validateAutonomousModelCatalogueSnapshot,
 } from "./autonomous.js";
 export {
@@ -691,6 +694,8 @@ export type {
   AutonomousAutoBlueprint,
   AutonomousCrossDomainBlueprint,
   AutonomousCrossDomainChildRun,
+  AutonomousCrossDomainExecutionNextAction,
+  AutonomousCrossDomainExecutionReceipt,
   AutonomousCrossDomainRunOptions,
   AutonomousCrossDomainRunResult,
   AutonomousCrossDomainRunStatus,

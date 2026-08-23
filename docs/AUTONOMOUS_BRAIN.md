@@ -2994,6 +2994,17 @@ completion cannot share one replay identity merely because they returned a typed
 `execution` summary is likewise truthful: the presence of a synthesis object alone no longer
 implies completion.
 
+The TypeScript façade now exposes the same operational boundary through
+`AutonomousCrossDomainExecutionReceipt`, `autonomousCrossDomainExecutionReceipt()`, and
+`validateAutonomousCrossDomainExecutionReceipt()`. Every `runCrossDomain()` exit path carries
+the receipt, including route review, provider approval, child-only completion, partial failure,
+and reconciliation. The validator checks exact field coverage, child-map partitioning, bounded
+progress, synthesis/result-digest pairing, recovery flags, and the canonical receipt digest;
+changing a next action or status without rebuilding the receipt is rejected. The projection
+contains no response text, prompts, credentials, or tool payloads, and its `safe_to_synthesize`
+and `next_action` fields are derived from actual child and synthesis statuses rather than from
+the mere presence of a result object.
+
 An uncertain provider or effect outcome is a separate durable quarantine. The TypeScript executor
 records `reconciliation_required` in the checkpoint rather than collapsing it into `paused`; the
 next ordinary resume returns the same status before child-result rehydration and before provider

@@ -27,6 +27,7 @@ import {
   AUTONOMOUS_API_TOOL_ADAPTER_SCHEMA,
   AUTONOMOUS_CAPABILITY_PLAN_SCHEMA,
   AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_EXECUTION_RECEIPT_SCHEMA,
   InMemoryAutonomousCapabilityJournalStore,
   AutonomousCapabilityJournalPersistenceCoordinator,
   validateAutonomousCapabilityJournalSnapshot,
@@ -44,6 +45,8 @@ import {
   createAutonomousApiToolExecutor,
   openaiCompatibleProvider,
   routeAutonomousTask,
+  autonomousCrossDomainExecutionReceipt,
+  validateAutonomousCrossDomainExecutionReceipt,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200) {
@@ -134,6 +137,48 @@ test("all twelve built-in domains expose profiles, workflows, tools, and determi
     assert.ok(profile.workflow.stages.length >= 4);
     assert.ok(profile.tool_profile.bindings.length >= 10);
     assert.equal(profile.workflow.workflow_digest.length, 64);
+  }
+});
+
+test("cross-domain execution receipts cover every built-in domain without retaining payloads", async () => {
+  const examples = {
+    coding: "debug this Rust repository",
+    browser: "navigate the browser and compare sources",
+    data: "validate this parquet dataset lineage",
+    science: "design a hypothesis experiment",
+    biomedical: "review this patient treatment evidence",
+    neuroscience: "analyze EEG preprocessing",
+    operations: "plan a rollback after an outage",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this subtask to a specialist agent",
+    multimodal: "inspect this image and transcript",
+    cross_domain: "perform an interdisciplinary synthesis",
+    evaluation: "run a benchmark holdout replay",
+  };
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const route = await routeAutonomousTask(examples[domain]);
+    const result = {
+      schema: "bioprism-typescript-autonomous-cross-domain-result/0.1",
+      status: "route_review_required",
+      route,
+      blueprint: null,
+      child_runs: [],
+      synthesis: null,
+      completed_children: 0,
+      total_children: route.selected_domains.length,
+      partial: false,
+      plan_refinement_digest: null,
+      learning_episode_ids: [],
+      learning: "provider_health_feedback_only",
+      retention: "provider_responses_local; child_digests_only_in_synthesis_metadata",
+    };
+    const receipt = await autonomousCrossDomainExecutionReceipt(result);
+    assert.equal(receipt.schema, AUTONOMOUS_CROSS_DOMAIN_EXECUTION_RECEIPT_SCHEMA, domain);
+    assert.equal(receipt.next_action, "review_route", domain);
+    assert.equal(receipt.safe_to_synthesize, false, domain);
+    assert.equal(receipt.reconciliation_required, false, domain);
+    assert.equal(receipt.progress, 0, domain);
+    assert.deepEqual(await validateAutonomousCrossDomainExecutionReceipt(receipt), receipt, domain);
   }
 });
 
@@ -1296,6 +1341,29 @@ test("cross-domain execution fans out to specialists, gates approval, and synthe
   assert.equal(result.child_runs.length, 2);
   assert.equal(result.completed_children, 2);
   assert.equal(result.synthesis.response.text, "integrated biomedical-neuroscience conclusion");
+  assert.equal(result.execution_receipt.schema, AUTONOMOUS_CROSS_DOMAIN_EXECUTION_RECEIPT_SCHEMA);
+  assert.deepEqual(result.execution_receipt.execution_child_ids, ["bio", "neuro"]);
+  assert.deepEqual(result.execution_receipt.completed_child_ids, ["bio", "neuro"]);
+  assert.deepEqual(result.execution_receipt.incomplete_child_ids, []);
+  assert.equal(result.execution_receipt.next_action, "complete");
+  assert.equal(result.execution_receipt.progress, 1);
+  assert.equal(result.execution_receipt.safe_to_synthesize, false, "a completed synthesis is not an invitation to synthesize again");
+  assert.equal(result.execution_receipt.reconciliation_required, false);
+  assert.equal(Object.hasOwn(result.execution_receipt, "response"), false);
+  assert.equal((await validateAutonomousCrossDomainExecutionReceipt(result.execution_receipt)).receipt_digest, result.execution_receipt.receipt_digest);
+  const tamperedReceipt = { ...result.execution_receipt, next_action: "retry_child" };
+  await assert.rejects(() => validateAutonomousCrossDomainExecutionReceipt(tamperedReceipt), /digest/);
+  const reconciled = {
+    ...result,
+    status: "reconciliation_required",
+    synthesis: null,
+    child_runs: [{ ...result.child_runs[0], result: { ...result.child_runs[0].result, status: "reconciliation_required" } }, result.child_runs[1]],
+  };
+  const reconciliationReceipt = await autonomousCrossDomainExecutionReceipt(reconciled);
+  assert.equal(reconciliationReceipt.next_action, "reconcile_child");
+  assert.equal(reconciliationReceipt.reconciliation_required, true);
+  assert.equal(reconciliationReceipt.safe_to_synthesize, false);
+  await validateAutonomousCrossDomainExecutionReceipt(reconciliationReceipt);
   assert.equal(calls, 3);
   const synthesisBody = bodies[2];
   assert.ok(synthesisBody.messages.some((message) => String(message.content).includes("biomedical evidence finding")));
@@ -1389,6 +1457,10 @@ test("cross-domain fan-out uses bounded concurrency and preserves deterministic 
   assert.equal(result.status, "children_completed");
   assert.deepEqual(result.child_runs.map((child) => child.id), ["bio", "neuro"]);
   assert.equal(result.completed_children, 2);
+  assert.equal(result.execution_receipt.next_action, "complete");
+  assert.equal(result.execution_receipt.safe_to_synthesize, true);
+  assert.equal(result.execution_receipt.progress, 1);
+  await validateAutonomousCrossDomainExecutionReceipt(result.execution_receipt);
   await assert.rejects(
     agent.runCrossDomain("Research a biomedical neuroscience study", {
       candidates: agent.models(),
