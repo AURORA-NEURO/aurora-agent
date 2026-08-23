@@ -5,7 +5,14 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_SCHEMA,
   AutonomousAgent,
+  AutonomousBrainFacade,
+  AutonomousWorkflowPortfolioAdmissionController,
+  AutonomousWorkflowPortfolioItemExecutionResult,
+  InMemoryAutonomousWorkflowPortfolioAdmissionPersistence,
+  JsonAutonomousWorkflowPortfolioAdmissionPersistence,
   LLMRuntime,
+  WebStorageAutonomousWorkflowPortfolioAdmissionTextStore,
+  digestJson,
   validateAutonomousWorkflowPortfolioAdmission,
 } from "../dist/index.js";
 
@@ -63,6 +70,9 @@ test("portfolio admission is a keyless all-domain gate and never dispatches", as
 
   const restored = await validateAutonomousWorkflowPortfolioAdmission(admission);
   assert.deepEqual(restored, admission);
+
+  const facadeAdmission = await new AutonomousBrainFacade({ agent }).admitWorkflowPortfolio(requests(), { plan: admission.plan });
+  assert.equal(facadeAdmission.admission_digest, admission.admission_digest);
 });
 
 test("portfolio admission closes dependencies over missing model and provider readiness", async () => {
@@ -120,6 +130,12 @@ test("portfolio admission keeps incomplete required-domain coverage partial and 
   assert.equal(admission.next_actions.includes("resolve_missing_required_domain_coverage_before_full_portfolio_execution"), true);
   await validateAutonomousWorkflowPortfolioAdmission(admission);
 
+  const partialExecution = await agent.executeWorkflowPortfolio([
+    { id: "coding-only", task: "bounded coding task", domain: "coding" },
+  ], { plan: admission.plan, admission, approveProviderCall: true });
+  assert.equal(partialExecution.status, "partial");
+  assert.equal(partialExecution.admissionDigest, admission.admission_digest);
+
   const toolBlocked = await agent.admitWorkflowPortfolio([
     { id: "coding-only", task: "bounded coding task", domain: "coding" },
   ], {
@@ -127,4 +143,135 @@ test("portfolio admission keeps incomplete required-domain coverage partial and 
   });
   assert.equal(toolBlocked.status, "blocked");
   assert.equal(toolBlocked.items[0].blockers.includes("tools:missing"), true);
+});
+
+test("resumable portfolio execution binds admission to its checkpoint and refuses a held portfolio", async () => {
+  let providerCalls = 0;
+  const agent = agentFor(() => { providerCalls += 1; });
+  const requestsForRestart = [
+    { id: "admission-first", task: "private first admitted task", domain: "coding" },
+    { id: "admission-second", task: "private second admitted task", domain: "data", dependsOn: ["admission-first"] },
+  ];
+  const originalRun = agent.run.bind(agent);
+  let firstRun;
+  agent.run = async (task, options) => {
+    const run = await originalRun(task, options);
+    if (task === "private first admitted task") firstRun = run;
+    return run;
+  };
+  const plan = await agent.planWorkflowPortfolio(requestsForRestart);
+  const admission = await agent.admitWorkflowPortfolio(requestsForRestart, { plan });
+  assert.equal(admission.status, "ready_for_approval");
+
+  let checkpoint;
+  await assert.rejects(
+    () => agent.executeWorkflowPortfolioResumable(requestsForRestart, {
+      jobId: "admission-restart",
+      plan,
+      admission,
+      requireAdmission: true,
+      approveProviderCall: true,
+      checkpointSink: async (value) => {
+        checkpoint = value;
+        if (value.settled_item_ids.length > 0) throw new Error("synthetic admission interruption");
+      },
+    }),
+    /synthetic admission interruption/,
+  );
+  assert.equal(providerCalls, 1);
+  assert.equal(checkpoint.admission_digest, admission.admission_digest);
+  assert.equal(checkpoint.schema, "bioprism-typescript-autonomous-workflow-portfolio-execution-checkpoint/0.3");
+
+  const resumed = await agent.executeWorkflowPortfolioResumable(requestsForRestart, {
+    jobId: "admission-restart",
+    plan,
+    admission,
+    requireAdmission: true,
+    checkpoint,
+    approveProviderCall: true,
+    rehydrateItem: async (context) => {
+      const output = firstRun.response?.text ?? "";
+      return new AutonomousWorkflowPortfolioItemExecutionResult(
+        context.item_id,
+        context.domain,
+        [],
+        "succeeded",
+        firstRun,
+        output ? await digestJson({ item_id: context.item_id, output }) : null,
+        new TextEncoder().encode(output).byteLength,
+        null,
+        null,
+        true,
+        output,
+      );
+    },
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(providerCalls, 2);
+
+  const heldAdmission = await agent.admitWorkflowPortfolio(requestsForRestart, { plan, run: { minQuality: 0.95 } });
+  const heldResult = await agent.executeWorkflowPortfolioResumable(requestsForRestart, {
+    jobId: "admission-held",
+    plan,
+    admission: heldAdmission,
+    requireAdmission: true,
+    approveProviderCall: true,
+  });
+  assert.equal(heldResult.status, "blocked");
+  assert.equal(providerCalls, 2);
+  assert.equal(heldResult.admissionDigest, heldAdmission.admission_digest);
+
+  const tampered = structuredClone(admission);
+  tampered.admission_digest = "0".repeat(64);
+  await assert.rejects(
+    () => agent.executeWorkflowPortfolioResumable(requestsForRestart, {
+      jobId: "admission-restart",
+      plan,
+      admission: tampered,
+      requireAdmission: true,
+      checkpoint,
+      approveProviderCall: true,
+      rehydrateItem: async () => { throw new Error("tampered admission must fail before rehydration"); },
+    }),
+    /admission digest is invalid/,
+  );
+});
+
+test("portfolio admission persistence restores redacted state and fences stale coordinators", async () => {
+  const agent = agentFor();
+  const persistence = new InMemoryAutonomousWorkflowPortfolioAdmissionPersistence();
+  const controller = new AutonomousWorkflowPortfolioAdmissionController(agent, persistence);
+  assert.equal((await controller.restore()).status, "empty");
+  const stale = new AutonomousWorkflowPortfolioAdmissionController(agent, persistence);
+  await stale.restore();
+  const admission = await controller.admit(requests(), { planOptions: { requireAllDomains: true } });
+  assert.equal(controller.projection().status, "admitted");
+  assert.equal(controller.projection().admission_digest, admission.admission_digest);
+  assert.doesNotMatch(JSON.stringify(await persistence.read()), /private admission task|private hint/);
+
+  const restarted = new AutonomousWorkflowPortfolioAdmissionController(agent, persistence);
+  const restoredProjection = await restarted.restore();
+  assert.equal(restoredProjection.status, "restored");
+  assert.deepEqual(restarted.admission(), admission);
+
+  await assert.rejects(
+    () => stale.admit(requests(), { planOptions: { requireAllDomains: true }, run: { minQuality: 0.95 } }),
+    /stale|digest/,
+  );
+
+  let text = null;
+  const json = new JsonAutonomousWorkflowPortfolioAdmissionPersistence({
+    read: () => text,
+    write: (value) => { text = value; },
+  });
+  await json.write(admission);
+  assert.deepEqual(await json.read(), admission);
+
+  const values = new Map();
+  const web = new WebStorageAutonomousWorkflowPortfolioAdmissionTextStore({
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  }, "admission-image");
+  await web.write(text);
+  assert.equal(web.read(), text);
 });

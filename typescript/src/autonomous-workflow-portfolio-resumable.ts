@@ -21,11 +21,12 @@ import {
   type AutonomousWorkflowPortfolioItemRequest,
   type AutonomousWorkflowPortfolioPlan,
 } from "./autonomous-workflow-portfolio.js";
+import { validateAutonomousWorkflowPortfolioAdmission, type AutonomousWorkflowPortfolioAdmission } from "./autonomous-workflow-portfolio-admission.js";
 import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Metadata-only restart checkpoint for a verified workflow portfolio. */
-export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-checkpoint/0.2" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-checkpoint/0.3" as const;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_BYTES = 256_000;
 
 export type AutonomousWorkflowPortfolioCheckpointStatus = "running" | "partial" | "completed" | "blocked";
@@ -34,6 +35,7 @@ export interface AutonomousWorkflowPortfolioExecutionCheckpointJSON extends Json
   schema: typeof AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA;
   job_id: string;
   plan_digest: string;
+  admission_digest: string | null;
   portfolio_input_digest: string;
   item_ids: string[];
   request_digests: string[];
@@ -70,6 +72,8 @@ export interface AutonomousWorkflowPortfolioExecutionCheckpointStore {
 
 export interface AutonomousWorkflowPortfolioResumableExecutionOptions extends AutonomousWorkflowPortfolioExecutionOptions {
   jobId: string;
+  /** Require a reviewed admission image before this resumable job can dispatch. */
+  requireAdmission?: boolean;
   checkpoint?: AutonomousWorkflowPortfolioExecutionCheckpointJSON;
   checkpointSink?: (checkpoint: AutonomousWorkflowPortfolioExecutionCheckpointJSON) => Promise<void> | void;
   rehydrateItem?: (context: AutonomousWorkflowPortfolioExecutionRehydrationContext) => Promise<AutonomousWorkflowPortfolioItemExecutionResult> | AutonomousWorkflowPortfolioItemExecutionResult;
@@ -139,10 +143,11 @@ function checkpointStatusFor(status: AutonomousWorkflowPortfolioExecutionStatus)
   return "partial";
 }
 
-async function portfolioInputDigest(plan: AutonomousWorkflowPortfolioPlan): Promise<string> {
+async function portfolioInputDigest(plan: AutonomousWorkflowPortfolioPlan, admissionDigest: string | null = null): Promise<string> {
   return digestJson({
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA,
     plan_digest: plan.portfolio_digest,
+    admission_digest: admissionDigest,
     items: plan.items.map((item) => ({
       item_id: item.item_id,
       domain: item.domain,
@@ -157,6 +162,7 @@ async function portfolioInputDigest(plan: AutonomousWorkflowPortfolioPlan): Prom
 async function makeCheckpoint(input: {
   jobId: string;
   plan: AutonomousWorkflowPortfolioPlan;
+  admissionDigest: string | null;
   progress: AutonomousWorkflowPortfolioExecutionProgress;
   maxParallelism: number;
   stopOnError: boolean;
@@ -174,7 +180,8 @@ async function makeCheckpoint(input: {
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA,
     job_id: input.jobId,
     plan_digest: input.plan.portfolio_digest,
-    portfolio_input_digest: await portfolioInputDigest(input.plan),
+    admission_digest: input.admissionDigest,
+    portfolio_input_digest: await portfolioInputDigest(input.plan, input.admissionDigest),
     item_ids: input.plan.items.map((item) => item.item_id),
     request_digests: input.plan.items.map((item) => item.request_digest),
     task_digests: input.plan.items.map((item) => item.task_digest),
@@ -196,10 +203,11 @@ async function makeCheckpoint(input: {
 /** Validate checkpoint structure, identity, digest, and retention markers before reuse. */
 export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(value: unknown): Promise<AutonomousWorkflowPortfolioExecutionCheckpointJSON> {
   if (!isObject(value) || value.schema !== AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA) throw new ArgumentError("workflow portfolio execution checkpoint schema is invalid");
-  const allowed = new Set(["schema", "job_id", "plan_digest", "portfolio_input_digest", "item_ids", "request_digests", "task_digests", "settled_item_ids", "settled_item_statuses", "settled_result_digests", "max_parallelism", "stop_on_error", "include_dependency_outputs", "max_dependency_handoff_bytes", "learning_policy_digest", "status", "checkpoint_digest", "retention", "secret_material"]);
+  const allowed = new Set(["schema", "job_id", "plan_digest", "admission_digest", "portfolio_input_digest", "item_ids", "request_digests", "task_digests", "settled_item_ids", "settled_item_statuses", "settled_result_digests", "max_parallelism", "stop_on_error", "include_dependency_outputs", "max_dependency_handoff_bytes", "learning_policy_digest", "status", "checkpoint_digest", "retention", "secret_material"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new ArgumentError("workflow portfolio execution checkpoint contains unsupported fields");
   const jobId = boundedIdentifier("workflow portfolio execution checkpoint job_id", value.job_id);
   const planDigest = digest(value.plan_digest, "workflow portfolio execution checkpoint plan_digest");
+  const admissionDigest = value.admission_digest === null ? null : digest(value.admission_digest, "workflow portfolio execution checkpoint admission_digest");
   const inputDigest = digest(value.portfolio_input_digest, "workflow portfolio execution checkpoint portfolio_input_digest");
   const itemIds = value.item_ids;
   const requestDigests = value.request_digests;
@@ -226,6 +234,7 @@ export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(val
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_CHECKPOINT_SCHEMA,
     job_id: jobId,
     plan_digest: planDigest,
+    admission_digest: admissionDigest,
     portfolio_input_digest: inputDigest,
     item_ids: normalizedItemIds,
     request_digests: [...requestDigests as string[]],
@@ -244,9 +253,9 @@ export async function validateAutonomousWorkflowPortfolioExecutionCheckpoint(val
   return structuredClone({ ...payload, checkpoint_digest: value.checkpoint_digest as string, retention: value.retention, secret_material: value.secret_material }) as AutonomousWorkflowPortfolioExecutionCheckpointJSON;
 }
 
-async function validatePlanBinding(plan: AutonomousWorkflowPortfolioPlan, checkpoint: AutonomousWorkflowPortfolioExecutionCheckpointJSON, controls: ReturnType<typeof boundedControls>): Promise<void> {
-  const inputDigest = await portfolioInputDigest(plan);
-  if (checkpoint.plan_digest !== plan.portfolio_digest || checkpoint.portfolio_input_digest !== inputDigest || JSON.stringify(checkpoint.item_ids) !== JSON.stringify(plan.items.map((item) => item.item_id)) || JSON.stringify(checkpoint.request_digests) !== JSON.stringify(plan.items.map((item) => item.request_digest)) || JSON.stringify(checkpoint.task_digests) !== JSON.stringify(plan.items.map((item) => item.task_digest))) throw new ArgumentError("workflow portfolio execution checkpoint does not match the current reviewed plan");
+async function validatePlanBinding(plan: AutonomousWorkflowPortfolioPlan, checkpoint: AutonomousWorkflowPortfolioExecutionCheckpointJSON, controls: ReturnType<typeof boundedControls>, admissionDigest: string | null): Promise<void> {
+  const inputDigest = await portfolioInputDigest(plan, admissionDigest);
+  if (checkpoint.plan_digest !== plan.portfolio_digest || checkpoint.admission_digest !== admissionDigest || checkpoint.portfolio_input_digest !== inputDigest || JSON.stringify(checkpoint.item_ids) !== JSON.stringify(plan.items.map((item) => item.item_id)) || JSON.stringify(checkpoint.request_digests) !== JSON.stringify(plan.items.map((item) => item.request_digest)) || JSON.stringify(checkpoint.task_digests) !== JSON.stringify(plan.items.map((item) => item.task_digest))) throw new ArgumentError("workflow portfolio execution checkpoint does not match the current reviewed plan or admission");
   if (checkpoint.max_parallelism !== controls.maxParallelism || checkpoint.stop_on_error !== controls.stopOnError || checkpoint.include_dependency_outputs !== controls.includeDependencyOutputs || checkpoint.max_dependency_handoff_bytes !== controls.maxDependencyHandoffBytes || checkpoint.learning_policy_digest !== controls.learningPolicyDigest) throw new ArgumentError("workflow portfolio execution checkpoint controls do not match");
   const readyItemIds = plan.items.filter((item) => item.status === "ready").map((item) => item.item_id);
   if (checkpoint.settled_item_ids.some((itemId) => !readyItemIds.includes(itemId))) throw new ArgumentError("workflow portfolio execution checkpoint settles an item that was not executable in the reviewed plan");
@@ -282,12 +291,17 @@ export async function executeAutonomousWorkflowPortfolioResumable(
   const jobId = boundedIdentifier("workflow portfolio resumable execution jobId", options.jobId);
   if (options.checkpointSink !== undefined && typeof options.checkpointSink !== "function") throw new ArgumentError("workflow portfolio resumable checkpointSink must be callable");
   if (options.rehydrateItem !== undefined && typeof options.rehydrateItem !== "function") throw new ArgumentError("workflow portfolio resumable rehydrateItem must be callable");
+  if (options.requireAdmission !== undefined && typeof options.requireAdmission !== "boolean") throw new ArgumentError("workflow portfolio resumable requireAdmission must be boolean");
   const controls = boundedControls(options);
   const plan = options.plan ? await validateAutonomousWorkflowPortfolioPlan(options.plan) : await planAutonomousWorkflowPortfolio(agent, requests, options.planOptions);
+  const admission: AutonomousWorkflowPortfolioAdmission | null = options.admission === undefined ? null : await validateAutonomousWorkflowPortfolioAdmission(options.admission);
+  if (options.requireAdmission === true && admission === null) throw new ArgumentError("workflow portfolio resumable execution requires a reviewed admission");
+  if (admission !== null && admission.plan.portfolio_digest !== plan.portfolio_digest) throw new ArgumentError("workflow portfolio resumable admission does not match the reviewed plan");
+  const admissionDigest = admission?.admission_digest ?? null;
   const restored = options.checkpoint === undefined ? null : await validateAutonomousWorkflowPortfolioExecutionCheckpoint(options.checkpoint);
   if (restored !== null) {
     if (restored.job_id !== jobId) throw new ArgumentError("workflow portfolio execution checkpoint job id does not match");
-    await validatePlanBinding(plan, restored, controls);
+    await validatePlanBinding(plan, restored, controls, admissionDigest);
     if (restored.settled_item_ids.length > 0 && options.rehydrateItem === undefined) throw new ArgumentError("resuming a workflow portfolio requires rehydrateItem for settled items");
   }
 
@@ -321,6 +335,7 @@ export async function executeAutonomousWorkflowPortfolioResumable(
   const executionOptions: AutonomousWorkflowPortfolioExecutionOptions = {
     ...options,
     plan,
+    ...(admission === null ? {} : { admission }),
     maxParallelism: controls.maxParallelism,
     stopOnError: controls.stopOnError,
     includeDependencyOutputs: controls.includeDependencyOutputs,
@@ -330,9 +345,10 @@ export async function executeAutonomousWorkflowPortfolioResumable(
   delete (executionOptions as Record<string, unknown>).checkpointSink;
   delete (executionOptions as Record<string, unknown>).rehydrateItem;
   delete (executionOptions as Record<string, unknown>).jobId;
+  delete (executionOptions as Record<string, unknown>).requireAdmission;
   const progressSink = options.checkpointSink
     ? async (progress: AutonomousWorkflowPortfolioExecutionProgress): Promise<void> => {
-      const checkpoint = await makeCheckpoint({ jobId, plan, progress, ...controls });
+      const checkpoint = await makeCheckpoint({ jobId, plan, admissionDigest, progress, ...controls });
       await options.checkpointSink!(checkpoint);
     }
     : undefined;

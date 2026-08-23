@@ -43,6 +43,13 @@ tool, source, learner, or effect. `validateAutonomousWorkflowPortfolioAdmission(
 caller-owned persistence/display checks. Durable external storage, approval UX, live health
 refresh, and multi-host admission leases remain deployment responsibilities.
 
+The admission artifact now has in-memory, strict JSON, transactional JSON, Web Storage, and a
+serialized controller with compare-and-swap fencing. Resumable portfolio checkpoints use schema
+`0.3` and bind `admission_digest` into their input identity; an explicitly required admission is
+validated before settled-item rehydration and held items cannot dispatch. This closes the local
+restart/remote-handoff integrity seam while leaving storage encryption, transport, leases, and
+approval UX to the embedding deployment.
+
 Domain evidence adapters now also have a digest-bound selector. It supports deterministic
 lexicographic routing, caller-supplied health/success/reward/latency/cost scoring, conservative
 abstention, candidate/registry drift detection, and an explicit acquirer handoff without putting

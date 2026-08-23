@@ -20,6 +20,7 @@ import type {
   AutonomousLearningController,
   AutonomousLearningOutboxSettlementOptions,
 } from "./autonomous-learning.js";
+import { validateAutonomousWorkflowPortfolioAdmission, type AutonomousWorkflowPortfolioAdmission } from "./autonomous-workflow-portfolio-admission.js";
 import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -61,6 +62,8 @@ export type AutonomousWorkflowPortfolioRunOptions = Omit<
 export interface AutonomousWorkflowPortfolioExecutionOptions {
   /** Reuse a previously reviewed metadata-only plan. When omitted, a provider-free plan is compiled. */
   plan?: AutonomousWorkflowPortfolioPlan;
+  /** Optional provider-free admission image. When present, only its eligible items may dispatch. */
+  admission?: AutonomousWorkflowPortfolioAdmission;
   planOptions?: AutonomousWorkflowPortfolioPlanOptions;
   /** Recompute the provider-free plan identity before any provider or tool dispatch; defaults to true. */
   verifyPlan?: boolean;
@@ -138,6 +141,7 @@ export interface AutonomousWorkflowPortfolioExecutionJSON extends JsonObject {
   schema: typeof AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA;
   status: AutonomousWorkflowPortfolioExecutionStatus;
   plan_digest: string;
+  admission_digest: string | null;
   execution_digest: string;
   wave_count: number;
   completed_count: number;
@@ -480,6 +484,7 @@ export class AutonomousWorkflowPortfolioExecutionResult {
     readonly items: AutonomousWorkflowPortfolioItemExecutionResult[],
     readonly waveCount: number,
     readonly executionDigest: string,
+    readonly admissionDigest: string | null = null,
   ) {}
 
   toJSON(): AutonomousWorkflowPortfolioExecutionJSON {
@@ -489,6 +494,7 @@ export class AutonomousWorkflowPortfolioExecutionResult {
       schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA,
       status: this.status,
       plan_digest: this.plan.portfolio_digest,
+      admission_digest: this.admissionDigest,
       execution_digest: this.executionDigest,
       wave_count: this.waveCount,
       completed_count: counts.completed,
@@ -541,10 +547,11 @@ function requestMap(values: readonly AutonomousWorkflowPortfolioItemRequest[]): 
   return map;
 }
 
-function overallStatus(plan: AutonomousWorkflowPortfolioPlan, items: readonly AutonomousWorkflowPortfolioItemExecutionResult[]): AutonomousWorkflowPortfolioExecutionStatus {
+function overallStatus(plan: AutonomousWorkflowPortfolioPlan, items: readonly AutonomousWorkflowPortfolioItemExecutionResult[], admissionStatus?: AutonomousWorkflowPortfolioAdmission["status"]): AutonomousWorkflowPortfolioExecutionStatus {
+  if (admissionStatus === "blocked") return "blocked";
   if (plan.status === "blocked") return "blocked";
   if (items.length > 0 && items.every((item) => item.status === "succeeded")) {
-    return items.some((item) => learningIncomplete(item.learningStatus)) ? "partial" : "completed";
+    return admissionStatus === "partial" || items.some((item) => learningIncomplete(item.learningStatus)) ? "partial" : "completed";
   }
   if (items.some((item) => item.status === "approval_required") && !items.some((item) => hardFailure(item.status) || item.status === "succeeded")) return "approval_required";
   if (items.some((item) => hardFailure(item.status)) && !items.some((item) => item.status === "succeeded")) return "failed";
@@ -583,6 +590,9 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
   const plan = options.plan
     ? await validateAutonomousWorkflowPortfolioPlan(options.plan)
     : await planAutonomousWorkflowPortfolio(agent, requests, options.planOptions);
+  const admission = options.admission === undefined ? null : await validateAutonomousWorkflowPortfolioAdmission(options.admission);
+  if (admission !== null && admission.plan.portfolio_digest !== plan.portfolio_digest) throw new ProviderRuntimeError("workflow portfolio admission does not match the reviewed plan", { code: "protocol", retryable: false, operation: "workflow_portfolio_admission" });
+  const admissionItems = admission === null ? null : new Map(admission.items.map((item) => [item.item_id, item]));
   if (options.plan && options.verifyPlan !== false) {
     const verification = await verifyAutonomousWorkflowPortfolio(agent, plan, requests, options.planOptions);
     if (verification.status !== "verified") throw new ProviderRuntimeError("workflow portfolio plan verification failed before dispatch", { code: "protocol", retryable: false, operation: "workflow_portfolio_verify" });
@@ -599,13 +609,15 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
     executions.set(initial.itemId, rehydrated);
   }
   for (const item of plan.items) {
+    const admitted = admissionItems?.get(item.item_id);
     if (item.status !== "ready") executions.set(item.item_id, new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], statusForPlanItem(item), null, null, 0, item.error_class, item.error_class));
+    else if (admitted && admitted.status !== "eligible") executions.set(item.item_id, new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, admitted.blockers[0] ?? "portfolio_admission_blocked", "portfolio_admission_blocked", options.includeDependencyOutputs !== false));
   }
   const snapshotItems = (): AutonomousWorkflowPortfolioItemExecutionResult[] => plan.items.map((item) => executions.get(item.item_id) ?? new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_item_pending", "portfolio_item_pending"));
   const reportProgress = async (): Promise<void> => {
     if (!progressSink) return;
     const snapshot = snapshotItems();
-    await progressSink({ plan, items: snapshot, status: overallStatus(plan, snapshot) });
+    await progressSink({ plan, items: snapshot, status: overallStatus(plan, snapshot, admission?.status) });
   };
   await reportProgress();
   if (plan.status === "blocked") {
@@ -661,13 +673,14 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
   }
 
   const items = plan.items.map((item) => executions.get(item.item_id) ?? new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_item_not_scheduled", "portfolio_item_not_scheduled"));
-  const status = overallStatus(plan, items);
+  const status = overallStatus(plan, items, admission?.status);
   await progressSink?.({ plan, items, status });
   const counts = executionCounts(items);
   const metadata = {
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA,
     status,
     plan_digest: plan.portfolio_digest,
+    admission_digest: admission?.admission_digest ?? null,
     wave_count: plan.dependency_graph.waves.length,
     completed_count: counts.completed,
     failed_count: counts.failed,
@@ -685,5 +698,5 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
     secret_material: "never_returned" as const,
   };
   const executionDigest = await digestJson(metadata);
-  return new AutonomousWorkflowPortfolioExecutionResult(plan, status, items, plan.dependency_graph.waves.length, executionDigest);
+  return new AutonomousWorkflowPortfolioExecutionResult(plan, status, items, plan.dependency_graph.waves.length, executionDigest, admission?.admission_digest ?? null);
 }

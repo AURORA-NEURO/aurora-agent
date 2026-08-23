@@ -307,8 +307,14 @@ export {
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ITEMS,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ACTIONS,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES,
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_CONTROLLER_SCHEMA,
   admitAutonomousWorkflowPortfolio,
   validateAutonomousWorkflowPortfolioAdmission,
+  InMemoryAutonomousWorkflowPortfolioAdmissionPersistence,
+  JsonAutonomousWorkflowPortfolioAdmissionPersistence,
+  TransactionalJsonAutonomousWorkflowPortfolioAdmissionPersistence,
+  WebStorageAutonomousWorkflowPortfolioAdmissionTextStore,
+  AutonomousWorkflowPortfolioAdmissionController,
 } from "./autonomous-workflow-portfolio-admission.js";
 export type {
   AutonomousWorkflowPortfolioAdmissionStatus,
@@ -318,6 +324,11 @@ export type {
   AutonomousWorkflowPortfolioAdmissionItem,
   AutonomousWorkflowPortfolioAdmissionPolicy,
   AutonomousWorkflowPortfolioAdmission,
+  AutonomousWorkflowPortfolioAdmissionPersistence,
+  AutonomousWorkflowPortfolioAdmissionTransactionalPersistence,
+  AutonomousWorkflowPortfolioAdmissionTextStore,
+  AutonomousWorkflowPortfolioAdmissionTransactionalTextStore,
+  AutonomousWorkflowPortfolioAdmissionControllerProjection,
 } from "./autonomous-workflow-portfolio-admission.js";
 export {
   AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA,
@@ -1196,6 +1207,8 @@ export type {
   AutonomousBrainAdaptiveBatchResult,
   AutonomousBrainReadinessOptions,
   AutonomousBrainReadinessReport,
+  AutonomousBrainWorkflowPortfolioAdmissionOptions,
+  AutonomousBrainWorkflowPortfolioAdmission,
   AutonomousBrainActivationState,
   AutonomousBrainActivationSnapshotStore,
   AutonomousBrainBatchItem,

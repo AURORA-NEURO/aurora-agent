@@ -30,6 +30,7 @@ export const AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_SCHEMA = "bioprism-typescri
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ITEMS = 64;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ACTIONS = 32;
 export const MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES = 1_000_000;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-admission-controller/0.1" as const;
 
 export type AutonomousWorkflowPortfolioAdmissionStatus = "ready_for_approval" | "partial" | "blocked";
 export type AutonomousWorkflowPortfolioAdmissionItemStatus = "eligible" | "blocked" | "dependency_blocked" | "route_review_required";
@@ -120,6 +121,35 @@ export interface AutonomousWorkflowPortfolioAdmission extends JsonObject {
   retention: "metadata_only_task_and_provider_values_not_retained";
   secret_material: "never_returned";
   admission_digest: string;
+}
+
+/** Caller-owned durable persistence for a validated, metadata-only admission image. */
+export interface AutonomousWorkflowPortfolioAdmissionPersistence {
+  read(): Promise<AutonomousWorkflowPortfolioAdmission | null> | AutonomousWorkflowPortfolioAdmission | null;
+  write(admission: AutonomousWorkflowPortfolioAdmission): Promise<void> | void;
+}
+
+export interface AutonomousWorkflowPortfolioAdmissionTransactionalPersistence extends AutonomousWorkflowPortfolioAdmissionPersistence {
+  writeIfUnchanged(expectedAdmissionDigest: string | null, admission: AutonomousWorkflowPortfolioAdmission): Promise<boolean> | boolean;
+}
+
+export interface AutonomousWorkflowPortfolioAdmissionTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousWorkflowPortfolioAdmissionTransactionalTextStore extends AutonomousWorkflowPortfolioAdmissionTextStore {
+  writeIfUnchanged(expectedAdmissionDigest: string | null, value: string): Promise<boolean> | boolean;
+}
+
+export interface AutonomousWorkflowPortfolioAdmissionControllerProjection extends JsonObject {
+  schema: typeof AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_CONTROLLER_SCHEMA;
+  status: "empty" | "restored" | "admitted";
+  plan_digest: string | null;
+  admission_digest: string | null;
+  persisted: true;
+  retention: "metadata_only_admission_and_plan_digests;tasks_prompts_credentials_and_provider_values_never_persisted";
+  secret_material: "never_returned";
 }
 
 const HEX_DIGEST = /^[0-9a-f]{64}$/;
@@ -456,4 +486,143 @@ export async function admitAutonomousWorkflowPortfolio(
   const admission = { ...descriptor, admission_digest: await digestJson(descriptor) };
   if (new TextEncoder().encode(JSON.stringify(admission)).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission exceeds its byte bound");
   return structuredClone(admission);
+}
+
+/** In-memory reference persistence with the same conditional-write semantics as durable stores. */
+export class InMemoryAutonomousWorkflowPortfolioAdmissionPersistence implements AutonomousWorkflowPortfolioAdmissionTransactionalPersistence {
+  private admission: AutonomousWorkflowPortfolioAdmission | null = null;
+
+  read(): AutonomousWorkflowPortfolioAdmission | null {
+    return this.admission === null ? null : structuredClone(this.admission);
+  }
+
+  async write(admission: AutonomousWorkflowPortfolioAdmission): Promise<void> {
+    this.admission = await validateAutonomousWorkflowPortfolioAdmission(admission);
+  }
+
+  async writeIfUnchanged(expectedAdmissionDigest: string | null, admission: AutonomousWorkflowPortfolioAdmission): Promise<boolean> {
+    if ((this.admission?.admission_digest ?? null) !== expectedAdmissionDigest) return false;
+    await this.write(admission);
+    return true;
+  }
+}
+
+/** Strict JSON adapter for Node, browser, IndexedDB, and application-owned object storage. */
+export class JsonAutonomousWorkflowPortfolioAdmissionPersistence implements AutonomousWorkflowPortfolioAdmissionPersistence {
+  constructor(protected readonly store: AutonomousWorkflowPortfolioAdmissionTextStore) {
+    if (!store || typeof store.read !== "function" || typeof store.write !== "function") throw new ArgumentError("workflow portfolio admission JSON store is malformed");
+  }
+
+  async read(): Promise<AutonomousWorkflowPortfolioAdmission | null> {
+    const encoded = await this.store.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission JSON exceeds its bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("workflow portfolio admission JSON is invalid"); }
+    return validateAutonomousWorkflowPortfolioAdmission(parsed);
+  }
+
+  async write(admission: AutonomousWorkflowPortfolioAdmission): Promise<void> {
+    const validated = await validateAutonomousWorkflowPortfolioAdmission(admission);
+    const encoded = JSON.stringify(validated);
+    if (new TextEncoder().encode(encoded).byteLength > MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES) throw new ArgumentError("workflow portfolio admission JSON exceeds its bound");
+    await this.store.write(encoded);
+  }
+}
+
+/** JSON adapter that refuses stale writers instead of pretending ordinary writes are atomic. */
+export class TransactionalJsonAutonomousWorkflowPortfolioAdmissionPersistence extends JsonAutonomousWorkflowPortfolioAdmissionPersistence implements AutonomousWorkflowPortfolioAdmissionTransactionalPersistence {
+  private readonly transactionalStore: AutonomousWorkflowPortfolioAdmissionTransactionalTextStore;
+
+  constructor(store: AutonomousWorkflowPortfolioAdmissionTransactionalTextStore) {
+    super(store);
+    if (typeof store.writeIfUnchanged !== "function") throw new ArgumentError("transactional workflow portfolio admission store requires writeIfUnchanged");
+    this.transactionalStore = store;
+  }
+
+  async writeIfUnchanged(expectedAdmissionDigest: string | null, admission: AutonomousWorkflowPortfolioAdmission): Promise<boolean> {
+    const validated = await validateAutonomousWorkflowPortfolioAdmission(admission);
+    const encoded = JSON.stringify(validated);
+    const committed = await this.transactionalStore.writeIfUnchanged(expectedAdmissionDigest, encoded);
+    if (typeof committed !== "boolean") throw new ArgumentError("transactional workflow portfolio admission store returned a non-boolean result");
+    return committed;
+  }
+}
+
+/** Browser-compatible text storage adapter; the caller owns quota, encryption, and lifecycle. */
+export class WebStorageAutonomousWorkflowPortfolioAdmissionTextStore implements AutonomousWorkflowPortfolioAdmissionTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("workflow portfolio admission Web Storage adapter is malformed");
+    boundedIdentifier("workflow portfolio admission Web Storage key", key);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
+}
+
+/**
+ * Serialized admission coordinator for process restarts and remote handoffs. It persists only
+ * the redacted admission image, validates every restore, and uses conditional writes when the
+ * backing adapter supports them. The caller still supplies transient requests and credentials to
+ * the later resumable execution call.
+ */
+export class AutonomousWorkflowPortfolioAdmissionController {
+  private currentAdmission: AutonomousWorkflowPortfolioAdmission | null = null;
+  private expectedAdmissionDigest: string | null = null;
+  private controllerStatus: "empty" | "restored" | "admitted" = "empty";
+  private mutation: Promise<void> = Promise.resolve();
+
+  constructor(readonly agent: AutonomousAgent, readonly persistence: AutonomousWorkflowPortfolioAdmissionPersistence) {
+    if (!agent || typeof agent.admitWorkflowPortfolio !== "function") throw new ArgumentError("workflow portfolio admission controller requires an AutonomousAgent");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("workflow portfolio admission controller persistence is malformed");
+  }
+
+  async restore(): Promise<AutonomousWorkflowPortfolioAdmissionControllerProjection> {
+    return this.serial(async () => {
+      const stored = await this.persistence.read();
+      this.currentAdmission = stored === null ? null : await validateAutonomousWorkflowPortfolioAdmission(stored);
+      this.expectedAdmissionDigest = this.currentAdmission?.admission_digest ?? null;
+      this.controllerStatus = this.currentAdmission === null ? "empty" : "restored";
+      return this.projection();
+    });
+  }
+
+  async admit(requests: readonly AutonomousWorkflowPortfolioItemRequest[], options: AutonomousWorkflowPortfolioAdmissionOptions = {}): Promise<AutonomousWorkflowPortfolioAdmission> {
+    return this.serial(async () => {
+      const admission = await this.agent.admitWorkflowPortfolio(requests, options);
+      const validated = await validateAutonomousWorkflowPortfolioAdmission(admission);
+      if (this.persistence && "writeIfUnchanged" in this.persistence && typeof this.persistence.writeIfUnchanged === "function") {
+        const committed = await this.persistence.writeIfUnchanged(this.expectedAdmissionDigest, validated);
+        if (!committed) throw new ArgumentError("workflow portfolio admission is stale; another coordinator committed after restore");
+      } else {
+        await this.persistence.write(validated);
+      }
+      this.currentAdmission = structuredClone(validated);
+      this.expectedAdmissionDigest = validated.admission_digest;
+      this.controllerStatus = "admitted";
+      return structuredClone(validated);
+    });
+  }
+
+  admission(): AutonomousWorkflowPortfolioAdmission | null {
+    return this.currentAdmission === null ? null : structuredClone(this.currentAdmission);
+  }
+
+  projection(): AutonomousWorkflowPortfolioAdmissionControllerProjection {
+    return {
+      schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_CONTROLLER_SCHEMA,
+      status: this.controllerStatus,
+      plan_digest: this.currentAdmission?.plan.portfolio_digest ?? null,
+      admission_digest: this.currentAdmission?.admission_digest ?? null,
+      persisted: true,
+      retention: "metadata_only_admission_and_plan_digests;tasks_prompts_credentials_and_provider_values_never_persisted",
+      secret_material: "never_returned",
+    };
+  }
+
+  private async serial<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.mutation.then(operation, operation);
+    this.mutation = next.then(() => undefined, () => undefined);
+    return next;
+  }
 }

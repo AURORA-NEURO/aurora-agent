@@ -1857,6 +1857,33 @@ single cross-domain view of model catalogue gaps, credentials, calibration, evid
 dependency blockers. The projection retains only plan/readiness/model-arm metadata and digests;
 transient tasks, prompts, credentials, provider values, and evidence bodies remain caller-owned.
 
+Admission images can be persisted through `InMemoryAutonomousWorkflowPortfolioAdmissionPersistence`,
+`JsonAutonomousWorkflowPortfolioAdmissionPersistence`, a transactional JSON adapter, or the
+browser-compatible `WebStorageAutonomousWorkflowPortfolioAdmissionTextStore`. The
+`AutonomousWorkflowPortfolioAdmissionController` serializes local admission writes, validates the
+restored image, and uses compare-and-swap when available. This is a handoff artifact, not a secret
+store: a remote worker receives only the redacted plan/readiness/model-arm projection and digest.
+
+Resumable execution can bind that image explicitly:
+
+```typescript
+const execution = await agent.executeWorkflowPortfolioResumable(requests, {
+  jobId: "portfolio-job-42",
+  plan: admission.plan,
+  admission,
+  requireAdmission: true,
+  approveProviderCall: true,
+  checkpoint: restoredCheckpoint,
+  rehydrateItem,
+});
+```
+
+The checkpoint now carries `admission_digest` and includes it in its input digest. A changed,
+tampered, held, or plan-mismatched admission fails before rehydration or provider dispatch; held
+items are materialized as blocked execution rows, so partial admission cannot silently widen into
+the full plan. Existing callers may omit admission for compatibility, while durable deployments
+should set `requireAdmission: true` at the worker boundary.
+
 The portfolio compiler rejects duplicate ids, unknown dependencies, self-dependencies, and
 oversized input. Cycles become explicit blocked items rather than being silently reordered, and
 an item whose prerequisite failed is blocked without being dispatched. After a restart, the

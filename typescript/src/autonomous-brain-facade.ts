@@ -49,6 +49,11 @@ import {
 import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { ProviderInvocationObserver } from "./llm.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import type {
+  AutonomousWorkflowPortfolioAdmission,
+  AutonomousWorkflowPortfolioAdmissionOptions,
+} from "./autonomous-workflow-portfolio-admission.js";
+import type { AutonomousWorkflowPortfolioItemRequest } from "./autonomous-workflow-portfolio.js";
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -337,6 +342,8 @@ export interface AutonomousBrainAdaptiveBatchResult {
 /** Options for the keyless readiness audit exposed at the application boundary. */
 export type AutonomousBrainReadinessOptions = Parameters<AutonomousAgent["readiness"]>[0];
 export type AutonomousBrainReadinessReport = Awaited<ReturnType<AutonomousAgent["readiness"]>>;
+export type AutonomousBrainWorkflowPortfolioAdmissionOptions = AutonomousWorkflowPortfolioAdmissionOptions;
+export type AutonomousBrainWorkflowPortfolioAdmission = AutonomousWorkflowPortfolioAdmission;
 export type AutonomousBrainActivationState = ReturnType<AutonomousAgent["activationState"]>;
 export type AutonomousBrainActivationSnapshotStore = AutonomousCapabilityActivationSnapshotStore;
 
@@ -882,6 +889,14 @@ export class AutonomousBrainFacade {
   /** Return the redacted provider/model/tool posture needed to render onboarding UI. */
   async readiness(options: AutonomousBrainReadinessOptions = {}): Promise<AutonomousBrainReadinessReport> {
     return this.agent.readiness(options);
+  }
+
+  /** Project a portfolio-wide admission image before provider/tool/source dispatch. */
+  async admitWorkflowPortfolio(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousWorkflowPortfolioAdmissionOptions = {},
+  ): Promise<AutonomousWorkflowPortfolioAdmission> {
+    return this.agent.admitWorkflowPortfolio(requests, options);
   }
 
   /**
