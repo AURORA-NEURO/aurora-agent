@@ -5787,22 +5787,28 @@ attempt metadata, receipt/assessment/result digests, and explicit lifecycle stat
 the source payload, prompt, credential, request metadata value, evaluator input, or projected value.
 
 The queue has explicit states for `queued`, `leased`, `completed`, `failed`,
-`awaiting_evaluation`, `reconciliation_required`, and `cancelled`. Lease ownership is fenced, lease
-expiry is observable, retry ceilings are bounded, and snapshot digests detect tampering. A runtime
-that reaches `awaiting_evaluation` is not automatically retried: the application must rehydrate the
-value and explicitly call `requeue(...)` after deciding that reevaluation is safe. A missing or
-conflicting rehydration is quarantined as `reconciliation_required`, which prevents duplicate source
-acquisition after a restart or uncertain external side effect.
+`awaiting_evaluation`, `reconciliation_required`, and `cancelled`, plus an execution phase of
+`not_started`, `running`, or `settled`. Lease ownership is fenced, lease expiry is observable,
+retry ceilings are bounded, and snapshot digests detect tampering. An expired lease before the
+worker crosses `begin_execution()` is returned to `queued`; an expired lease after that boundary
+is quarantined as `reconciliation_required` and is never silently reacquired. Cancellation is
+rejected for leased or uncertain work.
 
-Completion is now an explicit acceptance proof, not merely a runtime status. The worker checks that
-the returned receipt matches the queued plan, requirement, domain, workflow, stage, source, and
-source digest; validates the receipt and assessment content digests; requires an accepted assessment
-for that exact requirement; and requires the runtime result's completed-requirement projection to
-include it. A completed queue item stores an `acceptance_digest` bound to the leased item digest,
-receipt digest, assessment digest, result digest, and replay state. Pending, failed, and reconciliation
-outcomes never receive that digest. Queue schema `0.2` migrates `0.1` snapshots, but legacy completed
-items are conservatively moved to `reconciliation_required` because an acceptance proof cannot be
-reconstructed from metadata that was not persisted at the time.
+The worker crosses `begin_execution()` immediately before invoking the caller-owned runtime. The
+queue then requires a running execution phase for completion and evaluator handoff, preventing a
+stale worker from fabricating a result after its lease has expired. The worker validates that the
+returned receipt matches the queued plan, requirement, domain, workflow, stage, source, and source
+digest, then retains only receipt, assessment, and result digests. A runtime that reaches
+`awaiting_evaluation` is not automatically retried: the application must rehydrate the value and
+explicitly call `requeue(...)` after deciding that reevaluation is safe.
+
+Every uncertain execution can be settled through `settle_reconciliation(...)`, which stores only a
+content-addressed receipt containing the caller's evidence digest, evidence kind, operator, outcome,
+and `effect_absent` assertion. `succeeded` and `failed` settle terminally; `unknown` remains
+quarantined; and only `not_executed` with `effect_absent=True` can be requeued, using the exact
+`reconciliation_digest`. This makes recovery auditable and prevents a convenient retry from
+becoming a duplicate acquisition or external side effect. Work-item, queue, worker, and SQLite
+schemas are `0.2`; older `0.1` snapshots are rejected rather than guessed into the new shape.
 
 ```python
 from prism_sdk import (

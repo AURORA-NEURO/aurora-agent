@@ -169,6 +169,88 @@ def test_worker_leases_are_fenced_and_snapshot_tampering_is_rejected():
         queue.requeue(item.work_id, now=4_070)
 
 
+def test_expired_evidence_leases_distinguish_pre_dispatch_from_in_flight_execution():
+    plan = _single_domain_plan("science")
+    queue = InMemoryAutonomousEvidenceWorkQueue()
+
+    pre_dispatch = queue.enqueue(work_id="pre-dispatch-expired", plan=plan, request=_request(plan.requirements[0], 1), now=4_100)
+    assert queue.claim(pre_dispatch.work_id, "worker-a", lease_ms=10, now=4_100) is not None
+    reclaimed = queue.reclaim_expired(now=4_110)
+    assert reclaimed[0].status == "queued"
+    assert reclaimed[0].execution_phase == "not_started"
+    assert pre_dispatch.work_id in {item.work_id for item in queue.pending(now=4_110)}
+
+    in_flight = queue.enqueue(work_id="in-flight-expired", plan=plan, request=_request(plan.requirements[0], 2), now=4_100)
+    assert queue.claim(in_flight.work_id, "worker-a", lease_ms=10, now=4_100) is not None
+    queue.begin_execution(in_flight.work_id, "worker-a", now=4_105)
+    expired = queue.reclaim_expired(now=4_115)
+    quarantined = next(item for item in expired if item.work_id == in_flight.work_id)
+    assert quarantined.status == "reconciliation_required"
+    assert quarantined.execution_phase == "running"
+    assert quarantined.reconciliation_digest is None
+    with pytest.raises(ArgumentError, match="no-effect reconciliation"):
+        queue.requeue(in_flight.work_id, now=4_120)
+    with pytest.raises(ArgumentError, match="active or uncertain"):
+        queue.cancel(in_flight.work_id, now=4_120)
+
+
+def test_evidence_reconciliation_receipts_are_idempotent_and_bound_safe_requeue():
+    plan = _single_domain_plan("coding")
+    queue = InMemoryAutonomousEvidenceWorkQueue()
+
+    successful = queue.enqueue(work_id="reconcile-success", plan=plan, request=_request(plan.requirements[0], 3), now=4_200)
+    queue.claim(successful.work_id, "worker-a", lease_ms=100, now=4_200)
+    queue.begin_execution(successful.work_id, "worker-a", now=4_201)
+    queue.reclaim_expired(now=4_301)
+    settled = queue.settle_reconciliation(successful.work_id, outcome="succeeded", evidence_digest="a" * 64, now=4_302)
+    assert settled.status == "completed"
+    assert settled.execution_phase == "settled"
+    assert settled.result_digest == settled.reconciliation_digest
+    assert queue.settle_reconciliation(successful.work_id, outcome="succeeded", evidence_digest="a" * 64, now=4_303) == settled
+    with pytest.raises(ArgumentError, match="conflicts"):
+        queue.settle_reconciliation(successful.work_id, outcome="failed", evidence_digest="b" * 64, now=4_304)
+
+    no_effect = queue.enqueue(work_id="reconcile-no-effect", plan=plan, request=_request(plan.requirements[0], 4), now=4_200)
+    queue.claim(no_effect.work_id, "worker-a", lease_ms=100, now=4_200)
+    queue.begin_execution(no_effect.work_id, "worker-a", now=4_201)
+    queue.reclaim_expired(now=4_301)
+    observed = queue.settle_reconciliation(no_effect.work_id, outcome="not_executed", evidence_digest="c" * 64, now=4_302)
+    assert observed.reconciliation_effect_absent is True
+    with pytest.raises(ArgumentError, match="matching reconciliation digest"):
+        queue.requeue(no_effect.work_id, reconciliation_digest="d" * 64, now=4_303)
+    queued = queue.requeue(no_effect.work_id, reconciliation_digest=observed.reconciliation_digest, now=4_304)
+    assert queued.status == "queued"
+    assert queued.execution_phase == "not_started"
+    restored = InMemoryAutonomousEvidenceWorkQueue()
+    restored.restore(queue.snapshot())
+    assert restored.get(no_effect.work_id).item_digest == queued.item_digest
+
+
+def test_worker_never_retries_a_runtime_failure_after_execution_begins():
+    plan = _single_domain_plan("operations")
+    request = _request(plan.requirements[0], 5)
+    queue = InMemoryAutonomousEvidenceWorkQueue()
+
+    def acquire(_context):
+        raise RuntimeError("caller transport failed after dispatch")
+
+    item = queue.enqueue(work_id="post-dispatch-failure", plan=plan, request=request, now=4_400)
+    worker = AutonomousEvidenceWorker(
+        queue,
+        lambda _item: {
+            "plan": plan,
+            "request": request,
+            "runtime": AutonomousEvidenceRuntime(plan=plan),
+            "execute": {"acquirer": acquire},
+        },
+    )
+    result = worker.run(worker_id="worker-a", now=4_400)
+    assert result["reconciled"] == 1
+    assert result["retried"] == 0
+    assert queue.get(item.work_id).status == "reconciliation_required"
+    assert queue.get(item.work_id).execution_phase == "running"
+
+
 def test_worker_identity_mismatch_quarantines_work():
     plan = _single_domain_plan("biomedical")
     request = _request(plan.requirements[0])

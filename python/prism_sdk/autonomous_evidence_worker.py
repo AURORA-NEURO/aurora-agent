@@ -29,10 +29,10 @@ from .domain_tools import AUTONOMOUS_DOMAIN_NAMES, _identifier
 from .errors import ArgumentError
 
 
-AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-evidence-work-item/0.1"
-AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue/0.1"
-AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-python-autonomous-evidence-worker/0.1"
-AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue-sqlite/0.1"
+AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-python-autonomous-evidence-work-item/0.2"
+AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue/0.2"
+AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-python-autonomous-evidence-worker/0.2"
+AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA = "bioprism-python-autonomous-evidence-work-queue-sqlite/0.2"
 MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS = 4_096
 MAX_AUTONOMOUS_EVIDENCE_WORK_ATTEMPTS = 32
 MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH = 128
@@ -44,10 +44,12 @@ _WORK_STATUSES = frozenset({
 })
 _WORK_FAILURE_CLASSES = frozenset({
     None,
-    "rehydration_missing", "rehydration_invalid", "identity_conflict", "lease_expired",
+    "rehydration_missing", "rehydration_invalid", "identity_conflict", "lease_expired", "reconciliation_required", "execution_in_flight",
     "acquisition_failed", "projection_failed", "evaluation_pending", "evaluation_rejected",
     "executor_error", "transport_error", "unknown",
 })
+_EXECUTION_PHASES = frozenset({"not_started", "running", "settled"})
+_RECONCILIATION_OUTCOMES = frozenset({"succeeded", "failed", "not_executed", "unknown"})
 
 
 def _text(name: str, value: Any, maximum: int = 512) -> str:
@@ -164,6 +166,28 @@ def _requirement(plan: AutonomousEvidencePlan, requirement_id: str) -> Any:
     raise ArgumentError(f"evidence work requirement is not in the plan: {requirement_id}")
 
 
+def _reconciliation_receipt_digest(
+    *,
+    item: "AutonomousEvidenceWorkItem",
+    outcome: str,
+    evidence_digest: str,
+    evidence_kind: str,
+    operator: str,
+    effect_absent: bool | None,
+) -> str:
+    return content_digest({
+        "schema": f"{AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA}/reconciliation-receipt",
+        "work_id": item.work_id,
+        "plan_digest": item.plan_digest,
+        "observed_item_digest": item.reconciliation_observed_item_digest or item.item_digest,
+        "outcome": outcome,
+        "evidence_digest": evidence_digest,
+        "evidence_kind": evidence_kind,
+        "operator": operator,
+        "effect_absent": effect_absent,
+    })
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousEvidenceWorkItem:
     work_id: str
@@ -190,6 +214,14 @@ class AutonomousEvidenceWorkItem:
     last_error_class: str | None
     created_at: int
     updated_at: int
+    execution_phase: str = "not_started"
+    reconciliation_digest: str | None = None
+    reconciliation_observed_item_digest: str | None = None
+    reconciliation_outcome: str | None = None
+    reconciliation_evidence_digest: str | None = None
+    reconciliation_evidence_kind: str | None = None
+    reconciliation_operator: str | None = None
+    reconciliation_effect_absent: bool | None = None
     item_digest: str = ""
 
     def __post_init__(self) -> None:
@@ -213,6 +245,8 @@ class AutonomousEvidenceWorkItem:
         object.__setattr__(self, "attempts", attempts)
         if self.status not in _WORK_STATUSES:
             raise ArgumentError("autonomous evidence work status is invalid")
+        if self.execution_phase not in _EXECUTION_PHASES:
+            raise ArgumentError("autonomous evidence work execution phase is invalid")
         _timestamp("autonomous evidence work available_at", self.available_at)
         _timestamp("autonomous evidence work created_at", self.created_at)
         _timestamp("autonomous evidence work updated_at", self.updated_at)
@@ -228,6 +262,46 @@ class AutonomousEvidenceWorkItem:
             raise ArgumentError("autonomous evidence work failure class is invalid")
         if self.status not in {"awaiting_evaluation", "reconciliation_required", "failed", "cancelled"} and self.failure_class is not None:
             raise ArgumentError("autonomous evidence work active item cannot retain a terminal failure class")
+        if self.status == "queued" and self.execution_phase != "not_started":
+            raise ArgumentError("queued evidence work must not have crossed the execution boundary")
+        if self.status == "reconciliation_required" and self.execution_phase != "running":
+            raise ArgumentError("reconciliation-required evidence work must retain a running execution phase")
+        if self.status in {"completed", "awaiting_evaluation"} and self.execution_phase != "settled":
+            raise ArgumentError("settled evidence work status requires a settled execution phase")
+        receipt_values = (
+            self.reconciliation_observed_item_digest,
+            self.reconciliation_outcome,
+            self.reconciliation_evidence_digest,
+            self.reconciliation_evidence_kind,
+            self.reconciliation_operator,
+            self.reconciliation_effect_absent,
+        )
+        if self.reconciliation_digest is None:
+            if any(value is not None for value in receipt_values):
+                raise ArgumentError("evidence reconciliation metadata requires a reconciliation digest")
+        else:
+            _digest("autonomous evidence work reconciliation_digest", self.reconciliation_digest)
+            _digest("autonomous evidence work reconciliation_observed_item_digest", self.reconciliation_observed_item_digest)
+            if self.reconciliation_outcome not in _RECONCILIATION_OUTCOMES:
+                raise ArgumentError("autonomous evidence work reconciliation outcome is invalid")
+            _digest("autonomous evidence work reconciliation_evidence_digest", self.reconciliation_evidence_digest)
+            _identifier("autonomous evidence work reconciliation_evidence_kind", self.reconciliation_evidence_kind)
+            _identifier("autonomous evidence work reconciliation_operator", self.reconciliation_operator)
+            if not isinstance(self.reconciliation_effect_absent, bool) and self.reconciliation_effect_absent is not None:
+                raise ArgumentError("autonomous evidence work reconciliation effect_absent is invalid")
+            if self.reconciliation_outcome == "not_executed" and self.reconciliation_effect_absent is not True:
+                raise ArgumentError("not_executed evidence reconciliation requires effect_absent=true")
+            if self.reconciliation_outcome in {"succeeded", "unknown"} and self.reconciliation_effect_absent is True:
+                raise ArgumentError("evidence reconciliation effect_absent contradicts the selected outcome")
+            if self.reconciliation_digest != _reconciliation_receipt_digest(
+                item=self,
+                outcome=self.reconciliation_outcome,
+                evidence_digest=self.reconciliation_evidence_digest,
+                evidence_kind=self.reconciliation_evidence_kind,
+                operator=self.reconciliation_operator,
+                effect_absent=self.reconciliation_effect_absent,
+            ):
+                raise ArgumentError("autonomous evidence work reconciliation digest is invalid")
         if self.item_digest:
             _digest("autonomous evidence work item_digest", self.item_digest)
             if self.item_digest != self.computed_digest:
@@ -262,6 +336,14 @@ class AutonomousEvidenceWorkItem:
             "last_error_class": self.last_error_class,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "execution_phase": self.execution_phase,
+            "reconciliation_digest": self.reconciliation_digest,
+            "reconciliation_observed_item_digest": self.reconciliation_observed_item_digest,
+            "reconciliation_outcome": self.reconciliation_outcome,
+            "reconciliation_evidence_digest": self.reconciliation_evidence_digest,
+            "reconciliation_evidence_kind": self.reconciliation_evidence_kind,
+            "reconciliation_operator": self.reconciliation_operator,
+            "reconciliation_effect_absent": self.reconciliation_effect_absent,
             "retention": "metadata_only_request_and_values_caller_owned",
             "secret_material": "never_returned",
         }
@@ -280,6 +362,8 @@ def _work_item_from_mapping(value: Mapping[str, Any]) -> AutonomousEvidenceWorkI
         "stage_id", "source_id", "source_digest", "request_digest", "parent_evidence_digests", "max_attempts",
         "attempts", "status", "available_at", "lease_owner", "lease_until", "receipt_digest",
         "assessment_digest", "result_digest", "failure_class", "last_error_class", "created_at", "updated_at",
+        "execution_phase", "reconciliation_digest", "reconciliation_observed_item_digest", "reconciliation_outcome",
+        "reconciliation_evidence_digest", "reconciliation_evidence_kind", "reconciliation_operator", "reconciliation_effect_absent",
         "item_digest", "retention", "secret_material",
     }
     if not isinstance(value, Mapping) or set(value) != expected or value.get("schema") != AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA:
@@ -295,7 +379,11 @@ def _work_item_from_mapping(value: Mapping[str, Any]) -> AutonomousEvidenceWorkI
         available_at=value.get("available_at"), lease_owner=value.get("lease_owner"), lease_until=value.get("lease_until"),
         receipt_digest=value.get("receipt_digest"), assessment_digest=value.get("assessment_digest"), result_digest=value.get("result_digest"),
         failure_class=value.get("failure_class"), last_error_class=value.get("last_error_class"),
-        created_at=value.get("created_at"), updated_at=value.get("updated_at"), item_digest=value.get("item_digest"),
+        created_at=value.get("created_at"), updated_at=value.get("updated_at"), execution_phase=value.get("execution_phase"),
+        reconciliation_digest=value.get("reconciliation_digest"), reconciliation_observed_item_digest=value.get("reconciliation_observed_item_digest"),
+        reconciliation_outcome=value.get("reconciliation_outcome"), reconciliation_evidence_digest=value.get("reconciliation_evidence_digest"),
+        reconciliation_evidence_kind=value.get("reconciliation_evidence_kind"), reconciliation_operator=value.get("reconciliation_operator"),
+        reconciliation_effect_absent=value.get("reconciliation_effect_absent"), item_digest=value.get("item_digest"),
     )
 
 
@@ -413,11 +501,54 @@ class InMemoryAutonomousEvidenceWorkQueue:
         with self._lock:
             return self._items.get(_identifier("autonomous evidence work_id", work_id))
 
+    def reclaim_expired(self, *, limit: int | None = None, now: int | None = None) -> tuple[AutonomousEvidenceWorkItem, ...]:
+        """Reclaim leases without ever making an in-flight execution look safe to retry."""
+
+        current = _now_ms(now)
+        bounded_limit = self.max_items if limit is None else _bounded_integer(
+            "autonomous evidence work reclaim limit", limit, 1, min(MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH, self.max_items)
+        )
+        with self._lock:
+            expired = sorted(
+                (
+                    item for item in self._items.values()
+                    if item.status == "leased" and item.lease_until is not None and item.lease_until <= current
+                ),
+                key=lambda item: (item.lease_until or 0, item.created_at, item.work_id),
+            )[:bounded_limit]
+            reclaimed: list[AutonomousEvidenceWorkItem] = []
+            for item in expired:
+                if item.execution_phase == "running" or item.attempts >= item.max_attempts:
+                    next_item = self._refresh(
+                        item,
+                        current,
+                        status="reconciliation_required",
+                        lease_owner=None,
+                        lease_until=None,
+                        failure_class="lease_expired",
+                        last_error_class="lease_expired",
+                    )
+                else:
+                    next_item = self._refresh(
+                        item,
+                        current,
+                        status="queued",
+                        execution_phase="not_started",
+                        lease_owner=None,
+                        lease_until=None,
+                        failure_class=None,
+                        last_error_class="lease_expired",
+                        available_at=current,
+                    )
+                self._items[item.work_id] = next_item
+                reclaimed.append(next_item)
+            return tuple(reclaimed)
+
     def pending(self, *, limit: int = 64, now: int | None = None) -> tuple[AutonomousEvidenceWorkItem, ...]:
         current = _now_ms(now)
         limit = _bounded_integer("autonomous evidence work pending limit", limit, 1, min(MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH, self.max_items))
         with self._lock:
-            values = [item for item in self._items.values() if (item.status == "queued" and item.available_at <= current and item.attempts < item.max_attempts) or (item.status == "leased" and item.lease_until is not None and item.lease_until <= current and item.attempts < item.max_attempts)]
+            values = [item for item in self._items.values() if item.status == "queued" and item.available_at <= current and item.attempts < item.max_attempts]
         return tuple(sorted(values, key=lambda item: (item.available_at, item.created_at, item.work_id))[:limit])
 
     def claim(self, work_id: str, worker_id: str, *, lease_ms: int = 30_000, now: int | None = None) -> AutonomousEvidenceWorkItem | None:
@@ -429,12 +560,36 @@ class InMemoryAutonomousEvidenceWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status in {"completed", "failed", "awaiting_evaluation", "reconciliation_required", "cancelled"}:
                 return None
-            if item.status == "leased" and item.lease_until is not None and item.lease_until > current:
-                return None
+            if item.status == "leased":
+                if item.lease_until is not None and item.lease_until > current:
+                    return None
+                if item.execution_phase == "running":
+                    self._items[work_id] = self._refresh(
+                        item,
+                        current,
+                        status="reconciliation_required",
+                        lease_owner=None,
+                        lease_until=None,
+                        failure_class="lease_expired",
+                        last_error_class="lease_expired",
+                    )
+                    return None
+                item = self._refresh(
+                    item,
+                    current,
+                    status="queued",
+                    execution_phase="not_started",
+                    available_at=current,
+                    lease_owner=None,
+                    lease_until=None,
+                    failure_class=None,
+                    last_error_class="lease_expired",
+                )
+                self._items[work_id] = item
             if item.attempts >= item.max_attempts:
-                self._items[work_id] = self._refresh(item, current, status="reconciliation_required", failure_class="lease_expired", last_error_class="lease_expired", lease_owner=None, lease_until=None)
+                self._items[work_id] = self._refresh(item, current, status="reconciliation_required", execution_phase="running", failure_class="lease_expired", last_error_class="lease_expired", lease_owner=None, lease_until=None)
                 return None
-            claimed = self._refresh(item, current, status="leased", attempts=item.attempts + 1, lease_owner=worker_id, lease_until=current + lease_ms, failure_class=None, last_error_class=None)
+            claimed = self._refresh(item, current, status="leased", execution_phase="not_started", attempts=item.attempts + 1, lease_owner=worker_id, lease_until=current + lease_ms, failure_class=None, last_error_class=None)
             self._items[work_id] = claimed
             return claimed
 
@@ -451,6 +606,22 @@ class InMemoryAutonomousEvidenceWorkQueue:
             self._items[work_id] = renewed
             return renewed
 
+    def begin_execution(self, work_id: str, worker_id: str, *, now: int | None = None) -> AutonomousEvidenceWorkItem:
+        """Cross the irreversible caller-owned execution boundary under the current lease."""
+
+        work_id = _identifier("autonomous evidence work_id", work_id)
+        worker_id = _identifier("autonomous evidence worker_id", worker_id)
+        current = _now_ms(now)
+        with self._lock:
+            item = self._items.get(work_id)
+            if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
+                raise ArgumentError("autonomous evidence execution cannot begin across an expired or foreign lease")
+            if item.execution_phase != "not_started":
+                raise ArgumentError("autonomous evidence execution boundary has already been crossed")
+            executing = self._refresh(item, current, execution_phase="running")
+            self._items[work_id] = executing
+            return executing
+
     def complete(self, work_id: str, worker_id: str, result: AutonomousEvidenceRuntimeResult, *, now: int | None = None) -> AutonomousEvidenceWorkItem:
         work_id = _identifier("autonomous evidence work_id", work_id)
         worker_id = _identifier("autonomous evidence worker_id", worker_id)
@@ -459,10 +630,12 @@ class InMemoryAutonomousEvidenceWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
                 raise ArgumentError("autonomous evidence work completion is fenced by an expired or foreign lease")
+            if item.execution_phase != "running":
+                raise ArgumentError("autonomous evidence work completion requires a crossed execution boundary")
             metadata = _result_metadata(item, result)
             if result.status != "completed" and not (result.status == "awaiting_evaluation" and metadata[4] == "accepted"):
                 raise ArgumentError("autonomous evidence work completion requires an accepted queued requirement")
-            finished = self._refresh(item, current, status="completed", lease_owner=None, lease_until=None, receipt_digest=metadata[1], assessment_digest=metadata[2], result_digest=metadata[0], failure_class=None)
+            finished = self._refresh(item, current, status="completed", execution_phase="settled", lease_owner=None, lease_until=None, receipt_digest=metadata[1], assessment_digest=metadata[2], result_digest=metadata[0], failure_class=None)
             self._items[work_id] = finished
             return finished
 
@@ -474,10 +647,12 @@ class InMemoryAutonomousEvidenceWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
                 raise ArgumentError("autonomous evidence evaluation handoff is fenced by an expired or foreign lease")
+            if item.execution_phase != "running":
+                raise ArgumentError("autonomous evidence evaluation handoff requires a crossed execution boundary")
             if result.status != "awaiting_evaluation":
                 raise ArgumentError("autonomous evidence evaluation handoff requires an awaiting_evaluation runtime result")
             metadata = _result_metadata(item, result)
-            waiting = self._refresh(item, current, status="awaiting_evaluation", lease_owner=None, lease_until=None, receipt_digest=metadata[1], assessment_digest=metadata[2], result_digest=metadata[0], failure_class="evaluation_pending", last_error_class="evaluation_pending")
+            waiting = self._refresh(item, current, status="awaiting_evaluation", execution_phase="settled", lease_owner=None, lease_until=None, receipt_digest=metadata[1], assessment_digest=metadata[2], result_digest=metadata[0], failure_class="evaluation_pending", last_error_class="evaluation_pending")
             self._items[work_id] = waiting
             return waiting
 
@@ -490,10 +665,12 @@ class InMemoryAutonomousEvidenceWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
                 raise ArgumentError("autonomous evidence work failure is fenced by an expired or foreign lease")
+            if item.execution_phase != "not_started":
+                raise ArgumentError("post-dispatch evidence failures require reconciliation")
             metadata = None if result is None else _result_metadata(item, result)
             can_retry = retryable and item.attempts < item.max_attempts
             delay = min(3_600_000, 1_000 * (2 ** max(0, item.attempts - 1)))
-            failed = self._refresh(item, current, status="queued" if can_retry else "failed", available_at=current + delay if can_retry else item.available_at, lease_owner=None, lease_until=None, receipt_digest=metadata[1] if metadata else item.receipt_digest, assessment_digest=metadata[2] if metadata else item.assessment_digest, result_digest=metadata[0] if metadata else item.result_digest, failure_class=None if can_retry else failure, last_error_class=failure)
+            failed = self._refresh(item, current, status="queued" if can_retry else "failed", execution_phase="not_started", available_at=current + delay if can_retry else item.available_at, lease_owner=None, lease_until=None, receipt_digest=metadata[1] if metadata else item.receipt_digest, assessment_digest=metadata[2] if metadata else item.assessment_digest, result_digest=metadata[0] if metadata else item.result_digest, failure_class=None if can_retry else failure, last_error_class=failure)
             self._items[work_id] = failed
             return failed
 
@@ -506,11 +683,85 @@ class InMemoryAutonomousEvidenceWorkQueue:
             item = self._items.get(work_id)
             if item is None or item.status != "leased" or item.lease_owner != worker_id or item.lease_until is None or item.lease_until <= current:
                 raise ArgumentError("autonomous evidence reconciliation is fenced by an expired or foreign lease")
-            reconciled = self._refresh(item, current, status="reconciliation_required", lease_owner=None, lease_until=None, failure_class=failure, last_error_class=failure)
+            reconciled = self._refresh(item, current, status="reconciliation_required", execution_phase="running", lease_owner=None, lease_until=None, failure_class=failure, last_error_class=failure)
             self._items[work_id] = reconciled
             return reconciled
 
-    def requeue(self, work_id: str, *, now: int | None = None) -> AutonomousEvidenceWorkItem:
+    def settle_reconciliation(
+        self,
+        work_id: str,
+        *,
+        outcome: str,
+        evidence_digest: str,
+        evidence_kind: str = "caller_observation",
+        operator: str = "caller",
+        effect_absent: bool | None = None,
+        now: int | None = None,
+    ) -> AutonomousEvidenceWorkItem:
+        """Persist only caller-owned reconciliation metadata and its verifiable receipt digest."""
+
+        work_id = _identifier("autonomous evidence work_id", work_id)
+        outcome = _text("autonomous evidence reconciliation outcome", outcome, 32)
+        if outcome not in _RECONCILIATION_OUTCOMES:
+            raise ArgumentError("autonomous evidence reconciliation outcome is invalid")
+        evidence_digest = _digest("autonomous evidence reconciliation evidence_digest", evidence_digest)
+        evidence_kind = _identifier("autonomous evidence reconciliation evidence_kind", evidence_kind)
+        operator = _identifier("autonomous evidence reconciliation operator", operator)
+        if effect_absent is None:
+            effect_absent = outcome == "not_executed"
+        if not isinstance(effect_absent, bool):
+            raise ArgumentError("autonomous evidence reconciliation effect_absent must be boolean or omitted")
+        if outcome == "not_executed" and effect_absent is not True:
+            raise ArgumentError("not_executed evidence reconciliation requires effect_absent=true")
+        if outcome in {"succeeded", "unknown"} and effect_absent is True:
+            raise ArgumentError("evidence reconciliation effect_absent contradicts the selected outcome")
+        current = _now_ms(now)
+        with self._lock:
+            item = self._items.get(work_id)
+            if item is None:
+                raise ArgumentError("autonomous evidence work was not found")
+            if item.reconciliation_digest is not None:
+                if (
+                    item.reconciliation_outcome == outcome
+                    and item.reconciliation_evidence_digest == evidence_digest
+                    and item.reconciliation_evidence_kind == evidence_kind
+                    and item.reconciliation_operator == operator
+                    and item.reconciliation_effect_absent == effect_absent
+                ):
+                    return item
+                raise ArgumentError("autonomous evidence reconciliation receipt conflicts with the existing receipt")
+            if item.status != "reconciliation_required":
+                raise ArgumentError("autonomous evidence work is not awaiting reconciliation")
+            receipt = _reconciliation_receipt_digest(
+                item=item,
+                outcome=outcome,
+                evidence_digest=evidence_digest,
+                evidence_kind=evidence_kind,
+                operator=operator,
+                effect_absent=effect_absent,
+            )
+            settled = self._refresh(
+                item,
+                current,
+                status="completed" if outcome == "succeeded" else "failed" if outcome == "failed" else "reconciliation_required",
+                execution_phase="settled" if outcome in {"succeeded", "failed"} else "running",
+                result_digest=receipt if outcome == "succeeded" else item.result_digest,
+                failure_class=None if outcome == "succeeded" else "reconciliation_required",
+                last_error_class=None if outcome == "succeeded" else item.last_error_class,
+                reconciliation_digest=receipt,
+                reconciliation_observed_item_digest=item.item_digest,
+                reconciliation_outcome=outcome,
+                reconciliation_evidence_digest=evidence_digest,
+                reconciliation_evidence_kind=evidence_kind,
+                reconciliation_operator=operator,
+                reconciliation_effect_absent=effect_absent,
+                lease_owner=None,
+                lease_until=None,
+            )
+            self._items[work_id] = settled
+            return settled
+
+    def requeue(self, work_id: str, *, reconciliation_digest: str | None = None, now: int | None = None) -> AutonomousEvidenceWorkItem:
         work_id = _identifier("autonomous evidence work_id", work_id)
         current = _now_ms(now)
         with self._lock:
@@ -519,7 +770,14 @@ class InMemoryAutonomousEvidenceWorkQueue:
                 raise ArgumentError("autonomous evidence work is not waiting for explicit requeue")
             if item.attempts >= item.max_attempts:
                 raise ArgumentError("autonomous evidence work has exhausted its attempts")
-            queued = self._refresh(item, current, status="queued", available_at=current, failure_class=None, last_error_class=item.last_error_class)
+            if item.status == "reconciliation_required":
+                if item.reconciliation_digest is None or item.reconciliation_outcome != "not_executed" or item.reconciliation_effect_absent is not True:
+                    raise ArgumentError("evidence requeue requires a matching no-effect reconciliation receipt")
+                if reconciliation_digest != item.reconciliation_digest:
+                    raise ArgumentError("evidence requeue requires the matching reconciliation digest")
+            elif reconciliation_digest is not None:
+                _digest("autonomous evidence reconciliation_digest", reconciliation_digest)
+            queued = self._refresh(item, current, status="queued", execution_phase="not_started", available_at=current, failure_class=None, last_error_class=item.last_error_class)
             self._items[work_id] = queued
             return queued
 
@@ -529,9 +787,9 @@ class InMemoryAutonomousEvidenceWorkQueue:
         current = _now_ms(now)
         with self._lock:
             item = self._items.get(work_id)
-            if item is None or item.status in {"completed", "failed", "awaiting_evaluation", "reconciliation_required", "cancelled"}:
-                raise ArgumentError("autonomous evidence work cannot be cancelled in its current state")
-            cancelled = self._refresh(item, current, status="cancelled", lease_owner=None, lease_until=None, failure_class=failure, last_error_class=failure)
+            if item is None or item.status in {"completed", "failed", "awaiting_evaluation", "reconciliation_required", "cancelled"} or item.execution_phase == "running":
+                raise ArgumentError("autonomous evidence work cannot be cancelled across an active or uncertain execution boundary")
+            cancelled = self._refresh(item, current, status="cancelled", execution_phase="settled", lease_owner=None, lease_until=None, failure_class=failure, last_error_class=failure)
             self._items[work_id] = cancelled
             return cancelled
 
@@ -781,11 +1039,12 @@ class AutonomousEvidenceWorkerRow:
     receipt_digest: str | None
     assessment_digest: str | None
     result_digest: str | None
+    reconciliation_digest: str | None = None
     value_retained: bool = False
     error_class: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"work_id": self.work_id, "outcome": self.outcome, "attempts": self.attempts, "receipt_digest": self.receipt_digest, "assessment_digest": self.assessment_digest, "result_digest": self.result_digest, "value_retained": False, "error_class": self.error_class}
+        return {"work_id": self.work_id, "outcome": self.outcome, "attempts": self.attempts, "receipt_digest": self.receipt_digest, "assessment_digest": self.assessment_digest, "result_digest": self.result_digest, "reconciliation_digest": self.reconciliation_digest, "value_retained": False, "error_class": self.error_class}
 
 
 class AutonomousEvidenceWorker:
@@ -808,6 +1067,7 @@ class AutonomousEvidenceWorker:
             raise ArgumentError("autonomous evidence worker work_ids are outside their bound")
         deterministic = now is not None
         current = _now_ms(now)
+        self.queue.reclaim_expired(limit=min(MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH, self.queue.max_items), now=current)
         pending = self.queue.pending(limit=MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH if selected is not None else limit, now=current)
         candidates = tuple(item for item in pending if selected is None or item.work_id in selected)[:limit]
         rows: list[AutonomousEvidenceWorkerRow] = []
@@ -819,6 +1079,7 @@ class AutonomousEvidenceWorker:
                 rows.append(AutonomousEvidenceWorkerRow(candidate.work_id, "leased_elsewhere", candidate.attempts, candidate.receipt_digest, candidate.assessment_digest, candidate.result_digest))
                 continue
             finish_now = current if deterministic else None
+            execution_started = False
             try:
                 hydrated = self.rehydrate(claimed)
                 if not isinstance(hydrated, Mapping) or not isinstance(hydrated.get("runtime"), AutonomousEvidenceRuntime) or not isinstance(hydrated.get("plan"), AutonomousEvidencePlan) or not isinstance(hydrated.get("request"), Mapping) or not isinstance(hydrated.get("execute"), Mapping):
@@ -833,6 +1094,8 @@ class AutonomousEvidenceWorker:
                     raise ArgumentError("autonomous evidence worker rehydrated identity conflicts with the work item")
                 if "acquirer" not in execute:
                     raise ArgumentError("autonomous evidence worker rehydrated execution is missing an acquirer")
+                self.queue.begin_execution(claimed.work_id, worker_id, now=finish_now)
+                execution_started = True
                 result = hydrated["runtime"].execute(
                     [request], acquirer=execute["acquirer"], projector=execute.get("projector"), evaluator=execute.get("evaluator"),
                     rehydrate_value=execute.get("rehydrate_value"), parent_evidence_digests=claimed.parent_evidence_digests,
@@ -850,11 +1113,11 @@ class AutonomousEvidenceWorker:
                     rows.append(self._row(reconciled, "reconciliation_required", "rehydration_missing"))
                 else:
                     failure = "projection_failed" if any(receipt.evidence_status == "projection_failed" for receipt in result.receipts) else "acquisition_failed"
-                    failed = self.queue.fail(claimed.work_id, worker_id, failure, retryable=True, now=finish_now, result=result)
-                    rows.append(self._row(failed, "retry_scheduled" if failed.status == "queued" else "failed", failure))
+                    reconciled = self.queue.reconcile(claimed.work_id, worker_id, failure, now=finish_now)
+                    rows.append(self._row(reconciled, "reconciliation_required", failure))
             except Exception as error:
                 failure = self._classify(error)
-                if failure in {"rehydration_missing", "rehydration_invalid", "identity_conflict"}:
+                if execution_started or failure in {"rehydration_missing", "rehydration_invalid", "identity_conflict"}:
                     reconciled = self.queue.reconcile(claimed.work_id, worker_id, failure, now=finish_now)
                     rows.append(self._row(reconciled, "reconciliation_required", failure))
                 else:
@@ -877,7 +1140,7 @@ class AutonomousEvidenceWorker:
 
     @staticmethod
     def _row(item: AutonomousEvidenceWorkItem, outcome: str, error_class: str | None) -> AutonomousEvidenceWorkerRow:
-        return AutonomousEvidenceWorkerRow(item.work_id, outcome, item.attempts, item.receipt_digest, item.assessment_digest, item.result_digest, False, error_class)
+        return AutonomousEvidenceWorkerRow(item.work_id, outcome, item.attempts, item.receipt_digest, item.assessment_digest, item.result_digest, item.reconciliation_digest, False, error_class)
 
     @staticmethod
     def _classify(error: Exception) -> str:
