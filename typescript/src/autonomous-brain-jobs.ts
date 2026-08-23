@@ -1,6 +1,6 @@
 import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous.js";
 import { ArgumentError, isObject } from "./errors.js";
-import { digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /**
@@ -167,7 +167,7 @@ export class JsonAutonomousBrainJobSchedulerPersistence implements AutonomousBra
 
   protected encode(snapshot: AutonomousBrainJobSnapshot): string {
     if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new ArgumentError("brain job JSON persistence snapshot is malformed");
-    const encoded = JSON.stringify(snapshot);
+    const encoded = canonicalJson(snapshot);
     if (typeof encoded !== "string" || bytes(encoded) > MAX_AUTONOMOUS_BRAIN_JOB_SNAPSHOT_BYTES) throw new ArgumentError("brain job JSON persistence snapshot exceeds its bound");
     return encoded;
   }
@@ -182,6 +182,7 @@ export class JsonAutonomousBrainJobSchedulerPersistence implements AutonomousBra
       throw new ArgumentError("brain job JSON persistence text is invalid JSON");
     }
     if (!isObject(parsed) || Array.isArray(parsed)) throw new ArgumentError("brain job JSON persistence value is malformed");
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("brain job JSON persistence text is not canonical");
     return parsed as unknown as AutonomousBrainJobSnapshot;
   }
 }

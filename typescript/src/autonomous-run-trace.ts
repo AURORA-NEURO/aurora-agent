@@ -341,6 +341,7 @@ export class JsonAutonomousRunTracePersistence implements AutonomousRunTracePers
     if (new TextEncoder().encode(text).byteLength > this.maxBytes) throw new ArgumentError("autonomous run trace JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(text); } catch { throw new ArgumentError("autonomous run trace JSON is invalid"); }
+    if (canonicalJson(parsed) !== text) throw new ArgumentError("autonomous run trace JSON is not canonical");
     return validateSnapshot(parsed, this.maxEvents, this.maxBytes);
   }
 
@@ -452,6 +453,7 @@ export class AutonomousRunTracePersistenceCoordinator {
   readonly store: AutonomousRunTraceStore;
   readonly persistence: AutonomousRunTracePersistence;
   private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
 
   constructor(store: AutonomousRunTraceStore, persistence: AutonomousRunTracePersistence) {
     if (!store || typeof store.append !== "function" || typeof store.events !== "function" || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("autonomous run trace persistence requires a complete trace store");
@@ -461,23 +463,33 @@ export class AutonomousRunTracePersistenceCoordinator {
   }
 
   async restore(): Promise<AutonomousRunTraceSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot === null) {
-      this.expectedSnapshotDigest = null;
-      return null;
-    }
-    await this.store.restore(snapshot);
-    this.expectedSnapshotDigest = snapshot.snapshot_digest;
-    return structuredClone(snapshot);
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      await this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return structuredClone(snapshot);
+    });
   }
 
   async flush(): Promise<AutonomousRunTraceSnapshot> {
-    const snapshot = await this.store.snapshot();
-    if (typeof this.persistence.writeIfUnchanged === "function") {
-      if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("autonomous run trace persistence compare-and-swap conflict");
-    } else await this.persistence.write(snapshot);
-    this.expectedSnapshotDigest = snapshot.snapshot_digest;
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await this.store.snapshot();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("autonomous run trace persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }
 

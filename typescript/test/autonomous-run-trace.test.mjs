@@ -149,6 +149,9 @@ test("run trace JSON, browser, and CAS persistence survive all-domain restart wi
   const browserPersistence = new JsonAutonomousRunTracePersistence(browserTextStore);
   await browserPersistence.write(snapshot);
   assert.deepEqual(await browserPersistence.read(), snapshot);
+  browser.set("run-trace", ` ${browser.get("run-trace")}`);
+  await assert.rejects(() => browserPersistence.read(), /not canonical/);
+  await browserPersistence.write(snapshot);
   const tampered = structuredClone(snapshot);
   tampered.events[0].status = "failed";
   assert.throws(() => validateAutonomousRunTraceSnapshot(tampered), /digest|hash chain|invalid/);

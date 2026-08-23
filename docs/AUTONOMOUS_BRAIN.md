@@ -1593,6 +1593,13 @@ execution. These adapters retain only checkpoint/event metadata and digests—ta
 credentials, provider responses, tool arguments, and caller-owned result values remain outside
 the snapshot boundary.
 
+The local brain-job scheduler and run-trace adapters follow the same rule: their JSON writers
+emit canonical key ordering and their readers reject whitespace or key-order normalization drift
+before the scheduler/trace store sees the snapshot. Run-trace coordinator operations are also
+serialized, so concurrent dashboard flushes cannot race a restore or advance the expected digest
+out of order. This keeps model-health and operator evidence append-only at the metadata boundary
+while leaving raw provider values in the caller's transient execution scope.
+
 For restartable deployments, `AutonomousEvaluatorCalibrationRegistry` imports the validated
 report projection and exposes deterministic digest/status/domain queries. Its snapshot contains
 only calibration reports and registry generation metadata; `InMemoryAutonomousEvaluatorCalibrationStore`,

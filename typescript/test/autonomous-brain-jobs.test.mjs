@@ -180,6 +180,8 @@ test("JSON persistence round-trips metadata for every domain and fails closed on
   const restored = await new AutonomousBrainJobSchedulerPersistenceCoordinator(restoredScheduler, persistence).restore();
   assert.equal(restored.jobs.length, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.deepEqual(new Set(restored.jobs.map((job) => job.domain)), new Set(AUTONOMOUS_DOMAIN_NAMES));
+  text = ` ${text}`;
+  await assert.rejects(persistence.read(), /not canonical/);
   text = "not-json";
   await assert.rejects(persistence.read(), /invalid JSON/);
 });
