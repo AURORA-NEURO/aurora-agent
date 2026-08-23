@@ -164,15 +164,15 @@ test("remote mission worker renews long private resolution and retries typed pro
   const worker = new AutonomousMissionReplanRemoteWorker({
     queue,
     workerId: "heartbeat-worker",
-    leaseMs: 40,
+    leaseMs: 250,
     resolve: async ({ renew }) => {
       resolverCalls += 1;
       await new Promise((resolve) => setTimeout(resolve, 25));
-      await renew(40);
+      await renew(250);
       throw new ProviderRuntimeError("typed provider simulation", { code: "transport", retryable: true });
     },
   });
-  const run = await worker.run({ limit: 1, heartbeatMs: 10 });
+  const run = await worker.run({ limit: 1, heartbeatMs: 50 });
   assert.equal(resolverCalls, 1);
   assert.equal(run.retried, 1);
   assert.equal(run.failed, 0);

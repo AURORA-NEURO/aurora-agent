@@ -68,6 +68,25 @@ export type {
   AutonomousSelectionLifecycleSnapshot,
   AutonomousSelectionLifecycleStore,
 } from "./autonomous-selection-lifecycle.js";
+export {
+  AUTONOMOUS_DOMAIN_POLICY_SCHEMA,
+  AUTONOMOUS_DOMAIN_POLICY_ADMISSION_SCHEMA,
+  AUTONOMOUS_DOMAIN_POLICY_VERSION,
+  autonomousDomainPolicy,
+  builtinAutonomousDomainPolicies,
+  evaluateAutonomousDomainPolicy,
+} from "./autonomous-domain-policy.js";
+export type {
+  AutonomousDomainPolicy,
+  AutonomousDomainPolicyOverrides,
+  AutonomousDomainPolicyAdmissionInput,
+  AutonomousDomainPolicyAdmissionDecision,
+  AutonomousDomainPolicyAdmission,
+  AutonomousDomainPolicyResponseMode,
+  AutonomousDomainPolicyEvidenceMode,
+  AutonomousDomainPolicyEffectMode,
+  AutonomousDomainPolicyLearningMode,
+} from "./autonomous-domain-policy.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,

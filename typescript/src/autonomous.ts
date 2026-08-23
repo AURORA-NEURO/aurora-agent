@@ -159,6 +159,13 @@ import {
 } from "./autonomous-domain-response.js";
 import type { AutonomousDomainResponseContract, AutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
 import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson, digestJsonSync } from "./tooling.js";
+import {
+  autonomousDomainPolicy,
+  evaluateAutonomousDomainPolicy,
+  type AutonomousDomainPolicy,
+  type AutonomousDomainPolicyAdmission,
+  type AutonomousDomainPolicyOverrides,
+} from "./autonomous-domain-policy.js";
 import type {
   BrainBanditArm,
   BrainBanditContext,
@@ -486,6 +493,8 @@ export interface AutonomousPlan extends JsonObject {
   execution: "not_started";
   /** Optional digest of the structured domain response contract bound to this plan. */
   response_contract_digest?: string;
+  /** Digest of the provider-free domain policy bound to this plan. */
+  domain_policy_digest: string;
   plan_digest: string;
   does_not_claim: string[];
 }
@@ -655,6 +664,8 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   selection_context: BrainModelSelectionContext;
   learning_context_digest: string;
   required_capabilities: string[];
+  /** Provider-free bounded limits and approval posture for this domain. */
+  domain_policy: AutonomousDomainPolicy;
   prompt: AutonomousPromptResult;
   plan: AutonomousPlan;
   /** Present only when the caller explicitly enables the reviewed structured domain response. */
@@ -2478,6 +2489,7 @@ async function buildTaskBlueprint(
   if (typeof options.routeDigest !== "string" || !/^[0-9a-f]{64}$/.test(options.routeDigest)) throw new ArgumentError("autonomous task blueprint routeDigest must be a lowercase SHA-256 digest");
   const activeToolNames = [...new Set(options.activeToolNames ?? [])];
   const selectedToolNames = [...new Set(options.selectedToolNames ?? activeToolNames)];
+  const domainPolicy = autonomousDomainPolicy(profile.domain);
   const pack = await buildDomainPack(profile);
   const evidencePlan = await buildAutonomousEvidencePlan([profile.workflow]);
   const responseContract = options.structuredDomainResponse === true
@@ -2485,7 +2497,7 @@ async function buildTaskBlueprint(
     : null;
   const prompt = await assembleAutonomousPrompt(profile, taskText, {
     context: options.context,
-    maxInputTokens: options.maxInputTokens,
+    maxInputTokens: options.maxInputTokens ?? domainPolicy.max_input_tokens,
     stageIds: profile.workflow.stages.map((stage) => stage.id),
     evidencePlan,
     outputContract: responseContract?.prompt_contract,
@@ -2517,6 +2529,7 @@ async function buildTaskBlueprint(
     selection_context: selectionContext,
     learning_context_digest: learningContextDigest,
     required_capabilities: profile.required_model_capabilities,
+    domain_policy: domainPolicy,
     prompt,
     plan,
     ...(responseContract ? { response_contract: responseContract } : {}),
@@ -3162,6 +3175,7 @@ export async function compileAutonomousPlan(
     requires_approval: true,
     execution: "not_started" as const,
     ...(options.responseContractDigest === undefined ? {} : { response_contract_digest: boundedModelDigest("autonomous plan response contract digest", options.responseContractDigest) }),
+    domain_policy_digest: autonomousDomainPolicy(profile.domain).policy_digest,
     does_not_claim: ["the plan has not executed any provider or tool", "tool registration is not authorization", "a provider response is not external-effect evidence"],
   };
   return { ...descriptor, plan_digest: await digestJson(descriptor) };
@@ -4851,6 +4865,19 @@ export class AutonomousAgent {
       return { ...descriptor, route_digest: await digestJson(descriptor) };
     }
     return routeAutonomousTask(taskText, options);
+  }
+
+  /** Resolve the bounded policy for a domain without provider, tool, or source activity. */
+  domainPolicy(domain: AutonomousDomainName, overrides: AutonomousDomainPolicyOverrides = {}): AutonomousDomainPolicy {
+    return autonomousDomainPolicy(domain, overrides);
+  }
+
+  /**
+   * Explain whether a planned invocation has cleared the provider-free domain gates.
+   * `admitted` is still descriptive; provider/effect authorization remains caller-owned.
+   */
+  admitDomainPolicy(domain: AutonomousDomainName, input: Parameters<typeof evaluateAutonomousDomainPolicy>[1] = {}): AutonomousDomainPolicyAdmission {
+    return evaluateAutonomousDomainPolicy(this.domainPolicy(domain), input);
   }
 
   /**

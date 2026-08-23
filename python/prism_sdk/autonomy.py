@@ -41,6 +41,12 @@ from .autonomous_evidence_runtime import (
     AutonomousEvidenceRuntimeJournal,
     AutonomousEvidenceRuntimeResult,
 )
+from .autonomous_domain_policy import (
+    AutonomousDomainPolicy,
+    AutonomousDomainPolicyAdmission,
+    autonomous_domain_policy,
+    evaluate_autonomous_domain_policy,
+)
 from .brain import (
     AutonomousBrain,
     BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
@@ -3107,6 +3113,8 @@ class AutonomousTaskBlueprint:
     prompt: Mapping[str, Any]
     plan: Mapping[str, Any]
     required_capabilities: tuple[str, ...]
+    # Provider-free bounded limits and approval posture for this domain.
+    domain_policy: AutonomousDomainPolicy | None = None
 
     def evidence_plan(self) -> AutonomousEvidencePlan:
         """Return the deterministic evidence contract for this blueprint's workflow."""
@@ -3148,6 +3156,7 @@ class AutonomousTaskBlueprint:
             "evidence_plan": self.evidence_plan().to_dict(),
             "selection_context": dict(self.selection_context),
             "required_capabilities": list(self.required_capabilities),
+            "domain_policy": (self.domain_policy or autonomous_domain_policy(self.profile.domain)).to_dict(),
             "prompt": prompt_public,
             "plan": plan_public,
             "execution": "not_started",
@@ -6297,6 +6306,7 @@ class AutonomousPromptBuilder:
             raise BrainRunError(f"memory_episodes may contain at most {MAX_AUTONOMY_MEMORY_ITEMS} entries")
         safe_memory = [_safe_json("memory episode", episode, maximum=200_000) for episode in memory_episodes]
         evidence_plan = build_autonomous_evidence_plan((workflow,))
+        domain_policy = autonomous_domain_policy(profile.domain)
         context: list[dict[str, Any]] = [
             {
                 "id": "autonomy-domain-policy",
@@ -6311,6 +6321,7 @@ class AutonomousPromptBuilder:
                         "domain_capabilities": list(profile.capabilities),
                         "required_model_capabilities": list(profile.required_model_capabilities),
                         "guardrails": list(profile.guardrails),
+                        "domain_execution_policy": domain_policy.to_dict(),
                         "does_not_authorize": [
                             "provider invocation without caller approval",
                             "tools or side effects outside the caller policy",
@@ -6535,6 +6546,7 @@ class AutonomousPlanBuilder:
         domain_pack: AutonomousDomainPack | None = None,
     ) -> dict[str, Any]:
         workflow = workflow or _builtin_workflow_strategy(spec.domain)
+        domain_policy = autonomous_domain_policy(spec.domain)
         if domain_pack is not None:
             if not isinstance(domain_pack, AutonomousDomainPack):
                 raise BrainRunError("domain_pack must be an AutonomousDomainPack or None")
@@ -6562,6 +6574,14 @@ class AutonomousPlanBuilder:
                         "domain_pack_evidence_requirements": []
                         if domain_pack is None
                         else list(domain_pack.evidence_requirements),
+                        "domain_policy_digest": domain_policy.policy_digest,
+                        "domain_policy_limits": {
+                            "max_input_tokens": domain_policy.max_input_tokens,
+                            "max_output_tokens": domain_policy.max_output_tokens,
+                            "max_provider_attempts": domain_policy.max_provider_attempts,
+                            "max_tool_turns": domain_policy.max_tool_turns,
+                            "max_total_cost_units": domain_policy.max_total_cost_units,
+                        },
                     },
                     "depends_on": [],
                     "effect": "provider_call",
@@ -6569,7 +6589,8 @@ class AutonomousPlanBuilder:
                 }
             ],
             "allowed_tools": ["provider.invoke"],
-            "max_cost": max(1, spec.max_steps),
+            "max_cost": min(max(1, spec.max_steps), domain_policy.max_total_cost_units),
+            "domain_policy_digest": domain_policy.policy_digest,
             "require_approval_for_effects": True,
         }
 
@@ -6954,6 +6975,20 @@ class AutonomousTaskOrchestrator:
         """Route an unclassified task without contacting a provider or executing a tool."""
 
         return self.router.route(task, **kwargs)
+
+    def domain_policy(self, domain: str, overrides: Mapping[str, Any] | None = None) -> AutonomousDomainPolicy:
+        """Resolve one domain's bounded provider-free execution policy."""
+
+        return autonomous_domain_policy(domain, overrides)
+
+    def admit_domain_policy(
+        self,
+        domain: str,
+        **kwargs: Any,
+    ) -> AutonomousDomainPolicyAdmission:
+        """Explain pre-provider policy gates without contacting a provider or source."""
+
+        return evaluate_autonomous_domain_policy(self.domain_policy(domain), **kwargs)
 
     def route_with_provider(
         self,
@@ -7903,6 +7938,7 @@ class AutonomousTaskOrchestrator:
             prompt=prompt,
             plan=plan,
             required_capabilities=required,
+            domain_policy=autonomous_domain_policy(spec.domain),
         )
 
     def evidence_plan(
@@ -8800,6 +8836,7 @@ class AutonomousTaskOrchestrator:
                 prompt=prompt,
                 plan=blueprint.plan,
                 required_capabilities=blueprint.required_capabilities,
+                domain_policy=blueprint.domain_policy,
             )
         else:
             replacement = blueprint

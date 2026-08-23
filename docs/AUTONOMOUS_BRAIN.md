@@ -30,6 +30,40 @@ flowchart LR
     BU --> MS
 ```
 
+## Domain execution policies
+
+Every built-in domain now has a versioned, provider-free execution policy in both SDKs. The
+policy is bound into generated task blueprints and plans, so model selection and invocation can
+share explicit limits instead of inheriting one generic budget. It covers input/output tokens,
+provider attempts, tool turns, aggregate cost, route and selection confidence floors, structured
+response requirements, evidence posture, evaluator requirements, effect approval posture, and
+learning mode. The twelve policies cover coding, browser, data, science, biomedical,
+neuroscience, operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation.
+
+Use admission as a provider-free preflight. `admitted` means the metadata gates are clear, not
+that the SDK has authorized a provider or external effect; `review_required` and `blocked` retain
+stable reason codes for UI, queue, and operator decisions:
+
+```typescript
+const policy = autonomousDomainPolicy("biomedical");
+const admission = evaluateAutonomousDomainPolicy(policy, {
+  route_confidence: 1,
+  selection_confidence: 1,
+  selection_margin: 1,
+  structured_response: true,
+  evidence_ready: true,
+  evaluator_configured: true,
+  plan_accepted: true,
+});
+// admission.decision === "admitted"
+// policy.effect_mode === "forbidden" still blocks effectful requests.
+```
+
+The Python API exposes the same contract through `autonomous_domain_policy(...)`,
+`evaluate_autonomous_domain_policy(...)`, and `AutonomousTaskOrchestrator.admit_domain_policy(...)`.
+Policy metadata is value-only and digest-addressed; prompts, credentials, evidence values, and
+provider responses remain transient caller-owned data.
+
 ## Credential lifecycle
 
 Applications collect provider keys themselves. The SDK supports four caller-owned entry points:

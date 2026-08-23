@@ -1631,7 +1631,9 @@ test("cross-domain fan-out uses bounded concurrency and preserves deterministic 
   });
   const observedParallelism = await Promise.race([
     startedGate.then(() => true),
-    new Promise((resolve) => setTimeout(() => resolve(false), 250)),
+    // The full control-plane suite can be CPU-heavy; keep this timeout bounded
+    // while allowing the fan-out task to start under normal CI contention.
+    new Promise((resolve) => setTimeout(() => resolve(false), 5_000)),
   ]);
   release();
   const result = await runPromise;

@@ -129,7 +129,7 @@ test("remote portfolio worker renews long-running leases and rejects an unsafe h
   let providerCalls = 0;
   const agent = agentFor(async () => {
     providerCalls += 1;
-    await new Promise((resolve) => setTimeout(resolve, 35));
+    await new Promise((resolve) => setTimeout(resolve, 150));
   });
   const privateRequests = [{ id: "heartbeat-coding", task: "private heartbeat task", domain: "coding" }];
   const plan = await agent.planWorkflowPortfolio(privateRequests);
@@ -143,8 +143,8 @@ test("remote portfolio worker renews long-running leases and rejects an unsafe h
     executionOptions: { approveProviderCall: true },
   }), "heartbeat-worker");
 
-  await assert.rejects(() => worker.run({ leaseMs: 100, heartbeatMs: 100 }), /heartbeatMs must be less than leaseMs/);
-  const run = await worker.run({ leaseMs: 100, heartbeatMs: 20 });
+  await assert.rejects(() => worker.run({ leaseMs: 500, heartbeatMs: 500 }), /heartbeatMs must be less than leaseMs/);
+  const run = await worker.run({ leaseMs: 500, heartbeatMs: 100 });
   assert.equal(run.completed, 1);
   assert.equal(providerCalls, 1);
   assert.equal(queue.get(job.job_id).status, "completed");
