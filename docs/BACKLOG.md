@@ -1220,3 +1220,12 @@ observations can be snapshotted as strict canonical JSON, restored into a fresh 
 store, and CAS-fenced before they influence model selection across all twelve domains. The
 snapshot retains only bounded telemetry and digests; live credentials, provider responses, prompts,
 and evidence remain caller-owned.
+
+The Python learning ledger now has the same cross-process handoff discipline. JSONL and SQLite
+ledgers export one portable canonical snapshot containing value-only evaluator outcomes, pending
+episode metadata, bandit state, and replay metadata. Every row is validated and individually
+digested; the snapshot binds the ordered record set with a head digest and outer snapshot digest.
+The coordinator supports caller-owned text stores and transactional compare-and-swap writes, and
+restore is atomic for both local ledger implementations. All twelve autonomous domains are covered
+by restart and HTTP round-trip tests, with malformed envelopes, non-canonical rows, secret-shaped
+fields, oversized replay metadata, tampered row/snapshot digests, and stale writers failing closed.

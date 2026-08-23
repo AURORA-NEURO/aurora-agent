@@ -107,6 +107,7 @@ MAX_BRAIN_LEARNING_EPISODE_BYTES = 64_000
 MAX_BRAIN_LEARNING_TRAJECTORY_STEPS = 32
 MAX_BRAIN_LEARNING_TRAJECTORY_BYTES = 256_000
 MAX_BRAIN_CREDITED_OUTCOMES = 4096
+MAX_BRAIN_LEARNING_SNAPSHOT_BYTES = 32_000_000
 MAX_MODEL_SELECTION_AUDIT_RANKING = 64
 MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING = 512
 MAX_MODEL_SELECTION_AUDIT_REASON_BYTES = 512
@@ -117,6 +118,7 @@ AUTONOMOUS_EVALUATOR_MESH_SCHEMA = BRAIN_EVALUATOR_MESH_SCHEMA
 BRAIN_LEARNING_EPISODE_SCHEMA = "bioprism-brain-learning-episode/0.1"
 BRAIN_LEARNING_TRAJECTORY_SCHEMA = "bioprism-brain-learning-trajectory/0.1"
 BRAIN_CONTEXT_LEARNING_STATE_SCHEMA = "bioprism-brain-context-learning-state/0.1"
+BRAIN_LEARNING_SNAPSHOT_SCHEMA = "bioprism-brain-learning-snapshot/0.1"
 _REPLAN_SECRET_PATTERNS = (
     re.compile(
         r"(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|authorization|secret)\b\s*[:=]\s*\S+"
@@ -487,6 +489,47 @@ class BrainLearningLedger:
         with self._lock:
             return self._read_records_locked()
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return a verified, portable projection of the value-only learning ledger.
+
+        The JSONL file is intentionally an append target, not a cross-process transport format.
+        A snapshot binds every record to a digest and includes only evaluator evidence, bandit
+        state, episode identity, and replay metadata; provider prompts, responses, credentials,
+        and tool arguments are never added by this boundary.
+        """
+
+        with self._lock:
+            rows = self._read_records_locked()
+        return _build_learning_snapshot(rows, max_records=self.max_records, max_bytes=self.max_bytes)
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace the JSONL ledger with a strictly validated snapshot."""
+
+        normalized = _normalize_learning_snapshot(
+            snapshot,
+            max_records=self.max_records,
+            max_bytes=self.max_bytes,
+        )
+        lines = b"".join(
+            _canonical_learning_json(row).encode("utf-8") + b"\n"
+            for row in normalized["records"]
+        )
+        temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+        with self._lock:
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with temporary.open("wb") as handle:
+                    handle.write(lines)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, self.path)
+            except (OSError, ValueError) as error:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise BrainRunError("learning ledger snapshot could not be restored") from error
+
     def pending_episodes(self, *, limit: int = 128) -> list[BrainLearningEpisode]:
         """Return unsettled delayed-learning episodes without loading provider content."""
 
@@ -634,9 +677,10 @@ class BrainLearningLedger:
                     row = json.loads(raw_line.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError) as error:
                     raise BrainRunError("learning ledger contains invalid JSON") from error
-                if not isinstance(row, Mapping) or row.get("schema") != self._SCHEMA:
-                    raise BrainRunError("learning ledger contains an invalid schema")
-                rows.append(dict(row))
+                validated = _validate_learning_ledger_row(row)
+                if raw_line.rstrip(b"\r\n") != _canonical_learning_json(validated).encode("utf-8"):
+                    raise BrainRunError("learning ledger contains non-canonical JSON")
+                rows.append(validated)
         return rows
 
     @classmethod
@@ -654,6 +698,281 @@ class BrainLearningLedger:
         elif isinstance(value, (list, tuple)):
             for child in value:
                 cls._assert_safe(child)
+
+
+def _canonical_learning_json(value: Any) -> str:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as error:
+        raise BrainRunError("learning ledger value must be canonical JSON") from error
+
+
+def _validate_learning_ledger_row(value: Any) -> dict[str, Any]:
+    """Validate one durable row before it can influence a future bandit decision."""
+
+    if not isinstance(value, Mapping) or set(value) != {"schema", "record"}:
+        raise BrainRunError("learning ledger contains an invalid record envelope")
+    if value.get("schema") != BrainLearningLedger._SCHEMA:
+        raise BrainRunError("learning ledger contains an invalid schema")
+    record = value.get("record")
+    if not isinstance(record, Mapping):
+        raise BrainRunError("learning ledger record is missing its projection")
+    BrainLearningLedger._assert_safe(value)
+    if record.get("record_type") == "pending_episode":
+        episode = record.get("episode")
+        if not isinstance(episode, Mapping):
+            raise BrainRunError("learning ledger pending episode is malformed")
+        BrainLearningEpisode.from_mapping(episode)
+    elif not isinstance(record.get("learning_evidence"), Mapping) or not isinstance(record.get("next_state"), Mapping):
+        raise BrainRunError("learning ledger outcome record is malformed")
+    replay = record.get("replay")
+    if replay is not None:
+        if not isinstance(replay, Mapping):
+            raise BrainRunError("learning ledger replay is malformed")
+        if len(_canonical_learning_json(dict(replay)).encode("utf-8")) > MAX_BRAIN_REPLAY_BYTES:
+            raise BrainRunError("learning ledger replay exceeds the bounded size")
+    context_digest = record.get("context_digest")
+    if context_digest is not None and not _valid_digest(context_digest):
+        raise BrainRunError("learning ledger context_digest is invalid")
+    normalized = {
+        "schema": BrainLearningLedger._SCHEMA,
+        "record": json.loads(_canonical_learning_json(dict(record))),
+    }
+    # Canonicalization also rejects NaN, non-JSON values, and values that could not survive a
+    # portable snapshot round trip.
+    _canonical_learning_json(normalized)
+    return normalized
+
+
+def _build_learning_snapshot(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    max_records: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    if len(rows) > max_records:
+        raise BrainRunError("learning ledger snapshot exceeds max_records")
+    normalized_rows = [_validate_learning_ledger_row(row) for row in rows]
+    encoded_rows = [_canonical_learning_json(row).encode("utf-8") for row in normalized_rows]
+    if sum(len(row) + 1 for row in encoded_rows) > max_bytes:
+        raise BrainRunError("learning ledger snapshot exceeds max_bytes")
+    record_digests = [hashlib.sha256(row).hexdigest() for row in encoded_rows]
+    descriptor = {
+        "schema": BRAIN_LEARNING_SNAPSHOT_SCHEMA,
+        "records": normalized_rows,
+        "record_digests": record_digests,
+        "head_digest": record_digests[-1] if record_digests else "",
+        "retention": "value_only_evaluator_bandit_and_replay_metadata",
+        "secret_material": "never_returned",
+    }
+    snapshot = {**descriptor, "snapshot_digest": _json_digest(descriptor)}
+    if len(_canonical_learning_json(snapshot).encode("utf-8")) > min(max_bytes, MAX_BRAIN_LEARNING_SNAPSHOT_BYTES):
+        raise BrainRunError("learning ledger snapshot exceeds its byte capacity")
+    return snapshot
+
+
+def _normalize_learning_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_records: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    expected_keys = {
+        "schema",
+        "records",
+        "record_digests",
+        "head_digest",
+        "retention",
+        "secret_material",
+        "snapshot_digest",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise BrainRunError("learning ledger snapshot is malformed")
+    if value.get("schema") != BRAIN_LEARNING_SNAPSHOT_SCHEMA:
+        raise BrainRunError("learning ledger snapshot schema is unsupported")
+    if (
+        value.get("retention") != "value_only_evaluator_bandit_and_replay_metadata"
+        or value.get("secret_material") != "never_returned"
+    ):
+        raise BrainRunError("learning ledger snapshot retention is invalid")
+    raw_rows = value.get("records")
+    raw_digests = value.get("record_digests")
+    if not isinstance(raw_rows, Sequence) or isinstance(raw_rows, (str, bytes, bytearray)) or len(raw_rows) > max_records:
+        raise BrainRunError("learning ledger snapshot record count is outside its bound")
+    if not isinstance(raw_digests, Sequence) or isinstance(raw_digests, (str, bytes, bytearray)) or len(raw_digests) != len(raw_rows):
+        raise BrainRunError("learning ledger snapshot record digest count is invalid")
+    rows: list[dict[str, Any]] = []
+    digests: list[str] = []
+    total_bytes = 0
+    for raw_row, raw_digest in zip(raw_rows, raw_digests):
+        row = _validate_learning_ledger_row(raw_row)
+        encoded = _canonical_learning_json(row).encode("utf-8")
+        total_bytes += len(encoded) + 1
+        if total_bytes > max_bytes:
+            raise BrainRunError("learning ledger snapshot exceeds max_bytes")
+        if not isinstance(raw_digest, str) or not _valid_digest(raw_digest) or hashlib.sha256(encoded).hexdigest() != raw_digest:
+            raise BrainRunError("learning ledger snapshot record digest does not match its row")
+        rows.append(row)
+        digests.append(raw_digest)
+    head_digest = value.get("head_digest")
+    expected_head = digests[-1] if digests else ""
+    if not isinstance(head_digest, str) or (head_digest and not _valid_digest(head_digest)) or head_digest != expected_head:
+        raise BrainRunError("learning ledger snapshot head_digest is invalid")
+    descriptor = {
+        "schema": BRAIN_LEARNING_SNAPSHOT_SCHEMA,
+        "records": rows,
+        "record_digests": digests,
+        "head_digest": head_digest,
+        "retention": "value_only_evaluator_bandit_and_replay_metadata",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = value.get("snapshot_digest")
+    if not isinstance(snapshot_digest, str) or not _valid_digest(snapshot_digest) or _json_digest(descriptor) != snapshot_digest:
+        raise BrainRunError("learning ledger snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if len(_canonical_learning_json(normalized).encode("utf-8")) > min(max_bytes, MAX_BRAIN_LEARNING_SNAPSHOT_BYTES):
+        raise BrainRunError("learning ledger snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_brain_learning_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public strict validator for value-only evaluator and bandit snapshots."""
+
+    return _normalize_learning_snapshot(
+        value,
+        max_records=4096,
+        max_bytes=MAX_BRAIN_LEARNING_SNAPSHOT_BYTES,
+    )
+
+
+class BrainLearningSnapshotTextStore(Protocol):
+    """Portable text persistence for evaluator outcomes and bandit state."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalBrainLearningSnapshotTextStore(BrainLearningSnapshotTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonBrainLearningSnapshotPersistence:
+    """Canonical JSON learning persistence over a caller-owned text store."""
+
+    def __init__(
+        self,
+        store: BrainLearningSnapshotTextStore,
+        *,
+        max_bytes: int = MAX_BRAIN_LEARNING_SNAPSHOT_BYTES,
+    ) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise BrainRunError("learning JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_BRAIN_LEARNING_SNAPSHOT_BYTES:
+            raise BrainRunError("learning JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("learning JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise BrainRunError("learning JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise BrainRunError("learning JSON snapshot must be an object")
+        return _normalize_learning_snapshot(
+            raw,
+            max_records=4096,
+            max_bytes=self.max_bytes,
+        )
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_learning_snapshot(
+            snapshot,
+            max_records=4096,
+            max_bytes=self.max_bytes,
+        )
+        encoded = _canonical_learning_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("learning JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonBrainLearningSnapshotPersistence(JsonBrainLearningSnapshotPersistence):
+    """Canonical JSON learning persistence with stale-writer fencing."""
+
+    def __init__(
+        self,
+        store: TransactionalBrainLearningSnapshotTextStore,
+        *,
+        max_bytes: int = MAX_BRAIN_LEARNING_SNAPSHOT_BYTES,
+    ) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise BrainRunError("transactional learning persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and not _valid_digest(expected_snapshot_digest):
+            raise BrainRunError("learning expected snapshot digest is invalid")
+        normalized = _normalize_learning_snapshot(
+            snapshot,
+            max_records=4096,
+            max_bytes=self.max_bytes,
+        )
+        encoded = _canonical_learning_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("learning JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class BrainLearningPersistenceCoordinator:
+    """Flush and restore the bandit/evaluator ledger through caller-owned storage."""
+
+    def __init__(self, store: BrainLearningLedger, persistence: Any) -> None:
+        if not isinstance(store, BrainLearningLedger):
+            raise BrainRunError("learning persistence requires a BrainLearningLedger")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise BrainRunError("learning persistence adapter is malformed")
+        self.store = store
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = _normalize_learning_snapshot(
+            raw,
+            max_records=self.store.max_records,
+            max_bytes=self.store.max_bytes,
+        )
+        self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.store.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise BrainRunError("learning persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
 
 
 class BrainWorkspace(Protocol):

@@ -6,6 +6,8 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    BrainLearningLedger,
+    BrainLearningPersistenceCoordinator,
     BrainJobPersistenceCoordinator,
     BrainJobStore,
     BrainModelHealthPersistenceCoordinator,
@@ -20,6 +22,7 @@ from prism_sdk import (
     AutonomousHttpSnapshotTextStore,
     InMemoryAutonomousDecisionCycleStateStore,
     TransactionalJsonAutonomousExecutionSnapshotPersistence,
+    TransactionalJsonBrainLearningSnapshotPersistence,
     TransactionalJsonBrainJobSnapshotPersistence,
     TransactionalJsonBrainModelHealthSnapshotPersistence,
     TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
@@ -333,3 +336,45 @@ def test_http_snapshot_store_plugs_into_model_health_restart_for_every_domain(tm
         assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
         assert restored.health()[0].attempts == len(AUTONOMOUS_DOMAINS)
         assert restored.verify_integrity()["verified"] is True
+
+
+def test_http_snapshot_store_plugs_into_learning_restart_for_every_domain(tmp_path) -> None:
+    remote: str | None = None
+
+    def opener(request, _timeout):
+        nonlocal remote
+        if request.get_method() == "GET":
+            return _Response(remote.encode("utf-8")) if remote is not None else _Response(status=404)
+        current = None if remote is None else json.loads(remote)["snapshot_digest"]
+        expected = _header(request, "If-Match")
+        if _header(request, "If-None-Match") == "*" and current is not None:
+            return _Response(status=412)
+        if expected is not None and current != expected.strip('"'):
+            return _Response(status=412)
+        remote = request.data.decode("utf-8")
+        return _Response(status=204)
+
+    text_store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "all-domains/learning-ledger",
+        allowed_hosts=("state.test",),
+        opener=opener,
+    )
+    persistence = TransactionalJsonBrainLearningSnapshotPersistence(text_store)
+    source = BrainLearningLedger(tmp_path / "source-learning.jsonl")
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS, start=1):
+        source.append(
+            {
+                "learning_evidence": {"evidence_digest": f"{index:064x}", "domain": domain},
+                "next_state": {"schema": "bioprism-brain-bandit/0.1", "generation": index, "arms": []},
+            },
+            context_digest=f"{index:064x}",
+            replay={"run_id": f"http-{domain}", "domain": domain},
+        )
+    flushed = BrainLearningPersistenceCoordinator(source, persistence).flush()
+
+    restored = BrainLearningLedger(tmp_path / "restored-learning.jsonl")
+    restored_snapshot = BrainLearningPersistenceCoordinator(restored, persistence).restore()
+    assert restored_snapshot is not None
+    assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
+    assert {row["domain"] for row in restored.replays(limit=128)} == set(AUTONOMOUS_DOMAINS)

@@ -1354,6 +1354,33 @@ responses, credentials, headers, tool arguments, and raw evidence remain outside
 makes concurrent online reward updates serialize safely while preserving the explicit evaluator as
 the only reward authority.
 
+The learning ledger also has a portable handoff boundary for deployments that keep the durable
+ledger local but move snapshots through an object store, control plane, or HTTP resource. Both
+`BrainLearningLedger` and `SQLiteBrainLearningLedger` implement `snapshot()` and `restore()`;
+`BrainLearningPersistenceCoordinator` combines them with
+`TransactionalJsonBrainLearningSnapshotPersistence` for an atomic compare-and-swap flow:
+
+```python
+from prism_sdk import (
+    BrainLearningLedger,
+    BrainLearningPersistenceCoordinator,
+    TransactionalJsonBrainLearningSnapshotPersistence,
+)
+
+ledger = BrainLearningLedger("state/learning.jsonl")
+persistence = TransactionalJsonBrainLearningSnapshotPersistence(snapshot_text_store)
+coordinator = BrainLearningPersistenceCoordinator(ledger, persistence)
+coordinator.restore()  # validates every record before it can affect selection
+snapshot = coordinator.flush()  # binds row digests, head_digest, and snapshot_digest
+```
+
+The snapshot is canonical JSON with a strict envelope, per-record digests, a head digest, and a
+CAS-ready `snapshot_digest`. Restore rejects schema drift, non-canonical rows, malformed episodes,
+invalid context identities, oversized replay metadata, secret-shaped fields, and tampered records.
+The projection remains value-only evaluator/bandit/replay metadata, so a stale worker cannot
+overwrite a newer reward update and no provider prompt, response, credential, header, tool
+argument, or raw evidence is transported by this boundary.
+
 `ModelCatalogue` stores only deterministic model metadata and rejects credential-shaped metadata
 fields; it is safe to populate before a user has supplied any key. `agent.readiness()` projects
 provider registration, credential readiness, and model eligibility without exposing secret material.

@@ -7,10 +7,13 @@ import threading
 import pytest
 
 from prism_sdk import (
+    AUTONOMOUS_DOMAINS,
     BRAIN_LEARNING_EPISODE_SCHEMA,
+    BrainLearningPersistenceCoordinator,
     BrainLearningLedger,
     BrainRunError,
     SQLiteBrainLearningLedger,
+    TransactionalJsonBrainLearningSnapshotPersistence,
 )
 
 
@@ -47,6 +50,74 @@ def _episode(episode_id: str = "episode-1") -> dict[str, object]:
         "evidence_digest": None,
         "status": "pending",
     }
+
+
+class _CasTextStore:
+    def __init__(self) -> None:
+        self.value: str | None = None
+
+    def read(self) -> str | None:
+        return self.value
+
+    def write(self, value: str) -> None:
+        self.value = value
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+        if observed != expected_snapshot_digest:
+            return False
+        self.value = value
+        return True
+
+
+def test_learning_snapshot_rehydrates_all_domains_and_fences_stale_writers(tmp_path) -> None:
+    backend = _CasTextStore()
+    persistence = TransactionalJsonBrainLearningSnapshotPersistence(backend)
+    source = BrainLearningLedger(tmp_path / "source-learning.jsonl")
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS, start=1):
+        source.append(
+            _report(index),
+            context_digest=f"{index:064x}",
+            replay={"run_id": f"run-{domain}", "domain": domain},
+        )
+    source_coordinator = BrainLearningPersistenceCoordinator(source, persistence)
+    flushed = source_coordinator.flush()
+    assert flushed["head_digest"] == flushed["record_digests"][-1]
+
+    restored = BrainLearningLedger(tmp_path / "restored-learning.jsonl")
+    restored_coordinator = BrainLearningPersistenceCoordinator(restored, persistence)
+    restored_snapshot = restored_coordinator.restore()
+    assert restored_snapshot is not None
+    assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
+    assert {row["domain"] for row in restored.replays(limit=128)} == set(AUTONOMOUS_DOMAINS)
+    assert restored.snapshot()["snapshot_digest"] == flushed["snapshot_digest"]
+
+    stale = BrainLearningLedger(tmp_path / "stale-learning.jsonl")
+    stale_coordinator = BrainLearningPersistenceCoordinator(stale, persistence)
+    stale_coordinator.restore()
+    source.append(_report(99), context_digest="f" * 64, replay={"run_id": "new-run", "domain": "engineering"})
+    source_coordinator.flush()
+    with pytest.raises(BrainRunError, match="compare-and-swap conflict"):
+        stale_coordinator.flush()
+
+    tampered = json.loads(backend.value)
+    tampered["records"][0]["record"]["replay"]["domain"] = "tampered"
+    backend.value = json.dumps(tampered)
+    with pytest.raises(BrainRunError, match="digest"):
+        BrainLearningPersistenceCoordinator(BrainLearningLedger(tmp_path / "tampered.jsonl"), persistence).restore()
+
+
+def test_learning_snapshot_transfers_between_jsonl_and_sqlite_without_losing_append_indices(tmp_path) -> None:
+    source = BrainLearningLedger(tmp_path / "portable-source.jsonl")
+    source.append(_report(1), context_digest="a" * 64, replay={"run_id": "portable"})
+    snapshot = source.snapshot()
+    with SQLiteBrainLearningLedger(tmp_path / "portable.sqlite3") as restored:
+        restored.append(_report(99), context_digest="f" * 64)
+        restored.restore(snapshot)
+        assert restored.snapshot()["snapshot_digest"] == snapshot["snapshot_digest"]
+        receipt = restored.append(_report(2), context_digest="b" * 64)
+        assert receipt["record_index"] == 1
+        assert len(restored.records()) == 2
 
 
 def test_sqlite_learning_ledger_is_restart_safe_and_compatible_with_the_parent_interface(tmp_path) -> None:

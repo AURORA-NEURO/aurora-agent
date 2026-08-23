@@ -25,12 +25,14 @@ import time
 from typing import Any, Iterator, Mapping
 
 from .brain import (
-    BRAIN_LEARNING_EPISODE_SCHEMA,
     MAX_BRAIN_LEARNING_EPISODE_BYTES,
     MAX_BRAIN_REPLAY_BYTES,
     BrainLearningEpisode,
     BrainLearningLedger,
     BrainRunError,
+    _build_learning_snapshot,
+    _normalize_learning_snapshot,
+    _validate_learning_ledger_row,
 )
 
 
@@ -314,7 +316,7 @@ class SQLiteBrainLearningLedger(BrainLearningLedger):
         record = value.get("record")
         if not isinstance(record, Mapping):
             raise BrainRunError("SQLite learning ledger record is missing its projection")
-        return dict(value)
+        return _validate_learning_ledger_row(value)
 
     def records(self) -> list[dict[str, Any]]:
         with self._sqlite_lock:
@@ -329,6 +331,61 @@ class SQLiteBrainLearningLedger(BrainLearningLedger):
             if len(rows) > self.max_records:
                 raise BrainRunError("SQLite learning ledger exceeds max_records")
             return [self._decode_verified_row(row) for row in rows]
+
+    def snapshot(self) -> dict[str, Any]:
+        """Export the same portable projection as the JSONL ledger."""
+
+        return _build_learning_snapshot(
+            self.records(),
+            max_records=self.max_records,
+            max_bytes=self.max_bytes,
+        )
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace SQLite rows while preserving portable record indices."""
+
+        normalized = _normalize_learning_snapshot(
+            snapshot,
+            max_records=self.max_records,
+            max_bytes=self.max_bytes,
+        )
+        with self._transaction() as connection:
+            try:
+                connection.execute("DELETE FROM brain_learning_records")
+                # The public ledger contract exposes zero-based contiguous record indices. Reset
+                # SQLite's AUTOINCREMENT sequence so a restore followed by a new append preserves
+                # that contract even when replacing a previously longer database.
+                connection.execute(
+                    "DELETE FROM sqlite_sequence WHERE name = 'brain_learning_records'"
+                )
+                for index, (row, expected_digest) in enumerate(
+                    zip(normalized["records"], normalized["record_digests"]),
+                    start=1,
+                ):
+                    encoded_text, _encoded_bytes, digest = self._encode_record(row)
+                    if digest != expected_digest:
+                        raise BrainRunError("SQLite learning snapshot record digest changed during restore")
+                    record = row["record"]
+                    record_type = "pending_episode" if record.get("record_type") == "pending_episode" else "learning_outcome"
+                    episode = record.get("episode")
+                    episode_id = episode.get("episode_id") if isinstance(episode, Mapping) else None
+                    context_digest = record.get("context_digest")
+                    connection.execute(
+                        "INSERT INTO brain_learning_records "
+                        "(record_index, record_digest, record_json, context_digest, record_type, episode_id, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            index,
+                            digest,
+                            encoded_text,
+                            context_digest,
+                            record_type,
+                            episode_id,
+                            float(self._clock()),
+                        ),
+                    )
+            except sqlite3.Error as error:
+                raise BrainRunError("SQLite learning snapshot could not be restored") from error
 
     def close(self) -> None:
         with self._sqlite_lock:
