@@ -1795,6 +1795,17 @@ tasks, candidates, selector rankings, or reward values. Both SDK promotion tests
 CI steps in addition to the full contract suites, making learner activation evidence a visible
 build boundary rather than an implicit caller convention.
 
+The promotion result becomes operational through the digest-only lifecycle. Attach
+`AutonomousSelectionPromotionLifecycle` (or its Python equivalent) to the agent, apply the
+admitted report, and pass `requirePromotedSelection: true` / `require_promoted_selection=True`
+to readiness. Readiness then projects the lifecycle and the matching promotion digest into every
+domain row. When a lifecycle is attached to a learner, selection remains an explicit abstention
+until an admitted report is applied; a held report or an operator rollback removes the active
+promotion digest before another learned selection can influence invocation. The lifecycle can be
+persisted and restored with revision and digest checks, but it never persists bandit parameters,
+task text, provider values, credentials, or evaluator payloads. A new report must be applied after
+drift, so stale evidence cannot silently reactivate an older learner.
+
 This is a policy-evaluation boundary, not a source of ground truth: the caller owns reward
 construction and must define what evaluator evidence means. It never invokes a provider, reads
 or requests a credential, mutates learner state, or treats selection confidence as answer

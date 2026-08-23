@@ -357,6 +357,16 @@ from .autonomous_selection_promotion import (
     evaluate_autonomous_selection_promotion,
     validate_autonomous_selection_promotion_report,
 )
+from .autonomous_selection_lifecycle import (
+    AUTONOMOUS_SELECTION_LIFECYCLE_SCHEMA,
+    AUTONOMOUS_SELECTION_LIFECYCLE_STORE_SCHEMA,
+    MAX_AUTONOMOUS_SELECTION_LIFECYCLE_REASON_BYTES,
+    MAX_AUTONOMOUS_SELECTION_LIFECYCLE_BYTES,
+    MAX_AUTONOMOUS_SELECTION_LIFECYCLE_GENERATION,
+    AutonomousSelectionLifecycleState,
+    AutonomousSelectionPromotionLifecycle,
+    AutonomousSelectionPromotionLifecycleStore,
+)
 from .autonomous_evidence import (
     AUTONOMOUS_EVIDENCE_PLAN_SCHEMA,
     AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA,
@@ -5261,6 +5271,14 @@ __all__ = [
     "MAX_AUTONOMOUS_SELECTION_PROMOTION_BYTES",
     "evaluate_autonomous_selection_promotion",
     "validate_autonomous_selection_promotion_report",
+    "AUTONOMOUS_SELECTION_LIFECYCLE_SCHEMA",
+    "AUTONOMOUS_SELECTION_LIFECYCLE_STORE_SCHEMA",
+    "MAX_AUTONOMOUS_SELECTION_LIFECYCLE_REASON_BYTES",
+    "MAX_AUTONOMOUS_SELECTION_LIFECYCLE_BYTES",
+    "MAX_AUTONOMOUS_SELECTION_LIFECYCLE_GENERATION",
+    "AutonomousSelectionLifecycleState",
+    "AutonomousSelectionPromotionLifecycle",
+    "AutonomousSelectionPromotionLifecycleStore",
     "AUTONOMOUS_DOMAINS",
     "AUTONOMOUS_EXECUTION_MODES",
     "AUTONOMOUS_LEARNING_MODES",

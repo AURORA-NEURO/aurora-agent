@@ -88,6 +88,11 @@ from .autonomy_onboarding import (
     AutonomousCapabilityActivation,
     AutonomousCapabilityActivationStore,
 )
+from .autonomous_selection_lifecycle import (
+    AutonomousSelectionPromotionLifecycle,
+    AutonomousSelectionPromotionLifecycleStore,
+)
+from .autonomous_selection_promotion import validate_autonomous_selection_promotion_report
 from .autonomy_persistence import (
     AutonomousExecutionController,
     AutonomousExecutionJournal,
@@ -11303,6 +11308,7 @@ class AutonomousAgent:
         credential_provisioner: CredentialProvisioner | None = None,
         connector_registry: AutonomousConnectorRegistry | None = None,
         connector_runtime: AutonomousConnectorRuntime | None = None,
+        selection_promotion: AutonomousSelectionPromotionLifecycle | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -11341,6 +11347,8 @@ class AutonomousAgent:
             raise BrainRunError("connector_registry must be an AutonomousConnectorRegistry or None")
         if connector_runtime is not None and not isinstance(connector_runtime, AutonomousConnectorRuntime):
             raise BrainRunError("connector_runtime must be an AutonomousConnectorRuntime or None")
+        if selection_promotion is not None and not isinstance(selection_promotion, AutonomousSelectionPromotionLifecycle):
+            raise BrainRunError("selection_promotion must be an AutonomousSelectionPromotionLifecycle or None")
         if (
             connector_registry is not None
             and connector_runtime is not None
@@ -11375,6 +11383,7 @@ class AutonomousAgent:
         self.health_ledger = health_ledger
         self.tool_registry = tool_registry
         self.activation = activation or AutonomousCapabilityActivation()
+        self.selection_promotion = selection_promotion
         self.execution_journal = execution_journal
         self.execution_policy = resolved_execution_policy
         self.connector_registry = connector_registry or (
@@ -11997,6 +12006,77 @@ class AutonomousAgent:
         """Return the redacted durable provider/domain activation snapshot."""
 
         return self.activation.to_dict()
+
+    def selection_promotion_state(self) -> dict[str, Any] | None:
+        """Return the digest-only authority state for learned model selection."""
+
+        return None if self.selection_promotion is None else self.selection_promotion.state.to_dict()
+
+    def apply_selection_promotion(self, report: Mapping[str, Any]) -> dict[str, Any]:
+        """Apply replay admission and make learned selection eligible only when admitted."""
+
+        if self.selection_promotion is None:
+            raise BrainRunError("selection promotion lifecycle is not configured")
+        try:
+            return self.selection_promotion.apply(report).to_dict()
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("selection promotion could not be applied") from error
+
+    def rollback_selection_promotion(self, *, reason: str = "selection_promotion_rollback") -> dict[str, Any]:
+        """Immediately stop promoted learned selection while retaining rollback metadata."""
+
+        if self.selection_promotion is None:
+            raise BrainRunError("selection promotion lifecycle is not configured")
+        try:
+            return self.selection_promotion.rollback(reason=reason).to_dict()
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("selection promotion could not be rolled back") from error
+
+    def save_selection_promotion(
+        self,
+        store: AutonomousSelectionPromotionLifecycleStore,
+    ) -> dict[str, Any]:
+        """Persist only digest-bound learned-selection authority metadata."""
+
+        if not isinstance(store, AutonomousSelectionPromotionLifecycleStore):
+            raise BrainRunError(
+                "save_selection_promotion requires an AutonomousSelectionPromotionLifecycleStore"
+            )
+        if self.selection_promotion is None:
+            raise BrainRunError("selection promotion lifecycle is not configured")
+        try:
+            store.save(self.selection_promotion.state)
+            return store.snapshot()
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("selection promotion state could not be persisted") from error
+
+    def restore_selection_promotion(
+        self,
+        store: AutonomousSelectionPromotionLifecycleStore,
+    ) -> dict[str, Any] | None:
+        """Restore learned-selection authority after store digest and revision validation."""
+
+        if not isinstance(store, AutonomousSelectionPromotionLifecycleStore):
+            raise BrainRunError(
+                "restore_selection_promotion requires an AutonomousSelectionPromotionLifecycleStore"
+            )
+        if self.selection_promotion is None:
+            raise BrainRunError("selection promotion lifecycle is not configured")
+        try:
+            state = store.load()
+            return None if state is None else self.selection_promotion.restore(state).to_dict()
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("selection promotion state could not be restored") from error
+
+    def _assert_selection_promotion_admitted(self) -> None:
+        if self.selection_promotion is None:
+            return
+        if not self.selection_promotion.is_admitted():
+            state = self.selection_promotion.state
+            raise BrainRunError(
+                "learned model selection is not admitted: "
+                f"{state.status}; {state.last_reason or 'apply an admitted promotion report'}"
+            )
 
     def save_activation(
         self,
@@ -13680,8 +13760,25 @@ class AutonomousAgent:
         except (ArgumentError, ValueError) as error:
             raise BrainRunError("domain tool receipt evaluation failed") from error
 
-    def readiness(self) -> dict[str, Any]:
-        """Project provider/model readiness without exposing credentials or prompt material."""
+    def readiness(
+        self,
+        *,
+        selection_promotion_report: Mapping[str, Any] | None = None,
+        require_promoted_selection: bool = False,
+    ) -> dict[str, Any]:
+        """Project provider/model readiness plus learned-selection admission without secrets."""
+
+        if not isinstance(require_promoted_selection, bool):
+            raise BrainRunError("require_promoted_selection must be a boolean")
+        promotion_report = None if selection_promotion_report is None else validate_autonomous_selection_promotion_report(selection_promotion_report)
+        promotion_state = None if self.selection_promotion is None else self.selection_promotion.state
+        promotion_admitted = bool(
+            promotion_state is not None
+            and promotion_state.status == "admitted"
+            and promotion_state.active_promotion_digest is not None
+            and (promotion_report is None or promotion_state.active_promotion_digest == promotion_report["promotion_digest"])
+        )
+        promotion_blocks = require_promoted_selection and not promotion_admitted
 
         provider_names = {
             candidate["provider"]
@@ -13701,8 +13798,9 @@ class AutonomousAgent:
             for row in providers
             if isinstance(row, Mapping) and isinstance(row.get("provider"), str)
         }
+        catalogue_candidates = self.catalogue.candidates()
         models: list[dict[str, Any]] = []
-        for candidate in self.catalogue.candidates():
+        for candidate in catalogue_candidates:
             provider = candidate["provider"]
             provider_status = status_by_provider.get(provider, {})
             models.append(
@@ -13733,6 +13831,122 @@ class AutonomousAgent:
                 self.activation.record_provider_statuses(providers)
             except AutonomousActivationError as error:
                 raise BrainRunError("activation provider readiness projection failed") from error
+        domain_rows = self.domains()
+        readiness_states: set[str] = set()
+        for row in domain_rows:
+            domain = row.get("domain") if isinstance(row, Mapping) else None
+            domain_report = None if promotion_report is None else next((item for item in promotion_report["domains"] if item.get("domain") == domain), None)
+            if not isinstance(row, dict):
+                continue
+            profile = self.orchestrator.registry.resolve(domain) if isinstance(domain, str) else None
+            required_capabilities = () if profile is None else tuple(profile.required_model_capabilities)
+            compatible_candidates = [
+                candidate
+                for candidate in catalogue_candidates
+                if candidate.get("enabled", True)
+                and all(capability in candidate.get("capabilities", ()) for capability in required_capabilities)
+            ]
+            eligible_candidates = [
+                candidate
+                for candidate in compatible_candidates
+                if (
+                    status_by_provider.get(candidate["provider"], {}).get("provider_registered", False)
+                    and status_by_provider.get(candidate["provider"], {}).get("ready", False)
+                    and status_by_provider.get(candidate["provider"], {}).get("circuit", "closed") != "open"
+                )
+            ]
+            provider_missing = any(
+                not status_by_provider.get(candidate["provider"], {}).get("provider_registered", False)
+                for candidate in compatible_candidates
+            )
+            credential_missing = any(
+                status_by_provider.get(candidate["provider"], {}).get("provider_registered", False)
+                and not status_by_provider.get(candidate["provider"], {}).get("ready", False)
+                for candidate in compatible_candidates
+            )
+            base_state = (
+                "model_catalogue_required"
+                if not catalogue_candidates
+                else "model_capability_gap"
+                if not compatible_candidates
+                else "ready_for_caller_approval"
+                if eligible_candidates
+                else "credential_required"
+                if credential_missing
+                else "provider_registration_required"
+                if provider_missing
+                else "partial"
+            )
+            state = "partial" if promotion_blocks else base_state
+            readiness_states.add(state)
+            row.update(
+                {
+                    "required_model_capabilities": list(required_capabilities),
+                    "compatible_model_count": len(compatible_candidates),
+                    "eligible_model_count": len(eligible_candidates),
+                    "state": state,
+                }
+            )
+            row_next_actions = set(row.get("next_actions", ()))
+            if state == "model_catalogue_required":
+                row_next_actions.add("register at least one model candidate with the reviewed domain capabilities")
+            elif state == "model_capability_gap":
+                row_next_actions.add(
+                    "register a model declaring: " + ", ".join(required_capabilities)
+                )
+            elif state == "provider_registration_required":
+                row_next_actions.add("register the provider transport before requesting a credential")
+            elif state == "credential_required":
+                row_next_actions.add("collect a short-lived user credential through ProviderOnboarding")
+            if promotion_blocks:
+                row_next_actions.add(
+                    "attach and apply an admitted all-domain selection promotion report before enabling learned selection"
+                    if promotion_state is None
+                    else f"resolve selection promotion lifecycle hold: {promotion_state.last_reason or promotion_state.status}"
+                )
+            row["next_actions"] = sorted(row_next_actions)
+            row["selection_promotion"] = {
+                "decision": "admit" if promotion_admitted else promotion_report["decision"] if promotion_report is not None else "hold",
+                "status": promotion_state.status if promotion_state is not None else "unconfigured",
+                "promotion_digest": promotion_report["promotion_digest"] if promotion_report is not None else None if promotion_state is None else promotion_state.promotion_digest,
+                "active_promotion_digest": None if promotion_state is None else promotion_state.active_promotion_digest,
+                "source_report_digest": promotion_report["source_report_digest"] if promotion_report is not None else None if promotion_state is None else promotion_state.source_report_digest,
+                "domain_decision": None if domain_report is None else domain_report["decision"],
+                "reasons": list(domain_report["reasons"]) if domain_report is not None else [] if promotion_state is None or promotion_state.last_reason is None else [promotion_state.last_reason],
+                "execution": "readiness_projection_only;does_not_mutate_learner_or_invoke_provider",
+                "secret_material": "never_returned",
+            }
+        for row in domain_rows:
+            if isinstance(row, Mapping):
+                next_actions.extend(
+                    action
+                    for action in row.get("next_actions", ())
+                    if isinstance(action, str)
+                )
+        if promotion_blocks:
+            next_actions.append(
+                "attach and apply an admitted all-domain selection promotion report before enabling learned selection"
+                if promotion_state is None
+                else f"resolve selection promotion lifecycle hold: {promotion_state.last_reason or promotion_state.status}"
+            )
+        learning = self.domain_learning_coverage()
+        learning["selection_promotion"] = {
+            "configured": promotion_report is not None or promotion_state is not None,
+            "required": require_promoted_selection,
+            "report_digest": None if promotion_report is None else promotion_report["promotion_digest"],
+            "source_report_digest": promotion_report["source_report_digest"] if promotion_report is not None else None if promotion_state is None else promotion_state.source_report_digest,
+            "lifecycle_status": "unconfigured" if promotion_state is None else promotion_state.status,
+            "active_promotion_digest": None if promotion_state is None else promotion_state.active_promotion_digest,
+            "decision": "admit" if promotion_admitted else promotion_report["decision"] if promotion_report is not None else "hold",
+            "admitted_domain_count": 0 if promotion_report is None else sum(row["decision"] == "admit" for row in promotion_report["domains"]),
+            "held_domain_count": len(AUTONOMOUS_DOMAINS) if promotion_report is None and promotion_blocks else 0 if promotion_report is None else sum(row["decision"] == "hold" for row in promotion_report["domains"]),
+        }
+        if promotion_blocks:
+            readiness_state = "partial"
+        elif len(readiness_states) == 1:
+            readiness_state = next(iter(readiness_states))
+        else:
+            readiness_state = "partial"
         return {
             "schema": "bioprism-autonomous-agent-readiness/0.1",
             "providers": providers,
@@ -13741,9 +13955,9 @@ class AutonomousAgent:
                 tuple(sorted(provider_names))
             ),
             "provider_health": health,
-            "domains": self.domains(),
+            "domains": domain_rows,
             "model_capability_coverage": self.model_capability_coverage(),
-            "domain_learning_coverage": self.domain_learning_coverage(),
+            "domain_learning_coverage": learning,
             "workflows": self.workflows(),
             "domain_packs": self.domain_packs(),
             "domain_pack_registry_digest": self.orchestrator.pack_registry.digest,
@@ -13766,7 +13980,8 @@ class AutonomousAgent:
             "domain_tools": [] if self.tool_registry is None else self.tool_registry.catalogue(),
             "domain_tool_registry_digest": None if self.tool_registry is None else self.tool_registry.digest,
             "activation": self.activation.to_dict(),
-            "next_actions": next_actions,
+            "next_actions": sorted(set(next_actions)),
+            "readiness_state": readiness_state,
             "secret_material": "never_returned",
             "credential_posture": "caller_supplied_opaque_handles",
         }
@@ -13826,6 +14041,7 @@ class AutonomousAgent:
     ) -> AutonomousSemanticRouteResult:
         """Improve provider-free routing with a bounded, caller-approved semantic proposal."""
 
+        self._assert_selection_promotion_admitted()
         candidates = self._resolve_candidates(model_candidates)
         resolved_credentials = self._credential_mapping(credentials)
         resolved_overrides = None if selection_overrides is None else dict(selection_overrides)
@@ -14266,6 +14482,7 @@ class AutonomousAgent:
         execution_id: str | None = None,
         resume_execution: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, CredentialHandle], dict[str, Any], AutonomousExecutionController | None]:
+        self._assert_selection_promotion_admitted()
         resolved_credentials = self._credential_mapping(credentials)
         resolved_candidates = self._resolve_candidates(model_candidates)
         resolved_options = dict(options)

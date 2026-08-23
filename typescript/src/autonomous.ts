@@ -6,6 +6,9 @@ import {
   type AutonomousCapabilityActivationSnapshotStore,
   type AutonomousCapabilityActivationState,
 } from "./autonomous-activation.js";
+import { AutonomousSelectionPromotionLifecycle } from "./autonomous-selection-lifecycle.js";
+import type { AutonomousSelectionLifecycleState, AutonomousSelectionLifecycleStore } from "./autonomous-selection-lifecycle.js";
+import type { AutonomousSelectionPromotionReport } from "./autonomous-selection-promotion.js";
 import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import {
@@ -542,6 +545,7 @@ export interface AutonomousReadinessDomain extends JsonObject {
   learning_context_digest: string;
   evidence_readiness?: JsonObject;
   calibration_admission?: JsonObject;
+  selection_promotion?: JsonObject;
   state: AutonomousReadinessState;
   next_actions: string[];
 }
@@ -998,6 +1002,8 @@ export interface AutonomousAgentOptions {
   /** Optional caller-owned durable replay barrier for capability evaluator settlements. */
   capabilityLearningSettlementStore?: AutonomousCapabilityLearningSettlementStore;
   learner?: AutonomousOnlineLearner;
+  /** Optional digest-only lifecycle that gates learned model selection until replay admission. */
+  selectionPromotion?: AutonomousSelectionPromotionLifecycle;
   /** Optional caller-owned episodic memory used for bounded retrieval and value-only run recording. */
   memoryStore?: AutonomousEpisodicMemoryStore;
   /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
@@ -3212,6 +3218,7 @@ export class AutonomousAgent {
   readonly modelHealthController?: AutonomousModelHealthController;
   readonly modelHealthBridge?: AutonomousBrainControlPlaneBridge;
   readonly learner?: AutonomousOnlineLearner;
+  readonly selectionPromotion?: AutonomousSelectionPromotionLifecycle;
   private readonly apiClient?: ApiClient;
   private readonly modelsById = new Map<string, AutonomousModelCandidate>();
   private readonly toolCatalogue?: ToolCatalogue;
@@ -3236,12 +3243,14 @@ export class AutonomousAgent {
     if (options.toolExecutor !== undefined && typeof options.toolExecutor !== "function") throw new ArgumentError("AutonomousAgent toolExecutor must be callable");
     if (options.effectBoundary !== undefined && !(options.effectBoundary instanceof AutonomousEffectBoundary)) throw new ArgumentError("AutonomousAgent effectBoundary must be an AutonomousEffectBoundary");
     if (options.activation !== undefined && !(options.activation instanceof AutonomousCapabilityActivation)) throw new ArgumentError("AutonomousAgent activation must be an AutonomousCapabilityActivation");
+    if (options.selectionPromotion !== undefined && !(options.selectionPromotion instanceof AutonomousSelectionPromotionLifecycle)) throw new ArgumentError("AutonomousAgent selectionPromotion must be an AutonomousSelectionPromotionLifecycle");
     if (options.connectorRegistry !== undefined && !(options.connectorRegistry instanceof AutonomousConnectorRegistry)) throw new ArgumentError("AutonomousAgent connectorRegistry must be an AutonomousConnectorRegistry");
     if (options.connectorRuntime !== undefined && !(options.connectorRuntime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("AutonomousAgent connectorRuntime must be an AutonomousConnectorRuntime");
     if (options.connectorRegistry !== undefined && options.connectorRuntime !== undefined && options.connectorRuntime.registry !== options.connectorRegistry) throw new ArgumentError("AutonomousAgent connectorRegistry and connectorRuntime must reference the same catalogue");
     this.llm = llm;
     this.apiClient = options.apiClient;
     this.learner = options.learner;
+    this.selectionPromotion = options.selectionPromotion;
     if (options.memoryStore !== undefined && (
       typeof options.memoryStore.retrieve !== "function"
       || typeof options.memoryStore.recordEpisode !== "function"
@@ -3264,7 +3273,16 @@ export class AutonomousAgent {
     this.capabilityLearningSettlementStore = options.capabilityLearningSettlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
     this.connectorRegistry = options.connectorRegistry ?? options.connectorRuntime?.registry;
     this.connectorRuntime = options.connectorRuntime;
-    const selector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
+    const baseSelector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
+    const selector = options.learner !== undefined && this.selectionPromotion !== undefined
+      ? async (request: AutonomousSelectionRequest): Promise<AutonomousSelectionDecision> => {
+        if (!this.selectionPromotion!.isAdmitted()) {
+          return { selected_model: null, strategy: "caller_selector", ranking: [], abstention_reason: `learned model selection is not admitted (${this.selectionPromotion!.state.status})`, selection_confidence: 0, min_selection_confidence: request.min_selection_confidence ?? null };
+        }
+        if (baseSelector === undefined) throw new ProviderRuntimeError("promoted learner selector is not configured");
+        return baseSelector(request);
+      }
+      : baseSelector;
     this.runtime = new AutonomousRuntime(llm, { selector });
   }
 
@@ -3337,6 +3355,38 @@ export class AutonomousAgent {
     return this.activation.state;
   }
 
+  /** Return the digest-only learned-selection authority state. */
+  selectionPromotionState() {
+    return this.selectionPromotion?.state ?? null;
+  }
+
+  /** Apply a validated replay admission and make the learned selector eligible when admitted. */
+  applySelectionPromotion(report: AutonomousSelectionPromotionReport) {
+    if (!this.selectionPromotion) throw new ArgumentError("selection promotion lifecycle is not configured");
+    return this.selectionPromotion.apply(report);
+  }
+
+  /** Immediately stop promoted learned selection while retaining only rollback metadata. */
+  rollbackSelectionPromotion(reason = "selection_promotion_rollback") {
+    if (!this.selectionPromotion) throw new ArgumentError("selection promotion lifecycle is not configured");
+    return this.selectionPromotion.rollback(reason);
+  }
+
+  /** Persist only the digest-bound learned-selection authority state through a caller-owned store. */
+  async saveSelectionPromotion(store: AutonomousSelectionLifecycleStore): Promise<void> {
+    if (!store || typeof store.save !== "function" || typeof store.load !== "function") throw new ArgumentError("selection promotion store is malformed");
+    if (!this.selectionPromotion) throw new ArgumentError("selection promotion lifecycle is not configured");
+    await store.save(this.selectionPromotion.state);
+  }
+
+  /** Restore learned-selection authority state after validating identity, revision, and digests. */
+  async restoreSelectionPromotion(store: AutonomousSelectionLifecycleStore): Promise<AutonomousSelectionLifecycleState | null> {
+    if (!store || typeof store.load !== "function" || typeof store.save !== "function") throw new ArgumentError("selection promotion store is malformed");
+    if (!this.selectionPromotion) throw new ArgumentError("selection promotion lifecycle is not configured");
+    const state = await store.load();
+    return state === null ? null : this.selectionPromotion.restore(state);
+  }
+
   /** Record provider onboarding posture; this never accepts or persists a key value. */
   recordActivationProviderStatuses(statuses: readonly JsonObject[]): AutonomousCapabilityActivationState {
     return this.activation.recordProviderStatuses(statuses);
@@ -3352,7 +3402,7 @@ export class AutonomousAgent {
    * The operation is keyless: readiness reads opaque credential status only and performs no
    * discovery, provider call, tool call, prompt dispatch, or external effect.
    */
-  async refreshActivation(options: { candidates?: readonly AutonomousModelCandidate[]; estimatedInputTokens?: number; requestedOutputTokens?: number } = {}): Promise<AutonomousCapabilityActivationState> {
+  async refreshActivation(options: { candidates?: readonly AutonomousModelCandidate[]; estimatedInputTokens?: number; requestedOutputTokens?: number; selectionPromotionReport?: AutonomousSelectionPromotionReport; requirePromotedSelection?: boolean } = {}): Promise<AutonomousCapabilityActivationState> {
     const report = await this.readiness(options);
     this.activation.recordProviderStatuses(report.providers);
     const registry = await this.ensureToolRegistry();
@@ -3697,6 +3747,8 @@ export class AutonomousAgent {
     requestedOutputTokens?: number;
     calibrationReport?: AutonomousEvaluatorCalibrationReport;
     requireCalibratedLearning?: boolean;
+    selectionPromotionReport?: AutonomousSelectionPromotionReport;
+    requirePromotedSelection?: boolean;
     evidenceReadiness?: {
       registry: AutonomousEvidenceAdapterRegistry;
       healthStore?: AutonomousEvidenceAdapterHealthStore;
@@ -3710,8 +3762,16 @@ export class AutonomousAgent {
     }
     if (options.requireCalibratedLearning !== undefined && typeof options.requireCalibratedLearning !== "boolean") throw new ArgumentError("autonomous readiness requireCalibratedLearning must be boolean");
     if (options.requireCalibratedLearning === true && options.calibrationReport === undefined) throw new ArgumentError("autonomous readiness requires calibrationReport when calibrated learning is required");
+    if (options.requirePromotedSelection !== undefined && typeof options.requirePromotedSelection !== "boolean") throw new ArgumentError("autonomous readiness requirePromotedSelection must be boolean");
     const calibrationRuntime = options.calibrationReport === undefined ? null : await import("./autonomous-evaluator-calibration.js");
     const calibrationReport = options.calibrationReport === undefined ? null : calibrationRuntime!.validateAutonomousEvaluatorCalibrationReport(options.calibrationReport);
+    const selectionPromotionRuntime = options.selectionPromotionReport === undefined ? null : await import("./autonomous-selection-promotion.js");
+    const selectionPromotionReport = options.selectionPromotionReport === undefined ? null : selectionPromotionRuntime!.validateAutonomousSelectionPromotionReport(options.selectionPromotionReport);
+    const selectionPromotionState = this.selectionPromotion?.state ?? null;
+    const selectionPromotionAdmitted = selectionPromotionState?.status === "admitted"
+      && selectionPromotionState.active_promotion_digest !== null
+      && (selectionPromotionReport === null || selectionPromotionState.active_promotion_digest === selectionPromotionReport.promotion_digest);
+    const selectionPromotionBlocks = options.requirePromotedSelection === true && !selectionPromotionAdmitted;
     const candidates = (options.candidates === undefined ? this.models() : [...options.candidates].map(normalizeAutonomousModelCandidate));
     if (candidates.length > AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS) throw new ArgumentError(`autonomous readiness candidates must contain at most ${AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS} models`);
     const candidateIds = new Set<string>();
@@ -3791,10 +3851,11 @@ export class AutonomousAgent {
       });
       const calibrationAdmission = calibrationReport === null ? null : calibrationRuntime!.autonomousEvaluatorCalibrationAdmission(calibrationReport, profile.domain);
       const calibrationBlocks = options.requireCalibratedLearning === true && calibrationAdmission?.decision !== "admit_learning";
+      const selectionPromotionDomain = selectionPromotionReport?.domains.find((row) => row.domain === profile.domain) ?? null;
       const evidenceReadiness = evidenceReadinessByDomain?.get(profile.domain);
       const evidenceBlocks = evidenceReadiness !== undefined && evidenceReadiness.status !== "ready";
       const baseState: AutonomousReadinessState = !candidates.length ? "model_catalogue_required" : !compatible.length ? "model_capability_gap" : eligible.length ? "ready_for_caller_approval" : credentialMissing ? "credential_required" : providerMissing ? "provider_registration_required" : "partial";
-      const state: AutonomousReadinessState = calibrationBlocks || evidenceBlocks ? "partial" : baseState;
+      const state: AutonomousReadinessState = calibrationBlocks || evidenceBlocks || selectionPromotionBlocks ? "partial" : baseState;
       const nextActions = new Set<string>();
       if (state === "model_catalogue_required") nextActions.add("register at least one model candidate with the reviewed domain capabilities");
       if (state === "model_capability_gap") nextActions.add(`register a model declaring: ${requiredCapabilities.join(", ")}`);
@@ -3803,18 +3864,20 @@ export class AutonomousAgent {
       if (missingTools.length) nextActions.add("attach and review the live tool catalogue; missing tools remain optional provider-only fallbacks until bound");
       if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
       if (calibrationBlocks) nextActions.add(`hold evaluator calibration before learning: ${calibrationAdmission!.reasons.join(", ")}`);
+      if (selectionPromotionBlocks) nextActions.add(selectionPromotionState === null ? "attach and apply an admitted all-domain selection promotion report before enabling learned selection" : `resolve selection promotion lifecycle hold: ${selectionPromotionState.last_reason ?? selectionPromotionState.status}`);
       if (evidenceBlocks) nextActions.add(`resolve evidence readiness before source dispatch: ${evidenceReadiness!.reason}`);
-      const row: AutonomousReadinessDomain = { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, required_model_capabilities: requiredCapabilities, compatible_model_count: compatible.length, eligible_model_count: eligible.length, required_tool_count: uniqueBindings.length, available_tool_count: uniqueBindings.length - missingTools.length, missing_tools: missingTools, learning_context_digest: learningContextDigest, ...(evidenceReadiness === undefined ? {} : { evidence_readiness: { status: evidenceReadiness.status, reason: evidenceReadiness.reason, selected_adapter_id: evidenceReadiness.selected_adapter_id, selected_manifest_digest: evidenceReadiness.selected_manifest_digest, health: evidenceReadiness.health, report_digest: evidenceReadinessReport!.report_digest, execution: "readiness_projection_only;does_not_dispatch_source", secret_material: "never_returned" } }), ...(calibrationAdmission === null ? {} : { calibration_admission: { decision: calibrationAdmission.decision, report_digest: calibrationAdmission.report_digest, evaluator_id: calibrationAdmission.evaluator_id, evaluator_version: calibrationAdmission.evaluator_version, reasons: [...calibrationAdmission.reasons], execution: "readiness_projection_only;does_not_invoke_provider_or_mutate_learning", secret_material: "never_returned" } }), state, next_actions: [...nextActions].sort() };
+      const row: AutonomousReadinessDomain = { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, required_model_capabilities: requiredCapabilities, compatible_model_count: compatible.length, eligible_model_count: eligible.length, required_tool_count: uniqueBindings.length, available_tool_count: uniqueBindings.length - missingTools.length, missing_tools: missingTools, learning_context_digest: learningContextDigest, ...(evidenceReadiness === undefined ? {} : { evidence_readiness: { status: evidenceReadiness.status, reason: evidenceReadiness.reason, selected_adapter_id: evidenceReadiness.selected_adapter_id, selected_manifest_digest: evidenceReadiness.selected_manifest_digest, health: evidenceReadiness.health, report_digest: evidenceReadinessReport!.report_digest, execution: "readiness_projection_only;does_not_dispatch_source", secret_material: "never_returned" } }), ...(calibrationAdmission === null ? {} : { calibration_admission: { decision: calibrationAdmission.decision, report_digest: calibrationAdmission.report_digest, evaluator_id: calibrationAdmission.evaluator_id, evaluator_version: calibrationAdmission.evaluator_version, reasons: [...calibrationAdmission.reasons], execution: "readiness_projection_only;does_not_invoke_provider_or_mutate_learning", secret_material: "never_returned" } }), ...(selectionPromotionReport === null && selectionPromotionState === null ? {} : { selection_promotion: { decision: selectionPromotionReport?.decision ?? (selectionPromotionState?.last_decision === "admit" && selectionPromotionAdmitted ? "admit" : "hold"), status: selectionPromotionState?.status ?? "unapplied", promotion_digest: selectionPromotionReport?.promotion_digest ?? selectionPromotionState?.promotion_digest ?? null, active_promotion_digest: selectionPromotionState?.active_promotion_digest ?? null, source_report_digest: selectionPromotionReport?.source_report_digest ?? selectionPromotionState?.source_report_digest ?? null, domain_decision: selectionPromotionDomain?.decision ?? null, reasons: selectionPromotionDomain?.reasons ?? (selectionPromotionState?.last_reason ? [selectionPromotionState.last_reason] : []), execution: "readiness_projection_only;does_not_mutate_learner_or_invoke_provider", secret_material: "never_returned" } }), state, next_actions: [...nextActions].sort() };
       domainRows.push(row);
       capabilityRows.push({ domain: profile.domain, required_model_capabilities: requiredCapabilities, compatible_model_ids: compatible.map((candidate) => `${candidate.provider}/${candidate.model}`), incompatible_models: incompatible });
     }
-    const learning = { configured: this.learner !== undefined, domain_count: profiles.length, contexts: domainRows.map((row) => ({ domain: row.domain, context_digest: row.learning_context_digest })), calibration: calibrationReport === null ? { configured: false, required: options.requireCalibratedLearning === true, report_digest: null, status: null, decision: options.requireCalibratedLearning === true ? "hold_learning" : "not_required", admitted_domain_count: 0, held_domain_count: options.requireCalibratedLearning === true ? profiles.length : 0 } : { configured: true, required: options.requireCalibratedLearning === true, report_digest: calibrationReport.report_digest, status: calibrationReport.status, decision: calibrationReport.gate.decision, admitted_domain_count: domainRows.filter((row) => row.calibration_admission?.decision === "admit_learning").length, held_domain_count: domainRows.filter((row) => row.calibration_admission?.decision !== "admit_learning").length }, feedback_contract: "explicit_evaluator_reward_only; transport_success_is_not_task_quality", retention: "value_only_learning_metadata" };
+    const learning = { configured: this.learner !== undefined, domain_count: profiles.length, contexts: domainRows.map((row) => ({ domain: row.domain, context_digest: row.learning_context_digest })), calibration: calibrationReport === null ? { configured: false, required: options.requireCalibratedLearning === true, report_digest: null, status: null, decision: options.requireCalibratedLearning === true ? "hold_learning" : "not_required", admitted_domain_count: 0, held_domain_count: options.requireCalibratedLearning === true ? profiles.length : 0 } : { configured: true, required: options.requireCalibratedLearning === true, report_digest: calibrationReport.report_digest, status: calibrationReport.status, decision: calibrationReport.gate.decision, admitted_domain_count: domainRows.filter((row) => row.calibration_admission?.decision === "admit_learning").length, held_domain_count: domainRows.filter((row) => row.calibration_admission?.decision !== "admit_learning").length }, selection_promotion: { configured: selectionPromotionReport !== null || selectionPromotionState !== null, required: options.requirePromotedSelection === true, report_digest: selectionPromotionReport?.promotion_digest ?? null, source_report_digest: selectionPromotionReport?.source_report_digest ?? selectionPromotionState?.source_report_digest ?? null, lifecycle_status: selectionPromotionState?.status ?? "unconfigured", active_promotion_digest: selectionPromotionState?.active_promotion_digest ?? null, decision: selectionPromotionAdmitted ? "admit" : selectionPromotionReport?.decision ?? "hold", admitted_domain_count: selectionPromotionReport?.domains.filter((row) => row.decision === "admit").length ?? 0, held_domain_count: selectionPromotionReport === null ? (selectionPromotionBlocks ? profiles.length : 0) : selectionPromotionReport.domains.filter((row) => row.decision === "hold").length }, feedback_contract: "explicit_evaluator_reward_only; transport_success_is_not_task_quality", retention: "value_only_learning_metadata" };
     const domainPacks = await Promise.all(profiles.map((profile) => buildDomainPack(profile)));
     const nextActions = new Set<string>(domainRows.flatMap((row) => row.next_actions));
     for (const row of providerRows) if (row.next_action !== "ready") nextActions.add(`${row.next_action}: ${row.provider}`);
     if (!this.toolCatalogue) nextActions.add("attach a live ToolCatalogue to compute exact domain-tool coverage");
     if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
     if (options.requireCalibratedLearning === true && learning.calibration.decision !== "admit_learning") nextActions.add("resolve evaluator calibration holdout coverage before enabling learning");
+    if (selectionPromotionBlocks) nextActions.add("apply an admitted selection promotion report and persist its lifecycle state before enabling learned model selection");
     if (evidenceReadinessReport !== null && evidenceReadinessReport.status !== "ready") nextActions.add("resolve evidence routing readiness before source dispatch");
     const activation = this.activation.state;
     if (activation.status === "created" || activation.status === "provider_pending" || activation.status === "catalogue_pending") nextActions.add("refresh activation metadata, then review and explicitly approve proposed bindings");

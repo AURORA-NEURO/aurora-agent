@@ -50,6 +50,24 @@ export type {
   AutonomousSelectionPromotionDomainReport,
   AutonomousSelectionPromotionReport,
 } from "./autonomous-selection-promotion.js";
+export {
+  AUTONOMOUS_SELECTION_LIFECYCLE_SCHEMA,
+  AUTONOMOUS_SELECTION_LIFECYCLE_STORE_SCHEMA,
+  MAX_AUTONOMOUS_SELECTION_LIFECYCLE_REASON_BYTES,
+  MAX_AUTONOMOUS_SELECTION_LIFECYCLE_BYTES,
+  MAX_AUTONOMOUS_SELECTION_LIFECYCLE_GENERATION,
+  AutonomousSelectionPromotionLifecycle,
+  AutonomousSelectionPromotionLifecycleStore,
+  validateAutonomousSelectionLifecycleState,
+  validateAutonomousSelectionLifecycleSnapshot,
+} from "./autonomous-selection-lifecycle.js";
+export type {
+  AutonomousSelectionLifecycleStatus,
+  AutonomousSelectionLifecycleDecision,
+  AutonomousSelectionLifecycleState,
+  AutonomousSelectionLifecycleSnapshot,
+  AutonomousSelectionLifecycleStore,
+} from "./autonomous-selection-lifecycle.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
