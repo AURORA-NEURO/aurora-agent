@@ -33,6 +33,16 @@ operations remain deployment work. A bounded feedback worker now drains the same
 outbox with conditional leases, receipt-backed crash recovery, retry/terminal-failure reporting,
 and no provider replay; multi-host persistence and operational scheduling remain deployment work.
 
+Portfolio admission is now an explicit provider-free layer above that executor. The TypeScript
+`AutonomousAgent.admitWorkflowPortfolio()` API validates/replays a reviewed portfolio, composes
+all-domain model/provider/credential readiness with shared selection constraints, optional
+calibration and evidence-readiness gates, tool gaps, and dependency closure, then emits a bounded
+`ready_for_approval`/`partial`/`blocked` digest. It returns eligible model-arm identities and
+redacted remediation metadata but never freezes selection or authorizes a provider, connector,
+tool, source, learner, or effect. `validateAutonomousWorkflowPortfolioAdmission()` supports
+caller-owned persistence/display checks. Durable external storage, approval UX, live health
+refresh, and multi-host admission leases remain deployment responsibilities.
+
 Domain evidence adapters now also have a digest-bound selector. It supports deterministic
 lexicographic routing, caller-supplied health/success/reward/latency/cost scoring, conservative
 abstention, candidate/registry drift detection, and an explicit acquirer handoff without putting

@@ -1822,6 +1822,41 @@ const portfolio = await agent.planWorkflowPortfolio(
 // portfolio.execution is not_started; no provider, connector, or tool was invoked.
 ```
 
+For a portfolio-level startup gate, call `admitWorkflowPortfolio()` after planning and before
+execution. Admission composes the plan identity with the current keyless `readiness()` image and
+projects each item's compatible/eligible model arms, provider and credential gates, shared cost /
+latency / quality constraints, calibration holds, optional evidence readiness, missing tools, and
+dependency closure. It does not invoke a provider, source adapter, connector, tool, evaluator, or
+learner. The result is a bounded `ready_for_approval` / `partial` / `blocked` projection with a
+single admission digest and per-item remediation actions:
+
+```typescript
+const admission = await agent.admitWorkflowPortfolio(requests, {
+  plan: portfolio,
+  verifyPlan: true,
+  run: {
+    candidates,
+    maxInputTokens: 12_000,
+    maxOutputTokens: 2_000,
+    minQuality: 0.75,
+  },
+  calibrationReport,
+  requireCalibratedLearning: true,
+  requireAvailableTools: false,
+});
+
+// admission.status === "ready_for_approval" still requires explicit provider approval.
+// admission.items and admission.counts show exactly which domain or predecessor is held.
+// validateAutonomousWorkflowPortfolioAdmission(admission) is safe before persistence/display.
+```
+
+Admission deliberately does not freeze a model selection: runtime selection is rerun against
+fresh provider health after caller approval, and failover/effect/tool policies remain separate.
+This prevents a stale readiness screen from becoming execution authority while giving operators a
+single cross-domain view of model catalogue gaps, credentials, calibration, evidence routing, and
+dependency blockers. The projection retains only plan/readiness/model-arm metadata and digests;
+transient tasks, prompts, credentials, provider values, and evidence bodies remain caller-owned.
+
 The portfolio compiler rejects duplicate ids, unknown dependencies, self-dependencies, and
 oversized input. Cycles become explicit blocked items rather than being silently reordered, and
 an item whose prerequisite failed is blocked without being dispatched. After a restart, the

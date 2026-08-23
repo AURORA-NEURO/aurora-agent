@@ -58,6 +58,10 @@ import type {
   AutonomousWorkflowPortfolioExecutionResult,
 } from "./autonomous-workflow-portfolio-execution.js";
 import type {
+  AutonomousWorkflowPortfolioAdmission,
+  AutonomousWorkflowPortfolioAdmissionOptions,
+} from "./autonomous-workflow-portfolio-admission.js";
+import type {
   AutonomousWorkflowPortfolioResumableExecutionOptions,
 } from "./autonomous-workflow-portfolio-resumable.js";
 import type {
@@ -4081,6 +4085,18 @@ export class AutonomousAgent {
   ): Promise<AutonomousWorkflowPortfolioPlan> {
     const { planAutonomousWorkflowPortfolio } = await import("./autonomous-workflow-portfolio.js");
     return planAutonomousWorkflowPortfolio(this, requests, options);
+  }
+
+  /**
+   * Project portfolio-wide model/provider/evidence/calibration admission before dispatch.
+   * This is a metadata-only gate; caller approval remains required for every provider call.
+   */
+  async admitWorkflowPortfolio(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousWorkflowPortfolioAdmissionOptions = {},
+  ): Promise<AutonomousWorkflowPortfolioAdmission> {
+    const { admitAutonomousWorkflowPortfolio } = await import("./autonomous-workflow-portfolio-admission.js");
+    return admitAutonomousWorkflowPortfolio(this, requests, options);
   }
 
   /** Recompile a caller-rehydrated portfolio and compare every digest-bound workflow identity. */

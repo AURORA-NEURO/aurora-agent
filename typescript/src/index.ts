@@ -303,6 +303,23 @@ export type {
   AutonomousWorkflowPortfolioVerification,
 } from "./autonomous-workflow-portfolio.js";
 export {
+  AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_SCHEMA,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ITEMS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ACTIONS,
+  MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES,
+  admitAutonomousWorkflowPortfolio,
+  validateAutonomousWorkflowPortfolioAdmission,
+} from "./autonomous-workflow-portfolio-admission.js";
+export type {
+  AutonomousWorkflowPortfolioAdmissionStatus,
+  AutonomousWorkflowPortfolioAdmissionItemStatus,
+  AutonomousWorkflowPortfolioAdmissionOptions,
+  AutonomousWorkflowPortfolioAdmissionCounts,
+  AutonomousWorkflowPortfolioAdmissionItem,
+  AutonomousWorkflowPortfolioAdmissionPolicy,
+  AutonomousWorkflowPortfolioAdmission,
+} from "./autonomous-workflow-portfolio-admission.js";
+export {
   AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_PARALLELISM,
   DEFAULT_AUTONOMOUS_WORKFLOW_PORTFOLIO_HANDOFF_BYTES,
