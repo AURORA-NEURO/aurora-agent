@@ -6379,6 +6379,15 @@ secret-shaped fields, and tampered digests fail closed without mutating the live
 transport ledger informs circuit and failover continuity, while the existing model-health ledger
 continues to own evaluator-quality feedback and selection adaptation.
 
+The TypeScript and Python provider-health envelopes are now current `0.2` images. Every new
+snapshot carries a bounded `snapshot_generation` and exact `previous_snapshot_digest`; generation
+one is the only root, and a snapshot with unchanged provider/model counters is cache-stable rather
+than creating a phantom history entry. Restoring a `0.1` image is supported for migration, but its
+next snapshot is a fresh `0.2` root. A forged generation or predecessor is rejected even when the
+attacker recomputes the outer digest, because the generation/predecessor relationship is validated
+before runtime state is replaced. This keeps transport circuit continuity, remote CAS fencing, and
+cross-language replay diagnostics aligned with the learner and model-health persistence layers.
+
 For TypeScript deployments, `JsonLLMRuntimeHealthSnapshotPersistence` and
 `TransactionalJsonLLMRuntimeHealthSnapshotPersistence` provide the portable text boundary for
 that transport ledger. The transactional coordinator serializes overlapping restore/flush calls,

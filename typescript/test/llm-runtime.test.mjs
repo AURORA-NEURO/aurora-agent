@@ -14,6 +14,7 @@ import {
   TransactionalJsonLLMRuntimeHealthSnapshotPersistence,
   LLMRuntime,
   LLMRuntimeHealthPersistenceCoordinator,
+  digestJson,
   ProviderRuntimeError,
   anthropicProvider,
   openaiCompatibleProvider,
@@ -676,6 +677,9 @@ test("LLM transport health survives restart without restoring credentials or dis
   let persisted = null;
   const persistence = { read: () => persisted, write: (snapshot) => { persisted = structuredClone(snapshot); } };
   const snapshot = await new LLMRuntimeHealthPersistenceCoordinator(source, persistence).flush();
+  assert.equal(snapshot.snapshot_generation, 1);
+  assert.equal(snapshot.previous_snapshot_digest, null);
+  assert.deepEqual(await source.snapshotHealth(), snapshot);
   assert.equal(snapshot.providers[0].attempts, 1);
   assert.equal(snapshot.providers[0].failures, 1);
   assert.equal(snapshot.providers[0].consecutive_failures, 1);
@@ -702,6 +706,12 @@ test("LLM transport health survives restart without restoring credentials or dis
   tampered.providers[0].attempts = 99;
   tampered.providers[0].successes = 98;
   await assert.rejects(validateLLMRuntimeHealthSnapshot(tampered), /digest mismatch/);
+  const forgedGeneration = structuredClone(snapshot);
+  forgedGeneration.snapshot_generation = 2;
+  forgedGeneration.previous_snapshot_digest = null;
+  const { snapshot_digest: _forgedDigest, ...forgedBody } = forgedGeneration;
+  forgedGeneration.snapshot_digest = await digestJson(forgedBody);
+  await assert.rejects(validateLLMRuntimeHealthSnapshot(forgedGeneration), /generation and previous_snapshot_digest/);
   assert.equal(restarted.providerStatus("restart-health").attempts, 2);
 });
 
@@ -714,6 +724,8 @@ test("LLM transport health JSON persistence is canonical, serialized, and CAS-fe
   const coordinator = new LLMRuntimeHealthPersistenceCoordinator(source, persistence);
   await source.invoke("durable-health", request("model-a"));
   const first = await coordinator.flush();
+  assert.equal(first.snapshot_generation, 1);
+  assert.equal(first.previous_snapshot_digest, null);
   assert.equal(textStore.encoded(), JSON.stringify(JSON.parse(textStore.encoded())));
 
   const restarted = new LLMRuntime({ fetch: async () => jsonResponse({ output_text: "restarted" }) });
@@ -727,7 +739,23 @@ test("LLM transport health JSON persistence is canonical, serialized, and CAS-fe
   const stale = new LLMRuntimeHealthPersistenceCoordinator(staleRuntime, persistence);
   await stale.restore();
   await source.invoke("durable-health", request("model-b"));
-  await coordinator.flush();
+  const second = await coordinator.flush();
+  assert.equal(second.snapshot_generation, 2);
+  assert.equal(second.previous_snapshot_digest, first.snapshot_digest);
+
+  const legacy = structuredClone(first);
+  delete legacy.snapshot_generation;
+  delete legacy.previous_snapshot_digest;
+  legacy.schema = "bioprism-typescript-llm-runtime-health-snapshot/0.1";
+  const { snapshot_digest: _legacyDigest, ...legacyBody } = legacy;
+  legacy.snapshot_digest = await digestJson(legacyBody);
+  const legacyRuntime = new LLMRuntime({ fetch: async () => jsonResponse({ output_text: "legacy" }) });
+  legacyRuntime.registerProvider(config);
+  await legacyRuntime.restoreHealth(legacy);
+  const upgraded = await legacyRuntime.snapshotHealth();
+  assert.equal(upgraded.snapshot_generation, 1);
+  assert.equal(upgraded.previous_snapshot_digest, null);
+  assert.notEqual(upgraded.snapshot_digest, legacy.snapshot_digest);
   await staleRuntime.invoke("durable-health", request("model-c"));
   await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
 

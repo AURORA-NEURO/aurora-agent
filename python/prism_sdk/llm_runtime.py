@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 import getpass
 import hashlib
@@ -59,7 +60,8 @@ SUPPORTED_PROTOCOLS = {
 PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
 MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
 PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
-PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.1"
+_LEGACY_PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.1"
+PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.2"
 CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
 CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1"
 PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
@@ -1448,6 +1450,10 @@ class ProviderHealthLedger:
         self.max_bytes = max_bytes
         self._clock = clock
         self._lock = threading.RLock()
+        self._snapshot_generation = 0
+        self._previous_snapshot_digest: str | None = None
+        self._cached_snapshot: dict[str, Any] | None = None
+        self._cached_record_signature: tuple[str, ...] | None = None
 
     def record(self, observation: Mapping[str, Any]) -> dict[str, Any]:
         """Append one runtime observation and return a metadata-only receipt.
@@ -1477,6 +1483,8 @@ class ProviderHealthLedger:
                 handle.write(line)
                 handle.flush()
                 os.fsync(handle.fileno())
+            self._cached_snapshot = None
+            self._cached_record_signature = None
             digest = hashlib.sha256(line.rstrip(b"\n")).hexdigest()
             return {
                 "schema": PROVIDER_HEALTH_LEDGER_SCHEMA,
@@ -1587,6 +1595,8 @@ class ProviderHealthLedger:
                 handle.write(line)
                 handle.flush()
                 os.fsync(handle.fileno())
+            self._cached_snapshot = None
+            self._cached_record_signature = None
             return {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "record_index": len(rows), "record_digest": hashlib.sha256(line.rstrip(b"\n")).hexdigest(), "provider": normalized["provider"], "model": normalized["model"], "observation_kind": "evaluation", "outcome": "unknown", "replayed": False}
 
     def records(self, *, provider: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
@@ -1614,11 +1624,21 @@ class ProviderHealthLedger:
 
         with self._lock:
             rows = self._read_records_locked()
-        return _build_provider_health_snapshot(
-            rows,
-            max_records=self.max_records,
-            max_bytes=self.max_bytes,
-        )
+            signature = tuple(hashlib.sha256(_canonical_provider_health_json(row).encode("utf-8")).hexdigest() for row in rows)
+            if self._cached_snapshot is not None and self._cached_record_signature == signature:
+                return deepcopy(self._cached_snapshot)
+            snapshot = _build_provider_health_snapshot(
+                rows,
+                max_records=self.max_records,
+                max_bytes=self.max_bytes,
+                snapshot_generation=self._snapshot_generation + 1,
+                previous_snapshot_digest=None if self._snapshot_generation == 0 else self._previous_snapshot_digest,
+            )
+            self._snapshot_generation = snapshot["snapshot_generation"]
+            self._previous_snapshot_digest = snapshot["snapshot_digest"]
+            self._cached_snapshot = deepcopy(snapshot)
+            self._cached_record_signature = signature
+            return deepcopy(snapshot)
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
         """Atomically replace the JSONL health ledger with validated observations."""
@@ -1641,6 +1661,10 @@ class ProviderHealthLedger:
                     handle.flush()
                     os.fsync(handle.fileno())
                 os.replace(temporary, self.path)
+                self._snapshot_generation = int(normalized.get("snapshot_generation", 0))
+                self._previous_snapshot_digest = normalized["snapshot_digest"] if self._snapshot_generation > 0 else None
+                self._cached_snapshot = deepcopy(normalized) if self._snapshot_generation > 0 else None
+                self._cached_record_signature = tuple(hashlib.sha256(_canonical_provider_health_json(row).encode("utf-8")).hexdigest() for row in normalized["records"]) if self._cached_snapshot is not None else None
             except (OSError, ValueError) as error:
                 try:
                     temporary.unlink(missing_ok=True)
@@ -1990,9 +2014,21 @@ def _build_provider_health_snapshot(
     *,
     max_records: int,
     max_bytes: int,
+    snapshot_generation: int,
+    previous_snapshot_digest: str | None,
 ) -> dict[str, Any]:
     if len(rows) > max_records:
         raise ProviderError("provider health snapshot exceeds max_records")
+    if not isinstance(snapshot_generation, int) or isinstance(snapshot_generation, bool) or snapshot_generation < 1:
+        raise ProviderError("provider health snapshot generation is outside its bound")
+    if snapshot_generation == 1 and previous_snapshot_digest is not None:
+        raise ProviderError("provider health snapshot generation and previous_snapshot_digest are inconsistent")
+    if previous_snapshot_digest is not None and (
+        not isinstance(previous_snapshot_digest, str)
+        or len(previous_snapshot_digest) != 64
+        or any(character not in "0123456789abcdef" for character in previous_snapshot_digest)
+    ):
+        raise ProviderError("provider health previous_snapshot_digest is invalid")
     normalized_rows = [_validate_provider_health_row(row) for row in rows]
     encoded_rows = [_canonical_provider_health_json(row).encode("utf-8") for row in normalized_rows]
     if sum(len(row) + 1 for row in encoded_rows) > max_bytes:
@@ -2000,6 +2036,8 @@ def _build_provider_health_snapshot(
     record_digests = [hashlib.sha256(row).hexdigest() for row in encoded_rows]
     descriptor = {
         "schema": PROVIDER_HEALTH_SNAPSHOT_SCHEMA,
+        "snapshot_generation": snapshot_generation,
+        "previous_snapshot_digest": previous_snapshot_digest,
         "records": normalized_rows,
         "record_digests": record_digests,
         "head_digest": record_digests[-1] if record_digests else "",
@@ -2018,6 +2056,9 @@ def _normalize_provider_health_snapshot(
     max_records: int,
     max_bytes: int,
 ) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ProviderError("provider health snapshot is malformed")
+    legacy = value.get("schema") == _LEGACY_PROVIDER_HEALTH_SNAPSHOT_SCHEMA
     expected_keys = {
         "schema",
         "records",
@@ -2027,12 +2068,27 @@ def _normalize_provider_health_snapshot(
         "secret_material",
         "snapshot_digest",
     }
-    if not isinstance(value, Mapping) or set(value) != expected_keys:
+    if not legacy:
+        expected_keys.update({"snapshot_generation", "previous_snapshot_digest"})
+    if set(value) != expected_keys:
         raise ProviderError("provider health snapshot is malformed")
-    if value.get("schema") != PROVIDER_HEALTH_SNAPSHOT_SCHEMA:
+    if value.get("schema") != PROVIDER_HEALTH_SNAPSHOT_SCHEMA and not legacy:
         raise ProviderError("provider health snapshot schema is unsupported")
     if value.get("retention") != "value_only_provider_outcomes_no_payloads_or_credentials" or value.get("secret_material") != "never_returned":
         raise ProviderError("provider health snapshot retention is invalid")
+    if not legacy:
+        generation = value.get("snapshot_generation")
+        previous = value.get("previous_snapshot_digest")
+        if not isinstance(generation, int) or isinstance(generation, bool) or generation < 1:
+            raise ProviderError("provider health snapshot generation is outside its bound")
+        if previous is not None and (
+            not isinstance(previous, str)
+            or len(previous) != 64
+            or any(character not in "0123456789abcdef" for character in previous)
+        ):
+            raise ProviderError("provider health previous_snapshot_digest is invalid")
+        if (generation == 1) != (previous is None):
+            raise ProviderError("provider health snapshot generation and previous_snapshot_digest are inconsistent")
     raw_rows = value.get("records")
     raw_digests = value.get("record_digests")
     if not isinstance(raw_rows, Sequence) or isinstance(raw_rows, (str, bytes, bytearray)) or len(raw_rows) > max_records:
@@ -2053,7 +2109,8 @@ def _normalize_provider_health_snapshot(
     if not isinstance(head_digest, str) or (head_digest and (len(head_digest) != 64 or any(character not in "0123456789abcdef" for character in head_digest))) or head_digest != expected_head:
         raise ProviderError("provider health snapshot head_digest is invalid")
     descriptor = {
-        "schema": PROVIDER_HEALTH_SNAPSHOT_SCHEMA,
+        "schema": PROVIDER_HEALTH_SNAPSHOT_SCHEMA if not legacy else _LEGACY_PROVIDER_HEALTH_SNAPSHOT_SCHEMA,
+        **({} if legacy else {"snapshot_generation": value["snapshot_generation"], "previous_snapshot_digest": value["previous_snapshot_digest"]}),
         "records": rows,
         "record_digests": digests,
         "head_digest": head_digest,

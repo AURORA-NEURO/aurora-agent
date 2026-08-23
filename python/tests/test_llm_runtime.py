@@ -29,6 +29,7 @@ from prism_sdk.llm_runtime import (
     ProviderToolResult,
     PROVIDER_OBSERVATION_SCHEMA,
     TransactionalJsonProviderHealthSnapshotPersistence,
+    validate_provider_health_snapshot,
     anthropic_provider,
     deepseek_provider,
     groq_provider,
@@ -1143,6 +1144,27 @@ class LlmRuntimeTests(unittest.TestCase):
                 })
             source_coordinator = ProviderHealthPersistenceCoordinator(source, persistence)
             flushed = source_coordinator.flush()
+            self.assertEqual(flushed["snapshot_generation"], 1)
+            self.assertIsNone(flushed["previous_snapshot_digest"])
+            self.assertEqual(source.snapshot(), flushed)
+
+            legacy = dict(flushed)
+            legacy.pop("snapshot_generation")
+            legacy.pop("previous_snapshot_digest")
+            legacy["schema"] = "bioprism-llm-provider-health-snapshot/0.1"
+            legacy_body = dict(legacy)
+            legacy_body.pop("snapshot_digest")
+            legacy["snapshot_digest"] = hashlib.sha256(
+                json.dumps(legacy_body, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+            ).hexdigest()
+            self.assertEqual(validate_provider_health_snapshot(legacy)["schema"], "bioprism-llm-provider-health-snapshot/0.1")
+            legacy_restored = ProviderHealthLedger(Path(directory) / "legacy-health.jsonl", max_records=32)
+            legacy_restored.restore(legacy)
+            upgraded = legacy_restored.snapshot()
+            self.assertEqual(upgraded["snapshot_generation"], 1)
+            self.assertIsNone(upgraded["previous_snapshot_digest"])
+            self.assertNotEqual(upgraded["snapshot_digest"], legacy["snapshot_digest"])
+
             restored = ProviderHealthLedger(Path(directory) / "restored-health.jsonl", max_records=32)
             restored_snapshot = ProviderHealthPersistenceCoordinator(restored, persistence).restore()
             self.assertIsNotNone(restored_snapshot)
@@ -1163,7 +1185,9 @@ class LlmRuntimeTests(unittest.TestCase):
                 "observed_at": 20,
                 "failure_class": "provider_error",
             })
-            source_coordinator.flush()
+            advanced = source_coordinator.flush()
+            self.assertEqual(advanced["snapshot_generation"], 2)
+            self.assertEqual(advanced["previous_snapshot_digest"], flushed["snapshot_digest"])
             with self.assertRaisesRegex(ProviderError, "compare-and-swap conflict"):
                 stale_coordinator.flush()
             tampered = json.loads(backend.value)

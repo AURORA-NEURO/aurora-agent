@@ -10,7 +10,8 @@ export const LLM_RUNTIME_SCHEMA = "bioprism-typescript-llm-runtime/0.1" as const
 export const PROVIDER_OBSERVATION_SCHEMA = "bioprism-typescript-llm-provider-observation/0.1" as const;
 export const CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-typescript-llm-credential-onboarding/0.1" as const;
 export const PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-typescript-llm-provider-model-discovery/0.1" as const;
-export const LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-llm-runtime-health-snapshot/0.1" as const;
+const LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-llm-runtime-health-snapshot/0.1" as const;
+export const LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-typescript-llm-runtime-health-snapshot/0.2" as const;
 export const IN_MEMORY_PROVIDER_SCHEMA = "bioprism-typescript-llm-in-memory-provider/0.1" as const;
 
 export const MAX_PROVIDER_MESSAGE_BYTES = 2_000_000;
@@ -820,7 +821,10 @@ export interface LLMRuntimeModelHealthSnapshot extends JsonObject {
 
 /** Restart-safe provider transport health; credentials and task payloads are never retained. */
 export interface LLMRuntimeHealthSnapshot extends JsonObject {
-  schema: typeof LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA;
+  /** 0.1 remains readable; current snapshots carry an independent image lineage in 0.2. */
+  schema: typeof LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA | typeof LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA;
+  snapshot_generation?: number;
+  previous_snapshot_digest?: string | null;
   providers: LLMRuntimeProviderHealthSnapshot[];
   models: LLMRuntimeModelHealthSnapshot[];
   snapshot_digest: string;
@@ -2045,6 +2049,10 @@ export class LLMRuntime {
   private readonly circuits = new Map<string, CircuitState>();
   private readonly providerHealthState = new Map<string, HealthState>();
   private readonly modelHealthState = new Map<string, HealthState>();
+  private healthSnapshotGeneration = 0;
+  private previousHealthSnapshotDigest: string | null = null;
+  private cachedHealthSnapshot: LLMRuntimeHealthSnapshot | null = null;
+  private cachedHealthSignature: string | null = null;
   private readonly fetchImplementation: FetchImplementation;
   private readonly clock: () => number;
 
@@ -2198,8 +2206,23 @@ export class LLMRuntime {
         last_status_code: state.lastStatusCode,
       };
     });
-    const body = { schema: LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA, providers, models, retention: "transport_health_metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
-    return structuredClone({ ...body, snapshot_digest: await digestJson(body) });
+    const signature = canonicalJson({ providers, models });
+    if (this.cachedHealthSnapshot !== null && this.cachedHealthSignature === signature) return structuredClone(this.cachedHealthSnapshot);
+    const body = {
+      schema: LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA,
+      snapshot_generation: this.healthSnapshotGeneration + 1,
+      previous_snapshot_digest: this.healthSnapshotGeneration === 0 ? null : this.previousHealthSnapshotDigest,
+      providers,
+      models,
+      retention: "transport_health_metadata_only_hash_bound" as const,
+      secret_material: "never_returned" as const,
+    };
+    const snapshot = await validateLLMRuntimeHealthSnapshot({ ...body, snapshot_digest: await digestJson(body) });
+    this.healthSnapshotGeneration = snapshot.snapshot_generation!;
+    this.previousHealthSnapshotDigest = snapshot.snapshot_digest;
+    this.cachedHealthSnapshot = structuredClone(snapshot);
+    this.cachedHealthSignature = signature;
+    return structuredClone(snapshot);
   }
 
   /** Restore validated provider transport health atomically; providers must already be registered. */
@@ -2241,6 +2264,10 @@ export class LLMRuntime {
     for (const [provider, circuit] of circuits) this.circuits.set(provider, circuit);
     this.modelHealthState.clear();
     for (const [arm, state] of models) this.modelHealthState.set(arm, state);
+    this.healthSnapshotGeneration = snapshot.snapshot_generation ?? 0;
+    this.previousHealthSnapshotDigest = this.healthSnapshotGeneration === 0 ? null : snapshot.snapshot_digest;
+    this.cachedHealthSnapshot = snapshot.schema === LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA ? structuredClone(snapshot) : null;
+    this.cachedHealthSignature = this.cachedHealthSnapshot === null ? null : canonicalJson({ providers: this.cachedHealthSnapshot.providers, models: this.cachedHealthSnapshot.models });
   }
 
   async saveHealth(persistence: LLMRuntimeHealthPersistence): Promise<LLMRuntimeHealthSnapshot> {
@@ -2735,8 +2762,17 @@ function normalizeRuntimeModelHealthSnapshot(value: unknown): LLMRuntimeModelHea
 export async function validateLLMRuntimeHealthSnapshot(value: unknown): Promise<LLMRuntimeHealthSnapshot> {
   if (!isObject(value)) throw new ProviderRuntimeError("LLM runtime health snapshot must be an object");
   const snapshotValue = value as unknown as JsonObject;
-  runtimeHealthKeys("LLM runtime health snapshot", snapshotValue, ["schema", "providers", "models", "snapshot_digest", "retention", "secret_material"]);
-  if (snapshotValue.schema !== LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA || snapshotValue.retention !== "transport_health_metadata_only_hash_bound" || snapshotValue.secret_material !== "never_returned") throw new ProviderRuntimeError("LLM runtime health snapshot markers are invalid");
+  const legacy = snapshotValue.schema === LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA;
+  if (snapshotValue.schema !== LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA && !legacy) throw new ProviderRuntimeError("LLM runtime health snapshot schema is unsupported");
+  runtimeHealthKeys("LLM runtime health snapshot", snapshotValue, legacy
+    ? ["schema", "providers", "models", "snapshot_digest", "retention", "secret_material"]
+    : ["schema", "snapshot_generation", "previous_snapshot_digest", "providers", "models", "snapshot_digest", "retention", "secret_material"]);
+  if (snapshotValue.retention !== "transport_health_metadata_only_hash_bound" || snapshotValue.secret_material !== "never_returned") throw new ProviderRuntimeError("LLM runtime health snapshot markers are invalid");
+  if (!legacy) {
+    if (!Number.isSafeInteger(snapshotValue.snapshot_generation) || (snapshotValue.snapshot_generation as number) < 1) throw new ProviderRuntimeError("LLM runtime health snapshot generation is outside its bounds");
+    if (snapshotValue.previous_snapshot_digest !== null && (typeof snapshotValue.previous_snapshot_digest !== "string" || !/^[0-9a-f]{64}$/.test(snapshotValue.previous_snapshot_digest))) throw new ProviderRuntimeError("LLM runtime health previous_snapshot_digest is malformed");
+    if (((snapshotValue.snapshot_generation as number) === 1) !== (snapshotValue.previous_snapshot_digest === null)) throw new ProviderRuntimeError("LLM runtime health snapshot generation and previous_snapshot_digest are inconsistent");
+  }
   if (!Array.isArray(snapshotValue.providers) || snapshotValue.providers.length > MAX_LLM_RUNTIME_HEALTH_PROVIDERS) throw new ProviderRuntimeError("LLM runtime health snapshot provider capacity is exceeded");
   if (!Array.isArray(snapshotValue.models) || snapshotValue.models.length > MAX_LLM_RUNTIME_HEALTH_MODELS) throw new ProviderRuntimeError("LLM runtime health snapshot model capacity is exceeded");
   const providers = snapshotValue.providers.map(normalizeRuntimeProviderHealthSnapshot);
@@ -2754,7 +2790,9 @@ export async function validateLLMRuntimeHealthSnapshot(value: unknown): Promise<
   }
   const snapshotDigest = typeof snapshotValue.snapshot_digest === "string" && /^[0-9a-f]{64}$/.test(snapshotValue.snapshot_digest) ? snapshotValue.snapshot_digest : null;
   if (!snapshotDigest) throw new ProviderRuntimeError("LLM runtime health snapshot digest is malformed");
-  const descriptor = { schema: LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA, providers, models, retention: "transport_health_metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
+  const descriptor = legacy
+    ? { schema: LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA, providers, models, retention: "transport_health_metadata_only_hash_bound" as const, secret_material: "never_returned" as const }
+    : { schema: LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA, snapshot_generation: snapshotValue.snapshot_generation as number, previous_snapshot_digest: snapshotValue.previous_snapshot_digest as string | null, providers, models, retention: "transport_health_metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
   if (await digestJson(descriptor) !== snapshotDigest) throw new ProviderRuntimeError("LLM runtime health snapshot digest mismatch");
   const snapshot = { ...descriptor, snapshot_digest: snapshotDigest };
   if (bytes(canonicalJson(snapshot)) > MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) throw new ProviderRuntimeError("LLM runtime health snapshot exceeds its byte capacity");
