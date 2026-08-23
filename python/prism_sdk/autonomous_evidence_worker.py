@@ -16,7 +16,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .authoring import canonical_json, content_digest
 from .autonomous_evidence import AutonomousEvidencePlan
@@ -275,7 +275,14 @@ class AutonomousEvidenceWorkItem:
 
 
 def _work_item_from_mapping(value: Mapping[str, Any]) -> AutonomousEvidenceWorkItem:
-    if not isinstance(value, Mapping) or value.get("schema") != AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA:
+    expected = {
+        "schema", "work_id", "plan_digest", "requirement_id", "domain", "workflow_id", "workflow_digest",
+        "stage_id", "source_id", "source_digest", "request_digest", "parent_evidence_digests", "max_attempts",
+        "attempts", "status", "available_at", "lease_owner", "lease_until", "receipt_digest",
+        "assessment_digest", "result_digest", "failure_class", "last_error_class", "created_at", "updated_at",
+        "item_digest", "retention", "secret_material",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected or value.get("schema") != AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA:
         raise ArgumentError("autonomous evidence work item is malformed")
     if value.get("retention") != "metadata_only_request_and_values_caller_owned" or value.get("secret_material") != "never_returned":
         raise ArgumentError("autonomous evidence work item retention is invalid")
@@ -309,15 +316,23 @@ def _validated_snapshot(value: Mapping[str, Any], maximum: int) -> tuple[dict[st
     observed_digest = _digest("autonomous evidence work queue snapshot snapshot_digest", value.get("snapshot_digest"))
     if content_digest(descriptor) != observed_digest:
         raise ArgumentError("autonomous evidence work queue snapshot digest is invalid")
-    normalized = dict(value)
-    if len(canonical_json(normalized).encode("utf-8")) > MAX_AUTONOMOUS_EVIDENCE_WORK_SNAPSHOT_BYTES:
-        raise ArgumentError("autonomous evidence work queue snapshot exceeds its byte bound")
     restored: dict[str, AutonomousEvidenceWorkItem] = {}
     for raw in items:
         item = _work_item_from_mapping(raw)
         if item.work_id in restored:
             raise ArgumentError("autonomous evidence work queue snapshot contains duplicate work ids")
         restored[item.work_id] = item
+    normalized_descriptor = {
+        "schema": AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
+        "items": [item.to_dict() for item in sorted(restored.values(), key=lambda row: (row.created_at, row.work_id))],
+        "retention": "metadata_only_request_and_values_caller_owned",
+        "secret_material": "never_returned",
+    }
+    normalized = {**normalized_descriptor, "snapshot_digest": observed_digest}
+    if canonical_json(value) != canonical_json(normalized):
+        raise ArgumentError("autonomous evidence work queue snapshot is not normalized")
+    if len(canonical_json(normalized).encode("utf-8")) > MAX_AUTONOMOUS_EVIDENCE_WORK_SNAPSHOT_BYTES:
+        raise ArgumentError("autonomous evidence work queue snapshot exceeds its byte bound")
     return normalized, restored
 
 
@@ -544,6 +559,89 @@ class InMemoryAutonomousEvidenceWorkQueue:
             self._items = restored
 
 
+class AutonomousEvidenceWorkQueueSnapshotTextStore(Protocol):
+    """Portable text persistence for metadata-only evidence work queues."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalAutonomousEvidenceWorkQueueSnapshotTextStore(
+    AutonomousEvidenceWorkQueueSnapshotTextStore,
+    Protocol,
+):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonAutonomousEvidenceWorkQueueSnapshotPersistence:
+    """Strict canonical JSON persistence for evidence worker queues."""
+
+    def __init__(
+        self,
+        store: AutonomousEvidenceWorkQueueSnapshotTextStore,
+        *,
+        max_items: int = MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS,
+        max_bytes: int = MAX_AUTONOMOUS_EVIDENCE_WORK_SNAPSHOT_BYTES,
+    ) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ArgumentError("evidence work JSON persistence requires a text store")
+        self.max_items = _bounded_integer("evidence work JSON max_items", max_items, 1, MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS)
+        self.max_bytes = _bounded_integer("evidence work JSON max_bytes", max_bytes, 1, MAX_AUTONOMOUS_EVIDENCE_WORK_SNAPSHOT_BYTES)
+        self.store = store
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("evidence work JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ArgumentError("evidence work JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("evidence work JSON snapshot must be an object")
+        normalized, _ = _validated_snapshot(raw, self.max_items)
+        if encoded != canonical_json(normalized):
+            raise ArgumentError("evidence work JSON snapshot is not canonical")
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized, _ = _validated_snapshot(snapshot, self.max_items)
+        encoded = canonical_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("evidence work JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousEvidenceWorkQueueSnapshotPersistence(
+    JsonAutonomousEvidenceWorkQueueSnapshotPersistence,
+):
+    """Canonical evidence work persistence with stale-writer fencing."""
+
+    def __init__(
+        self,
+        store: TransactionalAutonomousEvidenceWorkQueueSnapshotTextStore,
+        *,
+        max_items: int = MAX_AUTONOMOUS_EVIDENCE_WORK_ITEMS,
+        max_bytes: int = MAX_AUTONOMOUS_EVIDENCE_WORK_SNAPSHOT_BYTES,
+    ) -> None:
+        super().__init__(store, max_items=max_items, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ArgumentError("transactional evidence work persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest("evidence work expected snapshot digest", expected_snapshot_digest)
+        normalized, _ = _validated_snapshot(snapshot, self.max_items)
+        encoded = canonical_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("evidence work JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
 class AutonomousEvidenceWorkQueuePersistenceCoordinator:
     def __init__(self, queue: InMemoryAutonomousEvidenceWorkQueue, persistence: Any) -> None:
         if not isinstance(queue, InMemoryAutonomousEvidenceWorkQueue):
@@ -552,17 +650,26 @@ class AutonomousEvidenceWorkQueuePersistenceCoordinator:
             raise ArgumentError("autonomous evidence work persistence adapter is malformed")
         self.queue = queue
         self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
 
     def restore(self) -> dict[str, Any]:
         snapshot = self.persistence.read()
         if snapshot is None:
+            self._expected_snapshot_digest = None
             return {"status": "empty", "snapshot_digest": None, "items": 0}
         self.queue.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
         return {"status": "restored", "snapshot_digest": snapshot["snapshot_digest"], "items": self.queue.verify_integrity()["items"]}
 
     def flush(self) -> dict[str, Any]:
         snapshot = self.queue.snapshot()
-        self.persistence.write(snapshot)
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise ArgumentError("evidence work persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
         return snapshot
 
 

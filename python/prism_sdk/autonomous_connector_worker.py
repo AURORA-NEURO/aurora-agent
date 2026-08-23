@@ -532,6 +532,47 @@ def _work_item_from_mapping(value: Mapping[str, Any], operation_registry: Autono
     return item
 
 
+def _validated_connector_work_snapshot(
+    value: Mapping[str, Any],
+    operation_registry: AutonomousConnectorOperationRegistry,
+    max_items: int,
+) -> tuple[dict[str, Any], dict[str, AutonomousConnectorWorkItem]]:
+    expected = {"schema", "operation_registry_digest", "items", "retention", "secret_material", "snapshot_digest"}
+    if not isinstance(value, Mapping) or set(value) != expected or value.get("schema") != AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA:
+        raise ArgumentError("autonomous connector work queue snapshot is malformed")
+    if value.get("retention") != "metadata_only_request_plan_and_payload_not_retained" or value.get("secret_material") != "never_returned":
+        raise ArgumentError("autonomous connector work queue snapshot retention is invalid")
+    if value.get("operation_registry_digest") != operation_registry.digest:
+        raise ArgumentError("autonomous connector work queue snapshot operation registry is stale")
+    raw_items = value.get("items")
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)) or len(raw_items) > max_items:
+        raise ArgumentError("autonomous connector work queue snapshot exceeds max_items")
+    restored: dict[str, AutonomousConnectorWorkItem] = {}
+    for raw in raw_items:
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("autonomous connector work queue snapshot item is malformed")
+        item = _work_item_from_mapping(raw, operation_registry)
+        if item.work_id in restored:
+            raise ArgumentError("autonomous connector work queue snapshot contains duplicate work ids")
+        restored[item.work_id] = item
+    normalized_descriptor = {
+        "schema": AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA,
+        "operation_registry_digest": operation_registry.digest,
+        "items": [item.to_dict() for item in sorted(restored.values(), key=lambda row: (row.created_at, row.work_id))],
+        "retention": "metadata_only_request_plan_and_payload_not_retained",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = _digest("autonomous connector work queue snapshot digest", value.get("snapshot_digest"))
+    if snapshot_digest != content_digest(normalized_descriptor):
+        raise ArgumentError("autonomous connector work queue snapshot digest is invalid")
+    normalized = {**normalized_descriptor, "snapshot_digest": snapshot_digest}
+    if canonical_json(value) != canonical_json(normalized):
+        raise ArgumentError("autonomous connector work queue snapshot is not normalized")
+    if len(canonical_json(normalized).encode("utf-8")) > MAX_AUTONOMOUS_CONNECTOR_WORK_SNAPSHOT_BYTES:
+        raise ArgumentError("autonomous connector work queue snapshot exceeds its bound")
+    return normalized, restored
+
+
 class InMemoryAutonomousConnectorWorkQueue:
     """Thread-safe, metadata-only queue with lease fencing and bounded retry."""
 
@@ -724,35 +765,100 @@ class InMemoryAutonomousConnectorWorkQueue:
         self.verify_integrity()
         descriptor = {"schema": AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA, "operation_registry_digest": self.operation_registry.digest, "items": [item.to_dict() for item in self.rows()], "retention": "metadata_only_request_plan_and_payload_not_retained", "secret_material": "never_returned"}
         snapshot = {**descriptor, "snapshot_digest": content_digest(descriptor)}
-        encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        if len(encoded) > MAX_AUTONOMOUS_CONNECTOR_WORK_SNAPSHOT_BYTES:
-            raise ArgumentError("autonomous connector work queue snapshot exceeds its bound")
-        return snapshot
+        normalized, _ = _validated_connector_work_snapshot(snapshot, self.operation_registry, self.max_items)
+        return normalized
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
-        if not isinstance(snapshot, Mapping) or snapshot.get("schema") != AUTONOMOUS_CONNECTOR_WORK_QUEUE_SCHEMA or not isinstance(snapshot.get("items"), Sequence) or isinstance(snapshot.get("items"), (str, bytes)):
-            raise ArgumentError("autonomous connector work queue snapshot is malformed")
-        if snapshot.get("retention") != "metadata_only_request_plan_and_payload_not_retained" or snapshot.get("secret_material") != "never_returned":
-            raise ArgumentError("autonomous connector work queue snapshot retention is invalid")
-        if snapshot.get("operation_registry_digest") != self.operation_registry.digest:
-            raise ArgumentError("autonomous connector work queue snapshot operation registry is stale")
-        observed = snapshot.get("snapshot_digest")
-        descriptor = {key: value for key, value in snapshot.items() if key != "snapshot_digest"}
-        if _digest("autonomous connector work queue snapshot digest", observed) != content_digest(descriptor):
-            raise ArgumentError("autonomous connector work queue snapshot digest is invalid")
-        raw_items = tuple(snapshot.get("items"))
-        if len(raw_items) > self.max_items:
-            raise ArgumentError("autonomous connector work queue snapshot exceeds max_items")
-        restored: dict[str, AutonomousConnectorWorkItem] = {}
-        for raw in raw_items:
-            if not isinstance(raw, Mapping):
-                raise ArgumentError("autonomous connector work queue snapshot item is malformed")
-            item = _work_item_from_mapping(raw, self.operation_registry)
-            if item.work_id in restored:
-                raise ArgumentError("autonomous connector work queue snapshot contains duplicate work ids")
-            restored[item.work_id] = item
+        _, restored = _validated_connector_work_snapshot(snapshot, self.operation_registry, self.max_items)
         with self._lock:
             self._items = restored
+
+
+class AutonomousConnectorWorkQueueSnapshotTextStore(Protocol):
+    """Portable text persistence for metadata-only connector work queues."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalAutonomousConnectorWorkQueueSnapshotTextStore(
+    AutonomousConnectorWorkQueueSnapshotTextStore,
+    Protocol,
+):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonAutonomousConnectorWorkQueueSnapshotPersistence:
+    """Strict canonical JSON persistence for connector work queue snapshots."""
+
+    def __init__(
+        self,
+        store: AutonomousConnectorWorkQueueSnapshotTextStore,
+        operation_registry: AutonomousConnectorOperationRegistry,
+        *,
+        max_bytes: int = MAX_AUTONOMOUS_CONNECTOR_WORK_SNAPSHOT_BYTES,
+    ) -> None:
+        if not isinstance(operation_registry, AutonomousConnectorOperationRegistry):
+            raise ArgumentError("connector work JSON persistence requires an operation registry")
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ArgumentError("connector work JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMOUS_CONNECTOR_WORK_SNAPSHOT_BYTES:
+            raise ArgumentError("connector work JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.operation_registry = operation_registry
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("connector work JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ArgumentError("connector work JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("connector work JSON snapshot must be an object")
+        normalized, _ = _validated_connector_work_snapshot(raw, self.operation_registry, MAX_AUTONOMOUS_CONNECTOR_WORK_ITEMS)
+        if encoded != canonical_json(normalized):
+            raise ArgumentError("connector work JSON snapshot is not canonical")
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized, _ = _validated_connector_work_snapshot(snapshot, self.operation_registry, MAX_AUTONOMOUS_CONNECTOR_WORK_ITEMS)
+        encoded = canonical_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("connector work JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence(
+    JsonAutonomousConnectorWorkQueueSnapshotPersistence,
+):
+    """Canonical connector work persistence with stale-writer fencing."""
+
+    def __init__(
+        self,
+        store: TransactionalAutonomousConnectorWorkQueueSnapshotTextStore,
+        operation_registry: AutonomousConnectorOperationRegistry,
+        *,
+        max_bytes: int = MAX_AUTONOMOUS_CONNECTOR_WORK_SNAPSHOT_BYTES,
+    ) -> None:
+        super().__init__(store, operation_registry, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ArgumentError("transactional connector work persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest("connector work expected snapshot digest", expected_snapshot_digest)
+        normalized, _ = _validated_connector_work_snapshot(snapshot, self.operation_registry, MAX_AUTONOMOUS_CONNECTOR_WORK_ITEMS)
+        encoded = canonical_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("connector work JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
 
 
 class AutonomousConnectorWorkQueuePersistenceCoordinator:
@@ -765,17 +871,26 @@ class AutonomousConnectorWorkQueuePersistenceCoordinator:
             raise ArgumentError("autonomous connector work persistence adapter is malformed")
         self.queue = queue
         self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
 
     def restore(self) -> dict[str, Any]:
         snapshot = self.persistence.read()
         if snapshot is None:
+            self._expected_snapshot_digest = None
             return {"status": "empty", "snapshot_digest": None, "items": 0}
         self.queue.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
         return {"status": "restored", "snapshot_digest": snapshot["snapshot_digest"], "items": self.queue.verify_integrity()["items"]}
 
     def flush(self) -> dict[str, Any]:
         snapshot = self.queue.snapshot()
-        self.persistence.write(snapshot)
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise ArgumentError("connector work persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
         return snapshot
 
 

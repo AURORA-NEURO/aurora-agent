@@ -15,6 +15,7 @@ from prism_sdk import (
     AutonomousConnectorWorker,
     AutonomousConnectorFeedbackPersistenceCoordinator,
     AutonomousConnectorWorkQueuePersistenceCoordinator,
+    TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence,
     DomainEvidenceProviderConnectorManifest,
     InMemoryAutonomousConnectorFeedbackLedger,
     InMemoryAutonomousConnectorWorkQueue,
@@ -155,6 +156,21 @@ def test_work_queue_is_metadata_only_fenced_retry_bounded_and_tamper_evident(tmp
     tampered["items"][0]["status"] = "completed"
     with pytest.raises(ArgumentError, match="digest"):
         restored.restore(tampered)
+
+    text_backend = _CasTextStore()
+    text_persistence = TransactionalJsonAutonomousConnectorWorkQueueSnapshotPersistence(text_backend, operations)
+    text_coordinator = AutonomousConnectorWorkQueuePersistenceCoordinator(queue, text_persistence)
+    text_flushed = text_coordinator.flush()
+    restarted_text_queue = InMemoryAutonomousConnectorWorkQueue(operations)
+    restarted_text_coordinator = AutonomousConnectorWorkQueuePersistenceCoordinator(restarted_text_queue, text_persistence)
+    assert restarted_text_coordinator.restore()["snapshot_digest"] == text_flushed["snapshot_digest"]
+    text_backend.value = json.dumps(json.loads(text_backend.value), indent=2)
+    with pytest.raises(ArgumentError, match="not canonical"):
+        text_persistence.read()
+    text_persistence.write(queue.snapshot())
+    text_persistence.write(InMemoryAutonomousConnectorWorkQueue(operations).snapshot())
+    with pytest.raises(ArgumentError, match="compare-and-swap conflict"):
+        restarted_text_coordinator.flush()
 
 
 def test_worker_rehydrates_once_replays_without_invocation_and_quarantines_missing_state(tmp_path) -> None:

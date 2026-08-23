@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from prism_sdk import (
@@ -8,6 +10,7 @@ from prism_sdk import (
     AutonomousEvidenceRuntime,
     AutonomousEvidenceWorker,
     AutonomousEvidenceWorkQueuePersistenceCoordinator,
+    TransactionalJsonAutonomousEvidenceWorkQueueSnapshotPersistence,
     InMemoryAutonomousEvidenceRuntimeJournal,
     InMemoryAutonomousEvidenceWorkQueue,
     build_autonomous_evidence_plan,
@@ -15,6 +18,24 @@ from prism_sdk import (
     builtin_autonomous_workflow_strategies,
     SQLiteAutonomousEvidenceWorkQueuePersistence,
 )
+
+
+class _CasTextStore:
+    def __init__(self) -> None:
+        self.value: str | None = None
+
+    def read(self) -> str | None:
+        return self.value
+
+    def write(self, value: str) -> None:
+        self.value = value
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+        if observed != expected_snapshot_digest:
+            return False
+        self.value = value
+        return True
 
 
 class _Evaluator:
@@ -206,3 +227,23 @@ def test_sqlite_persistence_restores_metadata_only_queue_across_process_objects(
 
     assert b"transient-evidence" not in path.read_bytes()
     assert b"caller-secret" not in path.read_bytes()
+
+
+def test_text_persistence_is_canonical_plan_safe_and_stale_writer_fenced():
+    plan = _single_domain_plan("science")
+    queue = InMemoryAutonomousEvidenceWorkQueue()
+    queue.enqueue(work_id="text-evidence", plan=plan, request=_request(plan.requirements[0]), now=8_000)
+    backend = _CasTextStore()
+    persistence = TransactionalJsonAutonomousEvidenceWorkQueueSnapshotPersistence(backend)
+    source = AutonomousEvidenceWorkQueuePersistenceCoordinator(queue, persistence)
+    flushed = source.flush()
+    restarted = InMemoryAutonomousEvidenceWorkQueue()
+    restarted_coordinator = AutonomousEvidenceWorkQueuePersistenceCoordinator(restarted, persistence)
+    assert restarted_coordinator.restore()["snapshot_digest"] == flushed["snapshot_digest"]
+    backend.value = json.dumps(json.loads(backend.value), indent=2)
+    with pytest.raises(ArgumentError, match="not canonical"):
+        persistence.read()
+    persistence.write(queue.snapshot())
+    persistence.write(InMemoryAutonomousEvidenceWorkQueue().snapshot())
+    with pytest.raises(ArgumentError, match="compare-and-swap conflict"):
+        restarted_coordinator.flush()
