@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "aurora-ops",
+  "version": "0.1.0",
+  "description": "Operations evidence for the aurora-agent control plane: an ops-auditor subagent and a health command that read snapshots, capability gates, and the recovery matrix — reporting evidence postures verbatim, never collapsing them into readiness.",
+  "author": {
+    "name": "AURORA-NEURO"
+  },
+  "homepage": "https://github.com/AURORA-NEURO/aurora-agent",
+  "license": "Apache-2.0",
+  "keywords": ["aurora", "operations", "gates", "recovery", "auditing"]
+}
