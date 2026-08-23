@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+
 import pytest
 
 from prism_sdk.autonomous_domain_response import (
@@ -10,14 +13,15 @@ from prism_sdk.autonomous_domain_response import (
     evaluate_autonomous_domain_response,
     replay_autonomous_domain_response_evaluation,
     validate_autonomous_domain_response,
+    validate_autonomous_domain_response_evaluation,
 )
 from prism_sdk.autonomy import (
+    AutonomousAgent,
     AutonomousTaskOrchestrator,
     builtin_autonomous_domain_profiles,
     builtin_autonomous_workflow_strategies,
 )
-from prism_sdk.brain import AutonomousBrain
-from prism_sdk.brain import BrainRunResult
+from prism_sdk.brain import AutonomousBrain, BrainLearningLedger, BrainRunResult
 from prism_sdk.errors import ArgumentError
 from prism_sdk.llm_runtime import LLMRuntime, ProviderResponse
 
@@ -61,6 +65,52 @@ def _contract_for(profile: object, domain: str) -> AutonomousDomainResponseContr
     return build_autonomous_domain_response_contract(profile, workflow=workflow)
 
 
+class _LearningWorkspace:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        assert name == "brain_outcome_record"
+        payload = {} if arguments is None else dict(arguments)
+        self.calls.append(payload)
+        state = payload["bandit_state"]
+        assert isinstance(state, dict)
+        return {
+            "ok": True,
+            "status": "recorded_evaluator_reward",
+            "next_state": {**state, "generation": int(state.get("generation", 0)) + 1},
+            "learning_evidence": {
+                "schema": "bioprism-brain-learning-evidence/0.1",
+                "evidence_digest": "f" * 64,
+            },
+        }
+
+
+def _structured_result(contract: AutonomousDomainResponseContract, run_id: str) -> BrainRunResult:
+    return BrainRunResult(
+        run_id=run_id,
+        status="completed_provider_call",
+        selection={
+            "selected_model": {"provider": "offline", "model": "fixture"},
+            "decision_digest": "a" * 64,
+            "context_digest": "b" * 64,
+        },
+        prompt={"prompt_digest": "c" * 64},
+        plan={"plan": {"plan_digest": "d" * 64}},
+        response=ProviderResponse(
+            provider="offline",
+            model="fixture",
+            text="bounded structured response",
+            status_code=200,
+            request_id=run_id,
+            usage={},
+            raw={},
+            structured=_response(contract),
+        ),
+        outcome_digest="e" * 64,
+    )
+
+
 def test_contract_covers_every_builtin_domain_and_replays() -> None:
     profiles = builtin_autonomous_domain_profiles()
     assert {profile.domain for profile in profiles} == set(AUTONOMOUS_DOMAIN_RESPONSE_FIELDS)
@@ -72,6 +122,7 @@ def test_contract_covers_every_builtin_domain_and_replays() -> None:
         evaluation = evaluate_autonomous_domain_response(normalized.to_dict(), contract)
         assert evaluation.passed is True
         assert evaluation.reward == 1.0
+        assert validate_autonomous_domain_response_evaluation(evaluation.to_dict()).to_dict() == evaluation.to_dict()
         assert replay_autonomous_domain_response_evaluation(response, contract, evaluation).evaluation_digest == evaluation.evaluation_digest
 
 
@@ -118,6 +169,20 @@ def test_replay_rejects_changed_structural_feedback() -> None:
         replay_autonomous_domain_response_evaluation(changed, contract, evaluation)
 
 
+def test_structured_evaluation_validator_rejects_digest_or_secret_tampering() -> None:
+    profile = builtin_autonomous_domain_profiles()[0]
+    contract = _contract_for(profile, profile.domain)
+    evaluation = evaluate_autonomous_domain_response(_response(contract), contract).to_dict()
+    changed = dict(evaluation)
+    changed["evaluation_digest"] = "0" * 64
+    with pytest.raises(ArgumentError, match="digest"):
+        validate_autonomous_domain_response_evaluation(changed)
+    unsafe = dict(evaluation)
+    unsafe["replan_instruction"] = "send gsk_fixture_redacted"
+    with pytest.raises(ArgumentError, match="credential"):
+        validate_autonomous_domain_response_evaluation(unsafe)
+
+
 def test_provider_boundary_attaches_value_only_evaluation_to_result() -> None:
     orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(object(), LLMRuntime()))
     blueprint = orchestrator.prepare(
@@ -148,3 +213,39 @@ def test_provider_boundary_attaches_value_only_evaluation_to_result() -> None:
     assert attached.response_evaluation is not None  # type: ignore[union-attr]
     assert attached.response_evaluation["passed"] is True  # type: ignore[union-attr]
     assert "response_evaluation" in attached.to_dict()  # type: ignore[union-attr]
+
+
+def test_structured_response_settlement_is_restart_safe_for_every_domain(tmp_path) -> None:
+    workspace = _LearningWorkspace()
+    ledger = BrainLearningLedger(tmp_path / "structured-response-learning.jsonl")
+    agent = AutonomousAgent(workspace, LLMRuntime(), ledger=ledger)
+    bandit_state = {"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []}
+    for index, profile in enumerate(builtin_autonomous_domain_profiles()):
+        contract = _contract_for(profile, profile.domain)
+        result = _structured_result(contract, f"structured-{profile.domain}")
+        attached = agent.orchestrator._attach_domain_response_evaluation(
+            agent.orchestrator.prepare(
+                task=f"validate {profile.domain}",
+                domain=profile.domain,
+                structured_domain_response=True,
+            ),
+            result,
+        )
+        evaluation = validate_autonomous_domain_response_evaluation(attached.response_evaluation)  # type: ignore[arg-type]
+        episode = agent.prepare_learning_episode(attached, ledger=ledger)
+        saved = json.loads(json.dumps(episode.to_dict()))
+        metadata_only = replace(attached, response=None)
+        restored_agent = AutonomousAgent(workspace, LLMRuntime(), ledger=ledger)
+        decision, report = restored_agent.settle_structured_response(
+            metadata_only,
+            episode=saved,
+            bandit_state=bandit_state,
+            ledger=ledger,
+        )
+        assert decision.evaluator_id == f"autonomous-{profile.domain}-response-integrity"
+        assert report["structured_response"]["evaluation_digest"] == evaluation.evaluation_digest
+        assert ledger.pending_episodes() == []
+        assert "bounded structured response" not in json.dumps(ledger.records())
+        bandit_state = report["next_state"]
+        assert isinstance(bandit_state, dict)
+        assert bandit_state["generation"] == index + 1

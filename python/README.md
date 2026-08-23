@@ -242,6 +242,41 @@ quality, source, or external-effect oracle. `evaluate_autonomous_domain_response
 detection; no provider call or credential is needed for those operations. Credential-shaped fields
 and values are refused before the response can cross into durable learning metadata.
 
+The structural signal can be settled into the bandit explicitly after a process boundary. The
+settlement only adapts response composition; task correctness still requires the caller's normal
+domain evaluator:
+
+```python
+blueprint = agent.prepare(
+    task="review this change and produce a verifiable handoff",
+    domain="coding",
+    structured_domain_response=True,
+)
+run = agent.run(
+    task="review this change and produce a verifiable handoff",
+    domain="coding",
+    structured_domain_response=True,
+    approve_provider_call=True,
+)
+episode = agent.prepare_learning_episode(run, ledger=learning_ledger)
+decision, settlement = agent.settle_structured_response(
+    run,
+    episode=episode,
+    bandit_state=agent.learning_state(),
+    # Pass the contract when the transient response is available for replay verification.
+    contract=blueprint.response_contract,
+    ledger=learning_ledger,
+)
+```
+
+After a restart, rehydrate only `episode.to_dict()` and the value-only
+`response_evaluation`; omit `contract` when the provider response is no longer retained. The
+settlement refuses altered evaluation digests, mismatched episode/run identities, duplicate
+episodes, and credential-shaped values. When `learn=True` is used on the normal provider or
+cross-domain learning path, the same structural signal is recorded as a separate
+`kind="structured_response"` evaluator update with its own idempotency key, so it cannot collide
+with task-quality credit or be mistaken for external truth.
+
 Set `refresh_inventory=True` with explicit `inventory_priors` or an
 `inventory_prior_factory` when deployments should discover and reconcile model arms before the
 task. Inventory failure is raised instead of silently executing against a stale catalogue.

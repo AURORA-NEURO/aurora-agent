@@ -6101,6 +6101,7 @@ class AutonomousBrain:
         evidence_digest: str | None = None,
         ledger: BrainLearningLedger | None = None,
         replay_metadata: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Submit one explicit evaluator judgment for a run, loop, or mission.
 
@@ -6171,6 +6172,9 @@ class AutonomousBrain:
             context_digest=contextual_digest,
             context=context,
         )
+        resolved_idempotency_key = idempotency_key or f"run:{brain_result.run_id}"
+        if not isinstance(resolved_idempotency_key, str) or not resolved_idempotency_key.strip() or len(resolved_idempotency_key.encode("utf-8")) > 512:
+            raise BrainRunError("evaluator idempotency_key must be a bounded non-empty string")
         report = self.workspace.tool(
             "brain_outcome_record",
             {
@@ -6197,7 +6201,7 @@ class AutonomousBrain:
                 "bandit_state": normalized_bandit_state,
                 "arm_id": effective_arm_id,
                 **({"context_digest": contextual_digest, "context": context} if contextual_digest is not None else {}),
-                "idempotency_key": f"run:{brain_result.run_id}",
+                "idempotency_key": resolved_idempotency_key,
             },
         )
         if not isinstance(report, Mapping) or not report.get("ok"):

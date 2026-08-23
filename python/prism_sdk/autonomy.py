@@ -68,6 +68,8 @@ from .autonomous_domain_response import (
     AutonomousDomainResponseContract,
     build_autonomous_domain_response_contract,
     evaluate_autonomous_domain_response,
+    replay_autonomous_domain_response_evaluation,
+    validate_autonomous_domain_response_evaluation,
     validate_autonomous_provider_domain_response,
 )
 from .brain import (
@@ -7351,6 +7353,123 @@ def _decision_cycle_learning_metadata(result: Any) -> tuple[tuple[str, ...], tup
     return tuple(episode_ids), tuple(settlement_digests)
 
 
+def _structured_response_result(result: Any) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
+    """Unwrap learning envelopes while keeping settlement on one brain result."""
+
+    if isinstance(result, AutonomousLearningResult):
+        result = result.final_result
+    elif isinstance(result, BrainLearningCycleResult):
+        result = result.final_result
+    if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+        raise BrainRunError(
+            "structured-response learning requires a brain run, tool-loop, mission, or learning result"
+        )
+    return result
+
+
+def _structured_response_evaluation(result: Any) -> Any:
+    """Read a structured evaluation from any supported result envelope."""
+
+    normalized = _structured_response_result(result)
+    if isinstance(normalized, BrainRunResult):
+        return normalized.response_evaluation
+    return normalized.brain_run.response_evaluation
+
+
+def _structured_response_decision(
+    evaluation: Mapping[str, Any],
+    *,
+    episode_evidence_digest: str | None = None,
+    credited_reward: float | None = None,
+) -> BrainEvaluatorDecision:
+    """Convert a validated structural projection into a value-only learning decision."""
+
+    normalized = validate_autonomous_domain_response_evaluation(evaluation)
+    reward = normalized.reward if credited_reward is None else credited_reward
+    if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not -1.0 <= float(reward) <= 1.0:
+        raise BrainRunError("structured-response credited_reward must be finite and within [-1, 1]")
+    return BrainEvaluatorDecision(
+        evaluator_id=normalized.evaluator_id,
+        evaluator_version=normalized.evaluator_version,
+        reward=float(reward),
+        passed=normalized.passed,
+        failed=normalized.failed,
+        feedback_digest=normalized.feedback_digest,
+        failure_class=normalized.failure_class,
+        # ``response_digest`` is structural evaluator evidence, not the optional caller
+        # evidence packet bound by BrainLearningEpisode.evidence_digest. Preserve the response
+        # digest in feedback/replay metadata and bind caller evidence separately.
+        evidence_digest=episode_evidence_digest,
+        replan_requested=normalized.replan_requested,
+        replan_instruction=normalized.replan_instruction,
+    )
+
+
+def _record_structured_response_feedback(
+    brain: AutonomousBrain,
+    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
+    *,
+    bandit_state: Mapping[str, Any],
+    ledger: BrainLearningLedger | None,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Record one structural response signal with a collision-free evaluator identity."""
+
+    structured_projection = _structured_response_evaluation(result)
+    if structured_projection is None:
+        return None
+    structured_evaluation = validate_autonomous_domain_response_evaluation(structured_projection)
+    structured_decision = _structured_response_decision(structured_projection)
+    brain_result = result if isinstance(result, BrainRunResult) else result.brain_run
+    structured_report = brain.record_evaluator_outcome(
+        result,
+        bandit_state=bandit_state,
+        evaluator_id=structured_decision.evaluator_id,
+        evaluator_version=structured_decision.evaluator_version,
+        reward=structured_decision.reward,
+        passed=structured_decision.passed,
+        failed=structured_decision.failed,
+        feedback_digest=structured_decision.feedback_digest,
+        failure_class=structured_decision.failure_class,
+        # This is a response digest, not caller-supplied evidence. It is retained only in the
+        # value-only evaluator record and never copied into prompts.
+        evidence_digest=structured_evaluation.response_digest,
+        ledger=ledger,
+        replay_metadata={
+            "schema": "bioprism-brain-structured-response-replay/0.1",
+            "run_id": brain_result.run_id,
+            "response_digest": structured_evaluation.response_digest,
+            "evaluation_digest": structured_evaluation.evaluation_digest,
+            "evaluator_id": structured_decision.evaluator_id,
+            "evaluator_version": structured_decision.evaluator_version,
+            "decision_digest": _json_digest(structured_decision.to_dict()),
+            "retention": "metadata_and_digests_only",
+        },
+        idempotency_key=(
+            "structured-response:"
+            + brain_result.run_id
+            + ":"
+            + structured_evaluation.evaluation_digest
+        ),
+    )
+    next_state = structured_report.get("next_state")
+    state = dict(next_state) if isinstance(next_state, Mapping) else dict(bandit_state)
+    return state, {
+        "kind": "structured_response",
+        "decision": structured_decision.to_dict(),
+        "response_evaluation": {
+            "evaluation_digest": structured_evaluation.evaluation_digest,
+            "response_digest": structured_evaluation.response_digest,
+            "signals": dict(structured_evaluation.signals),
+            "evaluator_authority": structured_evaluation.evaluator_authority,
+        },
+        "recording": {
+            "status": structured_report.get("status"),
+            "next_state": structured_report.get("next_state"),
+            "learning_evidence": structured_report.get("learning_evidence"),
+        },
+    }
+
+
 class AutonomousTaskOrchestrator:
     """Compose domain intake with adaptive execution and optional online learning."""
 
@@ -12225,10 +12344,19 @@ class AutonomousTaskOrchestrator:
                 evidence=item_evidence,
                 ledger=ledger,
             )
+            brain_result = result if isinstance(result, BrainRunResult) else result.brain_run
             next_state = report.get("next_state")
             if isinstance(next_state, Mapping):
                 state = dict(next_state)
-            brain_result = result if isinstance(result, BrainRunResult) else result.brain_run
+            structured_feedback = _record_structured_response_feedback(
+                self.brain,
+                result,
+                bandit_state=state,
+                ledger=ledger,
+            )
+            if structured_feedback is not None:
+                state, structured_evaluation_record = structured_feedback
+                evaluations.append(structured_evaluation_record)
             episode_id = f"cross-{scope}-{item_id}-{brain_result.run_id}"
             if len(episode_id.encode("utf-8")) > 256:
                 episode_id = "cross-episode-" + content_digest(
@@ -13201,10 +13329,19 @@ class AutonomousTaskOrchestrator:
                 evidence=evidence,
                 ledger=ledger,
             )
+            brain_result = result if isinstance(result, BrainRunResult) else result.brain_run
             next_state = report.get("next_state")
             if isinstance(next_state, Mapping):
                 state = dict(next_state)
-            brain_result = result if isinstance(result, BrainRunResult) else result.brain_run
+            structured_feedback = _record_structured_response_feedback(
+                self.brain,
+                result,
+                bandit_state=state,
+                ledger=ledger,
+            )
+            if structured_feedback is not None:
+                state, structured_evaluation_record = structured_feedback
+                evaluations.append(structured_evaluation_record)
             episode_id = f"{brain_result.run_id}-attempt-{attempt}"
             receipt = self.brain.remember_result(
                 result,
@@ -16742,6 +16879,83 @@ class AutonomousAgent:
             ledger=self.ledger if ledger is None else ledger,
         )
         return decision, {**report, "model_quality": self._record_model_quality_feedback(episode, decision)}
+
+    def settle_structured_response(
+        self,
+        result: Any,
+        *,
+        episode: BrainLearningEpisode | Mapping[str, Any] | None = None,
+        contract: AutonomousDomainResponseContract | None = None,
+        credited_reward: float | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        ledger: BrainLearningLedger | None = None,
+    ) -> tuple[BrainEvaluatorDecision, dict[str, Any]]:
+        """Settle the opt-in structural response signal into the adaptive bandit.
+
+        This boundary is deliberately separate from task-quality evaluation.  It credits only
+        response composition (stage coverage, domain-field coverage, uncertainty disclosure,
+        and related contract signals), while the normal domain evaluator remains responsible
+        for task-specific correctness.  If an episode is omitted, a value-only episode is
+        prepared and registered in the configured ledger.  Supplying ``contract`` replays the
+        transient provider response before settlement; omitting it is suitable for a restarted
+        evaluator worker that has retained only the validated evaluation projection.
+        """
+
+        normalized_result = _structured_response_result(result)
+        raw_evaluation = _structured_response_evaluation(result)
+        if raw_evaluation is None:
+            raise BrainRunError(
+                "structured-response settlement requires a completed structured domain response evaluation"
+            )
+        evaluation = validate_autonomous_domain_response_evaluation(raw_evaluation)
+        if contract is not None:
+            if not isinstance(contract, AutonomousDomainResponseContract):
+                raise BrainRunError("structured-response contract must be an AutonomousDomainResponseContract or None")
+            structured = self.orchestrator._workflow_structured_output(normalized_result)
+            if structured is None:
+                raise BrainRunError("structured-response replay requires a transient structured provider response")
+            replay_autonomous_domain_response_evaluation(structured, contract, evaluation)
+        resolved_ledger = self.ledger if ledger is None else ledger
+        if episode is None:
+            normalized_episode = self.prepare_learning_episode(
+                normalized_result,
+                ledger=resolved_ledger,
+            )
+        else:
+            normalized_episode = episode if isinstance(episode, BrainLearningEpisode) else BrainLearningEpisode.from_mapping(episode)
+        if normalized_episode.run_id != (
+            normalized_result.run_id
+            if isinstance(normalized_result, BrainRunResult)
+            else normalized_result.brain_run.run_id
+        ):
+            raise BrainRunError("structured-response episode does not belong to the supplied result")
+        decision = _structured_response_decision(
+            evaluation.to_dict(),
+            episode_evidence_digest=normalized_episode.evidence_digest,
+            credited_reward=credited_reward,
+        )
+        adapter = BrainOutcomeEvaluator(
+            lambda _evaluation_input: decision,
+            evaluator_id=decision.evaluator_id,
+            evaluator_version=decision.evaluator_version,
+        )
+        settled_decision, report = adapter.settle_episode(
+            self.brain,
+            normalized_episode,
+            decision=decision,
+            bandit_state=self.learning_state() if bandit_state is None else bandit_state,
+            ledger=resolved_ledger,
+        )
+        return settled_decision, {
+            **report,
+            "structured_response": {
+                "evaluation_digest": evaluation.evaluation_digest,
+                "response_digest": evaluation.response_digest,
+                "credited_reward": settled_decision.reward,
+                "evaluator_authority": evaluation.evaluator_authority,
+                "retention": "value_only;response_and_credentials_not_retained",
+            },
+        }
 
     def settle_learning_decision(
         self,

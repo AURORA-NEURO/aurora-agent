@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import re
 from typing import Any, Mapping, Sequence
 
@@ -561,6 +562,131 @@ def evaluate_autonomous_domain_response(value: Any, contract: AutonomousDomainRe
     return AutonomousDomainResponseEvaluation(evaluation_digest=evaluation_digest, **descriptor)
 
 
+def validate_autonomous_domain_response_evaluation(value: Any) -> AutonomousDomainResponseEvaluation:
+    """Validate a persisted structural response-evaluation projection.
+
+    A response evaluation is intentionally portable without the provider response or reviewed
+    workflow.  This validator therefore checks the evaluator identity, bounded signal range,
+    digest bindings, and the canonical evaluation digest before a caller can use the projection
+    as delayed learning credit.  It does not make the structural score evidence of task
+    correctness or of an external-world effect.
+    """
+
+    if not isinstance(value, Mapping):
+        raise ArgumentError("domain response evaluation must be a mapping")
+    _safe_value(value)
+    allowed = {
+        "schema", "evaluator_id", "evaluator_version", "domain", "workflow_id", "workflow_digest",
+        "contract_digest", "response_digest", "signals", "missing_signals", "reward", "passed",
+        "failed", "failure_class", "feedback_digest", "evidence_digest", "replan_requested",
+        "replan_instruction", "reward_input", "evaluator_authority", "retention", "secret_material",
+        "evaluation_digest",
+    }
+    if set(value) != allowed:
+        raise ArgumentError("domain response evaluation contains unsupported or missing fields")
+    if value.get("schema") != AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA:
+        raise ArgumentError("domain response evaluation schema is invalid")
+    evaluator_id = _identifier("domain response evaluator_id", value.get("evaluator_id"))
+    evaluator_version = _identifier("domain response evaluator_version", value.get("evaluator_version"))
+    domain = _identifier("domain response evaluation domain", value.get("domain"))
+    workflow_id = _identifier("domain response evaluation workflow_id", value.get("workflow_id"))
+    for field in ("workflow_digest", "contract_digest", "response_digest", "feedback_digest", "evidence_digest", "evaluation_digest"):
+        digest = value.get(field)
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ArgumentError(f"domain response evaluation {field} must be a lowercase SHA-256 digest")
+    if value.get("evaluator_authority") != "structural_response_contract_only;not_external_truth":
+        raise ArgumentError("domain response evaluation authority marker is invalid")
+    if value.get("retention") != "value_only;response_and_credentials_not_retained":
+        raise ArgumentError("domain response evaluation retention marker is invalid")
+    if value.get("secret_material") != "never_returned":
+        raise ArgumentError("domain response evaluation secret marker is invalid")
+
+    raw_signals = value.get("signals")
+    if not isinstance(raw_signals, Mapping) or not raw_signals:
+        raise ArgumentError("domain response evaluation signals must be a non-empty mapping")
+    signals: dict[str, float] = {}
+    for key, raw_score in raw_signals.items():
+        signal = _identifier("domain response evaluation signal", key)
+        if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)) or not math.isfinite(float(raw_score)) or not 0.0 <= float(raw_score) <= 1.0:
+            raise ArgumentError("domain response evaluation signal scores must be finite values within [0, 1]")
+        signals[signal] = float(raw_score)
+    raw_missing = value.get("missing_signals")
+    if not isinstance(raw_missing, Sequence) or isinstance(raw_missing, (str, bytes, bytearray)):
+        raise ArgumentError("domain response evaluation missing_signals must be a sequence")
+    missing_signals = tuple(_identifier("domain response missing signal", item) for item in raw_missing)
+    if len(set(missing_signals)) != len(missing_signals) or any(signal not in signals for signal in missing_signals):
+        raise ArgumentError("domain response evaluation missing_signals are inconsistent with signals")
+
+    reward = value.get("reward")
+    if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not 0.0 <= float(reward) <= 1.0:
+        raise ArgumentError("domain response evaluation reward must be finite and within [0, 1]")
+    passed = value.get("passed")
+    failed = value.get("failed")
+    replan_requested = value.get("replan_requested")
+    if not isinstance(passed, bool) or not isinstance(failed, bool) or failed == passed:
+        raise ArgumentError("domain response evaluation passed and failed flags are inconsistent")
+    if not isinstance(replan_requested, bool) or replan_requested != failed:
+        raise ArgumentError("domain response evaluation replan_requested is inconsistent")
+    failure_class = value.get("failure_class")
+    if failure_class is not None:
+        failure_class = _identifier("domain response failure_class", failure_class)
+    elif not passed:
+        raise ArgumentError("failed domain response evaluations require a failure_class")
+    instruction = value.get("replan_instruction")
+    if instruction is not None:
+        instruction = _text("domain response replan_instruction", instruction, MAX_AUTONOMOUS_DOMAIN_RESPONSE_ITEM_BYTES)
+    elif not passed:
+        raise ArgumentError("failed domain response evaluations require a replan_instruction")
+
+    raw_reward_input = value.get("reward_input")
+    if not isinstance(raw_reward_input, Mapping) or set(raw_reward_input) != {
+        "evaluator_id", "evaluator_version", "reward", "passed", "failed", "feedback_digest", "failure_class", "evidence_digest",
+    }:
+        raise ArgumentError("domain response evaluation reward_input is malformed")
+    if (
+        raw_reward_input.get("evaluator_id") != evaluator_id
+        or raw_reward_input.get("evaluator_version") != evaluator_version
+        or raw_reward_input.get("reward") != reward
+        or raw_reward_input.get("passed") != passed
+        or raw_reward_input.get("failed") != failed
+        or raw_reward_input.get("feedback_digest") != value.get("feedback_digest")
+        or raw_reward_input.get("failure_class") != failure_class
+        or raw_reward_input.get("evidence_digest") != value.get("evidence_digest")
+    ):
+        raise ArgumentError("domain response evaluation reward_input does not match its projection")
+
+    descriptor = dict(value)
+    descriptor.pop("evaluation_digest")
+    expected_digest = content_digest(descriptor)
+    if value.get("evaluation_digest") != expected_digest:
+        raise ArgumentError("domain response evaluation digest does not match its projection")
+    return AutonomousDomainResponseEvaluation(
+        schema=AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA,
+        evaluator_id=evaluator_id,
+        evaluator_version=evaluator_version,
+        domain=domain,
+        workflow_id=workflow_id,
+        workflow_digest=value["workflow_digest"],
+        contract_digest=value["contract_digest"],
+        response_digest=value["response_digest"],
+        signals=signals,
+        missing_signals=missing_signals,
+        reward=float(reward),
+        passed=passed,
+        failed=failed,
+        failure_class=failure_class,
+        feedback_digest=value["feedback_digest"],
+        evidence_digest=value["evidence_digest"],
+        replan_requested=replan_requested,
+        replan_instruction=instruction,
+        reward_input=dict(raw_reward_input),
+        evaluator_authority=value["evaluator_authority"],
+        retention=value["retention"],
+        secret_material=value["secret_material"],
+        evaluation_digest=value["evaluation_digest"],
+    )
+
+
 def replay_autonomous_domain_response_evaluation(
     value: Any,
     contract: AutonomousDomainResponseContract,
@@ -598,5 +724,6 @@ __all__ = [
     "validate_autonomous_domain_response",
     "validate_autonomous_provider_domain_response",
     "evaluate_autonomous_domain_response",
+    "validate_autonomous_domain_response_evaluation",
     "replay_autonomous_domain_response_evaluation",
 ]

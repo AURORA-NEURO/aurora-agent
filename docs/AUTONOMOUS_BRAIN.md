@@ -1872,6 +1872,18 @@ learning path; it does not turn a provider response into a reward automatically.
 can still call `AutonomousTaskOrchestrator` directly when it needs to provide every candidate
 mapping or policy field itself.
 
+Structured domain responses add a second, explicitly separated learning signal. Python validates
+the deterministic response-composition evaluation, and `AutonomousAgent.settle_structured_response()`
+can settle it against a value-only `BrainLearningEpisode` after the provider boundary. The signal
+updates the selected contextual bandit arm for response composition only; the normal domain
+evaluator remains the authority for task quality, and no structural score is treated as evidence
+of truth or an external effect. The settlement validates the canonical evaluation digest, binds
+the episode to the original run, uses a distinct idempotency key, and can replay the transient
+response against the reviewed contract when that response is still caller-owned. After restart,
+only the episode and validated response-evaluation projection are required. Normal provider and
+cross-domain online learning record this signal as a separate `structured_response` evaluation,
+so it cannot collide with task-quality credit.
+
 ### Provider-free model-selection preview
 
 Applications that need to show an operator what the brain would choose before requesting approval

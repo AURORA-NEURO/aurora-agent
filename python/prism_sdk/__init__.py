@@ -406,6 +406,7 @@ from .autonomous_domain_response import (
     validate_autonomous_domain_response,
     validate_autonomous_provider_domain_response,
     evaluate_autonomous_domain_response,
+    validate_autonomous_domain_response_evaluation,
     replay_autonomous_domain_response_evaluation,
 )
 from .autonomy_scenarios import (
@@ -5535,6 +5536,7 @@ __all__ = [
     "validate_autonomous_domain_response",
     "validate_autonomous_provider_domain_response",
     "evaluate_autonomous_domain_response",
+    "validate_autonomous_domain_response_evaluation",
     "replay_autonomous_domain_response_evaluation",
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
