@@ -1457,6 +1457,20 @@ report `model_catalogue_required` before any model is configured. The report als
 provider registration, credential collection, capacity/capability gaps, and mixed `partial`
 states instead of collapsing them into a misleading boolean.
 
+Readiness can also project the evaluator-learning gate before execution. Supply the
+metadata-only `calibrationReport` and `requireCalibratedLearning: true` to `agent.readiness()`
+when learning must be holdout-admitted. The report gains aggregate calibration status and
+admitted/held domain counts, while each domain row carries a redacted admission decision and
+reason list. A held calibration changes that domain to `partial` and adds an actionable next
+step; the audit still performs no provider, model-discovery, tool, or learning mutation:
+
+```typescript
+const report = await agent.readiness({
+  calibrationReport,
+  requireCalibratedLearning: true,
+});
+```
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

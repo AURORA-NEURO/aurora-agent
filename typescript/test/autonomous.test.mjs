@@ -14,6 +14,8 @@ import {
   validateAutonomousCapabilityLearningSnapshot,
   AutonomousCostBudget,
   AutonomousCostBudgetError,
+  AutonomousEvaluatorCalibrationHarness,
+  AutonomousValueEvaluatorRegistry,
   AutonomousDomainToolRegistry,
   AutonomousDomainToolRuntime,
   AutonomousLearningController,
@@ -26,10 +28,12 @@ import {
   AutonomousCapabilityJournalPersistenceCoordinator,
   validateAutonomousCapabilityJournalSnapshot,
   AUTONOMOUS_READINESS_SCHEMA,
+  AUTONOMOUS_DOMAIN_NAMES,
   CredentialStore,
   LLMRuntime,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
+  builtinAutonomousValueEvaluatorProfiles,
   assembleAutonomousPrompt,
   compileAutonomousPlan,
   digestCanonicalJsonTextSync,
@@ -64,6 +68,36 @@ const learningContextDigest = (context) => digestCanonicalJsonTextSync(JSON.stri
   risk_class: context.risk_class,
   task_family: context.task_family ?? null,
 }));
+
+function readinessCalibrationReport({ weak = false } = {}) {
+  const profiles = builtinAutonomousValueEvaluatorProfiles();
+  const cases = profiles.flatMap((profile) => {
+    const evidence = (value) => ({
+      schema: "bioprism-brain-domain-evaluator/0.1",
+      domain: profile.domain,
+      capability: "readiness-calibration",
+      risk_class: "read_only",
+      signals: Object.fromEntries(profile.required_signals.map((signal) => [signal, value])),
+      references: [],
+      limitations: [],
+      retention: "value_only_digests_and_signal_scores",
+    });
+    return [
+      { case_id: `${profile.domain}-readiness-calibration-positive`, domain: profile.domain, evidence: evidence(1), label: 1, split: "calibration" },
+      { case_id: `${profile.domain}-readiness-calibration-negative`, domain: profile.domain, evidence: evidence(0), label: 0, split: "calibration" },
+      { case_id: `${profile.domain}-readiness-holdout-positive`, domain: profile.domain, evidence: evidence(1), label: weak && profile.domain === "coding" ? 0 : 1, split: "holdout" },
+      { case_id: `${profile.domain}-readiness-holdout-negative`, domain: profile.domain, evidence: evidence(0), label: 0, split: "holdout" },
+    ];
+  });
+  return new AutonomousEvaluatorCalibrationHarness(AutonomousValueEvaluatorRegistry.withBuiltinProfiles()).run({
+    cases,
+    bins: 5,
+    minCalibrationCasesPerDomain: 2,
+    minHoldoutCasesPerDomain: 2,
+    maxExpectedCalibrationError: 0.01,
+    maxBrierScore: 0.01,
+  });
+}
 
 test("synchronous control-plane SHA-256 matches the standard digest", () => {
   assert.equal(digestCanonicalJsonTextSync("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
@@ -1759,6 +1793,38 @@ test("keyless readiness audits every built-in domain without contacting provider
   assert.match(report.readiness_digest, /^[0-9a-f]{64}$/);
   assert.match(JSON.stringify(report), /attach AutonomousOnlineLearner/);
   assert.doesNotMatch(JSON.stringify(report), /api_key|Bearer|sk-|test-secret/i);
+  assert.equal(fetchCalls, 0);
+});
+
+test("keyless readiness exposes all-domain calibration admission without provider calls", async () => {
+  let fetchCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("calibration readiness must not contact providers");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("local", "https://local.invalid", { requiresCredential: false }));
+  const profiles = await builtinAutonomousDomainProfiles();
+  const capabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(candidate("local", "ready-model", capabilities));
+
+  const readyReport = await agent.readiness({ calibrationReport: readinessCalibrationReport(), requireCalibratedLearning: true });
+  assert.equal(readyReport.learning.calibration.status, "ready");
+  assert.equal(readyReport.learning.calibration.decision, "admit_learning");
+  assert.equal(readyReport.learning.calibration.admitted_domain_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(readyReport.learning.calibration.held_domain_count, 0);
+  assert.ok(readyReport.domains.every((row) => row.calibration_admission?.decision === "admit_learning"));
+  assert.ok(readyReport.domains.every((row) => row.state === "ready_for_caller_approval"));
+
+  const heldReport = await agent.readiness({ calibrationReport: readinessCalibrationReport({ weak: true }), requireCalibratedLearning: true });
+  assert.equal(heldReport.learning.calibration.decision, "hold_learning");
+  assert.equal(heldReport.learning.calibration.held_domain_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(heldReport.domains.find((row) => row.domain === "coding").state, "partial");
+  assert.match(JSON.stringify(heldReport.domains.find((row) => row.domain === "coding")), /hold evaluator calibration/);
+  await assert.rejects(() => agent.readiness({ requireCalibratedLearning: true }), /requires calibrationReport/);
   assert.equal(fetchCalls, 0);
 });
 

@@ -149,6 +149,11 @@ decision, and reason rows are recomputed from the retained projection. A caller 
 digest to a forged `ready` projection, but the learning admission still refuses the inconsistent
 report.
 
+The keyless `AutonomousAgent.readiness()` projection now accepts the same calibration report and
+required-learning flag. It exposes aggregate admitted/held counts and a redacted per-domain
+admission reason before any provider, model-discovery, tool, or learner operation; a required
+calibration hold moves the affected readiness row to `partial` and adds the remediation action.
+
 The response contract now emits a deterministic, replayable composition evaluation and a safe
 `reward_input`. An explicit `AutonomousLearningController.settleStructuredResponse` helper routes
 that signal through the same idempotent bandit/outbox settlement boundary as other evaluator

@@ -45,6 +45,7 @@ import {
 } from "./autonomous-connectors.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
+import type { AutonomousEvaluatorCalibrationReport } from "./autonomous-evaluator-calibration.js";
 import type { AutonomousModelInventoryRefreshOptions, AutonomousModelInventorySnapshot } from "./autonomous-model-inventory.js";
 import type {
   AutonomousWorkflowPortfolioItemRequest,
@@ -530,6 +531,7 @@ export interface AutonomousReadinessDomain extends JsonObject {
   available_tool_count: number;
   missing_tools: string[];
   learning_context_digest: string;
+  calibration_admission?: JsonObject;
   state: AutonomousReadinessState;
   next_actions: string[];
 }
@@ -3665,12 +3667,18 @@ export class AutonomousAgent {
     candidates?: readonly AutonomousModelCandidate[];
     estimatedInputTokens?: number;
     requestedOutputTokens?: number;
+    calibrationReport?: AutonomousEvaluatorCalibrationReport;
+    requireCalibratedLearning?: boolean;
   } = {}): Promise<AutonomousReadinessReport> {
     const estimatedInputTokens = options.estimatedInputTokens ?? 4_096;
     const requestedOutputTokens = options.requestedOutputTokens ?? 1_024;
     for (const [name, value] of [["estimatedInputTokens", estimatedInputTokens], ["requestedOutputTokens", requestedOutputTokens]] as const) {
       if (!Number.isSafeInteger(value) || value < 1 || value > 10_000_000) throw new ArgumentError(`autonomous readiness ${name} is outside its bounds`);
     }
+    if (options.requireCalibratedLearning !== undefined && typeof options.requireCalibratedLearning !== "boolean") throw new ArgumentError("autonomous readiness requireCalibratedLearning must be boolean");
+    if (options.requireCalibratedLearning === true && options.calibrationReport === undefined) throw new ArgumentError("autonomous readiness requires calibrationReport when calibrated learning is required");
+    const calibrationRuntime = options.calibrationReport === undefined ? null : await import("./autonomous-evaluator-calibration.js");
+    const calibrationReport = options.calibrationReport === undefined ? null : calibrationRuntime!.validateAutonomousEvaluatorCalibrationReport(options.calibrationReport);
     const candidates = (options.candidates === undefined ? this.models() : [...options.candidates].map(normalizeAutonomousModelCandidate));
     if (candidates.length > AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS) throw new ArgumentError(`autonomous readiness candidates must contain at most ${AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS} models`);
     const candidateIds = new Set<string>();
@@ -3738,7 +3746,10 @@ export class AutonomousAgent {
         const state = providerState.get(candidate.provider);
         return state?.registered === true && state.credentialReady === false;
       });
-      const state: AutonomousReadinessState = !candidates.length ? "model_catalogue_required" : !compatible.length ? "model_capability_gap" : eligible.length ? "ready_for_caller_approval" : credentialMissing ? "credential_required" : providerMissing ? "provider_registration_required" : "partial";
+      const calibrationAdmission = calibrationReport === null ? null : calibrationRuntime!.autonomousEvaluatorCalibrationAdmission(calibrationReport, profile.domain);
+      const calibrationBlocks = options.requireCalibratedLearning === true && calibrationAdmission?.decision !== "admit_learning";
+      const baseState: AutonomousReadinessState = !candidates.length ? "model_catalogue_required" : !compatible.length ? "model_capability_gap" : eligible.length ? "ready_for_caller_approval" : credentialMissing ? "credential_required" : providerMissing ? "provider_registration_required" : "partial";
+      const state: AutonomousReadinessState = calibrationBlocks ? "partial" : baseState;
       const nextActions = new Set<string>();
       if (state === "model_catalogue_required") nextActions.add("register at least one model candidate with the reviewed domain capabilities");
       if (state === "model_capability_gap") nextActions.add(`register a model declaring: ${requiredCapabilities.join(", ")}`);
@@ -3746,16 +3757,18 @@ export class AutonomousAgent {
       if (state === "credential_required") nextActions.add("collect a short-lived user credential through ProviderOnboarding");
       if (missingTools.length) nextActions.add("attach and review the live tool catalogue; missing tools remain optional provider-only fallbacks until bound");
       if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
-      const row: AutonomousReadinessDomain = { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, required_model_capabilities: requiredCapabilities, compatible_model_count: compatible.length, eligible_model_count: eligible.length, required_tool_count: uniqueBindings.length, available_tool_count: uniqueBindings.length - missingTools.length, missing_tools: missingTools, learning_context_digest: learningContextDigest, state, next_actions: [...nextActions].sort() };
+      if (calibrationBlocks) nextActions.add(`hold evaluator calibration before learning: ${calibrationAdmission!.reasons.join(", ")}`);
+      const row: AutonomousReadinessDomain = { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, required_model_capabilities: requiredCapabilities, compatible_model_count: compatible.length, eligible_model_count: eligible.length, required_tool_count: uniqueBindings.length, available_tool_count: uniqueBindings.length - missingTools.length, missing_tools: missingTools, learning_context_digest: learningContextDigest, ...(calibrationAdmission === null ? {} : { calibration_admission: { decision: calibrationAdmission.decision, report_digest: calibrationAdmission.report_digest, evaluator_id: calibrationAdmission.evaluator_id, evaluator_version: calibrationAdmission.evaluator_version, reasons: [...calibrationAdmission.reasons], execution: "readiness_projection_only;does_not_invoke_provider_or_mutate_learning", secret_material: "never_returned" } }), state, next_actions: [...nextActions].sort() };
       domainRows.push(row);
       capabilityRows.push({ domain: profile.domain, required_model_capabilities: requiredCapabilities, compatible_model_ids: compatible.map((candidate) => `${candidate.provider}/${candidate.model}`), incompatible_models: incompatible });
     }
-    const learning = { configured: this.learner !== undefined, domain_count: profiles.length, contexts: domainRows.map((row) => ({ domain: row.domain, context_digest: row.learning_context_digest })), feedback_contract: "explicit_evaluator_reward_only; transport_success_is_not_task_quality", retention: "value_only_learning_metadata" };
+    const learning = { configured: this.learner !== undefined, domain_count: profiles.length, contexts: domainRows.map((row) => ({ domain: row.domain, context_digest: row.learning_context_digest })), calibration: calibrationReport === null ? { configured: false, required: options.requireCalibratedLearning === true, report_digest: null, status: null, decision: options.requireCalibratedLearning === true ? "hold_learning" : "not_required", admitted_domain_count: 0, held_domain_count: options.requireCalibratedLearning === true ? profiles.length : 0 } : { configured: true, required: options.requireCalibratedLearning === true, report_digest: calibrationReport.report_digest, status: calibrationReport.status, decision: calibrationReport.gate.decision, admitted_domain_count: domainRows.filter((row) => row.calibration_admission?.decision === "admit_learning").length, held_domain_count: domainRows.filter((row) => row.calibration_admission?.decision !== "admit_learning").length }, feedback_contract: "explicit_evaluator_reward_only; transport_success_is_not_task_quality", retention: "value_only_learning_metadata" };
     const domainPacks = await Promise.all(profiles.map((profile) => buildDomainPack(profile)));
     const nextActions = new Set<string>(domainRows.flatMap((row) => row.next_actions));
     for (const row of providerRows) if (row.next_action !== "ready") nextActions.add(`${row.next_action}: ${row.provider}`);
     if (!this.toolCatalogue) nextActions.add("attach a live ToolCatalogue to compute exact domain-tool coverage");
     if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
+    if (options.requireCalibratedLearning === true && learning.calibration.decision !== "admit_learning") nextActions.add("resolve evaluator calibration holdout coverage before enabling learning");
     const activation = this.activation.state;
     if (activation.status === "created" || activation.status === "provider_pending" || activation.status === "catalogue_pending") nextActions.add("refresh activation metadata, then review and explicitly approve proposed bindings");
     if (activation.status === "review_required" || activation.status === "partially_activated") nextActions.add("review the digest-bound activation plan and approve only the intended read-only bindings");
