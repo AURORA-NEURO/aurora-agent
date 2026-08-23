@@ -263,6 +263,14 @@ test("cross-domain snapshot JSON persistence is canonical, restart-safe, and CAS
   assert.equal(rehydrated.snapshot_digest, snapshot.snapshot_digest);
   assert.equal((await restored.verifyIntegrity()).verified, true);
 
+  const forgedCheckpoint = { ...snapshot.checkpoints[0], generation: 2, previous_checkpoint_digest: null };
+  const { checkpoint_digest: _checkpointDigest, ...forgedCheckpointBody } = forgedCheckpoint;
+  forgedCheckpoint.checkpoint_digest = await digestJson(forgedCheckpointBody);
+  const forgedSnapshot = { ...snapshot, checkpoints: [forgedCheckpoint] };
+  const { snapshot_digest: _snapshotDigest, ...forgedSnapshotBody } = forgedSnapshot;
+  forgedSnapshot.snapshot_digest = await digestJson(forgedSnapshotBody);
+  await assert.rejects(new InMemoryAutonomousCrossDomainCheckpointStore().restore(forgedSnapshot), /generation and predecessor/);
+
   const stale = new AutonomousCrossDomainPersistenceCoordinator(new InMemoryAutonomousCrossDomainCheckpointStore(), persistence);
   await assert.rejects(stale.flush(), /compare-and-swap conflict/);
   encoded = ` ${encoded}`;

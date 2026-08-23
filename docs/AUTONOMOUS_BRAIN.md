@@ -3256,7 +3256,10 @@ one-shot `runCrossDomain()` convenience method. Each invocation consumes a bound
 one specialist child or, after the ordered child prefix is complete, one synthesis call. Its
 `AutonomousCrossDomainCheckpoint` is metadata-only and binds task, route, base-plan, accepted-plan,
 execution-contract, ordered-child, result-digest, synthesis, and generation identities. Its event
-chain is predecessor-linked and snapshot-verifiable. Prompts, task text, BYOK handles, provider
+chain is predecessor-linked and snapshot-verifiable. Snapshot restore also requires generation one
+to have no predecessor and every later generation to carry one; `children_pending` must identify the
+next child, while `synthesis_pending` cannot carry a synthesis result. A caller cannot recompute a
+forged checkpoint digest to manufacture a false restart lineage. Prompts, task text, BYOK handles, provider
 responses, tool arguments, evaluator evidence, and raw provider errors remain in the application
 process or a caller-owned result resolver.
 

@@ -260,8 +260,12 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousCrossDomain
   if (status !== "children_pending" && status !== "synthesis_pending" && status !== "paused" && status !== "reconciliation_required" && status !== "completed" && status !== "failed") throw new ArgumentError("cross-domain checkpoint status is invalid");
   if (status === "completed" && synthesisResultDigest === null) throw new ArgumentError("completed cross-domain checkpoint must contain synthesis digest");
   if (status === "completed" && nextChildId !== null) throw new ArgumentError("completed cross-domain checkpoint cannot have a next child");
+  if (status === "children_pending" && nextChildId === null) throw new ArgumentError("children_pending checkpoint must have a next child");
+  if (status === "children_pending" && synthesisResultDigest !== null) throw new ArgumentError("children_pending checkpoint cannot contain synthesis");
   if (status === "synthesis_pending" && (completed.length !== execution.length || nextChildId !== null)) throw new ArgumentError("synthesis_pending checkpoint must have all children and no next child");
+  if (status === "synthesis_pending" && synthesisResultDigest !== null) throw new ArgumentError("synthesis_pending checkpoint cannot contain synthesis");
   const previous = digest(value.previous_checkpoint_digest, "cross-domain checkpoint previous_checkpoint_digest", true);
+  if ((generation === 1) !== (previous === null)) throw new ArgumentError("cross-domain checkpoint generation and predecessor are inconsistent");
   const descriptor = checkpointDescriptor({
     schema: AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA,
     job_id: jobId,
