@@ -399,7 +399,10 @@ export class JsonAutonomousMissionReplanRemoteJobQueuePersistence {
   }
 
   async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot): Promise<boolean> {
-    if (typeof this.store.writeIfUnchanged !== "function") return false;
+    if (typeof this.store.writeIfUnchanged !== "function") {
+      await this.store.write(validateSnapshot(snapshot));
+      return true;
+    }
     return this.store.writeIfUnchanged(expectedSnapshotDigest, validateSnapshot(snapshot));
   }
 }
@@ -417,7 +420,10 @@ export class JsonAutonomousMissionReplanRemoteJobQueueTextStore implements Auton
   }
   async write(snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot): Promise<void> { await this.textStore.write(canonicalJson(validateSnapshot(snapshot))); }
   async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousMissionReplanRemoteJobQueueSnapshot): Promise<boolean> {
-    if (typeof (this.textStore as Partial<AutonomousMissionReplanRemoteJobQueueTransactionalTextStore>).writeIfUnchanged !== "function") return false;
+    if (typeof (this.textStore as Partial<AutonomousMissionReplanRemoteJobQueueTransactionalTextStore>).writeIfUnchanged !== "function") {
+      await this.write(snapshot);
+      return true;
+    }
     return (this.textStore as AutonomousMissionReplanRemoteJobQueueTransactionalTextStore).writeIfUnchanged(expectedSnapshotDigest, canonicalJson(validateSnapshot(snapshot)));
   }
 }

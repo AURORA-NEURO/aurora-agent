@@ -177,4 +177,13 @@ test("remote mission CAS coordinator serializes competing lease writers and rest
   assert.equal(await restored.restore(), true);
   assert.equal((await restored.load(claim.job_id)).status, "leased");
   assert.equal((await restored.snapshot()).snapshot_digest, JSON.parse(backing.value).snapshot_digest);
+
+  const nonCasBacking = { value: null, async read() { return this.value; }, async write(value) { this.value = value; } };
+  const nonCas = new AutonomousMissionReplanRemoteJobQueuePersistenceCoordinator(
+    new InMemoryAutonomousMissionReplanRemoteJobQueue(),
+    new JsonAutonomousMissionReplanRemoteJobQueueTextStore(nonCasBacking),
+  );
+  await nonCas.restore();
+  await nonCas.enqueue({ jobId: "non-cas", rootMissionId: "non-cas-root", protectedContractDigest: "d".repeat(64), availableAt: 0 });
+  assert.equal((await nonCas.load("non-cas")).status, "queued");
 });
