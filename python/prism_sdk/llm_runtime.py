@@ -34,6 +34,7 @@ from pathlib import Path
 import secrets
 import threading
 import time
+import uuid
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import urlsplit
 
@@ -58,6 +59,7 @@ SUPPORTED_PROTOCOLS = {
 PROVIDER_OBSERVATION_SCHEMA = "bioprism-llm-provider-observation/0.1"
 MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
 PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
+PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.1"
 CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
 CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1"
 PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
@@ -66,6 +68,7 @@ MAX_MODEL_CANDIDATES = 512
 MAX_MODEL_METADATA_BYTES = 256_000
 MAX_PROVIDER_HEALTH_RECORDS = 16_384
 MAX_PROVIDER_HEALTH_BYTES = 32_000_000
+MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES = 32_000_000
 MAX_PROVIDER_DISCOVERED_MODELS = 512
 MAX_PROVIDER_MODEL_DISCOVERY_BYTES = 8_000_000
 MAX_CREDENTIAL_PROVISIONING_SOURCES = 128
@@ -1400,7 +1403,7 @@ class ProviderHealthLedger:
         provider invocation that produced the observation.
         """
 
-        normalized = self._normalize_observation(observation)
+        normalized = self._normalize_observation(observation, clock=self._clock)
         line = json.dumps(
             {"schema": PROVIDER_HEALTH_LEDGER_SCHEMA, "observation": normalized},
             ensure_ascii=False,
@@ -1448,6 +1451,45 @@ class ProviderHealthLedger:
         if limit is not None:
             observations = observations[-limit:]
         return observations
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a digest-bound, metadata-only provider health handoff."""
+
+        with self._lock:
+            rows = self._read_records_locked()
+        return _build_provider_health_snapshot(
+            rows,
+            max_records=self.max_records,
+            max_bytes=self.max_bytes,
+        )
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace the JSONL health ledger with validated observations."""
+
+        normalized = _normalize_provider_health_snapshot(
+            snapshot,
+            max_records=self.max_records,
+            max_bytes=self.max_bytes,
+        )
+        lines = b"".join(
+            _canonical_provider_health_json(row).encode("utf-8") + b"\n"
+            for row in normalized["records"]
+        )
+        temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+        with self._lock:
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with temporary.open("wb") as handle:
+                    handle.write(lines)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, self.path)
+            except (OSError, ValueError) as error:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise ProviderError("provider health snapshot could not be restored") from error
 
     def health_snapshot(self, *, now: float | None = None) -> dict[str, dict[str, Any]]:
         """Aggregate the latest safe health state for each observed provider.
@@ -1602,17 +1644,22 @@ class ProviderHealthLedger:
             "retention": "value_only_provider_outcomes_no_payloads_or_credentials",
         }
 
-    def _normalize_observation(self, observation: Mapping[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _normalize_observation(
+        observation: Mapping[str, Any],
+        *,
+        clock: Callable[[], float] = time.time,
+    ) -> dict[str, Any]:
         if not isinstance(observation, Mapping):
             raise ProviderError("provider health observation must be an object")
-        self._assert_value_only(observation)
-        unknown = [key for key in observation if not isinstance(key, str) or key not in self._ALLOWED_FIELDS]
+        ProviderHealthLedger._assert_value_only(observation)
+        unknown = [key for key in observation if not isinstance(key, str) or key not in ProviderHealthLedger._ALLOWED_FIELDS]
         if unknown:
             raise ProviderError("provider health observation contains unsupported fields")
         if observation.get("schema") != PROVIDER_OBSERVATION_SCHEMA:
             raise ProviderError("provider health observation schema is invalid")
         provider = observation.get("provider")
-        self._validate_provider(provider)
+        ProviderHealthLedger._validate_provider(provider)
         model = observation.get("model")
         if not isinstance(model, str) or not model.strip() or len(model.encode("utf-8")) > 512:
             raise ProviderError("provider health observation model is invalid")
@@ -1623,7 +1670,7 @@ class ProviderHealthLedger:
         latency = observation.get("latency_ms")
         if not isinstance(latency, (int, float)) or isinstance(latency, bool) or not math.isfinite(float(latency)) or latency < 0:
             raise ProviderError("provider health observation latency is invalid")
-        observed_at = observation.get("observed_at", self._clock())
+        observed_at = observation.get("observed_at", clock())
         if not isinstance(observed_at, (int, float)) or isinstance(observed_at, bool) or not math.isfinite(float(observed_at)):
             raise ProviderError("provider health observation timestamp is invalid")
         result: dict[str, Any] = {
@@ -1671,10 +1718,10 @@ class ProviderHealthLedger:
                     row = json.loads(raw_line.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError) as error:
                     raise ProviderError("provider health ledger contains invalid JSON") from error
-                if not isinstance(row, Mapping) or row.get("schema") != PROVIDER_HEALTH_LEDGER_SCHEMA:
-                    raise ProviderError("provider health ledger contains an invalid schema")
-                observation = row.get("observation")
-                rows.append({"schema": row["schema"], "observation": self._normalize_observation(observation)})
+                validated = _validate_provider_health_row(row)
+                if raw_line.rstrip(b"\r\n") != _canonical_provider_health_json(validated).encode("utf-8"):
+                    raise ProviderError("provider health ledger contains non-canonical JSON")
+                rows.append(validated)
         return rows
 
     @classmethod
@@ -1697,6 +1744,218 @@ class ProviderHealthLedger:
     def _validate_provider(provider: Any) -> None:
         if not isinstance(provider, str) or not provider.strip() or "/" in provider or " " in provider:
             raise ProviderError("provider health provider must be a path-safe identifier")
+
+
+def _canonical_provider_health_json(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ProviderError("provider health value must be canonical JSON") from error
+
+
+def _validate_provider_health_row(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"schema", "observation"}:
+        raise ProviderError("provider health ledger contains an invalid record envelope")
+    if value.get("schema") != PROVIDER_HEALTH_LEDGER_SCHEMA:
+        raise ProviderError("provider health ledger contains an invalid schema")
+    observation = value.get("observation")
+    if not isinstance(observation, Mapping) or "observed_at" not in observation:
+        raise ProviderError("provider health ledger observation is malformed")
+    normalized = ProviderHealthLedger._normalize_observation(observation)
+    return {
+        "schema": PROVIDER_HEALTH_LEDGER_SCHEMA,
+        "observation": normalized,
+    }
+
+
+def _build_provider_health_snapshot(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    max_records: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    if len(rows) > max_records:
+        raise ProviderError("provider health snapshot exceeds max_records")
+    normalized_rows = [_validate_provider_health_row(row) for row in rows]
+    encoded_rows = [_canonical_provider_health_json(row).encode("utf-8") for row in normalized_rows]
+    if sum(len(row) + 1 for row in encoded_rows) > max_bytes:
+        raise ProviderError("provider health snapshot exceeds max_bytes")
+    record_digests = [hashlib.sha256(row).hexdigest() for row in encoded_rows]
+    descriptor = {
+        "schema": PROVIDER_HEALTH_SNAPSHOT_SCHEMA,
+        "records": normalized_rows,
+        "record_digests": record_digests,
+        "head_digest": record_digests[-1] if record_digests else "",
+        "retention": "value_only_provider_outcomes_no_payloads_or_credentials",
+        "secret_material": "never_returned",
+    }
+    snapshot = {**descriptor, "snapshot_digest": hashlib.sha256(_canonical_provider_health_json(descriptor).encode("utf-8")).hexdigest()}
+    if len(_canonical_provider_health_json(snapshot).encode("utf-8")) > min(max_bytes, MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES):
+        raise ProviderError("provider health snapshot exceeds its byte capacity")
+    return snapshot
+
+
+def _normalize_provider_health_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_records: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    expected_keys = {
+        "schema",
+        "records",
+        "record_digests",
+        "head_digest",
+        "retention",
+        "secret_material",
+        "snapshot_digest",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise ProviderError("provider health snapshot is malformed")
+    if value.get("schema") != PROVIDER_HEALTH_SNAPSHOT_SCHEMA:
+        raise ProviderError("provider health snapshot schema is unsupported")
+    if value.get("retention") != "value_only_provider_outcomes_no_payloads_or_credentials" or value.get("secret_material") != "never_returned":
+        raise ProviderError("provider health snapshot retention is invalid")
+    raw_rows = value.get("records")
+    raw_digests = value.get("record_digests")
+    if not isinstance(raw_rows, Sequence) or isinstance(raw_rows, (str, bytes, bytearray)) or len(raw_rows) > max_records:
+        raise ProviderError("provider health snapshot record count is outside its bound")
+    if not isinstance(raw_digests, Sequence) or isinstance(raw_digests, (str, bytes, bytearray)) or len(raw_digests) != len(raw_rows):
+        raise ProviderError("provider health snapshot record digest count is invalid")
+    rows: list[dict[str, Any]] = []
+    digests: list[str] = []
+    for raw_row, raw_digest in zip(raw_rows, raw_digests):
+        row = _validate_provider_health_row(raw_row)
+        encoded = _canonical_provider_health_json(row).encode("utf-8")
+        if not isinstance(raw_digest, str) or len(raw_digest) != 64 or any(character not in "0123456789abcdef" for character in raw_digest) or hashlib.sha256(encoded).hexdigest() != raw_digest:
+            raise ProviderError("provider health snapshot record digest does not match its row")
+        rows.append(row)
+        digests.append(raw_digest)
+    head_digest = value.get("head_digest")
+    expected_head = digests[-1] if digests else ""
+    if not isinstance(head_digest, str) or (head_digest and (len(head_digest) != 64 or any(character not in "0123456789abcdef" for character in head_digest))) or head_digest != expected_head:
+        raise ProviderError("provider health snapshot head_digest is invalid")
+    descriptor = {
+        "schema": PROVIDER_HEALTH_SNAPSHOT_SCHEMA,
+        "records": rows,
+        "record_digests": digests,
+        "head_digest": head_digest,
+        "retention": "value_only_provider_outcomes_no_payloads_or_credentials",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = value.get("snapshot_digest")
+    expected_snapshot_digest = hashlib.sha256(_canonical_provider_health_json(descriptor).encode("utf-8")).hexdigest()
+    if not isinstance(snapshot_digest, str) or len(snapshot_digest) != 64 or any(character not in "0123456789abcdef" for character in snapshot_digest) or snapshot_digest != expected_snapshot_digest:
+        raise ProviderError("provider health snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if len(_canonical_provider_health_json(normalized).encode("utf-8")) > min(max_bytes, MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES):
+        raise ProviderError("provider health snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_provider_health_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public strict validator for provider-health ledger snapshots."""
+
+    return _normalize_provider_health_snapshot(
+        value,
+        max_records=MAX_PROVIDER_HEALTH_RECORDS,
+        max_bytes=MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES,
+    )
+
+
+class ProviderHealthSnapshotTextStore(Protocol):
+    """Portable text persistence for runtime provider observations."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalProviderHealthSnapshotTextStore(ProviderHealthSnapshotTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonProviderHealthSnapshotPersistence:
+    """Canonical JSON provider-health persistence over a caller-owned text store."""
+
+    def __init__(self, store: ProviderHealthSnapshotTextStore, *, max_bytes: int = MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ProviderError("provider health JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES:
+            raise ProviderError("provider health JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ProviderError("provider health JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ProviderError("provider health JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ProviderError("provider health JSON snapshot must be an object")
+        return _normalize_provider_health_snapshot(raw, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_provider_health_snapshot(snapshot, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)
+        encoded = _canonical_provider_health_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ProviderError("provider health JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonProviderHealthSnapshotPersistence(JsonProviderHealthSnapshotPersistence):
+    """Canonical JSON provider-health persistence with stale-writer fencing."""
+
+    def __init__(self, store: TransactionalProviderHealthSnapshotTextStore, *, max_bytes: int = MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ProviderError("transactional provider health persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and (len(expected_snapshot_digest) != 64 or any(character not in "0123456789abcdef" for character in expected_snapshot_digest)):
+            raise ProviderError("provider health expected snapshot digest is invalid")
+        normalized = _normalize_provider_health_snapshot(snapshot, max_records=MAX_PROVIDER_HEALTH_RECORDS, max_bytes=self.max_bytes)
+        return self.store.write_if_unchanged(expected_snapshot_digest, _canonical_provider_health_json(normalized))
+
+
+class ProviderHealthPersistenceCoordinator:
+    """Flush and restore provider health through caller-owned storage."""
+
+    def __init__(self, store: ProviderHealthLedger, persistence: Any) -> None:
+        if not isinstance(store, ProviderHealthLedger):
+            raise ProviderError("provider health persistence requires a ProviderHealthLedger")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ProviderError("provider health persistence adapter is malformed")
+        self.store = store
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = _normalize_provider_health_snapshot(raw, max_records=self.store.max_records, max_bytes=self.store.max_bytes)
+        self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.store.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise ProviderError("provider health persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
 
 
 @dataclass(frozen=True, slots=True)

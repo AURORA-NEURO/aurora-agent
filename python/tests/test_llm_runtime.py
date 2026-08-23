@@ -16,6 +16,7 @@ from prism_sdk.llm_runtime import (
     ModelCatalogue,
     ProviderModelDescriptor,
     ProviderHealthLedger,
+    ProviderHealthPersistenceCoordinator,
     ProviderError,
     ProviderOnboarding,
     ProviderConfig,
@@ -26,6 +27,8 @@ from prism_sdk.llm_runtime import (
     ProviderTool,
     ProviderToolCall,
     ProviderToolResult,
+    PROVIDER_OBSERVATION_SCHEMA,
+    TransactionalJsonProviderHealthSnapshotPersistence,
     anthropic_provider,
     deepseek_provider,
     groq_provider,
@@ -985,6 +988,74 @@ class LlmRuntimeTests(unittest.TestCase):
                         "api_key": "must-never-be-accepted",
                     }
                 )
+
+    def test_provider_health_snapshot_rehydrates_and_fences_stale_runtime_workers(self) -> None:
+        class CasTextStore:
+            def __init__(self) -> None:
+                self.value: str | None = None
+
+            def read(self) -> str | None:
+                return self.value
+
+            def write(self, value: str) -> None:
+                self.value = value
+
+            def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+                observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+                if observed != expected_snapshot_digest:
+                    return False
+                self.value = value
+                return True
+
+        with TemporaryDirectory() as directory:
+            backend = CasTextStore()
+            persistence = TransactionalJsonProviderHealthSnapshotPersistence(backend)
+            source = ProviderHealthLedger(Path(directory) / "source-health.jsonl", max_records=32)
+            for index, domain in enumerate((
+                "engineering", "research", "operations", "data", "biomedical", "clinical",
+                "genomics", "imaging", "chemistry", "statistics", "safety", "governance",
+            )):
+                source.record({
+                    "schema": PROVIDER_OBSERVATION_SCHEMA,
+                    "provider": "offline",
+                    "model": f"model-{domain}",
+                    "status": "completed",
+                    "outcome": "success",
+                    "latency_ms": index + 1,
+                    "observed_at": index + 1,
+                })
+            source_coordinator = ProviderHealthPersistenceCoordinator(source, persistence)
+            flushed = source_coordinator.flush()
+            restored = ProviderHealthLedger(Path(directory) / "restored-health.jsonl", max_records=32)
+            restored_snapshot = ProviderHealthPersistenceCoordinator(restored, persistence).restore()
+            self.assertIsNotNone(restored_snapshot)
+            self.assertEqual(restored_snapshot["snapshot_digest"], flushed["snapshot_digest"])
+            self.assertEqual(len(restored.records()), 12)
+            self.assertEqual(restored.snapshot()["snapshot_digest"], flushed["snapshot_digest"])
+
+            stale = ProviderHealthLedger(Path(directory) / "stale-health.jsonl", max_records=32)
+            stale_coordinator = ProviderHealthPersistenceCoordinator(stale, persistence)
+            stale_coordinator.restore()
+            source.record({
+                "schema": PROVIDER_OBSERVATION_SCHEMA,
+                "provider": "offline",
+                "model": "model-new",
+                "status": "provider_refused",
+                "outcome": "failure",
+                "latency_ms": 4,
+                "observed_at": 20,
+                "failure_class": "provider_error",
+            })
+            source_coordinator.flush()
+            with self.assertRaisesRegex(ProviderError, "compare-and-swap conflict"):
+                stale_coordinator.flush()
+            tampered = json.loads(backend.value)
+            tampered["records"][0]["observation"]["model"] = "tampered"
+            backend.value = json.dumps(tampered)
+            with self.assertRaisesRegex(ProviderError, "digest"):
+                ProviderHealthPersistenceCoordinator(
+                    ProviderHealthLedger(Path(directory) / "tampered-health.jsonl"), persistence
+                ).restore()
 
     def test_model_specific_transport_evidence_beats_provider_fallback_for_sibling_arms(self) -> None:
         store = CredentialStore()

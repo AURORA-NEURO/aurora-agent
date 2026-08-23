@@ -2282,6 +2282,13 @@ fields and never stores API keys, request messages, response text, headers, cred
 model prompts. This is complementary to `BrainLearningLedger`: provider health describes
 transport reliability, while evaluator rewards describe task quality and drive bandit adaptation.
 
+`ProviderHealthLedger` also supports `snapshot()`/`restore()` and
+`ProviderHealthPersistenceCoordinator`. `TransactionalJsonProviderHealthSnapshotPersistence`
+exports canonical value-only observations with per-record, head, and outer snapshot digests and
+fences remote writes with compare-and-swap. Restore is atomic for the JSONL file and rejects
+non-canonical rows, malformed observations, secret-shaped fields, tampered digests, and stale
+workers before historical transport evidence can influence model selection.
+
 The runtime also keeps a process-local value-only counter for immediate adaptation. Each completed
 or refused invocation updates provider-level and provider/model-level attempts, successes,
 failures, success rate, last/mean latency, status, circuit projection, and bounded token totals.

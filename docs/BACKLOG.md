@@ -1244,3 +1244,9 @@ state-binding, retention, head, and outer digest checks. Restore rebuilds the SQ
 index atomically, while JSON and conditional-write/HTTP coordinators fence stale revisions. The
 all-domain test matrix covers restart, tampering, lifecycle consistency, and stale writers without
 persisting task text, provider payloads, credentials, or raw criterion evidence.
+
+The lower-level Python `ProviderHealthLedger` now has the same transport boundary: canonical
+provider/model observations can be snapshotted, restored atomically, and handed through the
+conditional-write/HTTP adapter with stale-writer fencing. Its all-domain tests cover restart and
+tamper refusal while keeping request messages, response text, headers, credential handles, and
+model prompts outside historical transport evidence.

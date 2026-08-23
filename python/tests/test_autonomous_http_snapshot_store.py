@@ -15,6 +15,9 @@ from prism_sdk import (
     BrainModelHealthPersistenceCoordinator,
     BrainModelHealthStore,
     BrainModelObservation,
+    ProviderHealthLedger,
+    ProviderHealthPersistenceCoordinator,
+    PROVIDER_OBSERVATION_SCHEMA,
     AutonomousGoalLedger,
     AutonomousGoalPersistenceCoordinator,
     AutonomousDecisionCycle,
@@ -29,6 +32,7 @@ from prism_sdk import (
     TransactionalJsonBrainLearningSnapshotPersistence,
     TransactionalJsonBrainMemorySnapshotPersistence,
     TransactionalJsonAutonomousGoalSnapshotPersistence,
+    TransactionalJsonProviderHealthSnapshotPersistence,
     TransactionalJsonBrainJobSnapshotPersistence,
     TransactionalJsonBrainModelHealthSnapshotPersistence,
     TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
@@ -475,3 +479,46 @@ def test_http_snapshot_store_plugs_into_goal_restart_for_every_domain(tmp_path) 
     assert restored.verify_integrity()["ok"] is True
     source.close()
     restored.close()
+
+
+def test_http_snapshot_store_plugs_into_provider_health_restart_for_every_domain(tmp_path) -> None:
+    remote: str | None = None
+
+    def opener(request, _timeout):
+        nonlocal remote
+        if request.get_method() == "GET":
+            return _Response(remote.encode("utf-8")) if remote is not None else _Response(status=404)
+        current = None if remote is None else json.loads(remote)["snapshot_digest"]
+        expected = _header(request, "If-Match")
+        if _header(request, "If-None-Match") == "*" and current is not None:
+            return _Response(status=412)
+        if expected is not None and current != expected.strip('"'):
+            return _Response(status=412)
+        remote = request.data.decode("utf-8")
+        return _Response(status=204)
+
+    text_store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "all-domains/provider-health",
+        allowed_hosts=("state.test",),
+        opener=opener,
+    )
+    persistence = TransactionalJsonProviderHealthSnapshotPersistence(text_store)
+    domains = AUTONOMOUS_DOMAINS
+    source = ProviderHealthLedger(tmp_path / "source-provider-health.jsonl", max_records=32)
+    for index, domain in enumerate(domains):
+        source.record({
+            "schema": PROVIDER_OBSERVATION_SCHEMA,
+            "provider": "offline",
+            "model": f"model-{domain}",
+            "status": "completed",
+            "outcome": "success",
+            "latency_ms": index + 1,
+            "observed_at": index + 1,
+        })
+    flushed = ProviderHealthPersistenceCoordinator(source, persistence).flush()
+    restored = ProviderHealthLedger(tmp_path / "restored-provider-health.jsonl", max_records=32)
+    restored_snapshot = ProviderHealthPersistenceCoordinator(restored, persistence).restore()
+    assert restored_snapshot is not None
+    assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
+    assert {row["model"] for row in restored.records()} == {f"model-{domain}" for domain in domains}
