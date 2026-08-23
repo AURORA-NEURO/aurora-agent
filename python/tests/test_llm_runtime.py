@@ -719,6 +719,7 @@ class LlmRuntimeTests(unittest.TestCase):
 
     def test_adaptive_failover_disables_all_arms_after_provider_circuit_opens(self) -> None:
         selections: list[list[dict[str, object]]] = []
+        trace_events: list[dict[str, object]] = []
 
         class Workspace:
             def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
@@ -808,9 +809,27 @@ class LlmRuntimeTests(unittest.TestCase):
             credentials={"openai": openai_handle, "fallback": fallback_handle},
             approve_provider_call=True,
             max_provider_failovers=1,
+            trace_event_callback=lambda **event: trace_events.append(event),
         )
 
         self.assertEqual(result.response.provider, "fallback")  # type: ignore[union-attr]
+        self.assertEqual(
+            [event["phase"] for event in trace_events],
+            [
+                "model_selection_started",
+                "model_selection_finished",
+                "model_selection_started",
+                "model_selection_finished",
+            ],
+        )
+        self.assertEqual(
+            [event["status"] for event in trace_events if event["phase"] == "model_selection_finished"],
+            ["completed", "completed"],
+        )
+        self.assertEqual(
+            [event["attempt"] for event in trace_events if event["phase"] == "model_selection_finished"],
+            [1, 2],
+        )
         self.assertGreaterEqual(len(selections), 4)
         for retry_selection in selections[2:]:
             retry_enabled = {
@@ -846,6 +865,50 @@ class LlmRuntimeTests(unittest.TestCase):
         with self.assertRaises(CredentialError):
             session.handle("openai")
         self.assertEqual(store.status("openai").credential_count, 0)
+
+    def test_adaptive_selection_trace_records_explicit_abstention_before_provider_dispatch(self) -> None:
+        class AbstainingWorkspace:
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select":
+                    return {
+                        "selected_model": None,
+                        "selection_status": "refused_no_eligible_model",
+                        "decision_digest": "a" * 64,
+                        "ranking": [],
+                    }
+                raise AssertionError(f"unexpected tool {name}")
+
+        runtime = LLMRuntime()
+        runtime.register_in_memory_provider("local", lambda _request: {"output_text": "must not dispatch"})
+        events: list[dict[str, object]] = []
+        with self.assertRaisesRegex(BrainRunError, "no eligible provider"):
+            AutonomousBrain(AbstainingWorkspace(), runtime).run_adaptive(
+                task="abstain before dispatch",
+                model_candidates=[
+                    {
+                        "provider": "local",
+                        "model": "local-model",
+                        "requires_credential": False,
+                        "capabilities": ["reasoning"],
+                        "context_window_tokens": 16_000,
+                        "max_output_tokens": 1_024,
+                        "quality": 0.8,
+                        "latency_ms": 10,
+                        "cost_per_million_tokens": 0,
+                        "reliability": 0.9,
+                    }
+                ],
+                prompt={"max_input_tokens": 100},
+                plan={"allowed_tools": ["provider.invoke"], "max_cost": 10},
+                credentials={},
+                approve_provider_call=True,
+                trace_event_callback=lambda **event: events.append(event),
+            )
+        self.assertEqual([event["phase"] for event in events], ["model_selection_started", "model_selection_finished"])
+        self.assertEqual(events[0]["status"], "running")
+        self.assertEqual(events[1]["status"], "refused")
+        self.assertEqual(events[1]["failure_code"], "selection_abstained")
+        self.assertIsNone(events[1]["provider"])
 
     def test_credentialless_provider_is_ready_without_a_fake_key(self) -> None:
         runtime = LLMRuntime(CredentialStore())

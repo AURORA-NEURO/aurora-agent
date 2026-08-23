@@ -1959,6 +1959,57 @@ def _selection_attempt_metadata(audit: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _emit_model_selection_trace(
+    callback: Callable[..., Any] | None,
+    *,
+    phase: str,
+    status: str,
+    attempt: int,
+    selection: Mapping[str, Any],
+    audit: Mapping[str, Any] | None = None,
+    selected: Mapping[str, Any] | None = None,
+    failure_code: str | None = None,
+) -> None:
+    """Project one adaptive selection transition without exposing task or provider payloads."""
+
+    if callback is None:
+        return
+    models = selection.get("models", [])
+    candidate_count = len(models) if isinstance(models, Sequence) and not isinstance(models, (str, bytes)) else 0
+    eligibility = audit.get("eligibility") if isinstance(audit, Mapping) else None
+    eligible_count = eligibility.get("eligible_count") if isinstance(eligibility, Mapping) else None
+    if not isinstance(eligible_count, int) or isinstance(eligible_count, bool) or eligible_count < 0:
+        eligible_count = None
+    selected_provider = selected.get("provider") if isinstance(selected, Mapping) else None
+    selected_model = selected.get("model") if isinstance(selected, Mapping) else None
+    if not isinstance(selected_provider, str) or not selected_provider.strip():
+        selected_provider = None
+    if not isinstance(selected_model, str) or not selected_model.strip():
+        selected_model = None
+    selection_digest = selection.get("decision_digest")
+    if not _valid_digest(selection_digest):
+        selection_digest = None
+    detail = {
+        "candidate_count": candidate_count,
+        "eligible_candidate_count": eligible_count,
+        "selection_status": audit.get("selection_status") if isinstance(audit, Mapping) else None,
+        "selection_confidence": selection.get("selection_confidence"),
+        "min_selection_confidence": selection.get("min_selection_confidence"),
+        "failover": attempt > 1,
+        "selection_audit_digest": audit.get("audit_digest") if isinstance(audit, Mapping) else None,
+    }
+    callback(
+        phase=phase,
+        status=status,
+        provider=selected_provider,
+        model=selected_model,
+        attempt=attempt,
+        selection_digest=selection_digest,
+        detail_digest=_json_digest(detail),
+        failure_code=failure_code,
+    )
+
+
 def _routing_health_evidence(subject: str, health: Mapping[str, Any]) -> dict[str, Any] | None:
     """Validate and project bounded transport evidence for one routing subject.
 
@@ -3274,31 +3325,66 @@ class AutonomousBrain:
         task: str,
         selection: Mapping[str, Any],
         context: Mapping[str, Any] | None,
+        trace_event_callback: Callable[..., Any] | None = None,
+        attempt: int = 1,
     ) -> dict[str, Any]:
-        arguments = dict(selection)
-        arguments["task"] = task
-        if context is None:
-            report = self.workspace.tool("brain_model_select", arguments)
-            if not isinstance(report, Mapping):
-                raise BrainRunError("adaptive model selection preview returned a non-object")
-            return dict(report)
-        observations = selection.get("contextual_observations", [])
-        if not isinstance(observations, list):
-            raise BrainRunError("adaptive contextual selection observations are malformed")
-        report = self.workspace.tool(
-            "brain_model_select_contextual",
-            {
-                "context": dict(context),
-                "base": arguments,
-                "observations": [dict(observation) for observation in observations],
-            },
+        _emit_model_selection_trace(
+            trace_event_callback,
+            phase="model_selection_started",
+            status="running",
+            attempt=attempt,
+            selection=selection,
         )
-        if not isinstance(report, Mapping):
-            raise BrainRunError("adaptive contextual selection preview returned a non-object")
-        nested = report.get("selection")
-        if not isinstance(nested, Mapping):
-            raise BrainRunError("adaptive contextual selection preview omitted selection")
-        return dict(nested)
+        try:
+            arguments = dict(selection)
+            arguments["task"] = task
+            if context is None:
+                report = self.workspace.tool("brain_model_select", arguments)
+                if not isinstance(report, Mapping):
+                    raise BrainRunError("adaptive model selection preview returned a non-object")
+                result = dict(report)
+            else:
+                observations = selection.get("contextual_observations", [])
+                if not isinstance(observations, list):
+                    raise BrainRunError("adaptive contextual selection observations are malformed")
+                report = self.workspace.tool(
+                    "brain_model_select_contextual",
+                    {
+                        "context": dict(context),
+                        "base": arguments,
+                        "observations": [dict(observation) for observation in observations],
+                    },
+                )
+                if not isinstance(report, Mapping):
+                    raise BrainRunError("adaptive contextual selection preview returned a non-object")
+                nested = report.get("selection")
+                if not isinstance(nested, Mapping):
+                    raise BrainRunError("adaptive contextual selection preview omitted selection")
+                result = dict(nested)
+            if trace_event_callback is not None:
+                audit = build_model_selection_audit(result)
+                selected = result.get("selected_model")
+                _emit_model_selection_trace(
+                    trace_event_callback,
+                    phase="model_selection_finished",
+                    status="completed" if isinstance(selected, Mapping) else "refused",
+                    attempt=attempt,
+                    selection=result,
+                    audit=audit,
+                    selected=selected if isinstance(selected, Mapping) else None,
+                    failure_code=None if isinstance(selected, Mapping) else "selection_abstained",
+                )
+            return result
+        except Exception:
+            _emit_model_selection_trace(
+                trace_event_callback,
+                phase="model_selection_finished",
+                status="failed",
+                attempt=attempt,
+                selection=selection,
+                failure_code="selection_error",
+            )
+            raise
 
     def run_adaptive(
         self,
@@ -3333,6 +3419,7 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> BrainRunResult:
         """Select, plan, and invoke from live providers using caller-persisted learning state."""
 
@@ -3385,6 +3472,8 @@ class AutonomousBrain:
                 task=task,
                 selection=attempt_selection,
                 context=context,
+                trace_event_callback=trace_event_callback,
+                attempt=attempt + 1,
             )
             selected = preview.get("selected_model")
             if not isinstance(selected, Mapping):
@@ -3505,6 +3594,7 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> BrainToolLoopResult:
         """Select adaptively, then enter the bounded route-aware native tool loop.
 
@@ -3605,6 +3695,8 @@ class AutonomousBrain:
                 task=task,
                 selection=attempt_selection,
                 context=effective_context,
+                trace_event_callback=trace_event_callback,
+                attempt=attempt + 1,
             )
             selected = preview.get("selected_model")
             if not isinstance(selected, Mapping):
@@ -3748,6 +3840,7 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> BrainMissionResult:
         """Select, route, plan, and execute one bounded cross-domain mission.
 
@@ -3821,6 +3914,8 @@ class AutonomousBrain:
                 task=task,
                 selection=attempt_selection,
                 context=effective_context,
+                trace_event_callback=trace_event_callback,
+                attempt=attempt + 1,
             )
             selected = preview.get("selected_model")
             if not isinstance(selected, Mapping):
@@ -3965,6 +4060,7 @@ class AutonomousBrain:
         mission_options: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> BrainLearningCycleResult:
         """Run, evaluate, remember, and boundedly replan a cross-domain mission.
 
@@ -4129,6 +4225,7 @@ class AutonomousBrain:
                 bandit_state=current_bandit_state,
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
+                trace_event_callback=trace_event_callback,
                 **options,
             )
             attempts.append(result)

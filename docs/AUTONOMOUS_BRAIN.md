@@ -1462,6 +1462,15 @@ confidence floor, unavailable credentials, disabled arms, or an exhausted failov
 before any provider request. A selected model is not treated as task success; provider health and
 evaluator rewards remain separate learning signals.
 
+The Python adaptive brain emits the same `model_selection_started` and
+`model_selection_finished` phases through the existing `trace_event_callback` on provider,
+native tool-loop, mission-proposal, workflow-stage, learning, and cross-domain execution. Its
+finished projection uses `completed` for a selected arm, `refused` with
+`selection_abstained` when no arm is eligible, and `failed` for a malformed or unavailable
+selection result. Attempt numbers are one-based and failover attempts are visible in the
+digest-bound detail projection, so a restart-safe trace can explain the decision boundary before
+provider invocation without retaining the task, prompt, response, or credential.
+
 The TypeScript SDK exposes the same boundary as `traceEventCallback` on
 `AutonomousConnectorRuntime.dispatch()`/`dispatchFromPlan()`, the operation and intent facades,
 durable connector workers, and the mission/workflow connector adapters. Its traced brain façade

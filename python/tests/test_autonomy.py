@@ -472,11 +472,51 @@ def test_agent_trace_facade_emits_live_plan_and_provider_events() -> None:
         phases = [event.phase for event in events]
         assert phases[0] == "started"
         assert phases[1] == "plan_compiled"
+        assert phases.count("model_selection_started") == 1
+        assert phases.count("model_selection_finished") == 1
         assert phases.count("provider_invocation_started") == 1
         assert phases.count("provider_invocation_finished") == 1
         assert phases[-1] == "completed"
         assert traced.trace.provider_invocations == 1
         assert traced.trace.event_count == len(events)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_agent_trace_facade_emits_selection_lifecycle_for_every_domain() -> None:
+    runtime, store, server, thread = _structured_runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    handle = store.register("openai", "trace-all-domains-secret")
+    trace_store = InMemoryAutonomousRunTraceStore(clock=lambda: 1)
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            run_id = f"selection-trace-{domain}"
+            traced = agent.run_with_trace(
+                task=f"review a bounded {domain} task",
+                domain=domain,
+                credentials={"openai": handle},
+                trace_store=trace_store,
+                run_id=run_id,
+                approve_provider_call=True,
+            )
+            assert traced.trace.status == "completed", domain
+            events = trace_store.events({"run_id": run_id})
+            selection_events = [
+                event for event in events
+                if event.phase in {"model_selection_started", "model_selection_finished"}
+            ]
+            assert [event.phase for event in selection_events] == [
+                "model_selection_started",
+                "model_selection_finished",
+            ], domain
+            assert selection_events[0].status == "running"
+            assert selection_events[1].status == "completed"
+            assert selection_events[1].selection_digest is not None
+            assert selection_events[1].provider == "openai"
+            assert selection_events[1].model == "test-model"
+            assert "trace-all-domains-secret" not in json.dumps([event.to_dict() for event in selection_events])
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -505,6 +545,8 @@ def test_workflow_trace_facade_emits_stage_and_provider_events() -> None:
         phases = [event.phase for event in events]
         assert phases[0] == "started"
         assert phases.count("plan_compiled") >= 2
+        assert phases.count("model_selection_started") >= 1
+        assert phases.count("model_selection_finished") >= 1
         assert phases.count("provider_invocation_finished") >= 1
         assert phases.count("evaluation_settled") >= 1
         assert phases[-1] == "completed"

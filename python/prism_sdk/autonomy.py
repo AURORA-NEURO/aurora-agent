@@ -8250,7 +8250,7 @@ class AutonomousTaskOrchestrator:
         if options is not None and not isinstance(options, Mapping):
             raise BrainRunError("mission_options must be a mapping or None")
         merged = {} if options is None else dict(options)
-        forbidden = {"task", "model_candidates", "prompt", "plan", "credentials", "mission_policy"}
+        forbidden = {"task", "model_candidates", "prompt", "plan", "credentials", "mission_policy", "trace_event_callback"}
         unknown = sorted(forbidden.intersection(merged))
         if unknown:
             raise BrainRunError("mission_options cannot override generated fields: " + ", ".join(unknown))
@@ -8320,6 +8320,7 @@ class AutonomousTaskOrchestrator:
         tool_loop_options: Mapping[str, Any] | None,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        trace_event_callback: Callable[..., Any] | None = None,
     ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         # Keep the legacy ``mission_policy`` shorthand while making the execution route
         # explicit for new callers.
@@ -8357,6 +8358,7 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
+                trace_event_callback=trace_event_callback,
             )
         if effective_mode == "tool_loop":
             if tool_loop_options is not None and not isinstance(tool_loop_options, Mapping):
@@ -8415,6 +8417,7 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
+                trace_event_callback=trace_event_callback,
             )
         if effective_mode != "mission":
             raise BrainRunError(f"unsupported autonomous execution mode: {effective_mode!r}")
@@ -8457,6 +8460,7 @@ class AutonomousTaskOrchestrator:
             bandit_state=bandit_state,
             execution_controller=execution_controller,
             invocation_observer=invocation_observer,
+            trace_event_callback=trace_event_callback,
             **options,
         )
 
@@ -8567,6 +8571,7 @@ class AutonomousTaskOrchestrator:
             "provider_tools", "tool_choice", "max_provider_failovers", "prompt", "execution_mode",
             "tool_loop_options", "bandit_state",
             "execution_controller", "invocation_observer",
+            "trace_event_callback",
         }
         unknown = sorted(set(kwargs).difference(allowed))
         if unknown:
@@ -9376,6 +9381,7 @@ class AutonomousTaskOrchestrator:
                     mission_options=options,
                     execution_controller=execution_controller,
                     invocation_observer=invocation_observer,
+                    trace_event_callback=trace_event_callback,
                 ))
             if bandit_state is None:
                 raise BrainRunError("bandit_state is required when learn=True")
@@ -9420,6 +9426,7 @@ class AutonomousTaskOrchestrator:
                     "bandit_state": bandit_state,
                     "execution_controller": execution_controller,
                     "invocation_observer": invocation_observer,
+                    "trace_event_callback": trace_event_callback,
                 },
             ))
         return self._execute(
@@ -9455,6 +9462,7 @@ class AutonomousTaskOrchestrator:
             bandit_state=bandit_state,
             execution_controller=execution_controller,
             invocation_observer=invocation_observer,
+            trace_event_callback=trace_event_callback,
         )
 
     @staticmethod
