@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -21,6 +22,11 @@ from prism_sdk.evaluators import (
     builtin_autonomous_domain_evaluator_profiles,
 )
 from prism_sdk.jobs import BrainJobError, BrainJobStore
+from prism_sdk import (
+    AUTONOMOUS_DOMAINS,
+    BrainJobPersistenceCoordinator,
+    TransactionalJsonBrainJobSnapshotPersistence,
+)
 from prism_sdk.control_plane import BrainApprovalRouter, BrainReconciliationRouter
 from prism_sdk.llm_runtime import LLMRuntime
 
@@ -69,7 +75,87 @@ class _OutcomeWorkspace:
         }
 
 
+class _CasTextStore:
+    def __init__(self) -> None:
+        self.value: str | None = None
+
+    def read(self) -> str | None:
+        return self.value
+
+    def write(self, value: str) -> None:
+        self.value = value
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+        if observed != expected_snapshot_digest:
+            return False
+        self.value = value
+        return True
+
+
 class BrainJobStoreTests(unittest.TestCase):
+    def test_portable_snapshot_rehydrates_every_domain_and_fences_stale_workers(self) -> None:
+        clock = _Clock()
+        store_backend = _CasTextStore()
+        persistence = TransactionalJsonBrainJobSnapshotPersistence(store_backend)
+        with TemporaryDirectory() as directory:
+            source_path = f"{directory}/source.sqlite3"
+            with BrainJobStore(source_path, clock=clock) as store:
+                for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+                    packet = {**_job_packet(f"domain-job-{index}"), "domain": domain}
+                    store.submit(packet)
+                store.claim("domain-job-0", "worker-a", lease_seconds=10)
+                store.checkpoint("domain-job-0", "worker-a", phase="preflight", checkpoint={"plan_digest": "a" * 64}, side_effect_boundary="preflight")
+                store.request_approval(
+                    "domain-job-1",
+                    requester="operator",
+                    approval_id="approval-1",
+                    approval_scope="read_only_review",
+                    request_digest="b" * 64,
+                )
+                store.claim("domain-job-2", "worker-b", lease_seconds=10)
+                store.complete("domain-job-2", "worker-b", result_metadata={"outcome_digest": "c" * 64})
+                store.claim("domain-job-3", "worker-c", lease_seconds=1)
+                store.checkpoint("domain-job-3", "worker-c", phase="dispatch", checkpoint={"dispatch_digest": "d" * 64}, side_effect_boundary="dispatched")
+                clock.advance(2)
+                self.assertEqual(store.recover_expired()[0].state, "reconciliation_required")
+                source_coordinator = BrainJobPersistenceCoordinator(store, persistence)
+                snapshot = source_coordinator.flush()
+                self.assertEqual(snapshot["head_digest"], store.head_digest())
+                self.assertEqual({row["domain"] for row in snapshot["jobs"]}, set(AUTONOMOUS_DOMAINS))
+
+            with BrainJobStore(f"{directory}/restored.sqlite3", clock=clock) as restored_store:
+                restored = BrainJobPersistenceCoordinator(restored_store, persistence).restore()
+                self.assertIsNotNone(restored)
+                self.assertEqual(restored_store.verify_integrity()["ok"], True)
+                self.assertEqual(restored_store.stats()["job_count"], len(AUTONOMOUS_DOMAINS))
+                self.assertEqual(
+                    {record.domain for record in restored_store.inventory(limit=256)},
+                    set(AUTONOMOUS_DOMAINS),
+                )
+                self.assertEqual(restored_store.get("domain-job-1").state, "waiting_approval")  # type: ignore[union-attr]
+                self.assertEqual(restored_store.get("domain-job-2").state, "succeeded")  # type: ignore[union-attr]
+                self.assertEqual(restored_store.get("domain-job-3").state, "reconciliation_required")  # type: ignore[union-attr]
+
+            with BrainJobStore(f"{directory}/stale.sqlite3", clock=clock) as stale_store:
+                stale_coordinator = BrainJobPersistenceCoordinator(stale_store, persistence)
+                stale_coordinator.restore()
+                with BrainJobStore(source_path, clock=clock) as newer_store:
+                    newer_store.restore(snapshot)
+                    newer_coordinator = BrainJobPersistenceCoordinator(newer_store, persistence)
+                    newer_coordinator.restore()
+                    newer_store.resume_waiting("domain-job-1", approver="operator")
+                    newer_coordinator.flush()
+                with self.assertRaisesRegex(BrainJobError, "compare-and-swap conflict"):
+                    stale_coordinator.flush()
+
+            tampered = json.loads(store_backend.value)
+            tampered["head_digest"] = "e" * 64
+            store_backend.value = json.dumps(tampered)
+            with BrainJobStore(f"{directory}/tampered.sqlite3", clock=clock) as tampered_store:
+                with self.assertRaises(BrainJobError):
+                    BrainJobPersistenceCoordinator(tampered_store, persistence).restore()
+
     def test_claim_next_is_atomic_and_priority_ordered(self) -> None:
         clock = _Clock()
         with TemporaryDirectory() as directory:

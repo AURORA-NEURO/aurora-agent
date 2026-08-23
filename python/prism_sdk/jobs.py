@@ -18,7 +18,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol, Sequence
 import uuid
 
 from .memory import (
@@ -54,11 +54,29 @@ JOB_STATES = frozenset(
 JOB_BOUNDARIES = ("not_started", "preflight", "dispatched", "unknown")
 JOB_RECONCILIATION_OUTCOMES = frozenset({"succeeded", "failed", "not_executed", "unknown"})
 JOB_RECONCILIATION_SCHEMA = "bioprism-brain-job-reconciliation/0.1"
+JOB_SNAPSHOT_SCHEMA = "bioprism-brain-job-snapshot/0.1"
+MAX_JOB_EVENTS = 100_000
+MAX_JOB_SNAPSHOT_JOBS = 8_192
+MAX_JOB_SNAPSHOT_BYTES = 64_000_000
 _BOUNDARY_ORDER = {value: index for index, value in enumerate(JOB_BOUNDARIES)}
 
 
 class BrainJobError(RuntimeError):
     """A job submission, lease, checkpoint, or recovery operation was refused."""
+
+
+class BrainJobSnapshotTextStore(Protocol):
+    """Portable text persistence for metadata-only durable worker snapshots."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalBrainJobSnapshotTextStore(BrainJobSnapshotTextStore, Protocol):
+    """Text persistence with compare-and-swap fencing for competing workers."""
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
 
 
 def _safe_job_value(value: Any) -> Any:
@@ -1015,6 +1033,96 @@ class BrainJobStore:
         with self._lock:
             return self._head_locked()
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return a verified, portable snapshot of queue state and its event chain.
+
+        The snapshot is an explicit worker handoff artifact.  It contains the redacted job
+        index and metadata-only events, never the resolver-owned task, prompt, provider output,
+        credentials, or tool payload.  Restoring it into another ``BrainJobStore`` is a full
+        replacement operation and must be coordinated by the caller-owned persistence adapter.
+        """
+
+        with self._lock:
+            integrity = self.verify_integrity()
+            if not integrity["ok"]:
+                raise BrainJobError("cannot snapshot an invalid brain job journal")
+            event_rows = self._connection.execute("SELECT * FROM brain_job_events ORDER BY sequence ASC").fetchall()
+            job_rows = self._connection.execute("SELECT * FROM brain_jobs ORDER BY job_id ASC").fetchall()
+            descriptor = {
+                "schema": JOB_SNAPSHOT_SCHEMA,
+                "events": [self._row_to_event(row).to_dict() for row in event_rows],
+                "jobs": [self._row_to_record(row).to_dict() for row in job_rows],
+                "head_digest": integrity["head_digest"],
+                "retention": "metadata_only_hash_chained",
+                "secret_material": "never_returned",
+            }
+            snapshot = {**descriptor, "snapshot_digest": _digest(descriptor)}
+            if len(_canonical(snapshot).encode("utf-8")) > MAX_JOB_SNAPSHOT_BYTES:
+                raise BrainJobError("brain job snapshot exceeds its byte capacity")
+            return snapshot
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace this SQLite queue with a validated worker snapshot."""
+
+        normalized = _normalize_job_snapshot(snapshot, max_jobs=self.max_jobs, max_bytes=self.max_bytes)
+        with self._lock:
+            self._begin_locked()
+            try:
+                self._connection.execute("DELETE FROM brain_jobs")
+                self._connection.execute("DELETE FROM brain_job_events")
+                for event in normalized["events"]:
+                    payload = event["payload"]
+                    self._connection.execute(
+                        "INSERT INTO brain_job_events (sequence, event_type, job_id, payload_json, previous_digest, event_digest, created_ns) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            event["sequence"],
+                            event["event_type"],
+                            event["job_id"],
+                            _canonical(payload),
+                            event["previous_digest"],
+                            event["event_digest"],
+                            event["created_ns"],
+                        ),
+                    )
+                for job in normalized["jobs"]:
+                    self._connection.execute(
+                        """
+                        INSERT INTO brain_jobs (
+                            job_id, idempotency_key, spec_digest, domain, capability, risk_class,
+                            priority, max_attempts, state, attempts, lease_owner, lease_expires_ns,
+                            checkpoint_json, side_effect_boundary, recovered_after_restart, reason,
+                            created_ns, updated_ns, record_sequence, record_digest
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            job["job_id"],
+                            job["idempotency_key"],
+                            job["spec_digest"],
+                            job["domain"],
+                            job["capability"],
+                            job["risk_class"],
+                            job["priority"],
+                            job["max_attempts"],
+                            job["state"],
+                            job["attempts"],
+                            job["lease_owner"],
+                            job["lease_expires_ns"],
+                            _canonical(job["checkpoint"]),
+                            job["side_effect_boundary"],
+                            1 if job["recovered_after_restart"] else 0,
+                            job["reason"],
+                            job["created_ns"],
+                            job["updated_ns"],
+                            job["record_sequence"],
+                            job["record_digest"],
+                        ),
+                    )
+                self._ensure_capacity_locked()
+                self._connection.execute("COMMIT")
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+
     def verify_integrity(self) -> dict[str, Any]:
         with self._lock:
             try:
@@ -1396,14 +1504,304 @@ class BrainJobStore:
             raise BrainJobError("brain job byte capacity is exhausted")
 
 
+def _normalize_job_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_jobs: int = MAX_JOB_SNAPSHOT_JOBS,
+    max_bytes: int = MAX_JOB_SNAPSHOT_BYTES,
+) -> dict[str, Any]:
+    """Validate the queue index, event chain, and snapshot digest as one unit."""
+
+    expected_keys = {"schema", "events", "jobs", "head_digest", "retention", "secret_material", "snapshot_digest"}
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise BrainJobError("brain job snapshot is malformed")
+    if value.get("schema") != JOB_SNAPSHOT_SCHEMA:
+        raise BrainJobError("brain job snapshot schema is unsupported")
+    if value.get("retention") != "metadata_only_hash_chained" or value.get("secret_material") != "never_returned":
+        raise BrainJobError("brain job snapshot retention is invalid")
+    raw_events = value.get("events")
+    if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes, bytearray)) or len(raw_events) > MAX_JOB_EVENTS:
+        raise BrainJobError("brain job snapshot event count is outside its bound")
+    event_keys = {"schema", "sequence", "event_type", "job_id", "payload", "previous_digest", "event_digest", "created_ns", "retention"}
+    events: list[dict[str, Any]] = []
+    events_by_sequence: dict[int, dict[str, Any]] = {}
+    submitted: set[str] = set()
+    previous_digest = ""
+    for expected_sequence, raw_event in enumerate(raw_events, start=1):
+        if not isinstance(raw_event, Mapping) or set(raw_event) != event_keys:
+            raise BrainJobError("brain job snapshot contains an invalid event envelope")
+        if raw_event.get("schema") != JOB_EVENT_SCHEMA or raw_event.get("retention") != "metadata_only_hash_chained":
+            raise BrainJobError("brain job snapshot event schema or retention is invalid")
+        if raw_event.get("sequence") != expected_sequence:
+            raise BrainJobError("brain job snapshot event sequence is invalid")
+        event_type = _job_text("brain job snapshot event_type", raw_event.get("event_type"), 256)
+        job_id = _job_text("brain job snapshot event job_id", raw_event.get("job_id"), MAX_JOB_ID_BYTES)
+        payload = _safe_job_value(raw_event.get("payload"))
+        if not isinstance(payload, Mapping) or payload.get("schema") != JOB_EVENT_SCHEMA or payload.get("event") != event_type or payload.get("job_id") != job_id:
+            raise BrainJobError("brain job snapshot event payload is invalid")
+        if raw_event.get("previous_digest") != previous_digest:
+            raise BrainJobError("brain job snapshot event hash chain is discontinuous")
+        created_ns = raw_event.get("created_ns")
+        if not isinstance(created_ns, int) or isinstance(created_ns, bool) or created_ns < 0:
+            raise BrainJobError("brain job snapshot event timestamp is invalid")
+        event_digest = raw_event.get("event_digest")
+        if not _valid_digest(event_digest):
+            raise BrainJobError("brain job snapshot event digest is invalid")
+        envelope = {
+            "schema": JOB_EVENT_SCHEMA,
+            "event_type": event_type,
+            "job_id": job_id,
+            "payload": dict(payload),
+            "previous_digest": previous_digest,
+            "sequence": expected_sequence,
+            "created_ns": created_ns,
+        }
+        if _digest(envelope) != event_digest:
+            raise BrainJobError("brain job snapshot event digest does not match its metadata")
+        normalized_event = {
+            **envelope,
+            "event_digest": event_digest,
+            "retention": "metadata_only_hash_chained",
+        }
+        events.append(normalized_event)
+        events_by_sequence[expected_sequence] = normalized_event
+        if event_type == "job_submitted":
+            submitted.add(job_id)
+        previous_digest = event_digest
+    head_digest = value.get("head_digest")
+    if not isinstance(head_digest, str) or (head_digest and not _valid_digest(head_digest)):
+        raise BrainJobError("brain job snapshot head_digest is invalid")
+    if head_digest != previous_digest:
+        raise BrainJobError("brain job snapshot head_digest is inconsistent")
+
+    raw_jobs = value.get("jobs")
+    if not isinstance(raw_jobs, Sequence) or isinstance(raw_jobs, (str, bytes, bytearray)) or len(raw_jobs) > max_jobs:
+        raise BrainJobError("brain job snapshot job count is outside its bound")
+    job_keys = {
+        "schema", "job_id", "idempotency_key", "spec_digest", "domain", "capability", "risk_class",
+        "priority", "max_attempts", "state", "attempts", "lease_owner", "lease_expires_ns", "checkpoint",
+        "side_effect_boundary", "recovered_after_restart", "reason", "created_ns", "updated_ns",
+        "record_sequence", "record_digest", "spec",
+    }
+    jobs: list[dict[str, Any]] = []
+    seen_job_ids: set[str] = set()
+    seen_idempotency: set[str] = set()
+    for raw_job in raw_jobs:
+        if not isinstance(raw_job, Mapping) or set(raw_job) != job_keys:
+            raise BrainJobError("brain job snapshot contains an invalid job record")
+        if raw_job.get("schema") != JOB_SCHEMA or raw_job.get("spec") != "not_returned; caller resolver owns rehydration":
+            raise BrainJobError("brain job snapshot record schema or retention is invalid")
+        job_id = _job_text("brain job snapshot job_id", raw_job.get("job_id"), MAX_JOB_ID_BYTES)
+        idempotency_key = _job_text("brain job snapshot idempotency_key", raw_job.get("idempotency_key"), MAX_JOB_ID_BYTES)
+        if job_id in seen_job_ids or idempotency_key in seen_idempotency:
+            raise BrainJobError("brain job snapshot contains duplicate job identity")
+        seen_job_ids.add(job_id)
+        seen_idempotency.add(idempotency_key)
+        spec_digest = raw_job.get("spec_digest")
+        if not _valid_digest(spec_digest):
+            raise BrainJobError("brain job snapshot spec_digest is invalid")
+        domain = _job_text("brain job snapshot domain", raw_job.get("domain"))
+        capability = _job_text("brain job snapshot capability", raw_job.get("capability"))
+        risk_class = _job_text("brain job snapshot risk_class", raw_job.get("risk_class"))
+        priority = raw_job.get("priority")
+        if not isinstance(priority, int) or isinstance(priority, bool) or not 0 <= priority <= 255:
+            raise BrainJobError("brain job snapshot priority is invalid")
+        max_attempts = raw_job.get("max_attempts")
+        if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or not 1 <= max_attempts <= 8:
+            raise BrainJobError("brain job snapshot max_attempts is invalid")
+        state = raw_job.get("state")
+        if not isinstance(state, str) or state not in JOB_STATES:
+            raise BrainJobError("brain job snapshot state is invalid")
+        attempts = raw_job.get("attempts")
+        if not isinstance(attempts, int) or isinstance(attempts, bool) or not 0 <= attempts <= max_attempts:
+            raise BrainJobError("brain job snapshot attempts are invalid")
+        lease_owner = raw_job.get("lease_owner")
+        if lease_owner is not None:
+            lease_owner = _job_text("brain job snapshot lease_owner", lease_owner, MAX_JOB_ID_BYTES)
+        lease_expires_ns = raw_job.get("lease_expires_ns")
+        if lease_expires_ns is not None and (not isinstance(lease_expires_ns, int) or isinstance(lease_expires_ns, bool) or lease_expires_ns < 0):
+            raise BrainJobError("brain job snapshot lease expiry is invalid")
+        checkpoint = _safe_job_value(raw_job.get("checkpoint"))
+        if not isinstance(checkpoint, Mapping) or len(_canonical(checkpoint).encode("utf-8")) > MAX_JOB_CHECKPOINT_BYTES:
+            raise BrainJobError("brain job snapshot checkpoint is invalid")
+        side_effect_boundary = raw_job.get("side_effect_boundary")
+        if not isinstance(side_effect_boundary, str) or side_effect_boundary not in JOB_BOUNDARIES:
+            raise BrainJobError("brain job snapshot side_effect_boundary is invalid")
+        recovered = raw_job.get("recovered_after_restart")
+        if not isinstance(recovered, bool):
+            raise BrainJobError("brain job snapshot recovered_after_restart is invalid")
+        if state in {"leased", "running"} and (lease_owner is None or lease_expires_ns is None):
+            raise BrainJobError("active brain job snapshot state requires a lease")
+        if state not in {"leased", "running"} and (lease_owner is not None or lease_expires_ns is not None):
+            raise BrainJobError("non-active brain job snapshot state cannot retain a lease")
+        reason = raw_job.get("reason")
+        if reason is not None:
+            reason = _job_text("brain job snapshot reason", reason, MAX_JOB_REASON_BYTES)
+        created_ns = raw_job.get("created_ns")
+        updated_ns = raw_job.get("updated_ns")
+        if any(not isinstance(item, int) or isinstance(item, bool) or item < 0 for item in (created_ns, updated_ns)):
+            raise BrainJobError("brain job snapshot timestamps are invalid")
+        record_sequence = raw_job.get("record_sequence")
+        if not isinstance(record_sequence, int) or isinstance(record_sequence, bool) or not 1 <= record_sequence <= len(events):
+            raise BrainJobError("brain job snapshot record_sequence is invalid")
+        record_digest = raw_job.get("record_digest")
+        if not _valid_digest(record_digest) or events_by_sequence[record_sequence]["event_digest"] != record_digest or events_by_sequence[record_sequence]["job_id"] != job_id:
+            raise BrainJobError("brain job snapshot record_digest is not bound to its event")
+        if job_id not in submitted:
+            raise BrainJobError("brain job snapshot record has no submission event")
+        jobs.append({
+            "schema": JOB_SCHEMA,
+            "job_id": job_id,
+            "idempotency_key": idempotency_key,
+            "spec_digest": spec_digest,
+            "domain": domain,
+            "capability": capability,
+            "risk_class": risk_class,
+            "priority": priority,
+            "max_attempts": max_attempts,
+            "state": state,
+            "attempts": attempts,
+            "lease_owner": lease_owner,
+            "lease_expires_ns": lease_expires_ns,
+            "checkpoint": dict(checkpoint),
+            "side_effect_boundary": side_effect_boundary,
+            "recovered_after_restart": recovered,
+            "reason": reason,
+            "created_ns": created_ns,
+            "updated_ns": updated_ns,
+            "record_sequence": record_sequence,
+            "record_digest": record_digest,
+            "spec": "not_returned; caller resolver owns rehydration",
+        })
+    if {event["job_id"] for event in events}.difference(seen_job_ids):
+        raise BrainJobError("brain job snapshot event has no indexed job record")
+    descriptor = {
+        "schema": JOB_SNAPSHOT_SCHEMA,
+        "events": events,
+        "jobs": jobs,
+        "head_digest": head_digest,
+        "retention": "metadata_only_hash_chained",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = value.get("snapshot_digest")
+    if not _valid_digest(snapshot_digest) or _digest(descriptor) != snapshot_digest:
+        raise BrainJobError("brain job snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if len(_canonical(normalized).encode("utf-8")) > min(max_bytes, MAX_JOB_SNAPSHOT_BYTES):
+        raise BrainJobError("brain job snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_brain_job_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public strict validator for metadata-only durable worker snapshots."""
+
+    return _normalize_job_snapshot(value)
+
+
+class JsonBrainJobSnapshotPersistence:
+    """Canonical JSON job persistence over a caller-owned text store."""
+
+    def __init__(self, store: BrainJobSnapshotTextStore, *, max_bytes: int = MAX_JOB_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise BrainJobError("brain job JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_JOB_SNAPSHOT_BYTES:
+            raise BrainJobError("brain job JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainJobError("brain job JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise BrainJobError("brain job JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise BrainJobError("brain job JSON snapshot must be an object")
+        return _normalize_job_snapshot(raw, max_bytes=self.max_bytes)
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_job_snapshot(snapshot, max_bytes=self.max_bytes)
+        encoded = _canonical(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainJobError("brain job JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonBrainJobSnapshotPersistence(JsonBrainJobSnapshotPersistence):
+    """Canonical JSON job persistence with compare-and-swap fencing."""
+
+    def __init__(self, store: TransactionalBrainJobSnapshotTextStore, *, max_bytes: int = MAX_JOB_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise BrainJobError("transactional brain job persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and not _valid_digest(expected_snapshot_digest):
+            raise BrainJobError("brain job expected snapshot digest is invalid")
+        normalized = _normalize_job_snapshot(snapshot, max_bytes=self.max_bytes)
+        encoded = _canonical(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainJobError("brain job JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class BrainJobPersistenceCoordinator:
+    """Flush and restore a durable worker queue through caller-owned snapshot storage."""
+
+    def __init__(self, store: BrainJobStore, persistence: Any) -> None:
+        if not isinstance(store, BrainJobStore):
+            raise BrainJobError("brain job persistence requires a BrainJobStore")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise BrainJobError("brain job persistence adapter is malformed")
+        self.store = store
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = _normalize_job_snapshot(raw, max_jobs=self.store.max_jobs, max_bytes=self.store.max_bytes)
+        self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.store.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise BrainJobError("brain job persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+
 __all__ = [
     "BrainJobError",
     "BrainJobEvent",
     "BrainJobEventReceipt",
     "BrainJobRecord",
+    "BrainJobPersistenceCoordinator",
+    "BrainJobSnapshotTextStore",
     "BrainJobStore",
+    "JOB_SNAPSHOT_SCHEMA",
+    "MAX_JOB_EVENTS",
+    "MAX_JOB_SNAPSHOT_JOBS",
+    "MAX_JOB_SNAPSHOT_BYTES",
     "JOB_RECONCILIATION_OUTCOMES",
     "JOB_RECONCILIATION_SCHEMA",
     "JOB_EVENT_SCHEMA",
     "JOB_SCHEMA",
+    "JsonBrainJobSnapshotPersistence",
+    "TransactionalBrainJobSnapshotTextStore",
+    "TransactionalJsonBrainJobSnapshotPersistence",
+    "validate_brain_job_snapshot",
 ]

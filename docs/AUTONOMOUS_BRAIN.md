@@ -4321,6 +4321,36 @@ workflow identity, checkpoint digest, stage-level outcome updates, approval hist
 recovery posture. If a lease expires after a possible external dispatch, the existing
 `reconciliation_required` quarantine still wins over replay.
 
+The Python job store also supports a portable worker handoff. `BrainJobStore.snapshot()` captures
+the verified event chain plus the redacted queue index, and
+`TransactionalJsonBrainJobSnapshotPersistence` moves that artifact through any text store with
+compare-and-swap fencing. `BrainJobPersistenceCoordinator` restores the snapshot into a fresh
+SQLite queue before a worker starts claiming work:
+
+```python
+from prism_sdk import (
+    BrainJobPersistenceCoordinator,
+    BrainJobStore,
+    TransactionalJsonBrainJobSnapshotPersistence,
+)
+
+remote_jobs = TransactionalJsonBrainJobSnapshotPersistence(
+    application_snapshot_text_store("tenant-42/brain-jobs")
+)
+with BrainJobStore("state/worker-rehydration.sqlite3") as jobs:
+    handoff = BrainJobPersistenceCoordinator(jobs, remote_jobs)
+    handoff.restore()
+    # Claim/checkpoint/release or reconcile one bounded stage.
+    handoff.flush()
+```
+
+The snapshot validator binds every event payload, sequence, previous digest, job record digest,
+lease/approval state, side-effect boundary, and queue identity into one digest. It rejects
+unsupported fields, duplicate idempotency keys, missing submission events, stale record pointers,
+tampered heads, unsafe checkpoint metadata, oversize JSON, and stale worker flushes. Restoring is
+a full queue replacement under SQLite transaction; caller-owned task/spec resolution and external
+effect reconciliation remain separate and are never inferred from the snapshot.
+
 ### Python remote high-level brain worker
 
 `RemoteBrainJobWorker` closes the equivalent queue-to-full-brain boundary for Python deployments

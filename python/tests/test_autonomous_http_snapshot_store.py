@@ -6,6 +6,8 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    BrainJobPersistenceCoordinator,
+    BrainJobStore,
     AutonomousDecisionCycle,
     AutonomousDecisionCyclePersistenceCoordinator,
     AutonomousExecutionController,
@@ -15,6 +17,7 @@ from prism_sdk import (
     AutonomousHttpSnapshotTextStore,
     InMemoryAutonomousDecisionCycleStateStore,
     TransactionalJsonAutonomousExecutionSnapshotPersistence,
+    TransactionalJsonBrainJobSnapshotPersistence,
     TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
 )
 from prism_sdk.authoring import content_digest
@@ -235,3 +238,48 @@ def test_http_snapshot_store_plugs_into_execution_journal_restart_for_every_doma
     assert restored_snapshot["snapshot_digest"] == snapshot["snapshot_digest"]
     assert {row["event"]["domain"] for row in restored_journal.events()} == set(AUTONOMOUS_DOMAINS)
     assert restored_journal.verify_integrity()["verified"] is True
+
+
+def test_http_snapshot_store_plugs_into_durable_job_worker_restart_for_every_domain(tmp_path) -> None:
+    remote: str | None = None
+
+    def opener(request, _timeout):
+        nonlocal remote
+        if request.get_method() == "GET":
+            return _Response(remote.encode("utf-8")) if remote is not None else _Response(status=404)
+        current = None if remote is None else json.loads(remote)["snapshot_digest"]
+        expected = _header(request, "If-Match")
+        if _header(request, "If-None-Match") == "*" and current is not None:
+            return _Response(status=412)
+        if expected is not None and current != expected.strip('"'):
+            return _Response(status=412)
+        remote = request.data.decode("utf-8")
+        return _Response(status=204)
+
+    text_store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "all-domains/brain-jobs",
+        allowed_hosts=("state.test",),
+        opener=opener,
+    )
+    persistence = TransactionalJsonBrainJobSnapshotPersistence(text_store)
+    with BrainJobStore(tmp_path / "source-jobs.sqlite3") as source:
+        for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+            source.submit({
+                "job_id": f"http-job-{index}",
+                "idempotency_key": f"http-idempotency-{index}",
+                "spec_digest": content_digest({"domain": domain, "index": index}),
+                "domain": domain,
+                "capability": "observability",
+                "risk_class": "read_only",
+                "priority": index,
+                "max_attempts": 3,
+                "checkpoint": {"phase": "submitted"},
+            })
+        flushed = BrainJobPersistenceCoordinator(source, persistence).flush()
+    with BrainJobStore(tmp_path / "restored-jobs.sqlite3") as restored:
+        restored_snapshot = BrainJobPersistenceCoordinator(restored, persistence).restore()
+        assert restored_snapshot is not None
+        assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
+        assert {record.domain for record in restored.inventory(limit=256)} == set(AUTONOMOUS_DOMAINS)
+        assert restored.verify_integrity()["ok"] is True

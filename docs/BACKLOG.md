@@ -763,6 +763,12 @@ admission, restart-safe lifecycle calls, and digest-only projections aligned wit
 `brain_job_*` vocabulary. This closes the missing local durable transport seam; HTTP/MCP identity,
 multi-host consensus, tenant fairness, external delivery guarantees, and provider-specific
 execution remain deployment-owned.
+Python durable job state now has a portable handoff as well: queue records and the complete
+hash-chained event journal can be validated, serialized as canonical JSON, restored into a fresh
+SQLite worker, and fenced with conditional writes through a caller-owned text store. The snapshot
+preserves queued, leased, approval-paused, terminal, and reconciliation-required states across all
+twelve domains while retaining no task, prompt, credential, provider response, or tool payload.
+Multi-host scheduling, storage encryption, and external effect authority remain deployment-owned.
 The MCP control-plane projection now also exposes the matching remote lifecycle vocabulary:
 `brain_job_claim_next`, `brain_job_claim`, `brain_job_renew`, `brain_job_checkpoint`,
 `brain_job_complete`, `brain_job_fail`, `brain_job_reconcile`, and `brain_job_cancel`. The
