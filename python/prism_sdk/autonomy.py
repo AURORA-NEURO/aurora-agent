@@ -5896,7 +5896,15 @@ def _decision_cycle_selection_digest(result: Any) -> str | None:
                 }
                 if safe:
                     add(content_digest(safe))
-        for key in ("final_result", "final", "brain_run", "synthesis_result"):
+        for key in (
+            "result",
+            "planning",
+            "semantic_route",
+            "final_result",
+            "final",
+            "brain_run",
+            "synthesis_result",
+        ):
             nested = value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
             visit(nested, depth + 1)
         children = value.get("child_results") if isinstance(value, Mapping) else getattr(value, "child_results", None)
@@ -16203,7 +16211,7 @@ class AutonomousAgent:
         )
         if decision_cycle is not None:
             cycle_outcome_digest = content_digest(automatic_result.to_dict())
-            selection_digest = _decision_cycle_selection_digest(result)
+            selection_digest = _decision_cycle_selection_digest(automatic_result)
             evaluation_digest = _decision_cycle_evaluation_digest(result)
             learning_episode_ids, settlement_digests = _decision_cycle_learning_metadata(result)
             if evaluation_digest is None:

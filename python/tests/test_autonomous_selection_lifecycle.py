@@ -147,6 +147,26 @@ def test_selection_lifecycle_joins_all_domain_readiness() -> None:
             credentials={},
             model_candidates=agent.models(),
         )
+    single_blueprint = agent.prepare_auto(task="fix this coding repository").blueprint
+    cross_blueprint = agent.prepare_auto(
+        task="write python code for the dataset pipeline",
+        min_confidence=0.20,
+        min_margin=0.10,
+    ).cross_domain_blueprint
+    assert single_blueprint is not None
+    assert cross_blueprint is not None
+    with pytest.raises(BrainRunError, match="learned model selection is not admitted"):
+        agent.plan_with_provider(
+            blueprint=single_blueprint,
+            credentials={},
+            model_candidates=agent.models(),
+        )
+    with pytest.raises(BrainRunError, match="learned model selection is not admitted"):
+        agent.plan_cross_domain_with_provider(
+            blueprint=cross_blueprint,
+            credentials={},
+            model_candidates=agent.models(),
+        )
 
     agent.apply_selection_promotion(promotion)
     ready = agent.readiness(selection_promotion_report=promotion, require_promoted_selection=True)
