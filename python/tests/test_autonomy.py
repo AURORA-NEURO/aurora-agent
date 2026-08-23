@@ -29,7 +29,6 @@ from prism_sdk import (
     AutonomousCrossDomainCheckpoint,
     AutonomousCrossDomainResult,
     AutonomousCrossDomainReplanResult,
-    AutonomousDecisionCycle,
     InMemoryAutonomousDecisionCycleStateStore,
     AutonomousRoutingHoldoutCase,
     AutonomousRoutingHoldoutEvaluator,
@@ -53,6 +52,8 @@ from prism_sdk import (
     CredentialError,
     LLMRuntime,
     InMemoryAutonomousCapabilityJournalStore,
+    AutonomousCapabilityJournalPersistenceCoordinator,
+    TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence,
     ModelCandidate,
     ModelCatalogue,
     ProviderHealthLedger,
@@ -66,6 +67,25 @@ from prism_sdk import (
     content_digest,
     task_facet_digests,
 )
+from prism_sdk.errors import ArgumentError
+
+
+class _CasTextStore:
+    def __init__(self) -> None:
+        self.value: str | None = None
+
+    def read(self) -> str | None:
+        return self.value
+
+    def write(self, value: str) -> None:
+        self.value = value
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+        if observed != expected_snapshot_digest:
+            return False
+        self.value = value
+        return True
 
 
 class _ProviderHandler(BaseHTTPRequestHandler):
@@ -1011,6 +1031,23 @@ def test_autonomous_agent_exposes_reviewed_capability_execution_and_journal_repl
     assert replayed.value is None
     assert workspace.calls == [("developer_platform_status", {"scope": "workspace"})]
     assert agent.capability_execution_evidence()[0]["request_digest"]
+
+    backend = _CasTextStore()
+    persistence = TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence(backend)
+    source_coordinator = AutonomousCapabilityJournalPersistenceCoordinator(journal, persistence)
+    flushed = source_coordinator.flush()
+    assert flushed["snapshot_digest"] == json.loads(backend.value)["snapshot_digest"]
+    restarted_journal = InMemoryAutonomousCapabilityJournalStore()
+    restarted_coordinator = AutonomousCapabilityJournalPersistenceCoordinator(restarted_journal, persistence)
+    restored_snapshot = restarted_coordinator.restore()
+    assert restored_snapshot["entry_count"] == 1
+    assert restarted_journal.records()[0].request_digest == first.record.request_digest
+    backend.value = json.dumps(json.loads(backend.value), indent=2)
+    with pytest.raises(ArgumentError, match="not canonical"):
+        persistence.read()
+    persistence.write(InMemoryAutonomousCapabilityJournalStore().snapshot())
+    with pytest.raises(ArgumentError, match="compare-and-swap conflict"):
+        restarted_coordinator.flush()
 
 
 def test_autonomous_agent_persists_native_tool_execution_and_terminal_state(tmp_path):

@@ -7218,6 +7218,18 @@ not invoke the executor again. `agent.capability_execution_evidence()` exposes t
 metadata history for an independent evaluator, which must supply the actual reward or pass/fail
 decision before any bandit or online-learning update.
 
+The Python journal now has a portable persistence contract that mirrors the other autonomous
+state surfaces. `JsonAutonomousCapabilityJournalSnapshotPersistence` validates the complete
+hash chain and writes canonical JSON through any caller-owned text store; its transactional
+variant calls `write_if_unchanged(expected_snapshot_digest, value)`. The
+`AutonomousCapabilityJournalPersistenceCoordinator` remembers the restored digest and fences a
+stale worker instead of allowing it to overwrite a newer replay barrier. Non-canonical JSON,
+duplicate or reordered entries, unsupported record fields, digest mismatches, and snapshots over
+the configured byte bound are rejected before the in-memory journal changes. The adapter stores
+only the already-redacted journal projection, so an HTTP snapshot store, SQLite-backed text
+store, or atomic file store can be substituted without giving the SDK access to task text,
+arguments, outputs, credentials, or provider transcripts.
+
 The capability-to-learning boundary is explicit through
 `evaluate_capability_execution(...)` and `evaluate_capability_executions(...)`. These methods
 accept either a transient execution result or its metadata-only record, project only
@@ -7629,6 +7641,16 @@ Those signals can be translated into the existing bandit/contextual learner by t
 the worker never infers reward from HTTP status, connector health, model self-report, or retry
 count. This preserves the separation between execution, evaluation, and adaptation across every
 autonomous domain.
+
+Python deployments can persist that evaluator ledger with
+`JsonAutonomousConnectorFeedbackSnapshotPersistence` and
+`AutonomousConnectorFeedbackPersistenceCoordinator`. The strict normalizer checks the exact
+metadata-only schema, all twelve domain names, bounded evaluator values and timestamps,
+deterministic `(created_at, feedback_id)` ordering, every entry digest, and the aggregate snapshot
+digest. The transactional adapter uses the last restored digest as a compare-and-swap fence, so
+two evaluator workers cannot silently replace one another's learning signal. Canonical JSON is
+required on reads as well as writes, making serialization drift and hand-edited state explicit
+failures rather than hidden changes to connector selection.
 
 #### The restart-safe intent job controller
 

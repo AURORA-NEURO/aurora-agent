@@ -13,10 +13,12 @@ from prism_sdk import (
     AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
     AutonomousConnectorWorker,
+    AutonomousConnectorFeedbackPersistenceCoordinator,
     AutonomousConnectorWorkQueuePersistenceCoordinator,
     DomainEvidenceProviderConnectorManifest,
     InMemoryAutonomousConnectorFeedbackLedger,
     InMemoryAutonomousConnectorWorkQueue,
+    TransactionalJsonAutonomousConnectorFeedbackSnapshotPersistence,
     content_digest,
 )
 from prism_sdk.errors import ArgumentError
@@ -31,6 +33,24 @@ class _SnapshotStore:
 
     def write(self, snapshot):
         self.snapshot = snapshot
+
+
+class _CasTextStore:
+    def __init__(self):
+        self.value = None
+
+    def read(self):
+        return self.value
+
+    def write(self, value):
+        self.value = value
+
+    def write_if_unchanged(self, expected_snapshot_digest, value):
+        observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+        if observed != expected_snapshot_digest:
+            return False
+        self.value = value
+        return True
 
 
 def _fixture(tmp_path):
@@ -133,7 +153,7 @@ def test_work_queue_is_metadata_only_fenced_retry_bounded_and_tamper_evident(tmp
     assert restarted.verify_integrity() == queue.verify_integrity()
     tampered = json.loads(json.dumps(snapshot))
     tampered["items"][0]["status"] = "completed"
-    with pytest.raises(ArgumentError, match="snapshot digest"):
+    with pytest.raises(ArgumentError, match="digest"):
         restored.restore(tampered)
 
 
@@ -188,5 +208,21 @@ def test_feedback_requires_explicit_evaluator_and_projects_adaptive_signals(tmp_
     assert restored.verify_integrity() == ledger.verify_integrity()
     tampered = json.loads(json.dumps(snapshot))
     tampered["entries"][0]["reward"] = -1
-    with pytest.raises(ArgumentError, match="snapshot digest"):
+    with pytest.raises(ArgumentError, match="digest"):
         restored.restore(tampered)
+
+    backend = _CasTextStore()
+    persistence = TransactionalJsonAutonomousConnectorFeedbackSnapshotPersistence(backend)
+    source_coordinator = AutonomousConnectorFeedbackPersistenceCoordinator(ledger, persistence)
+    flushed = source_coordinator.flush()
+    assert flushed["snapshot_digest"] == json.loads(backend.value)["snapshot_digest"]
+    restarted = InMemoryAutonomousConnectorFeedbackLedger()
+    restarted_coordinator = AutonomousConnectorFeedbackPersistenceCoordinator(restarted, persistence)
+    assert restarted_coordinator.restore()["snapshot_digest"] == flushed["snapshot_digest"]
+    assert restarted.signals(domain="coding", capability="review")["worker-test-connector"]["evaluator_reward"] == 0.8
+    backend.value = json.dumps(json.loads(backend.value), indent=2)
+    with pytest.raises(ArgumentError, match="not canonical"):
+        persistence.read()
+    persistence.write({"schema": "bioprism-python-autonomous-connector-feedback-ledger/0.1", "entries": [], "retention": "metadata_only_explicit_evaluator_signal_no_request_or_payload", "secret_material": "never_returned", "snapshot_digest": content_digest({"schema": "bioprism-python-autonomous-connector-feedback-ledger/0.1", "entries": [], "retention": "metadata_only_explicit_evaluator_signal_no_request_or_payload", "secret_material": "never_returned"})})
+    with pytest.raises(ArgumentError, match="compare-and-swap conflict"):
+        restarted_coordinator.flush()

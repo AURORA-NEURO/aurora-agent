@@ -516,6 +516,100 @@ def validate_autonomous_capability_journal_snapshot(value: Mapping[str, Any] | A
     return AutonomousCapabilityJournalSnapshot(entries, head, snapshot_digest)
 
 
+def _canonical_capability_journal_json(
+    value: Mapping[str, Any] | AutonomousCapabilityJournalSnapshot,
+) -> str:
+    """Return the canonical wire representation used by durable journal stores."""
+
+    return canonical_json(validate_autonomous_capability_journal_snapshot(value).to_dict())
+
+
+class AutonomousCapabilityJournalSnapshotTextStore(Protocol):
+    """Portable text persistence for metadata-only capability replay journals."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalAutonomousCapabilityJournalSnapshotTextStore(
+    AutonomousCapabilityJournalSnapshotTextStore,
+    Protocol,
+):
+    """Capability journal text persistence with stale-writer fencing."""
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonAutonomousCapabilityJournalSnapshotPersistence:
+    """Strict canonical JSON persistence over a caller-owned text store."""
+
+    def __init__(
+        self,
+        store: AutonomousCapabilityJournalSnapshotTextStore,
+        *,
+        max_bytes: int = MAX_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_BYTES,
+    ) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ArgumentError("capability journal JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_BYTES:
+            raise ArgumentError("capability journal JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("capability journal JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ArgumentError("capability journal JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("capability journal JSON snapshot must be an object")
+        normalized = validate_autonomous_capability_journal_snapshot(raw).to_dict()
+        if encoded != canonical_json(normalized):
+            raise ArgumentError("capability journal JSON snapshot is not canonical")
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any] | AutonomousCapabilityJournalSnapshot) -> None:
+        encoded = _canonical_capability_journal_json(snapshot)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("capability journal JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence(
+    JsonAutonomousCapabilityJournalSnapshotPersistence,
+):
+    """Canonical JSON capability persistence with compare-and-swap fencing."""
+
+    def __init__(
+        self,
+        store: TransactionalAutonomousCapabilityJournalSnapshotTextStore,
+        *,
+        max_bytes: int = MAX_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_BYTES,
+    ) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ArgumentError("transactional capability journal persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(
+        self,
+        expected_snapshot_digest: str | None,
+        snapshot: Mapping[str, Any] | AutonomousCapabilityJournalSnapshot,
+    ) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest("capability journal expected snapshot digest", expected_snapshot_digest)
+        encoded = _canonical_capability_journal_json(snapshot)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("capability journal JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
 class InMemoryAutonomousCapabilityJournalStore:
     """Bounded reference journal for tests and small caller-owned workers."""
 
@@ -580,18 +674,27 @@ class AutonomousCapabilityJournalPersistenceCoordinator:
             raise ArgumentError("capability journal persistence requires a snapshot store and read/write persistence")
         self.store = store
         self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
 
     def flush(self) -> dict[str, Any]:
         snapshot = self.store.snapshot()
-        self.persistence.write(snapshot.to_dict())
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise ArgumentError("capability journal persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot.to_dict())
+        self._expected_snapshot_digest = snapshot.snapshot_digest
         return {"schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA, "bytes": _json_bytes(snapshot.to_dict()), "snapshot_digest": snapshot.snapshot_digest, "retention": "metadata_only"}
 
     def restore(self) -> dict[str, Any]:
         raw = self.persistence.read()
         if raw is None:
+            self._expected_snapshot_digest = None
             return {"restored": False, "entry_count": 0, "snapshot_digest": None}
         snapshot = validate_autonomous_capability_journal_snapshot(raw)
         self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot.snapshot_digest
         return {"restored": True, "entry_count": len(snapshot.entries), "snapshot_digest": snapshot.snapshot_digest}
 
 
@@ -862,6 +965,10 @@ __all__ = [
     "AutonomousCapabilityJournalEntry",
     "AutonomousCapabilityJournalSnapshot",
     "AutonomousCapabilityJournalStore",
+    "AutonomousCapabilityJournalSnapshotTextStore",
+    "TransactionalAutonomousCapabilityJournalSnapshotTextStore",
+    "JsonAutonomousCapabilityJournalSnapshotPersistence",
+    "TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence",
     "InMemoryAutonomousCapabilityJournalStore",
     "AutonomousCapabilityJournalPersistenceCoordinator",
     "AutonomousCapabilityRuntime",

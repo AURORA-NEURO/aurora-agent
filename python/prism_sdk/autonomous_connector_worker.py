@@ -23,14 +23,12 @@ import json
 import math
 import threading
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from .authoring import content_digest
+from .authoring import canonical_json, content_digest
 from .autonomous_connectors import (
-    AUTONOMOUS_CONNECTOR_DISPATCH_STATUSES,
     AutonomousConnectorDispatchReceipt,
     AutonomousConnectorDispatchRequest,
-    AutonomousConnectorRegistry,
     AutonomousConnectorRuntime,
     AutonomousConnectorSelectionPlan,
 )
@@ -135,6 +133,99 @@ def _digest_sequence(name: str, value: Any, *, maximum: int = 128) -> tuple[str,
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) > maximum:
         raise ArgumentError(f"{name} must contain at most {maximum} entries")
     return tuple(_digest(f"{name} entry", item) for item in value)  # type: ignore[misc]
+
+
+_FEEDBACK_ENTRY_KEYS = frozenset({
+    "schema", "feedback_id", "domain", "capability", "connector_id", "receipt_digest",
+    "evaluator_id", "evaluator_version", "reward", "passed", "evidence_digest", "failure_class",
+    "created_at", "entry_digest", "retention", "secret_material",
+})
+_FEEDBACK_RETENTION = "metadata_only_explicit_evaluator_signal_no_request_or_payload"
+_FEEDBACK_SECRET_MATERIAL = "never_returned"
+
+
+def _normalize_feedback_entry(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != _FEEDBACK_ENTRY_KEYS:
+        raise ArgumentError("autonomous connector feedback snapshot entry is malformed")
+    if value.get("schema") != AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA or value.get("retention") != _FEEDBACK_RETENTION or value.get("secret_material") != _FEEDBACK_SECRET_MATERIAL:
+        raise ArgumentError("autonomous connector feedback snapshot entry retention is invalid")
+    feedback_id = _identifier("autonomous connector feedback_id", value.get("feedback_id"))
+    domain = value.get("domain")
+    if domain not in AUTONOMOUS_DOMAIN_NAMES:
+        raise ArgumentError("autonomous connector feedback snapshot entry domain is unsupported")
+    capability = _capability_identifier("autonomous connector feedback capability", value.get("capability"))
+    connector_id = _identifier("autonomous connector feedback connector_id", value.get("connector_id"))
+    receipt_digest = _digest("autonomous connector feedback receipt_digest", value.get("receipt_digest"))
+    evaluator_id = _identifier("autonomous connector evaluator_id", value.get("evaluator_id"))
+    evaluator_version = _identifier("autonomous connector evaluator_version", value.get("evaluator_version"))
+    reward = value.get("reward")
+    if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not -1.0 <= float(reward) <= 1.0:
+        raise ArgumentError("autonomous connector evaluator reward must be between -1 and 1")
+    passed = value.get("passed")
+    if not isinstance(passed, bool):
+        raise ArgumentError("autonomous connector evaluator passed must be boolean")
+    evidence_digest = _digest("autonomous connector feedback evidence_digest", value.get("evidence_digest"), allow_none=True)
+    failure_class = value.get("failure_class")
+    if failure_class is not None:
+        failure_class = _identifier("autonomous connector feedback failure_class", failure_class)
+    created_at = _bounded_timestamp("autonomous connector feedback created_at", value.get("created_at"))
+    entry = {
+        "schema": AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA,
+        "feedback_id": feedback_id,
+        "domain": domain,
+        "capability": capability,
+        "connector_id": connector_id,
+        "receipt_digest": receipt_digest,
+        "evaluator_id": evaluator_id,
+        "evaluator_version": evaluator_version,
+        "reward": float(reward),
+        "passed": passed,
+        "evidence_digest": evidence_digest,
+        "failure_class": failure_class,
+        "created_at": created_at,
+        "retention": _FEEDBACK_RETENTION,
+        "secret_material": _FEEDBACK_SECRET_MATERIAL,
+        "entry_digest": value.get("entry_digest"),
+    }
+    entry_digest = _digest("autonomous connector feedback entry_digest", entry["entry_digest"])
+    if entry_digest != content_digest({key: item for key, item in entry.items() if key != "entry_digest"}):
+        raise ArgumentError("autonomous connector feedback snapshot entry digest is invalid")
+    entry["entry_digest"] = entry_digest
+    return entry
+
+
+def _normalize_feedback_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_entries: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    expected = {"schema", "entries", "retention", "secret_material", "snapshot_digest"}
+    if not isinstance(value, Mapping) or set(value) != expected or value.get("schema") != AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA:
+        raise ArgumentError("autonomous connector feedback snapshot is malformed")
+    if value.get("retention") != _FEEDBACK_RETENTION or value.get("secret_material") != _FEEDBACK_SECRET_MATERIAL:
+        raise ArgumentError("autonomous connector feedback snapshot retention is invalid")
+    raw_entries = value.get("entries")
+    if not isinstance(raw_entries, Sequence) or isinstance(raw_entries, (str, bytes, bytearray)) or len(raw_entries) > max_entries:
+        raise ArgumentError("autonomous connector feedback snapshot exceeds max_entries")
+    entries = [_normalize_feedback_entry(raw) for raw in raw_entries]
+    if entries != sorted(entries, key=lambda row: (row["created_at"], row["feedback_id"])):
+        raise ArgumentError("autonomous connector feedback snapshot entries are not deterministically ordered")
+    if len({entry["feedback_id"] for entry in entries}) != len(entries):
+        raise ArgumentError("autonomous connector feedback snapshot contains duplicate feedback ids")
+    descriptor = {
+        "schema": AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA,
+        "entries": entries,
+        "retention": _FEEDBACK_RETENTION,
+        "secret_material": _FEEDBACK_SECRET_MATERIAL,
+    }
+    snapshot_digest = _digest("autonomous connector feedback snapshot digest", value.get("snapshot_digest"))
+    if snapshot_digest != content_digest(descriptor):
+        raise ArgumentError("autonomous connector feedback snapshot digest is invalid")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if len(canonical_json(normalized).encode("utf-8")) > min(max_bytes, MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_SNAPSHOT_BYTES):
+        raise ArgumentError("autonomous connector feedback snapshot exceeds its byte bound")
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -744,7 +835,8 @@ class AutonomousConnectorWorker:
             if claimed is None:
                 rows.append(AutonomousConnectorWorkerRow(candidate.work_id, "leased_elsewhere", candidate.attempts, None, False, candidate.payload_digest, None))
                 continue
-            finish_now = lambda: current if deterministic_now else _now_ms()
+            def finish_now() -> int:
+                return current if deterministic_now else _now_ms()
             try:
                 hydrated = self.rehydrate(claimed)
                 if not isinstance(hydrated, Mapping) or not isinstance(hydrated.get("request"), AutonomousConnectorDispatchRequest):
@@ -916,36 +1008,158 @@ class InMemoryAutonomousConnectorFeedbackLedger:
 
     def snapshot(self) -> dict[str, Any]:
         self.verify_integrity()
-        descriptor = {"schema": AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA, "entries": list(self.rows()), "retention": "metadata_only_explicit_evaluator_signal_no_request_or_payload", "secret_material": "never_returned"}
+        descriptor = {
+            "schema": AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA,
+            "entries": list(self.rows()),
+            "retention": _FEEDBACK_RETENTION,
+            "secret_material": _FEEDBACK_SECRET_MATERIAL,
+        }
         snapshot = {**descriptor, "snapshot_digest": content_digest(descriptor)}
-        encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        if len(encoded) > MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_SNAPSHOT_BYTES:
-            raise ArgumentError("autonomous connector feedback snapshot exceeds its bound")
-        return snapshot
+        return _normalize_feedback_snapshot(
+            snapshot,
+            max_entries=self.max_entries,
+            max_bytes=MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_SNAPSHOT_BYTES,
+        )
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
-        if not isinstance(snapshot, Mapping) or snapshot.get("schema") != AUTONOMOUS_CONNECTOR_FEEDBACK_LEDGER_SCHEMA or not isinstance(snapshot.get("entries"), Sequence) or isinstance(snapshot.get("entries"), (str, bytes)):
-            raise ArgumentError("autonomous connector feedback snapshot is malformed")
-        if snapshot.get("retention") != "metadata_only_explicit_evaluator_signal_no_request_or_payload" or snapshot.get("secret_material") != "never_returned":
-            raise ArgumentError("autonomous connector feedback snapshot retention is invalid")
-        descriptor = {key: value for key, value in snapshot.items() if key != "snapshot_digest"}
-        if _digest("autonomous connector feedback snapshot digest", snapshot.get("snapshot_digest")) != content_digest(descriptor):
-            raise ArgumentError("autonomous connector feedback snapshot digest is invalid")
-        entries: dict[str, dict[str, Any]] = {}
-        for raw in snapshot["entries"]:
-            if not isinstance(raw, Mapping) or raw.get("schema") != AUTONOMOUS_CONNECTOR_FEEDBACK_SCHEMA or raw.get("retention") != "metadata_only_explicit_evaluator_signal_no_request_or_payload" or raw.get("secret_material") != "never_returned":
-                raise ArgumentError("autonomous connector feedback snapshot entry is malformed")
-            entry = dict(raw)
-            if entry.get("entry_digest") != content_digest({key: value for key, value in entry.items() if key != "entry_digest"}):
-                raise ArgumentError("autonomous connector feedback snapshot entry digest is invalid")
-            feedback_id = _identifier("autonomous connector feedback_id", entry.get("feedback_id"))
-            if feedback_id in entries:
-                raise ArgumentError("autonomous connector feedback snapshot contains duplicate feedback ids")
-            entries[feedback_id] = entry
-        if len(entries) > self.max_entries:
-            raise ArgumentError("autonomous connector feedback snapshot exceeds max_entries")
+        normalized = _normalize_feedback_snapshot(
+            snapshot,
+            max_entries=self.max_entries,
+            max_bytes=MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_SNAPSHOT_BYTES,
+        )
+        entries = {entry["feedback_id"]: entry for entry in normalized["entries"]}
         with self._lock:
             self._entries = entries
+
+
+class AutonomousConnectorFeedbackSnapshotTextStore(Protocol):
+    """Portable text persistence for explicit connector evaluator signals."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalAutonomousConnectorFeedbackSnapshotTextStore(
+    AutonomousConnectorFeedbackSnapshotTextStore,
+    Protocol,
+):
+    """Feedback text persistence with stale-writer fencing."""
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonAutonomousConnectorFeedbackSnapshotPersistence:
+    """Strict canonical JSON persistence for evaluator feedback."""
+
+    def __init__(
+        self,
+        store: AutonomousConnectorFeedbackSnapshotTextStore,
+        *,
+        max_bytes: int = MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_SNAPSHOT_BYTES,
+    ) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ArgumentError("connector feedback JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_SNAPSHOT_BYTES:
+            raise ArgumentError("connector feedback JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("connector feedback JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ArgumentError("connector feedback JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("connector feedback JSON snapshot must be an object")
+        normalized = _normalize_feedback_snapshot(raw, max_entries=MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_ENTRIES, max_bytes=self.max_bytes)
+        if encoded != canonical_json(normalized):
+            raise ArgumentError("connector feedback JSON snapshot is not canonical")
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_feedback_snapshot(
+            snapshot,
+            max_entries=MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_ENTRIES,
+            max_bytes=self.max_bytes,
+        )
+        encoded = canonical_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("connector feedback JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousConnectorFeedbackSnapshotPersistence(
+    JsonAutonomousConnectorFeedbackSnapshotPersistence,
+):
+    """Canonical JSON feedback persistence with compare-and-swap fencing."""
+
+    def __init__(
+        self,
+        store: TransactionalAutonomousConnectorFeedbackSnapshotTextStore,
+        *,
+        max_bytes: int = MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_SNAPSHOT_BYTES,
+    ) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ArgumentError("transactional connector feedback persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest("connector feedback expected snapshot digest", expected_snapshot_digest)
+        normalized = _normalize_feedback_snapshot(
+            snapshot,
+            max_entries=MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_ENTRIES,
+            max_bytes=self.max_bytes,
+        )
+        encoded = canonical_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("connector feedback JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class AutonomousConnectorFeedbackPersistenceCoordinator:
+    """Flush and restore explicit evaluator signals with optional CAS fencing."""
+
+    def __init__(self, ledger: InMemoryAutonomousConnectorFeedbackLedger, persistence: Any) -> None:
+        if not isinstance(ledger, InMemoryAutonomousConnectorFeedbackLedger):
+            raise ArgumentError("connector feedback persistence requires a typed ledger")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ArgumentError("connector feedback persistence adapter is malformed")
+        self.ledger = ledger
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        normalized = _normalize_feedback_snapshot(
+            raw,
+            max_entries=self.ledger.max_entries,
+            max_bytes=MAX_AUTONOMOUS_CONNECTOR_FEEDBACK_SNAPSHOT_BYTES,
+        )
+        self.ledger.restore(normalized)
+        self._expected_snapshot_digest = normalized["snapshot_digest"]
+        return normalized
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.ledger.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise ArgumentError("connector feedback persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
 
 
 __all__ = [
@@ -973,4 +1187,9 @@ __all__ = [
     "AutonomousConnectorWorkerRow",
     "AutonomousConnectorWorker",
     "InMemoryAutonomousConnectorFeedbackLedger",
+    "AutonomousConnectorFeedbackSnapshotTextStore",
+    "TransactionalAutonomousConnectorFeedbackSnapshotTextStore",
+    "JsonAutonomousConnectorFeedbackSnapshotPersistence",
+    "TransactionalJsonAutonomousConnectorFeedbackSnapshotPersistence",
+    "AutonomousConnectorFeedbackPersistenceCoordinator",
 ]
