@@ -5807,8 +5807,9 @@ content-addressed receipt containing the caller's evidence digest, evidence kind
 and `effect_absent` assertion. `succeeded` and `failed` settle terminally; `unknown` remains
 quarantined; and only `not_executed` with `effect_absent=True` can be requeued, using the exact
 `reconciliation_digest`. This makes recovery auditable and prevents a convenient retry from
-becoming a duplicate acquisition or external side effect. Work-item, queue, worker, and SQLite
-schemas are `0.3`; a safe no-effect requeue consumes the current receipt into bounded
+becoming a duplicate acquisition or external side effect. Python work-item, queue, worker, and
+SQLite schemas, and the TypeScript work-item, queue, and worker schemas, are `0.3`; a safe
+no-effect requeue consumes the current receipt into bounded
 `reconciliation_history`, ensuring that a later acquisition attempt receives a fresh reconciliation
 identity while prior authorizations remain auditable. Older snapshots are rejected rather than
 guessed into the new shape.
