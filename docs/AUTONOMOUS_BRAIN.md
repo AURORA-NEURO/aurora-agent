@@ -1471,6 +1471,36 @@ const report = await agent.readiness({
 });
 ```
 
+The same keyless projection can include operational evidence-routing posture when the caller
+passes an `AutonomousEvidenceAdapterRegistry`. `evidenceReadiness` audits the same twelve domain
+rows using the optional health store and readiness policy; it never calls an adapter, provider, or
+model. The top-level report gains an `evidence` summary, each affected domain gains a redacted
+`evidence_readiness` row, and a `degraded` or `blocked` evidence route moves that domain to
+`partial` with an explicit source-dispatch remediation. This makes startup readiness composable
+without turning a registry or health observation into authorization:
+
+```typescript
+const report = await agent.readiness({
+  evidenceReadiness: {
+    registry: evidenceAdapters,
+    healthStore: evidenceHealth,
+    options: {
+      policy: new AutonomousEvidenceReadinessPolicy({
+        requireHealth: true,
+        minAttempts: 3,
+        minSuccessRate: 0.5,
+      }),
+    },
+  },
+});
+// report.evidence.status is ready/degraded/blocked; no source dispatch occurred
+```
+
+When this option is omitted, the existing readiness shape is preserved. The evidence summary
+contains only adapter/manifest, health, policy, and digest metadata; it excludes credentials,
+requests, prompts, errors, and acquired values. A caller must still use the reviewed evidence
+execution controller and explicit source-dispatch approval to acquire anything.
+
 For restartable deployments, `AutonomousEvaluatorCalibrationRegistry` imports the validated
 report projection and exposes deterministic digest/status/domain queries. Its snapshot contains
 only calibration reports and registry generation metadata; `InMemoryAutonomousEvaluatorCalibrationStore`,

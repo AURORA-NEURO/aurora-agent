@@ -73,6 +73,13 @@ strict default requires observed health and refuses open circuits; a caller can 
 a permissive degraded posture for startup or review UI. The audit never dispatches a source or
 provider and does not replace external liveness, credential, incident, or authorization systems.
 
+The high-level TypeScript `AutonomousAgent.readiness()` projection now accepts that same evidence
+registry, optional health store, and readiness-policy options. When configured, it composes the
+auditor's twelve-domain status into the keyless readiness report, marks degraded or blocked
+evidence routes as domain `partial`, and emits redacted remediation/digest metadata. The
+integration preserves the no-dispatch guarantee and leaves source authorization to the reviewed
+evidence execution controller.
+
 Evidence routing now also has a reviewed execution controller. The TypeScript
 `AutonomousEvidenceExecutionController` binds the evidence plan, selection, readiness image,
 retry policy, and explicit failover budget into one reviewable plan; execution revalidates the

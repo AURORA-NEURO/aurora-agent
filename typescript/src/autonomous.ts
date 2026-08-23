@@ -79,6 +79,7 @@ import {
 import type { AutonomousEvidenceAdapterRegistry } from "./autonomous-evidence-adapters.js";
 import type { AutonomousEvidenceAdapterHealthStore } from "./autonomous-evidence-adapter-health.js";
 import type { AutonomousEvidenceProviderContractRegistry } from "./autonomous-evidence-provider-contract.js";
+import type { AutonomousEvidenceReadinessAuditOptions } from "./autonomous-evidence-readiness.js";
 import type {
   AutonomousEvidenceExecutionController,
   AutonomousEvidenceExecutionOptions,
@@ -531,6 +532,7 @@ export interface AutonomousReadinessDomain extends JsonObject {
   available_tool_count: number;
   missing_tools: string[];
   learning_context_digest: string;
+  evidence_readiness?: JsonObject;
   calibration_admission?: JsonObject;
   state: AutonomousReadinessState;
   next_actions: string[];
@@ -547,6 +549,7 @@ export interface AutonomousReadinessReport extends JsonObject {
   model_health: JsonObject;
   learning: JsonObject;
   tooling: JsonObject;
+  evidence?: JsonObject;
   connectors?: JsonObject;
   activation: AutonomousCapabilityActivationState;
   next_actions: string[];
@@ -3669,6 +3672,11 @@ export class AutonomousAgent {
     requestedOutputTokens?: number;
     calibrationReport?: AutonomousEvaluatorCalibrationReport;
     requireCalibratedLearning?: boolean;
+    evidenceReadiness?: {
+      registry: AutonomousEvidenceAdapterRegistry;
+      healthStore?: AutonomousEvidenceAdapterHealthStore;
+      options?: AutonomousEvidenceReadinessAuditOptions;
+    };
   } = {}): Promise<AutonomousReadinessReport> {
     const estimatedInputTokens = options.estimatedInputTokens ?? 4_096;
     const requestedOutputTokens = options.requestedOutputTokens ?? 1_024;
@@ -3688,6 +3696,16 @@ export class AutonomousAgent {
       candidateIds.add(id);
     }
     const profiles = await builtinAutonomousDomainProfiles();
+    let evidenceReadinessReport: import("./autonomous-evidence-readiness.js").AutonomousEvidenceReadinessReport | null = null;
+    if (options.evidenceReadiness !== undefined) {
+      const { AutonomousEvidenceReadinessAuditor } = await import("./autonomous-evidence-readiness.js");
+      const { AutonomousEvidenceAdapterRegistry } = await import("./autonomous-evidence-adapters.js");
+      if (!(options.evidenceReadiness.registry instanceof AutonomousEvidenceAdapterRegistry)) throw new ArgumentError("autonomous readiness evidence registry is malformed");
+      const requestedEvidenceDomains = profiles.map((profile) => profile.domain);
+      const auditor = new AutonomousEvidenceReadinessAuditor(options.evidenceReadiness.registry, options.evidenceReadiness.healthStore);
+      evidenceReadinessReport = await auditor.audit(requestedEvidenceDomains, options.evidenceReadiness.options ?? {});
+    }
+    const evidenceReadinessByDomain = evidenceReadinessReport === null ? null : new Map(evidenceReadinessReport.domains.map((row) => [row.domain, row]));
     const metadataByProvider = new Map(this.llm.providerMetadata().map((row) => [String(row.provider), row]));
     const providerNames = [...new Set([...metadataByProvider.keys(), ...candidates.map((candidate) => candidate.provider)])].sort();
     const providerRows: AutonomousReadinessProvider[] = [];
@@ -3748,8 +3766,10 @@ export class AutonomousAgent {
       });
       const calibrationAdmission = calibrationReport === null ? null : calibrationRuntime!.autonomousEvaluatorCalibrationAdmission(calibrationReport, profile.domain);
       const calibrationBlocks = options.requireCalibratedLearning === true && calibrationAdmission?.decision !== "admit_learning";
+      const evidenceReadiness = evidenceReadinessByDomain?.get(profile.domain);
+      const evidenceBlocks = evidenceReadiness !== undefined && evidenceReadiness.status !== "ready";
       const baseState: AutonomousReadinessState = !candidates.length ? "model_catalogue_required" : !compatible.length ? "model_capability_gap" : eligible.length ? "ready_for_caller_approval" : credentialMissing ? "credential_required" : providerMissing ? "provider_registration_required" : "partial";
-      const state: AutonomousReadinessState = calibrationBlocks ? "partial" : baseState;
+      const state: AutonomousReadinessState = calibrationBlocks || evidenceBlocks ? "partial" : baseState;
       const nextActions = new Set<string>();
       if (state === "model_catalogue_required") nextActions.add("register at least one model candidate with the reviewed domain capabilities");
       if (state === "model_capability_gap") nextActions.add(`register a model declaring: ${requiredCapabilities.join(", ")}`);
@@ -3758,7 +3778,8 @@ export class AutonomousAgent {
       if (missingTools.length) nextActions.add("attach and review the live tool catalogue; missing tools remain optional provider-only fallbacks until bound");
       if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
       if (calibrationBlocks) nextActions.add(`hold evaluator calibration before learning: ${calibrationAdmission!.reasons.join(", ")}`);
-      const row: AutonomousReadinessDomain = { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, required_model_capabilities: requiredCapabilities, compatible_model_count: compatible.length, eligible_model_count: eligible.length, required_tool_count: uniqueBindings.length, available_tool_count: uniqueBindings.length - missingTools.length, missing_tools: missingTools, learning_context_digest: learningContextDigest, ...(calibrationAdmission === null ? {} : { calibration_admission: { decision: calibrationAdmission.decision, report_digest: calibrationAdmission.report_digest, evaluator_id: calibrationAdmission.evaluator_id, evaluator_version: calibrationAdmission.evaluator_version, reasons: [...calibrationAdmission.reasons], execution: "readiness_projection_only;does_not_invoke_provider_or_mutate_learning", secret_material: "never_returned" } }), state, next_actions: [...nextActions].sort() };
+      if (evidenceBlocks) nextActions.add(`resolve evidence readiness before source dispatch: ${evidenceReadiness!.reason}`);
+      const row: AutonomousReadinessDomain = { domain: profile.domain, workflow_id: profile.workflow.workflow_id, workflow_digest: profile.workflow.workflow_digest, required_model_capabilities: requiredCapabilities, compatible_model_count: compatible.length, eligible_model_count: eligible.length, required_tool_count: uniqueBindings.length, available_tool_count: uniqueBindings.length - missingTools.length, missing_tools: missingTools, learning_context_digest: learningContextDigest, ...(evidenceReadiness === undefined ? {} : { evidence_readiness: { status: evidenceReadiness.status, reason: evidenceReadiness.reason, selected_adapter_id: evidenceReadiness.selected_adapter_id, selected_manifest_digest: evidenceReadiness.selected_manifest_digest, health: evidenceReadiness.health, report_digest: evidenceReadinessReport!.report_digest, execution: "readiness_projection_only;does_not_dispatch_source", secret_material: "never_returned" } }), ...(calibrationAdmission === null ? {} : { calibration_admission: { decision: calibrationAdmission.decision, report_digest: calibrationAdmission.report_digest, evaluator_id: calibrationAdmission.evaluator_id, evaluator_version: calibrationAdmission.evaluator_version, reasons: [...calibrationAdmission.reasons], execution: "readiness_projection_only;does_not_invoke_provider_or_mutate_learning", secret_material: "never_returned" } }), state, next_actions: [...nextActions].sort() };
       domainRows.push(row);
       capabilityRows.push({ domain: profile.domain, required_model_capabilities: requiredCapabilities, compatible_model_ids: compatible.map((candidate) => `${candidate.provider}/${candidate.model}`), incompatible_models: incompatible });
     }
@@ -3769,6 +3790,7 @@ export class AutonomousAgent {
     if (!this.toolCatalogue) nextActions.add("attach a live ToolCatalogue to compute exact domain-tool coverage");
     if (!this.learner) nextActions.add("attach AutonomousOnlineLearner and settle only explicit evaluator rewards");
     if (options.requireCalibratedLearning === true && learning.calibration.decision !== "admit_learning") nextActions.add("resolve evaluator calibration holdout coverage before enabling learning");
+    if (evidenceReadinessReport !== null && evidenceReadinessReport.status !== "ready") nextActions.add("resolve evidence routing readiness before source dispatch");
     const activation = this.activation.state;
     if (activation.status === "created" || activation.status === "provider_pending" || activation.status === "catalogue_pending") nextActions.add("refresh activation metadata, then review and explicitly approve proposed bindings");
     if (activation.status === "review_required" || activation.status === "partially_activated") nextActions.add("review the digest-bound activation plan and approve only the intended read-only bindings");
@@ -3779,7 +3801,7 @@ export class AutonomousAgent {
     const connectorReadiness = this.connectorRegistry
       ? { configured: true, registry_digest: this.connectorRegistry.digest, connector_count: this.connectorRegistry.registrations().length, execution: "selection_and_dispatch_require_explicit_plan_and_approval", secret_material: "never_returned" as const }
       : { configured: false, registry_digest: null, connector_count: 0, execution: "caller_owned_connector_registry_not_configured", secret_material: "never_returned" as const };
-    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, connectors: connectorReadiness, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, ...(evidenceReadinessReport === null ? {} : { evidence: { configured: true, registry_digest: evidenceReadinessReport.registry_digest, report_digest: evidenceReadinessReport.report_digest, status: evidenceReadinessReport.status, ready_count: evidenceReadinessReport.ready_count, degraded_count: evidenceReadinessReport.degraded_count, blocked_count: evidenceReadinessReport.blocked_count, missing_count: evidenceReadinessReport.missing_count, domains: evidenceReadinessReport.domains.map((row) => row.toJSON()), execution: "readiness_projection_only;no_source_dispatch", secret_material: "never_returned" } }), connectors: connectorReadiness, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
     return { ...descriptor, readiness_digest: await digestJson(descriptor) };
   }
 

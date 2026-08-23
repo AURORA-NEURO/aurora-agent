@@ -14,6 +14,8 @@ import {
   validateAutonomousCapabilityLearningSnapshot,
   AutonomousCostBudget,
   AutonomousCostBudgetError,
+  AutonomousEvidenceAdapterRegistry,
+  AutonomousEvidenceReadinessPolicy,
   AutonomousEvaluatorCalibrationHarness,
   AutonomousValueEvaluatorRegistry,
   AutonomousDomainToolRegistry,
@@ -1794,6 +1796,57 @@ test("keyless readiness audits every built-in domain without contacting provider
   assert.match(JSON.stringify(report), /attach AutonomousOnlineLearner/);
   assert.doesNotMatch(JSON.stringify(report), /api_key|Bearer|sk-|test-secret/i);
   assert.equal(fetchCalls, 0);
+});
+
+test("keyless readiness composes all-domain evidence routing posture without source dispatch", async () => {
+  let fetchCalls = 0;
+  let sourceCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("evidence readiness must not contact providers");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("local", "https://local.invalid", { requiresCredential: false }));
+  const profiles = await builtinAutonomousDomainProfiles();
+  const capabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  registry.register({
+    adapterId: "readiness.all-domains",
+    version: "1.0.0",
+    domains: AUTONOMOUS_DOMAIN_NAMES,
+    capabilities: ["bounded_evidence"],
+    sourceKinds: ["caller_fixture"],
+    acquire: async () => {
+      sourceCalls += 1;
+      return { must_not_be_acquired: true };
+    },
+  });
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("local", "ready-model", capabilities));
+
+  const report = await agent.readiness({
+    evidenceReadiness: {
+      registry,
+      options: { policy: new AutonomousEvidenceReadinessPolicy({ requireHealth: false }) },
+    },
+  });
+
+  assert.equal(report.evidence?.status, "degraded");
+  assert.equal(report.evidence?.ready_count, 0);
+  assert.equal(report.evidence?.degraded_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(report.evidence?.blocked_count, 0);
+  assert.equal(report.evidence?.missing_count, 0);
+  assert.equal(report.evidence?.domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(report.evidence?.registry_digest.match(/^[0-9a-f]{64}$/));
+  assert.ok(report.evidence?.report_digest.match(/^[0-9a-f]{64}$/));
+  assert.ok(report.domains.every((row) => row.state === "partial"));
+  assert.ok(report.domains.every((row) => row.evidence_readiness?.status === "degraded"));
+  assert.match(JSON.stringify(report), /resolve evidence routing readiness before source dispatch/);
+  assert.doesNotMatch(JSON.stringify(report), /must_not_be_acquired|api_key|Bearer|sk-|test-secret/i);
+  assert.equal(fetchCalls, 0);
+  assert.equal(sourceCalls, 0);
 });
 
 test("keyless readiness exposes all-domain calibration admission without provider calls", async () => {
