@@ -15,9 +15,9 @@ import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Durable metadata-only orchestration for caller-owned evidence runtimes. */
-export const AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-evidence-work-item/0.2" as const;
-export const AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-evidence-work-queue/0.2" as const;
-export const AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-typescript-autonomous-evidence-worker/0.2" as const;
+export const AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-evidence-work-item/0.3" as const;
+export const AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-evidence-work-queue/0.3" as const;
+export const AUTONOMOUS_EVIDENCE_WORKER_SCHEMA = "bioprism-typescript-autonomous-evidence-worker/0.3" as const;
 const LEGACY_AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA = "bioprism-typescript-autonomous-evidence-work-item/0.1" as const;
 const LEGACY_AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA = "bioprism-typescript-autonomous-evidence-work-queue/0.1" as const;
 const AUTONOMOUS_EVIDENCE_WORK_ACCEPTANCE_SCHEMA = "bioprism-typescript-autonomous-evidence-work-acceptance/0.1" as const;
@@ -35,6 +35,9 @@ export type AutonomousEvidenceWorkStatus =
   | "awaiting_evaluation"
   | "reconciliation_required"
   | "cancelled";
+
+export type AutonomousEvidenceWorkExecutionPhase = "not_started" | "running" | "settled";
+export type AutonomousEvidenceWorkReconciliationOutcome = "succeeded" | "failed" | "not_executed" | "unknown";
 
 export type AutonomousEvidenceWorkFailureClass =
   | "rehydration_missing"
@@ -219,6 +222,15 @@ export interface AutonomousEvidenceWorkItem extends JsonObject {
   last_error_class: AutonomousEvidenceWorkFailureClass | null;
   created_at: number;
   updated_at: number;
+  execution_phase: AutonomousEvidenceWorkExecutionPhase;
+  reconciliation_digest: string | null;
+  reconciliation_observed_item_digest: string | null;
+  reconciliation_outcome: AutonomousEvidenceWorkReconciliationOutcome | null;
+  reconciliation_evidence_digest: string | null;
+  reconciliation_evidence_kind: string | null;
+  reconciliation_operator: string | null;
+  reconciliation_effect_absent: boolean | null;
+  reconciliation_history: string[];
   item_digest: string;
   retention: "metadata_only_request_and_values_caller_owned";
   secret_material: "never_returned";
@@ -256,6 +268,26 @@ function itemDigest(item: AutonomousEvidenceWorkItem): string {
   return digestJsonSync(itemPayload(item));
 }
 
+function reconciliationReceiptDigest(item: AutonomousEvidenceWorkItem, options: {
+  outcome: AutonomousEvidenceWorkReconciliationOutcome;
+  evidenceDigest: string;
+  evidenceKind: string;
+  operator: string;
+  effectAbsent: boolean | null;
+}): string {
+  return digestJsonSync({
+    schema: `${AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA}/reconciliation-receipt`,
+    work_id: item.work_id,
+    plan_digest: item.plan_digest,
+    observed_item_digest: item.reconciliation_observed_item_digest ?? item.item_digest,
+    outcome: options.outcome,
+    evidence_digest: options.evidenceDigest,
+    evidence_kind: options.evidenceKind,
+    operator: options.operator,
+    effect_absent: options.effectAbsent,
+  });
+}
+
 function workFailure(value: unknown): AutonomousEvidenceWorkFailureClass {
   return (WORK_FAILURE_CLASSES as readonly unknown[]).includes(value) && value !== null ? value as AutonomousEvidenceWorkFailureClass : "unknown";
 }
@@ -264,6 +296,25 @@ function validateItem(raw: unknown): AutonomousEvidenceWorkItem {
   if (!isObject(raw) || raw.schema !== AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA) throw new ArgumentError("autonomous evidence work item is malformed");
   if (raw.retention !== "metadata_only_request_and_values_caller_owned" || raw.secret_material !== "never_returned") throw new ArgumentError("autonomous evidence work item retention is invalid");
   if (!(WORK_STATUSES as readonly unknown[]).includes(raw.status)) throw new ArgumentError("autonomous evidence work item status is invalid");
+  const executionPhases: readonly AutonomousEvidenceWorkExecutionPhase[] = ["not_started", "running", "settled"];
+  if (!executionPhases.includes(raw.execution_phase as AutonomousEvidenceWorkExecutionPhase)) throw new ArgumentError("autonomous evidence work item execution phase is invalid");
+  const reconciliationOutcomes: readonly AutonomousEvidenceWorkReconciliationOutcome[] = ["succeeded", "failed", "not_executed", "unknown"];
+  const reconciliationDigest = digest("autonomous evidence work reconciliation_digest", raw.reconciliation_digest, true);
+  const reconciliationObservedItemDigest = digest("autonomous evidence work reconciliation_observed_item_digest", raw.reconciliation_observed_item_digest, true);
+  const reconciliationOutcome = raw.reconciliation_outcome === null || raw.reconciliation_outcome === undefined ? null : raw.reconciliation_outcome as AutonomousEvidenceWorkReconciliationOutcome;
+  const reconciliationEvidenceDigest = digest("autonomous evidence work reconciliation_evidence_digest", raw.reconciliation_evidence_digest, true);
+  const reconciliationEvidenceKind = raw.reconciliation_evidence_kind === null || raw.reconciliation_evidence_kind === undefined ? null : identifier("autonomous evidence work reconciliation_evidence_kind", raw.reconciliation_evidence_kind);
+  const reconciliationOperator = raw.reconciliation_operator === null || raw.reconciliation_operator === undefined ? null : identifier("autonomous evidence work reconciliation_operator", raw.reconciliation_operator);
+  const reconciliationEffectAbsent = raw.reconciliation_effect_absent === null || raw.reconciliation_effect_absent === undefined ? null : raw.reconciliation_effect_absent as boolean;
+  if (reconciliationEffectAbsent !== null && typeof reconciliationEffectAbsent !== "boolean") throw new ArgumentError("autonomous evidence work reconciliation effect_absent is invalid");
+  const reconciliationHistory = digests("autonomous evidence work reconciliation_history", raw.reconciliation_history, MAX_AUTONOMOUS_EVIDENCE_WORK_ATTEMPTS);
+  if (reconciliationDigest === null) {
+    if ([reconciliationObservedItemDigest, reconciliationOutcome, reconciliationEvidenceDigest, reconciliationEvidenceKind, reconciliationOperator, reconciliationEffectAbsent].some((value) => value !== null)) throw new ArgumentError("autonomous evidence reconciliation metadata requires a reconciliation digest");
+  } else {
+    if (reconciliationObservedItemDigest === null || reconciliationOutcome === null || !reconciliationOutcomes.includes(reconciliationOutcome) || reconciliationEvidenceDigest === null || reconciliationEvidenceKind === null || reconciliationOperator === null) throw new ArgumentError("autonomous evidence reconciliation metadata is incomplete");
+    if (reconciliationOutcome === "not_executed" && reconciliationEffectAbsent !== true) throw new ArgumentError("not_executed evidence reconciliation requires effectAbsent=true");
+    if ((reconciliationOutcome === "succeeded" || reconciliationOutcome === "unknown") && reconciliationEffectAbsent === true) throw new ArgumentError("evidence reconciliation effectAbsent contradicts the selected outcome");
+  }
   const item = {
     schema: AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
     work_id: identifier("autonomous evidence work_id", raw.work_id),
@@ -291,14 +342,35 @@ function validateItem(raw: unknown): AutonomousEvidenceWorkItem {
     last_error_class: raw.last_error_class === null ? null : workFailure(raw.last_error_class),
     created_at: timestamp("autonomous evidence work created_at", raw.created_at),
     updated_at: timestamp("autonomous evidence work updated_at", raw.updated_at),
+    execution_phase: raw.execution_phase as AutonomousEvidenceWorkExecutionPhase,
+    reconciliation_digest: reconciliationDigest,
+    reconciliation_observed_item_digest: reconciliationObservedItemDigest,
+    reconciliation_outcome: reconciliationOutcome,
+    reconciliation_evidence_digest: reconciliationEvidenceDigest,
+    reconciliation_evidence_kind: reconciliationEvidenceKind,
+    reconciliation_operator: reconciliationOperator,
+    reconciliation_effect_absent: reconciliationEffectAbsent,
+    reconciliation_history: reconciliationHistory,
     item_digest: digest("autonomous evidence work item_digest", raw.item_digest) as string,
     retention: "metadata_only_request_and_values_caller_owned" as const,
     secret_material: "never_returned" as const,
   } satisfies AutonomousEvidenceWorkItem;
   if (item.attempts > item.max_attempts || (item.status === "leased") !== (item.lease_owner !== null && item.lease_until !== null)) throw new ArgumentError("autonomous evidence work lease state is inconsistent");
+  if (item.status === "queued" && item.execution_phase !== "not_started") throw new ArgumentError("queued evidence work must not have crossed the execution boundary");
+  if (item.status === "reconciliation_required" && item.execution_phase !== "running") throw new ArgumentError("reconciliation-required evidence work must retain a running execution phase");
+  if (item.status === "completed" && item.execution_phase !== "settled") throw new ArgumentError("completed evidence work requires a settled execution phase");
+  if (item.status === "awaiting_evaluation" && item.execution_phase !== "settled") throw new ArgumentError("awaiting-evaluation evidence work requires a settled execution phase");
   if (item.status !== "awaiting_evaluation" && item.status !== "reconciliation_required" && item.status !== "failed" && item.status !== "cancelled" && item.failure_class !== null) throw new ArgumentError("autonomous evidence work active item cannot retain a terminal failure class");
-  if ((item.status === "completed") !== (item.acceptance_digest !== null)) throw new ArgumentError("autonomous evidence work completion must retain an acceptance digest");
+  const reconciledSuccess = item.reconciliation_digest !== null && item.reconciliation_outcome === "succeeded";
+  if (!reconciledSuccess && (item.status === "completed") !== (item.acceptance_digest !== null)) throw new ArgumentError("autonomous evidence work completion must retain an acceptance digest");
   if (item.item_digest !== itemDigest(item)) throw new ArgumentError("autonomous evidence work item digest is invalid");
+  if (item.reconciliation_digest !== null && item.reconciliation_digest !== reconciliationReceiptDigest(item, {
+    outcome: item.reconciliation_outcome as AutonomousEvidenceWorkReconciliationOutcome,
+    evidenceDigest: item.reconciliation_evidence_digest as string,
+    evidenceKind: item.reconciliation_evidence_kind as string,
+    operator: item.reconciliation_operator as string,
+    effectAbsent: item.reconciliation_effect_absent,
+  })) throw new ArgumentError("autonomous evidence work reconciliation digest is invalid");
   return item;
 }
 
@@ -306,9 +378,24 @@ function migrateLegacyItem(raw: unknown): AutonomousEvidenceWorkItem {
   if (!isObject(raw) || raw.schema !== LEGACY_AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA) throw new ArgumentError("autonomous evidence legacy work item is malformed");
   const { item_digest: observed, ...legacyPayload } = raw;
   if (typeof observed !== "string" || digestJsonSync(legacyPayload) !== observed) throw new ArgumentError("autonomous evidence legacy work item digest is invalid");
-  const upgraded = { ...raw, schema: AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA, acceptance_digest: null, item_digest: "" } as unknown as AutonomousEvidenceWorkItem;
+  const upgraded = {
+    ...raw,
+    schema: AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
+    acceptance_digest: null,
+    execution_phase: raw.execution_phase ?? (raw.status === "completed" ? "settled" : raw.status === "reconciliation_required" ? "running" : "not_started"),
+    reconciliation_digest: raw.reconciliation_digest ?? null,
+    reconciliation_observed_item_digest: raw.reconciliation_observed_item_digest ?? null,
+    reconciliation_outcome: raw.reconciliation_outcome ?? null,
+    reconciliation_evidence_digest: raw.reconciliation_evidence_digest ?? null,
+    reconciliation_evidence_kind: raw.reconciliation_evidence_kind ?? null,
+    reconciliation_operator: raw.reconciliation_operator ?? null,
+    reconciliation_effect_absent: raw.reconciliation_effect_absent ?? null,
+    reconciliation_history: raw.reconciliation_history ?? [],
+    item_digest: "",
+  } as unknown as AutonomousEvidenceWorkItem;
   if (upgraded.status === "completed") {
     upgraded.status = "reconciliation_required";
+    upgraded.execution_phase = "running";
     upgraded.failure_class = "result_reconciliation_required";
     upgraded.last_error_class = "result_reconciliation_required";
     upgraded.lease_owner = null;
@@ -421,6 +508,15 @@ export class InMemoryAutonomousEvidenceWorkQueue {
       last_error_class: null,
       created_at: time,
       updated_at: time,
+      execution_phase: "not_started" as const,
+      reconciliation_digest: null,
+      reconciliation_observed_item_digest: null,
+      reconciliation_outcome: null,
+      reconciliation_evidence_digest: null,
+      reconciliation_evidence_kind: null,
+      reconciliation_operator: null,
+      reconciliation_effect_absent: null,
+      reconciliation_history: [],
       item_digest: "",
       retention: "metadata_only_request_and_values_caller_owned" as const,
       secret_material: "never_returned" as const,
@@ -445,6 +541,24 @@ export class InMemoryAutonomousEvidenceWorkQueue {
       .map((item) => clone(item));
   }
 
+  reclaimExpired(limit = Math.min(MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH, this.maxItems), now = Date.now()): AutonomousEvidenceWorkItem[] {
+    const boundedLimit = boundedInteger("autonomous evidence work reclaim limit", limit, 1, Math.min(MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH, this.maxItems));
+    const time = nowMs(now);
+    const expired = [...this.items.values()]
+      .filter((item) => item.status === "leased" && item.lease_until !== null && item.lease_until <= time)
+      .sort((left, right) => (left.lease_until ?? 0) - (right.lease_until ?? 0) || left.created_at - right.created_at || left.work_id.localeCompare(right.work_id))
+      .slice(0, boundedLimit);
+    const reclaimed: AutonomousEvidenceWorkItem[] = [];
+    for (const item of expired) {
+      const next = item.execution_phase === "running" || item.attempts >= item.max_attempts
+        ? refresh(item, { status: "reconciliation_required", execution_phase: "running", lease_owner: null, lease_until: null, failure_class: "lease_expired", last_error_class: "lease_expired" }, time)
+        : refresh(item, { status: "queued", execution_phase: "not_started", available_at: time, lease_owner: null, lease_until: null, failure_class: null, last_error_class: "lease_expired" }, time);
+      this.items.set(item.work_id, next);
+      reclaimed.push(clone(next));
+    }
+    return reclaimed;
+  }
+
   claim(workId: string, workerId: string, leaseMs = 30_000, now = Date.now()): AutonomousEvidenceWorkItem | null {
     const id = identifier("autonomous evidence work_id", workId);
     const worker = identifier("autonomous evidence worker_id", workerId);
@@ -453,11 +567,27 @@ export class InMemoryAutonomousEvidenceWorkQueue {
     const item = this.items.get(id);
     if (!item || ["completed", "failed", "awaiting_evaluation", "reconciliation_required", "cancelled"].includes(item.status)) return null;
     if (item.status === "leased" && item.lease_until !== null && item.lease_until > time) return null;
+    if (item.status === "leased" && item.execution_phase === "running") {
+      this.items.set(id, refresh(item, { status: "reconciliation_required", execution_phase: "running", failure_class: "lease_expired", last_error_class: "lease_expired", lease_owner: null, lease_until: null }, time));
+      return null;
+    }
     if (item.attempts >= item.max_attempts) {
       this.items.set(id, refresh(item, { status: "reconciliation_required", failure_class: "lease_expired", last_error_class: "lease_expired", lease_owner: null, lease_until: null }, time));
       return null;
     }
     const next = refresh(item, { status: "leased", attempts: item.attempts + 1, lease_owner: worker, lease_until: time + lease, failure_class: null, last_error_class: null }, time);
+    this.items.set(id, next);
+    return clone(next);
+  }
+
+  beginExecution(workId: string, workerId: string, now = Date.now()): AutonomousEvidenceWorkItem {
+    const id = identifier("autonomous evidence work_id", workId);
+    const worker = identifier("autonomous evidence worker_id", workerId);
+    const time = nowMs(now);
+    const item = this.items.get(id);
+    if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous evidence execution cannot begin across an expired or foreign lease");
+    if (item.execution_phase !== "not_started") throw new ArgumentError("autonomous evidence execution boundary has already been crossed");
+    const next = refresh(item, { execution_phase: "running" }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -480,11 +610,12 @@ export class InMemoryAutonomousEvidenceWorkQueue {
     const time = nowMs(now);
     const item = this.items.get(id);
     if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous evidence work completion is fenced by an expired or foreign lease");
+    if (item.execution_phase !== "running") throw new ArgumentError("autonomous evidence work completion requires a crossed execution boundary");
     const json = result.toJSON();
     const metadata = resultMetadata(item, result);
     if (json.status !== "completed" && !(json.status === "awaiting_evaluation" && metadata.evaluatorStatus === "accepted")) throw new ArgumentError("autonomous evidence work completion requires an accepted queued requirement");
     if (metadata.acceptanceDigest === null || metadata.evaluatorStatus !== "accepted") throw new ArgumentError("autonomous evidence work completion requires a digest-bound accepted assessment");
-    const next = refresh(item, { status: "completed", lease_owner: null, lease_until: null, receipt_digest: metadata.receiptDigest, assessment_digest: metadata.assessmentDigest, result_digest: metadata.resultDigest, acceptance_digest: metadata.acceptanceDigest, failure_class: null, last_error_class: null }, time);
+    const next = refresh(item, { status: "completed", execution_phase: "settled", lease_owner: null, lease_until: null, receipt_digest: metadata.receiptDigest, assessment_digest: metadata.assessmentDigest, result_digest: metadata.resultDigest, acceptance_digest: metadata.acceptanceDigest, failure_class: null, last_error_class: null }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -495,9 +626,10 @@ export class InMemoryAutonomousEvidenceWorkQueue {
     const time = nowMs(now);
     const item = this.items.get(id);
     if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous evidence evaluation handoff is fenced by an expired or foreign lease");
+    if (item.execution_phase !== "running") throw new ArgumentError("autonomous evidence evaluation handoff requires a crossed execution boundary");
     if (result.toJSON().status !== "awaiting_evaluation") throw new ArgumentError("autonomous evidence evaluation handoff requires an awaiting_evaluation runtime result");
     const metadata = resultMetadata(item, result);
-    const next = refresh(item, { status: "awaiting_evaluation", lease_owner: null, lease_until: null, receipt_digest: metadata.receiptDigest, assessment_digest: metadata.assessmentDigest, result_digest: metadata.resultDigest, acceptance_digest: null, failure_class: "evaluation_pending", last_error_class: "evaluation_pending" }, time);
+    const next = refresh(item, { status: "awaiting_evaluation", execution_phase: "settled", lease_owner: null, lease_until: null, receipt_digest: metadata.receiptDigest, assessment_digest: metadata.assessmentDigest, result_digest: metadata.resultDigest, acceptance_digest: null, failure_class: "evaluation_pending", last_error_class: "evaluation_pending" }, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -509,11 +641,13 @@ export class InMemoryAutonomousEvidenceWorkQueue {
     const time = nowMs(now);
     const item = this.items.get(id);
     if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous evidence work failure is fenced by an expired or foreign lease");
+    if (item.execution_phase !== "not_started") throw new ArgumentError("post-dispatch evidence failures require reconciliation");
     const metadata = result === null ? null : resultMetadata(item, result);
     const canRetry = retryable && item.attempts < item.max_attempts;
     const delay = Math.min(3_600_000, 1_000 * (2 ** Math.max(0, item.attempts - 1)));
     const next = refresh(item, {
       status: canRetry ? "queued" : "failed",
+      execution_phase: canRetry ? "not_started" : "settled",
       available_at: canRetry ? time + delay : item.available_at,
       lease_owner: null,
       lease_until: null,
@@ -535,18 +669,85 @@ export class InMemoryAutonomousEvidenceWorkQueue {
     const time = nowMs(now);
     const item = this.items.get(id);
     if (!item || item.status !== "leased" || item.lease_owner !== worker || item.lease_until === null || item.lease_until <= time) throw new ArgumentError("autonomous evidence reconciliation is fenced by an expired or foreign lease");
-    const next = refresh(item, { status: "reconciliation_required", lease_owner: null, lease_until: null, failure_class: failure, last_error_class: failure }, time);
+    const next = refresh(item, { status: "reconciliation_required", execution_phase: "running", lease_owner: null, lease_until: null, failure_class: failure, last_error_class: failure }, time);
     this.items.set(id, next);
     return clone(next);
   }
 
-  requeue(workId: string, now = Date.now()): AutonomousEvidenceWorkItem {
+  settleReconciliation(workId: string, options: {
+    outcome: AutonomousEvidenceWorkReconciliationOutcome;
+    evidenceDigest: string;
+    evidenceKind?: string;
+    operator?: string;
+    effectAbsent?: boolean | null;
+  }, now = Date.now()): AutonomousEvidenceWorkItem {
     const id = identifier("autonomous evidence work_id", workId);
     const time = nowMs(now);
+    const outcomes: readonly AutonomousEvidenceWorkReconciliationOutcome[] = ["succeeded", "failed", "not_executed", "unknown"];
+    if (!outcomes.includes(options.outcome)) throw new ArgumentError("autonomous evidence reconciliation outcome is invalid");
+    const evidenceDigest = digest("autonomous evidence reconciliation evidenceDigest", options.evidenceDigest) as string;
+    const evidenceKind = identifier("autonomous evidence reconciliation evidenceKind", options.evidenceKind ?? "caller_observation");
+    const operator = identifier("autonomous evidence reconciliation operator", options.operator ?? "caller");
+    const effectAbsent = options.effectAbsent === undefined ? (options.outcome === "not_executed" ? true : null) : options.effectAbsent;
+    if (effectAbsent !== null && typeof effectAbsent !== "boolean") throw new ArgumentError("autonomous evidence reconciliation effectAbsent must be boolean or omitted");
+    if (options.outcome === "not_executed" && effectAbsent !== true) throw new ArgumentError("not_executed evidence reconciliation requires effectAbsent=true");
+    if ((options.outcome === "succeeded" || options.outcome === "unknown") && effectAbsent === true) throw new ArgumentError("evidence reconciliation effectAbsent contradicts the selected outcome");
+    const item = this.items.get(id);
+    if (!item) throw new ArgumentError("autonomous evidence work was not found");
+    if (item.reconciliation_digest !== null) {
+      if (item.reconciliation_outcome === options.outcome && item.reconciliation_evidence_digest === evidenceDigest && item.reconciliation_evidence_kind === evidenceKind && item.reconciliation_operator === operator && item.reconciliation_effect_absent === effectAbsent) return clone(item);
+      throw new ArgumentError("autonomous evidence reconciliation receipt conflicts with the existing receipt");
+    }
+    if (item.status !== "reconciliation_required") throw new ArgumentError("autonomous evidence work is not awaiting reconciliation");
+    const receipt = reconciliationReceiptDigest(item, { outcome: options.outcome, evidenceDigest, evidenceKind, operator, effectAbsent });
+    const next = refresh(item, {
+      status: options.outcome === "succeeded" ? "completed" : options.outcome === "failed" ? "failed" : "reconciliation_required",
+      execution_phase: options.outcome === "succeeded" || options.outcome === "failed" ? "settled" : "running",
+      result_digest: options.outcome === "succeeded" ? receipt : item.result_digest,
+      acceptance_digest: null,
+      failure_class: options.outcome === "succeeded" ? null : "result_reconciliation_required",
+      last_error_class: options.outcome === "succeeded" ? null : item.last_error_class,
+      reconciliation_digest: receipt,
+      reconciliation_observed_item_digest: item.item_digest,
+      reconciliation_outcome: options.outcome,
+      reconciliation_evidence_digest: evidenceDigest,
+      reconciliation_evidence_kind: evidenceKind,
+      reconciliation_operator: operator,
+      reconciliation_effect_absent: effectAbsent,
+      lease_owner: null,
+      lease_until: null,
+    }, time);
+    this.items.set(id, next);
+    return clone(next);
+  }
+
+  requeue(workId: string, nowOrOptions: number | { reconciliationDigest?: string } = Date.now(), maybeNow = Date.now()): AutonomousEvidenceWorkItem {
+    const id = identifier("autonomous evidence work_id", workId);
+    const options = typeof nowOrOptions === "number" ? {} : nowOrOptions;
+    const time = nowMs(typeof nowOrOptions === "number" ? nowOrOptions : maybeNow);
     const item = this.items.get(id);
     if (!item || !["awaiting_evaluation", "reconciliation_required"].includes(item.status)) throw new ArgumentError("autonomous evidence work is not waiting for explicit requeue");
     if (item.attempts >= item.max_attempts) throw new ArgumentError("autonomous evidence work has exhausted its attempts");
-    const next = refresh(item, { status: "queued", available_at: time, failure_class: null, last_error_class: item.last_error_class }, time);
+    let history = item.reconciliation_history;
+    const updates: Partial<AutonomousEvidenceWorkItem> = { status: "queued", execution_phase: "not_started", available_at: time, failure_class: null, last_error_class: item.last_error_class };
+    if (item.status === "reconciliation_required") {
+      if (item.reconciliation_digest === null || item.reconciliation_outcome !== "not_executed" || item.reconciliation_effect_absent !== true) throw new ArgumentError("evidence requeue requires a matching no-effect reconciliation receipt");
+      if (options.reconciliationDigest !== item.reconciliation_digest) throw new ArgumentError("evidence requeue requires the matching reconciliation digest");
+      history = [...history, item.reconciliation_digest];
+      Object.assign(updates, {
+        reconciliation_digest: null,
+        reconciliation_observed_item_digest: null,
+        reconciliation_outcome: null,
+        reconciliation_evidence_digest: null,
+        reconciliation_evidence_kind: null,
+        reconciliation_operator: null,
+        reconciliation_effect_absent: null,
+      });
+    } else if (options.reconciliationDigest !== undefined) {
+      digest("autonomous evidence reconciliation_digest", options.reconciliationDigest);
+    }
+    updates.reconciliation_history = history;
+    const next = refresh(item, updates, time);
     this.items.set(id, next);
     return clone(next);
   }
@@ -727,12 +928,14 @@ export class AutonomousEvidenceWorker {
     if (workIds !== null && (workIds.length < 1 || workIds.length > MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH || new Set(workIds).size !== workIds.length)) throw new ArgumentError("autonomous evidence worker workIds are outside their bound");
     const time = nowMs(options.now);
     const currentTime = () => options.now === undefined ? Date.now() : time;
+    this.queue.reclaimExpired(Math.min(MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH, this.queue.maxItems), time);
     const pending = this.queue.pending(workIds === null ? limit : MAX_AUTONOMOUS_EVIDENCE_WORK_BATCH, time).filter((item) => workIds === null || workIds.includes(item.work_id)).slice(0, limit);
     const rows: AutonomousEvidenceWorkerRow[] = [];
     for (const candidate of pending) {
       if (options.signal?.aborted) break;
       const claimed = this.queue.claim(candidate.work_id, workerId, leaseMs, time);
       if (!claimed) { rows.push(row(candidate, "leased_elsewhere")); continue; }
+      let executionStarted = false;
       try {
         const hydrated = await this.rehydrate(claimed);
         if (!hydrated || !(hydrated.runtime instanceof AutonomousEvidenceRuntime) || !hydrated.request || !hydrated.execute || typeof hydrated.execute.acquirer !== "object" && typeof hydrated.execute.acquirer !== "function") {
@@ -745,6 +948,8 @@ export class AutonomousEvidenceWorker {
         const requirementRow = requirement(plan, request.requirement_id);
         if (plan.plan_digest !== claimed.plan_digest || hydrated.runtime.plan.plan_digest !== claimed.plan_digest || requestDigest(plan.plan_digest, request) !== claimed.request_digest || requirementRow.domain !== claimed.domain || requirementRow.workflow_digest !== claimed.workflow_digest || request.source_id !== claimed.source_id || request.source_digest !== claimed.source_digest) throw new ArgumentError("autonomous evidence worker rehydrated identity conflicts with the work item");
         const executeOptions = { ...hydrated.execute, parentEvidenceDigests: claimed.parent_evidence_digests };
+        this.queue.beginExecution(claimed.work_id, workerId, currentTime());
+        executionStarted = true;
         const result = await hydrated.runtime.execute([request], executeOptions);
         const queuedReceipt = result.json.receipts.find((receipt) => receipt.request_digest === claimed.request_digest);
         if (result.json.status === "completed" || (result.json.status === "awaiting_evaluation" && queuedReceipt?.evaluator_status === "accepted")) {
@@ -758,12 +963,12 @@ export class AutonomousEvidenceWorker {
           rows.push(row(reconciled, "reconciliation_required", "result_reconciliation_required"));
         } else {
           const failure = result.json.receipts.some((receipt) => receipt.evidence_status === "projection_failed") ? "projection_failed" : "acquisition_failed";
-          const failed = this.queue.fail(claimed.work_id, workerId, failure, true, currentTime(), result);
-          rows.push(row(failed, failed.status === "queued" ? "retry_scheduled" : "failed", failure));
+          const reconciled = this.queue.reconcile(claimed.work_id, workerId, failure, currentTime());
+          rows.push(row(reconciled, "reconciliation_required", failure));
         }
       } catch (error) {
         const failure = this.classify(error);
-        if (["rehydration_missing", "rehydration_invalid", "identity_conflict", "result_reconciliation_required", "result_invalid"].includes(failure)) {
+        if (executionStarted || ["rehydration_missing", "rehydration_invalid", "identity_conflict", "result_reconciliation_required", "result_invalid"].includes(failure)) {
           const reconciled = this.queue.reconcile(claimed.work_id, workerId, failure, currentTime());
           rows.push(row(reconciled, "reconciliation_required", failure));
         } else {

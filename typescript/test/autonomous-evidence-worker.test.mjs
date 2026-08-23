@@ -177,6 +177,56 @@ test("worker identity rehydration failures quarantine work instead of reacquirin
   assert.equal(queue.get(item.work_id).status, "reconciliation_required");
 });
 
+test("evidence reconciliation receipts are idempotent and fresh across safe requeue", async () => {
+  const plan = await singleDomainPlan("coding");
+  const request = requestFor(plan.requirements[0], 99);
+  const queue = new InMemoryAutonomousEvidenceWorkQueue();
+  const successful = queue.enqueue({ workId: "evidence-reconciliation-success", plan, request: requestFor(plan.requirements[0], 98), now: 5_400 });
+  queue.claim(successful.work_id, "worker-a", 100, 5_400);
+  queue.beginExecution(successful.work_id, "worker-a", 5_401);
+  queue.reconcile(successful.work_id, "worker-a", "result_reconciliation_required", 5_499);
+  const successReceipt = queue.settleReconciliation(successful.work_id, { outcome: "succeeded", evidenceDigest: "a".repeat(64) }, 5_500);
+  assert.equal(successReceipt.status, "completed");
+  assert.equal(successReceipt.result_digest, successReceipt.reconciliation_digest);
+  const item = queue.enqueue({ workId: "evidence-reconciliation-history", plan, request, now: 5_500 });
+  queue.claim(item.work_id, "worker-a", 100, 5_500);
+  queue.beginExecution(item.work_id, "worker-a", 5_501);
+  queue.reconcile(item.work_id, "worker-a", "result_reconciliation_required", 5_599);
+  const observed = queue.settleReconciliation(item.work_id, { outcome: "not_executed", evidenceDigest: "c".repeat(64) }, 5_600);
+  assert.equal(observed.reconciliation_effect_absent, true);
+  assert.throws(() => queue.requeue(item.work_id, { reconciliationDigest: "d".repeat(64) }, 5_601), /matching reconciliation digest/);
+  const queued = queue.requeue(item.work_id, { reconciliationDigest: observed.reconciliation_digest }, 5_602);
+  assert.equal(queued.reconciliation_digest, null);
+  assert.deepEqual(queued.reconciliation_history, [observed.reconciliation_digest]);
+  queue.claim(item.work_id, "worker-a", 100, 5_603);
+  queue.beginExecution(item.work_id, "worker-a", 5_604);
+  queue.reconcile(item.work_id, "worker-a", "result_reconciliation_required", 5_699);
+  const second = queue.settleReconciliation(item.work_id, { outcome: "not_executed", evidenceDigest: "e".repeat(64) }, 5_700);
+  assert.notEqual(second.reconciliation_digest, observed.reconciliation_digest);
+  assert.deepEqual(second.reconciliation_history, [observed.reconciliation_digest]);
+  assert.deepEqual(queue.settleReconciliation(item.work_id, { outcome: "not_executed", evidenceDigest: "e".repeat(64) }, 5_701), second);
+  const restored = new InMemoryAutonomousEvidenceWorkQueue();
+  restored.restore(queue.snapshot());
+  assert.equal(restored.get(item.work_id).reconciliation_digest, second.reconciliation_digest);
+  assert.deepEqual(restored.get(item.work_id).reconciliation_history, [observed.reconciliation_digest]);
+});
+
+test("evidence expiry reclaims only pre-dispatch work and quarantines in-flight work", async () => {
+  const plan = await singleDomainPlan("coding");
+  const queue = new InMemoryAutonomousEvidenceWorkQueue();
+  const preDispatch = queue.enqueue({ workId: "evidence-pre-dispatch-expiry", plan, request: requestFor(plan.requirements[0], 100), now: 5_800 });
+  queue.claim(preDispatch.work_id, "worker-a", 100, 5_800);
+  const reclaimed = queue.reclaimExpired(128, 5_900);
+  assert.equal(reclaimed.find((item) => item.work_id === preDispatch.work_id).status, "queued");
+  const inFlight = queue.enqueue({ workId: "evidence-in-flight-expiry", plan, request: requestFor(plan.requirements[0], 101), now: 5_800 });
+  queue.claim(inFlight.work_id, "worker-a", 100, 5_800);
+  queue.beginExecution(inFlight.work_id, "worker-a", 5_801);
+  const quarantined = queue.reclaimExpired(128, 5_901).find((item) => item.work_id === inFlight.work_id);
+  assert.equal(quarantined.status, "reconciliation_required");
+  assert.equal(quarantined.execution_phase, "running");
+  assert.throws(() => queue.requeue(inFlight.work_id, 5_902), /no-effect reconciliation/);
+});
+
 test("work queue rejects credential-shaped metadata before persistence", async () => {
   const plan = await singleDomainPlan("operations");
   const requirement = plan.requirements[0];
@@ -204,6 +254,7 @@ test("completion requires the exact queued requirement to have a digest-valid ac
   const result = await runtime.execute([request], { acquirer: adapters([]).acquirer, projector: adapters([]).projector });
   assert.equal(result.json.status, "awaiting_evaluation");
   assert.ok(queue.claim(item.work_id, "worker-a", 30_000, 7_000));
+  queue.beginExecution(item.work_id, "worker-a", 7_000);
   assert.throws(() => queue.complete(item.work_id, "worker-a", result, 7_001), /accepted queued requirement/);
   assert.equal(queue.get(item.work_id).status, "leased");
 });
@@ -229,7 +280,7 @@ test("legacy queue snapshots migrate conservatively and completed legacy work is
   const legacySnapshot = { ...legacyDescriptor, snapshot_digest: digestJsonSync(legacyDescriptor) };
   const restored = new InMemoryAutonomousEvidenceWorkQueue();
   restored.restore(legacySnapshot);
-  assert.equal(restored.get(item.work_id).schema, "bioprism-typescript-autonomous-evidence-work-item/0.2");
+  assert.equal(restored.get(item.work_id).schema, "bioprism-typescript-autonomous-evidence-work-item/0.3");
   assert.equal(restored.get(item.work_id).status, "queued");
 
   const completedLegacy = { ...legacyItems[0], status: "completed" };
