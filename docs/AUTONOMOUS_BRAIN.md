@@ -118,6 +118,20 @@ application owns authentication, TLS, CSRF protection, tenancy, rate limits, and
 permissions. The SDK owns the sensitive part after intake—non-echo collection helpers, bounded
 in-memory lifetime, opaque handles, provider matching, expiry/revocation, and redacted readiness.
 
+### Keyless provider conformance
+
+Deployments can run `runProviderProtocolConformance()` as a deterministic preflight before accepting
+user credentials. It covers every built-in preset (OpenAI Responses, Anthropic Messages, and the
+OpenAI-compatible DeepSeek, Groq, Mistral, OpenRouter, and xAI routes) through the real
+`LLMRuntime`: registration, protocol-specific request shape, credential header policy, response
+normalization, model discovery, streaming, and missing-credential refusal. The harness uses an
+intercepted fetch fixture and a reserved invalid host, so it never opens a network connection and
+requires no API key. Its report contains only provider/protocol/check status and a digest; synthetic
+fixture credentials, prompts, request bodies, response payloads, and headers are not retained. A
+deployment may call `assertProviderProtocolConformance(report)` as a release or startup gate, while
+live provider availability, quotas, model permissions, and user credential readiness remain separate
+runtime checks.
+
 ### Operator process boundary
 
 The Python package now ships a small process boundary for operators and local integrations. It is

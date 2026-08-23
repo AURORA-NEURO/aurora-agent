@@ -146,6 +146,21 @@ export type {
   AutonomousProvisionedBrainAdaptiveCycleOptions,
   SupportedProviderName,
 } from "./provider-setup.js";
+export {
+  PROVIDER_PROTOCOL_CONFORMANCE_SCHEMA,
+  PROVIDER_PROTOCOL_CONFORMANCE_MODE,
+  MAX_PROVIDER_CONFORMANCE_PROVIDERS,
+  MAX_PROVIDER_CONFORMANCE_CHECKS,
+  runProviderProtocolConformance,
+  assertProviderProtocolConformance,
+} from "./provider-conformance.js";
+export type {
+  ProviderConformanceCheckName,
+  ProviderConformanceCheck,
+  ProviderConformanceProviderResult,
+  ProviderProtocolConformanceReport,
+  ProviderProtocolConformanceOptions,
+} from "./provider-conformance.js";
 export { AUTONOMOUS_CREDENTIAL_SCOPE_SCHEMA } from "./autonomous-credential-scope.js";
 export type {
   AutonomousCredentialBinding,

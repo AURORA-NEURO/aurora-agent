@@ -50,6 +50,14 @@ validated before settled-item rehydration and held items cannot dispatch. This c
 restart/remote-handoff integrity seam while leaving storage encryption, transport, leases, and
 approval UX to the embedding deployment.
 
+The TypeScript runtime now includes a keyless provider protocol conformance gate. It runs all seven
+built-in provider presets through the actual request, credential, response, model-discovery, and SSE
+stream boundaries using an intercepted fetch fixture, and refuses missing credentials before any
+fixture dispatch. Reports are bounded, digest-addressed, and metadata-only; no API key, prompt,
+request, response, or header is persisted. This validates protocol wiring in CI without claiming
+live quota, model availability, provider uptime, or user credential readiness, which remain
+deployment/runtime checks.
+
 The evidence handoff now preserves that same identity explicitly. Portfolio evidence checkpoints
 use schema `0.2` and carry the nullable provider admission digest; `requireAdmission: true`
 refuses resumable evidence execution without a reviewed admission before journal replay or
