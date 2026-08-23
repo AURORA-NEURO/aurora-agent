@@ -17,6 +17,7 @@ from prism_sdk import (
     BrainModelObservation,
     BrainReplayCase,
     BrainReplayEngine,
+    validate_brain_replay_report,
     DomainEvaluatorRegistry,
     builtin_autonomous_domain_evaluator_profiles,
     BrainWorker,
@@ -355,6 +356,18 @@ def test_replay_engine_runs_all_builtin_domains_and_updates_bandit_without_evide
     assert all(row["passed"] for row in report.decisions)
     assert len(calls) == 5
     assert report.next_bandit_state["arms"][-1]["attempts"] == 1
+    serialized = report.to_dict()
+    assert len(serialized["report_digest"]) == 64
+    assert validate_brain_replay_report(serialized) == serialized
+
+    with pytest.raises(BrainRunError, match="run_id values must be unique"):
+        BrainReplayEngine().replay([_case("research"), _case("research")], evaluators=registry)
+    forged = dict(serialized)
+    forged["disagreement_count"] = 1
+    forged.pop("report_digest")
+    forged["report_digest"] = _digest(forged)
+    with pytest.raises(BrainRunError, match="disagreement count"):
+        validate_brain_replay_report(forged)
 
     broken = _case("research")
     broken["evidence_digest"] = "0" * 64

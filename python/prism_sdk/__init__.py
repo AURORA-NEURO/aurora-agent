@@ -129,6 +129,7 @@ from .control_plane import (
     MODEL_HEALTH_SNAPSHOT_SCHEMA,
     MODEL_OBSERVATION_SCHEMA,
     MAX_MODEL_HEALTH_SNAPSHOT_BYTES,
+    MAX_REPLAY_REPORT_BYTES,
     REPLAY_CASE_SCHEMA,
     REPLAY_REPORT_SCHEMA,
     BrainApprovalRequest,
@@ -151,6 +152,7 @@ from .control_plane import (
     TransactionalBrainModelHealthSnapshotTextStore,
     TransactionalJsonBrainModelHealthSnapshotPersistence,
     validate_model_health_snapshot,
+    validate_brain_replay_report,
 )
 from .brain_api import (
     CONTROL_SCHEMA as BRAIN_CONTROL_SCHEMA,
@@ -3202,6 +3204,11 @@ __all__ = [
     "MODEL_HEALTH_SNAPSHOT_SCHEMA",
     "MODEL_OBSERVATION_SCHEMA",
     "MAX_MODEL_HEALTH_SNAPSHOT_BYTES",
+    "MAX_REPLAY_REPORT_BYTES",
+    "BrainReplayCase",
+    "BrainReplayEngine",
+    "BrainReplayReport",
+    "validate_brain_replay_report",
     "AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA",
     "AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA",
     "MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_LEASE_MS",

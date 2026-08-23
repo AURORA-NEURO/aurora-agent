@@ -2646,7 +2646,11 @@ limitations. It never sees provider text, prompts, credentials, tool arguments, 
 `BrainReplayEngine` can replay all twelve exact-domain contracts, compare expected decision
 digests, and update a caller-owned bandit state. The evidence domain is allowed to carry the
 legacy canonical alias, but the exact autonomous adapter remains the evaluator identity recorded
-in the learning and replay receipt.
+in the learning and replay receipt. Python replay now rejects duplicate `run_id` identities before
+any evaluator or bandit update runs. `BrainReplayReport.to_dict()` emits a content digest, and
+`validate_brain_replay_report()` verifies exact decision identities, per-domain counts and means,
+disagreement totals, bounded next-state metadata, and the report digest before output is persisted
+or promoted.
 
 The TypeScript `AutonomousOfflineReplayEngine` now requires a non-empty batch with unique `run_id`
 identities and returns a digest-bound report that can be checked with

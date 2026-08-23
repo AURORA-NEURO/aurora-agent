@@ -51,6 +51,7 @@ MAX_CONTROL_PAGE = 256
 MAX_APPROVAL_SCOPE_BYTES = 512
 MAX_REPLAY_CASES = 256
 MAX_REPLAY_EVIDENCE_BYTES = 350_000
+MAX_REPLAY_REPORT_BYTES = 8_000_000
 MAX_MODEL_OBSERVATION_BYTES = 8_192
 MAX_MODEL_HEALTH_EVENTS = 100_000
 MAX_MODEL_HEALTH_BYTES = 64_000_000
@@ -1131,6 +1132,10 @@ class BrainReplayCase:
         }
         if set(safe).difference(allowed):
             raise BrainRunError("replay case contains unsupported fields")
+        if safe.get("schema") not in (None, REPLAY_CASE_SCHEMA):
+            raise BrainRunError("replay case schema is invalid")
+        if safe.get("retention") not in (None, "caller_rehydrated_evidence_digest_bound"):
+            raise BrainRunError("replay case retention is invalid")
         evidence = safe.get("evidence")
         if not isinstance(evidence, Mapping):
             raise BrainRunError("replay case evidence must be a mapping")
@@ -1180,7 +1185,7 @@ class BrainReplayReport:
     next_bandit_state: Mapping[str, Any] | None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        body = {
             "schema": REPLAY_REPORT_SCHEMA,
             "status": "completed",
             "cases": self.cases,
@@ -1190,6 +1195,111 @@ class BrainReplayReport:
             "next_bandit_state": None if self.next_bandit_state is None else dict(self.next_bandit_state),
             "retention": "decision_metadata_and_digests_only",
         }
+        return {**body, "report_digest": _digest(body)}
+
+
+def validate_brain_replay_report(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a replay result before persistence, display, or promotion use."""
+
+    if not isinstance(value, Mapping):
+        raise BrainRunError("replay report must be a mapping")
+    expected = {
+        "schema", "status", "cases", "decisions", "by_domain", "disagreement_count",
+        "next_bandit_state", "retention", "report_digest",
+    }
+    if set(value) != expected:
+        raise BrainRunError("replay report contains unsupported or missing fields")
+    if value.get("schema") != REPLAY_REPORT_SCHEMA or value.get("status") != "completed":
+        raise BrainRunError("replay report schema or status is invalid")
+    if value.get("retention") != "decision_metadata_and_digests_only":
+        raise BrainRunError("replay report retention is invalid")
+    case_count = value.get("cases")
+    if isinstance(case_count, bool) or not isinstance(case_count, int) or not 1 <= case_count <= MAX_REPLAY_CASES:
+        raise BrainRunError("replay report case count is outside its bound")
+    decisions = value.get("decisions")
+    if not isinstance(decisions, list) or len(decisions) != case_count:
+        raise BrainRunError("replay report decisions do not match cases")
+    run_ids: set[str] = set()
+    normalized_decisions: list[dict[str, Any]] = []
+    decision_keys = {
+        "run_id", "domain", "capability", "risk_class", "evaluator_id", "evaluator_version",
+        "reward", "passed", "failed", "failure_class", "evidence_digest", "decision_digest",
+        "expected_decision_digest", "disagreement",
+    }
+    for index, raw in enumerate(decisions, start=1):
+        if not isinstance(raw, Mapping) or set(raw) != decision_keys:
+            raise BrainRunError(f"replay report decision {index} is malformed")
+        run_id = _text(f"replay report decision {index} run_id", raw.get("run_id"))
+        if run_id in run_ids:
+            raise BrainRunError("replay report run_id values must be unique")
+        run_ids.add(run_id)
+        for name in ("domain", "capability", "risk_class", "evaluator_id", "evaluator_version"):
+            _text(f"replay report decision {index} {name}", raw.get(name))
+        reward = raw.get("reward")
+        if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not 0 <= float(reward) <= 1:
+            raise BrainRunError(f"replay report decision {index} reward is invalid")
+        for name in ("passed", "failed", "disagreement"):
+            if not isinstance(raw.get(name), bool):
+                raise BrainRunError(f"replay report decision {index} {name} must be boolean")
+        for name in ("evidence_digest", "decision_digest", "expected_decision_digest"):
+            if raw.get(name) is not None and not _valid_digest(raw.get(name)):
+                raise BrainRunError(f"replay report decision {index} {name} is invalid")
+        if raw.get("failure_class") is not None:
+            _text(f"replay report decision {index} failure_class", raw.get("failure_class"), 256)
+        normalized_decisions.append(dict(raw))
+    by_domain = value.get("by_domain")
+    if not isinstance(by_domain, Mapping):
+        raise BrainRunError("replay report by_domain is malformed")
+    expected_domains: dict[str, dict[str, Any]] = {}
+    for decision in normalized_decisions:
+        domain = str(decision["domain"])
+        aggregate = expected_domains.setdefault(domain, {"cases": 0, "passed": 0, "failed": 0, "reward_total": 0.0})
+        aggregate["cases"] += 1
+        aggregate["passed"] += int(decision["passed"])
+        aggregate["failed"] += int(decision["failed"])
+        aggregate["reward_total"] += float(decision["reward"])
+    if set(by_domain) != set(expected_domains):
+        raise BrainRunError("replay report domains do not match decisions")
+    normalized_domains: dict[str, dict[str, Any]] = {}
+    for domain, aggregate in expected_domains.items():
+        raw = by_domain.get(domain)
+        if not isinstance(raw, Mapping) or set(raw) != {"cases", "passed", "failed", "pass_rate", "mean_reward"}:
+            raise BrainRunError(f"replay report aggregate for {domain} is malformed")
+        count = aggregate["cases"]
+        expected = {
+            "cases": count,
+            "passed": aggregate["passed"],
+            "failed": aggregate["failed"],
+            "pass_rate": aggregate["passed"] / count,
+            "mean_reward": aggregate["reward_total"] / count,
+        }
+        if raw != expected:
+            raise BrainRunError(f"replay report aggregate for {domain} does not match decisions")
+        normalized_domains[domain] = dict(raw)
+    disagreement_count = value.get("disagreement_count")
+    if isinstance(disagreement_count, bool) or not isinstance(disagreement_count, int) or disagreement_count != sum(int(row["disagreement"]) for row in normalized_decisions):
+        raise BrainRunError("replay report disagreement count does not match decisions")
+    next_state = value.get("next_bandit_state")
+    if next_state is not None:
+        if not isinstance(next_state, Mapping):
+            raise BrainRunError("replay report next_bandit_state is malformed")
+        BrainLearningLedger._assert_safe(next_state)
+    body = {
+        "schema": REPLAY_REPORT_SCHEMA,
+        "status": "completed",
+        "cases": case_count,
+        "decisions": normalized_decisions,
+        "by_domain": normalized_domains,
+        "disagreement_count": disagreement_count,
+        "next_bandit_state": None if next_state is None else dict(next_state),
+        "retention": "decision_metadata_and_digests_only",
+    }
+    if value.get("report_digest") != _digest(body):
+        raise BrainRunError("replay report digest does not match its contents")
+    normalized = {**body, "report_digest": value["report_digest"]}
+    if len(_canonical(normalized).encode("utf-8")) > MAX_REPLAY_REPORT_BYTES:
+        raise BrainRunError("replay report exceeds its byte capacity")
+    return normalized
 
 
 class BrainReplayEngine:
@@ -1217,11 +1327,18 @@ class BrainReplayEngine:
         if bandit_updater is not None and not callable(bandit_updater):
             raise BrainRunError("bandit_updater must be callable or None")
         current_state = None if bandit_state is None else dict(bandit_state)
+        normalized_cases: list[BrainReplayCase] = []
+        seen_run_ids: set[str] = set()
+        for raw_case in cases:
+            case = raw_case if isinstance(raw_case, BrainReplayCase) else BrainReplayCase.from_mapping(raw_case)
+            if case.run_id in seen_run_ids:
+                raise BrainRunError("replay run_id values must be unique")
+            seen_run_ids.add(case.run_id)
+            normalized_cases.append(case)
         decisions: list[dict[str, Any]] = []
         aggregates: dict[str, dict[str, Any]] = {}
         disagreements = 0
-        for raw_case in cases:
-            case = raw_case if isinstance(raw_case, BrainReplayCase) else BrainReplayCase.from_mapping(raw_case)
+        for case in normalized_cases:
             evaluator = registry.resolve_for_replay(
                 case.domain,
                 evaluator_id=case.evaluator_id,
@@ -1670,6 +1787,7 @@ __all__ = [
     "BrainReplayCase",
     "BrainReplayEngine",
     "BrainReplayReport",
+    "validate_brain_replay_report",
     "BrainWorker",
     "JsonBrainModelHealthSnapshotPersistence",
     "CONTROL_PLANE_SCHEMA",
@@ -1680,6 +1798,7 @@ __all__ = [
     "MAX_MODEL_HEALTH_SNAPSHOT_BYTES",
     "REPLAY_CASE_SCHEMA",
     "REPLAY_REPORT_SCHEMA",
+    "MAX_REPLAY_REPORT_BYTES",
     "TransactionalBrainModelHealthSnapshotTextStore",
     "TransactionalJsonBrainModelHealthSnapshotPersistence",
     "validate_model_health_snapshot",
