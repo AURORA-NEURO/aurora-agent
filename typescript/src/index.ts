@@ -2043,6 +2043,7 @@ export {
   MAX_AUTONOMOUS_MISSION_REPLAN_JOBS,
   MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS,
   MAX_AUTONOMOUS_MISSION_REPLAN_JOB_LEASE_MS,
+  MAX_AUTONOMOUS_MISSION_REPLAN_WORKER_HEARTBEAT_MS,
   MAX_AUTONOMOUS_MISSION_REPLAN_JOB_SNAPSHOT_BYTES,
   InMemoryAutonomousMissionReplanRemoteJobQueue,
   JsonAutonomousMissionReplanRemoteJobQueuePersistence,
@@ -2063,6 +2064,7 @@ export type {
   AutonomousMissionReplanRemoteJobResolverContext,
   AutonomousMissionReplanRemoteJobResolver,
   AutonomousMissionReplanRemoteWorkerOptions,
+  AutonomousMissionReplanRemoteWorkerRunOptions,
   AutonomousMissionReplanRemoteWorkerRow,
   AutonomousMissionReplanRemoteWorkerRun,
 } from "./mission-replan-worker.js";

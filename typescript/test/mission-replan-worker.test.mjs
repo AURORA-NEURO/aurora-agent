@@ -8,6 +8,7 @@ import {
   JsonAutonomousMissionReplanRemoteJobQueuePersistence,
   JsonAutonomousMissionReplanRemoteJobQueueTextStore,
   ToolCatalogue,
+  ProviderRuntimeError,
   digestJson,
   runAutonomousMissionReplanCycle,
   validateAutonomousMissionReplanRemoteJobQueueSnapshot,
@@ -67,7 +68,27 @@ test("remote mission replan worker rehydrates accepted plans without provider re
     resolve: async ({ job }) => ({
       executor: new AutonomousMissionExecutor({ catalogue: await catalogue(), executeStep: async ({ step }) => { executed.push(step.id); return { status: "succeeded", value: { private_output: "transient" } }; } }),
       mission: root,
-      options: { acceptedPlanRefinement: plan, acceptPlan: true, evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }) },
+      options: {
+        acceptedPlanRefinement: plan,
+        acceptPlan: true,
+        evaluatePlanning: () => ({ evaluator_id: "planner-reviewer", evaluator_version: "1", reward: 0.9, passed: true }),
+        plannerLearning: {
+          settlePlanningQuality: async (candidate) => ({
+            schema: "bioprism-typescript-autonomous-planning-quality-settlement/0.1",
+            status: "settled",
+            plan_refinement: candidate,
+            evaluation: { evaluator_id: "planner-reviewer", evaluator_version: "1", reward: 0.9, passed: true },
+            next_state: null,
+            model_quality: null,
+            reason: null,
+            remote: true,
+            retention: "value_only;secret_material_excluded",
+            secret_material: "never_returned",
+          }),
+        },
+        plannerLearningRemote: true,
+        evaluate: () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+      },
     }),
   });
   const run = await worker.run();
@@ -76,6 +97,8 @@ test("remote mission replan worker rehydrates accepted plans without provider re
   const job = await queue.load("remote-mission-job");
   assert.equal(job.status, "completed");
   assert.equal(job.plan_refinement_digest, planDigest);
+  assert.match(job.planner_learning_settlement_digest, /^[0-9a-f]{64}$/);
+  assert.equal(run.rows[0].planner_learning_settlement_digest, job.planner_learning_settlement_digest);
   assert.doesNotMatch(JSON.stringify(await queue.snapshot()), /verify first|private_output|remote mission/);
   assert.equal((await validateAutonomousMissionReplanRemoteJobQueueSnapshot(await queue.snapshot())).snapshot_digest.length, 64);
 });
@@ -98,4 +121,27 @@ test("remote mission replan queue snapshots round-trip through canonical text pe
   const reopened = await restored.requeue(requeue.job_id, { planningStatus: "accepted", planRefinementDigest: "b".repeat(64) });
   assert.equal(reopened.status, "queued");
   assert.equal(reopened.planning_status, "accepted");
+  assert.equal(reopened.planner_learning_settlement_digest, null);
+});
+
+test("remote mission worker renews long private resolution and retries typed provider failures", async () => {
+  const queue = new InMemoryAutonomousMissionReplanRemoteJobQueue();
+  await queue.enqueue({ jobId: "heartbeat-job", rootMissionId: "heartbeat-root", protectedContractDigest: "c".repeat(64), maxAttempts: 2, availableAt: 0 });
+  let resolverCalls = 0;
+  const worker = new AutonomousMissionReplanRemoteWorker({
+    queue,
+    workerId: "heartbeat-worker",
+    leaseMs: 40,
+    resolve: async ({ renew }) => {
+      resolverCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      await renew(40);
+      throw new ProviderRuntimeError("typed provider simulation", { code: "transport", retryable: true });
+    },
+  });
+  const run = await worker.run({ limit: 1, heartbeatMs: 10 });
+  assert.equal(resolverCalls, 1);
+  assert.equal(run.retried, 1);
+  assert.equal(run.failed, 0);
+  assert.equal((await queue.load("heartbeat-job")).status, "queued");
 });

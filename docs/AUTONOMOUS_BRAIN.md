@@ -2150,11 +2150,14 @@ graphs.
 For service workers, `InMemoryAutonomousMissionReplanRemoteJobQueue` and
 `AutonomousMissionReplanRemoteWorker` provide a claim/lease/requeue boundary around the same
 cycle. A remote job contains only the root mission identity, protected-contract digest, planner
-status, plan-refinement digest, lease/attempt metadata, and a result digest. The resolver owns
+status, plan-refinement digest, planner-quality settlement digest, lease/attempt metadata, and a
+result digest. The resolver owns
 the mission payload, executor, credentials, evaluator, provider policy, and rehydration callback.
 `requeue()` is explicit for a `plan_review_required`, approval, reconciliation, or failed job;
 the caller can bind the accepted plan digest before a worker claims it again. Queue snapshots are
-canonical, hash-bound, capacity-limited, and persistence-adapter friendly. A worker therefore
+canonical, hash-bound, capacity-limited, and persistence-adapter friendly. Workers renew leases
+during private resolution and execution, expose a resolver-owned `renew()` hook, and classify
+lost-lease settlement races as `leased_elsewhere` rather than fabricating completion. A worker therefore
 cannot reconstruct a missing mission from queue state and cannot silently replay a provider
 planner after a remote process restart.
 

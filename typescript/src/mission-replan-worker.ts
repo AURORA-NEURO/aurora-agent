@@ -1,6 +1,7 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import { AutonomousMissionExecutor } from "./mission-execution.js";
 import {
+  AutonomousMissionReplanContractError,
   runAutonomousMissionReplanCycle,
   type AutonomousMissionReplanOptions,
   type AutonomousMissionReplanResult,
@@ -16,6 +17,7 @@ export const AUTONOMOUS_MISSION_REPLAN_REMOTE_WORKER_SCHEMA = "bioprism-typescri
 export const MAX_AUTONOMOUS_MISSION_REPLAN_JOBS = 4_096;
 export const MAX_AUTONOMOUS_MISSION_REPLAN_JOB_ATTEMPTS = 8;
 export const MAX_AUTONOMOUS_MISSION_REPLAN_JOB_LEASE_MS = 300_000;
+export const MAX_AUTONOMOUS_MISSION_REPLAN_WORKER_HEARTBEAT_MS = 120_000;
 export const MAX_AUTONOMOUS_MISSION_REPLAN_JOB_SNAPSHOT_BYTES = 512_000;
 
 export type AutonomousMissionReplanRemoteJobStatus =
@@ -56,6 +58,7 @@ export interface AutonomousMissionReplanRemoteJob extends JsonObject {
   lease_owner: string | null;
   lease_until: number | null;
   result_digest: string | null;
+  planner_learning_settlement_digest: string | null;
   failure_class: AutonomousMissionReplanRemoteJobFailureClass | null;
   failure_code: string | null;
   job_digest: string;
@@ -103,6 +106,7 @@ export interface AutonomousMissionReplanRemoteWorkerRow extends JsonObject {
   attempts: number;
   result_digest: string | null;
   plan_refinement_digest: string | null;
+  planner_learning_settlement_digest: string | null;
   failure_class: AutonomousMissionReplanRemoteJobFailureClass | null;
   lease_retained: false;
 }
@@ -117,6 +121,7 @@ export interface AutonomousMissionReplanRemoteWorkerRun extends JsonObject {
   reconciliations: number;
   retried: number;
   failed: number;
+  leased_elsewhere: number;
   rows: AutonomousMissionReplanRemoteWorkerRow[];
   retention: "metadata_only_job_receipts_and_digests_no_private_values";
   secret_material: "never_returned";
@@ -173,14 +178,15 @@ function resultDigest(result: AutonomousMissionReplanResult): string {
     planning_status: result.planning_status,
     plan_refinement_digest: result.plan_refinement ? digestJsonSync(result.plan_refinement) : null,
     planner_learning_status: result.planner_learning_status,
+    planner_learning_settlement_digest: result.planner_learning_settlement ? digestJsonSync(result.planner_learning_settlement) : null,
     replan_count: result.replan_count,
   });
 }
 
 function failureProjection(error: unknown): { failureClass: AutonomousMissionReplanRemoteJobFailureClass; failureCode: string } {
   if (error instanceof ProviderRuntimeError) return { failureClass: "provider_error", failureCode: error.code };
+  if (error instanceof AutonomousMissionReplanContractError) return { failureClass: "contract_mismatch", failureCode: "mission_contract" };
   if (error instanceof ArgumentError) return { failureClass: "contract_mismatch", failureCode: "configuration" };
-  if (error instanceof Error && error.constructor.name === "AutonomousMissionReplanContractError") return { failureClass: "contract_mismatch", failureCode: "mission_contract" };
   if (error instanceof Error && /^[A-Za-z0-9_.:-]+$/.test(error.constructor.name)) return { failureClass: "execution_error", failureCode: error.constructor.name };
   return { failureClass: "unknown", failureCode: "unknown" };
 }
@@ -210,6 +216,7 @@ function validateJob(value: unknown): AutonomousMissionReplanRemoteJob {
   if (job.lease_owner !== null) identifier("mission remote lease_owner", job.lease_owner);
   if (job.lease_until !== null) timestamp("mission remote lease_until", job.lease_until);
   digest("mission remote result_digest", job.result_digest, true);
+  digest("mission remote planner_learning_settlement_digest", job.planner_learning_settlement_digest, true);
   if (job.failure_class !== null && !FAILURE_CLASSES.includes(job.failure_class)) throw new ArgumentError("mission remote failure_class is invalid");
   if (job.failure_code !== null) identifier("mission remote failure_code", job.failure_code);
   digest("mission remote job_digest", job.job_digest);
@@ -259,6 +266,7 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue {
       lease_owner: null,
       lease_until: null,
       result_digest: null,
+      planner_learning_settlement_digest: null,
       failure_class: null,
       failure_code: null,
       job_digest: "0".repeat(64),
@@ -300,7 +308,8 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue {
     const planDigest = result.plan_refinement ? digestJsonSync(result.plan_refinement) : null;
     if (job.protected_contract_digest !== result.protected_contract_digest) throw new ArgumentError("mission remote result protected contract does not match the job");
     if (job.plan_refinement_digest !== null && job.plan_refinement_digest !== planDigest) throw new ArgumentError("mission remote result plan digest does not match the job");
-    const next = refresh(job, { status: classifyResult(result), planning_status: result.planning_status, plan_refinement_digest: planDigest, result_digest: resultDigest(result), lease_owner: null, lease_until: null, failure_class: null, failure_code: null }, now);
+    const plannerSettlementDigest = result.planner_learning_settlement ? digestJsonSync(result.planner_learning_settlement) : null;
+    const next = refresh(job, { status: classifyResult(result), planning_status: result.planning_status, plan_refinement_digest: planDigest, planner_learning_settlement_digest: plannerSettlementDigest, result_digest: resultDigest(result), lease_owner: null, lease_until: null, failure_class: null, failure_code: null }, now);
     this.jobs.set(next.job_id, next);
     return clone(next);
   }
@@ -330,7 +339,7 @@ export class InMemoryAutonomousMissionReplanRemoteJobQueue {
     const nextStatus = options.planningStatus === undefined ? job.planning_status : planningStatus(options.planningStatus);
     const nextPlanDigest = digest("mission remote requeue planRefinementDigest", options.planRefinementDigest ?? job.plan_refinement_digest, true);
     if (nextStatus === "accepted" && nextPlanDigest === null) throw new ArgumentError("accepted mission remote requeue requires a plan refinement digest");
-    const next = refresh(job, { status: "queued", planning_status: nextStatus, plan_refinement_digest: nextPlanDigest, result_digest: null, failure_class: null, failure_code: null, lease_owner: null, lease_until: null, available_at: timestamp("mission remote requeue availableAt", options.availableAt, now) }, now);
+    const next = refresh(job, { status: "queued", planning_status: nextStatus, plan_refinement_digest: nextPlanDigest, planner_learning_settlement_digest: null, result_digest: null, failure_class: null, failure_code: null, lease_owner: null, lease_until: null, available_at: timestamp("mission remote requeue availableAt", options.availableAt, now) }, now);
     this.jobs.set(id, next);
     return clone(next);
   }
@@ -396,6 +405,8 @@ export interface AutonomousMissionReplanRemoteJobResolution {
 export interface AutonomousMissionReplanRemoteJobResolverContext {
   job: AutonomousMissionReplanRemoteJob;
   attempt: number;
+  worker_id: string;
+  renew: (leaseMs?: number, now?: number) => Promise<AutonomousMissionReplanRemoteJob>;
 }
 
 export type AutonomousMissionReplanRemoteJobResolver = (context: AutonomousMissionReplanRemoteJobResolverContext) => AutonomousMissionReplanRemoteJobResolution | Promise<AutonomousMissionReplanRemoteJobResolution>;
@@ -405,6 +416,15 @@ export interface AutonomousMissionReplanRemoteWorkerOptions {
   workerId: string;
   resolve: AutonomousMissionReplanRemoteJobResolver;
   leaseMs?: number;
+}
+
+export interface AutonomousMissionReplanRemoteWorkerRunOptions {
+  limit?: number;
+  leaseMs?: number;
+  heartbeatMs?: number;
+  now?: number;
+  clock?: () => number;
+  signal?: { readonly aborted: boolean };
 }
 
 /**
@@ -426,23 +446,58 @@ export class AutonomousMissionReplanRemoteWorker {
     this.leaseMs = integer("mission remote worker leaseMs", options.leaseMs, 1, MAX_AUTONOMOUS_MISSION_REPLAN_JOB_LEASE_MS, 60_000);
   }
 
-  async run(limit = 1): Promise<AutonomousMissionReplanRemoteWorkerRun> {
-    const max = integer("mission remote worker limit", limit, 1, 64);
+  async run(limitOrOptions: number | AutonomousMissionReplanRemoteWorkerRunOptions = 1): Promise<AutonomousMissionReplanRemoteWorkerRun> {
+    const options = typeof limitOrOptions === "number" ? { limit: limitOrOptions } : (limitOrOptions ?? {});
+    const max = integer("mission remote worker limit", options.limit, 1, 64, 1);
+    const leaseMs = integer("mission remote worker leaseMs", options.leaseMs, 1, MAX_AUTONOMOUS_MISSION_REPLAN_JOB_LEASE_MS, this.leaseMs);
+    const heartbeatMs = integer("mission remote worker heartbeatMs", options.heartbeatMs, 1, MAX_AUTONOMOUS_MISSION_REPLAN_WORKER_HEARTBEAT_MS, Math.min(30_000, Math.floor(leaseMs / 3)));
+    if (heartbeatMs >= leaseMs) throw new ArgumentError("mission remote worker heartbeatMs must be less than leaseMs");
+    if (options.clock !== undefined && typeof options.clock !== "function") throw new ArgumentError("mission remote worker clock must be callable");
+    const requestedNow = options.now;
+    const initialNow = timestamp("mission remote worker now", requestedNow ?? (options.clock ?? (() => Date.now()))());
+    const clock = options.clock ?? (requestedNow === undefined ? (() => Date.now()) : (() => initialNow));
     const rows: AutonomousMissionReplanRemoteWorkerRow[] = [];
     for (let index = 0; index < max; index += 1) {
-      const job = await this.queue.claimNext(this.workerId, this.leaseMs);
+      if (options.signal?.aborted) break;
+      const job = await this.queue.claimNext(this.workerId, leaseMs, clock());
       if (!job) break;
+      let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+      let heartbeatRunning = false;
+      let heartbeatError: unknown = null;
+      const heartbeat = async (): Promise<void> => {
+        if (heartbeatRunning || heartbeatError !== null) return;
+        heartbeatRunning = true;
+        try {
+          await this.queue.renew(job.job_id, this.workerId, leaseMs, clock());
+        } catch (error) {
+          heartbeatError = error;
+        } finally {
+          heartbeatRunning = false;
+        }
+      };
+      heartbeatTimer = setInterval(() => { void heartbeat(); }, heartbeatMs);
+      const unref = (heartbeatTimer as unknown as { unref?: () => void }).unref;
+      if (typeof unref === "function") unref.call(heartbeatTimer);
       try {
-        const resolved = await this.resolve({ job: clone(job), attempt: job.attempts });
+        const resolved = await this.resolve({ job: clone(job), attempt: job.attempts, worker_id: this.workerId, renew: (renewLeaseMs = leaseMs, renewAt = clock()) => this.queue.renew(job.job_id, this.workerId, renewLeaseMs, renewAt) });
         if (!(resolved.executor instanceof AutonomousMissionExecutor) || !isObject(resolved.mission) || !isObject(resolved.options)) throw new ArgumentError("mission remote resolver returned malformed private execution state");
+        if (heartbeatError !== null) throw new ProviderRuntimeError("mission remote worker lease heartbeat failed before execution", { code: "transport", retryable: true });
         const result = await runAutonomousMissionReplanCycle(resolved.executor, resolved.mission, resolved.options);
-        const completed = await this.queue.complete(job.job_id, this.workerId, result);
-        rows.push({ job_id: job.job_id, outcome: completed.status === "completed" ? "completed" : completed.status === "plan_review_required" ? "plan_review_required" : completed.status === "approval_required" ? "approval_required" : completed.status === "reconciliation_required" ? "reconciliation_required" : "failed", attempts: completed.attempts, result_digest: completed.result_digest, plan_refinement_digest: completed.plan_refinement_digest, failure_class: completed.failure_class, lease_retained: false });
+        if (heartbeatError !== null) throw new ProviderRuntimeError("mission remote worker lease heartbeat failed after execution", { code: "transport", retryable: true });
+        const completed = await this.queue.complete(job.job_id, this.workerId, result, clock());
+        rows.push({ job_id: job.job_id, outcome: completed.status === "completed" ? "completed" : completed.status === "plan_review_required" ? "plan_review_required" : completed.status === "approval_required" ? "approval_required" : completed.status === "reconciliation_required" ? "reconciliation_required" : "failed", attempts: completed.attempts, result_digest: completed.result_digest, plan_refinement_digest: completed.plan_refinement_digest, planner_learning_settlement_digest: completed.planner_learning_settlement_digest, failure_class: completed.failure_class, lease_retained: false });
       } catch (error) {
         const projection = failureProjection(error);
         const retryable = error instanceof ProviderRuntimeError ? error.retryable : false;
-        const failed = await this.queue.fail(job.job_id, this.workerId, projection.failureClass, projection.failureCode, retryable);
-        rows.push({ job_id: job.job_id, outcome: failed.status === "queued" ? "retry_scheduled" : "failed", attempts: failed.attempts, result_digest: failed.result_digest, plan_refinement_digest: failed.plan_refinement_digest, failure_class: failed.failure_class, lease_retained: false });
+        try {
+          const failed = await this.queue.fail(job.job_id, this.workerId, projection.failureClass, projection.failureCode, retryable, clock());
+          rows.push({ job_id: job.job_id, outcome: failed.status === "queued" ? "retry_scheduled" : "failed", attempts: failed.attempts, result_digest: failed.result_digest, plan_refinement_digest: failed.plan_refinement_digest, planner_learning_settlement_digest: failed.planner_learning_settlement_digest, failure_class: failed.failure_class, lease_retained: false });
+        } catch {
+          const current = await this.queue.load(job.job_id);
+          rows.push({ job_id: job.job_id, outcome: "leased_elsewhere", attempts: current?.attempts ?? job.attempts, result_digest: current?.result_digest ?? null, plan_refinement_digest: current?.plan_refinement_digest ?? null, planner_learning_settlement_digest: current?.planner_learning_settlement_digest ?? null, failure_class: current?.failure_class ?? projection.failureClass, lease_retained: false });
+        }
+      } finally {
+        if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
       }
     }
     const counts = {
@@ -452,6 +507,7 @@ export class AutonomousMissionReplanRemoteWorker {
       reconciliations: rows.filter((row) => row.outcome === "reconciliation_required").length,
       retried: rows.filter((row) => row.outcome === "retry_scheduled").length,
       failed: rows.filter((row) => row.outcome === "failed").length,
+      leased_elsewhere: rows.filter((row) => row.outcome === "leased_elsewhere").length,
     };
     return { schema: AUTONOMOUS_MISSION_REPLAN_REMOTE_WORKER_SCHEMA, worker_id: this.workerId, inspected: rows.length, ...counts, rows, retention: "metadata_only_job_receipts_and_digests_no_private_values", secret_material: "never_returned" };
   }
