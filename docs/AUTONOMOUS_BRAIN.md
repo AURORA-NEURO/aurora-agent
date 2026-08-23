@@ -1578,6 +1578,21 @@ never treats a declared adapter as live, never invokes a provider/source/tool, a
 credentials. Both rows and the report are SHA-256 digest-bound, so a worker can persist the
 projection or require explicit re-audit when its profile or runtime surface changes.
 
+The same restart contract now covers the three durable execution families, not only their
+control-plane ledgers. `JsonAutonomousWorkflowSnapshotPersistence`,
+`JsonAutonomousMissionSnapshotPersistence`, and
+`JsonAutonomousCrossDomainSnapshotPersistence` accept only canonical JSON and revalidate the
+complete checkpoint/event chain before restore. Their transactional counterparts require a
+text-store `writeIfUnchanged(expectedSnapshotDigest, value)` operation. The corresponding
+workflow, mission, and cross-domain persistence coordinators serialize overlapping flush/restore
+operations, remember the last successfully restored or written snapshot digest, and fail with a
+typed compare-and-swap conflict when a stale worker attempts to overwrite a newer execution
+image. A fresh worker must explicitly restore its snapshot before its first CAS flush; an empty
+local store cannot silently claim create-if-absent authority over an already populated durable
+execution. These adapters retain only checkpoint/event metadata and digests—task text, prompts,
+credentials, provider responses, tool arguments, and caller-owned result values remain outside
+the snapshot boundary.
+
 For restartable deployments, `AutonomousEvaluatorCalibrationRegistry` imports the validated
 report projection and exposes deterministic digest/status/domain queries. Its snapshot contains
 only calibration reports and registry generation metadata; `InMemoryAutonomousEvaluatorCalibrationStore`,

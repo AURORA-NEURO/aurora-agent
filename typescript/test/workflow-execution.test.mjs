@@ -8,6 +8,7 @@ import {
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
   AutonomousWorkflowPersistenceCoordinator,
+  TransactionalJsonAutonomousWorkflowSnapshotPersistence,
   AutonomousWorkflowExecutor,
   CredentialStore,
   InMemoryAutonomousWorkflowCheckpointStore,
@@ -571,6 +572,31 @@ test("workflow checkpoint snapshots restore a paused job without admitting paylo
   });
   await persistence.flush();
   assert.equal(durableSnapshot.snapshot_digest, snapshot.snapshot_digest);
+
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const actual = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (actual !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const transactional = new TransactionalJsonAutonomousWorkflowSnapshotPersistence(textStore);
+  const transactionalWriter = new AutonomousWorkflowPersistenceCoordinator(sourceStore, transactional);
+  await transactionalWriter.restore();
+  await transactionalWriter.flush();
+  assert.equal(encoded, JSON.stringify(JSON.parse(encoded)));
+  const transactionalReaderStore = new InMemoryAutonomousWorkflowCheckpointStore();
+  const transactionalReader = new AutonomousWorkflowPersistenceCoordinator(transactionalReaderStore, transactional);
+  await transactionalReader.restore();
+  assert.equal((await transactionalReaderStore.verifyIntegrity()).verified, true);
+  const stale = new AutonomousWorkflowPersistenceCoordinator(new InMemoryAutonomousWorkflowCheckpointStore(), transactional);
+  await assert.rejects(stale.flush(), /compare-and-swap conflict/);
+  encoded = ` ${encoded}`;
+  await assert.rejects(() => transactional.read(), /not canonical/);
 
   const tampered = structuredClone(durableSnapshot);
   tampered.event_rows[0].events[0].event_type = "completed";

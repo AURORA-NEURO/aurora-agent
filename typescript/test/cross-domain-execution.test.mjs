@@ -4,7 +4,9 @@ import { test } from "node:test";
 import {
   AutonomousAgent,
   AutonomousCrossDomainExecutor,
+  AutonomousCrossDomainPersistenceCoordinator,
   InMemoryAutonomousCrossDomainCheckpointStore,
+  TransactionalJsonAutonomousCrossDomainSnapshotPersistence,
   CredentialStore,
   LLMRuntime,
   digestJson,
@@ -227,6 +229,44 @@ test("durable cross-domain execution pauses before dispatch and refuses a tamper
     /result digest does not match/,
   );
   assert.equal(calls(), 1, "digest refusal must happen before the next provider dispatch");
+});
+
+test("cross-domain snapshot JSON persistence is canonical, restart-safe, and CAS-fenced", async () => {
+  const { agent } = makeAgent();
+  const sourceStore = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const executor = new AutonomousCrossDomainExecutor(agent, sourceStore);
+  const first = await executor.start(task, { candidates: agent.models(), subtasks, approveProviderCall: false, jobId: "cross-domain-persistence", maxSteps: 1 });
+  const snapshot = await sourceStore.snapshot();
+  assert.equal(first.checkpoint.status, "paused");
+
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const actual = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (actual !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousCrossDomainSnapshotPersistence(textStore);
+  const writer = new AutonomousCrossDomainPersistenceCoordinator(sourceStore, persistence);
+  await writer.restore();
+  const flushed = await writer.flush();
+  assert.equal(flushed.snapshot_digest, snapshot.snapshot_digest);
+  assert.equal(encoded, JSON.stringify(JSON.parse(encoded)));
+
+  const restored = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const reader = new AutonomousCrossDomainPersistenceCoordinator(restored, persistence);
+  const rehydrated = await reader.restore();
+  assert.equal(rehydrated.snapshot_digest, snapshot.snapshot_digest);
+  assert.equal((await restored.verifyIntegrity()).verified, true);
+
+  const stale = new AutonomousCrossDomainPersistenceCoordinator(new InMemoryAutonomousCrossDomainCheckpointStore(), persistence);
+  await assert.rejects(stale.flush(), /compare-and-swap conflict/);
+  encoded = ` ${encoded}`;
+  await assert.rejects(() => persistence.read(), /not canonical/);
 });
 
 test("durable cross-domain child reconciliation is quarantined until an explicit retry decision", async () => {

@@ -3,7 +3,7 @@ import { AUTONOMOUS_DOMAIN_NAMES, validateAutonomousRouteOverride, type Autonomo
 import { AutonomousEffectReconciliationRequiredError, type AutonomousEffectBoundary } from "./autonomous-effects.js";
 import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
 import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
-import { digestJson, ToolCatalogue } from "./tooling.js";
+import { canonicalJson, digestJson, ToolCatalogue } from "./tooling.js";
 import { preflightMission } from "./mission.js";
 import { AutonomousCostBudget } from "./llm.js";
 import type {
@@ -246,6 +246,16 @@ export interface AutonomousMissionSnapshotStore extends AutonomousMissionCheckpo
 export interface AutonomousMissionPersistence {
   read(): Promise<AutonomousMissionSnapshot | null> | AutonomousMissionSnapshot | null;
   write(snapshot: AutonomousMissionSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousMissionSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousMissionSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousMissionTransactionalSnapshotTextStore extends AutonomousMissionSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousMissionExecutionResult {
@@ -667,6 +677,8 @@ export class InMemoryAutonomousMissionCheckpointStore implements AutonomousMissi
 export class AutonomousMissionPersistenceCoordinator {
   readonly store: AutonomousMissionSnapshotStore;
   readonly persistence: AutonomousMissionPersistence;
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
 
   constructor(store: AutonomousMissionSnapshotStore, persistence: AutonomousMissionPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("mission persistence requires a snapshot-capable store");
@@ -676,19 +688,73 @@ export class AutonomousMissionPersistenceCoordinator {
   }
 
   async flush(): Promise<{ schema: typeof AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA; bytes: number; snapshot_digest: string; retention: "metadata_only" }> {
-    const snapshot = await this.store.snapshot();
-    const bytes = jsonBytes(snapshot);
-    if (bytes > AUTONOMOUS_MISSION_MAX_SNAPSHOT_BYTES) throw new AutonomousMissionExecutionError("mission snapshot exceeds its bounded size");
-    await this.persistence.write(snapshot);
-    return { schema: AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA, bytes, snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };
+    return this.enqueue(async () => {
+      const snapshot = (await validateAutonomousMissionSnapshot(await this.store.snapshot())).snapshot;
+      const bytes = jsonBytes(snapshot);
+      if (bytes > AUTONOMOUS_MISSION_MAX_SNAPSHOT_BYTES) throw new AutonomousMissionExecutionError("mission snapshot exceeds its bounded size");
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new AutonomousMissionExecutionError("mission persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return { schema: AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA, bytes, snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };
+    });
   }
 
   async restore(): Promise<{ schema: typeof AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA; restored: boolean; missions: number; events: number; snapshot_digest: string | null; retention: "metadata_only" }> {
-    const raw = await this.persistence.read();
-    if (raw === null) return { schema: AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA, restored: false, missions: 0, events: 0, snapshot_digest: null, retention: "metadata_only" };
-    const validated = await validateAutonomousMissionSnapshot(raw);
-    await this.store.restore(validated.snapshot);
-    return { schema: AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA, restored: true, missions: validated.snapshot.checkpoints.length, events: validated.eventCount, snapshot_digest: validated.snapshot.snapshot_digest, retention: "metadata_only" };
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return { schema: AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA, restored: false, missions: 0, events: 0, snapshot_digest: null, retention: "metadata_only" };
+      }
+      const validated = await validateAutonomousMissionSnapshot(raw);
+      await this.store.restore(validated.snapshot);
+      this.expectedSnapshotDigest = validated.snapshot.snapshot_digest;
+      return { schema: AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA, restored: true, missions: validated.snapshot.checkpoints.length, events: validated.eventCount, snapshot_digest: validated.snapshot.snapshot_digest, retention: "metadata_only" };
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+export class JsonAutonomousMissionSnapshotPersistence implements AutonomousMissionPersistence {
+  constructor(readonly textStore: AutonomousMissionSnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new AutonomousMissionExecutionError("mission text store is malformed");
+  }
+
+  async read(): Promise<AutonomousMissionSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (jsonBytes(encoded) > AUTONOMOUS_MISSION_MAX_SNAPSHOT_BYTES) throw new AutonomousMissionExecutionError("mission JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new AutonomousMissionExecutionError("mission JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new AutonomousMissionExecutionError("mission JSON is not canonical");
+    return (await validateAutonomousMissionSnapshot(parsed)).snapshot;
+  }
+
+  async write(raw: AutonomousMissionSnapshot): Promise<void> {
+    const snapshot = (await validateAutonomousMissionSnapshot(raw)).snapshot;
+    await this.textStore.write(canonicalJson(snapshot));
+  }
+}
+
+export class TransactionalJsonAutonomousMissionSnapshotPersistence extends JsonAutonomousMissionSnapshotPersistence {
+  declare readonly textStore: AutonomousMissionTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousMissionTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new AutonomousMissionExecutionError("mission text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, raw: AutonomousMissionSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !/^[0-9a-f]{64}$/.test(expectedSnapshotDigest)) throw new AutonomousMissionExecutionError("mission expected snapshot digest is invalid");
+    const snapshot = (await validateAutonomousMissionSnapshot(raw)).snapshot;
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(snapshot));
   }
 }
 

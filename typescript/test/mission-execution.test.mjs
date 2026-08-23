@@ -8,6 +8,8 @@ import {
   CredentialStore,
   InMemoryAutonomousMissionCheckpointStore,
   InMemoryAutonomousMissionResultStore,
+  AutonomousMissionPersistenceCoordinator,
+  TransactionalJsonAutonomousMissionSnapshotPersistence,
   LLMRuntime,
   agentMissionStepExecutor,
   digestJson,
@@ -131,6 +133,47 @@ test("durable mission execution resumes dependency waves and rehydrates caller-o
   assert.equal(calls[1].args.value, "private-seed-resolved");
   assert.equal(second.completed_steps, 2);
   assert.equal((await resumed.events("mission-local-1")).at(-1).event_type, "mission.completed");
+});
+
+test("mission snapshot JSON persistence is canonical, restart-safe, and CAS-fenced", async () => {
+  const store = new InMemoryAutonomousMissionCheckpointStore();
+  const resultStore = new InMemoryAutonomousMissionResultStore();
+  const executor = new AutonomousMissionExecutor({
+    catalogue: await catalogue(),
+    checkpointStore: store,
+    resultStore,
+    executeStep: async () => ({ status: "succeeded", value: { ok: true } }),
+  });
+  const steps = [{ id: "seed", domain: "coding", capability: "testing", objective: "produce a seed", tool: "mission_probe", arguments: { value: "private-seed" } }];
+  await executor.start(mission(steps), { max_waves: 1, approveProviderCall: false });
+
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const actual = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (actual !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousMissionSnapshotPersistence(textStore);
+  const writer = new AutonomousMissionPersistenceCoordinator(store, persistence);
+  await writer.restore();
+  const flushed = await writer.flush();
+  assert.equal(flushed.snapshot_digest, (await store.snapshot()).snapshot_digest);
+  assert.equal(encoded, JSON.stringify(JSON.parse(encoded)));
+
+  const restoredStore = new InMemoryAutonomousMissionCheckpointStore();
+  const reader = new AutonomousMissionPersistenceCoordinator(restoredStore, persistence);
+  const restored = await reader.restore();
+  assert.equal(restored.restored, true);
+  assert.equal((await restoredStore.snapshot()).snapshot_digest, flushed.snapshot_digest);
+  const stale = new AutonomousMissionPersistenceCoordinator(new InMemoryAutonomousMissionCheckpointStore(), persistence);
+  await assert.rejects(stale.flush(), /compare-and-swap conflict/);
+  encoded = ` ${encoded}`;
+  await assert.rejects(() => persistence.read(), /not canonical/);
 });
 
 test("parallel mission waves merge deterministically and cap in-flight execution", async () => {

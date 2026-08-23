@@ -18,7 +18,7 @@ import type {
 import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
 import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
 import { AutonomousCostBudget } from "./llm.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type {
   BrainJobApprovalResult,
   BrainJobCancelResult,
@@ -133,6 +133,16 @@ export interface AutonomousWorkflowSnapshotStore extends AutonomousWorkflowCheck
 export interface AutonomousWorkflowSnapshotPersistence {
   read(): Promise<AutonomousWorkflowCheckpointStoreSnapshot | null> | AutonomousWorkflowCheckpointStoreSnapshot | null;
   write(snapshot: AutonomousWorkflowCheckpointStoreSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousWorkflowCheckpointStoreSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousWorkflowSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousWorkflowTransactionalSnapshotTextStore extends AutonomousWorkflowSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousWorkflowStageResult {
@@ -419,7 +429,7 @@ async function validateWorkflowEvent(value: unknown): Promise<AutonomousWorkflow
   return { ...descriptor, event_digest: eventDigest } as AutonomousWorkflowEvent;
 }
 
-async function validateWorkflowSnapshot(value: unknown): Promise<{ snapshot: AutonomousWorkflowCheckpointStoreSnapshot; eventCount: number }> {
+export async function validateAutonomousWorkflowSnapshot(value: unknown): Promise<{ snapshot: AutonomousWorkflowCheckpointStoreSnapshot; eventCount: number }> {
   if (!isObject(value)) throw new ArgumentError("workflow snapshot must be an object");
   exactKeys(value, ["schema", "checkpoints", "event_rows", "retention", "secret_material", "snapshot_digest"], "workflow snapshot");
   if (value.schema !== AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA || value.retention !== "metadata_only;task_prompt_response_credentials_and_provider_payloads_not_retained" || value.secret_material !== "never_returned") throw new ArgumentError("workflow snapshot metadata markers are invalid");
@@ -519,11 +529,11 @@ export class InMemoryAutonomousWorkflowCheckpointStore implements AutonomousWork
       secret_material: "never_returned" as const,
     };
     const snapshot = { ...descriptor, snapshot_digest: await digestJson(descriptor) };
-    return (await validateWorkflowSnapshot(snapshot)).snapshot;
+    return (await validateAutonomousWorkflowSnapshot(snapshot)).snapshot;
   }
 
   async restore(snapshot: AutonomousWorkflowCheckpointStoreSnapshot): Promise<void> {
-    const validated = (await validateWorkflowSnapshot(snapshot)).snapshot;
+    const validated = (await validateAutonomousWorkflowSnapshot(snapshot)).snapshot;
     this.checkpoints.clear();
     this.eventRows.clear();
     for (const checkpoint of validated.checkpoints) this.checkpoints.set(checkpoint.job_id, structuredClone(checkpoint));
@@ -538,21 +548,80 @@ export class InMemoryAutonomousWorkflowCheckpointStore implements AutonomousWork
 
 /** Coordinates workflow checkpoint snapshots with a caller-owned durable adapter. */
 export class AutonomousWorkflowPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly store: AutonomousWorkflowSnapshotStore, readonly persistence: AutonomousWorkflowSnapshotPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("workflow persistence requires a snapshot-capable store");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("workflow persistence adapter is malformed");
   }
 
   async restore(): Promise<AutonomousWorkflowCheckpointStoreSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot) await this.store.restore(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot) {
+        const validated = (await validateAutonomousWorkflowSnapshot(snapshot)).snapshot;
+        await this.store.restore(validated);
+        this.expectedSnapshotDigest = validated.snapshot_digest;
+        return validated;
+      }
+      this.expectedSnapshotDigest = null;
+      return null;
+    });
   }
 
   async flush(): Promise<AutonomousWorkflowCheckpointStoreSnapshot> {
-    const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = (await validateAutonomousWorkflowSnapshot(await this.store.snapshot())).snapshot;
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("workflow persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+export class JsonAutonomousWorkflowSnapshotPersistence implements AutonomousWorkflowSnapshotPersistence {
+  constructor(readonly textStore: AutonomousWorkflowSnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("workflow text store is malformed");
+  }
+
+  async read(): Promise<AutonomousWorkflowCheckpointStoreSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_WORKFLOW_MAX_SNAPSHOT_BYTES) throw new ArgumentError("workflow JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("workflow JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("workflow JSON is not canonical");
+    return (await validateAutonomousWorkflowSnapshot(parsed)).snapshot;
+  }
+
+  async write(raw: AutonomousWorkflowCheckpointStoreSnapshot): Promise<void> {
+    const snapshot = (await validateAutonomousWorkflowSnapshot(raw)).snapshot;
+    await this.textStore.write(canonicalJson(snapshot));
+  }
+}
+
+export class TransactionalJsonAutonomousWorkflowSnapshotPersistence extends JsonAutonomousWorkflowSnapshotPersistence {
+  declare readonly textStore: AutonomousWorkflowTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousWorkflowTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("workflow text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, raw: AutonomousWorkflowCheckpointStoreSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !/^[0-9a-f]{64}$/.test(expectedSnapshotDigest)) throw new ArgumentError("workflow expected snapshot digest is invalid");
+    const snapshot = (await validateAutonomousWorkflowSnapshot(raw)).snapshot;
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(snapshot));
   }
 }
 

@@ -1664,7 +1664,10 @@ export {
   AUTONOMOUS_CROSS_DOMAIN_SNAPSHOT_SCHEMA,
   AutonomousCrossDomainExecutor,
   AutonomousCrossDomainPersistenceCoordinator,
+  JsonAutonomousCrossDomainSnapshotPersistence,
+  TransactionalJsonAutonomousCrossDomainSnapshotPersistence,
   InMemoryAutonomousCrossDomainCheckpointStore,
+  validateAutonomousCrossDomainSnapshot,
 } from "./cross-domain-execution.js";
 export type {
   AutonomousCrossDomainCheckpoint,
@@ -1683,6 +1686,8 @@ export type {
   AutonomousCrossDomainExecutorOptions,
   AutonomousCrossDomainRehydratableChild,
   AutonomousCrossDomainSnapshotPersistence,
+  AutonomousCrossDomainSnapshotTextStore,
+  AutonomousCrossDomainTransactionalSnapshotTextStore,
   AutonomousCrossDomainSnapshotStore,
   AutonomousCrossDomainStepResult,
 } from "./cross-domain-execution.js";
@@ -1790,8 +1795,11 @@ export {
   AutonomousDurableJobController,
   AutonomousDurableJobWorker,
   AutonomousWorkflowPersistenceCoordinator,
+  JsonAutonomousWorkflowSnapshotPersistence,
+  TransactionalJsonAutonomousWorkflowSnapshotPersistence,
   AutonomousWorkflowExecutor,
   InMemoryAutonomousWorkflowCheckpointStore,
+  validateAutonomousWorkflowSnapshot,
 } from "./workflow-execution.js";
 export type {
   AutonomousDurableJobExecutionResult,
@@ -1817,6 +1825,8 @@ export type {
   AutonomousWorkflowSemanticRouteStatus,
   AutonomousWorkflowSemanticRoutingOptions,
   AutonomousWorkflowSnapshotPersistence,
+  AutonomousWorkflowSnapshotTextStore,
+  AutonomousWorkflowTransactionalSnapshotTextStore,
   AutonomousWorkflowSnapshotStore,
   AutonomousWorkflowStageExecutionContext,
   AutonomousWorkflowStageExecutor,
@@ -1854,6 +1864,8 @@ export {
   AutonomousMissionExecutionError,
   AutonomousMissionExecutor,
   AutonomousMissionPersistenceCoordinator,
+  JsonAutonomousMissionSnapshotPersistence,
+  TransactionalJsonAutonomousMissionSnapshotPersistence,
   AutonomousMissionPolicyError,
   AutonomousMissionRecoveryError,
   InMemoryAutonomousMissionCheckpointStore,
@@ -1875,6 +1887,8 @@ export type {
   AutonomousMissionSemanticRouteStatus,
   AutonomousMissionSemanticRoutingOptions,
   AutonomousMissionPersistence,
+  AutonomousMissionSnapshotTextStore,
+  AutonomousMissionTransactionalSnapshotTextStore,
   AutonomousMissionResultStore,
   AutonomousMissionSnapshot,
   AutonomousMissionSnapshotStore,

@@ -18,7 +18,7 @@ import type { AutonomousLearningController } from "./autonomous-learning.js";
 import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
 import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
 import { AutonomousCostBudget, type AutonomousModelCandidate } from "./llm.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { AutonomousCrossDomainPlanRefinementResult, JsonObject } from "./types.js";
 
 /** Durable cross-domain execution is deliberately separate from the one-shot fan-out API. */
@@ -97,6 +97,16 @@ export interface AutonomousCrossDomainSnapshotStore extends AutonomousCrossDomai
 export interface AutonomousCrossDomainSnapshotPersistence {
   read(): Promise<AutonomousCrossDomainCheckpointStoreSnapshot | null> | AutonomousCrossDomainCheckpointStoreSnapshot | null;
   write(snapshot: AutonomousCrossDomainCheckpointStoreSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousCrossDomainCheckpointStoreSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousCrossDomainSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousCrossDomainTransactionalSnapshotTextStore extends AutonomousCrossDomainSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 /** A result or child envelope retained by the caller and rehydrated before another step. */
@@ -295,7 +305,7 @@ async function validateEvent(value: unknown): Promise<AutonomousCrossDomainEvent
   return { ...descriptor, event_type: eventType as AutonomousCrossDomainEventType, event_digest: eventDigest };
 }
 
-async function validateSnapshot(value: unknown): Promise<AutonomousCrossDomainCheckpointStoreSnapshot> {
+export async function validateAutonomousCrossDomainSnapshot(value: unknown): Promise<AutonomousCrossDomainCheckpointStoreSnapshot> {
   if (!isObject(value)) throw new ArgumentError("cross-domain snapshot must be an object");
   exactKeys(value, ["schema", "checkpoints", "event_rows", "retention", "secret_material", "snapshot_digest"], "cross-domain snapshot");
   if (value.schema !== AUTONOMOUS_CROSS_DOMAIN_SNAPSHOT_SCHEMA || value.retention !== "metadata_only;task_prompt_response_credentials_and_provider_payloads_not_retained" || value.secret_material !== "never_returned") throw new ArgumentError("cross-domain snapshot metadata markers are invalid");
@@ -379,11 +389,11 @@ export class InMemoryAutonomousCrossDomainCheckpointStore implements AutonomousC
   async snapshot(): Promise<AutonomousCrossDomainCheckpointStoreSnapshot> {
     const descriptor = { schema: AUTONOMOUS_CROSS_DOMAIN_SNAPSHOT_SCHEMA, checkpoints: [...this.checkpoints.values()].sort((left, right) => left.job_id.localeCompare(right.job_id)).map((checkpoint) => structuredClone(checkpoint)), event_rows: [...this.eventRows.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([job_id, events]) => ({ job_id, events: events.map((event) => structuredClone(event)) })), retention: "metadata_only;task_prompt_response_credentials_and_provider_payloads_not_retained" as const, secret_material: "never_returned" as const };
     const snapshot = { ...descriptor, snapshot_digest: await digestJson(descriptor) };
-    return (await validateSnapshot(snapshot));
+    return (await validateAutonomousCrossDomainSnapshot(snapshot));
   }
 
   async restore(snapshot: AutonomousCrossDomainCheckpointStoreSnapshot): Promise<void> {
-    const validated = await validateSnapshot(snapshot);
+    const validated = await validateAutonomousCrossDomainSnapshot(snapshot);
     this.checkpoints.clear();
     this.eventRows.clear();
     for (const checkpoint of validated.checkpoints) this.checkpoints.set(checkpoint.job_id, structuredClone(checkpoint));
@@ -397,21 +407,80 @@ export class InMemoryAutonomousCrossDomainCheckpointStore implements AutonomousC
 }
 
 export class AutonomousCrossDomainPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly store: AutonomousCrossDomainSnapshotStore, readonly persistence: AutonomousCrossDomainSnapshotPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("cross-domain persistence requires a snapshot-capable store");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("cross-domain persistence adapter is malformed");
   }
 
   async restore(): Promise<AutonomousCrossDomainCheckpointStoreSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot) await this.store.restore(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot) {
+        const validated = await validateAutonomousCrossDomainSnapshot(snapshot);
+        await this.store.restore(validated);
+        this.expectedSnapshotDigest = validated.snapshot_digest;
+        return validated;
+      }
+      this.expectedSnapshotDigest = null;
+      return null;
+    });
   }
 
   async flush(): Promise<AutonomousCrossDomainCheckpointStoreSnapshot> {
-    const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await validateAutonomousCrossDomainSnapshot(await this.store.snapshot());
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("cross-domain persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+export class JsonAutonomousCrossDomainSnapshotPersistence implements AutonomousCrossDomainSnapshotPersistence {
+  constructor(readonly textStore: AutonomousCrossDomainSnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("cross-domain text store is malformed");
+  }
+
+  async read(): Promise<AutonomousCrossDomainCheckpointStoreSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_CROSS_DOMAIN_MAX_SNAPSHOT_BYTES) throw new ArgumentError("cross-domain JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("cross-domain JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("cross-domain JSON is not canonical");
+    return validateAutonomousCrossDomainSnapshot(parsed);
+  }
+
+  async write(raw: AutonomousCrossDomainCheckpointStoreSnapshot): Promise<void> {
+    const snapshot = await validateAutonomousCrossDomainSnapshot(raw);
+    await this.textStore.write(canonicalJson(snapshot));
+  }
+}
+
+export class TransactionalJsonAutonomousCrossDomainSnapshotPersistence extends JsonAutonomousCrossDomainSnapshotPersistence {
+  declare readonly textStore: AutonomousCrossDomainTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousCrossDomainTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("cross-domain text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, raw: AutonomousCrossDomainCheckpointStoreSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !/^[0-9a-f]{64}$/.test(expectedSnapshotDigest)) throw new ArgumentError("cross-domain expected snapshot digest is invalid");
+    const snapshot = await validateAutonomousCrossDomainSnapshot(raw);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(snapshot));
   }
 }
 
