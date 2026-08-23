@@ -679,6 +679,15 @@ export {
   createBuiltinAutonomousDomainEvidenceSourceCatalogue,
   domainEvidenceRequestIdentity,
 } from "./autonomous-domain-evidence-catalogue.js";
+export {
+  AUTONOMOUS_DOMAIN_HTTP_SOURCE_SCHEMA,
+  MAX_AUTONOMOUS_DOMAIN_HTTP_SOURCE_METADATA_BYTES,
+  registerAutonomousDomainHttpEvidenceSource,
+} from "./autonomous-domain-http-source.js";
+export type {
+  AutonomousDomainHttpEvidenceSourceOptions,
+  AutonomousDomainHttpEvidenceSourceRegistration,
+} from "./autonomous-domain-http-source.js";
 export type {
   AutonomousDomainEvidenceFreshnessMode,
   AutonomousDomainEvidenceAuthMode,

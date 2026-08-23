@@ -4651,6 +4651,42 @@ queries, source payloads, prompts, credentials, and normalized values remain tra
 every domain the same practical source-registration lifecycle while keeping domain evaluators,
 provider clients, secret storage, and truth authority in the embedding application.
 
+### Policy-gated HTTP source registration
+
+`registerAutonomousDomainHttpEvidenceSource()` is the concrete bridge from that catalogue to the
+existing bounded HTTP transport. It takes a profile, source identity, provider/adapter identity,
+endpoint resolver, request builder, optional transient header resolver, and the HTTP policy. The
+helper registers the adapter manifest when an `AutonomousEvidenceAdapterRegistry` is supplied and
+binds its manifest digest into the catalogue route. Registration does not call the endpoint.
+
+```typescript
+registerAutonomousDomainHttpEvidenceSource({
+  catalogue,
+  profileId: "builtin.browser.evidence",
+  sourceId: "search-primary",
+  provider: "caller-search-adapter",
+  adapterId: "search-http",
+  adapterVersion: "1",
+  adapterRegistry,
+  policy: new AutonomousHttpConnectorPolicy({
+    allowedHosts: ["search.example"],
+    requireHttps: true,
+  }),
+  endpointResolver: callerEndpointResolver,
+  requestForContext: callerRequestBuilder,
+  headerResolver: callerCredentialSessionHeaderResolver,
+  fetch: callerFetch,
+  metadata: { operation: "search" },
+});
+```
+
+The HTTP layer enforces host/scheme/method, request/response size, timeout, redirect, and header
+boundaries before the caller's fetch function runs. A caller-owned session may supply a transient
+authorization header, but the header, request, response, and key never enter the route, adapter
+manifest, reconciliation plan, or catalogue projection. Approval and normalizer requirements are
+still enforced by the catalogue/reconciler, so HTTP success remains transport evidence rather than
+evaluator success or source truth.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected

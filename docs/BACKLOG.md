@@ -134,6 +134,15 @@ profiles, required metadata, capability scope, approval, dissent, typed failures
 and restart drift. This closes the practical domain-to-source composition gap while leaving source
 clients, credential sessions, evaluators, and truth authority caller-owned.
 
+The TypeScript SDK now also exposes `registerAutonomousDomainHttpEvidenceSource`, which composes
+the bounded HTTP transport with a typed domain source profile and catalogue route. It binds optional
+adapter manifests, source/provider identities, endpoint/request/header resolvers, and explicit
+host/scheme/method/size/timeout policy without dispatching during registration. Approved execution
+then reaches the same all-domain reconciliation path; offline tests exercise twelve-domain success,
+approval pauses, transient header handling, auth refusal, unsafe endpoint policy, and metadata
+redaction. This closes the concrete HTTP-to-domain evidence bridge while keeping endpoint clients,
+credential sessions, response interpretation, and evaluator authority caller-owned.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's
