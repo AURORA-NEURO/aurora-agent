@@ -5837,6 +5837,17 @@ secret-shaped fields, and tampered digests fail closed without mutating the live
 transport ledger informs circuit and failover continuity, while the existing model-health ledger
 continues to own evaluator-quality feedback and selection adaptation.
 
+For TypeScript deployments, `JsonLLMRuntimeHealthSnapshotPersistence` and
+`TransactionalJsonLLMRuntimeHealthSnapshotPersistence` provide the portable text boundary for
+that transport ledger. The transactional coordinator serializes overlapping restore/flush calls,
+requires an explicit restored digest before updating an already-populated store, emits canonical
+JSON, rejects whitespace or key-order rewrites, and fails with a typed CAS conflict when a second
+worker has advanced circuit state. `WebStorageLLMRuntimeHealthSnapshotTextStore` covers browser
+workers; an HTTP or object-store implementation can supply the same caller-owned text contract.
+This is deliberately separate from evaluator-quality persistence: transport failures can preserve
+safe circuit continuity, but they cannot manufacture quality reward or override local credential,
+registration, capability, or approval gates.
+
 All use the same `ProviderRequest` and `ProviderResponse` contract. The runtime does not follow
 redirects, does not allow plain HTTP unless explicitly enabled for local/test use, bounds response
 bytes, retries only classified transient failures, opens a per-provider circuit after repeated

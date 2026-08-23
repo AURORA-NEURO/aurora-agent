@@ -2,7 +2,7 @@ import { ArgumentError, AutonomousCostBudgetError, CredentialError, ProviderRunt
 import type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
 import { AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS } from "./autonomous-execution.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
 /** Public schema for the cross-language, application-owned provider runtime. */
@@ -813,6 +813,16 @@ export interface LLMRuntimeHealthSnapshot extends JsonObject {
 export interface LLMRuntimeHealthPersistence {
   read(): Promise<LLMRuntimeHealthSnapshot | null> | LLMRuntimeHealthSnapshot | null;
   write(snapshot: LLMRuntimeHealthSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: LLMRuntimeHealthSnapshot): Promise<boolean> | boolean;
+}
+
+export interface LLMRuntimeHealthSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface LLMRuntimeTransactionalHealthSnapshotTextStore extends LLMRuntimeHealthSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 interface HealthState {
@@ -2729,23 +2739,114 @@ export async function validateLLMRuntimeHealthSnapshot(value: unknown): Promise<
   const descriptor = { schema: LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA, providers, models, retention: "transport_health_metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
   if (await digestJson(descriptor) !== snapshotDigest) throw new ProviderRuntimeError("LLM runtime health snapshot digest mismatch");
   const snapshot = { ...descriptor, snapshot_digest: snapshotDigest };
-  if (bytes(JSON.stringify(snapshot) ?? "") > MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) throw new ProviderRuntimeError("LLM runtime health snapshot exceeds its byte capacity");
+  if (bytes(canonicalJson(snapshot)) > MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) throw new ProviderRuntimeError("LLM runtime health snapshot exceeds its byte capacity");
   return structuredClone(snapshot);
+}
+
+/** Canonical JSON persistence for transport-health snapshots over a caller-owned text store. */
+export class JsonLLMRuntimeHealthSnapshotPersistence implements LLMRuntimeHealthPersistence {
+  protected readonly textStore: LLMRuntimeHealthSnapshotTextStore;
+  readonly maxBytes: number;
+
+  constructor(textStore: LLMRuntimeHealthSnapshotTextStore, maxBytes = MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("LLM runtime health text store is malformed");
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) throw new ArgumentError("LLM runtime health JSON maxBytes is outside its bound");
+    this.textStore = textStore;
+    this.maxBytes = maxBytes;
+  }
+
+  async read(): Promise<LLMRuntimeHealthSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || bytes(encoded) > this.maxBytes) throw new ProviderRuntimeError("LLM runtime health JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ProviderRuntimeError("LLM runtime health JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ProviderRuntimeError("LLM runtime health JSON is not canonical");
+    const snapshot = await validateLLMRuntimeHealthSnapshot(parsed);
+    if (bytes(canonicalJson(snapshot)) > this.maxBytes) throw new ProviderRuntimeError("LLM runtime health JSON exceeds its byte bound");
+    return snapshot;
+  }
+
+  async write(snapshot: LLMRuntimeHealthSnapshot): Promise<void> {
+    await this.textStore.write(await this.encode(snapshot));
+  }
+
+  protected async encode(snapshot: LLMRuntimeHealthSnapshot): Promise<string> {
+    const validated = await validateLLMRuntimeHealthSnapshot(snapshot);
+    const encoded = canonicalJson(validated);
+    if (bytes(encoded) > this.maxBytes) throw new ProviderRuntimeError("LLM runtime health JSON exceeds its byte bound");
+    return encoded;
+  }
+}
+
+/** Canonical JSON transport-health persistence with atomic stale-writer fencing. */
+export class TransactionalJsonLLMRuntimeHealthSnapshotPersistence extends JsonLLMRuntimeHealthSnapshotPersistence {
+  declare protected readonly textStore: LLMRuntimeTransactionalHealthSnapshotTextStore;
+
+  constructor(textStore: LLMRuntimeTransactionalHealthSnapshotTextStore, maxBytes = MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) {
+    super(textStore, maxBytes);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("LLM runtime health text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: LLMRuntimeHealthSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !/^[0-9a-f]{64}$/.test(expectedSnapshotDigest)) throw new ProviderRuntimeError("LLM runtime health expected snapshot digest is malformed");
+    const committed = await this.textStore.writeIfUnchanged(expectedSnapshotDigest, await this.encode(snapshot));
+    if (typeof committed !== "boolean") throw new ProviderRuntimeError("LLM runtime health compare-and-swap returned a non-boolean result");
+    return committed;
+  }
+}
+
+/** Browser-compatible local text storage for transport-health snapshots. */
+export class WebStorageLLMRuntimeHealthSnapshotTextStore implements LLMRuntimeHealthSnapshotTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("LLM runtime health Web Storage adapter is malformed");
+    boundedIdentifier("LLM runtime health storage key", key, 256);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
 }
 
 /** Connect LLM transport-health snapshots to a caller-owned durable adapter. */
 export class LLMRuntimeHealthPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly runtime: LLMRuntime, readonly persistence: LLMRuntimeHealthPersistence) {
     if (!runtime || typeof runtime.snapshotHealth !== "function" || typeof runtime.restoreHealth !== "function") throw new ArgumentError("LLM runtime health persistence requires an LLMRuntime");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("LLM runtime health persistence adapter is malformed");
   }
 
   async restore(): Promise<LLMRuntimeHealthSnapshot | null> {
-    return this.runtime.restorePersistedHealth(this.persistence);
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = await validateLLMRuntimeHealthSnapshot(raw);
+      await this.runtime.restoreHealth(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return structuredClone(snapshot);
+    });
   }
 
   async flush(): Promise<LLMRuntimeHealthSnapshot> {
-    return this.runtime.saveHealth(this.persistence);
+    return this.enqueue(async () => {
+      const snapshot = await this.runtime.snapshotHealth();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ProviderRuntimeError("LLM runtime health persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return structuredClone(snapshot);
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }
 

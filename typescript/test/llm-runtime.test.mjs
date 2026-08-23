@@ -11,6 +11,7 @@ import {
   AutonomousRuntime,
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
+  TransactionalJsonLLMRuntimeHealthSnapshotPersistence,
   LLMRuntime,
   LLMRuntimeHealthPersistenceCoordinator,
   ProviderRuntimeError,
@@ -41,6 +42,21 @@ function request(model = "test-model", overrides = {}) {
     messages: [{ role: "user", content: "Return a bounded answer." }],
     maxOutputTokens: 128,
     ...overrides,
+  };
+}
+
+function transactionalRuntimeHealthTextStore() {
+  let encoded = null;
+  return {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (current !== expected) return false;
+      encoded = value;
+      return true;
+    },
+    encoded: () => encoded,
   };
 }
 
@@ -687,6 +703,38 @@ test("LLM transport health survives restart without restoring credentials or dis
   tampered.providers[0].successes = 98;
   await assert.rejects(validateLLMRuntimeHealthSnapshot(tampered), /digest mismatch/);
   assert.equal(restarted.providerStatus("restart-health").attempts, 2);
+});
+
+test("LLM transport health JSON persistence is canonical, serialized, and CAS-fenced", async () => {
+  const config = openaiCompatibleProvider("durable-health", "https://durable-health.test", { requiresCredential: false, maxAttempts: 1 });
+  const source = new LLMRuntime({ fetch: async () => jsonResponse({ output_text: "bounded" }) });
+  source.registerProvider(config);
+  const textStore = transactionalRuntimeHealthTextStore();
+  const persistence = new TransactionalJsonLLMRuntimeHealthSnapshotPersistence(textStore);
+  const coordinator = new LLMRuntimeHealthPersistenceCoordinator(source, persistence);
+  await source.invoke("durable-health", request("model-a"));
+  const first = await coordinator.flush();
+  assert.equal(textStore.encoded(), JSON.stringify(JSON.parse(textStore.encoded())));
+
+  const restarted = new LLMRuntime({ fetch: async () => jsonResponse({ output_text: "restarted" }) });
+  restarted.registerProvider(config);
+  const restored = new LLMRuntimeHealthPersistenceCoordinator(restarted, persistence);
+  assert.deepEqual(await restored.restore(), first);
+  assert.equal(restarted.providerStatus("durable-health").attempts, 1);
+
+  const staleRuntime = new LLMRuntime({ fetch: async () => jsonResponse({ output_text: "stale" }) });
+  staleRuntime.registerProvider(config);
+  const stale = new LLMRuntimeHealthPersistenceCoordinator(staleRuntime, persistence);
+  await stale.restore();
+  await source.invoke("durable-health", request("model-b"));
+  await coordinator.flush();
+  await staleRuntime.invoke("durable-health", request("model-c"));
+  await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
+
+  const canonical = textStore.encoded();
+  textStore.write(JSON.stringify(JSON.parse(canonical), null, 2));
+  await assert.rejects(() => persistence.read(), /not canonical/);
+  textStore.write(canonical);
 });
 
 test("autonomous runtime gates candidates on provider readiness and feeds health back to selection", async () => {
