@@ -33,7 +33,8 @@ from .errors import ArgumentError
 
 AUTONOMOUS_RUN_TRACE_SCHEMA = "bioprism-python-autonomous-run-trace/0.1"
 AUTONOMOUS_RUN_TRACE_EVENT_SCHEMA = "bioprism-python-autonomous-run-trace-event/0.1"
-AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-run-trace-snapshot/0.1"
+_LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-run-trace-snapshot/0.1"
+AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-run-trace-snapshot/0.2"
 AUTONOMOUS_RUN_TRACE_PHASES = (
     "started",
     "plan_compiled",
@@ -313,6 +314,8 @@ class AutonomousRunTraceSnapshot:
     head_digest: str
     events: tuple[AutonomousRunTraceEvent, ...]
     snapshot_digest: str
+    snapshot_generation: int | None = None
+    previous_snapshot_digest: str | None = None
     retention: str = AUTONOMOUS_RUN_TRACE_SNAPSHOT_RETENTION
     secret_material: str = AUTONOMOUS_RUN_TRACE_SECRET_MATERIAL
 
@@ -325,6 +328,9 @@ class AutonomousRunTraceSnapshot:
             "retention": self.retention,
             "secret_material": self.secret_material,
         }
+        if self.snapshot_generation is not None:
+            body["snapshot_generation"] = self.snapshot_generation
+            body["previous_snapshot_digest"] = self.previous_snapshot_digest
         if include_digest:
             body["snapshot_digest"] = self.snapshot_digest
         return body
@@ -332,10 +338,27 @@ class AutonomousRunTraceSnapshot:
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any], *, max_events: int = MAX_AUTONOMOUS_RUN_TRACE_EVENTS, max_bytes: int = MAX_AUTONOMOUS_RUN_TRACE_SNAPSHOT_BYTES) -> "AutonomousRunTraceSnapshot":
         max_events, max_bytes = _validate_trace_limits(max_events, max_bytes)
-        if not isinstance(raw, Mapping) or raw.get("schema") != AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA:
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("autonomous run trace snapshot is malformed")
+        legacy = raw.get("schema") == _LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA
+        if raw.get("schema") != AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA and not legacy:
+            raise ArgumentError("autonomous run trace snapshot schema is unsupported")
+        expected_keys = {"schema", "sequence", "head_digest", "events", "snapshot_digest", "retention", "secret_material"}
+        if not legacy:
+            expected_keys.update({"snapshot_generation", "previous_snapshot_digest"})
+        if set(raw) != expected_keys:
             raise ArgumentError("autonomous run trace snapshot is malformed")
         if raw.get("retention") != AUTONOMOUS_RUN_TRACE_SNAPSHOT_RETENTION or raw.get("secret_material") != AUTONOMOUS_RUN_TRACE_SECRET_MATERIAL:
             raise ArgumentError("autonomous run trace snapshot retention is invalid")
+        generation: int | None = None
+        previous_snapshot_digest: str | None = None
+        if not legacy:
+            generation = raw.get("snapshot_generation")
+            previous_snapshot_digest = _digest("autonomous run trace previous_snapshot_digest", raw.get("previous_snapshot_digest"), allow_none=True)
+            if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+                raise ArgumentError("autonomous run trace snapshot generation is outside its bounds")
+            if (generation == 1) != (previous_snapshot_digest is None):
+                raise ArgumentError("autonomous run trace snapshot generation and previous_snapshot_digest are inconsistent")
         raw_events = raw.get("events")
         if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes)):
             raise ArgumentError("autonomous run trace snapshot events are malformed")
@@ -345,7 +368,8 @@ class AutonomousRunTraceSnapshot:
         if raw.get("sequence") != len(events) or raw.get("head_digest") != expected_head:
             raise ArgumentError("autonomous run trace snapshot head is inconsistent")
         body = {
-            "schema": AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,
+            "schema": AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA if not legacy else _LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,
+            **({} if legacy else {"snapshot_generation": generation, "previous_snapshot_digest": previous_snapshot_digest}),
             "sequence": len(events),
             "head_digest": expected_head,
             "events": [event.to_dict() for event in events],
@@ -356,11 +380,13 @@ class AutonomousRunTraceSnapshot:
         if not isinstance(supplied, str) or content_digest(body) != supplied:
             raise ArgumentError("autonomous run trace snapshot digest is invalid")
         snapshot = cls(
-            schema=AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,
+            schema=_LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA if legacy else AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,
             sequence=len(events),
             head_digest=expected_head,
             events=events,
             snapshot_digest=supplied,
+            snapshot_generation=generation,
+            previous_snapshot_digest=previous_snapshot_digest,
         )
         if len(canonical_json(snapshot.to_dict()).encode("utf-8")) > max_bytes:
             raise ArgumentError("autonomous run trace snapshot exceeds its byte capacity")
@@ -407,6 +433,10 @@ class InMemoryAutonomousRunTraceStore:
         self.clock = time.time_ns if clock is None else clock
         self._events: list[AutonomousRunTraceEvent] = []
         self._lock = threading.RLock()
+        self._snapshot_generation = 0
+        self._previous_snapshot_digest: str | None = None
+        self._cached_snapshot: AutonomousRunTraceSnapshot | None = None
+        self._cached_event_signature: tuple[str, ...] | None = None
 
     def append(self, event: Mapping[str, Any]) -> AutonomousRunTraceEvent:
         with self._lock:
@@ -423,6 +453,8 @@ class InMemoryAutonomousRunTraceStore:
             if len(canonical_json(result.to_dict()).encode("utf-8")) > self.max_event_bytes:
                 raise ArgumentError("autonomous run trace event exceeds its byte capacity")
             self._events.append(result)
+            self._cached_snapshot = None
+            self._cached_event_signature = None
             return result
 
     def events(self, query: Mapping[str, Any] | None = None) -> tuple[AutonomousRunTraceEvent, ...]:
@@ -454,8 +486,13 @@ class InMemoryAutonomousRunTraceStore:
     def snapshot(self) -> AutonomousRunTraceSnapshot:
         with self._lock:
             _verify_chain(self._events, self.max_events)
+            signature = tuple(event.event_digest for event in self._events)
+            if self._cached_snapshot is not None and self._cached_event_signature == signature:
+                return self._cached_snapshot
             body = {
                 "schema": AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,
+                "snapshot_generation": self._snapshot_generation + 1,
+                "previous_snapshot_digest": None if self._snapshot_generation == 0 else self._previous_snapshot_digest,
                 "sequence": len(self._events),
                 "head_digest": self._events[-1].event_digest if self._events else "",
                 "events": [event.to_dict() for event in self._events],
@@ -468,15 +505,25 @@ class InMemoryAutonomousRunTraceStore:
                 head_digest=body["head_digest"],
                 events=tuple(self._events),
                 snapshot_digest=content_digest(body),
+                snapshot_generation=body["snapshot_generation"],
+                previous_snapshot_digest=body["previous_snapshot_digest"],
             )
             if len(canonical_json(snapshot.to_dict()).encode("utf-8")) > self.max_snapshot_bytes:
                 raise ArgumentError("autonomous run trace snapshot exceeds its byte capacity")
+            self._snapshot_generation = snapshot.snapshot_generation or 0
+            self._previous_snapshot_digest = snapshot.snapshot_digest
+            self._cached_snapshot = snapshot
+            self._cached_event_signature = signature
             return snapshot
 
     def restore(self, snapshot: Mapping[str, Any] | AutonomousRunTraceSnapshot) -> None:
         verified = validate_autonomous_run_trace_snapshot(snapshot, max_events=self.max_events, max_bytes=self.max_snapshot_bytes)
         with self._lock:
             self._events = list(verified.events)
+            self._snapshot_generation = verified.snapshot_generation or 0
+            self._previous_snapshot_digest = verified.snapshot_digest if self._snapshot_generation > 0 else None
+            self._cached_snapshot = None if verified.snapshot_generation is None else verified
+            self._cached_event_signature = None if self._cached_snapshot is None else tuple(event.event_digest for event in verified.events)
 
     def verify_integrity(self) -> dict[str, Any]:
         with self._lock:

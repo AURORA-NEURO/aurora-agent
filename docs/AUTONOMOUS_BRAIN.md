@@ -7473,6 +7473,15 @@ The trace validator rechecks every event digest, sequence, retention marker, and
 restore. Persistence retains only the bounded metadata trace; the remote service still owns
 atomic CAS, access control, encryption, retention, and operational export policy.
 
+Run-trace snapshots in both SDKs use a versioned lineage envelope. Current `0.2` snapshots carry
+an explicit generation and predecessor snapshot digest, are cached byte-for-byte when the event
+journal has not changed, and advance the lineage only after a new event is appended. The stores
+continue to read `0.1` snapshots and migrate them in memory without rewriting the legacy image;
+the next write emits the current schema. Restore rejects forged lineage, digest, sequence, and
+event mutations before changing live state, so a stale or tampered trace cannot silently become
+the source for a later flush. This makes run traces consistent with the model-health, capability,
+evidence-runtime, and provider-health snapshot boundaries used by cross-domain orchestration.
+
 For deployments that need to forward those already-redacted events to an operational collector,
 the TypeScript and Python SDKs provide `AutonomousHttpMetadataEventSink` as a separate bounded
 delivery adapter. It accepts only

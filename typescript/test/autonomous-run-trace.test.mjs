@@ -10,6 +10,7 @@ import {
   InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   autonomousRunTraceStatus,
+  digestJson,
   TransactionalJsonAutonomousRunTracePersistence,
   WebStorageAutonomousRunTraceTextStore,
   validateAutonomousRunTraceSnapshot,
@@ -76,6 +77,9 @@ test("run trace snapshot rehydrates atomically and rejects tampering", async () 
   await session.started();
   await session.complete({ status: "paused", route_digest: digest("f") });
   const snapshot = source.snapshot();
+  assert.equal(snapshot.snapshot_generation, 1);
+  assert.equal(snapshot.previous_snapshot_digest, null);
+  assert.deepEqual(source.snapshot(), snapshot);
   const restored = new InMemoryAutonomousRunTraceStore({ clock: () => 20 });
   restored.restore(snapshot);
   assert.deepEqual(restored.snapshot(), snapshot);
@@ -99,6 +103,26 @@ test("run trace snapshot rehydrates atomically and rejects tampering", async () 
   tampered.events[0].status = "failed";
   assert.throws(() => restored.restore(tampered), /digest|hash chain|invalid/);
   assert.deepEqual(restored.snapshot(), snapshot, "failed restore must leave live state unchanged");
+
+  const forged = structuredClone(snapshot);
+  forged.snapshot_generation = 2;
+  forged.previous_snapshot_digest = null;
+  const { snapshot_digest: _forgedDigest, ...forgedBody } = forged;
+  forged.snapshot_digest = await digestJson(forgedBody);
+  assert.throws(() => restored.restore(forged), /generation and previous_snapshot_digest/);
+
+  const legacy = structuredClone(snapshot);
+  delete legacy.snapshot_generation;
+  delete legacy.previous_snapshot_digest;
+  legacy.schema = "bioprism-typescript-autonomous-run-trace-snapshot/0.1";
+  const { snapshot_digest: _legacyDigest, ...legacyBody } = legacy;
+  legacy.snapshot_digest = await digestJson(legacyBody);
+  const legacyStore = new InMemoryAutonomousRunTraceStore({ clock: () => 40 });
+  legacyStore.restore(legacy);
+  const upgraded = legacyStore.snapshot();
+  assert.equal(upgraded.snapshot_generation, 1);
+  assert.equal(upgraded.previous_snapshot_digest, null);
+  assert.notEqual(upgraded.snapshot_digest, legacy.snapshot_digest);
 });
 
 test("run trace JSON, browser, and CAS persistence survive all-domain restart without stale overwrite", async () => {
@@ -131,6 +155,9 @@ test("run trace JSON, browser, and CAS persistence survive all-domain restart wi
   assert.equal(restored.snapshot_digest, snapshot.snapshot_digest);
   assert.equal(restartedStore.verifyIntegrity().events, AUTONOMOUS_DOMAIN_NAMES.length * 2);
   await restartedCoordinator.flush();
+  const advanced = restartedStore.snapshot();
+  assert.equal(advanced.snapshot_generation, 1);
+  assert.equal(advanced.previous_snapshot_digest, null);
 
   const staleStore = new InMemoryAutonomousRunTraceStore({ clock: () => 300 });
   const staleCoordinator = new AutonomousRunTracePersistenceCoordinator(staleStore, transactional);
@@ -138,7 +165,9 @@ test("run trace JSON, browser, and CAS persistence survive all-domain restart wi
   const freshSession = new AutonomousRunTraceSession(restartedStore, { run_id: "persist-fresh", task_digest: digest("f"), domains: ["evaluation"] });
   await freshSession.started();
   await freshSession.complete({ status: "completed" });
-  await restartedCoordinator.flush();
+  const second = await restartedCoordinator.flush();
+  assert.equal(second.snapshot_generation, 2);
+  assert.equal(second.previous_snapshot_digest, snapshot.snapshot_digest);
   const staleSession = new AutonomousRunTraceSession(staleStore, { run_id: "persist-stale", task_digest: digest("e"), domains: ["evaluation"] });
   await staleSession.started();
   await staleSession.complete({ status: "completed" });

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 
 import pytest
 
@@ -8,7 +9,6 @@ from prism_sdk import (
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousRunTraceSession,
     AutonomousRunTracePersistenceCoordinator,
-    AutonomousRunTraceSnapshot,
     AutonomousTracedRunResult,
     BrainRunResult,
     InMemoryAutonomousRunTraceStore,
@@ -105,8 +105,28 @@ def test_snapshot_json_cas_restore_and_tamper_detection() -> None:
     persistence = TransactionalJsonAutonomousRunTracePersistence(text_store)
     coordinator = AutonomousRunTracePersistenceCoordinator(store, persistence)
     snapshot = coordinator.flush()
+    assert snapshot.snapshot_generation == 1
+    assert snapshot.previous_snapshot_digest is None
+    assert store.snapshot().to_dict() == snapshot.to_dict()
     assert coordinator.restore() is not None
     assert validate_autonomous_run_trace_snapshot(snapshot.to_dict()).snapshot_digest == snapshot.snapshot_digest
+
+    legacy = snapshot.to_dict()
+    legacy.pop("snapshot_generation")
+    legacy.pop("previous_snapshot_digest")
+    legacy["schema"] = "bioprism-python-autonomous-run-trace-snapshot/0.1"
+    legacy_body = dict(legacy)
+    legacy_body.pop("snapshot_digest")
+    legacy["snapshot_digest"] = hashlib.sha256(
+        json.dumps(legacy_body, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    assert validate_autonomous_run_trace_snapshot(legacy).schema == "bioprism-python-autonomous-run-trace-snapshot/0.1"
+    legacy_store = InMemoryAutonomousRunTraceStore(clock=lambda: 4)
+    legacy_store.restore(legacy)
+    upgraded = legacy_store.snapshot()
+    assert upgraded.snapshot_generation == 1
+    assert upgraded.previous_snapshot_digest is None
+    assert upgraded.snapshot_digest != legacy["snapshot_digest"]
 
     tampered = snapshot.to_dict()
     tampered["events"][0]["status"] = "failed"
@@ -135,7 +155,9 @@ def test_snapshot_json_cas_restore_and_tamper_detection() -> None:
             "status": "running",
         }
     )
-    competing_coordinator.flush()
+    advanced = competing_coordinator.flush()
+    assert advanced.snapshot_generation == 2
+    assert advanced.previous_snapshot_digest == snapshot.snapshot_digest
     with pytest.raises(ArgumentError):
         coordinator.flush()
 

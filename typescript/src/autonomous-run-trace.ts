@@ -7,7 +7,8 @@ import type { JsonObject } from "./types.js";
 /** A metadata-only, append-only execution trace for one or more autonomous invocations. */
 export const AUTONOMOUS_RUN_TRACE_SCHEMA = "bioprism-typescript-autonomous-run-trace/0.1" as const;
 export const AUTONOMOUS_RUN_TRACE_EVENT_SCHEMA = "bioprism-typescript-autonomous-run-trace-event/0.1" as const;
-export const AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-run-trace-snapshot/0.1" as const;
+const LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-run-trace-snapshot/0.1" as const;
+export const AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-run-trace-snapshot/0.2" as const;
 export const AUTONOMOUS_RUN_TRACE_PHASES = [
   "started",
   "plan_compiled",
@@ -106,7 +107,10 @@ export interface AutonomousRunTraceQuery {
 }
 
 export interface AutonomousRunTraceSnapshot extends JsonObject {
-  schema: typeof AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA;
+  /** 0.1 remains readable; current snapshots carry independent image lineage in 0.2. */
+  schema: typeof AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA;
+  snapshot_generation?: number;
+  previous_snapshot_digest?: string | null;
   sequence: number;
   head_digest: string;
   events: AutonomousRunTraceEvent[];
@@ -282,9 +286,13 @@ function verifyEventChain(events: readonly AutonomousRunTraceEvent[], maximum: n
   return { verified: true, events: events.length, head_digest: previous };
 }
 
-function snapshotBody(events: readonly AutonomousRunTraceEvent[]): Omit<AutonomousRunTraceSnapshot, "snapshot_digest"> {
+function snapshotBody(events: readonly AutonomousRunTraceEvent[], options: { schema: typeof AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA; snapshotGeneration?: number; previousSnapshotDigest?: string | null }): Omit<AutonomousRunTraceSnapshot, "snapshot_digest"> {
+  const lineage = options.schema === AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA
+    ? { snapshot_generation: options.snapshotGeneration!, previous_snapshot_digest: options.previousSnapshotDigest! }
+    : {};
   return {
-    schema: AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,
+    schema: options.schema,
+    ...lineage,
     sequence: events.length,
     head_digest: events.at(-1)?.event_digest ?? "",
     events: events.map(cloneEvent),
@@ -294,15 +302,28 @@ function snapshotBody(events: readonly AutonomousRunTraceEvent[]): Omit<Autonomo
 }
 
 function validateSnapshot(value: unknown, maximumEvents: number, maximumBytes: number): AutonomousRunTraceSnapshot {
-  if (!isObject(value) || value.schema !== AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA || !Array.isArray(value.events)) throw new ArgumentError("autonomous run trace snapshot is malformed");
+  if (!isObject(value) || !Array.isArray(value.events)) throw new ArgumentError("autonomous run trace snapshot is malformed");
+  const legacy = value.schema === LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA;
+  if (value.schema !== AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA && !legacy) throw new ArgumentError("autonomous run trace snapshot schema is unsupported");
+  const allowedKeys = legacy
+    ? ["schema", "sequence", "head_digest", "events", "snapshot_digest", "retention", "secret_material"]
+    : ["schema", "snapshot_generation", "previous_snapshot_digest", "sequence", "head_digest", "events", "snapshot_digest", "retention", "secret_material"];
+  if (Object.keys(value).some((key) => !allowedKeys.includes(key))) throw new ArgumentError("autonomous run trace snapshot contains unsupported metadata");
   if (value.retention !== "metadata_only_hash_chained_no_prompts_responses_or_tool_payloads" || value.secret_material !== "never_returned") throw new ArgumentError("autonomous run trace snapshot retention is invalid");
   const snapshotValue = value as Record<string, unknown>;
+  if (!legacy) {
+    if (!Number.isSafeInteger(snapshotValue.snapshot_generation) || (snapshotValue.snapshot_generation as number) < 1) throw new ArgumentError("autonomous run trace snapshot generation is outside its bounds");
+    if (snapshotValue.previous_snapshot_digest !== null && (typeof snapshotValue.previous_snapshot_digest !== "string" || !/^[0-9a-f]{64}$/.test(snapshotValue.previous_snapshot_digest))) throw new ArgumentError("autonomous run trace previous_snapshot_digest is malformed");
+    if (((snapshotValue.snapshot_generation as number) === 1) !== (snapshotValue.previous_snapshot_digest === null)) throw new ArgumentError("autonomous run trace snapshot generation and previous_snapshot_digest are inconsistent");
+  }
   const events = (snapshotValue.events as unknown[]).map((event) => {
     if (!isObject(event)) throw new ArgumentError("autonomous run trace snapshot contains a malformed event");
     return structuredClone(event) as unknown as AutonomousRunTraceEvent;
   });
   const verified = verifyEventChain(events, maximumEvents);
-  const body = snapshotBody(events);
+  const body = legacy
+    ? snapshotBody(events, { schema: LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA })
+    : snapshotBody(events, { schema: AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA, snapshotGeneration: snapshotValue.snapshot_generation as number, previousSnapshotDigest: snapshotValue.previous_snapshot_digest as string | null });
   const suppliedSequence = snapshotValue.sequence;
   const suppliedHead = snapshotValue.head_digest;
   const suppliedDigest = snapshotValue.snapshot_digest;
@@ -388,6 +409,10 @@ export class InMemoryAutonomousRunTraceStore implements AutonomousRunTraceStore 
   private readonly maxEventBytes: number;
   private readonly maxSnapshotBytes: number;
   private readonly clock: () => number;
+  private snapshotGeneration = 0;
+  private previousSnapshotDigest: string | null = null;
+  private cachedSnapshot: AutonomousRunTraceSnapshot | null = null;
+  private cachedEventSignature: string | null = null;
 
   constructor(options: { maxEvents?: number; maxEventBytes?: number; maxSnapshotBytes?: number; clock?: () => number } = {}) {
     this.maxEvents = options.maxEvents ?? MAX_AUTONOMOUS_RUN_TRACE_EVENTS;
@@ -405,6 +430,8 @@ export class InMemoryAutonomousRunTraceStore implements AutonomousRunTraceStore 
     const event = { ...eventBody, event_digest: eventDigest(eventBody) } as AutonomousRunTraceEvent;
     if (new TextEncoder().encode(canonicalJson(event)).byteLength > this.maxEventBytes) throw new ArgumentError("autonomous run trace event exceeds its byte capacity");
     this.eventsValue.push(event);
+    this.cachedSnapshot = null;
+    this.cachedEventSignature = null;
     return cloneEvent(event);
   }
 
@@ -433,9 +460,19 @@ export class InMemoryAutonomousRunTraceStore implements AutonomousRunTraceStore 
   }
 
   snapshot(): AutonomousRunTraceSnapshot {
-    const body = snapshotBody(this.eventsValue);
+    const signature = this.eventsValue.map((event) => event.event_digest).join(":");
+    if (this.cachedSnapshot !== null && this.cachedEventSignature === signature) return structuredClone(this.cachedSnapshot);
+    const body = snapshotBody(this.eventsValue, {
+      schema: AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,
+      snapshotGeneration: this.snapshotGeneration + 1,
+      previousSnapshotDigest: this.snapshotGeneration === 0 ? null : this.previousSnapshotDigest,
+    });
     const snapshot = { ...body, snapshot_digest: digestJsonSync(body) } as AutonomousRunTraceSnapshot;
     if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > this.maxSnapshotBytes) throw new ArgumentError("autonomous run trace snapshot exceeds its byte capacity");
+    this.snapshotGeneration = snapshot.snapshot_generation!;
+    this.previousSnapshotDigest = snapshot.snapshot_digest;
+    this.cachedSnapshot = structuredClone(snapshot);
+    this.cachedEventSignature = signature;
     return structuredClone(snapshot);
   }
 
@@ -443,6 +480,10 @@ export class InMemoryAutonomousRunTraceStore implements AutonomousRunTraceStore 
     const snapshot = validateSnapshot(raw, this.maxEvents, this.maxSnapshotBytes);
     const next = snapshot.events.map(cloneEvent);
     this.eventsValue.splice(0, this.eventsValue.length, ...next);
+    this.snapshotGeneration = snapshot.snapshot_generation ?? 0;
+    this.previousSnapshotDigest = this.snapshotGeneration === 0 ? null : snapshot.snapshot_digest;
+    this.cachedSnapshot = snapshot.schema === AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA ? structuredClone(snapshot) : null;
+    this.cachedEventSignature = this.cachedSnapshot === null ? null : this.eventsValue.map((event) => event.event_digest).join(":");
   }
 
   verifyIntegrity(): { verified: true; events: number; head_digest: string } {
