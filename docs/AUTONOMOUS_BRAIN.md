@@ -3784,10 +3784,13 @@ the selected learning envelope exposes them; when an in-process learner has no r
 the evaluator projection itself is the bounded settlement identity. A restart is never guessed:
 callers must set
 `resume_decision_cycle=True` and provide `decision_cycle_rehydrate_result`, which returns the
-private `AutonomousAutoResult` from caller-owned storage. The SDK verifies the route digest,
-outcome digest, selection digest, evaluation digest, terminal status, task digest, mode, learning
-flags, and trajectory identity before returning it, so a rehydration callback cannot substitute a
-different result or trigger a duplicate provider call.
+private `AutonomousAutoResult` from caller-owned storage. Provider-assisted runs also retain the
+redacted `semantic_route` receipt, including its classifier selection identity, so routing and
+execution model decisions remain distinguishable. On an explicit resume, the persisted cursor is
+loaded before semantic routing or provider planning can run; the SDK verifies the route digest,
+planning digest, outcome digest, selection digest, evaluation digest, terminal status, task digest,
+mode, learning flags, and trajectory identity before returning it. A rehydration callback therefore
+cannot substitute a different result or trigger a duplicate classifier, planner, or provider call.
 
 ```python
 from prism_sdk import (

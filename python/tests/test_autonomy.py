@@ -1506,6 +1506,45 @@ def test_provider_semantic_router_requires_approval_and_never_builds_executable_
         server.server_close()
 
 
+def test_run_auto_preserves_semantic_route_selection_in_restart_safe_result():
+    runtime, store, server, thread = _runtime()
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    cycle_store = InMemoryAutonomousDecisionCycleStateStore()
+    try:
+        handle = store.register("openai", "semantic-cycle-secret")
+        result = agent.run_auto(
+            task="compare synaptic oscillation artifacts across two measurement protocols",
+            credentials={"openai": handle},
+            semantic_routing=True,
+            approve_provider_call=True,
+            decision_cycle_id="semantic-cycle-1",
+            decision_cycle_store=cycle_store,
+        )
+        persisted = cycle_store.load("semantic-cycle-1")
+        assert result.status == "completed"
+        assert result.semantic_route is not None
+        assert result.semantic_route.status == "completed"
+        assert result.semantic_route.selection_digest is not None
+        assert persisted is not None and persisted.selection_digest is not None
+        public = json.dumps(result.to_dict())
+        assert "semantic-cycle-secret" not in public
+
+        resumed = agent.run_auto(
+            task="compare synaptic oscillation artifacts across two measurement protocols",
+            credentials={"openai": handle},
+            semantic_routing=True,
+            decision_cycle_id="semantic-cycle-1",
+            decision_cycle_store=cycle_store,
+            resume_decision_cycle=True,
+            decision_cycle_rehydrate_result=lambda _context: result,
+        )
+        assert resumed.to_dict() == result.to_dict()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_provider_plan_refinement_is_dependency_closed_and_approval_gated():
     runtime, store, server, thread = _runtime()
     try:

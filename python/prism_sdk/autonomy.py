@@ -2993,6 +2993,7 @@ class AutonomousAutoResult:
     learning_mode: str = "off"
     planning_mode: str = "deterministic"
     planning: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | None = None
+    semantic_route: AutonomousSemanticRouteResult | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {"completed", "route_review_required", "planning_review_required"}:
@@ -3014,6 +3015,13 @@ class AutonomousAutoResult:
             (AutonomousPlanRefinementResult, AutonomousCrossDomainPlanRefinementResult),
         ):
             raise BrainRunError("automatic result planning proposal is invalid")
+        if self.semantic_route is not None and not isinstance(
+            self.semantic_route, AutonomousSemanticRouteResult
+        ):
+            raise BrainRunError("automatic result semantic route is invalid")
+        if self.semantic_route is not None and self.semantic_route.status == "completed":
+            if self.semantic_route.route.route_digest != self.route.route_digest:
+                raise BrainRunError("completed automatic semantic route must match the result route")
         if self.status == "route_review_required" and (
             not self.route.abstained or self.result is not None or self.planning is not None
         ):
@@ -3045,6 +3053,7 @@ class AutonomousAutoResult:
             "learning_mode": self.learning_mode,
             "planning_mode": self.planning_mode,
             "planning": None if self.planning is None else self.planning.to_dict(),
+            "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
             "retention": "route_metadata_only; provider_result_caller_owned",
         }
 
@@ -15792,6 +15801,56 @@ class AutonomousAgent:
 
         if "domain" in kwargs:
             raise BrainRunError("run_auto chooses the domain; pass routing hints instead")
+        cycle_learning = explicit_learning or learning_mode != "off"
+
+        def rehydrate_restored_cycle(cycle: AutonomousDecisionCycle) -> AutonomousAutoResult:
+            if not resume_decision_cycle:
+                raise BrainRunError("persisted decision cycle requires resume_decision_cycle=True")
+            if decision_cycle_rehydrate_result is None:
+                raise BrainRunError("decision-cycle resume requires decision_cycle_rehydrate_result")
+            rehydrated = decision_cycle_rehydrate_result(cycle.context())
+            if not isinstance(rehydrated, AutonomousAutoResult):
+                raise BrainRunError("decision-cycle rehydrator must return an AutonomousAutoResult")
+            if cycle.state.route_digest is not None and rehydrated.route.route_digest != cycle.state.route_digest:
+                raise BrainRunError("rehydrated decision result does not match the persisted route digest")
+            if cycle.state.plan_refinement_digest is not None:
+                if rehydrated.planning is None or content_digest(rehydrated.planning.to_dict()) != cycle.state.plan_refinement_digest:
+                    raise BrainRunError("rehydrated decision result does not match the persisted planning digest")
+            if cycle.state.outcome_digest is not None:
+                if content_digest(rehydrated.to_dict()) != cycle.state.outcome_digest:
+                    raise BrainRunError("rehydrated decision result does not match the persisted outcome digest")
+            if cycle.state.selection_digest is not None:
+                observed_selection_digest = _decision_cycle_selection_digest(rehydrated)
+                if observed_selection_digest != cycle.state.selection_digest:
+                    raise BrainRunError("rehydrated decision result does not match the persisted selection digest")
+            if cycle.state.evaluation_digest is not None:
+                observed_evaluation_digest = _decision_cycle_evaluation_digest(rehydrated.result)
+                if observed_evaluation_digest != cycle.state.evaluation_digest:
+                    raise BrainRunError("rehydrated decision result does not match the persisted evaluation digest")
+            if cycle.state.terminal_status is not None and rehydrated.status != cycle.state.terminal_status:
+                raise BrainRunError("rehydrated decision result does not match the persisted terminal status")
+            return rehydrated
+
+        if resume_decision_cycle and decision_cycle_store is not None:
+            persisted = decision_cycle_store.load(decision_cycle_id)  # type: ignore[arg-type]
+            if persisted is not None:
+                persisted_mode = persisted.get("mode") if isinstance(persisted, Mapping) else getattr(persisted, "mode", None)
+                persisted_trajectory_id = persisted.get("trajectory_id") if isinstance(persisted, Mapping) else getattr(persisted, "trajectory_id", None)
+                requested_trajectory_id = kwargs.get("trajectory_id")
+                if requested_trajectory_id is not None and requested_trajectory_id != persisted_trajectory_id:
+                    raise BrainRunError("resume decision-cycle trajectory identity does not match the persisted cycle")
+                decision_cycle = AutonomousDecisionCycle(
+                    decision_cycle_store,
+                    cycle_id=decision_cycle_id,  # type: ignore[arg-type]
+                    task=task,
+                    mode=persisted_mode,
+                    learning_enabled=cycle_learning,
+                    evaluation_enabled=cycle_learning,
+                    trajectory_id=persisted_trajectory_id,
+                )
+                if decision_cycle.restored:
+                    return rehydrate_restored_cycle(decision_cycle)
+
         prepare_options = {
             key: value
             for key, value in kwargs.items()
@@ -15849,7 +15908,6 @@ class AutonomousAgent:
         decision_cycle: AutonomousDecisionCycle | None = None
         if decision_cycle_store is not None:
             cycle_mode = "single_domain" if len(blueprint.route.selected_domains) == 1 else "cross_domain"
-            cycle_learning = explicit_learning or learning_mode != "off"
             cycle_trajectory = kwargs.get("trajectory_id")
             if cycle_mode == "cross_domain" and cycle_learning and cycle_trajectory is None:
                 cycle_trajectory = f"{decision_cycle_id}-trajectory"
@@ -15863,39 +15921,14 @@ class AutonomousAgent:
                 trajectory_id=cycle_trajectory,
             )
             if decision_cycle.restored:
-                if not resume_decision_cycle:
-                    raise BrainRunError("persisted decision cycle requires resume_decision_cycle=True")
-                if decision_cycle_rehydrate_result is None:
-                    raise BrainRunError("decision-cycle resume requires decision_cycle_rehydrate_result")
-                rehydrated = decision_cycle_rehydrate_result(decision_cycle.context())
-                if not isinstance(rehydrated, AutonomousAutoResult):
-                    raise BrainRunError("decision-cycle rehydrator must return an AutonomousAutoResult")
-                if decision_cycle.state.route_digest is not None and rehydrated.route.route_digest != decision_cycle.state.route_digest:
-                    raise BrainRunError("rehydrated decision result does not match the persisted route digest")
-                if decision_cycle.state.outcome_digest is not None:
-                    if content_digest(rehydrated.to_dict()) != decision_cycle.state.outcome_digest:
-                        raise BrainRunError("rehydrated decision result does not match the persisted outcome digest")
-                if decision_cycle.state.selection_digest is not None:
-                    observed_selection_digest = _decision_cycle_selection_digest(rehydrated)
-                    if observed_selection_digest != decision_cycle.state.selection_digest:
-                        raise BrainRunError(
-                            "rehydrated decision result does not match the persisted selection digest"
-                        )
-                if decision_cycle.state.evaluation_digest is not None:
-                    observed_evaluation_digest = _decision_cycle_evaluation_digest(rehydrated.result)
-                    if observed_evaluation_digest != decision_cycle.state.evaluation_digest:
-                        raise BrainRunError(
-                            "rehydrated decision result does not match the persisted evaluation digest"
-                        )
-                if decision_cycle.state.terminal_status is not None and rehydrated.status != decision_cycle.state.terminal_status:
-                    raise BrainRunError("rehydrated decision result does not match the persisted terminal status")
-                return rehydrated
+                return rehydrate_restored_cycle(decision_cycle)
             decision_cycle.advance(phase="route_pending", route_digest=blueprint.route.route_digest)
 
         if blueprint.route.abstained:
             result = AutonomousAutoResult(
                 status="route_review_required",
                 route=blueprint.route,
+                semantic_route=blueprint.semantic_route,
                 learning_mode=learning_mode,
                 planning_mode=planning_mode,
             )
@@ -15948,6 +15981,7 @@ class AutonomousAgent:
                 return AutonomousAutoResult(
                     status="planning_review_required",
                     route=blueprint.route,
+                    semantic_route=blueprint.semantic_route,
                     learning_mode=learning_mode,
                     planning_mode=planning_mode,
                     planning=planning_result,
@@ -16204,6 +16238,7 @@ class AutonomousAgent:
         automatic_result = AutonomousAutoResult(
             status="completed",
             route=blueprint.route,
+            semantic_route=blueprint.semantic_route,
             result=result,
             learning_mode=learning_mode,
             planning_mode=planning_mode,
