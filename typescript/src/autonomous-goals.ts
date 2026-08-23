@@ -506,6 +506,7 @@ export class JsonAutonomousGoalPersistence implements AutonomousGoalPersistence 
     if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_GOAL_MAX_SNAPSHOT_BYTES) throw new ArgumentError("goal JSON exceeds its byte bound");
     let parsed: unknown;
     try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("goal JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("goal JSON is not canonical");
     return validateAutonomousGoalSnapshot(parsed);
   }
 

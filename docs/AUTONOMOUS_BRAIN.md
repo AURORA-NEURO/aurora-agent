@@ -4273,6 +4273,15 @@ and evaluator metadata—never task text, prompts, responses, tool arguments, cr
 or raw evidence—and rejects malformed payloads, duplicate episodes, unknown evaluation targets,
 tampered event/head digests, and stale writers.
 
+The TypeScript memory boundary now exposes the same guarantees through
+`JsonAutonomousMemoryPersistence` and `TransactionalJsonAutonomousMemoryPersistence`. These
+adapters validate the episode index and event chain before restore, emit canonical JSON, reject
+non-canonical text on read, serialize coordinator operations, and fence multi-worker flushes by
+the outer snapshot digest. `WebStorageAutonomousMemorySnapshotTextStore` supplies a browser
+storage seam; HTTP, IndexedDB, SQLite, or object storage can implement the same caller-owned text
+contract. Goal snapshots use the same canonical-read rule, so a pretty-printed or reordered copy
+cannot quietly bypass the digest-bound restart boundary.
+
 ### Durable objective state across attempts
 
 `AutonomousGoalLedger` is the objective-level state boundary above episodic memory and below an

@@ -8,6 +8,7 @@ import {
   AutonomousMemoryPersistenceCoordinator,
   CredentialStore,
   InMemoryAutonomousEpisodicMemory,
+  TransactionalJsonAutonomousMemoryPersistence,
   LLMRuntime,
   builtinAutonomousDomainProfiles,
   digestJson,
@@ -15,6 +16,7 @@ import {
   openaiCompatibleProvider,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousDecisionCycle,
+  validateAutonomousMemorySnapshot,
 } from "../dist/index.js";
 
 function jsonResponse(payload) {
@@ -34,6 +36,21 @@ function candidate() {
     latency_ms: 100,
     cost_per_million_tokens: 5,
     reliability: 0.95,
+  };
+}
+
+function transactionalMemoryTextStore() {
+  let encoded = null;
+  return {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (current !== expected) return false;
+      encoded = value;
+      return true;
+    },
+    encoded: () => encoded,
   };
 }
 
@@ -154,6 +171,35 @@ test("episodic memory snapshots restore integrity and refuse tampering", async (
   const tampered = structuredClone(snapshot);
   tampered.episodes[0].tags = ["tampered"];
   await assert.rejects(restored.restore(tampered), /snapshot digest mismatch/);
+});
+
+test("episodic memory JSON persistence is canonical, restart-safe, serialized, and CAS-fenced", async () => {
+  const textStore = transactionalMemoryTextStore();
+  const persistence = new TransactionalJsonAutonomousMemoryPersistence(textStore);
+  const source = new InMemoryAutonomousEpisodicMemory({ clock: () => 10 });
+  const coordinator = new AutonomousMemoryPersistenceCoordinator(source, persistence);
+  await source.recordEpisode(await episodeInput("science", "durable-memory-1"));
+  const first = await coordinator.flush();
+  assert.equal(textStore.encoded(), JSON.stringify(JSON.parse(textStore.encoded())));
+  assert.deepEqual(await validateAutonomousMemorySnapshot(JSON.parse(textStore.encoded())), first);
+
+  const restartedStore = new InMemoryAutonomousEpisodicMemory({ clock: () => 11 });
+  const restarted = new AutonomousMemoryPersistenceCoordinator(restartedStore, persistence);
+  assert.deepEqual(await restarted.restore(), first);
+  assert.equal(restartedStore.get("durable-memory-1").context.domain, "science");
+
+  const staleStore = new InMemoryAutonomousEpisodicMemory({ clock: () => 12 });
+  const stale = new AutonomousMemoryPersistenceCoordinator(staleStore, persistence);
+  await stale.restore();
+  await source.recordEpisode(await episodeInput("operations", "durable-memory-2"));
+  await coordinator.flush();
+  await staleStore.recordEpisode(await episodeInput("coding", "durable-memory-3"));
+  await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
+
+  const canonical = textStore.encoded();
+  textStore.write(JSON.stringify(JSON.parse(canonical), null, 2));
+  await assert.rejects(() => persistence.read(), /not canonical/);
+  textStore.write(canonical);
 });
 
 test("decision cycles recall memory into the next prompt and persist only digest metadata", async () => {

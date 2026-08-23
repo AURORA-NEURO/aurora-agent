@@ -1,5 +1,5 @@
-import { ArgumentError } from "./errors.js";
-import { digestBytesSync, digestCanonicalJsonText, digestJson } from "./tooling.js";
+import { ArgumentError, isObject } from "./errors.js";
+import { canonicalJson, digestBytesSync, digestCanonicalJsonText, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 export const AUTONOMOUS_MEMORY_SCHEMA = "bioprism-typescript-autonomous-episodic-memory/0.1" as const;
@@ -10,6 +10,7 @@ export const AUTONOMOUS_MEMORY_MAX_EVENTS = 16_384;
 export const AUTONOMOUS_MEMORY_MAX_TAGS = 64;
 export const AUTONOMOUS_MEMORY_MAX_TASK_FACETS = 32;
 export const AUTONOMOUS_MEMORY_MAX_QUERY_LIMIT = 128;
+export const AUTONOMOUS_MEMORY_MAX_SNAPSHOT_BYTES = 8_000_000;
 
 const PRIVATE_RETENTION = "value_only_hash_chained;task_prompt_response_tool_payloads_and_credentials_not_retained" as const;
 
@@ -156,6 +157,16 @@ export interface AutonomousMemorySnapshot extends JsonObject {
 export interface AutonomousMemoryPersistence {
   read(): Promise<AutonomousMemorySnapshot | null> | AutonomousMemorySnapshot | null;
   write(snapshot: AutonomousMemorySnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousMemorySnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousMemorySnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousMemoryTransactionalSnapshotTextStore extends AutonomousMemorySnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousEpisodicMemoryStore {
@@ -480,19 +491,16 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
 
   async snapshot(): Promise<AutonomousMemorySnapshot> {
     const body = { schema: AUTONOMOUS_MEMORY_SNAPSHOT_SCHEMA, sequence: this.events.length, head_digest: this.events.at(-1)?.event_digest ?? "", episodes: [...this.episodes.values()].map(clone), events: this.events.map(clone), retention: PRIVATE_RETENTION, secret_material: "never_returned" as const };
-    return { ...body, snapshot_digest: await digestJson(body) };
+    return validateAutonomousMemorySnapshot({ ...body, snapshot_digest: await digestJson(body) }, { maxEpisodes: this.maxEpisodes, maxEvents: this.maxEvents });
   }
 
   async restore(snapshot: AutonomousMemorySnapshot): Promise<void> {
-    if (!snapshot || snapshot.schema !== AUTONOMOUS_MEMORY_SNAPSHOT_SCHEMA || !Array.isArray(snapshot.episodes) || !Array.isArray(snapshot.events)) throw new ArgumentError("autonomous memory snapshot is malformed");
-    const { snapshot_digest: supplied, ...body } = snapshot;
-    if (await digestJson(body) !== supplied) throw new ArgumentError("autonomous memory snapshot digest mismatch");
-    if (snapshot.events.length > this.maxEvents || snapshot.episodes.length > this.maxEpisodes) throw new ArgumentError("autonomous memory snapshot exceeds store capacity");
+    const validated = await validateAutonomousMemorySnapshot(snapshot, { maxEpisodes: this.maxEpisodes, maxEvents: this.maxEvents });
     const restored = new InMemoryAutonomousEpisodicMemory({ clock: this.clock, maxEpisodes: this.maxEpisodes, maxEvents: this.maxEvents });
-    for (const episode of snapshot.episodes) restored.episodes.set(boundedIdentifier("memory episode_id", episode.episode_id), clone(episode));
-    restored.events.push(...snapshot.events.map(clone));
+    for (const episode of validated.episodes) restored.episodes.set(boundedIdentifier("memory episode_id", episode.episode_id), clone(episode));
+    restored.events.push(...validated.events.map(clone));
     await restored.verifyIntegrity();
-    if (restored.events.length !== snapshot.sequence || (restored.events.at(-1)?.event_digest ?? "") !== snapshot.head_digest) throw new ArgumentError("autonomous memory snapshot head is inconsistent");
+    if (restored.events.length !== validated.sequence || (restored.events.at(-1)?.event_digest ?? "") !== validated.head_digest) throw new ArgumentError("autonomous memory snapshot head is inconsistent");
     this.episodes.clear();
     this.events.splice(0, this.events.length, ...restored.events);
     for (const [id, episode] of restored.episodes) this.episodes.set(id, episode);
@@ -512,22 +520,188 @@ export class InMemoryAutonomousEpisodicMemory implements AutonomousEpisodicMemor
   }
 }
 
+/** Validate a digest-bound episodic-memory restart image without mutating a live store. */
+export async function validateAutonomousMemorySnapshot(
+  raw: unknown,
+  options: { maxEpisodes?: number; maxEvents?: number; maxBytes?: number } = {},
+): Promise<AutonomousMemorySnapshot> {
+  const maxEpisodes = options.maxEpisodes ?? AUTONOMOUS_MEMORY_MAX_EPISODES;
+  const maxEvents = options.maxEvents ?? AUTONOMOUS_MEMORY_MAX_EVENTS;
+  const maxBytes = options.maxBytes ?? AUTONOMOUS_MEMORY_MAX_SNAPSHOT_BYTES;
+  if (!Number.isSafeInteger(maxEpisodes) || maxEpisodes < 1 || maxEpisodes > AUTONOMOUS_MEMORY_MAX_EPISODES) throw new ArgumentError("memory snapshot maxEpisodes is outside its bound");
+  if (!Number.isSafeInteger(maxEvents) || maxEvents < 1 || maxEvents > AUTONOMOUS_MEMORY_MAX_EVENTS) throw new ArgumentError("memory snapshot maxEvents is outside its bound");
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > AUTONOMOUS_MEMORY_MAX_SNAPSHOT_BYTES) throw new ArgumentError("memory snapshot maxBytes is outside its bound");
+  if (!isObject(raw) || raw.schema !== AUTONOMOUS_MEMORY_SNAPSHOT_SCHEMA || !Array.isArray(raw.episodes) || !Array.isArray(raw.events)) throw new ArgumentError("autonomous memory snapshot is malformed");
+  const snapshotValue = raw as unknown as Record<string, unknown>;
+  const episodesRaw = snapshotValue.episodes as unknown[];
+  const eventsRaw = snapshotValue.events as unknown[];
+  const snapshotKeys = new Set(["schema", "sequence", "head_digest", "episodes", "events", "snapshot_digest", "retention", "secret_material"]);
+  if (Object.keys(raw).some((key) => !snapshotKeys.has(key))) throw new ArgumentError("autonomous memory snapshot contains unsupported metadata");
+  if (raw.retention !== PRIVATE_RETENTION || raw.secret_material !== "never_returned") throw new ArgumentError("autonomous memory snapshot retention is invalid");
+  if (!Number.isSafeInteger(snapshotValue.sequence) || (snapshotValue.sequence as number) < 0 || snapshotValue.sequence !== eventsRaw.length || episodesRaw.length > maxEpisodes || eventsRaw.length > maxEvents) throw new ArgumentError("autonomous memory snapshot sequence or capacity is invalid");
+  if (raw.head_digest !== "") boundedDigest("memory snapshot head_digest", raw.head_digest);
+  boundedDigest("memory snapshot snapshot_digest", raw.snapshot_digest);
+
+  const episodes = new Map<string, AutonomousMemoryEpisode>();
+  const episodeKeys = new Set(["schema", "episode_id", "run_id", "result_kind", "status", "task_digest", "task_facets", "context", "context_digest", "selected_model", "digests", "route", "tags", "lesson", "provenance", "evaluation", "created_at", "updated_at", "episode_digest", "retention", "secret_material"]);
+  for (let index = 0; index < episodesRaw.length; index += 1) {
+    const candidate = episodesRaw[index];
+    if (!isObject(candidate)) throw new ArgumentError(`memory episode ${index + 1} is malformed`);
+    if (Object.keys(candidate).some((key) => !episodeKeys.has(key))) throw new ArgumentError(`memory episode ${index + 1} contains unsupported metadata`);
+    const episode = candidate as unknown as AutonomousMemoryEpisode;
+    if (episode.schema !== AUTONOMOUS_MEMORY_SCHEMA || episode.retention !== PRIVATE_RETENTION || episode.secret_material !== "never_returned") throw new ArgumentError(`memory episode ${index + 1} retention is invalid`);
+    const episodeId = boundedIdentifier("memory episode_id", episode.episode_id);
+    if (episodes.has(episodeId)) throw new ArgumentError(`memory snapshot contains duplicate episode ${episodeId}`);
+    boundedDigest("memory episode_digest", episode.episode_digest);
+    if (typeof episode.created_at !== "number" || !Number.isFinite(episode.created_at) || episode.created_at < 0 || typeof episode.updated_at !== "number" || !Number.isFinite(episode.updated_at) || episode.updated_at < 0) throw new ArgumentError(`memory episode ${episodeId} timestamps are invalid`);
+    const { episode_digest: _episodeDigest, evaluation: _evaluation, created_at: _createdAt, updated_at: _updatedAt, ...core } = episode;
+    if (await digestJson(core) !== episode.episode_digest) throw new ArgumentError(`autonomous memory snapshot digest mismatch: episode digest mismatch for ${episodeId}`);
+    if (episode.evaluation !== null) {
+      if (!isObject(episode.evaluation)) throw new ArgumentError(`memory episode ${episodeId} evaluation is malformed`);
+      const evaluationKeys = new Set(["evaluator_id", "evaluator_version", "reward", "passed", "failed", "feedback_digest", "failure_class", "evidence_digest", "evaluation_digest"]);
+      if (Object.keys(episode.evaluation).some((key) => !evaluationKeys.has(key))) throw new ArgumentError(`memory episode ${episodeId} evaluation contains unsupported metadata`);
+      boundedDigest("memory evaluation_digest", episode.evaluation.evaluation_digest);
+      const { evaluation_digest: _evaluationDigest, ...evaluation } = episode.evaluation;
+      if (await digestJson(evaluation) !== episode.evaluation.evaluation_digest) throw new ArgumentError(`autonomous memory snapshot digest mismatch: evaluation digest mismatch for ${episodeId}`);
+    }
+    episodes.set(episodeId, clone(episode));
+  }
+
+  const eventKeys = new Set(["schema", "sequence", "event_type", "episode_id", "payload", "previous_digest", "event_digest", "created_at", "retention", "secret_material"]);
+  let previous = "";
+  for (let index = 0; index < eventsRaw.length; index += 1) {
+    const candidate = eventsRaw[index];
+    if (!isObject(candidate)) throw new ArgumentError(`memory event ${index + 1} is malformed`);
+    if (Object.keys(candidate).some((key) => !eventKeys.has(key))) throw new ArgumentError(`memory event ${index + 1} contains unsupported metadata`);
+    const event = candidate as unknown as AutonomousMemoryEvent;
+    if (event.schema !== AUTONOMOUS_MEMORY_EVENT_SCHEMA || event.sequence !== index + 1 || event.previous_digest !== previous || event.retention !== PRIVATE_RETENTION || event.secret_material !== "never_returned") throw new ArgumentError(`memory event chain is invalid at sequence ${index + 1}`);
+    if (!episodes.has(event.episode_id) || !isObject(event.payload)) throw new ArgumentError(`memory event ${index + 1} references an unknown episode`);
+    if (typeof event.created_at !== "number" || !Number.isFinite(event.created_at) || event.created_at < 0) throw new ArgumentError(`memory event ${index + 1} timestamp is invalid`);
+    boundedDigest(`memory event ${index + 1} digest`, event.event_digest);
+    const { event_digest: suppliedEventDigest, ...eventBody } = event;
+    if (await digestJson(eventBody) !== suppliedEventDigest) throw new ArgumentError(`memory event ${index + 1} digest mismatch`);
+    if (event.event_type === "episode_recorded") {
+      if (event.payload.episode_id !== event.episode_id || event.payload.episode_digest !== episodes.get(event.episode_id)?.episode_digest) throw new ArgumentError(`memory episode event disagrees at sequence ${event.sequence}`);
+    } else if (event.event_type === "evaluation_recorded") {
+      if (event.payload.evaluation_digest !== episodes.get(event.episode_id)?.evaluation?.evaluation_digest) throw new ArgumentError(`memory evaluation event disagrees at sequence ${event.sequence}`);
+    } else throw new ArgumentError(`memory event type is unsupported at sequence ${event.sequence}`);
+    previous = suppliedEventDigest;
+  }
+  if (raw.head_digest !== previous) throw new ArgumentError("autonomous memory snapshot head is inconsistent");
+  const { snapshot_digest: suppliedSnapshotDigest, ...snapshotBody } = raw;
+  if (await digestJson(snapshotBody) !== suppliedSnapshotDigest) throw new ArgumentError("autonomous memory snapshot digest mismatch");
+  const snapshot = clone(raw) as unknown as AutonomousMemorySnapshot;
+  if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > maxBytes) throw new ArgumentError("autonomous memory snapshot exceeds its byte bound");
+  return snapshot;
+}
+
+/** Canonical JSON persistence for episodic memory over a caller-owned text store. */
+export class JsonAutonomousMemoryPersistence implements AutonomousMemoryPersistence {
+  protected readonly textStore: AutonomousMemorySnapshotTextStore;
+  readonly maxEpisodes: number;
+  readonly maxEvents: number;
+  readonly maxBytes: number;
+
+  constructor(textStore: AutonomousMemorySnapshotTextStore, options: { maxEpisodes?: number; maxEvents?: number; maxBytes?: number } = {}) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("memory text store is malformed");
+    this.textStore = textStore;
+    this.maxEpisodes = options.maxEpisodes ?? AUTONOMOUS_MEMORY_MAX_EPISODES;
+    this.maxEvents = options.maxEvents ?? AUTONOMOUS_MEMORY_MAX_EVENTS;
+    this.maxBytes = options.maxBytes ?? AUTONOMOUS_MEMORY_MAX_SNAPSHOT_BYTES;
+    if (!Number.isSafeInteger(this.maxEpisodes) || this.maxEpisodes < 1 || this.maxEpisodes > AUTONOMOUS_MEMORY_MAX_EPISODES) throw new ArgumentError("memory JSON maxEpisodes is outside its bound");
+    if (!Number.isSafeInteger(this.maxEvents) || this.maxEvents < 1 || this.maxEvents > AUTONOMOUS_MEMORY_MAX_EVENTS) throw new ArgumentError("memory JSON maxEvents is outside its bound");
+    if (!Number.isSafeInteger(this.maxBytes) || this.maxBytes < 1 || this.maxBytes > AUTONOMOUS_MEMORY_MAX_SNAPSHOT_BYTES) throw new ArgumentError("memory JSON maxBytes is outside its bound");
+  }
+
+  async read(): Promise<AutonomousMemorySnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > this.maxBytes) throw new ArgumentError("memory JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("memory JSON is invalid"); }
+    if (canonicalJson(parsed) !== encoded) throw new ArgumentError("memory JSON is not canonical");
+    return validateAutonomousMemorySnapshot(parsed, { maxEpisodes: this.maxEpisodes, maxEvents: this.maxEvents, maxBytes: this.maxBytes });
+  }
+
+  async write(snapshot: AutonomousMemorySnapshot): Promise<void> {
+    await this.textStore.write(await this.encode(snapshot));
+  }
+
+  protected async encode(snapshot: AutonomousMemorySnapshot): Promise<string> {
+    const validated = await validateAutonomousMemorySnapshot(snapshot, { maxEpisodes: this.maxEpisodes, maxEvents: this.maxEvents, maxBytes: this.maxBytes });
+    const encoded = canonicalJson(validated);
+    if (new TextEncoder().encode(encoded).byteLength > this.maxBytes) throw new ArgumentError("memory JSON exceeds its byte bound");
+    return encoded;
+  }
+}
+
+/** Canonical JSON memory persistence with atomic stale-writer fencing. */
+export class TransactionalJsonAutonomousMemoryPersistence extends JsonAutonomousMemoryPersistence {
+  declare protected readonly textStore: AutonomousMemoryTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousMemoryTransactionalSnapshotTextStore, options: { maxEpisodes?: number; maxEvents?: number; maxBytes?: number } = {}) {
+    super(textStore, options);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("memory text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, snapshot: AutonomousMemorySnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null) boundedDigest("memory expected snapshot digest", expectedSnapshotDigest);
+    const committed = await this.textStore.writeIfUnchanged(expectedSnapshotDigest, await this.encode(snapshot));
+    if (typeof committed !== "boolean") throw new ArgumentError("memory compare-and-swap returned a non-boolean result");
+    return committed;
+  }
+}
+
+/** Browser-compatible local text storage for episodic-memory snapshots. */
+export class WebStorageAutonomousMemorySnapshotTextStore implements AutonomousMemorySnapshotTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("memory Web Storage adapter is malformed");
+    boundedIdentifier("memory storage key", key);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
+}
+
 /** Connect memory snapshots to SQLite, IndexedDB, Postgres, or another caller-owned adapter. */
 export class AutonomousMemoryPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly store: AutonomousEpisodicMemoryStore, readonly persistence: AutonomousMemoryPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("memory store is malformed");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("memory persistence adapter is malformed");
   }
 
   async restore(): Promise<AutonomousMemorySnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot) await this.store.restore(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = await validateAutonomousMemorySnapshot(raw);
+      await this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
   }
 
   async flush(): Promise<AutonomousMemorySnapshot> {
-    const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await this.store.snapshot();
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("memory persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }

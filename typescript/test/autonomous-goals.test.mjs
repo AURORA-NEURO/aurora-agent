@@ -260,6 +260,10 @@ test("goal JSON persistence round-trips through browser storage and rejects unsa
   const snapshot = ledger.snapshot();
   await browserPersistence.write(snapshot);
   assert.deepEqual(await browserPersistence.read(), snapshot);
+  const canonical = values.get("aurora-goals");
+  values.set("aurora-goals", JSON.stringify(JSON.parse(canonical), null, 2));
+  await assert.rejects(() => browserPersistence.read(), /not canonical/);
+  values.set("aurora-goals", canonical);
 
   const inconsistent = structuredClone(snapshot);
   inconsistent.goals[0] = structuredClone(inconsistent.events[0].payload);
