@@ -6,6 +6,7 @@ import {
   AutonomousAgent,
   AutonomousOfflineScenarioHarness,
   AutonomousOnlineLearner,
+  AutonomousEvaluatorCalibrationHarness,
   AutonomousValueEvaluatorRegistry,
   LLMRuntime,
 } from "../dist/index.js";
@@ -100,4 +101,34 @@ test("offline scenario replay rejects metadata tampering before learning settlem
   tampered.cases[0].evaluation.reward = 0;
   assert.throws(() => harness.replay(tampered), /report digest/);
   assert.equal(agent.learner.snapshot().generation, 1);
+});
+
+test("offline scenario can require calibrated evaluators before provider execution or learning", async () => {
+  const seen = [];
+  const runtime = localRuntime(seen);
+  const agent = new AutonomousAgent(runtime, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(model);
+  const registry = AutonomousValueEvaluatorRegistry.withBuiltinProfiles();
+  const profile = registry.resolveForAutonomousDomain("coding").profile;
+  const calibration = new AutonomousEvaluatorCalibrationHarness(registry).run({
+    domains: ["coding"],
+    cases: [
+      { case_id: "coding-calibration-positive", domain: "coding", evidence: perfectEvidence(profile), label: 1, split: "calibration" },
+      { case_id: "coding-holdout-false-positive", domain: "coding", evidence: perfectEvidence(profile), label: 0, split: "holdout" },
+    ],
+    minCalibrationCasesPerDomain: 1,
+    minHoldoutCasesPerDomain: 1,
+    maxExpectedCalibrationError: 0.01,
+    maxBrierScore: 0.01,
+  });
+  assert.equal(calibration.status, "miscalibrated");
+  const harness = new AutonomousOfflineScenarioHarness(agent, { evaluatorRegistry: registry });
+  await assert.rejects(() => harness.run({
+    cases: [{ domain: "coding", task: "calibration-gated coding task", id: "coding" }],
+    evidenceFor: ({ preview }) => ({ evidence: perfectEvidence(registry.resolveForAutonomousDomain(preview.domain).profile) }),
+    calibrationReport: calibration,
+    requireCalibratedLearning: true,
+  }), /calibration holds learning/);
+  assert.equal(seen.length, 0);
+  assert.equal(agent.learner.snapshot().generation, 0);
 });

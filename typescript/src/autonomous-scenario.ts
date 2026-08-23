@@ -11,6 +11,11 @@ import {
   type AutonomousValueEvaluation,
   type AutonomousValueEvaluationInput,
 } from "./autonomous-domain-evaluators.js";
+import {
+  assertAutonomousEvaluatorCalibrationReady,
+  validateAutonomousEvaluatorCalibrationReport,
+} from "./autonomous-evaluator-calibration.js";
+import type { AutonomousEvaluatorCalibrationReport } from "./autonomous-evaluator-calibration.js";
 import { digestJsonSync } from "./tooling.js";
 import type { AutonomousModelCandidate } from "./llm.js";
 import type { JsonObject } from "./types.js";
@@ -61,6 +66,9 @@ export interface AutonomousOfflineScenarioRunOptions {
   cases: readonly AutonomousOfflineScenarioCase[];
   evidenceFor?: AutonomousOfflineScenarioEvidenceFactory;
   evaluatorRegistry?: AutonomousValueEvaluatorRegistry;
+  /** Require a previously validated holdout calibration report before settling learning. */
+  calibrationReport?: AutonomousEvaluatorCalibrationReport;
+  requireCalibratedLearning?: boolean;
 }
 
 export interface AutonomousOfflineScenarioAllDomainsOptions {
@@ -72,6 +80,8 @@ export interface AutonomousOfflineScenarioAllDomainsOptions {
   contextForDomain?: (domain: AutonomousDomainName) => readonly AutonomousPromptChunk[] | undefined;
   candidatesForDomain?: (domain: AutonomousDomainName) => readonly AutonomousModelCandidate[] | undefined;
   evaluatorRegistry?: AutonomousValueEvaluatorRegistry;
+  calibrationReport?: AutonomousEvaluatorCalibrationReport;
+  requireCalibratedLearning?: boolean;
 }
 
 export interface AutonomousOfflineScenarioCaseReport extends JsonObject {
@@ -261,6 +271,12 @@ export class AutonomousOfflineScenarioHarness {
     const cases = options.cases.map(cloneCase);
     const evaluatorRegistry = options.evaluatorRegistry ?? this.evaluatorRegistry;
     if (!(evaluatorRegistry instanceof AutonomousValueEvaluatorRegistry)) throw new ArgumentError("offline scenario evaluator registry is malformed");
+    if (options.requireCalibratedLearning !== undefined && typeof options.requireCalibratedLearning !== "boolean") throw new ArgumentError("offline scenario requireCalibratedLearning must be boolean");
+    const calibrationReport = options.calibrationReport === undefined ? null : validateAutonomousEvaluatorCalibrationReport(options.calibrationReport);
+    if (options.requireCalibratedLearning === true) {
+      if (calibrationReport === null) throw new ArgumentError("offline scenario calibrated learning requires calibrationReport");
+      for (const scenarioCase of cases) assertAutonomousEvaluatorCalibrationReady(calibrationReport, scenarioCase.domain);
+    }
     const rows: AutonomousOfflineScenarioCaseReport[] = [];
     for (const scenarioCase of cases) {
       const preview = await this.agent.modelSelectionPreview(scenarioCase.task, {
@@ -359,7 +375,7 @@ export class AutonomousOfflineScenarioHarness {
         ...(options.candidatesForDomain?.(domain) === undefined ? {} : { candidates: options.candidatesForDomain(domain) }),
       } satisfies AutonomousOfflineScenarioCase;
     }));
-    return this.run({ cases, evidenceFor: options.evidenceFor, evaluatorRegistry: options.evaluatorRegistry });
+    return this.run({ cases, evidenceFor: options.evidenceFor, evaluatorRegistry: options.evaluatorRegistry, calibrationReport: options.calibrationReport, requireCalibratedLearning: options.requireCalibratedLearning });
   }
 
   /** Verify and idempotently settle a metadata-only report without invoking a provider. */

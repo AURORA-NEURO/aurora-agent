@@ -1702,6 +1702,33 @@ export type {
   AutonomousValueEvaluatorProfile,
 } from "./autonomous-domain-evaluators.js";
 export {
+  AUTONOMOUS_EVALUATOR_CALIBRATION_SCHEMA,
+  AUTONOMOUS_EVALUATOR_CALIBRATION_REPLAY_SCHEMA,
+  AUTONOMOUS_EVALUATOR_CALIBRATION_ADMISSION_SCHEMA,
+  MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_CASES,
+  MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_BINS,
+  MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_DOMAINS,
+  MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_REPORT_BYTES,
+  AutonomousEvaluatorCalibrationHarness,
+  autonomousEvaluatorCalibrationAdmission,
+  assertAutonomousEvaluatorCalibrationReady,
+  validateAutonomousEvaluatorCalibrationReport,
+} from "./autonomous-evaluator-calibration.js";
+export type {
+  AutonomousEvaluatorCalibrationSplit,
+  AutonomousEvaluatorCalibrationDomainStatus,
+  AutonomousEvaluatorCalibrationStatus,
+  AutonomousEvaluatorCalibrationCase,
+  AutonomousEvaluatorCalibrationMetrics,
+  AutonomousEvaluatorCalibrationBin,
+  AutonomousEvaluatorCalibrationDomainReport,
+  AutonomousEvaluatorCalibrationGate,
+  AutonomousEvaluatorCalibrationReport,
+  AutonomousEvaluatorCalibrationRunOptions,
+  AutonomousEvaluatorCalibrationReplayResult,
+  AutonomousEvaluatorCalibrationAdmission,
+} from "./autonomous-evaluator-calibration.js";
+export {
   AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
   semanticRouteAutonomousTask,
 } from "./autonomous-routing.js";

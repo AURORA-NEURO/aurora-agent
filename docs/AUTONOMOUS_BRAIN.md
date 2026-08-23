@@ -1639,6 +1639,37 @@ evidence bodies, or raw tool envelopes—only model identity, status, evaluator 
 digests. The built-in evaluator registry covers all twelve domains and rejects cross-domain
 evidence, secret-shaped fields, unsupported payloads, and tampered references.
 
+Evaluator reliability is a separate, provider-free gate. `AutonomousEvaluatorCalibrationHarness`
+accepts caller-labeled value-only cases, keeps explicit calibration and deterministic holdout
+splits, and reports coverage, abstention, Brier score, expected calibration error, maximum
+calibration error, threshold accuracy, and bounded reliability bins for every requested domain.
+The report retains evaluator/catalogue/case-set digests only; it never persists evidence, labels,
+tasks, prompts, or provider responses. `autonomousEvaluatorCalibrationAdmission()` returns an
+explicit `admit_learning` or `hold_learning` decision without assigning reward. Passing
+`calibrationReport` with `requireCalibratedLearning: true` to the TypeScript offline scenario
+harness blocks provider execution and bandit settlement until every scenario domain meets its
+holdout gate:
+
+```typescript
+const calibration = new AutonomousEvaluatorCalibrationHarness(evaluators).run({
+  cases: callerLabeledCases,
+  minCalibrationCasesPerDomain: 8,
+  minHoldoutCasesPerDomain: 8,
+  maxExpectedCalibrationError: 0.1,
+  maxBrierScore: 0.2,
+});
+const report = await scenario.runAll({
+  evidenceFor,
+  calibrationReport: calibration,
+  requireCalibratedLearning: true,
+});
+```
+
+Calibration is measurement of the caller-declared evaluator signal, not evidence that the
+evaluator is correct about the external world. Holdout failure, missing domain coverage, label
+abstention, evaluator refusal, or report drift keeps learning on hold while leaving provider
+execution and source truth as separate gates.
+
 ### Reviewed capability packs for every domain
 
 The domain profile and workflow are joined by an `AutonomousDomainPack` for every built-in domain:

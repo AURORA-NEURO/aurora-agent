@@ -126,6 +126,16 @@ operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation pa
 offline. This closes the generic-answer-to-domain-evaluator composition gap while preserving the
 caller/evaluator distinction: structured model output is not external-world truth.
 
+Evaluator calibration is now an explicit TypeScript subsystem. The provider-free
+`AutonomousEvaluatorCalibrationHarness` computes deterministic calibration/holdout splits,
+coverage and abstention, reliability bins, Brier score, expected and maximum calibration error,
+threshold accuracy, and per-domain admission status for all twelve evaluator profiles. Reports
+retain only evaluator, case-set, metric, and policy digests; replay recomputes the report without
+provider or learner side effects. `assertAutonomousEvaluatorCalibrationReady()` and the offline
+scenario `requireCalibratedLearning` option hold bandit settlement before provider execution when
+holdout evidence is missing, miscalibrated, or incomplete. This is an evaluator-signal gate, not
+external truth, reward synthesis, or a substitute for domain validation.
+
 The response contract now emits a deterministic, replayable composition evaluation and a safe
 `reward_input`. An explicit `AutonomousLearningController.settleStructuredResponse` helper routes
 that signal through the same idempotent bandit/outbox settlement boundary as other evaluator
