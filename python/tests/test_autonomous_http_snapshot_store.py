@@ -4,7 +4,14 @@ import json
 
 import pytest
 
-from prism_sdk import AUTONOMOUS_DOMAINS, AutonomousHttpSnapshotTextStore
+from prism_sdk import (
+    AUTONOMOUS_DOMAINS,
+    AutonomousDecisionCycle,
+    AutonomousDecisionCyclePersistenceCoordinator,
+    AutonomousHttpSnapshotTextStore,
+    InMemoryAutonomousDecisionCycleStateStore,
+    TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
+)
 from prism_sdk.authoring import content_digest
 from prism_sdk.errors import ArgumentError, TransportError
 
@@ -142,3 +149,38 @@ def test_http_snapshot_store_separates_cas_conflicts_from_transport_failures_and
     )
     with pytest.raises(ArgumentError, match="header value"):
         unsafe.read()
+
+
+def test_http_snapshot_store_plugs_into_decision_cycle_restart_and_cas() -> None:
+    remote: str | None = None
+
+    def opener(request, _timeout):
+        nonlocal remote
+        if request.get_method() == "GET":
+            return _Response(remote.encode("utf-8")) if remote is not None else _Response(status=404)
+        current = None if remote is None else json.loads(remote)["snapshot_digest"]
+        expected = _header(request, "If-Match")
+        if _header(request, "If-None-Match") == "*" and current is not None:
+            return _Response(status=412)
+        if expected is not None and current != expected.strip('"'):
+            return _Response(status=412)
+        remote = request.data.decode("utf-8")
+        return _Response(status=204)
+
+    text_store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "all-domains/decision-cycles",
+        allowed_hosts=("state.test",),
+        opener=opener,
+    )
+    persistence = TransactionalJsonAutonomousDecisionCycleSnapshotPersistence(text_store)
+    source = InMemoryAutonomousDecisionCycleStateStore()
+    cycle = AutonomousDecisionCycle(source, cycle_id="http-cycle", task="HTTP restart cycle", mode="single_domain")
+    cycle.advance(phase="route_pending", route_digest="a" * 64)
+    coordinator = AutonomousDecisionCyclePersistenceCoordinator(source, persistence)
+    flushed = coordinator.flush()
+
+    restored_store = InMemoryAutonomousDecisionCycleStateStore()
+    restored = AutonomousDecisionCyclePersistenceCoordinator(restored_store, persistence)
+    assert restored.restore().snapshot_digest == flushed.snapshot_digest
+    assert restored_store.load("http-cycle").state_digest == source.load("http-cycle").state_digest

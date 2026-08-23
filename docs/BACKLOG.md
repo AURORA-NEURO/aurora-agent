@@ -713,6 +713,9 @@ admission, no redirects, transient header resolution, bounded UTF-8 JSON, and `I
 `If-None-Match` fencing, so its autonomous learning, evidence, trace, and job adapters can share
 the remote persistence seam. The server-side atomic write, authorization, tenant isolation,
 retention, and backup contract remain deployment-owned.
+The Python decision-cycle coordinator now consumes that seam through strict JSON and transactional
+CAS persistence adapters, restoring the verified route/plan/evaluation state chain and refusing
+stale writers before a newer cycle snapshot can be overwritten.
 The same adapters now expose bounded provider-neutral pagination: strict array/items-page parsing,
 transient cursor continuation, cursor-cycle detection, page/item/aggregate-byte ceilings, and
 metadata-only partial progress when a later page fails. Provider-specific envelope parsing remains

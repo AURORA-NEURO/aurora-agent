@@ -7744,6 +7744,26 @@ text_store = AutonomousHttpSnapshotTextStore(
 )
 ```
 
+The Python decision-cycle boundary is directly composable with that store through
+`JsonAutonomousDecisionCycleSnapshotPersistence` or
+`TransactionalJsonAutonomousDecisionCycleSnapshotPersistence`. The transactional coordinator
+restores the verified state chain, carries the expected snapshot digest across flushes, and
+refuses a stale worker before it can replace a newer route/plan/evaluation image:
+
+```python
+from prism_sdk import (
+    AutonomousDecisionCyclePersistenceCoordinator,
+    InMemoryAutonomousDecisionCycleStateStore,
+    TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
+)
+
+cycle_store = InMemoryAutonomousDecisionCycleStateStore()
+cycle_persistence = TransactionalJsonAutonomousDecisionCycleSnapshotPersistence(text_store)
+cycle_coordinator = AutonomousDecisionCyclePersistenceCoordinator(cycle_store, cycle_persistence)
+cycle_coordinator.restore()
+cycle_coordinator.flush()
+```
+
 `GET` returns `200` with a JSON object or `404` for an absent snapshot. Unconditional `PUT`
 accepts a successful 2xx response. Conditional writes send `If-Match: "<snapshot_digest>"`, or
 `If-None-Match: *` for first creation; `409` and `412` become a clean CAS miss (`false`). The

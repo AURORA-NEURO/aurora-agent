@@ -21,7 +21,7 @@ import re
 import threading
 from typing import Any, Mapping, Protocol, Sequence
 
-from .authoring import content_digest
+from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
 
 
@@ -338,6 +338,69 @@ class AutonomousDecisionCycleSnapshotPersistence(Protocol):
     def write(self, snapshot: AutonomousDecisionCycleSnapshot) -> None: ...
 
 
+class AutonomousDecisionCycleTextStore(Protocol):
+    """Portable text storage contract for JSON, HTTP, SQLite, or object-store adapters."""
+
+    def read(self) -> str | None: ...
+    def write(self, value: str) -> None: ...
+
+
+class AutonomousDecisionCycleTransactionalTextStore(AutonomousDecisionCycleTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonAutonomousDecisionCycleSnapshotPersistence:
+    """Strict JSON persistence for decision-cycle snapshots over a caller-owned text store."""
+
+    def __init__(self, store: AutonomousDecisionCycleTextStore, *, max_bytes: int = MAX_AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ArgumentError("decision-cycle JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_BYTES:
+            raise ArgumentError("decision-cycle JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> AutonomousDecisionCycleSnapshot | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("decision-cycle JSON exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except json.JSONDecodeError as error:
+            raise ArgumentError("decision-cycle JSON is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("decision-cycle JSON must be an object")
+        return AutonomousDecisionCycleSnapshot.from_mapping(raw)
+
+    def write(self, snapshot: AutonomousDecisionCycleSnapshot | Mapping[str, Any]) -> None:
+        normalized = snapshot if isinstance(snapshot, AutonomousDecisionCycleSnapshot) else AutonomousDecisionCycleSnapshot.from_mapping(snapshot)
+        encoded = canonical_json(normalized.to_dict())
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("decision-cycle JSON exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousDecisionCycleSnapshotPersistence(JsonAutonomousDecisionCycleSnapshotPersistence):
+    """JSON persistence variant with compare-and-swap on the snapshot digest."""
+
+    def __init__(self, store: AutonomousDecisionCycleTransactionalTextStore, *, max_bytes: int = MAX_AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ArgumentError("decision-cycle transactional persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: AutonomousDecisionCycleSnapshot | Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and (not isinstance(expected_snapshot_digest, str) or len(expected_snapshot_digest) != 64 or any(character not in "0123456789abcdef" for character in expected_snapshot_digest)):
+            raise ArgumentError("decision-cycle expected snapshot digest is invalid")
+        normalized = snapshot if isinstance(snapshot, AutonomousDecisionCycleSnapshot) else AutonomousDecisionCycleSnapshot.from_mapping(snapshot)
+        encoded = canonical_json(normalized.to_dict())
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("decision-cycle JSON exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
 class InMemoryAutonomousDecisionCycleStateStore:
     """Thread-safe reference store; production callers should provide durable transactions."""
 
@@ -391,18 +454,27 @@ class AutonomousDecisionCyclePersistenceCoordinator:
             raise ArgumentError("decision-cycle persistence adapter is malformed")
         self.store = store
         self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
 
     def flush(self) -> AutonomousDecisionCycleSnapshot:
         snapshot = self.store.snapshot()
-        self.persistence.write(snapshot)
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise ArgumentError("decision-cycle persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot.snapshot_digest
         return snapshot
 
     def restore(self) -> AutonomousDecisionCycleSnapshot | None:
         raw = self.persistence.read()
         if raw is None:
+            self._expected_snapshot_digest = None
             return None
         snapshot = raw if isinstance(raw, AutonomousDecisionCycleSnapshot) else AutonomousDecisionCycleSnapshot.from_mapping(raw)
         self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot.snapshot_digest
         return snapshot
 
 
@@ -567,6 +639,10 @@ __all__ = [
     "AutonomousDecisionCycleSnapshot",
     "AutonomousDecisionCycleStateStore",
     "AutonomousDecisionCycleSnapshotPersistence",
+    "AutonomousDecisionCycleTextStore",
+    "AutonomousDecisionCycleTransactionalTextStore",
+    "JsonAutonomousDecisionCycleSnapshotPersistence",
+    "TransactionalJsonAutonomousDecisionCycleSnapshotPersistence",
     "AutonomousDecisionCyclePersistenceCoordinator",
     "AutonomousDecisionCycleRehydrationContext",
     "AutonomousDecisionCycle",

@@ -11,6 +11,7 @@ from prism_sdk import (
     AutonomousDecisionCycle,
     AutonomousDecisionCyclePersistenceCoordinator,
     InMemoryAutonomousDecisionCycleStateStore,
+    TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
     content_digest,
 )
 from prism_sdk.errors import ArgumentError
@@ -25,6 +26,24 @@ class _SnapshotStore:
 
     def write(self, snapshot):
         self.snapshot = snapshot.to_dict()
+
+
+class _CasTextStore:
+    def __init__(self):
+        self.encoded = None
+
+    def read(self):
+        return self.encoded
+
+    def write(self, value):
+        self.encoded = value
+
+    def write_if_unchanged(self, expected, value):
+        current = None if self.encoded is None else json.loads(self.encoded)["snapshot_digest"]
+        if current != expected:
+            return False
+        self.encoded = value
+        return True
 
 
 def _digest(seed: str) -> str:
@@ -125,3 +144,43 @@ def test_decision_cycle_persistence_requires_complete_adapters_and_rehydration_c
     assert context["phase"] == "route_pending"
     assert "rehydrate route" not in json.dumps(context)
     assert content_digest({"task": "rehydrate route"}) == context["task_digest"]
+
+
+def test_decision_cycle_json_cas_persistence_rehydrates_all_domains_and_fences_stale_writers() -> None:
+    text_store = _CasTextStore()
+    source_store = InMemoryAutonomousDecisionCycleStateStore(max_states=len(AUTONOMOUS_DOMAINS))
+    for domain in AUTONOMOUS_DOMAINS:
+        cycle = AutonomousDecisionCycle(
+            source_store,
+            cycle_id=f"persisted-{domain}",
+            task=f"persisted task for {domain}",
+            mode="single_domain",
+            evaluation_enabled=True,
+        )
+        cycle.advance(phase="route_pending", route_digest=_digest("a"))
+    persistence = TransactionalJsonAutonomousDecisionCycleSnapshotPersistence(text_store)
+    coordinator = AutonomousDecisionCyclePersistenceCoordinator(source_store, persistence)
+    initial = coordinator.flush()
+
+    restored_store = InMemoryAutonomousDecisionCycleStateStore(max_states=len(AUTONOMOUS_DOMAINS))
+    restored = AutonomousDecisionCyclePersistenceCoordinator(restored_store, persistence)
+    restored_snapshot = restored.restore()
+    assert restored_snapshot is not None
+    assert restored_snapshot.snapshot_digest == initial.snapshot_digest
+    assert set(restored_store.snapshot().states[index].cycle_id for index in range(len(AUTONOMOUS_DOMAINS))) == {f"persisted-{domain}" for domain in AUTONOMOUS_DOMAINS}
+
+    stale_store = InMemoryAutonomousDecisionCycleStateStore(max_states=len(AUTONOMOUS_DOMAINS))
+    stale = AutonomousDecisionCyclePersistenceCoordinator(stale_store, persistence)
+    assert stale.restore() is not None
+    next_cycle = AutonomousDecisionCycle(source_store, cycle_id="persisted-coding", task="persisted task for coding", mode="single_domain", evaluation_enabled=True)
+    next_cycle.advance(phase="planning_pending", plan_refinement_digest=_digest("b"))
+    advanced = coordinator.flush()
+    assert advanced.snapshot_digest != initial.snapshot_digest
+    with pytest.raises(ArgumentError, match="compare-and-swap conflict"):
+        stale.flush()
+
+    tampered = json.loads(text_store.encoded)
+    tampered["states"][0]["phase"] = "terminal"
+    text_store.encoded = json.dumps(tampered)
+    with pytest.raises(ArgumentError, match="digest|phase"):
+        persistence.read()
