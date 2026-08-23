@@ -1471,6 +1471,14 @@ const report = await agent.readiness({
 });
 ```
 
+For restartable deployments, `AutonomousEvaluatorCalibrationRegistry` imports the validated
+report projection and exposes deterministic digest/status/domain queries. Its snapshot contains
+only calibration reports and registry generation metadata; `InMemoryAutonomousEvaluatorCalibrationStore`,
+`JsonAutonomousEvaluatorCalibrationStore`, and the transactional JSON adapter provide reference
+read/write and compare-and-swap seams. Restore revalidates every report and the snapshot digest,
+so a worker can rehydrate the same readiness gate without retaining the caller's calibration cases,
+labels, evidence, prompts, provider responses, or credentials.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

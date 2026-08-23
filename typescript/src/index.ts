@@ -1729,6 +1729,23 @@ export type {
   AutonomousEvaluatorCalibrationAdmission,
 } from "./autonomous-evaluator-calibration.js";
 export {
+  AUTONOMOUS_EVALUATOR_CALIBRATION_STORE_SCHEMA,
+  AUTONOMOUS_EVALUATOR_CALIBRATION_IMPORT_SCHEMA,
+  MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_STORED_REPORTS,
+  MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_STORE_BYTES,
+  AutonomousEvaluatorCalibrationRegistry,
+  InMemoryAutonomousEvaluatorCalibrationStore,
+  JsonAutonomousEvaluatorCalibrationStore,
+  TransactionalJsonAutonomousEvaluatorCalibrationStore,
+} from "./autonomous-evaluator-calibration-store.js";
+export type {
+  AutonomousEvaluatorCalibrationStoreSnapshot,
+  AutonomousEvaluatorCalibrationStore,
+  AutonomousEvaluatorCalibrationTransactionalStore,
+  AutonomousEvaluatorCalibrationImport,
+  AutonomousEvaluatorCalibrationQueryOptions,
+} from "./autonomous-evaluator-calibration-store.js";
+export {
   AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA,
   semanticRouteAutonomousTask,
 } from "./autonomous-routing.js";

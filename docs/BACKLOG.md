@@ -154,6 +154,11 @@ required-learning flag. It exposes aggregate admitted/held counts and a redacted
 admission reason before any provider, model-discovery, tool, or learner operation; a required
 calibration hold moves the affected readiness row to `partial` and adds the remediation action.
 
+`AutonomousEvaluatorCalibrationRegistry` now carries validated reports across restarts with
+deterministic query projections and bounded metadata-only snapshots. In-memory, JSON, and
+compare-and-swap JSON stores are included; restore revalidates every report and the snapshot
+digest, while cases, labels, evidence, prompts, responses, and credentials remain caller-owned.
+
 The response contract now emits a deterministic, replayable composition evaluation and a safe
 `reward_input`. An explicit `AutonomousLearningController.settleStructuredResponse` helper routes
 that signal through the same idempotent bandit/outbox settlement boundary as other evaluator
