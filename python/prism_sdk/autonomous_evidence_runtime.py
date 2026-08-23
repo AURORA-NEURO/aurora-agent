@@ -27,7 +27,8 @@ AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA = "bioprism-python-autonomous-evidence-runtim
 AUTONOMOUS_EVIDENCE_RECEIPT_SCHEMA = "bioprism-python-autonomous-evidence-receipt/0.1"
 AUTONOMOUS_EVIDENCE_ASSESSMENT_SCHEMA = "bioprism-python-autonomous-evidence-assessment/0.1"
 AUTONOMOUS_EVIDENCE_RUNTIME_JOURNAL_SCHEMA = "bioprism-python-autonomous-evidence-runtime-journal/0.1"
-AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-evidence-runtime-snapshot/0.1"
+_LEGACY_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-evidence-runtime-snapshot/0.1"
+AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-evidence-runtime-snapshot/0.2"
 AUTONOMOUS_EVIDENCE_OBSERVATION_SCHEMA = "bioprism-python-autonomous-evidence-observation/0.1"
 MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS = 128
 MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS = 4_096
@@ -285,10 +286,12 @@ class AutonomousEvidenceRuntimeSnapshot:
     entries: tuple[AutonomousEvidenceRuntimeJournalEntry, ...]
     head_digest: str | None
     snapshot_digest: str
+    snapshot_generation: int | None = None
+    previous_snapshot_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA,
+        payload = {
+            "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA if self.snapshot_generation is not None else _LEGACY_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA,
             "plan_digest": self.plan_digest,
             "entries": [entry.to_dict() for entry in self.entries],
             "head_digest": self.head_digest,
@@ -296,6 +299,10 @@ class AutonomousEvidenceRuntimeSnapshot:
             "retention": "metadata_only_hash_bound",
             "secret_material": "never_returned",
         }
+        if self.snapshot_generation is not None:
+            payload["snapshot_generation"] = self.snapshot_generation
+            payload["previous_snapshot_digest"] = self.previous_snapshot_digest
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -435,6 +442,9 @@ _EVIDENCE_ENTRY_KEYS = frozenset({
     "retention", "secret_material",
 })
 _EVIDENCE_SNAPSHOT_KEYS = frozenset({
+    "schema", "snapshot_generation", "previous_snapshot_digest", "plan_digest", "entries", "head_digest", "snapshot_digest", "retention", "secret_material",
+})
+_LEGACY_EVIDENCE_SNAPSHOT_KEYS = frozenset({
     "schema", "plan_digest", "entries", "head_digest", "snapshot_digest", "retention", "secret_material",
 })
 
@@ -473,10 +483,24 @@ def validate_autonomous_evidence_runtime_snapshot(
     """Strictly validate a plan-bound, metadata-only evidence runtime snapshot."""
 
     raw = value.to_dict() if isinstance(value, AutonomousEvidenceRuntimeSnapshot) else value
-    if not isinstance(raw, Mapping) or set(raw) != _EVIDENCE_SNAPSHOT_KEYS:
+    if not isinstance(raw, Mapping):
         raise ArgumentError("evidence runtime snapshot is malformed")
-    if raw.get("schema") != AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA or raw.get("retention") != "metadata_only_hash_bound" or raw.get("secret_material") != "never_returned":
+    legacy = raw.get("schema") == _LEGACY_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA
+    if raw.get("schema") != AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA and not legacy:
+        raise ArgumentError("evidence runtime snapshot schema is unsupported")
+    if set(raw) != (_LEGACY_EVIDENCE_SNAPSHOT_KEYS if legacy else _EVIDENCE_SNAPSHOT_KEYS):
+        raise ArgumentError("evidence runtime snapshot is malformed")
+    if raw.get("retention") != "metadata_only_hash_bound" or raw.get("secret_material") != "never_returned":
         raise ArgumentError("evidence runtime snapshot retention is invalid")
+    generation: int | None = None
+    previous_snapshot_digest: str | None = None
+    if not legacy:
+        generation = raw.get("snapshot_generation")
+        previous_snapshot_digest = _digest("evidence runtime previous_snapshot_digest", raw.get("previous_snapshot_digest"), allow_none=True)
+        if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+            raise ArgumentError("evidence runtime snapshot generation is outside its bound")
+        if (generation == 1) != (previous_snapshot_digest is None):
+            raise ArgumentError("evidence runtime snapshot generation and previous_snapshot_digest are inconsistent")
     plan_digest = _digest("evidence runtime snapshot plan_digest", raw.get("plan_digest"))
     if expected_plan_digest is not None and plan_digest != _digest("expected evidence runtime plan_digest", expected_plan_digest):
         raise ArgumentError("evidence runtime snapshot belongs to a different plan")
@@ -493,7 +517,8 @@ def validate_autonomous_evidence_runtime_snapshot(
     if head_digest != (entries[-1].entry_digest if entries else None):
         raise ArgumentError("evidence runtime snapshot head digest is invalid")
     descriptor = {
-        "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA,
+        "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA if not legacy else _LEGACY_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA,
+        **({} if legacy else {"snapshot_generation": generation, "previous_snapshot_digest": previous_snapshot_digest}),
         "plan_digest": plan_digest,
         "entries": [entry.to_dict() for entry in entries],
         "head_digest": head_digest,
@@ -508,7 +533,7 @@ def validate_autonomous_evidence_runtime_snapshot(
         raise ArgumentError("evidence runtime snapshot is not normalized")
     if len(canonical_json(normalized).encode("utf-8")) > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_BYTES:
         raise ArgumentError("evidence runtime snapshot exceeds its byte bound")
-    return AutonomousEvidenceRuntimeSnapshot(plan_digest, entries, head_digest, snapshot_digest)  # type: ignore[arg-type]
+    return AutonomousEvidenceRuntimeSnapshot(plan_digest, entries, head_digest, snapshot_digest, generation, previous_snapshot_digest)  # type: ignore[arg-type]
 
 
 class InMemoryAutonomousEvidenceRuntimeJournal:
@@ -517,6 +542,10 @@ class InMemoryAutonomousEvidenceRuntimeJournal:
     def __init__(self) -> None:
         self._entries: list[AutonomousEvidenceRuntimeJournalEntry] = []
         self._lock = threading.RLock()
+        self._snapshot_generation = 0
+        self._previous_snapshot_digest: str | None = None
+        self._cached_snapshot: AutonomousEvidenceRuntimeSnapshot | None = None
+        self._cached_entry_signature: tuple[str, ...] | None = None
 
     def append(self, entry: AutonomousEvidenceRuntimeJournalEntry) -> AutonomousEvidenceRuntimeJournalEntry:
         with self._lock:
@@ -530,6 +559,8 @@ class InMemoryAutonomousEvidenceRuntimeJournal:
             if len(self._entries) >= MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS:
                 raise ArgumentError("evidence runtime journal capacity is exhausted")
             self._entries.append(entry)
+            self._cached_snapshot = None
+            self._cached_entry_signature = None
             return entry
 
     def records(self) -> tuple[AutonomousEvidenceRuntimeJournalEntry, ...]:
@@ -538,16 +569,28 @@ class InMemoryAutonomousEvidenceRuntimeJournal:
 
     def snapshot(self, plan_digest: str) -> AutonomousEvidenceRuntimeSnapshot:
         plan = _digest("evidence runtime snapshot plan_digest", plan_digest)  # type: ignore[assignment]
+        signature = tuple(entry.entry_digest for entry in self.records())
+        with self._lock:
+            if self._cached_snapshot is not None and self._cached_entry_signature == signature and self._cached_snapshot.plan_digest == plan:
+                return self._cached_snapshot
         descriptor = {
             "schema": AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA,
+            "snapshot_generation": self._snapshot_generation + 1,
+            "previous_snapshot_digest": None if self._snapshot_generation == 0 else self._previous_snapshot_digest,
             "plan_digest": plan,
             "entries": [entry.to_dict() for entry in self.records()],
             "head_digest": self._entries[-1].entry_digest if self._entries else None,
             "retention": "metadata_only_hash_bound",
             "secret_material": "never_returned",
         }
-        snapshot = AutonomousEvidenceRuntimeSnapshot(plan, self.records(), descriptor["head_digest"], content_digest(descriptor))
-        return validate_autonomous_evidence_runtime_snapshot(snapshot, expected_plan_digest=plan)
+        snapshot = AutonomousEvidenceRuntimeSnapshot(plan, self.records(), descriptor["head_digest"], content_digest(descriptor), descriptor["snapshot_generation"], descriptor["previous_snapshot_digest"])
+        validated = validate_autonomous_evidence_runtime_snapshot(snapshot, expected_plan_digest=plan)
+        with self._lock:
+            self._snapshot_generation = validated.snapshot_generation or 0
+            self._previous_snapshot_digest = validated.snapshot_digest
+            self._cached_snapshot = validated
+            self._cached_entry_signature = signature
+        return validated
 
     def restore(self, snapshot: AutonomousEvidenceRuntimeSnapshot | Mapping[str, Any], plan_digest: str) -> None:
         validated = validate_autonomous_evidence_runtime_snapshot(
@@ -556,6 +599,10 @@ class InMemoryAutonomousEvidenceRuntimeJournal:
         )
         with self._lock:
             self._entries = list(validated.entries)
+            self._snapshot_generation = validated.snapshot_generation or 0
+            self._previous_snapshot_digest = validated.snapshot_digest if self._snapshot_generation > 0 else None
+            self._cached_snapshot = None if validated.snapshot_generation is None else validated
+            self._cached_entry_signature = None if self._cached_snapshot is None else tuple(entry.entry_digest for entry in validated.entries)
 
 
 def _canonical_evidence_runtime_snapshot_json(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 
 import pytest
 
@@ -12,6 +13,7 @@ from prism_sdk import (
     TransactionalJsonAutonomousEvidenceRuntimeSnapshotPersistence,
     build_autonomous_evidence_plan,
     builtin_autonomous_workflow_strategies,
+    validate_autonomous_evidence_runtime_snapshot,
 )
 
 
@@ -122,6 +124,25 @@ def test_evidence_runtime_replay_requires_value_reconciliation_after_journal_reh
     first = AutonomousEvidenceRuntime(plan, journal=journal).execute([request], acquirer=adapters, projector=adapters)
     assert first.receipts[0].replay == "fresh"
     snapshot = journal.snapshot(plan.plan_digest)
+    assert snapshot.snapshot_generation == 1
+    assert snapshot.previous_snapshot_digest is None
+    assert journal.snapshot(plan.plan_digest).to_dict() == snapshot.to_dict()
+    legacy = snapshot.to_dict()
+    legacy.pop("snapshot_generation")
+    legacy.pop("previous_snapshot_digest")
+    legacy["schema"] = "bioprism-python-autonomous-evidence-runtime-snapshot/0.1"
+    legacy_body = dict(legacy)
+    legacy_body.pop("snapshot_digest")
+    legacy["snapshot_digest"] = hashlib.sha256(
+        json.dumps(legacy_body, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    assert validate_autonomous_evidence_runtime_snapshot(legacy, expected_plan_digest=plan.plan_digest).to_dict()["schema"] == "bioprism-python-autonomous-evidence-runtime-snapshot/0.1"
+    legacy_journal = InMemoryAutonomousEvidenceRuntimeJournal()
+    legacy_journal.restore(legacy, plan.plan_digest)
+    upgraded = legacy_journal.snapshot(plan.plan_digest)
+    assert upgraded.snapshot_generation == 1
+    assert upgraded.previous_snapshot_digest is None
+    assert upgraded.snapshot_digest != legacy["snapshot_digest"]
     backend = _CasTextStore()
     persistence = TransactionalJsonAutonomousEvidenceRuntimeSnapshotPersistence(backend)
     source_coordinator = AutonomousEvidenceRuntimePersistenceCoordinator(journal, plan.plan_digest, persistence)

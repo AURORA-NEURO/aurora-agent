@@ -8,6 +8,7 @@ import {
   InMemoryAutonomousEvidenceRuntimeJournal,
   builtinAutonomousDomainProfiles,
   buildAutonomousEvidencePlan,
+  digestJson,
 } from "../dist/index.js";
 
 function requestFor(requirement, index = 0) {
@@ -96,6 +97,29 @@ test("evidence runtime replay requires value reconciliation after journal rehydr
   const first = await new AutonomousEvidenceRuntime({ plan, journal }).execute([request], adapters);
   assert.equal(first.json.receipts[0].replay, "fresh");
   const snapshot = await journal.snapshot(plan.plan_digest);
+  assert.equal(snapshot.snapshot_generation, 1);
+  assert.equal(snapshot.previous_snapshot_digest, null);
+  assert.deepEqual(await journal.snapshot(plan.plan_digest), snapshot);
+  const forged = structuredClone(snapshot);
+  forged.snapshot_generation = 2;
+  forged.previous_snapshot_digest = null;
+  const { snapshot_digest: _forgedDigest, ...forgedBody } = forged;
+  forged.snapshot_digest = await digestJson(forgedBody);
+  const forgedJournal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  await assert.rejects(() => forgedJournal.restore(forged, plan.plan_digest), /generation and previous_snapshot_digest/);
+
+  const legacy = structuredClone(snapshot);
+  delete legacy.snapshot_generation;
+  delete legacy.previous_snapshot_digest;
+  legacy.schema = "bioprism-typescript-autonomous-evidence-runtime-snapshot/0.1";
+  const { snapshot_digest: _legacyDigest, ...legacyBody } = legacy;
+  legacy.snapshot_digest = await digestJson(legacyBody);
+  const legacyJournal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  await legacyJournal.restore(legacy, plan.plan_digest);
+  const upgraded = await legacyJournal.snapshot(plan.plan_digest);
+  assert.equal(upgraded.snapshot_generation, 1);
+  assert.equal(upgraded.previous_snapshot_digest, null);
+  assert.notEqual(upgraded.snapshot_digest, legacy.snapshot_digest);
   const restoredJournal = new InMemoryAutonomousEvidenceRuntimeJournal();
   await restoredJournal.restore(snapshot, plan.plan_digest);
   const restored = new AutonomousEvidenceRuntime({ plan, journal: restoredJournal });
@@ -160,5 +184,8 @@ test("evidence runtime persists a pending evaluator revision and accepts it afte
   assert.ok(!accepted.json.pending_evaluation_requirement_ids.includes(plan.requirements[0].requirement_id));
   assert.equal(accepted.json.missing_requirement_ids.length, 0);
   assert.equal(restoredJournal.records().length, 2, "assessment reconciliation is an append-only revision");
+  const secondSnapshot = await restoredJournal.snapshot(plan.plan_digest);
+  assert.equal(secondSnapshot.snapshot_generation, 2);
+  assert.equal(secondSnapshot.previous_snapshot_digest, snapshot.snapshot_digest);
   assert.deepEqual(calls, ["acquire"]);
 });

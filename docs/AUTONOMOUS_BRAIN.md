@@ -5826,6 +5826,14 @@ canonical JSON over a caller-owned text store; its transactional variant and
 digest. A snapshot from a different plan, a non-canonical encoding, a receipt/assessment mismatch,
 or a tampered evaluator revision is rejected before the journal changes.
 
+The TypeScript and Python evidence-runtime envelopes now also use current `0.2` images with a
+bounded `snapshot_generation` and exact `previous_snapshot_digest`. Repeated snapshots with no
+new acquisition or evaluator revision are stable reads; a new append advances the chain, while a
+legacy `0.1` image is accepted only as a migration input and becomes a fresh generation-one `0.2`
+root on its next snapshot. The lineage relation is checked before journal replacement, including
+when a forged image has been rehashed, so pending evaluator recovery and source replay cannot
+silently fork the persisted evidence history.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected

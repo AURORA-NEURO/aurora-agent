@@ -12,7 +12,8 @@ export const AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA = "bioprism-typescript-autonomou
 export const AUTONOMOUS_EVIDENCE_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-evidence-receipt/0.1" as const;
 export const AUTONOMOUS_EVIDENCE_ASSESSMENT_SCHEMA = "bioprism-typescript-autonomous-evidence-assessment/0.1" as const;
 export const AUTONOMOUS_EVIDENCE_RUNTIME_JOURNAL_SCHEMA = "bioprism-typescript-autonomous-evidence-runtime-journal/0.1" as const;
-export const AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-evidence-runtime-snapshot/0.1" as const;
+const LEGACY_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-evidence-runtime-snapshot/0.1" as const;
+export const AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-evidence-runtime-snapshot/0.2" as const;
 export const MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS = 128;
 export const MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS = 4_096;
 export const MAX_AUTONOMOUS_EVIDENCE_RUNTIME_METADATA_BYTES = 64_000;
@@ -210,7 +211,10 @@ export interface AutonomousEvidenceRuntimeJournalEntry extends JsonObject {
 }
 
 export interface AutonomousEvidenceRuntimeSnapshot extends JsonObject {
-  schema: typeof AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA;
+  /** 0.1 remains readable; current snapshots carry independent image lineage in 0.2. */
+  schema: typeof AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA;
+  snapshot_generation?: number;
+  previous_snapshot_digest?: string | null;
   plan_digest: string;
   entries: AutonomousEvidenceRuntimeJournalEntry[];
   head_digest: string | null;
@@ -341,6 +345,10 @@ function journalDescriptor(entry: AutonomousEvidenceRuntimeJournalEntry): JsonOb
 
 export class InMemoryAutonomousEvidenceRuntimeJournal implements AutonomousEvidenceRuntimeJournal {
   private entries: AutonomousEvidenceRuntimeJournalEntry[] = [];
+  private snapshotGeneration = 0;
+  private previousSnapshotDigest: string | null = null;
+  private cachedSnapshot: AutonomousEvidenceRuntimeSnapshot | null = null;
+  private cachedEntrySignature: string | null = null;
 
   async append(entry: AutonomousEvidenceRuntimeJournalEntry): Promise<AutonomousEvidenceRuntimeJournalEntry> {
     const validatedReceipt = await validateReceipt(entry.receipt);
@@ -352,6 +360,8 @@ export class InMemoryAutonomousEvidenceRuntimeJournal implements AutonomousEvide
     if (await digestJson(journalDescriptor(normalized)) !== normalized.entry_digest) throw new ArgumentError("evidence runtime journal entry digest is invalid");
     if (this.entries.length >= MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS) throw new ArgumentError("evidence runtime journal capacity is exhausted");
     this.entries.push(normalized);
+    this.cachedSnapshot = null;
+    this.cachedEntrySignature = null;
     return structuredClone(normalized);
   }
 
@@ -359,8 +369,12 @@ export class InMemoryAutonomousEvidenceRuntimeJournal implements AutonomousEvide
 
   async snapshot(planDigest: string): Promise<AutonomousEvidenceRuntimeSnapshot> {
     const plan = digestOrNull("evidence runtime snapshot plan_digest", planDigest, true)!;
+    const signature = this.entries.map((entry) => entry.entry_digest).join(":");
+    if (this.cachedSnapshot !== null && this.cachedEntrySignature === signature && this.cachedSnapshot.plan_digest === plan) return structuredClone(this.cachedSnapshot);
     const descriptor = {
       schema: AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA,
+      snapshot_generation: this.snapshotGeneration + 1,
+      previous_snapshot_digest: this.snapshotGeneration === 0 ? null : this.previousSnapshotDigest,
       plan_digest: plan,
       entries: this.records(),
       head_digest: this.entries.at(-1)?.entry_digest ?? null,
@@ -369,13 +383,31 @@ export class InMemoryAutonomousEvidenceRuntimeJournal implements AutonomousEvide
     };
     const snapshot = { ...descriptor, snapshot_digest: await digestJson(descriptor) } as AutonomousEvidenceRuntimeSnapshot;
     if (bytes(canonicalJson(snapshot)) > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_BYTES) throw new ArgumentError("evidence runtime snapshot exceeds its byte bound");
-    return snapshot;
+    this.snapshotGeneration = snapshot.snapshot_generation!;
+    this.previousSnapshotDigest = snapshot.snapshot_digest;
+    this.cachedSnapshot = structuredClone(snapshot);
+    this.cachedEntrySignature = signature;
+    return structuredClone(snapshot);
   }
 
   async restore(snapshot: AutonomousEvidenceRuntimeSnapshot, planDigest: string): Promise<void> {
-    if (!isObject(snapshot) || snapshot.schema !== AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA || snapshot.plan_digest !== planDigest || snapshot.retention !== "metadata_only_hash_bound" || snapshot.secret_material !== "never_returned") throw new ArgumentError("evidence runtime snapshot metadata is invalid");
+    if (!isObject(snapshot)) throw new ArgumentError("evidence runtime snapshot metadata is invalid");
+    const snapshotValue = snapshot as unknown as JsonObject;
+    const legacy = snapshotValue.schema === LEGACY_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA;
+    if (snapshotValue.schema !== AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA && !legacy || snapshotValue.plan_digest !== planDigest || snapshotValue.retention !== "metadata_only_hash_bound" || snapshotValue.secret_material !== "never_returned") throw new ArgumentError("evidence runtime snapshot metadata is invalid");
+    const allowedKeys = legacy
+      ? ["schema", "plan_digest", "entries", "head_digest", "snapshot_digest", "retention", "secret_material"]
+      : ["schema", "snapshot_generation", "previous_snapshot_digest", "plan_digest", "entries", "head_digest", "snapshot_digest", "retention", "secret_material"];
+    if (Object.keys(snapshotValue).some((key) => !allowedKeys.includes(key))) throw new ArgumentError("evidence runtime snapshot contains unsupported metadata");
+    if (!legacy) {
+      if (!Number.isSafeInteger(snapshotValue.snapshot_generation) || (snapshotValue.snapshot_generation as number) < 1) throw new ArgumentError("evidence runtime snapshot generation is outside its bounds");
+      if (snapshotValue.previous_snapshot_digest !== null && (typeof snapshotValue.previous_snapshot_digest !== "string" || !/^[0-9a-f]{64}$/.test(snapshotValue.previous_snapshot_digest))) throw new ArgumentError("evidence runtime previous_snapshot_digest is malformed");
+      if (((snapshotValue.snapshot_generation as number) === 1) !== (snapshotValue.previous_snapshot_digest === null)) throw new ArgumentError("evidence runtime snapshot generation and previous_snapshot_digest are inconsistent");
+    }
     if (!Array.isArray(snapshot.entries) || snapshot.entries.length > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_RECEIPTS) throw new ArgumentError("evidence runtime snapshot entries are invalid");
-    const descriptor = { schema: snapshot.schema, plan_digest: snapshot.plan_digest, entries: snapshot.entries, head_digest: snapshot.head_digest, retention: snapshot.retention, secret_material: snapshot.secret_material };
+    const descriptor = legacy
+      ? { schema: LEGACY_AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA, plan_digest: snapshot.plan_digest, entries: snapshot.entries, head_digest: snapshot.head_digest, retention: snapshot.retention, secret_material: snapshot.secret_material }
+      : { schema: AUTONOMOUS_EVIDENCE_RUNTIME_SNAPSHOT_SCHEMA, snapshot_generation: snapshot.snapshot_generation as number, previous_snapshot_digest: snapshot.previous_snapshot_digest as string | null, plan_digest: snapshot.plan_digest, entries: snapshot.entries, head_digest: snapshot.head_digest, retention: snapshot.retention, secret_material: snapshot.secret_material };
     if (await digestJson(descriptor) !== snapshot.snapshot_digest) throw new ArgumentError("evidence runtime snapshot digest is invalid");
     const restored: AutonomousEvidenceRuntimeJournalEntry[] = [];
     for (const raw of snapshot.entries) {
@@ -387,6 +419,10 @@ export class InMemoryAutonomousEvidenceRuntimeJournal implements AutonomousEvide
     }
     if (snapshot.head_digest !== (restored.at(-1)?.entry_digest ?? null)) throw new ArgumentError("evidence runtime snapshot head digest is invalid");
     this.entries = restored;
+    this.snapshotGeneration = legacy ? 0 : snapshot.snapshot_generation!;
+    this.previousSnapshotDigest = legacy ? null : snapshot.snapshot_digest;
+    this.cachedSnapshot = legacy ? null : structuredClone(snapshot);
+    this.cachedEntrySignature = legacy ? null : this.entries.map((entry) => entry.entry_digest).join(":");
   }
 }
 
