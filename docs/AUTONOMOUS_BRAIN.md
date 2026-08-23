@@ -7984,6 +7984,14 @@ only the already-redacted journal projection, so an HTTP snapshot store, SQLite-
 store, or atomic file store can be substituted without giving the SDK access to task text,
 arguments, outputs, credentials, or provider transcripts.
 
+Current TypeScript and Python journal snapshots use `0.2` envelopes with a strictly increasing
+`snapshot_generation` and an exact `previous_snapshot_digest`. A no-op snapshot is cache-stable;
+appending an execution invalidates that image and advances the chain. Generation one is the only
+root, so a copied, reordered, forged-but-rehashed, or stale journal image cannot masquerade as a
+new restart state. The `0.1` envelope remains readable and is upgraded to a generation-one
+`0.2` root on the next snapshot. Restore validates the complete entry chain and replaces the
+live journal image atomically, preserving retry barriers without retaining adapter values.
+
 The capability-to-learning boundary is explicit through
 `evaluate_capability_execution(...)` and `evaluate_capability_executions(...)`. These methods
 accept either a transient execution result or its metadata-only record, project only

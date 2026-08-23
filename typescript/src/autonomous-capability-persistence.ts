@@ -8,7 +8,8 @@ import type { JsonObject } from "./types.js";
 
 /** Metadata-only, caller-owned persistence for reviewed capability executions. */
 export const AUTONOMOUS_CAPABILITY_JOURNAL_SCHEMA = "bioprism-typescript-autonomous-capability-journal/0.1" as const;
-export const AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-capability-journal-snapshot/0.1" as const;
+const LEGACY_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-capability-journal-snapshot/0.1" as const;
+export const AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-capability-journal-snapshot/0.2" as const;
 export const AUTONOMOUS_CAPABILITY_JOURNAL_MAX_ENTRIES = 4_096;
 export const AUTONOMOUS_CAPABILITY_JOURNAL_MAX_SNAPSHOT_BYTES = 64_000_000;
 
@@ -27,7 +28,10 @@ export interface AutonomousCapabilityJournalEntry extends JsonObject {
 }
 
 export interface AutonomousCapabilityJournalSnapshot extends JsonObject {
-  schema: typeof AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA;
+  /** 0.1 remains readable; current images carry independent snapshot lineage in 0.2. */
+  schema: typeof AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA;
+  snapshot_generation?: number;
+  previous_snapshot_digest?: string | null;
   entries: AutonomousCapabilityJournalEntry[];
   head_digest: string | null;
   retention: "metadata_only_hash_bound";
@@ -266,10 +270,19 @@ export async function validateAutonomousCapabilityJournalEntry(value: unknown): 
 /** Validate a journal snapshot, including every row and the snapshot root digest. */
 export async function validateAutonomousCapabilityJournalSnapshot(value: unknown): Promise<AutonomousCapabilityJournalSnapshot> {
   if (!isObject(value)) throw new AutonomousCapabilityPersistenceError("capability journal snapshot must be an object");
-  const keys = ["schema", "entries", "head_digest", "retention", "secret_material", "snapshot_digest"] as const;
+  const legacy = value.schema === LEGACY_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA;
+  const keys = legacy
+    ? ["schema", "entries", "head_digest", "retention", "secret_material", "snapshot_digest"] as const
+    : ["schema", "snapshot_generation", "previous_snapshot_digest", "entries", "head_digest", "retention", "secret_material", "snapshot_digest"] as const;
   assertKeys("capability journal snapshot", value, keys);
   assertRequired("capability journal snapshot", value, keys);
-  if (value.schema !== AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA || value.retention !== "metadata_only_hash_bound" || value.secret_material !== "never_returned") throw new AutonomousCapabilityPersistenceError("capability journal snapshot retention markers are invalid");
+  if (value.schema !== AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA && !legacy) throw new AutonomousCapabilityPersistenceError("capability journal snapshot schema is unsupported");
+  if (value.retention !== "metadata_only_hash_bound" || value.secret_material !== "never_returned") throw new AutonomousCapabilityPersistenceError("capability journal snapshot retention markers are invalid");
+  if (!legacy) {
+    if (!Number.isSafeInteger(value.snapshot_generation) || (value.snapshot_generation as number) < 1) throw new AutonomousCapabilityPersistenceError("capability journal snapshot generation is outside its bound");
+    if (value.previous_snapshot_digest !== null && boundedDigest("capability journal previous_snapshot_digest", value.previous_snapshot_digest) === null) throw new AutonomousCapabilityPersistenceError("capability journal previous_snapshot_digest is invalid");
+    if (((value.snapshot_generation as number) === 1) !== (value.previous_snapshot_digest === null)) throw new AutonomousCapabilityPersistenceError("capability journal snapshot generation and previous_snapshot_digest are inconsistent");
+  }
   if (!Array.isArray(value.entries) || value.entries.length > AUTONOMOUS_CAPABILITY_JOURNAL_MAX_ENTRIES) throw new AutonomousCapabilityPersistenceError("capability journal snapshot exceeds its entry capacity");
   const entries = await Promise.all(value.entries.map((entry) => validateAutonomousCapabilityJournalEntry(entry)));
   for (let index = 0; index < entries.length; index += 1) {
@@ -281,7 +294,9 @@ export async function validateAutonomousCapabilityJournalSnapshot(value: unknown
   const headDigest = boundedDigest("capability journal snapshot head_digest", value.head_digest, true);
   if (headDigest !== (entries.length ? entries[entries.length - 1]!.entry_digest : null)) throw new AutonomousCapabilityPersistenceError("capability journal snapshot head digest does not match its entries");
   const snapshotDigest = boundedDigest("capability journal snapshot snapshot_digest", value.snapshot_digest)!;
-  const descriptor = { schema: AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA, entries, head_digest: headDigest, retention: "metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
+  const descriptor = legacy
+    ? { schema: LEGACY_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA, entries, head_digest: headDigest, retention: "metadata_only_hash_bound" as const, secret_material: "never_returned" as const }
+    : { schema: AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA, snapshot_generation: value.snapshot_generation as number, previous_snapshot_digest: value.previous_snapshot_digest as string | null, entries, head_digest: headDigest, retention: "metadata_only_hash_bound" as const, secret_material: "never_returned" as const };
   if (await digestJson(descriptor) !== snapshotDigest) throw new AutonomousCapabilityPersistenceError("capability journal snapshot digest does not match its metadata");
   if (jsonBytes(value) > AUTONOMOUS_CAPABILITY_JOURNAL_MAX_SNAPSHOT_BYTES) throw new AutonomousCapabilityPersistenceError("capability journal snapshot exceeds its byte capacity");
   return clone({ ...descriptor, snapshot_digest: snapshotDigest });
@@ -290,6 +305,10 @@ export async function validateAutonomousCapabilityJournalSnapshot(value: unknown
 /** Bounded in-memory journal for tests, desktop workers, and small caller-owned deployments. */
 export class InMemoryAutonomousCapabilityJournalStore implements AutonomousCapabilityJournalSnapshotStore {
   private readonly entries: AutonomousCapabilityJournalEntry[] = [];
+  private snapshotGeneration = 0;
+  private previousSnapshotDigest: string | null = null;
+  private cachedSnapshot: AutonomousCapabilityJournalSnapshot | null = null;
+  private cachedEntrySignature: string | null = null;
 
   async append(rawRecord: AutonomousCapabilityExecutionRecord): Promise<AutonomousCapabilityJournalEntry> {
     const record = await validateAutonomousCapabilityExecutionRecord(rawRecord);
@@ -301,6 +320,8 @@ export class InMemoryAutonomousCapabilityJournalStore implements AutonomousCapab
     if (this.entries.length >= AUTONOMOUS_CAPABILITY_JOURNAL_MAX_ENTRIES) throw new AutonomousCapabilityPersistenceError("capability journal capacity exhausted");
     const entry = await sealEntry(this.entries.length + 1, this.entries.at(-1)?.entry_digest ?? null, record);
     this.entries.push(entry);
+    this.cachedSnapshot = null;
+    this.cachedEntrySignature = null;
     return clone(entry);
   }
 
@@ -315,20 +336,33 @@ export class InMemoryAutonomousCapabilityJournalStore implements AutonomousCapab
   }
 
   async snapshot(): Promise<AutonomousCapabilityJournalSnapshot> {
+    const signature = this.entries.map((entry) => entry.entry_digest).join(":");
+    if (this.cachedSnapshot !== null && this.cachedEntrySignature === signature) return clone(this.cachedSnapshot);
     const descriptor = {
       schema: AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
+      snapshot_generation: this.snapshotGeneration + 1,
+      previous_snapshot_digest: this.snapshotGeneration === 0 ? null : this.previousSnapshotDigest,
       entries: this.entries.map(clone),
       head_digest: this.entries.at(-1)?.entry_digest ?? null,
       retention: "metadata_only_hash_bound" as const,
       secret_material: "never_returned" as const,
     };
-    return { ...descriptor, snapshot_digest: await digestJson(descriptor) };
+    const snapshot = await validateAutonomousCapabilityJournalSnapshot({ ...descriptor, snapshot_digest: await digestJson(descriptor) });
+    this.snapshotGeneration = snapshot.snapshot_generation!;
+    this.previousSnapshotDigest = snapshot.snapshot_digest;
+    this.cachedSnapshot = clone(snapshot);
+    this.cachedEntrySignature = signature;
+    return clone(snapshot);
   }
 
   async restore(rawSnapshot: AutonomousCapabilityJournalSnapshot): Promise<void> {
     const snapshot = await validateAutonomousCapabilityJournalSnapshot(rawSnapshot);
     this.entries.length = 0;
     this.entries.push(...snapshot.entries.map(clone));
+    this.snapshotGeneration = snapshot.snapshot_generation ?? 0;
+    this.previousSnapshotDigest = this.snapshotGeneration === 0 ? null : snapshot.snapshot_digest;
+    this.cachedSnapshot = snapshot.schema === AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA ? clone(snapshot) : null;
+    this.cachedEntrySignature = this.cachedSnapshot === null ? null : this.entries.map((entry) => entry.entry_digest).join(":");
   }
 }
 
@@ -339,7 +373,7 @@ export class AutonomousCapabilityJournalPersistenceCoordinator {
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new AutonomousCapabilityPersistenceError("capability journal persistence requires readable and writable storage");
   }
 
-  async flush(): Promise<{ schema: typeof AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA; bytes: number; snapshot_digest: string; retention: "metadata_only" }> {
+  async flush(): Promise<{ schema: AutonomousCapabilityJournalSnapshot["schema"]; bytes: number; snapshot_digest: string; retention: "metadata_only" }> {
     const snapshot = await this.store.snapshot();
     await this.persistence.write(snapshot);
     return { schema: snapshot.schema, bytes: jsonBytes(snapshot), snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };

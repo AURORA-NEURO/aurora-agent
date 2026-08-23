@@ -1262,8 +1262,34 @@ test("capability journal rehydrates replay identity without retaining adapter va
   assert.equal(first.value.transient, "never stored");
   const snapshot = await journal.snapshot();
   assert.equal(snapshot.entries.length, 1);
+  assert.equal(snapshot.snapshot_generation, 1);
+  assert.equal(snapshot.previous_snapshot_digest, null);
   assert.equal(snapshot.entries[0].record.replay, "fresh");
   assert.equal(Object.prototype.hasOwnProperty.call(snapshot.entries[0].record, "value"), false);
+  assert.equal((await journal.snapshot()).snapshot_digest, snapshot.snapshot_digest);
+
+  const forgedGeneration = structuredClone(snapshot);
+  forgedGeneration.snapshot_generation = 2;
+  forgedGeneration.previous_snapshot_digest = null;
+  const { snapshot_digest: _forgedDigest, ...forgedBody } = forgedGeneration;
+  forgedGeneration.snapshot_digest = await digestJson(forgedBody);
+  await assert.rejects(() => validateAutonomousCapabilityJournalSnapshot(forgedGeneration), /generation and previous_snapshot_digest/);
+
+  const { snapshot_generation: _generation, previous_snapshot_digest: _previous, snapshot_digest: _legacyDigest, ...legacyBody } = structuredClone(snapshot);
+  const legacySnapshot = { ...legacyBody, schema: "bioprism-typescript-autonomous-capability-journal-snapshot/0.1" };
+  legacySnapshot.snapshot_digest = await digestJson(legacySnapshot);
+  const legacyJournal = new InMemoryAutonomousCapabilityJournalStore();
+  await legacyJournal.restore(legacySnapshot);
+  const upgraded = await legacyJournal.snapshot();
+  assert.equal(upgraded.schema, "bioprism-typescript-autonomous-capability-journal-snapshot/0.2");
+  assert.equal(upgraded.snapshot_generation, 1);
+  assert.equal(upgraded.previous_snapshot_digest, null);
+
+  await capabilities.execute({ ...request, call_id: "journal-replay-2", replay_key: "journal-replay-key-2" });
+  const advanced = await journal.snapshot();
+  assert.equal(advanced.entries.length, 2);
+  assert.equal(advanced.snapshot_generation, 2);
+  assert.equal(advanced.previous_snapshot_digest, snapshot.snapshot_digest);
 
   const restoredJournal = new InMemoryAutonomousCapabilityJournalStore();
   await restoredJournal.restore(snapshot);
@@ -1275,7 +1301,7 @@ test("capability journal rehydrates replay identity without retaining adapter va
   assert.equal(replay.record.output_digest, first.record.output_digest);
   assert.equal(replay.value, null);
   assert.match(replay.value_retention, /transient/);
-  assert.equal(executions, 1, "rehydration must not redispatch the external tool");
+  assert.equal(executions, 2, "rehydration must not redispatch the external tool");
 
   const tampered = structuredClone(snapshot);
   tampered.entries[0].record.value = { leaked: true };
@@ -1288,7 +1314,7 @@ test("capability journal rehydrates replay identity without retaining adapter va
   });
   const flushed = await coordinator.flush();
   assert.equal(flushed.retention, "metadata_only");
-  assert.equal(flushed.snapshot_digest, snapshot.snapshot_digest);
+  assert.equal(flushed.snapshot_digest, advanced.snapshot_digest);
   const empty = new InMemoryAutonomousCapabilityJournalStore();
   const restoreCoordinator = new AutonomousCapabilityJournalPersistenceCoordinator(empty, {
     async read() { return persisted; },
@@ -1296,7 +1322,7 @@ test("capability journal rehydrates replay identity without retaining adapter va
   });
   const restored = await restoreCoordinator.restore();
   assert.equal(restored.restored, true);
-  assert.equal(restored.entry_count, 1);
+  assert.equal(restored.entry_count, 2);
 });
 
 test("AutonomousAgent exposes capability records through its activation-aware runtime", async () => {

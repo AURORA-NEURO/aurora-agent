@@ -61,6 +61,7 @@ from prism_sdk import (
     InMemoryAutonomousRunTraceStore,
     AutonomousCapabilityJournalPersistenceCoordinator,
     TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence,
+    validate_autonomous_capability_journal_snapshot,
     ModelCandidate,
     ModelCatalogue,
     ProviderHealthLedger,
@@ -1128,6 +1129,10 @@ def test_autonomous_agent_exposes_reviewed_capability_execution_and_journal_repl
     }
 
     first = agent.execute_capability(request)
+    first_snapshot = journal.snapshot()
+    assert first_snapshot.snapshot_generation == 1
+    assert first_snapshot.previous_snapshot_digest is None
+    assert journal.snapshot().snapshot_digest == first_snapshot.snapshot_digest
     learning = agent.evaluate_capability_execution(
         first,
         evaluator=AutonomousToolOutcomeEvaluator(
@@ -1160,6 +1165,37 @@ def test_autonomous_agent_exposes_reviewed_capability_execution_and_journal_repl
     assert workspace.calls == [("developer_platform_status", {"scope": "workspace"})]
     assert agent.capability_execution_evidence()[0]["request_digest"]
 
+    second_request = {
+        **request,
+        "call_id": "agent-capability-call-2",
+        "replay_key": "agent-capability-replay-2",
+        "execution_id": "agent-capability-execution-2",
+    }
+    agent.execute_capability(second_request)
+    advanced_snapshot = journal.snapshot()
+    assert advanced_snapshot.snapshot_generation == 2
+    assert advanced_snapshot.previous_snapshot_digest == first_snapshot.snapshot_digest
+
+    forged_generation = first_snapshot.to_dict()
+    forged_generation["snapshot_generation"] = 2
+    forged_generation["previous_snapshot_digest"] = None
+    forged_generation.pop("snapshot_digest")
+    forged_generation["snapshot_digest"] = content_digest(forged_generation)
+    with pytest.raises(ArgumentError, match="generation and previous_snapshot_digest"):
+        validate_autonomous_capability_journal_snapshot(forged_generation)
+
+    legacy_snapshot = first_snapshot.to_dict()
+    legacy_snapshot.pop("snapshot_generation")
+    legacy_snapshot.pop("previous_snapshot_digest")
+    legacy_snapshot["schema"] = "bioprism-python-autonomous-capability-journal-snapshot/0.1"
+    legacy_snapshot.pop("snapshot_digest")
+    legacy_snapshot["snapshot_digest"] = content_digest(legacy_snapshot)
+    legacy_journal = InMemoryAutonomousCapabilityJournalStore()
+    legacy_journal.restore(legacy_snapshot)
+    upgraded_snapshot = legacy_journal.snapshot()
+    assert upgraded_snapshot.snapshot_generation == 1
+    assert upgraded_snapshot.previous_snapshot_digest is None
+
     backend = _CasTextStore()
     persistence = TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence(backend)
     source_coordinator = AutonomousCapabilityJournalPersistenceCoordinator(journal, persistence)
@@ -1168,7 +1204,7 @@ def test_autonomous_agent_exposes_reviewed_capability_execution_and_journal_repl
     restarted_journal = InMemoryAutonomousCapabilityJournalStore()
     restarted_coordinator = AutonomousCapabilityJournalPersistenceCoordinator(restarted_journal, persistence)
     restored_snapshot = restarted_coordinator.restore()
-    assert restored_snapshot["entry_count"] == 1
+    assert restored_snapshot["entry_count"] == 2
     assert restarted_journal.records()[0].request_digest == first.record.request_digest
     backend.value = json.dumps(json.loads(backend.value), indent=2)
     with pytest.raises(ArgumentError, match="not canonical"):

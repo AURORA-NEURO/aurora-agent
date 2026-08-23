@@ -25,7 +25,8 @@ AUTONOMOUS_CAPABILITY_EXECUTION_SCHEMA = "bioprism-python-autonomous-capability-
 AUTONOMOUS_CAPABILITY_BATCH_SCHEMA = "bioprism-python-autonomous-capability-batch/0.1"
 AUTONOMOUS_CAPABILITY_OBSERVATION_SCHEMA = "bioprism-python-autonomous-capability-observation/0.1"
 AUTONOMOUS_CAPABILITY_JOURNAL_SCHEMA = "bioprism-python-autonomous-capability-journal/0.1"
-AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-capability-journal-snapshot/0.1"
+_LEGACY_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-capability-journal-snapshot/0.1"
+AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-capability-journal-snapshot/0.2"
 MAX_AUTONOMOUS_CAPABILITY_BATCH = 64
 MAX_AUTONOMOUS_CAPABILITY_HISTORY = 512
 MAX_AUTONOMOUS_CAPABILITY_OBSERVATIONS = 128
@@ -445,16 +446,24 @@ class AutonomousCapabilityJournalSnapshot:
     entries: tuple[AutonomousCapabilityJournalEntry, ...]
     head_digest: str | None
     snapshot_digest: str
+    snapshot_generation: int | None = None
+    previous_snapshot_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
+        descriptor = {
+            "schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA if self.snapshot_generation is not None else _LEGACY_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
             "entries": [entry.to_dict() for entry in self.entries],
             "head_digest": self.head_digest,
             "retention": "metadata_only_hash_bound",
             "secret_material": "never_returned",
-            "snapshot_digest": self.snapshot_digest,
         }
+        if self.snapshot_generation is not None:
+            descriptor = {
+                **descriptor,
+                "snapshot_generation": self.snapshot_generation,
+                "previous_snapshot_digest": self.previous_snapshot_digest,
+            }
+        return {**descriptor, "snapshot_digest": self.snapshot_digest}
 
 
 class AutonomousCapabilityJournalStore(Protocol):
@@ -488,9 +497,21 @@ def _entry_from_mapping(value: Mapping[str, Any]) -> AutonomousCapabilityJournal
 
 def validate_autonomous_capability_journal_snapshot(value: Mapping[str, Any] | AutonomousCapabilityJournalSnapshot) -> AutonomousCapabilityJournalSnapshot:
     raw = value.to_dict() if isinstance(value, AutonomousCapabilityJournalSnapshot) else value
+    legacy = isinstance(raw, Mapping) and raw.get("schema") == _LEGACY_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA
     expected = {"schema", "entries", "head_digest", "retention", "secret_material", "snapshot_digest"}
-    if not isinstance(raw, Mapping) or set(raw) != expected or raw.get("schema") != AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA or raw.get("retention") != "metadata_only_hash_bound" or raw.get("secret_material") != "never_returned":
+    if not legacy:
+        expected.update({"snapshot_generation", "previous_snapshot_digest"})
+    if not isinstance(raw, Mapping) or set(raw) != expected or raw.get("schema") not in {_LEGACY_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA, AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA} or raw.get("retention") != "metadata_only_hash_bound" or raw.get("secret_material") != "never_returned":
         raise ArgumentError("capability journal snapshot is malformed")
+    snapshot_generation = raw.get("snapshot_generation")
+    previous_snapshot_digest = raw.get("previous_snapshot_digest")
+    if not legacy:
+        if not isinstance(snapshot_generation, int) or isinstance(snapshot_generation, bool) or snapshot_generation < 1:
+            raise ArgumentError("capability journal snapshot generation is outside its bound")
+        if previous_snapshot_digest is not None:
+            previous_snapshot_digest = _digest("capability journal previous_snapshot_digest", previous_snapshot_digest)
+        if (snapshot_generation == 1) != (previous_snapshot_digest is None):
+            raise ArgumentError("capability journal snapshot generation and previous_snapshot_digest are inconsistent")
     entries_raw = raw.get("entries")
     if not isinstance(entries_raw, Sequence) or isinstance(entries_raw, (str, bytes, bytearray)) or len(entries_raw) > MAX_AUTONOMOUS_CAPABILITY_JOURNAL_ENTRIES:
         raise ArgumentError("capability journal snapshot exceeds its entry capacity")
@@ -503,17 +524,29 @@ def validate_autonomous_capability_journal_snapshot(value: Mapping[str, Any] | A
         raise ArgumentError("capability journal snapshot head digest is inconsistent")
     snapshot_digest = _digest("capability journal snapshot snapshot_digest", raw.get("snapshot_digest"))
     descriptor = {
-        "schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
+        "schema": raw["schema"],
         "entries": [entry.to_dict() for entry in entries],
         "head_digest": head,
         "retention": "metadata_only_hash_bound",
         "secret_material": "never_returned",
     }
+    if not legacy:
+        descriptor = {
+            **descriptor,
+            "snapshot_generation": snapshot_generation,
+            "previous_snapshot_digest": previous_snapshot_digest,
+        }
     if content_digest(descriptor) != snapshot_digest:
         raise ArgumentError("capability journal snapshot digest does not match its metadata")
     if _json_bytes(raw) > MAX_AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_BYTES:
         raise ArgumentError("capability journal snapshot exceeds its byte capacity")
-    return AutonomousCapabilityJournalSnapshot(entries, head, snapshot_digest)
+    return AutonomousCapabilityJournalSnapshot(
+        entries,
+        head,
+        snapshot_digest,
+        None if legacy else snapshot_generation,
+        None if legacy else previous_snapshot_digest,
+    )
 
 
 def _canonical_capability_journal_json(
@@ -616,6 +649,10 @@ class InMemoryAutonomousCapabilityJournalStore:
     def __init__(self) -> None:
         self._entries: list[AutonomousCapabilityJournalEntry] = []
         self._lock = threading.RLock()
+        self._snapshot_generation = 0
+        self._previous_snapshot_digest: str | None = None
+        self._snapshot_cache: AutonomousCapabilityJournalSnapshot | None = None
+        self._snapshot_cache_entry_signature: tuple[str, ...] | None = None
 
     def append(self, record: AutonomousCapabilityExecutionRecord) -> AutonomousCapabilityJournalEntry:
         normalized = _record_input(record)
@@ -638,6 +675,8 @@ class InMemoryAutonomousCapabilityJournalStore:
             }
             entry = AutonomousCapabilityJournalEntry(descriptor["sequence"], descriptor["previous_entry_digest"], normalized, content_digest(descriptor))
             self._entries.append(entry)
+            self._snapshot_cache = None
+            self._snapshot_cache_entry_signature = None
             return entry
 
     def find(self, request_digest: str) -> AutonomousCapabilityExecutionRecord | None:
@@ -653,19 +692,33 @@ class InMemoryAutonomousCapabilityJournalStore:
     def snapshot(self) -> AutonomousCapabilityJournalSnapshot:
         with self._lock:
             entries = tuple(_entry_from_mapping(entry.to_dict()) for entry in self._entries)
+            signature = tuple(entry.entry_digest for entry in entries)
+            if self._snapshot_cache is not None and self._snapshot_cache_entry_signature == signature:
+                return self._snapshot_cache
             descriptor = {
                 "schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
+                "snapshot_generation": self._snapshot_generation + 1,
+                "previous_snapshot_digest": self._previous_snapshot_digest if self._snapshot_generation else None,
                 "entries": [entry.to_dict() for entry in entries],
                 "head_digest": entries[-1].entry_digest if entries else None,
                 "retention": "metadata_only_hash_bound",
                 "secret_material": "never_returned",
             }
-            return AutonomousCapabilityJournalSnapshot(entries, descriptor["head_digest"], content_digest(descriptor))
+            snapshot = validate_autonomous_capability_journal_snapshot({**descriptor, "snapshot_digest": content_digest(descriptor)})
+            self._snapshot_generation = snapshot.snapshot_generation or 0
+            self._previous_snapshot_digest = snapshot.snapshot_digest
+            self._snapshot_cache = snapshot
+            self._snapshot_cache_entry_signature = signature
+            return snapshot
 
     def restore(self, snapshot: AutonomousCapabilityJournalSnapshot | Mapping[str, Any]) -> None:
         validated = validate_autonomous_capability_journal_snapshot(snapshot)
         with self._lock:
             self._entries = list(validated.entries)
+            self._snapshot_generation = validated.snapshot_generation or 0
+            self._previous_snapshot_digest = validated.snapshot_digest if self._snapshot_generation else None
+            self._snapshot_cache = validated if validated.snapshot_generation is not None else None
+            self._snapshot_cache_entry_signature = None if self._snapshot_cache is None else tuple(entry.entry_digest for entry in validated.entries)
 
 
 class AutonomousCapabilityJournalPersistenceCoordinator:
