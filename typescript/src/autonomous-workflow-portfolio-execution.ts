@@ -1,5 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import {
+  AUTONOMOUS_DOMAIN_NAMES,
   type AutonomousAgent,
   type AutonomousDomainName,
   type AutonomousPromptChunk,
@@ -21,7 +22,7 @@ import type {
   AutonomousLearningOutboxSettlementOptions,
 } from "./autonomous-learning.js";
 import { validateAutonomousWorkflowPortfolioAdmission, type AutonomousWorkflowPortfolioAdmission } from "./autonomous-workflow-portfolio-admission.js";
-import { digestJson } from "./tooling.js";
+import { digestJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 /** Digest-bound execution result for a portfolio whose plan was reviewed separately. */
@@ -42,6 +43,56 @@ export type AutonomousWorkflowPortfolioExecutionItemStatus =
   | "omitted";
 
 export type AutonomousWorkflowPortfolioExecutionStatus = "completed" | "partial" | "failed" | "approval_required" | "blocked";
+
+/** Metadata-only lifecycle phases for one dependency-aware portfolio execution. */
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-trace/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_SCHEMA = "bioprism-typescript-autonomous-workflow-portfolio-execution-trace-event/0.1" as const;
+export type AutonomousWorkflowPortfolioExecutionTracePhase = "started" | "plan_verified" | "item_started" | "item_decided" | "progress" | "completed" | "paused" | "failed" | "blocked";
+export type AutonomousWorkflowPortfolioExecutionTraceStatus = AutonomousWorkflowPortfolioExecutionStatus | AutonomousWorkflowPortfolioExecutionItemStatus | "running";
+
+export interface AutonomousWorkflowPortfolioExecutionTraceEvent extends JsonObject {
+  schema: typeof AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_SCHEMA;
+  trace_id: string;
+  sequence: number;
+  plan_digest: string;
+  admission_digest: string | null;
+  phase: AutonomousWorkflowPortfolioExecutionTracePhase;
+  status: AutonomousWorkflowPortfolioExecutionTraceStatus;
+  item_id: string | null;
+  domain: AutonomousDomainName | null;
+  wave_index: number | null;
+  provider_call: AutonomousWorkflowPortfolioExecutionItemJSON["provider_call"] | null;
+  result_digest: string | null;
+  failure_code: string | null;
+  learning_status: AutonomousWorkflowPortfolioLearningStatus | null;
+  detail_digest: string | null;
+  previous_digest: string;
+  event_digest: string;
+  retention: "metadata_only_no_tasks_prompts_outputs_credentials_or_evidence";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousWorkflowPortfolioExecutionTraceEventInput {
+  phase: AutonomousWorkflowPortfolioExecutionTracePhase;
+  status: AutonomousWorkflowPortfolioExecutionTraceStatus;
+  item_id?: string | null;
+  domain?: AutonomousDomainName | null;
+  wave_index?: number | null;
+  provider_call?: AutonomousWorkflowPortfolioExecutionItemJSON["provider_call"] | null;
+  result_digest?: string | null;
+  failure_code?: string | null;
+  learning_status?: AutonomousWorkflowPortfolioLearningStatus | null;
+  detail_digest?: string | null;
+}
+
+export type AutonomousWorkflowPortfolioExecutionTraceSink = (event: AutonomousWorkflowPortfolioExecutionTraceEvent) => Promise<void> | void;
+
+export interface AutonomousWorkflowPortfolioExecutionTraceEmitter {
+  emit(input: AutonomousWorkflowPortfolioExecutionTraceEventInput): Promise<AutonomousWorkflowPortfolioExecutionTraceEvent>;
+  flush(): Promise<void>;
+  readonly traceId: string;
+  readonly headDigest: string;
+}
 
 /** Explicit state of the optional evaluator-to-bandit handoff for one portfolio item. */
 export type AutonomousWorkflowPortfolioLearningStatus =
@@ -87,6 +138,10 @@ export interface AutonomousWorkflowPortfolioExecutionOptions {
   includeDependencyOutputs?: boolean;
   /** Aggregate byte budget for direct predecessor prompt handoffs. */
   maxDependencyHandoffBytes?: number;
+  /** Caller-owned metadata sink for the portfolio decision trace; no transient values are emitted. */
+  traceSink?: AutonomousWorkflowPortfolioExecutionTraceSink;
+  /** Stable caller-owned trace identity, required when traceSink is supplied. */
+  traceId?: string;
 }
 
 export interface AutonomousWorkflowPortfolioLearningEvaluationContext {
@@ -142,6 +197,7 @@ export interface AutonomousWorkflowPortfolioExecutionJSON extends JsonObject {
   status: AutonomousWorkflowPortfolioExecutionStatus;
   plan_digest: string;
   admission_digest: string | null;
+  trace_digest: string | null;
   execution_digest: string;
   wave_count: number;
   completed_count: number;
@@ -485,6 +541,7 @@ export class AutonomousWorkflowPortfolioExecutionResult {
     readonly waveCount: number,
     readonly executionDigest: string,
     readonly admissionDigest: string | null = null,
+    readonly traceDigest: string | null = null,
   ) {}
 
   toJSON(): AutonomousWorkflowPortfolioExecutionJSON {
@@ -495,6 +552,7 @@ export class AutonomousWorkflowPortfolioExecutionResult {
       status: this.status,
       plan_digest: this.plan.portfolio_digest,
       admission_digest: this.admissionDigest,
+      trace_digest: this.traceDigest,
       execution_digest: this.executionDigest,
       wave_count: this.waveCount,
       completed_count: counts.completed,
@@ -558,6 +616,93 @@ function overallStatus(plan: AutonomousWorkflowPortfolioPlan, items: readonly Au
   return "partial";
 }
 
+const PORTFOLIO_TRACE_RETENTION = "metadata_only_no_tasks_prompts_outputs_credentials_or_evidence" as const;
+const PORTFOLIO_TRACE_SECRET_MATERIAL = "never_returned" as const;
+const PORTFOLIO_TRACE_PHASES: readonly AutonomousWorkflowPortfolioExecutionTracePhase[] = ["started", "plan_verified", "item_started", "item_decided", "progress", "completed", "paused", "failed", "blocked"];
+const PORTFOLIO_TRACE_STATUSES: readonly AutonomousWorkflowPortfolioExecutionTraceStatus[] = ["completed", "partial", "failed", "approval_required", "blocked", "running", "succeeded", "route_review_required", "reconciliation_required", "turn_limit_reached", "child_failed", "omitted"];
+const PORTFOLIO_TRACE_PROVIDER_CALLS: readonly NonNullable<AutonomousWorkflowPortfolioExecutionItemJSON["provider_call"]>[] = ["not_started", "approval_required", "may_have_started"];
+const PORTFOLIO_TRACE_LEARNING_STATUSES: readonly AutonomousWorkflowPortfolioLearningStatus[] = ["disabled", "not_eligible", "pending_evaluation", "preparation_failed", "evaluation_failed", "settled", "settlement_failed"];
+
+function traceIdentifier(name: string, value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 256 || value.includes("\u0000") || !/^[A-Za-z0-9_.:+-]+$/.test(value)) throw new ArgumentError(`${name} is outside its bounded identifier contract`);
+  return value;
+}
+
+function traceOptionalDigest(name: string, value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+  return value;
+}
+
+function traceOptionalText(name: string, value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || value.length === 0 || value.length > 256 || value.includes("\u0000")) throw new ArgumentError(`${name} is outside its bounded text contract`);
+  return value;
+}
+
+/** Create a serialized, hash-chained metadata trace for a portfolio execution. */
+export function createAutonomousWorkflowPortfolioExecutionTraceEmitter(input: {
+  traceId: string;
+  planDigest: string;
+  admissionDigest?: string | null;
+  sink: AutonomousWorkflowPortfolioExecutionTraceSink;
+}): AutonomousWorkflowPortfolioExecutionTraceEmitter {
+  const traceId = traceIdentifier("workflow portfolio traceId", input?.traceId);
+  const planDigest = traceOptionalDigest("workflow portfolio trace planDigest", input?.planDigest);
+  if (planDigest === null) throw new ArgumentError("workflow portfolio trace planDigest is required");
+  const admissionDigest = traceOptionalDigest("workflow portfolio trace admissionDigest", input.admissionDigest);
+  if (typeof input.sink !== "function") throw new ArgumentError("workflow portfolio trace sink must be callable");
+  let sequence = 0;
+  let previousDigest = "";
+  let tail: Promise<void> = Promise.resolve();
+  const emit = (eventInput: AutonomousWorkflowPortfolioExecutionTraceEventInput): Promise<AutonomousWorkflowPortfolioExecutionTraceEvent> => {
+    let result!: Promise<AutonomousWorkflowPortfolioExecutionTraceEvent>;
+    const operation = tail.then(async () => {
+      if (!eventInput || !PORTFOLIO_TRACE_PHASES.includes(eventInput.phase)) throw new ArgumentError("workflow portfolio trace phase is invalid");
+      if (!PORTFOLIO_TRACE_STATUSES.includes(eventInput.status)) throw new ArgumentError("workflow portfolio trace status is invalid");
+      const itemId = eventInput.item_id === null || eventInput.item_id === undefined ? null : traceIdentifier("workflow portfolio trace item_id", eventInput.item_id);
+      const domain = eventInput.domain === null || eventInput.domain === undefined ? null : (AUTONOMOUS_DOMAIN_NAMES.includes(eventInput.domain) ? eventInput.domain : (() => { throw new ArgumentError("workflow portfolio trace domain is invalid"); })());
+      const waveIndex = eventInput.wave_index === null || eventInput.wave_index === undefined ? null : boundedInteger("workflow portfolio trace wave_index", eventInput.wave_index, 0, MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ITEMS, 0);
+      const providerCall = eventInput.provider_call === null || eventInput.provider_call === undefined ? null : (PORTFOLIO_TRACE_PROVIDER_CALLS.includes(eventInput.provider_call) ? eventInput.provider_call : (() => { throw new ArgumentError("workflow portfolio trace provider_call is invalid"); })());
+      const learningStatus = eventInput.learning_status === null || eventInput.learning_status === undefined ? null : (PORTFOLIO_TRACE_LEARNING_STATUSES.includes(eventInput.learning_status) ? eventInput.learning_status : (() => { throw new ArgumentError("workflow portfolio trace learning_status is invalid"); })());
+      const body = {
+        schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_TRACE_EVENT_SCHEMA,
+        trace_id: traceId,
+        sequence: sequence + 1,
+        plan_digest: planDigest,
+        admission_digest: admissionDigest,
+        phase: eventInput.phase,
+        status: eventInput.status,
+        item_id: itemId,
+        domain,
+        wave_index: waveIndex,
+        provider_call: providerCall,
+        result_digest: traceOptionalDigest("workflow portfolio trace result_digest", eventInput.result_digest),
+        failure_code: traceOptionalText("workflow portfolio trace failure_code", eventInput.failure_code),
+        learning_status: learningStatus,
+        detail_digest: traceOptionalDigest("workflow portfolio trace detail_digest", eventInput.detail_digest),
+        previous_digest: previousDigest,
+        retention: PORTFOLIO_TRACE_RETENTION,
+        secret_material: PORTFOLIO_TRACE_SECRET_MATERIAL,
+      } satisfies Omit<AutonomousWorkflowPortfolioExecutionTraceEvent, "event_digest">;
+      const event = { ...body, event_digest: digestJsonSync(body) } as AutonomousWorkflowPortfolioExecutionTraceEvent;
+      await input.sink(event);
+      sequence += 1;
+      previousDigest = event.event_digest;
+      return structuredClone(event);
+    });
+    result = operation;
+    tail = operation.then(() => undefined, () => undefined);
+    return result;
+  };
+  return {
+    emit,
+    flush: async () => { await tail; },
+    get traceId() { return traceId; },
+    get headDigest() { return previousDigest; },
+  };
+}
+
 /** Execute a verified portfolio in deterministic dependency waves with bounded transient handoffs. */
 export async function executeAutonomousWorkflowPortfolio(
   agent: AutonomousAgent,
@@ -592,11 +737,15 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
     : await planAutonomousWorkflowPortfolio(agent, requests, options.planOptions);
   const admission = options.admission === undefined ? null : await validateAutonomousWorkflowPortfolioAdmission(options.admission);
   if (admission !== null && admission.plan.portfolio_digest !== plan.portfolio_digest) throw new ProviderRuntimeError("workflow portfolio admission does not match the reviewed plan", { code: "protocol", retryable: false, operation: "workflow_portfolio_admission" });
+  if (options.traceId !== undefined && options.traceSink === undefined) throw new ArgumentError("workflow portfolio traceId requires traceSink");
+  const trace = options.traceSink === undefined ? null : createAutonomousWorkflowPortfolioExecutionTraceEmitter({ traceId: options.traceId ?? `portfolio-trace:${plan.portfolio_digest.slice(0, 24)}`, planDigest: plan.portfolio_digest, admissionDigest: admission?.admission_digest ?? null, sink: options.traceSink });
+  await trace?.emit({ phase: "started", status: "running" });
   const admissionItems = admission === null ? null : new Map(admission.items.map((item) => [item.item_id, item]));
   if (options.plan && options.verifyPlan !== false) {
     const verification = await verifyAutonomousWorkflowPortfolio(agent, plan, requests, options.planOptions);
     if (verification.status !== "verified") throw new ProviderRuntimeError("workflow portfolio plan verification failed before dispatch", { code: "protocol", retryable: false, operation: "workflow_portfolio_verify" });
   }
+  await trace?.emit({ phase: "plan_verified", status: "running" });
 
   const executions = new Map<string, AutonomousWorkflowPortfolioItemExecutionResult>();
   const planItemsById = new Map(plan.items.map((item) => [item.item_id, item]));
@@ -615,14 +764,19 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
   }
   const snapshotItems = (): AutonomousWorkflowPortfolioItemExecutionResult[] => plan.items.map((item) => executions.get(item.item_id) ?? new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_item_pending", "portfolio_item_pending"));
   const reportProgress = async (): Promise<void> => {
-    if (!progressSink) return;
     const snapshot = snapshotItems();
-    await progressSink({ plan, items: snapshot, status: overallStatus(plan, snapshot, admission?.status) });
+    const status = overallStatus(plan, snapshot, admission?.status);
+    await trace?.emit({ phase: "progress", status, detail_digest: await digestJson(snapshot.map((item) => item.toJSON(new Map(snapshot.map((candidate) => [candidate.itemId, candidate]))))) });
+    await progressSink?.({ plan, items: snapshot, status });
   };
   await reportProgress();
   if (plan.status === "blocked") {
     for (const item of plan.items) {
-      if (!executions.has(item.item_id)) executions.set(item.item_id, new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_plan_blocked", "portfolio_plan_blocked"));
+      if (!executions.has(item.item_id)) {
+        const blocked = new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_plan_blocked", "portfolio_plan_blocked");
+        executions.set(item.item_id, blocked);
+        await trace?.emit({ phase: "blocked", status: blocked.status, item_id: item.item_id, domain: item.domain, failure_code: blocked.failureCode });
+      }
     }
   } else {
     const includeDependencyOutputs = options.includeDependencyOutputs !== false;
@@ -632,7 +786,9 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
       if (stopped) {
         for (const itemId of waveIds) {
           const item = plan.items.find((candidate) => candidate.item_id === itemId)!;
-          executions.set(itemId, new AutonomousWorkflowPortfolioItemExecutionResult(itemId, item.domain, [...item.depends_on], "omitted", null, null, 0, "portfolio_stopped_after_failure", "portfolio_stopped_after_failure", includeDependencyOutputs));
+          const omitted = new AutonomousWorkflowPortfolioItemExecutionResult(itemId, item.domain, [...item.depends_on], "omitted", null, null, 0, "portfolio_stopped_after_failure", "portfolio_stopped_after_failure", includeDependencyOutputs);
+          executions.set(itemId, omitted);
+          await trace?.emit({ phase: "item_decided", status: omitted.status, item_id: itemId, domain: item.domain, failure_code: omitted.failureCode });
         }
         continue;
       }
@@ -642,12 +798,16 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
       });
       for (const itemId of waveIds.filter((itemId) => !runnable.includes(itemId))) {
         const item = plan.items.find((candidate) => candidate.item_id === itemId)!;
-        executions.set(itemId, new AutonomousWorkflowPortfolioItemExecutionResult(itemId, item.domain, [...item.depends_on], "blocked", null, null, 0, "dependency_not_succeeded", "dependency_not_succeeded", includeDependencyOutputs));
+        const blocked = new AutonomousWorkflowPortfolioItemExecutionResult(itemId, item.domain, [...item.depends_on], "blocked", null, null, 0, "dependency_not_succeeded", "dependency_not_succeeded", includeDependencyOutputs);
+        executions.set(itemId, blocked);
+        await trace?.emit({ phase: "blocked", status: blocked.status, item_id: itemId, domain: item.domain, failure_code: blocked.failureCode });
       }
       const waveResults = await runBounded(runnable, maxParallelism, async (itemId) => {
         const planItem = plan.items.find((item) => item.item_id === itemId)!;
         const request = requestById.get(itemId);
         if (!request) throw new ProviderRuntimeError("workflow portfolio execution request is missing for the reviewed plan", { code: "protocol", retryable: false, operation: "workflow_portfolio_dispatch" });
+        const waveIndex = plan.dependency_graph.waves.findIndex((wave) => wave.includes(itemId));
+        await trace?.emit({ phase: "item_started", status: "running", item_id: itemId, domain: planItem.domain, wave_index: waveIndex < 0 ? 0 : waveIndex, provider_call: "not_started" });
         const context = [
           ...(options.run?.context ?? []),
           ...(request.context ?? []),
@@ -660,10 +820,14 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
           const output = outputProjection.text;
           const outputDigest = output ? await digestJson({ item_id: itemId, output }) : null;
           const learning = await settlePortfolioItemLearning(options, plan.portfolio_digest, request, planItem, itemId, run, output, outputDigest);
-          return new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], status, run, outputDigest, outputProjection.bytes, null, status === "succeeded" ? null : status, includeDependencyOutputs, output, learning.status, learning.episodeId, learning.evaluationDigest, learning.settlementDigest, learning.errorClass);
+          const result = new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], status, run, outputDigest, outputProjection.bytes, null, status === "succeeded" ? null : status, includeDependencyOutputs, output, learning.status, learning.episodeId, learning.evaluationDigest, learning.settlementDigest, learning.errorClass);
+          await trace?.emit({ phase: "item_decided", status: result.status, item_id: itemId, domain: result.domain, wave_index: waveIndex < 0 ? 0 : waveIndex, provider_call: result.toJSON().provider_call, result_digest: result.outputDigest, failure_code: result.failureCode, learning_status: result.learningStatus });
+          return result;
         } catch (error) {
           const metadata = errorMetadata(error);
-          return new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], "failed", null, null, 0, metadata.errorClass, metadata.failureCode, includeDependencyOutputs);
+          const result = new AutonomousWorkflowPortfolioItemExecutionResult(itemId, planItem.domain, [...planItem.depends_on], "failed", null, null, 0, metadata.errorClass, metadata.failureCode, includeDependencyOutputs);
+          await trace?.emit({ phase: "item_decided", status: result.status, item_id: itemId, domain: result.domain, wave_index: waveIndex < 0 ? 0 : waveIndex, provider_call: result.toJSON().provider_call, failure_code: result.failureCode, learning_status: result.learningStatus });
+          return result;
         }
       });
       for (const result of waveResults) executions.set(result.itemId, result);
@@ -674,13 +838,17 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
 
   const items = plan.items.map((item) => executions.get(item.item_id) ?? new AutonomousWorkflowPortfolioItemExecutionResult(item.item_id, item.domain, [...item.depends_on], "blocked", null, null, 0, "portfolio_item_not_scheduled", "portfolio_item_not_scheduled"));
   const status = overallStatus(plan, items, admission?.status);
+  await trace?.emit({ phase: status === "blocked" ? "blocked" : status === "approval_required" ? "paused" : status === "failed" ? "failed" : "completed", status, detail_digest: await digestJson(items.map((item) => item.toJSON(new Map(items.map((candidate) => [candidate.itemId, candidate]))))) });
   await progressSink?.({ plan, items, status });
+  await trace?.flush();
+  const traceDigest = trace?.headDigest ?? null;
   const counts = executionCounts(items);
   const metadata = {
     schema: AUTONOMOUS_WORKFLOW_PORTFOLIO_EXECUTION_SCHEMA,
     status,
     plan_digest: plan.portfolio_digest,
     admission_digest: admission?.admission_digest ?? null,
+    trace_digest: traceDigest,
     wave_count: plan.dependency_graph.waves.length,
     completed_count: counts.completed,
     failed_count: counts.failed,
@@ -698,5 +866,5 @@ export async function executeAutonomousWorkflowPortfolioWithInitialItems(
     secret_material: "never_returned" as const,
   };
   const executionDigest = await digestJson(metadata);
-  return new AutonomousWorkflowPortfolioExecutionResult(plan, status, items, plan.dependency_graph.waves.length, executionDigest, admission?.admission_digest ?? null);
+  return new AutonomousWorkflowPortfolioExecutionResult(plan, status, items, plan.dependency_graph.waves.length, executionDigest, admission?.admission_digest ?? null, traceDigest);
 }

@@ -69,6 +69,28 @@ test("portfolio execution runs every domain in dependency waves and hands off bo
   assert.equal(result.items[0].outputDigest.length, 64);
 });
 
+test("portfolio execution emits a hash-chained decision trace without transient values", async () => {
+  const events = [];
+  const agent = agentFor();
+  const result = await agent.executeWorkflowPortfolio(allDomainRequests(), {
+    planOptions: { requireAllDomains: true },
+    approveProviderCall: true,
+    traceId: "portfolio-trace-1",
+    traceSink: (event) => { events.push(event); },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.traceDigest, events.at(-1).event_digest);
+  assert.equal(result.toJSON().trace_digest, result.traceDigest);
+  assert.equal(events[0].phase, "started");
+  assert.equal(events[1].phase, "plan_verified");
+  assert.equal(events.filter((event) => event.phase === "item_started").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(events.filter((event) => event.phase === "item_decided").length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(events.at(-1).phase, "completed");
+  assert.equal(events.every((event, index) => event.sequence === index + 1 && (index === 0 ? event.previous_digest === "" : event.previous_digest === events[index - 1].event_digest)), true);
+  assert.doesNotMatch(JSON.stringify(events), /private task payload|private hint|offline result/);
+});
+
 test("portfolio execution fails closed at the provider approval boundary", async () => {
   let providerCalls = 0;
   const agent = agentFor(() => { providerCalls += 1; });

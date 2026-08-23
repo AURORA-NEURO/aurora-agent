@@ -310,6 +310,13 @@ queue transition, retry bounded conflicts, and prevent duplicate claims after tw
 the same snapshot. The backing text store still must provide a real atomic compare-and-swap;
 the SDK cannot manufacture distributed consensus from an ordinary read/write store.
 
+Portfolio execution now also offers a caller-owned hash-chained decision trace. It records plan
+verification, item dispatch decisions, blocked/omitted outcomes, learning status, progress, and
+the terminal portfolio state as metadata-only events; `trace_digest` is bound into the execution
+identity. This provides a useful dashboard/remote-worker observability seam without retaining
+tasks, prompts, outputs, evidence, credentials, or tool payloads and without granting the trace
+sink execution authority.
+
 The checkpoint seam now includes an optional atomic compare-and-swap contract plus bounded JSON
 and transactional-JSON adapters. The controller serializes local operations, fences every flush
 against the restored digest, and surfaces stale-writer conflicts instead of overwriting progress;

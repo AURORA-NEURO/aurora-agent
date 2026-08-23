@@ -1932,6 +1932,16 @@ const execution = await agent.executeWorkflowPortfolio(requests, {
 // prompts, credentials, provider responses, tool payloads, or predecessor output.
 ```
 
+For operational visibility, pass `traceId` and a caller-owned `traceSink` to the same execution.
+The sink receives a serialized hash chain covering plan verification, dependency decisions,
+provider dispatch intent, item outcomes, learning status, progress, and the terminal portfolio
+state. The result exposes `traceDigest`, and its JSON projection binds `trace_digest` into the
+execution identity. Trace events contain only plan/admission digests, item/domain identities,
+statuses, failure codes, result digests, and retention markers; they never contain task text,
+prompts, provider output, evidence values, credentials, or tool payloads. The sink can therefore
+feed a dashboard, append-only journal, or remote worker monitor without becoming an execution
+authority.
+
 Portfolio execution can also close the evaluator-to-bandit loop for every item, but reward is
 never inferred from a provider response or from `status: "completed"`. The caller supplies the
 learning controller and an `evaluateItem` callback that returns one explicit bounded reward
