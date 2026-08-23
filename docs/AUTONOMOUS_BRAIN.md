@@ -4695,6 +4695,14 @@ previous-entry, receipt, and ledger digests before replay. The existing evidence
 receives only the transient raw value for projection; the source receipt is independently
 correlated by its request digest.
 
+For deployment persistence, `JsonAutonomousEvidenceSourceLedgerPersistence` stores one canonical,
+bounded metadata snapshot through a caller-owned text store. `TransactionalJsonAutonomousEvidenceSourceLedgerPersistence`
+adds a caller-provided compare-and-swap fence so two workers cannot silently overwrite a newer
+provenance head; `AutonomousEvidenceSourceLedgerWebStorage` is a bounded browser adapter. Reads
+validate the complete receipt chain, head digest, snapshot digest, retention markers, and byte
+ceiling before the ledger can resume. A CAS refusal is surfaced as a stale-writer error, never
+converted into a new source attempt.
+
 ```typescript
 const sourceLedger = new AutonomousEvidenceSourceLedger(sourcePersistence);
 const sourceAcquirer = createAutonomousEvidenceSourceAcquirer({

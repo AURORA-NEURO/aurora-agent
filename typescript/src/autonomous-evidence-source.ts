@@ -216,6 +216,15 @@ export interface AutonomousEvidenceSourceLedgerPersistence {
   records(): readonly AutonomousEvidenceSourceLedgerEntryJSON[] | Promise<readonly AutonomousEvidenceSourceLedgerEntryJSON[]>;
 }
 
+export interface AutonomousEvidenceSourceLedgerTextStore {
+  read(): string | null | Promise<string | null>;
+  write(value: string): void | Promise<void>;
+}
+
+export interface AutonomousEvidenceSourceLedgerTransactionalTextStore extends AutonomousEvidenceSourceLedgerTextStore {
+  writeIfUnchanged(expectedLedgerDigest: string | null, value: string): boolean | Promise<boolean>;
+}
+
 export interface AutonomousEvidenceSourcePolicyJSON extends JsonObject {
   schema: typeof AUTONOMOUS_EVIDENCE_SOURCE_POLICY_SCHEMA;
   max_age_ms: number | null;
@@ -309,6 +318,38 @@ function validateChain(entries: readonly AutonomousEvidenceSourceLedgerEntryJSON
     if (entry.previous_entry_digest !== previous) throw new ArgumentError("source ledger hash chain is invalid");
     previous = entry.entry_digest;
   });
+}
+
+function ledgerBody(entries: readonly AutonomousEvidenceSourceLedgerEntryJSON[]): Omit<AutonomousEvidenceSourceLedgerJSON, "ledger_digest"> {
+  const normalized = entries.map((entry) => structuredClone(entry));
+  validateChain(normalized);
+  const body = {
+    schema: AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_SCHEMA,
+    entries: normalized,
+    head_digest: normalized.at(-1)?.entry_digest ?? null,
+    execution: "metadata_only_source_observation_ledger" as const,
+    retention: "metadata_only;raw_source_values_excluded" as const,
+    secret_material: "never_returned" as const,
+  };
+  if (bytes(canonicalJson(body)) > MAX_AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_BYTES) throw new ArgumentError("source ledger exceeds its metadata byte bound");
+  return body;
+}
+
+function ledgerSnapshot(entries: readonly AutonomousEvidenceSourceLedgerEntryJSON[]): AutonomousEvidenceSourceLedgerJSON {
+  const body = ledgerBody(entries);
+  return { ...body, ledger_digest: digestJsonSync(body) } as AutonomousEvidenceSourceLedgerJSON;
+}
+
+function validateLedgerSnapshot(value: unknown): AutonomousEvidenceSourceLedgerJSON {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_SCHEMA || !Array.isArray(value.entries)) throw new ArgumentError("source ledger snapshot is malformed");
+  const snapshot = value as unknown as AutonomousEvidenceSourceLedgerJSON;
+  if (snapshot.execution !== "metadata_only_source_observation_ledger" || snapshot.retention !== "metadata_only;raw_source_values_excluded" || snapshot.secret_material !== "never_returned") throw new ArgumentError("source ledger snapshot retention is invalid");
+  digest("source ledger snapshot ledger_digest", snapshot.ledger_digest);
+  if (snapshot.entries.length > MAX_AUTONOMOUS_EVIDENCE_SOURCE_RECORDS) throw new ArgumentError("source ledger snapshot exceeds its record bound");
+  const entries = snapshot.entries.map(validateEntry);
+  const body = ledgerBody(entries);
+  if (body.head_digest !== snapshot.head_digest || digestJsonSync(body) !== snapshot.ledger_digest) throw new ArgumentError("source ledger snapshot digest or head is invalid");
+  return structuredClone({ ...body, ledger_digest: snapshot.ledger_digest }) as AutonomousEvidenceSourceLedgerJSON;
 }
 
 /** Explicit freshness, authority, and source-integrity policy. It never contacts a source. */
@@ -488,18 +529,7 @@ export class AutonomousEvidenceSourceLedger {
   }
 
   toJSON(): AutonomousEvidenceSourceLedgerJSON {
-    const entries = this.records();
-    validateChain(entries);
-    const descriptor = {
-      schema: AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_SCHEMA,
-      entries,
-      head_digest: entries.at(-1)?.entry_digest ?? null,
-      execution: "metadata_only_source_observation_ledger" as const,
-      retention: "metadata_only;raw_source_values_excluded" as const,
-      secret_material: "never_returned" as const,
-    };
-    if (bytes(canonicalJson(descriptor)) > MAX_AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_BYTES) throw new ArgumentError("source ledger exceeds its metadata byte bound");
-    return { ...descriptor, ledger_digest: digestJsonSync(descriptor) };
+    return ledgerSnapshot(this.records());
   }
 }
 
@@ -516,6 +546,103 @@ export class InMemoryAutonomousEvidenceSourceLedgerPersistence implements Autono
 
   records(): readonly AutonomousEvidenceSourceLedgerEntryJSON[] {
     return this.entries.map((entry) => structuredClone(entry));
+  }
+}
+
+/** Portable JSON persistence for files, databases, object stores, and browser bridges. */
+export class JsonAutonomousEvidenceSourceLedgerPersistence implements AutonomousEvidenceSourceLedgerPersistence {
+  protected readonly textStore: AutonomousEvidenceSourceLedgerTextStore;
+  readonly maxBytes: number;
+
+  constructor(textStore: AutonomousEvidenceSourceLedgerTextStore, maxBytes = MAX_AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_BYTES) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("source ledger JSON persistence requires a text store");
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_BYTES) throw new ArgumentError("source ledger JSON persistence maxBytes is outside its bound");
+    this.textStore = textStore;
+    this.maxBytes = maxBytes;
+  }
+
+  protected async readSnapshot(): Promise<AutonomousEvidenceSourceLedgerJSON | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (typeof encoded !== "string" || bytes(encoded) > this.maxBytes) throw new ArgumentError("source ledger JSON persistence text exceeds its bound");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(encoded);
+    } catch {
+      throw new ArgumentError("source ledger JSON persistence text is invalid JSON");
+    }
+    const snapshot = validateLedgerSnapshot(parsed);
+    if (bytes(canonicalJson(snapshot)) > this.maxBytes) throw new ArgumentError("source ledger JSON persistence snapshot exceeds its bound");
+    return snapshot;
+  }
+
+  protected encode(snapshot: AutonomousEvidenceSourceLedgerJSON): string {
+    const validated = validateLedgerSnapshot(snapshot);
+    const encoded = canonicalJson(validated);
+    if (bytes(encoded) > this.maxBytes) throw new ArgumentError("source ledger JSON persistence snapshot exceeds its bound");
+    return encoded;
+  }
+
+  protected async persist(expectedLedgerDigest: string | null, snapshot: AutonomousEvidenceSourceLedgerJSON): Promise<void> {
+    void expectedLedgerDigest;
+    await this.textStore.write(this.encode(snapshot));
+  }
+
+  async records(): Promise<readonly AutonomousEvidenceSourceLedgerEntryJSON[]> {
+    const snapshot = await this.readSnapshot();
+    return snapshot ? snapshot.entries.map((entry) => structuredClone(entry)) : [];
+  }
+
+  async append(entry: AutonomousEvidenceSourceLedgerEntryJSON): Promise<AutonomousEvidenceSourceLedgerEntryJSON> {
+    const validated = validateEntry(entry);
+    const current = await this.readSnapshot();
+    const entries = current?.entries ?? [];
+    const existing = entries.find((candidate) => candidate.sequence === validated.sequence);
+    if (existing) {
+      if (existing.entry_digest !== validated.entry_digest) throw new ArgumentError("source ledger persistence has a conflicting sequence");
+      return structuredClone(existing);
+    }
+    if (validated.sequence !== entries.length + 1 || validated.previous_entry_digest !== (current?.head_digest ?? null)) throw new ArgumentError("source ledger persistence append is stale or out of order");
+    const next = ledgerSnapshot([...entries, validated]);
+    await this.persist(current?.ledger_digest ?? null, next);
+    return structuredClone(validated);
+  }
+}
+
+/** JSON source-ledger persistence with an atomic compare-and-swap writer fence. */
+export class TransactionalJsonAutonomousEvidenceSourceLedgerPersistence extends JsonAutonomousEvidenceSourceLedgerPersistence {
+  private readonly transactionalStore: AutonomousEvidenceSourceLedgerTransactionalTextStore;
+
+  constructor(transactionalStore: AutonomousEvidenceSourceLedgerTransactionalTextStore, maxBytes = MAX_AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_BYTES) {
+    super(transactionalStore, maxBytes);
+    if (typeof transactionalStore.writeIfUnchanged !== "function") throw new ArgumentError("transactional source ledger persistence requires writeIfUnchanged");
+    this.transactionalStore = transactionalStore;
+  }
+
+  protected override async persist(expectedLedgerDigest: string | null, snapshot: AutonomousEvidenceSourceLedgerJSON): Promise<void> {
+    const committed = await this.transactionalStore.writeIfUnchanged(expectedLedgerDigest, this.encode(snapshot));
+    if (typeof committed !== "boolean") throw new ArgumentError("transactional source ledger persistence returned a non-boolean commit result");
+    if (!committed) throw new ArgumentError("source ledger persistence rejected a stale writer");
+  }
+}
+
+/** Browser Web Storage adapter for source-ledger JSON snapshots. */
+export class AutonomousEvidenceSourceLedgerWebStorage implements AutonomousEvidenceSourceLedgerTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string, readonly maxBytes = MAX_AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_BYTES) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("source ledger web storage adapter is malformed");
+    if (!key.trim() || key.length > 256) throw new ArgumentError("source ledger web storage key is invalid");
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_AUTONOMOUS_EVIDENCE_SOURCE_LEDGER_BYTES) throw new ArgumentError("source ledger web storage maxBytes is outside its bound");
+  }
+
+  read(): string | null {
+    const value = this.storage.getItem(this.key);
+    if (value !== null && bytes(value) > this.maxBytes) throw new ArgumentError("source ledger web storage value exceeds its bound");
+    return value;
+  }
+
+  write(value: string): void {
+    if (typeof value !== "string" || bytes(value) > this.maxBytes) throw new ArgumentError("source ledger web storage value exceeds its bound");
+    this.storage.setItem(this.key, value);
   }
 }
 

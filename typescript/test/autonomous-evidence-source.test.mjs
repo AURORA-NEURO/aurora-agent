@@ -11,7 +11,10 @@ import {
   AutonomousEvidenceReadinessPolicy,
   AutonomousEvidenceSourceLedger,
   AutonomousEvidenceSourcePolicy,
+  AutonomousEvidenceSourceLedgerWebStorage,
+  JsonAutonomousEvidenceSourceLedgerPersistence,
   InMemoryAutonomousEvidenceSourceLedgerPersistence,
+  TransactionalJsonAutonomousEvidenceSourceLedgerPersistence,
   LLMRuntime,
   createAutonomousEvidenceSourceAcquirer,
   createAutonomousEvidenceAdapterFailoverAcquirer,
@@ -42,6 +45,53 @@ function contextFor(plan, requirement, sourceId, sourceDigest, metadata = { oper
     parent_evidence_digests: [],
     execution: "caller_owned_adapter;raw_value_transient",
   };
+}
+
+async function populatePortableSourceLedger(persistence, now = 1_700_000_000_000) {
+  const registry = new AutonomousEvidenceAdapterRegistry();
+  registry.register({
+    adapterId: "portable-source-fixture",
+    version: "1",
+    domains: AUTONOMOUS_DOMAIN_NAMES,
+    capabilities: ALL_DOMAIN_CAPABILITIES,
+    sourceKinds: ["json"],
+    acquire: async (context) => ({ domain: context.requirement.domain, transient_payload: `portable-${context.request.source_id}` }),
+  });
+  const contracts = new AutonomousEvidenceProviderContractRegistry(registry);
+  contracts.register({
+    contractId: "portable.source",
+    version: "1",
+    provider: "offline-fixture",
+    protocol: "http_json",
+    operations: ["observe"],
+    domains: AUTONOMOUS_DOMAIN_NAMES,
+    capabilities: ALL_DOMAIN_CAPABILITIES,
+    sourceKinds: ["json"],
+    authMode: "none",
+    freshness: "realtime",
+    pagination: "none",
+    requiredMetadata: ["operation"],
+    operationMetadataKey: "operation",
+    adapterId: "portable-source-fixture",
+  });
+  const agent = new AutonomousAgent(runtime());
+  const ledger = new AutonomousEvidenceSourceLedger(persistence);
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const plan = await agent.evidencePlan([domain]);
+    const requirement = plan.requirements[0];
+    const sourceId = `portable-source-${domain}`;
+    const sourceDigest = digestJsonSync({ sourceId, revision: "1" });
+    const acquirer = createAutonomousEvidenceSourceAcquirer({
+      providerContracts: contracts,
+      adapterId: "portable-source-fixture",
+      domain,
+      policy: new AutonomousEvidenceSourcePolicy({ now: () => now, maxAgeMs: 60_000 }),
+      ledger,
+      describeSource: ({ now_ms }) => ({ authority: "provider_observed", status: "observed", sourceDigest, observedAtMs: now_ms }),
+    });
+    await acquirer.acquire(contextFor(plan, requirement, sourceId, sourceDigest));
+  }
+  return { agent, contracts, ledger };
 }
 
 test("source boundary admits fresh provider observations across every autonomous domain and persists only metadata", async () => {
@@ -124,6 +174,76 @@ test("source boundary admits fresh provider observations across every autonomous
   const restoreResult = await restored.restore();
   assert.equal(restoreResult.restored, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.deepEqual(restored.toJSON(), snapshot);
+});
+
+test("source ledger JSON, CAS, and browser persistence restore all domains and fail closed on tampering", async () => {
+  let encoded = null;
+  const textStore = {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+  };
+  const jsonPersistence = new JsonAutonomousEvidenceSourceLedgerPersistence(textStore);
+  const populated = await populatePortableSourceLedger(jsonPersistence);
+  const snapshot = populated.ledger.toJSON();
+  assert.equal(snapshot.entries.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal((await jsonPersistence.records()).length, AUTONOMOUS_DOMAIN_NAMES.length);
+
+  const restored = new AutonomousEvidenceSourceLedger(jsonPersistence);
+  assert.equal((await restored.restore()).restored, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.deepEqual(restored.toJSON(), snapshot);
+
+  const tampered = JSON.parse(encoded);
+  tampered.entries[0].receipt.source_id = "tampered-source";
+  encoded = JSON.stringify(tampered);
+  await assert.rejects(() => restored.restore(), /digest|chain|invalid/);
+
+  let casEncoded = null;
+  let rejectNext = false;
+  const casStore = {
+    read: () => casEncoded,
+    write: () => { throw new Error("CAS store must not use unconditional writes"); },
+    writeIfUnchanged: (expected, value) => {
+      if (rejectNext) { rejectNext = false; return false; }
+      const current = casEncoded === null ? null : JSON.parse(casEncoded).ledger_digest;
+      if (current !== expected) return false;
+      casEncoded = value;
+      return true;
+    },
+  };
+  const casPersistence = new TransactionalJsonAutonomousEvidenceSourceLedgerPersistence(casStore);
+  const casPopulated = await populatePortableSourceLedger(casPersistence);
+  const casSnapshot = casPopulated.ledger.toJSON();
+  assert.equal(casSnapshot.entries.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  const last = casSnapshot.entries.at(-1);
+  const nextReceiptBase = {
+    ...last.receipt,
+    request_digest: digestJsonSync({ request: "cas-extra" }),
+    source_id: "cas-extra-source",
+    source_digest: digestJsonSync({ source: "cas-extra-source" }),
+    value_digest: digestJsonSync({ value: "cas-extra" }),
+  };
+  const { receipt_digest: _receiptDigest, ...nextReceiptDescriptor } = nextReceiptBase;
+  const nextReceipt = { ...nextReceiptBase, receipt_digest: digestJsonSync(nextReceiptDescriptor) };
+  const nextEntryBase = {
+    schema: "bioprism-typescript-autonomous-evidence-source-ledger-entry/0.1",
+    sequence: last.sequence + 1,
+    previous_entry_digest: last.entry_digest,
+    receipt: nextReceipt,
+    retention: "metadata_only;raw_source_values_excluded",
+    secret_material: "never_returned",
+  };
+  const nextEntry = { ...nextEntryBase, entry_digest: digestJsonSync(nextEntryBase) };
+  rejectNext = true;
+  await assert.rejects(() => casPersistence.append(nextEntry), /stale writer/);
+
+  let storageValue = null;
+  const storage = {
+    getItem: () => storageValue,
+    setItem: (_key, value) => { storageValue = value; },
+  };
+  const browserPersistence = new JsonAutonomousEvidenceSourceLedgerPersistence(new AutonomousEvidenceSourceLedgerWebStorage(storage, "aurora-source-ledger"));
+  await browserPersistence.append(casSnapshot.entries[0]);
+  assert.equal((await browserPersistence.records()).length, 1);
 });
 
 test("source boundary fails closed on stale, unverified, future, and mismatched source observations", async () => {

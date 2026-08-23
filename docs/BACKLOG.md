@@ -189,6 +189,12 @@ bounded concurrency and disagreement/secret-boundary tests. This closes the sour
 provider-disagreement composition gap while keeping evaluator authority and domain semantics
 caller-owned.
 
+The source provenance ledger now also has portable restart persistence: canonical JSON/text storage,
+transactional compare-and-swap fencing, bounded browser Web Storage, snapshot/head/digest validation,
+contiguous chain enforcement, and stale-writer refusal. Restore still retains only source and result
+metadata; source values, locators, prompts, responses, credentials, and provider sessions remain
+caller-owned.
+
 The TypeScript SDK now also provides `AutonomousDomainEvidenceSourceCatalogue`, which supplies a
 versioned source profile and route-registration boundary for every autonomous domain. Profiles bind
 source kinds, capabilities, operations, freshness/auth/pagination posture, normalizer identity,
