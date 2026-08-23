@@ -34,6 +34,7 @@ import {
   builtinAutonomousDomainProfiles,
   builtinAutonomousValueEvaluatorProfiles,
   openaiCompatibleProvider,
+  digestJson,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200) {
@@ -897,6 +898,8 @@ test("learning state snapshots restore pending/settled rows and refuse tampering
   });
   const snapshot = await coordinator.flush();
   assert.equal(snapshot.snapshot_digest.length, 64);
+  assert.equal(snapshot.generation, 1);
+  assert.equal(snapshot.previous_snapshot_digest, null);
   assert.equal(snapshot.episodes[0].status, "settled");
   const restoredState = new InMemoryAutonomousLearningStateStore();
   const restoredCoordinator = new AutonomousLearningPersistenceCoordinator(restoredState, {
@@ -905,9 +908,31 @@ test("learning state snapshots restore pending/settled rows and refuse tampering
   });
   await restoredCoordinator.restore();
   assert.equal(restoredState.loadEpisode("persisted-episode").status, "settled");
+  const nextSnapshot = await coordinator.flush();
+  assert.equal(nextSnapshot.generation, 2);
+  assert.equal(nextSnapshot.previous_snapshot_digest, snapshot.snapshot_digest);
   const tampered = structuredClone(persisted);
   tampered.episodes[0].episode_id = "tampered-episode";
   await assert.rejects(() => restoredState.restore(tampered), /snapshot digest does not match/);
+
+  const forged = structuredClone(snapshot);
+  forged.generation = 2;
+  forged.previous_snapshot_digest = null;
+  const { snapshot_digest: _ignored, ...forgedDescriptor } = forged;
+  forged.snapshot_digest = await digestJson(forgedDescriptor);
+  await assert.rejects(() => validateAutonomousLearningStateSnapshot(forged), /generation and previous_snapshot_digest/);
+
+  const legacy = structuredClone(snapshot);
+  legacy.schema = "bioprism-typescript-autonomous-learning-snapshot/0.1";
+  delete legacy.previous_snapshot_digest;
+  const { snapshot_digest: _legacyIgnored, ...legacyDescriptor } = legacy;
+  legacy.snapshot_digest = await digestJson(legacyDescriptor);
+  const legacyState = new InMemoryAutonomousLearningStateStore();
+  await legacyState.restore(legacy);
+  const upgraded = await legacyState.snapshot();
+  assert.equal(upgraded.schema, "bioprism-typescript-autonomous-learning-snapshot/0.2");
+  assert.equal(upgraded.generation, 2);
+  assert.equal(upgraded.previous_snapshot_digest, legacy.snapshot_digest);
 });
 
 test("settlement receipts persist through browser JSON and fence stale workers", async () => {

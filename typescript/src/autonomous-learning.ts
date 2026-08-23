@@ -38,7 +38,8 @@ import type {
 export const AUTONOMOUS_EVALUATION_SCHEMA = "bioprism-typescript-autonomous-workflow-evaluation/0.1" as const;
 export const AUTONOMOUS_LEARNING_EPISODE_SCHEMA = "bioprism-typescript-autonomous-learning-episode/0.1" as const;
 export const AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA = "bioprism-typescript-autonomous-learning-trajectory/0.1" as const;
-export const AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.1" as const;
+const LEGACY_AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.1" as const;
+export const AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.2" as const;
 export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-learning-settlement-receipt/0.1" as const;
 export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-settlement-receipt-snapshot/0.1" as const;
 export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA = "bioprism-typescript-autonomous-learning-feedback-outbox/0.1" as const;
@@ -176,10 +177,13 @@ export interface AutonomousLearningTrajectoryStore {
 }
 
 export interface AutonomousLearningStateSnapshot extends JsonObject {
-  schema: typeof AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA;
+  /** 0.1 is accepted for a read-only compatibility handoff; new writes use 0.2. */
+  schema: typeof AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA;
   generation: number;
   episodes: AutonomousLearningEpisode[];
   trajectories: AutonomousLearningTrajectory[];
+  /** Digest of the immediately preceding snapshot. Required by schema 0.2. */
+  previous_snapshot_digest?: Digest | null;
   snapshot_digest: Digest;
   retention: typeof PRIVATE_RETENTION;
   secret_material: "never_returned";
@@ -1165,6 +1169,7 @@ export class InMemoryAutonomousLearningEpisodeStore implements AutonomousLearnin
   restoreRows(rows: readonly AutonomousLearningEpisode[]): void {
     if (!Array.isArray(rows) || rows.length > 4096) throw new ArgumentError("learning episode snapshot is outside its bounds");
     const seen = new Set<string>();
+    const restored = new Map<string, AutonomousLearningEpisode>();
     for (const episode of rows) {
       if (!isObject(episode) || typeof episode.episode_id !== "string" || typeof episode.episode_digest !== "string" || typeof episode.status !== "string" || !["pending", "settled"].includes(episode.status) || episode.retention !== PRIVATE_RETENTION || episode.secret_material !== "never_returned") throw new ArgumentError("learning episode snapshot row is malformed");
       const row = episode as unknown as AutonomousLearningEpisode;
@@ -1173,10 +1178,10 @@ export class InMemoryAutonomousLearningEpisodeStore implements AutonomousLearnin
       assertValueOnlySettlement(row);
       if (seen.has(row.episode_id)) throw new ArgumentError(`learning episode snapshot contains duplicate ${row.episode_id}`);
       seen.add(row.episode_id);
-      const prior = this.episodes.get(row.episode_id);
-      if (prior && prior.episode_digest !== row.episode_digest) throw new ArgumentError(`learning episode ${row.episode_id} conflicts during restore`);
-      this.episodes.set(row.episode_id, clone(row));
+      restored.set(row.episode_id, clone(row));
     }
+    this.episodes.clear();
+    for (const [episodeId, episode] of restored) this.episodes.set(episodeId, episode);
   }
 }
 
@@ -1214,6 +1219,7 @@ export class InMemoryAutonomousLearningTrajectoryStore implements AutonomousLear
   restoreRows(rows: readonly AutonomousLearningTrajectory[]): void {
     if (!Array.isArray(rows) || rows.length > 1024) throw new ArgumentError("learning trajectory snapshot is outside its bounds");
     const seen = new Set<string>();
+    const restored = new Map<string, AutonomousLearningTrajectory>();
     for (const trajectory of rows) {
       if (!isObject(trajectory) || typeof trajectory.trajectory_id !== "string" || typeof trajectory.trajectory_digest !== "string" || typeof trajectory.status !== "string" || !["pending", "settled"].includes(trajectory.status) || trajectory.retention !== PRIVATE_RETENTION || trajectory.secret_material !== "never_returned") throw new ArgumentError("learning trajectory snapshot row is malformed");
       const row = trajectory as unknown as AutonomousLearningTrajectory;
@@ -1223,10 +1229,10 @@ export class InMemoryAutonomousLearningTrajectoryStore implements AutonomousLear
       assertValueOnlySettlement(row);
       if (seen.has(row.trajectory_id)) throw new ArgumentError(`learning trajectory snapshot contains duplicate ${row.trajectory_id}`);
       seen.add(row.trajectory_id);
-      const prior = this.trajectories.get(row.trajectory_id);
-      if (prior && prior.trajectory_digest !== row.trajectory_digest) throw new ArgumentError(`learning trajectory ${row.trajectory_id} conflicts during restore`);
-      this.trajectories.set(row.trajectory_id, clone(row));
+      restored.set(row.trajectory_id, clone(row));
     }
+    this.trajectories.clear();
+    for (const [trajectoryId, trajectory] of restored) this.trajectories.set(trajectoryId, trajectory);
   }
 }
 
@@ -1654,6 +1660,7 @@ export class InMemoryAutonomousLearningStateStore implements AutonomousLearningS
   private readonly episodeStore = new InMemoryAutonomousLearningEpisodeStore();
   private readonly trajectoryStore = new InMemoryAutonomousLearningTrajectoryStore();
   private generation = 0;
+  private previousSnapshotDigest: Digest | null = null;
 
   loadEpisode(episodeId: string): AutonomousLearningEpisode | null {
     return this.episodeStore.load(episodeId);
@@ -1683,10 +1690,17 @@ export class InMemoryAutonomousLearningStateStore implements AutonomousLearningS
     return this.trajectoryStore.markSettled(trajectoryId, settlementDigest);
   }
 
+  /** Apply already envelope-validated rows as one restart image. */
+  restoreRows(episodes: readonly AutonomousLearningEpisode[], trajectories: readonly AutonomousLearningTrajectory[]): void {
+    this.episodeStore.restoreRows(episodes);
+    this.trajectoryStore.restoreRows(trajectories);
+  }
+
   async snapshot(): Promise<AutonomousLearningStateSnapshot> {
     const descriptor = {
       schema: AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA,
       generation: this.generation + 1,
+      previous_snapshot_digest: this.previousSnapshotDigest,
       episodes: this.episodeStore.snapshotRows(),
       trajectories: this.trajectoryStore.snapshotRows(),
       retention: PRIVATE_RETENTION,
@@ -1695,39 +1709,43 @@ export class InMemoryAutonomousLearningStateStore implements AutonomousLearningS
     const snapshot = { ...descriptor, snapshot_digest: await digestJson(descriptor) };
     if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state snapshot exceeds its byte bound");
     this.generation = snapshot.generation;
+    this.previousSnapshotDigest = snapshot.snapshot_digest;
     return clone(snapshot);
   }
 
   async restore(snapshot: AutonomousLearningStateSnapshot): Promise<void> {
-    if (!isObject(snapshot) || snapshot.schema !== AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA || !Array.isArray(snapshot.episodes) || !Array.isArray(snapshot.trajectories)) throw new ArgumentError("learning state snapshot is malformed");
-    assertExactKeys(snapshot, ["schema", "generation", "episodes", "trajectories", "snapshot_digest", "retention", "secret_material"], "learning state snapshot");
-    if (snapshot.retention !== PRIVATE_RETENTION || snapshot.secret_material !== "never_returned") throw new ArgumentError("learning state snapshot retention contract is malformed");
-    boundedGeneration(snapshot.generation);
-    const { snapshot_digest: observed, ...descriptor } = snapshot;
-    boundedDigest("snapshot_digest", observed);
-    const expected = await digestJson(descriptor);
-    if (expected !== observed) throw new ArgumentError("learning state snapshot digest does not match");
-    if (snapshot.episodes.length > 4096 || snapshot.trajectories.length > 1024) throw new ArgumentError("learning state snapshot exceeds its bounds");
-    if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state snapshot exceeds its byte bound");
-    this.episodeStore.restoreRows(snapshot.episodes);
-    this.trajectoryStore.restoreRows(snapshot.trajectories);
-    this.generation = snapshot.generation;
+    const validated = await validateAutonomousLearningStateSnapshot(snapshot);
+    this.restoreRows(validated.episodes, validated.trajectories);
+    this.generation = validated.generation;
+    // A legacy generation-zero image has no meaningful predecessor. Every new 0.2
+    // snapshot still starts a fresh chain in that one compatibility case.
+    this.previousSnapshotDigest = validated.generation === 0 ? null : validated.snapshot_digest;
   }
 }
 
 /** Validate a learning episode/trajectory restart image before mutating a live state store. */
 export async function validateAutonomousLearningStateSnapshot(raw: unknown): Promise<AutonomousLearningStateSnapshot> {
-  if (!isObject(raw) || raw.schema !== AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA || !Array.isArray(raw.episodes) || !Array.isArray(raw.trajectories)) throw new ArgumentError("learning state snapshot is malformed");
-  assertExactKeys(raw, ["schema", "generation", "episodes", "trajectories", "snapshot_digest", "retention", "secret_material"], "learning state snapshot");
+  if (!isObject(raw) || !Array.isArray(raw.episodes) || !Array.isArray(raw.trajectories)) throw new ArgumentError("learning state snapshot is malformed");
+  const schema = raw.schema;
+  const legacy = schema === LEGACY_AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA;
+  if (schema !== AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA && !legacy) throw new ArgumentError("learning state snapshot schema is unsupported");
+  assertExactKeys(raw, legacy
+    ? ["schema", "generation", "episodes", "trajectories", "snapshot_digest", "retention", "secret_material"]
+    : ["schema", "generation", "previous_snapshot_digest", "episodes", "trajectories", "snapshot_digest", "retention", "secret_material"], "learning state snapshot");
   if (raw.retention !== PRIVATE_RETENTION || raw.secret_material !== "never_returned") throw new ArgumentError("learning state snapshot retention contract is malformed");
-  boundedGeneration(raw.generation);
+  const generation = boundedGeneration(raw.generation);
+  if (!legacy) {
+    if (generation < 1) throw new ArgumentError("learning state snapshot generation must start at one");
+    boundedDigest("learning state previous_snapshot_digest", raw.previous_snapshot_digest, true);
+    if ((generation === 1) !== (raw.previous_snapshot_digest === null)) throw new ArgumentError("learning state snapshot generation and previous_snapshot_digest are inconsistent");
+  }
   if (raw.episodes.length > 4096 || raw.trajectories.length > 1024) throw new ArgumentError("learning state snapshot exceeds its bounds");
   boundedDigest("learning state snapshot_digest", raw.snapshot_digest);
   const { snapshot_digest: observed, ...descriptor } = raw;
   if (await digestJson(descriptor) !== observed) throw new ArgumentError("learning state snapshot digest does not match");
-  if (new TextEncoder().encode(canonicalJson(raw)).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state snapshot exceeds its byte bound");
   const probe = new InMemoryAutonomousLearningStateStore();
-  await probe.restore(raw as unknown as AutonomousLearningStateSnapshot);
+  probe.restoreRows(raw.episodes as AutonomousLearningEpisode[], raw.trajectories as AutonomousLearningTrajectory[]);
+  if (new TextEncoder().encode(canonicalJson(raw)).byteLength > AUTONOMOUS_LEARNING_MAX_STATE_SNAPSHOT_BYTES) throw new ArgumentError("learning state snapshot exceeds its byte bound");
   return clone(raw as unknown as AutonomousLearningStateSnapshot);
 }
 

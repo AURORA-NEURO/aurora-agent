@@ -8174,7 +8174,13 @@ material, which remain separate caller-owned stores.
 
 Episode and trajectory state now has the same TypeScript restart contract. The state validator
 checks exact top-level keys, retention markers, duplicate identities, value-only rows, digest
-integrity, and a four-megabyte canonical limit before restore. `JsonAutonomousLearningStatePersistence`,
+integrity, and a four-megabyte canonical limit before restore. Current `0.2` snapshots also bind
+`generation` to `previous_snapshot_digest`: the first image must be generation one with no
+predecessor, while every later image names the digest it extends. The `0.1` envelope remains
+read-compatible and is upgraded on the next write, so existing deployments can migrate without
+silently weakening the new chain for future snapshots. Restore validates the complete image before
+replacing in-memory rows, which prevents stale episodes or trajectories from surviving because they
+were absent from a newer durable snapshot. `JsonAutonomousLearningStatePersistence`,
 `TransactionalJsonAutonomousLearningStatePersistence`, and
 `WebStorageAutonomousLearningSnapshotTextStore` provide canonical JSON, CAS, and browser seams;
 `AutonomousLearningPersistenceCoordinator` serializes restore/flush operations and refuses a stale
