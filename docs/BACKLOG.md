@@ -112,6 +112,17 @@ now be installed inside each selected/fallback candidate, preserving the actual 
 contract identity in its source receipt. This closes the provenance/freshness composition gap
 while preserving explicit domain evaluators and source authority boundaries.
 
+The TypeScript SDK now also exposes `AutonomousEvidenceSourceReconciler`, a request-free,
+digest-bound fan-out/fan-in plan for independent source routes. It binds route and metadata
+digests, quorum, bounded concurrency, parent evidence, and a named normalizer version before
+dispatch; execution requires approval and refuses route or normalizer drift. It retains separate
+typed source failures, groups caller-normalized transient values by digest, and distinguishes
+consensus, consensus-with-dissent, disagreement, insufficient evidence, and total failure without
+claiming that quorum is truth. All twelve autonomous domains are covered offline, including
+bounded concurrency and disagreement/secret-boundary tests. This closes the source-comparison and
+provider-disagreement composition gap while keeping evaluator authority and domain semantics
+caller-owned.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's

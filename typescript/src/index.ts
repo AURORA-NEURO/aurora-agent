@@ -647,6 +647,31 @@ export type {
   AutonomousEvidenceSourceGuardOptions,
 } from "./autonomous-evidence-source.js";
 export {
+  AUTONOMOUS_EVIDENCE_RECONCILIATION_PLAN_SCHEMA,
+  AUTONOMOUS_EVIDENCE_RECONCILIATION_SOURCE_SCHEMA,
+  AUTONOMOUS_EVIDENCE_RECONCILIATION_RESULT_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_RECONCILIATION_ROUTES,
+  MAX_AUTONOMOUS_EVIDENCE_RECONCILIATION_CONCURRENCY,
+  MAX_AUTONOMOUS_EVIDENCE_RECONCILIATION_METADATA_BYTES,
+  MAX_AUTONOMOUS_EVIDENCE_RECONCILIATION_VALUE_BYTES,
+  MAX_AUTONOMOUS_EVIDENCE_RECONCILIATION_RESULT_BYTES,
+  AutonomousEvidenceReconciliationPlan,
+  AutonomousEvidenceSourceReconciler,
+  AutonomousEvidenceReconciliationResult,
+} from "./autonomous-evidence-reconciliation.js";
+export type {
+  AutonomousEvidenceReconciliationStatus,
+  AutonomousEvidenceReconciliationSourceStatus,
+  AutonomousEvidenceReconciliationRouteDescriptor,
+  AutonomousEvidenceReconciliationRoute,
+  AutonomousEvidenceReconciliationRouteJSON,
+  AutonomousEvidenceReconciliationPlanJSON,
+  AutonomousEvidenceReconciliationSourceJSON,
+  AutonomousEvidenceReconciliationResultJSON,
+  AutonomousEvidenceReconciliationPrepareOptions,
+  AutonomousEvidenceReconciliationExecuteOptions,
+} from "./autonomous-evidence-reconciliation.js";
+export {
   AUTONOMOUS_HTTP_EVIDENCE_ADAPTER_SCHEMA,
   MAX_AUTONOMOUS_HTTP_EVIDENCE_REQUEST_BYTES,
   MAX_AUTONOMOUS_HTTP_EVIDENCE_REQUEST_DEPTH,

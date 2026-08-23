@@ -4570,6 +4570,42 @@ answer. It applies identically to coding, browser, data, science, biomedical, ne
 operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation workflows; a
 domain-specific adapter or evaluator still owns the meaning of its source.
 
+### Multi-source reconciliation and disagreement
+
+`AutonomousEvidenceSourceReconciler` adds a reviewed fan-out/fan-in boundary for requirements
+that need independent source routes rather than one provider response. `prepare()` records only
+the evidence-plan identity, requirement, source IDs/digests, request-metadata digests, quorum,
+concurrency, parent evidence digests, and a caller-named normalizer contract. It never dispatches
+or stores the query metadata. `execute()` requires explicit approval, revalidates every route and
+normalizer identity, runs bounded concurrent acquisitions, and keeps each source failure separate.
+
+The caller's normalizer converts transient provider values into a comparable JSON claim. The
+reconciler groups normalized digests and returns `consensus`, `consensus_with_dissent`,
+`disagreement`, `insufficient_evidence`, or `failed`. Consensus is a quorum result, not a truth
+oracle: source values, normalized values, evaluator authority, and domain interpretation remain
+caller-owned. The durable result contains only source/request/value/normalized digests, counts,
+failure classes, retryability, disagreement digest, and explicit status.
+
+```typescript
+const reconciler = new AutonomousEvidenceSourceReconciler(evidencePlan);
+const review = reconciler.prepare("science:compare:disagreements", [sourceA, sourceB], {
+  quorum: 2,
+  maxConcurrency: 2,
+  normalizerId: "claim-projection",
+  normalizerVersion: "1",
+});
+const result = await reconciler.execute(review, [sourceA, sourceB], {
+  approveSourceDispatch: true,
+  normalizerId: "claim-projection",
+  normalizerVersion: "1",
+  normalizer: (value) => ({ claim: value.claim, units: value.units }),
+});
+```
+
+This gives browser research, scientific comparison, biomedical review, data lineage, multimodal
+alignment, multi-agent handoff, cross-domain synthesis, and evaluation workflows a common way to
+surface agreement and dissent without silently promoting majority vote into evidence truth.
+
 ## Durable evidence acquisition workers
 
 The evidence runtime is intentionally caller-owned: it owns the transient acquirer input, projected
