@@ -226,7 +226,37 @@ test("remote mission queue quarantines expired in-flight execution until explici
   assert.equal(quarantined.status, "reconciliation_required");
   assert.equal(quarantined.execution_phase, "running");
   assert.equal(quarantined.failure_class, "lease_expired");
-  const reopened = await queue.requeue("in-flight-job", {}, 200);
+  await assert.rejects(() => queue.requeue("in-flight-job", {}, 200), /requires a reconciliation receipt/);
+  const unknown = await queue.reconcile("in-flight-job", { outcome: "unknown", evidenceDigest: "f".repeat(64), evidenceKind: "provider_status", operator: "operator-1" }, 201);
+  assert.equal(unknown.status, "reconciliation_required");
+  assert.match(unknown.reconciliation_digest, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(await queue.snapshot()).includes("provider_status"), true);
+  await assert.rejects(() => queue.requeue("in-flight-job", { reconciliationDigest: unknown.reconciliation_digest }, 202), /does not authorize requeue/);
+  const notExecuted = await queue.reconcile("in-flight-job", { outcome: "not_executed", evidenceDigest: "a".repeat(64), evidenceKind: "idempotency_probe", operator: "operator-1", effectAbsent: true }, 203);
+  assert.equal(notExecuted.status, "reconciliation_required");
+  assert.notEqual(notExecuted.reconciliation_digest, unknown.reconciliation_digest);
+  await assert.rejects(() => queue.requeue("in-flight-job", { reconciliationDigest: "b".repeat(64) }, 204), /matching reconciliation digest/);
+  const reopened = await queue.requeue("in-flight-job", { reconciliationDigest: notExecuted.reconciliation_digest }, 204);
   assert.equal(reopened.status, "queued");
   assert.equal(reopened.execution_phase, "not_started");
+  assert.equal(reopened.reconciliation_outcome, "not_executed");
+  const restored = new InMemoryAutonomousMissionReplanRemoteJobQueue();
+  await restored.restore(await queue.snapshot());
+  assert.equal((await restored.load("in-flight-job")).reconciliation_digest, reopened.reconciliation_digest);
+});
+
+test("remote reconciliation can settle a completed external effect without replay", async () => {
+  const queue = new InMemoryAutonomousMissionReplanRemoteJobQueue();
+  await queue.enqueue({ jobId: "settled-job", rootMissionId: "settled-root", protectedContractDigest: "c".repeat(64), availableAt: 0 });
+  const claimed = await queue.claimNext("worker-a", 10_000, 10);
+  await queue.beginExecution(claimed.job_id, "worker-a", 11);
+  await queue.fail(claimed.job_id, "worker-a", "transport_error", "transport", true, 12);
+  const settled = await queue.reconcile(claimed.job_id, { outcome: "succeeded", evidenceDigest: "d".repeat(64), evidenceKind: "provider_receipt", operator: "operator-2", effectAbsent: false }, 13);
+  assert.equal(settled.status, "completed");
+  assert.equal(settled.execution_phase, "settled");
+  assert.equal(settled.failure_class, null);
+  assert.equal(settled.result_digest, settled.reconciliation_digest);
+  const repeated = await queue.reconcile(claimed.job_id, { outcome: "succeeded", evidenceDigest: "d".repeat(64), evidenceKind: "provider_receipt", operator: "operator-2", effectAbsent: false }, 14);
+  assert.equal(repeated.job_digest, settled.job_digest);
+  await assert.rejects(() => queue.requeue(claimed.job_id, {}, 14), /not requeueable/);
 });

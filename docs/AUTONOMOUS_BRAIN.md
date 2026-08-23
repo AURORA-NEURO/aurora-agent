@@ -2164,8 +2164,17 @@ planner after a remote process restart.
 
 If a lease expires before the worker marks execution as running, the job can be safely reclaimed.
 If it expires after that boundary, the queue moves it to `reconciliation_required`; explicit caller
-review and `requeue()` are required before another attempt. This prevents a crashed worker from
+review and `requeue()` are required before another attempt. `reconcile()` records a digest-bound
+caller receipt with the outcome, evidence digest, evidence kind, operator, and optional effect-absence
+assertion. A `succeeded` or `failed` receipt settles the job without replay; only a
+`not_executed` receipt with `effectAbsent: true`, followed by the matching
+`reconciliationDigest`, can authorize `requeue()`. Unknown outcomes remain quarantined. The queue
+persists no raw evidence, prompts, provider responses, credentials, or operator explanations, and
+the receipt digest is chained to the observed job digest. This prevents a crashed worker from
 turning an uncertain external effect into an automatic duplicate dispatch.
+
+The receipt fields are part of the `0.2` remote mission queue/job/worker schemas; older snapshots
+are rejected rather than silently interpreted with weaker execution guarantees.
 
 For applications that need one reviewed plan spanning several domain workflows, the TypeScript
 facade also exposes `planWorkflowPortfolio()`. Each item supplies an explicit domain and task,
