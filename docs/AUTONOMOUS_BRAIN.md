@@ -5304,6 +5304,33 @@ failures even when a job never produces a final brain result. Observer failures 
 provider authorization or retry behavior. A provider that repeatedly fails can therefore be
 excluded deterministically until an operator resets or replaces the health state.
 
+The health ledger now has a portable restart boundary as well. `BrainModelHealthStore.snapshot()`
+captures the verified observation chain, while `TransactionalJsonBrainModelHealthSnapshotPersistence`
+and `BrainModelHealthPersistenceCoordinator` support canonical JSON, HTTP/object-store handoff,
+and CAS fencing before a restored worker feeds health back into model selection:
+
+```python
+from prism_sdk import (
+    BrainModelHealthPersistenceCoordinator,
+    BrainModelHealthStore,
+    TransactionalJsonBrainModelHealthSnapshotPersistence,
+)
+
+persistence = TransactionalJsonBrainModelHealthSnapshotPersistence(
+    application_snapshot_text_store("tenant-42/model-health")
+)
+with BrainModelHealthStore("state/rehydrated-health.sqlite3") as health:
+    coordinator = BrainModelHealthPersistenceCoordinator(health, persistence)
+    coordinator.restore()
+    # The worker records bounded observations after provider calls.
+    coordinator.flush()
+```
+
+The digest binds every observation payload, sequence, timestamp, previous digest, and aggregate
+selection input. Tampered heads, broken chains, extra fields, unsafe provider metadata, oversize
+snapshots, and stale worker writes fail closed; provider responses, prompts, credentials, and raw
+evidence remain outside health persistence.
+
 `BrainReplayEngine` is the offline learning path. The caller rehydrates evidence from its own
 retained source, supplies the exact evidence digest, and selects a registered evaluator version.
 The engine recomputes decisions for engineering, research, operations, data, and biomedical cases,

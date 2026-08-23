@@ -6,18 +6,21 @@ import json
 import pytest
 
 from prism_sdk import (
+    AUTONOMOUS_DOMAINS,
     AutonomousBrain,
     BrainApprovalRouter,
     BrainControlPlane,
     BrainJobRunResult,
     BrainJobStore,
     BrainModelHealthStore,
+    BrainModelHealthPersistenceCoordinator,
     BrainModelObservation,
     BrainReplayCase,
     BrainReplayEngine,
     DomainEvaluatorRegistry,
     builtin_autonomous_domain_evaluator_profiles,
     BrainWorker,
+    TransactionalJsonBrainModelHealthSnapshotPersistence,
     CredentialStore,
     LLMRuntime,
     openai_provider,
@@ -70,6 +73,7 @@ def _case(domain: str) -> dict[str, object]:
         "data": ("domain-data-quality", "1"),
         "biomedical": ("domain-biomedical-boundary", "1"),
     }
+
     evaluator_id, evaluator_version = identities[domain]
     return {
         "run_id": f"replay-{domain}",
@@ -81,6 +85,24 @@ def _case(domain: str) -> dict[str, object]:
         "evidence": evidence,
         "evidence_digest": _digest(evidence),
     }
+
+
+class _CasTextStore:
+    def __init__(self) -> None:
+        self.value: str | None = None
+
+    def read(self) -> str | None:
+        return self.value
+
+    def write(self, value: str) -> None:
+        self.value = value
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        observed = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+        if observed != expected_snapshot_digest:
+            return False
+        self.value = value
+        return True
 
 
 class _StubBrain:
@@ -245,6 +267,71 @@ def test_empty_model_health_store_is_a_valid_closed_control_plane_snapshot(tmp_p
         assert health.health() == ()
         assert health.provider_health() == {}
         assert health.verify_integrity()["verified"] is True
+
+
+def test_model_health_snapshot_rehydrates_all_domains_and_fences_stale_selection_workers(tmp_path):
+    backend = _CasTextStore()
+    persistence = TransactionalJsonBrainModelHealthSnapshotPersistence(backend)
+    with BrainModelHealthStore(tmp_path / "source-health.sqlite3") as source:
+        for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+            source.record(
+                BrainModelObservation(
+                    provider="offline",
+                    model="offline-model",
+                    domain=domain,
+                    capability="domain_review",
+                    risk_class="read_only",
+                    status="completed" if index % 2 == 0 else "provider_refused",
+                    outcome="success" if index % 2 == 0 else "failure",
+                    latency_ms=10 + index,
+                    failure_class=None if index % 2 == 0 else "provider_error",
+                    quality_reward=0.8 if index % 2 == 0 else None,
+                    quality_passed=True if index % 2 == 0 else None,
+                    outcome_digest=("a" * 64) if index % 2 == 0 else None,
+                )
+            )
+        source_coordinator = BrainModelHealthPersistenceCoordinator(source, persistence)
+        snapshot = source_coordinator.flush()
+        assert {row["payload"]["domain"] for row in snapshot["events"]} == set(AUTONOMOUS_DOMAINS)
+
+        restored = BrainModelHealthStore(tmp_path / "restored-health.sqlite3")
+        try:
+            restored_coordinator = BrainModelHealthPersistenceCoordinator(restored, persistence)
+            restored_snapshot = restored_coordinator.restore()
+            assert restored_snapshot is not None
+            assert restored.verify_integrity()["verified"] is True
+            assert restored.health()[0].attempts == len(AUTONOMOUS_DOMAINS)
+
+            stale = BrainModelHealthStore(tmp_path / "stale-health.sqlite3")
+            try:
+                stale_coordinator = BrainModelHealthPersistenceCoordinator(stale, persistence)
+                stale_coordinator.restore()
+                source.record(
+                    BrainModelObservation(
+                        provider="offline",
+                        model="offline-model",
+                        domain=AUTONOMOUS_DOMAINS[0],
+                        capability="domain_review",
+                        risk_class="read_only",
+                        status="completed",
+                        outcome="success",
+                        latency_ms=5,
+                    )
+                )
+                source_coordinator.flush()
+                with pytest.raises(BrainRunError, match="compare-and-swap conflict"):
+                    stale_coordinator.flush()
+            finally:
+                stale.close()
+        finally:
+            restored.close()
+
+    tampered = json.loads(backend.value)
+    tampered["head_digest"] = "b" * 64
+    backend.value = json.dumps(tampered)
+    with BrainModelHealthStore(tmp_path / "tampered-health.sqlite3") as tampered_store:
+        with pytest.raises(BrainRunError):
+            BrainModelHealthPersistenceCoordinator(tampered_store, persistence).restore()
 
 
 def test_replay_engine_runs_all_builtin_domains_and_updates_bandit_without_evidence_leak():

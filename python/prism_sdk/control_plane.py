@@ -18,7 +18,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 import uuid
 
 from .brain import (
@@ -44,6 +44,7 @@ CONTROL_PLANE_SCHEMA = "bioprism-brain-control-plane/0.1"
 RECONCILIATION_SCHEMA = JOB_RECONCILIATION_SCHEMA
 MODEL_OBSERVATION_SCHEMA = "bioprism-brain-model-observation/0.1"
 MODEL_HEALTH_SCHEMA = "bioprism-brain-model-health/0.1"
+MODEL_HEALTH_SNAPSHOT_SCHEMA = "bioprism-brain-model-health-snapshot/0.1"
 REPLAY_CASE_SCHEMA = "bioprism-brain-replay-case/0.1"
 REPLAY_REPORT_SCHEMA = "bioprism-brain-replay-report/0.1"
 MAX_CONTROL_PAGE = 256
@@ -53,6 +54,7 @@ MAX_REPLAY_EVIDENCE_BYTES = 350_000
 MAX_MODEL_OBSERVATION_BYTES = 8_192
 MAX_MODEL_HEALTH_EVENTS = 100_000
 MAX_MODEL_HEALTH_BYTES = 64_000_000
+MAX_MODEL_HEALTH_SNAPSHOT_BYTES = MAX_MODEL_HEALTH_BYTES
 _APPROVAL_STATES = frozenset({"pending", "approved", "denied"})
 _MODEL_OUTCOMES = frozenset({"success", "failure", "unknown"})
 
@@ -852,6 +854,68 @@ class BrainModelHealthStore:
             previous = expected
         return {"schema": MODEL_HEALTH_SCHEMA, "verified": True, "events": len(rows), "head_digest": previous}
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return the verified metadata event chain used by model/provider selection."""
+
+        with self._lock:
+            integrity = self.verify_integrity()
+            rows = self._connection.execute("SELECT * FROM brain_model_health_events ORDER BY sequence ASC").fetchall()
+            events: list[dict[str, Any]] = []
+            previous = ""
+            for row in rows:
+                observation = BrainModelObservation.from_mapping(json.loads(row["payload_json"]))
+                event = {
+                    "schema": MODEL_OBSERVATION_SCHEMA,
+                    "sequence": int(row["sequence"]),
+                    "payload": observation.to_dict(),
+                    "previous_digest": previous,
+                    "created_ns": int(row["created_ns"]),
+                    "event_digest": str(row["event_digest"]),
+                    "retention": "metadata_only_hash_chained",
+                }
+                events.append(event)
+                previous = event["event_digest"]
+            descriptor = {
+                "schema": MODEL_HEALTH_SNAPSHOT_SCHEMA,
+                "events": events,
+                "head_digest": integrity["head_digest"],
+                "retention": "aggregated_metadata_only_hash_chained",
+                "secret_material": "never_returned",
+            }
+            snapshot = {**descriptor, "snapshot_digest": _digest(descriptor)}
+            if len(_canonical(snapshot).encode("utf-8")) > MAX_MODEL_HEALTH_SNAPSHOT_BYTES:
+                raise BrainRunError("model health snapshot exceeds its byte capacity")
+            return snapshot
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        """Atomically replace the SQLite health ledger with a validated snapshot."""
+
+        normalized = _normalize_model_health_snapshot(
+            snapshot,
+            max_events=self.max_events,
+            max_bytes=self.max_bytes,
+        )
+        with self._lock:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                self._connection.execute("DELETE FROM brain_model_health_events")
+                for event in normalized["events"]:
+                    self._connection.execute(
+                        "INSERT INTO brain_model_health_events (sequence, payload_json, previous_digest, event_digest, created_ns) VALUES (?, ?, ?, ?, ?)",
+                        (
+                            event["sequence"],
+                            _canonical(event["payload"]),
+                            event["previous_digest"],
+                            event["event_digest"],
+                            event["created_ns"],
+                        ),
+                    )
+                self._ensure_capacity_locked()
+                self._connection.execute("COMMIT")
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+
     def _head_locked(self) -> str:
         row = self._connection.execute("SELECT event_digest FROM brain_model_health_events ORDER BY sequence DESC LIMIT 1").fetchone()
         return "" if row is None else str(row["event_digest"])
@@ -870,6 +934,175 @@ class BrainModelHealthStore:
         page_size = int(self._connection.execute("PRAGMA page_size").fetchone()[0])
         if page_count * page_size > self.max_bytes:
             raise BrainRunError("model health byte capacity is exhausted")
+
+
+def _normalize_model_health_snapshot(
+    value: Mapping[str, Any],
+    *,
+    max_events: int = MAX_MODEL_HEALTH_EVENTS,
+    max_bytes: int = MAX_MODEL_HEALTH_BYTES,
+) -> dict[str, Any]:
+    expected_keys = {"schema", "events", "head_digest", "retention", "secret_material", "snapshot_digest"}
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise BrainRunError("model health snapshot is malformed")
+    if value.get("schema") != MODEL_HEALTH_SNAPSHOT_SCHEMA:
+        raise BrainRunError("model health snapshot schema is unsupported")
+    if value.get("retention") != "aggregated_metadata_only_hash_chained" or value.get("secret_material") != "never_returned":
+        raise BrainRunError("model health snapshot retention is invalid")
+    raw_events = value.get("events")
+    if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes, bytearray)) or len(raw_events) > max_events:
+        raise BrainRunError("model health snapshot event count is outside its bound")
+    event_keys = {"schema", "sequence", "payload", "previous_digest", "created_ns", "event_digest", "retention"}
+    events: list[dict[str, Any]] = []
+    previous = ""
+    for expected_sequence, raw_event in enumerate(raw_events, start=1):
+        if not isinstance(raw_event, Mapping) or set(raw_event) != event_keys:
+            raise BrainRunError("model health snapshot contains an invalid event envelope")
+        if raw_event.get("schema") != MODEL_OBSERVATION_SCHEMA or raw_event.get("retention") != "metadata_only_hash_chained":
+            raise BrainRunError("model health snapshot event schema or retention is invalid")
+        if raw_event.get("sequence") != expected_sequence or raw_event.get("previous_digest") != previous:
+            raise BrainRunError("model health snapshot event sequence or chain is invalid")
+        created_ns = raw_event.get("created_ns")
+        if not isinstance(created_ns, int) or isinstance(created_ns, bool) or created_ns < 0:
+            raise BrainRunError("model health snapshot event timestamp is invalid")
+        event_digest = raw_event.get("event_digest")
+        if not isinstance(event_digest, str) or not _valid_digest(event_digest):
+            raise BrainRunError("model health snapshot event digest is invalid")
+        observation = BrainModelObservation.from_mapping(raw_event.get("payload"))
+        payload = observation.to_dict()
+        envelope = {
+            "schema": MODEL_OBSERVATION_SCHEMA,
+            "sequence": expected_sequence,
+            "payload": payload,
+            "previous_digest": previous,
+            "created_ns": created_ns,
+        }
+        if _digest(envelope) != event_digest:
+            raise BrainRunError("model health snapshot event digest does not match its metadata")
+        normalized_event = {**envelope, "event_digest": event_digest, "retention": "metadata_only_hash_chained"}
+        events.append(normalized_event)
+        previous = event_digest
+    head_digest = value.get("head_digest")
+    if not isinstance(head_digest, str) or (head_digest and not _valid_digest(head_digest)) or head_digest != previous:
+        raise BrainRunError("model health snapshot head_digest is invalid")
+    descriptor = {
+        "schema": MODEL_HEALTH_SNAPSHOT_SCHEMA,
+        "events": events,
+        "head_digest": head_digest,
+        "retention": "aggregated_metadata_only_hash_chained",
+        "secret_material": "never_returned",
+    }
+    snapshot_digest = value.get("snapshot_digest")
+    if not isinstance(snapshot_digest, str) or not _valid_digest(snapshot_digest) or _digest(descriptor) != snapshot_digest:
+        raise BrainRunError("model health snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": snapshot_digest}
+    if len(_canonical(normalized).encode("utf-8")) > min(max_bytes, MAX_MODEL_HEALTH_SNAPSHOT_BYTES):
+        raise BrainRunError("model health snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_model_health_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public strict validator for metadata-only model health snapshots."""
+
+    return _normalize_model_health_snapshot(value)
+
+
+class BrainModelHealthSnapshotTextStore(Protocol):
+    """Portable text persistence for aggregated provider/model health."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalBrainModelHealthSnapshotTextStore(BrainModelHealthSnapshotTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonBrainModelHealthSnapshotPersistence:
+    """Canonical JSON model-health persistence over a caller-owned text store."""
+
+    def __init__(self, store: BrainModelHealthSnapshotTextStore, *, max_bytes: int = MAX_MODEL_HEALTH_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise BrainRunError("model health JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_MODEL_HEALTH_SNAPSHOT_BYTES:
+            raise BrainRunError("model health JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("model health JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise BrainRunError("model health JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise BrainRunError("model health JSON snapshot must be an object")
+        return _normalize_model_health_snapshot(raw, max_bytes=self.max_bytes)
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_model_health_snapshot(snapshot, max_bytes=self.max_bytes)
+        encoded = _canonical(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("model health JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonBrainModelHealthSnapshotPersistence(JsonBrainModelHealthSnapshotPersistence):
+    """Canonical JSON model-health persistence with stale-writer fencing."""
+
+    def __init__(self, store: TransactionalBrainModelHealthSnapshotTextStore, *, max_bytes: int = MAX_MODEL_HEALTH_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise BrainRunError("transactional model health persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and not _valid_digest(expected_snapshot_digest):
+            raise BrainRunError("model health expected snapshot digest is invalid")
+        normalized = _normalize_model_health_snapshot(snapshot, max_bytes=self.max_bytes)
+        encoded = _canonical(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise BrainRunError("model health JSON snapshot exceeds its byte bound")
+        return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
+
+
+class BrainModelHealthPersistenceCoordinator:
+    """Flush and restore the selection health ledger through caller-owned storage."""
+
+    def __init__(self, store: BrainModelHealthStore, persistence: Any) -> None:
+        if not isinstance(store, BrainModelHealthStore):
+            raise BrainRunError("model health persistence requires a BrainModelHealthStore")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise BrainRunError("model health persistence adapter is malformed")
+        self.store = store
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+
+    def restore(self) -> dict[str, Any] | None:
+        raw = self.persistence.read()
+        if raw is None:
+            self._expected_snapshot_digest = None
+            return None
+        snapshot = _normalize_model_health_snapshot(raw, max_events=self.store.max_events, max_bytes=self.store.max_bytes)
+        self.store.restore(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
+
+    def flush(self) -> dict[str, Any]:
+        snapshot = self.store.snapshot()
+        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+        if callable(write_if_unchanged):
+            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                raise BrainRunError("model health persistence compare-and-swap conflict")
+        else:
+            self.persistence.write(snapshot)
+        self._expected_snapshot_digest = snapshot["snapshot_digest"]
+        return snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -1427,16 +1660,24 @@ __all__ = [
     "BrainReconciliationReceipt",
     "BrainReconciliationRouter",
     "BrainModelHealth",
+    "BrainModelHealthPersistenceCoordinator",
+    "BrainModelHealthSnapshotTextStore",
     "BrainModelHealthStore",
     "BrainModelObservation",
     "BrainReplayCase",
     "BrainReplayEngine",
     "BrainReplayReport",
     "BrainWorker",
+    "JsonBrainModelHealthSnapshotPersistence",
     "CONTROL_PLANE_SCHEMA",
     "RECONCILIATION_SCHEMA",
     "MODEL_HEALTH_SCHEMA",
+    "MODEL_HEALTH_SNAPSHOT_SCHEMA",
     "MODEL_OBSERVATION_SCHEMA",
+    "MAX_MODEL_HEALTH_SNAPSHOT_BYTES",
     "REPLAY_CASE_SCHEMA",
     "REPLAY_REPORT_SCHEMA",
+    "TransactionalBrainModelHealthSnapshotTextStore",
+    "TransactionalJsonBrainModelHealthSnapshotPersistence",
+    "validate_model_health_snapshot",
 ]

@@ -8,6 +8,9 @@ from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     BrainJobPersistenceCoordinator,
     BrainJobStore,
+    BrainModelHealthPersistenceCoordinator,
+    BrainModelHealthStore,
+    BrainModelObservation,
     AutonomousDecisionCycle,
     AutonomousDecisionCyclePersistenceCoordinator,
     AutonomousExecutionController,
@@ -18,6 +21,7 @@ from prism_sdk import (
     InMemoryAutonomousDecisionCycleStateStore,
     TransactionalJsonAutonomousExecutionSnapshotPersistence,
     TransactionalJsonBrainJobSnapshotPersistence,
+    TransactionalJsonBrainModelHealthSnapshotPersistence,
     TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
 )
 from prism_sdk.authoring import content_digest
@@ -283,3 +287,49 @@ def test_http_snapshot_store_plugs_into_durable_job_worker_restart_for_every_dom
         assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
         assert {record.domain for record in restored.inventory(limit=256)} == set(AUTONOMOUS_DOMAINS)
         assert restored.verify_integrity()["ok"] is True
+
+
+def test_http_snapshot_store_plugs_into_model_health_restart_for_every_domain(tmp_path) -> None:
+    remote: str | None = None
+
+    def opener(request, _timeout):
+        nonlocal remote
+        if request.get_method() == "GET":
+            return _Response(remote.encode("utf-8")) if remote is not None else _Response(status=404)
+        current = None if remote is None else json.loads(remote)["snapshot_digest"]
+        expected = _header(request, "If-Match")
+        if _header(request, "If-None-Match") == "*" and current is not None:
+            return _Response(status=412)
+        if expected is not None and current != expected.strip('"'):
+            return _Response(status=412)
+        remote = request.data.decode("utf-8")
+        return _Response(status=204)
+
+    text_store = AutonomousHttpSnapshotTextStore(
+        "https://state.test/snapshots",
+        "all-domains/model-health",
+        allowed_hosts=("state.test",),
+        opener=opener,
+    )
+    persistence = TransactionalJsonBrainModelHealthSnapshotPersistence(text_store)
+    with BrainModelHealthStore(tmp_path / "source-model-health.sqlite3") as source:
+        for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+            source.record(BrainModelObservation(
+                provider="offline",
+                model="offline-model",
+                domain=domain,
+                capability="domain_review",
+                risk_class="read_only",
+                status="completed",
+                outcome="success",
+                latency_ms=1 + index,
+                quality_reward=0.75,
+                quality_passed=True,
+            ))
+        flushed = BrainModelHealthPersistenceCoordinator(source, persistence).flush()
+    with BrainModelHealthStore(tmp_path / "restored-model-health.sqlite3") as restored:
+        restored_snapshot = BrainModelHealthPersistenceCoordinator(restored, persistence).restore()
+        assert restored_snapshot is not None
+        assert restored_snapshot["snapshot_digest"] == flushed["snapshot_digest"]
+        assert restored.health()[0].attempts == len(AUTONOMOUS_DOMAINS)
+        assert restored.verify_integrity()["verified"] is True

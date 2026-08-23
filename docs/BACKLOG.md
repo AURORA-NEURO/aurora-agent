@@ -1214,3 +1214,9 @@ and transactional JSON adapters preserve the request/result digest image, and ev
 progress flush uses the restored checkpoint digest as a CAS fence. This protects domain, automatic,
 and cross-domain batches from stale workers while retaining no task text, prompts, provider values,
 connector observations, tool arguments, or credentials.
+
+The Python model-health ledger now closes its remote restart seam too. Hash-chained provider/model
+observations can be snapshotted as strict canonical JSON, restored into a fresh SQLite health
+store, and CAS-fenced before they influence model selection across all twelve domains. The
+snapshot retains only bounded telemetry and digests; live credentials, provider responses, prompts,
+and evidence remain caller-owned.
