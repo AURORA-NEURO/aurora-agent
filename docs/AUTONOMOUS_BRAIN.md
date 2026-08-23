@@ -1381,6 +1381,63 @@ The projection remains value-only evaluator/bandit/replay metadata, so a stale w
 overwrite a newer reward update and no provider prompt, response, credential, header, tool
 argument, or raw evidence is transported by this boundary.
 
+### Metadata-only run traces
+
+For operator dashboards, offline evaluation, and cross-process handoff, Python now exposes the
+same run-trace boundary as the TypeScript SDK. `AutonomousRunTraceSession` creates an append-only
+hash chain across the complete twelve-domain catalogue, including `cross_domain` fan-out and
+`evaluation` runs. Each event records only a phase (`started`, `plan_compiled`, provider
+invocation, evaluation, learning, terminal), bounded status, route/plan/selection digests,
+provider/model labels, attempt/turn counters, token/tool counts, latency, and typed failure
+metadata. It never accepts task text, prompts, responses, credentials, headers, connector
+arguments, connector results, or raw learning evidence.
+
+```python
+from prism_sdk import (
+    AutonomousRunTracePersistenceCoordinator,
+    AutonomousRunTraceSession,
+    InMemoryAutonomousRunTraceStore,
+    TransactionalJsonAutonomousRunTracePersistence,
+)
+
+trace_store = InMemoryAutonomousRunTraceStore()
+trace = AutonomousRunTraceSession(
+    trace_store,
+    run_id="job-2026-08-23",
+    task_digest=task_digest,
+    domains=("coding",),
+)
+trace.started()
+trace.record(
+    phase="plan_compiled",
+    status="running",
+    plan_digest=plan_digest,
+    selection_digest=selection_digest,
+)
+# A redacted BrainRunResult.provider_invocations tuple can be projected here. The
+# provider request and response themselves are never passed to this API.
+trace.record_provider_receipts(provider_invocations)
+trace.complete(status="completed", detail_digest=outcome_digest)
+summary = trace.summary()
+
+persistence = TransactionalJsonAutonomousRunTracePersistence(snapshot_text_store)
+coordinator = AutonomousRunTracePersistenceCoordinator(trace_store, persistence)
+coordinator.restore()  # verifies schema, canonical JSON, chain, and snapshot digest
+coordinator.flush()    # fences stale writers with compare-and-swap
+```
+
+Applications that want the façade to own the lifecycle can call
+`agent.run_with_trace(..., trace_store=trace_store, run_id=...)` or
+`agent.run_cross_domain_with_trace(..., trace_store=trace_store, run_id=...)`. The returned
+`AutonomousTracedRunResult.result` is the live caller-owned provider result; its `.trace` is the
+metadata-only `AutonomousRunTraceSummary`, and `.to_dict()` intentionally replaces the live
+result with `caller_owned_live_result_not_serialized`. The helper binds the execution-controller
+id to the trace id, records compiled plan and provider receipt metadata, maps approval/refusal,
+partial, failure, and reconciliation statuses conservatively, and closes the trace on exceptions
+with a typed failure event. `JsonAutonomousRunTracePersistence`, its transactional CAS variant,
+`InMemoryAutonomousRunTraceTextStore`, and `FileAutonomousRunTraceTextStore` are adapters only;
+they do not resume provider work or grant effect authority during restore.
+
 `ModelCatalogue` stores only deterministic model metadata and rejects credential-shaped metadata
 fields; it is safe to populate before a user has supplied any key. `agent.readiness()` projects
 provider registration, credential readiness, and model eligibility without exposing secret material.

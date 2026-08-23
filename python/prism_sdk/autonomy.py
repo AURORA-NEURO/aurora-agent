@@ -99,6 +99,12 @@ from .autonomy_persistence import (
     AutonomousExecutionPolicy,
     AutonomyPersistenceError,
 )
+from .autonomous_run_trace import (
+    AutonomousRunTraceSession,
+    AutonomousRunTraceStore,
+    AutonomousTracedRunResult,
+    autonomous_run_trace_status,
+)
 from .autonomous_decision_persistence import (
     AutonomousDecisionCycle,
     AutonomousDecisionCycleRehydrationContext,
@@ -15653,6 +15659,184 @@ class AutonomousAgent:
             raise
         self._finish_execution(execution_controller, result=result)
         return result
+
+    @staticmethod
+    def _trace_brain_results(result: Any) -> tuple[BrainRunResult, ...]:
+        """Extract only brain envelopes needed to project provider metadata."""
+
+        if isinstance(result, BrainRunResult):
+            return (result,)
+        if isinstance(result, (BrainToolLoopResult, BrainMissionResult)):
+            return (result.brain_run,)
+        if isinstance(result, AutonomousCrossDomainResult):
+            values: list[BrainRunResult] = []
+            for child in (*result.child_results, result.synthesis_result):
+                if child is None:
+                    continue
+                values.extend(AutonomousAgent._trace_brain_results(child))
+            return tuple(values)
+        return ()
+
+    @staticmethod
+    def _trace_execution_metadata(result: Any) -> dict[str, Any]:
+        brain_results = AutonomousAgent._trace_brain_results(result)
+        receipts: list[Mapping[str, Any]] = []
+        selection_digests: list[str] = []
+        plan_digests: list[str] = []
+        route_digest: str | None = None
+        if isinstance(result, AutonomousCrossDomainResult):
+            plan_digests.append(_cross_domain_plan_digest(result.blueprint))
+        for brain_result in brain_results:
+            receipts.extend(brain_result.provider_invocations)
+            selection_digest = brain_result.selection.get("decision_digest")
+            if isinstance(selection_digest, str) and len(selection_digest) == 64:
+                selection_digests.append(selection_digest)
+            candidate_plan = brain_result.plan.get("plan_digest")
+            if isinstance(candidate_plan, str) and len(candidate_plan) == 64:
+                plan_digests.append(candidate_plan)
+            elif brain_result.plan:
+                plan_digests.append(content_digest(brain_result.plan))
+        route = getattr(result, "route", None)
+        if isinstance(route, Mapping) and isinstance(route.get("route_digest"), str):
+            route_digest = route["route_digest"]
+        outcome_digest = None
+        if brain_results:
+            outcome_digest = brain_results[-1].outcome_digest
+        elif isinstance(result, AutonomousCrossDomainResult):
+            outcome_digest = _cross_domain_execution_digest(result)
+        return {
+            "receipts": tuple(receipts),
+            "selection_digest": selection_digests[-1] if selection_digests else None,
+            "selection_digests": tuple(dict.fromkeys(selection_digests)),
+            "plan_digest": plan_digests[-1] if plan_digests else None,
+            "route_digest": route_digest,
+            "detail_digest": outcome_digest,
+        }
+
+    @staticmethod
+    def _trace_store(store: Any) -> AutonomousRunTraceStore:
+        if not all(callable(getattr(store, name, None)) for name in ("append", "events", "snapshot", "restore")):
+            raise BrainRunError("autonomous run trace store must implement append, events, snapshot, and restore")
+        return store
+
+    def run_with_trace(
+        self,
+        *,
+        task: str,
+        domain: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Run one domain and return the live result with a durable metadata-only trace.
+
+        ``run_id`` is also used as the execution-controller id so provider accounting and the
+        trace share one stable identity.  A caller may persist the trace independently through
+        :class:`AutonomousRunTracePersistenceCoordinator`; no transcript is written by this
+        helper.
+        """
+
+        self._trace_store(trace_store)
+        resolved_run_id = run_id or kwargs.pop("execution_id", None) or f"trace-{uuid.uuid4().hex}"
+        task_digest = content_digest({"task": task})
+        session = AutonomousRunTraceSession(
+            trace_store,
+            run_id=resolved_run_id,
+            task_digest=task_digest,
+            domains=(domain,),
+        )
+        session.started()
+        try:
+            result = self.run(
+                task=task,
+                domain=domain,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                execution_id=resolved_run_id,
+                **kwargs,
+            )
+            metadata = self._trace_execution_metadata(result)
+            session.record(
+                phase="plan_compiled",
+                status="running",
+                route_digest=metadata["route_digest"],
+                plan_digest=metadata["plan_digest"],
+                selection_digest=metadata["selection_digest"],
+            )
+            session.record_provider_receipts(metadata["receipts"])
+            session.complete(
+                status=autonomous_run_trace_status(getattr(result, "status", "unknown")),
+                route_digest=metadata["route_digest"],
+                plan_digest=metadata["plan_digest"],
+                selection_digest=metadata["selection_digest"],
+                detail_digest=metadata["detail_digest"],
+            )
+        except Exception as error:
+            session.fail(failure_class=type(error).__name__, failure_code="execution_error")
+            raise
+        return AutonomousTracedRunResult(result=result, trace=session.summary())
+
+    def run_cross_domain_with_trace(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Run a bounded fan-out/fan-in task with one trace spanning every specialist domain."""
+
+        self._trace_store(trace_store)
+        requested_domains = [
+            value.get("domain")
+            for value in subtasks
+            if isinstance(value, Mapping) and isinstance(value.get("domain"), str)
+        ]
+        trace_domains = tuple(dict.fromkeys(["cross_domain", *requested_domains]))
+        resolved_run_id = run_id or kwargs.pop("execution_id", None) or f"trace-{uuid.uuid4().hex}"
+        session = AutonomousRunTraceSession(
+            trace_store,
+            run_id=resolved_run_id,
+            task_digest=content_digest({"task": task}),
+            domains=trace_domains,
+        )
+        session.started()
+        try:
+            result = self.run_cross_domain(
+                task=task,
+                subtasks=subtasks,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                execution_id=resolved_run_id,
+                **kwargs,
+            )
+            metadata = self._trace_execution_metadata(result)
+            session.record(
+                phase="plan_compiled",
+                status="running",
+                domains=trace_domains,
+                route_digest=metadata["route_digest"],
+                plan_digest=metadata["plan_digest"],
+                selection_digest=metadata["selection_digest"],
+            )
+            session.record_provider_receipts(metadata["receipts"])
+            session.complete(
+                status=autonomous_run_trace_status(result.status),
+                domains=trace_domains,
+                route_digest=metadata["route_digest"],
+                plan_digest=metadata["plan_digest"],
+                selection_digest=metadata["selection_digest"],
+                detail_digest=metadata["detail_digest"],
+            )
+        except Exception as error:
+            session.fail(failure_class=type(error).__name__, failure_code="execution_error")
+            raise
+        return AutonomousTracedRunResult(result=result, trace=session.summary())
 
     @staticmethod
     def _batch_controls(max_parallelism: int, stop_on_error: bool) -> tuple[int, bool]:
