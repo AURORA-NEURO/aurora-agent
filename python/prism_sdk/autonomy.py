@@ -191,6 +191,7 @@ AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES = (
     "paused",
 )
 AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-workflow-checkpoint/0.1"
+AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA = "bioprism-python-autonomous-workflow-execution-receipt/0.1"
 AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-cross-domain-checkpoint/0.1"
 AUTONOMOUS_CROSS_DOMAIN_STEP_SCHEMA = "bioprism-python-autonomous-cross-domain-step/0.1"
 AUTONOMOUS_CROSS_DOMAIN_EXECUTION_RECEIPT_SCHEMA = "bioprism-python-autonomous-cross-domain-execution-receipt/0.1"
@@ -5384,6 +5385,373 @@ class AutonomousWorkflowStageResult:
         }
 
 
+AUTONOMOUS_WORKFLOW_RECEIPT_STAGE_STATUSES = (
+    "not_started",
+    "completed",
+    "approval_required",
+    "reconciliation_required",
+    "failed",
+    "proposed",
+    "blocked",
+    "not_attempted",
+)
+AUTONOMOUS_WORKFLOW_RECEIPT_ACTIONS = (
+    "approve_provider_call",
+    "continue_workflow",
+    "retry_stage",
+    "reconcile_stage",
+    "complete",
+    "inspect_failure",
+)
+
+
+def _workflow_receipt_next_action(
+    status: str,
+    incomplete_stage_ids: Sequence[str],
+    reconciliation_required: bool,
+    stage_statuses: Mapping[str, str],
+) -> str:
+    """Choose the only safe next control-plane action for a workflow projection."""
+
+    if reconciliation_required:
+        return "reconcile_stage"
+    if status == "approval_required":
+        return "approve_provider_call"
+    if status == "completed":
+        return "complete"
+    if status == "paused":
+        return "continue_workflow" if incomplete_stage_ids else "complete"
+    if any(value in {"proposed", "blocked", "not_attempted"} for value in stage_statuses.values()):
+        return "retry_stage"
+    if status == "stage_failed":
+        return "inspect_failure"
+    return "retry_stage"
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousWorkflowExecutionReceipt:
+    """A digest-bound, payload-free recovery projection for one workflow run.
+
+    ``AutonomousWorkflowRun`` intentionally returns the caller-owned provider result for
+    inspection, but control-plane consumers should persist this receipt instead.  It retains
+    only workflow identity, stage state, outcome digests, progress, and the next safe action;
+    task text, prompts, credentials, tool arguments, and provider output never enter it.
+    """
+
+    job_id: str | None
+    domain: str
+    task_digest: str
+    workflow_id: str
+    workflow_digest: str
+    checkpoint_digest: str
+    status: str
+    execution_stage_ids: tuple[str, ...]
+    stage_statuses: Mapping[str, str]
+    stage_result_digests: Mapping[str, str | None]
+    completed_stage_ids: tuple[str, ...]
+    incomplete_stage_ids: tuple[str, ...]
+    completed_units: int
+    total_units: int
+    progress: float
+    next_action: str
+    safe_to_continue: bool
+    reconciliation_required: bool
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "completed",
+            "approval_required",
+            "stage_failed",
+            "stage_blocked",
+            "stage_proposed",
+            "stage_not_attempted",
+            "paused",
+        }:
+            raise BrainRunError("workflow execution receipt has an invalid status")
+        if self.job_id is not None:
+            _identifier("workflow execution receipt job_id", self.job_id)
+        _identifier("workflow execution receipt domain", self.domain)
+        if self.domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError("workflow execution receipt domain is not supported")
+        _workflow_digest(self.task_digest, "workflow execution receipt task_digest")
+        _identifier("workflow execution receipt workflow_id", self.workflow_id)
+        _workflow_digest(self.workflow_digest, "workflow execution receipt workflow_digest")
+        _workflow_digest(self.checkpoint_digest, "workflow execution receipt checkpoint_digest")
+
+        execution = _sequence(
+            "workflow execution receipt execution_stage_ids",
+            self.execution_stage_ids,
+            maximum=16,
+        )
+        statuses = self.stage_statuses
+        digests = self.stage_result_digests
+        if not isinstance(statuses, Mapping) or not isinstance(digests, Mapping):
+            raise BrainRunError("workflow execution receipt stage maps must be mappings")
+        statuses = dict(statuses)
+        digests = dict(digests)
+        if set(statuses) != set(execution) or set(digests) != set(execution):
+            raise BrainRunError("workflow execution receipt stage maps must cover exactly execution_stage_ids")
+        for stage_id in execution:
+            _identifier("workflow execution receipt stage status id", stage_id)
+            if statuses[stage_id] not in AUTONOMOUS_WORKFLOW_RECEIPT_STAGE_STATUSES:
+                raise BrainRunError("workflow execution receipt contains an invalid stage status")
+            if digests[stage_id] is not None:
+                _workflow_digest(digests[stage_id], f"workflow execution receipt result digest for {stage_id}")
+
+        completed = _sequence(
+            "workflow execution receipt completed_stage_ids",
+            self.completed_stage_ids,
+            maximum=16,
+        )
+        incomplete = _sequence(
+            "workflow execution receipt incomplete_stage_ids",
+            self.incomplete_stage_ids,
+            maximum=16,
+        )
+        if (
+            set(completed) | set(incomplete) != set(execution)
+            or set(completed) & set(incomplete)
+            or tuple(stage_id for stage_id in execution if statuses[stage_id] == "completed") != completed
+            or tuple(stage_id for stage_id in execution if statuses[stage_id] != "completed") != incomplete
+        ):
+            raise BrainRunError("workflow execution receipt stage classifications must partition execution order")
+        expected_total = max(1, len(execution))
+        if (
+            not isinstance(self.completed_units, int)
+            or isinstance(self.completed_units, bool)
+            or self.completed_units != len(completed)
+        ):
+            raise BrainRunError("workflow execution receipt completed_units is inconsistent")
+        if self.total_units != expected_total:
+            raise BrainRunError("workflow execution receipt total_units is inconsistent")
+        if (
+            isinstance(self.progress, bool)
+            or not isinstance(self.progress, (int, float))
+            or not math.isfinite(float(self.progress))
+            or float(self.progress) != self.completed_units / self.total_units
+        ):
+            raise BrainRunError("workflow execution receipt progress is inconsistent")
+        if self.next_action not in AUTONOMOUS_WORKFLOW_RECEIPT_ACTIONS:
+            raise BrainRunError("workflow execution receipt next_action is invalid")
+        reconciliation = any(value == "reconciliation_required" for value in statuses.values())
+        if self.reconciliation_required != reconciliation:
+            raise BrainRunError("workflow execution receipt reconciliation_required is inconsistent")
+        safe_to_continue = self.status == "paused" and not reconciliation and bool(incomplete)
+        if self.safe_to_continue != safe_to_continue:
+            raise BrainRunError("workflow execution receipt safe_to_continue is inconsistent")
+        expected_action = _workflow_receipt_next_action(self.status, incomplete, reconciliation, statuses)
+        if self.next_action != expected_action:
+            raise BrainRunError("workflow execution receipt next_action is inconsistent")
+        if not isinstance(self.safe_to_continue, bool) or not isinstance(self.reconciliation_required, bool):
+            raise BrainRunError("workflow execution receipt boolean fields are invalid")
+        object.__setattr__(self, "execution_stage_ids", execution)
+        object.__setattr__(self, "stage_statuses", statuses)
+        object.__setattr__(self, "stage_result_digests", digests)
+        object.__setattr__(self, "completed_stage_ids", completed)
+        object.__setattr__(self, "incomplete_stage_ids", incomplete)
+        object.__setattr__(self, "progress", float(self.progress))
+
+    @property
+    def receipt_digest(self) -> str:
+        return content_digest(self._digest_payload())
+
+    def _digest_payload(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA,
+            "job_id": self.job_id,
+            "domain": self.domain,
+            "task_digest": self.task_digest,
+            "workflow_id": self.workflow_id,
+            "workflow_digest": self.workflow_digest,
+            "checkpoint_digest": self.checkpoint_digest,
+            "status": self.status,
+            "stages": [
+                {
+                    "id": stage_id,
+                    "status": self.stage_statuses[stage_id],
+                    "result_digest": self.stage_result_digests[stage_id],
+                }
+                for stage_id in self.execution_stage_ids
+            ],
+            "completed_stage_ids": self.completed_stage_ids,
+            "incomplete_stage_ids": self.incomplete_stage_ids,
+            "completed_units": self.completed_units,
+            "total_units": self.total_units,
+            "progress": self.progress,
+            "next_action": self.next_action,
+            "safe_to_continue": self.safe_to_continue,
+            "reconciliation_required": self.reconciliation_required,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._digest_payload(),
+            "execution_stage_ids": list(self.execution_stage_ids),
+            "stage_statuses": dict(self.stage_statuses),
+            "stage_result_digests": dict(self.stage_result_digests),
+            "completed_stage_ids": list(self.completed_stage_ids),
+            "incomplete_stage_ids": list(self.incomplete_stage_ids),
+            "receipt_digest": self.receipt_digest,
+            "retention": "status_and_outcome_digests_only; provider_payloads_caller_owned",
+            "secret_material": "never_returned",
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AutonomousWorkflowExecutionReceipt":
+        """Restore a receipt from a caller-owned journal and reject drift or tampering."""
+
+        allowed = {
+            "schema",
+            "job_id",
+            "domain",
+            "task_digest",
+            "workflow_id",
+            "workflow_digest",
+            "checkpoint_digest",
+            "status",
+            "stages",
+            "execution_stage_ids",
+            "stage_statuses",
+            "stage_result_digests",
+            "completed_stage_ids",
+            "incomplete_stage_ids",
+            "completed_units",
+            "total_units",
+            "progress",
+            "next_action",
+            "safe_to_continue",
+            "reconciliation_required",
+            "receipt_digest",
+            "retention",
+            "secret_material",
+        }
+        if not isinstance(value, Mapping) or set(value) != allowed:
+            raise BrainRunError("workflow execution receipt contains unexpected or missing fields")
+        if value.get("schema") != AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA:
+            raise BrainRunError("workflow execution receipt has an invalid schema")
+        if value.get("retention") != "status_and_outcome_digests_only; provider_payloads_caller_owned":
+            raise BrainRunError("workflow execution receipt retention marker is invalid")
+        if value.get("secret_material") != "never_returned":
+            raise BrainRunError("workflow execution receipt secret marker is invalid")
+        receipt = cls(
+            job_id=value.get("job_id"),
+            domain=value.get("domain"),
+            task_digest=value.get("task_digest"),
+            workflow_id=value.get("workflow_id"),
+            workflow_digest=value.get("workflow_digest"),
+            checkpoint_digest=value.get("checkpoint_digest"),
+            status=value.get("status"),
+            execution_stage_ids=tuple(value.get("execution_stage_ids", ())),
+            stage_statuses=value.get("stage_statuses", {}),
+            stage_result_digests=value.get("stage_result_digests", {}),
+            completed_stage_ids=tuple(value.get("completed_stage_ids", ())),
+            incomplete_stage_ids=tuple(value.get("incomplete_stage_ids", ())),
+            completed_units=value.get("completed_units"),
+            total_units=value.get("total_units"),
+            progress=value.get("progress"),
+            next_action=value.get("next_action"),
+            safe_to_continue=value.get("safe_to_continue"),
+            reconciliation_required=value.get("reconciliation_required"),
+        )
+        if value.get("stages") != receipt._digest_payload()["stages"]:
+            raise BrainRunError("workflow execution receipt stages do not match their maps")
+        if value.get("receipt_digest") != receipt.receipt_digest:
+            raise BrainRunError("workflow execution receipt digest does not match its contents")
+        return receipt
+
+    @classmethod
+    def from_result(cls, result: "AutonomousWorkflowRun") -> "AutonomousWorkflowExecutionReceipt":
+        if not isinstance(result, AutonomousWorkflowRun):
+            raise BrainRunError("workflow execution receipt requires an AutonomousWorkflowRun")
+        stage_ids = tuple(stage.id for stage in result.blueprint.workflow.stages)
+        statuses: dict[str, str] = {stage_id: "not_started" for stage_id in stage_ids}
+        digests: dict[str, str | None] = {stage_id: None for stage_id in stage_ids}
+
+        def set_status(stage_id: str, status: str) -> None:
+            if stage_id not in statuses:
+                raise BrainRunError(f"workflow execution receipt contains an unknown stage {stage_id!r}")
+            statuses[stage_id] = status
+
+        for row in result.checkpoint.stages:
+            stage_id = row["stage_id"]
+            execution_status = row.get("execution_status", "completed")
+            if row.get("status") == "completed" and execution_status == "completed":
+                set_status(stage_id, "completed")
+            elif execution_status == "approval_required":
+                set_status(stage_id, "approval_required")
+            elif row.get("status") in {"proposed", "blocked", "not_attempted"}:
+                set_status(stage_id, row["status"])
+            else:
+                set_status(stage_id, "failed")
+            response_digest = row.get("response_digest")
+            if response_digest is not None:
+                digests[stage_id] = _workflow_digest(
+                    response_digest,
+                    f"workflow execution receipt checkpoint response_digest for {stage_id}",
+                )
+
+        for stage_result in result.stage_results:
+            stage_id = stage_result.stage.id
+            run_status = None if stage_result.result is None else getattr(stage_result.result, "status", None)
+            if run_status == "reconciliation_required":
+                set_status(stage_id, "reconciliation_required")
+            elif run_status == "approval_required" or stage_result.execution_status == "approval_required":
+                set_status(stage_id, "approval_required")
+            elif stage_result.declared_status in {"proposed", "blocked", "not_attempted"}:
+                set_status(stage_id, stage_result.declared_status)
+            elif (
+                stage_result.execution_status == "completed"
+                and stage_result.declared_status == "completed"
+                and not stage_result.validation_errors
+                and isinstance(run_status, str)
+                and run_status.startswith("completed")
+            ):
+                set_status(stage_id, "completed")
+            else:
+                set_status(stage_id, "failed")
+            if stage_result.response_digest is not None:
+                digests[stage_id] = _workflow_digest(
+                    stage_result.response_digest,
+                    f"workflow execution receipt stage response_digest for {stage_id}",
+                )
+
+        completed = tuple(stage_id for stage_id in stage_ids if statuses[stage_id] == "completed")
+        incomplete = tuple(stage_id for stage_id in stage_ids if statuses[stage_id] != "completed")
+        reconciliation = any(status == "reconciliation_required" for status in statuses.values())
+        return cls(
+            job_id=None,
+            domain=result.blueprint.profile.domain,
+            task_digest=result.blueprint.spec.task_digest,
+            workflow_id=result.blueprint.workflow.workflow_id,
+            workflow_digest=result.blueprint.workflow.workflow_digest,
+            checkpoint_digest=result.checkpoint.checkpoint_digest,
+            status=result.status,
+            execution_stage_ids=stage_ids,
+            stage_statuses=statuses,
+            stage_result_digests=digests,
+            completed_stage_ids=completed,
+            incomplete_stage_ids=incomplete,
+            completed_units=len(completed),
+            total_units=max(1, len(stage_ids)),
+            progress=len(completed) / max(1, len(stage_ids)),
+            next_action=_workflow_receipt_next_action(result.status, incomplete, reconciliation, statuses),
+            safe_to_continue=result.status == "paused" and not reconciliation and bool(incomplete),
+            reconciliation_required=reconciliation,
+        )
+
+
+def validate_autonomous_workflow_execution_receipt(
+    value: Mapping[str, Any] | AutonomousWorkflowExecutionReceipt,
+) -> AutonomousWorkflowExecutionReceipt:
+    """Validate and normalize a workflow receipt from memory or a caller-owned journal."""
+
+    if isinstance(value, AutonomousWorkflowExecutionReceipt):
+        return AutonomousWorkflowExecutionReceipt.from_dict(value.to_dict())
+    if not isinstance(value, Mapping):
+        raise BrainRunError("workflow execution receipt must be a mapping or receipt instance")
+    return AutonomousWorkflowExecutionReceipt.from_dict(value)
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousWorkflowRun:
     """Bounded execution report for a domain workflow stage DAG."""
@@ -5413,6 +5781,10 @@ class AutonomousWorkflowRun:
             raise BrainRunError("workflow run checkpoint is malformed")
         object.__setattr__(self, "next_stage_ids", _sequence("workflow next_stage_ids", self.next_stage_ids, maximum=16))
 
+    @property
+    def execution_receipt(self) -> AutonomousWorkflowExecutionReceipt:
+        return AutonomousWorkflowExecutionReceipt.from_result(self)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": "bioprism-python-autonomous-workflow-run/0.1",
@@ -5422,6 +5794,8 @@ class AutonomousWorkflowRun:
             "stage_results": [result.to_dict() for result in self.stage_results],
             "checkpoint": self.checkpoint.to_dict(),
             "next_stage_ids": list(self.next_stage_ids),
+            "execution": "completed" if self.status == "completed" else "partial_or_blocked",
+            "execution_receipt": self.execution_receipt.to_dict(),
             "authorization": "caller_approval_per_provider_and_effect_boundary",
         }
 
@@ -17182,6 +17556,7 @@ __all__ = [
     "MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
     "AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA",
     "AUTONOMOUS_WORKFLOW_EVALUATOR_SCHEMA",
     "AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA",
     "AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA",
@@ -17229,12 +17604,14 @@ __all__ = [
     "AutonomousLearningResult",
     "AutonomousAgent",
     "AutonomousWorkflowCheckpoint",
+    "AutonomousWorkflowExecutionReceipt",
     "AutonomousWorkflowEvaluator",
     "AutonomousWorkflowLearningResult",
     "AutonomousWorkflowTrajectoryLearningResult",
     "AutonomousWorkflowRun",
     "AutonomousWorkflowStageEvaluation",
     "AutonomousWorkflowStageResult",
+    "validate_autonomous_workflow_execution_receipt",
     "AutonomousPlanBuilder",
     "AutonomousPromptBuilder",
     "AutonomousTaskBlueprint",

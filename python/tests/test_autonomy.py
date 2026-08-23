@@ -34,8 +34,13 @@ from prism_sdk import (
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
     AutonomousTaskOrchestrator,
+    AutonomousWorkflowCheckpoint,
+    AutonomousWorkflowExecutionReceipt,
     AutonomousWorkflowRegistry,
+    AutonomousWorkflowRun,
+    AutonomousWorkflowStageResult,
     AutonomousWorkflowCycleCheckpoint,
+    validate_autonomous_workflow_execution_receipt,
     AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_KEY,
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
@@ -3107,6 +3112,21 @@ def test_run_workflow_executes_stage_dag_and_resumes_only_unfinished_stages():
         assert paused.status == "paused"
         assert [item.stage.id for item in paused.stage_results] == ["scope", "inspect"]
         assert paused.checkpoint.completed_stage_ids == ("scope", "inspect")
+        paused_receipt = paused.execution_receipt
+        assert paused_receipt.completed_stage_ids == ("scope", "inspect")
+        assert paused_receipt.incomplete_stage_ids == ("implement", "verify", "handoff")
+        assert paused_receipt.progress == 0.4
+        assert paused_receipt.next_action == "continue_workflow"
+        assert paused_receipt.safe_to_continue is True
+        receipt_wire = paused_receipt.to_dict()
+        assert "structured" not in json.dumps(receipt_wire)
+        assert "workflow-secret" not in json.dumps(receipt_wire)
+        assert AutonomousWorkflowExecutionReceipt.from_dict(receipt_wire) == paused_receipt
+        assert validate_autonomous_workflow_execution_receipt(receipt_wire) == paused_receipt
+        tampered_receipt = dict(receipt_wire)
+        tampered_receipt["next_action"] = "retry_stage"
+        with pytest.raises(BrainRunError, match="receipt (next_action|digest)"):
+            AutonomousWorkflowExecutionReceipt.from_dict(tampered_receipt)
         checkpoint_wire = json.dumps(paused.checkpoint.to_dict())
         assert "Produce a bounded implementation review" not in checkpoint_wire
         assert "workflow-secret" not in checkpoint_wire
@@ -3132,6 +3152,9 @@ def test_run_workflow_executes_stage_dag_and_resumes_only_unfinished_stages():
         assert resumed.status == "completed"
         assert [item.stage.id for item in resumed.stage_results] == ["implement", "verify", "handoff"]
         assert resumed.checkpoint.completed_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
+        assert resumed.execution_receipt.progress == 1.0
+        assert resumed.execution_receipt.next_action == "complete"
+        assert resumed.execution_receipt.safe_to_continue is False
         assert "workflow-secret" not in json.dumps(resumed.to_dict())
     finally:
         server.shutdown()
@@ -3157,6 +3180,9 @@ def test_run_workflow_requires_approval_and_supports_explicit_blocked_stage_retr
         )
         assert waiting.status == "approval_required"
         assert waiting.stage_results[0].execution_status == "approval_required"
+        assert waiting.execution_receipt.next_action == "approve_provider_call"
+        assert waiting.execution_receipt.progress == 0.0
+        assert waiting.execution_receipt.safe_to_continue is False
         assert not hasattr(server, "request_body")
 
         server.block_stage = "scope"  # type: ignore[attr-defined]
@@ -3210,10 +3236,65 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
             assert result.stage_results[0].stage.id == blueprint.workflow.stages[0].id
             assert result.stage_results[0].declared_status == "completed"
             assert result.checkpoint.completed_stage_ids == (blueprint.workflow.stages[0].id,)
+            assert result.execution_receipt.completed_stage_ids == (blueprint.workflow.stages[0].id,)
+            assert result.execution_receipt.next_action == "continue_workflow"
+            assert result.execution_receipt.progress == 1 / len(blueprint.workflow.stages)
     finally:
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_workflow_execution_receipt_surfaces_reconciliation_and_rejects_drift():
+    brain = AutonomousBrain(_Workspace(), LLMRuntime())
+    blueprint = brain.prepare_autonomous(
+        task="Reconcile a bounded workflow provider boundary.",
+        domain="coding",
+    )
+    stage = blueprint.workflow.stages[0]
+    provider_result = BrainRunResult(
+        run_id="workflow-reconciliation-result",
+        status="reconciliation_required",
+        selection={},
+        prompt={},
+        plan={},
+        response=None,
+        outcome_digest="c" * 64,
+    )
+    checkpoint = AutonomousWorkflowCheckpoint(
+        run_id="workflow-reconciliation",
+        task_digest=blueprint.spec.task_digest,
+        workflow_id=blueprint.workflow.workflow_id,
+        workflow_digest=blueprint.workflow.workflow_digest,
+    )
+    workflow = AutonomousWorkflowRun(
+        run_id="workflow-reconciliation",
+        status="stage_failed",
+        blueprint=blueprint,
+        stage_results=(
+            AutonomousWorkflowStageResult(
+                stage=stage,
+                execution_status="provider_failed",
+                declared_status="completed",
+                result=provider_result,
+                structured={"status": "completed", "evidence": ["boundary uncertain"]},
+                response_digest="d" * 64,
+            ),
+        ),
+        checkpoint=checkpoint,
+    )
+    receipt = workflow.execution_receipt
+    assert receipt.stage_statuses[stage.id] == "reconciliation_required"
+    assert receipt.reconciliation_required is True
+    assert receipt.next_action == "reconcile_stage"
+    assert receipt.safe_to_continue is False
+    restored = AutonomousWorkflowExecutionReceipt.from_dict(receipt.to_dict())
+    assert restored == receipt
+    tampered = dict(receipt.to_dict())
+    tampered["stage_statuses"] = dict(receipt.stage_statuses)
+    tampered["stage_statuses"][stage.id] = "failed"  # type: ignore[index]
+    with pytest.raises(BrainRunError, match="receipt (next_action|reconciliation|digest|stages)"):
+        AutonomousWorkflowExecutionReceipt.from_dict(tampered)
 
 
 def test_run_workflow_learning_updates_each_completed_stage_with_explicit_signals():

@@ -2750,6 +2750,14 @@ It never stores stage objectives, prompts, structured output, provider responses
 credentials, or task text. This gives UI progress, evaluator admission, and restart handlers one
 truthful value-only view across all built-in domain workflows.
 
+The Python `AutonomousWorkflowRun` exposes the same recovery projection through
+`execution_receipt`, and `validate_autonomous_workflow_execution_receipt()` round-trips a
+caller-owned receipt with strict field, stage-map, progress, retention-marker, and digest checks.
+Python also marks a stage as `reconciliation_required` when its provider result crosses an
+uncertain boundary, so a resume handler cannot mistake an interrupted effect for a retryable
+provider failure. The receipt is deliberately separate from the transient `stage_results` field:
+applications may inspect provider output in memory while persisting only the safe receipt.
+
 The automatic entrypoint can also perform that planning step itself when the caller opts into
 `planning_mode="provider"`:
 
