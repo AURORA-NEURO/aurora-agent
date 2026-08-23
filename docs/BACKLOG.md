@@ -708,6 +708,11 @@ stores, a browser Web Storage single-writer adapter, and an optional atomic comp
 The coordinator serializes local flushes and refuses stale restored workers before provider
 dispatch. A deployment still owns the actual IndexedDB, OPFS, SQLite, Postgres, or service-backed
 transaction and must provide the CAS primitive before claiming multi-host lease safety.
+Python now exposes the same bounded provider-neutral HTTP snapshot text store with strict endpoint
+admission, no redirects, transient header resolution, bounded UTF-8 JSON, and `If-Match`/
+`If-None-Match` fencing, so its autonomous learning, evidence, trace, and job adapters can share
+the remote persistence seam. The server-side atomic write, authorization, tenant isolation,
+retention, and backup contract remain deployment-owned.
 The same adapters now expose bounded provider-neutral pagination: strict array/items-page parsing,
 transient cursor continuation, cursor-cycle detection, page/item/aggregate-byte ceilings, and
 metadata-only partial progress when a later page fails. Provider-specific envelope parsing remains

@@ -7711,7 +7711,7 @@ a claim that production infrastructure exists.
 
 ### Remote metadata persistence over HTTP
 
-The strict JSON/CAS persistence adapters can now be backed by the reusable
+The strict JSON/CAS persistence adapters in both SDKs can now be backed by the reusable
 `AutonomousHttpSnapshotTextStore`. It is deliberately schema-neutral: learning, evaluator
 feedback, settlement receipts, episodes/trajectories, goals, evidence checkpoints, portfolio
 admission, and remote job queues continue to validate their own snapshots before the transport
@@ -7729,6 +7729,19 @@ const textStore = new AutonomousHttpSnapshotTextStore({
 });
 
 const persistence = new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(textStore);
+```
+
+Python exposes the same synchronous text-store contract for its local persistence adapters:
+
+```python
+from prism_sdk import AutonomousHttpSnapshotTextStore
+
+text_store = AutonomousHttpSnapshotTextStore(
+    "https://state.example.internal/v1/snapshots/learner",
+    "tenant-opaque/all-domains/online-learner",
+    allowed_hosts=("state.example.internal",),
+    header_resolver=lambda context: deployment_headers(context),
+)
 ```
 
 `GET` returns `200` with a JSON object or `404` for an absent snapshot. Unconditional `PUT`
