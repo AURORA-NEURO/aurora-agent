@@ -4657,7 +4657,10 @@ provider clients, secret storage, and truth authority in the embedding applicati
 existing bounded HTTP transport. It takes a profile, source identity, provider/adapter identity,
 endpoint resolver, request builder, optional transient header resolver, and the HTTP policy. The
 helper registers the adapter manifest when an `AutonomousEvidenceAdapterRegistry` is supplied and
-binds its manifest digest into the catalogue route. Registration does not call the endpoint.
+binds its manifest digest into the catalogue route. An optional
+`AutonomousEvidenceProviderContractRegistry` can also bind protocol, operation, capability,
+freshness, pagination, and auth semantics; its guarded acquirer is then used for the route rather
+than the unguarded adapter function. Registration does not call the endpoint.
 
 ```typescript
 registerAutonomousDomainHttpEvidenceSource({

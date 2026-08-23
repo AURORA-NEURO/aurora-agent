@@ -143,6 +143,13 @@ approval pauses, transient header handling, auth refusal, unsafe endpoint policy
 redaction. This closes the concrete HTTP-to-domain evidence bridge while keeping endpoint clients,
 credential sessions, response interpretation, and evaluator authority caller-owned.
 
+The HTTP bridge can now optionally bind `AutonomousEvidenceProviderContractRegistry` contracts at
+registration time. The registered route carries the contract digest, while the actual acquirer
+enforces protocol, operation metadata, capability, freshness, pagination, and auth posture before
+the HTTP adapter is reached. Additive unrelated adapters no longer invalidate a bound contract;
+replacement of its bound adapter still fails closed. All twelve offline HTTP paths exercise this
+contract-backed composition.
+
 The portfolio now also has a bounded evidence supervisor. It verifies successful provider items,
 rejects cross-domain requests, scopes each evidence runtime to its item's domain, preserves direct
 predecessor evidence digests, and executes acquisition/projection/evaluation in the portfolio's

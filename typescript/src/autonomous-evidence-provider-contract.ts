@@ -379,9 +379,15 @@ export class AutonomousEvidenceProviderContractRegistry {
   verify(): this {
     const current = this.adapterRegistry.toJSON().registry_digest;
     for (const contract of this.entries.values()) {
-      if (contract.adapter_registry_digest !== current) throw new ArgumentError("provider evidence contract adapter registry is stale or tampered");
       const adapter = this.adapterRegistry.manifests().find((candidate) => candidate.adapter_id === contract.adapter_id);
-      if (!adapter || adapter.manifest_digest !== contract.adapter_manifest_digest) throw new ArgumentError(`provider evidence contract adapter binding changed: ${contract.contract_id}`);
+      // The registry digest is a snapshot of the whole adapter catalogue. An unrelated additive
+      // adapter must not invalidate an already-reviewed contract; the bound manifest digest is the
+      // actual identity gate. A changed or removed bound adapter still gets the legacy stale/tamper
+      // failure so callers cannot mistake replacement for harmless catalogue growth.
+      if (!adapter || adapter.manifest_digest !== contract.adapter_manifest_digest) {
+        if (contract.adapter_registry_digest !== current) throw new ArgumentError("provider evidence contract adapter registry is stale or tampered");
+        throw new ArgumentError(`provider evidence contract adapter binding changed: ${contract.contract_id}`);
+      }
       if (contract.domains.some((domain) => !adapter.domains.includes(domain)) || contract.capabilities.some((capability) => !adapter.capabilities.includes(capability)) || contract.source_kinds.some((sourceKind) => !adapter.source_kinds.includes(sourceKind))) throw new ArgumentError(`provider evidence contract exceeds its live adapter binding: ${contract.contract_id}`);
     }
     return this;

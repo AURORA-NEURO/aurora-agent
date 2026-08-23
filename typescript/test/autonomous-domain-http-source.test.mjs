@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousEvidenceAdapterRegistry,
+  AutonomousEvidenceProviderContractRegistry,
   AutonomousHttpConnectorPolicy,
   AutonomousHttpConnectorRequest,
   buildAutonomousEvidencePlan,
@@ -22,7 +23,7 @@ function digest(value) {
   return digestJsonSync(value);
 }
 
-function httpOptions({ catalogue, profile, sourceId, fetch, calls, adapterRegistry }) {
+function httpOptions({ catalogue, profile, sourceId, fetch, calls, adapterRegistry, providerContractRegistry }) {
   return {
     catalogue,
     profileId: profile.profile_id,
@@ -31,6 +32,18 @@ function httpOptions({ catalogue, profile, sourceId, fetch, calls, adapterRegist
     adapterId: `http-adapter-${profile.domain}`,
     adapterVersion: "1",
     adapterRegistry,
+    providerContractRegistry,
+    providerContract: providerContractRegistry === undefined ? undefined : {
+      contractId: `contract-${profile.domain}`,
+      version: "1",
+      protocol: "http_json",
+      operations: [profile.operations[0]],
+      authMode: "caller_managed_credential",
+      freshness: profile.freshness,
+      pagination: profile.pagination,
+      requiredMetadata: profile.required_metadata,
+      operationMetadataKey: "operation",
+    },
     policy: new AutonomousHttpConnectorPolicy({
       allowedHosts: ["source.example"],
       requireHttps: true,
@@ -56,6 +69,7 @@ function httpOptions({ catalogue, profile, sourceId, fetch, calls, adapterRegist
 test("policy-gated HTTP sources invoke through the catalogue across all domains", async () => {
   const catalogue = createBuiltinAutonomousDomainEvidenceSourceCatalogue();
   const adapterRegistry = new AutonomousEvidenceAdapterRegistry();
+  const providerContractRegistry = new AutonomousEvidenceProviderContractRegistry(adapterRegistry);
   const profiles = builtinAutonomousDomainEvidenceSourceProfiles();
   const plan = await evidencePlan();
   const calls = { fetch: 0, headers: 0 };
@@ -70,6 +84,7 @@ test("policy-gated HTTP sources invoke through the catalogue across all domains"
         profile,
         sourceId: `${domain}-http-source`,
         adapterRegistry,
+        providerContractRegistry,
         calls,
         fetch: async (input, init) => {
           calls.fetch += 1;
@@ -83,6 +98,8 @@ test("policy-gated HTTP sources invoke through the catalogue across all domains"
       }),
     });
     assert.equal(registration.adapter_manifest.adapter_id, `http-adapter-${domain}`);
+    assert.equal(registration.provider_contract.contract_id, `contract-${domain}`);
+    assert.equal(registration.route.contract_digest, registration.provider_contract.contract_digest);
     assert.ok(registration.route.adapter_manifest_digest);
     assert.equal(calls.fetch, beforeRegistrationFetch, "registration must not dispatch HTTP");
 
@@ -110,6 +127,7 @@ test("policy-gated HTTP sources invoke through the catalogue across all domains"
   assert.equal(calls.fetch, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(calls.headers, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(adapterRegistry.toJSON().adapters.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(providerContractRegistry.toJSON().contracts.length, AUTONOMOUS_DOMAIN_NAMES.length);
   const projection = JSON.stringify(catalogue.toJSON());
   assert.equal(projection.includes("caller-owned-session"), false);
   assert.equal(projection.includes("response_marker"), false);

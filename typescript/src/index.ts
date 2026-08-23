@@ -686,6 +686,7 @@ export {
 } from "./autonomous-domain-http-source.js";
 export type {
   AutonomousDomainHttpEvidenceSourceOptions,
+  AutonomousDomainHttpEvidenceProviderContract,
   AutonomousDomainHttpEvidenceSourceRegistration,
 } from "./autonomous-domain-http-source.js";
 export type {
