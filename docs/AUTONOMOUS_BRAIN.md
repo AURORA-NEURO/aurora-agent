@@ -7192,6 +7192,17 @@ be kept in caller-controlled storage and explicitly rehydrated after restart. Du
 should atomically create a receipt for a key and keep the receipt store alongside the learning and
 cycle journals, while private execution material remains in a separately access-controlled store.
 
+The TypeScript receipt boundary includes a reference durable implementation. Its snapshot is
+allow-listed, duplicate-key checked, digest-bound, value-only, and capped at four megabytes.
+`JsonAutonomousLearningSettlementReceiptPersistence` and
+`WebStorageAutonomousLearningSettlementReceiptTextStore` support canonical JSON/browser storage;
+`TransactionalJsonAutonomousLearningSettlementReceiptPersistence` adds compare-and-swap; and
+`AutonomousLearningSettlementReceiptPersistenceCoordinator` serializes publication, restores the
+expected snapshot digest, rolls back local mutations when a write fails, and refuses stale writers.
+This makes the receipt adapter usable directly as `AutonomousLearningController`'s
+`settlementReceipts` store; it does not claim to persist private episodes, trajectories, or provider
+material, which remain separate caller-owned stores.
+
 The TypeScript façade also provides a caller-owned feedback outbox for deployments that need a
 worker/restart boundary across evaluator, learner, and memory stores. `enqueueRunSettlement()` and
 `enqueueTrajectorySettlement()` persist normalized evaluator values plus target/request digests;

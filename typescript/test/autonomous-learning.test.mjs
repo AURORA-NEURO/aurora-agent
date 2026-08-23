@@ -16,6 +16,11 @@ import {
   InMemoryAutonomousLearningStateStore,
   InMemoryAutonomousLearningTrajectoryStore,
   AutonomousLearningPersistenceCoordinator,
+  AutonomousLearningSettlementReceiptPersistenceCoordinator,
+  JsonAutonomousLearningSettlementReceiptPersistence,
+  TransactionalJsonAutonomousLearningSettlementReceiptPersistence,
+  WebStorageAutonomousLearningSettlementReceiptTextStore,
+  validateAutonomousLearningSettlementReceiptSnapshot,
   InMemoryAutonomousWorkflowCheckpointStore,
   LLMRuntime,
   AutonomousWorkflowExecutor,
@@ -697,4 +702,55 @@ test("learning state snapshots restore pending/settled rows and refuse tampering
   const tampered = structuredClone(persisted);
   tampered.episodes[0].episode_id = "tampered-episode";
   await assert.rejects(() => restoredState.restore(tampered), /snapshot digest does not match/);
+});
+
+test("settlement receipts persist through browser JSON and fence stale workers", async () => {
+  const agent = await learningAgent();
+  const receipts = new InMemoryAutonomousLearningSettlementReceiptStore();
+  const controller = new AutonomousLearningController(agent, { settlementReceipts: receipts });
+  const run = await agent.run("Persist a value-only settlement receipt.", { domain: "coding", approveProviderCall: true });
+  await controller.prepareRun(run, { episodeId: "receipt-persist-1" });
+  await controller.settleRun("receipt-persist-1", { evaluator_id: "receipt-reviewer", evaluator_version: "1", reward: 0.7, passed: true });
+
+  let encoded = null;
+  const persistence = new TransactionalJsonAutonomousLearningSettlementReceiptPersistence({
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expectedDigest, value) => {
+      const observedDigest = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (observedDigest !== expectedDigest) return false;
+      encoded = value;
+      return true;
+    },
+  });
+  const primary = new AutonomousLearningSettlementReceiptPersistenceCoordinator(receipts, persistence);
+  const first = await primary.flush();
+  assert.equal(first.receipts.length, 1);
+  assert.doesNotMatch(encoded, /Persist a value-only settlement receipt/);
+
+  const stale = new AutonomousLearningSettlementReceiptPersistenceCoordinator(new InMemoryAutonomousLearningSettlementReceiptStore(), persistence);
+  await stale.restore();
+  const secondController = new AutonomousLearningController(agent, { episodes: controller.episodes, settlementReceipts: primary });
+  const secondRun = await agent.run("Persist a second value-only receipt.", { domain: "science", approveProviderCall: true });
+  await secondController.prepareRun(secondRun, { episodeId: "receipt-persist-2" });
+  await secondController.settleRun("receipt-persist-2", { evaluator_id: "receipt-reviewer", evaluator_version: "1", reward: 0.8, passed: true });
+  await assert.rejects(() => stale.flush(), /compare-and-swap conflict/);
+
+  const values = new Map();
+  const browserPersistence = new JsonAutonomousLearningSettlementReceiptPersistence(new WebStorageAutonomousLearningSettlementReceiptTextStore({
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  }, "aurora-receipts"));
+  const persisted = await persistence.read();
+  await browserPersistence.write(persisted);
+  assert.deepEqual(await browserPersistence.read(), persisted);
+  const restored = new InMemoryAutonomousLearningSettlementReceiptStore();
+  const recovered = new AutonomousLearningSettlementReceiptPersistenceCoordinator(restored, persistence);
+  const recoverySnapshot = await recovered.restore();
+  assert.equal(recoverySnapshot.receipts.length, 2);
+  assert.equal(restored.rows().length, 2);
+
+  const unsafe = structuredClone(recoverySnapshot);
+  unsafe.authorization = "never retained";
+  assert.throws(() => validateAutonomousLearningSettlementReceiptSnapshot(unsafe), /unsupported fields/);
 });

@@ -33,6 +33,7 @@ export const AUTONOMOUS_LEARNING_EPISODE_SCHEMA = "bioprism-typescript-autonomou
 export const AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA = "bioprism-typescript-autonomous-learning-trajectory/0.1" as const;
 export const AUTONOMOUS_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-snapshot/0.1" as const;
 export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-learning-settlement-receipt/0.1" as const;
+export const AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-settlement-receipt-snapshot/0.1" as const;
 export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SCHEMA = "bioprism-typescript-autonomous-learning-feedback-outbox/0.1" as const;
 export const AUTONOMOUS_LEARNING_FEEDBACK_OUTBOX_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-learning-feedback-outbox-snapshot/0.1" as const;
 export const AUTONOMOUS_EVALUATOR_MESH_SCHEMA = "bioprism-typescript-autonomous-evaluator-mesh/0.1" as const;
@@ -40,6 +41,8 @@ export const AUTONOMOUS_LEARNING_MAX_STAGES = 64;
 export const AUTONOMOUS_LEARNING_MAX_TRAJECTORY_STEPS = 32;
 export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX = 8_192;
 export const AUTONOMOUS_LEARNING_MAX_FEEDBACK_OUTBOX_SNAPSHOT_BYTES = 4_000_000;
+export const AUTONOMOUS_LEARNING_MAX_SETTLEMENT_RECEIPTS = 8_192;
+export const AUTONOMOUS_LEARNING_MAX_SETTLEMENT_RECEIPT_SNAPSHOT_BYTES = 4_000_000;
 
 type Digest = string;
 
@@ -199,6 +202,34 @@ export interface AutonomousLearningSettlementReceipt extends JsonObject {
 export interface AutonomousLearningSettlementReceiptStore {
   load(idempotencyKey: string): Promise<AutonomousLearningSettlementReceipt | null> | AutonomousLearningSettlementReceipt | null;
   save(receipt: AutonomousLearningSettlementReceipt): Promise<void> | void;
+}
+
+export interface AutonomousLearningSettlementReceiptSnapshot extends JsonObject {
+  schema: typeof AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SNAPSHOT_SCHEMA;
+  receipts: AutonomousLearningSettlementReceipt[];
+  snapshot_digest: Digest;
+  retention: typeof PRIVATE_RETENTION;
+  secret_material: "never_returned";
+}
+
+export interface AutonomousLearningSettlementReceiptSnapshotPersistence {
+  read(): Promise<AutonomousLearningSettlementReceiptSnapshot | null> | AutonomousLearningSettlementReceiptSnapshot | null;
+  write(snapshot: AutonomousLearningSettlementReceiptSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: Digest | null, snapshot: AutonomousLearningSettlementReceiptSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousLearningSettlementReceiptTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousLearningSettlementReceiptTransactionalTextStore extends AutonomousLearningSettlementReceiptTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: Digest | null, value: string): Promise<boolean> | boolean;
+}
+
+export interface AutonomousLearningSettlementReceiptSnapshotStore extends AutonomousLearningSettlementReceiptStore {
+  snapshot(): AutonomousLearningSettlementReceiptSnapshot;
+  restore(snapshot: AutonomousLearningSettlementReceiptSnapshot): void;
 }
 
 export type AutonomousLearningFeedbackOutboxPayload =
@@ -481,6 +512,7 @@ function assertValueOnlySettlement(value: unknown, depth = 0): void {
 
 function assertSettlementReceiptShape(value: unknown): asserts value is AutonomousLearningSettlementReceipt {
   if (!isObject(value) || value.schema !== AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SCHEMA || !isObject(value.settlement)) throw new ArgumentError("learning settlement receipt is malformed");
+  assertExactKeys(value, ["schema", "operation", "idempotency_key", "target_id", "target_digest", "request_digest", "settlement", "settlement_digest", "retention", "secret_material"], "learning settlement receipt");
   if (value.operation !== "single_run" && value.operation !== "trajectory") throw new ArgumentError("learning settlement receipt operation is malformed");
   boundedIdentifier("settlement receipt idempotency_key", value.idempotency_key);
   boundedIdentifier("settlement receipt target_id", value.target_id);
@@ -491,6 +523,29 @@ function assertSettlementReceiptShape(value: unknown): asserts value is Autonomo
   if (value.operation === "single_run" && !isObject(value.settlement.episode)) throw new ArgumentError("single-run settlement receipt is missing its episode projection");
   if (value.operation === "trajectory" && (!isObject(value.settlement.trajectory) || !Array.isArray(value.settlement.settlements))) throw new ArgumentError("trajectory settlement receipt is missing its trajectory projection");
   assertValueOnlySettlement(value.settlement);
+}
+
+function assertSettlementReceiptSnapshotShape(value: unknown): asserts value is AutonomousLearningSettlementReceiptSnapshot {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SNAPSHOT_SCHEMA || !Array.isArray(value.receipts)) throw new ArgumentError("learning settlement receipt snapshot is malformed");
+  assertExactKeys(value, ["schema", "receipts", "snapshot_digest", "retention", "secret_material"], "learning settlement receipt snapshot");
+  if (value.receipts.length > AUTONOMOUS_LEARNING_MAX_SETTLEMENT_RECEIPTS) throw new ArgumentError("learning settlement receipt snapshot exceeds its bound");
+  if (value.retention !== PRIVATE_RETENTION || value.secret_material !== "never_returned") throw new ArgumentError("learning settlement receipt snapshot retention contract is malformed");
+  boundedDigest("learning settlement receipt snapshot_digest", value.snapshot_digest);
+  const { snapshot_digest: observed, ...descriptor } = value;
+  if (digestJsonSync(descriptor) !== observed) throw new ArgumentError("learning settlement receipt snapshot digest does not match");
+  if (new TextEncoder().encode(canonicalJson(value)).byteLength > AUTONOMOUS_LEARNING_MAX_SETTLEMENT_RECEIPT_SNAPSHOT_BYTES) throw new ArgumentError("learning settlement receipt snapshot exceeds its byte bound");
+  const ids = new Set<string>();
+  for (const receipt of value.receipts) {
+    assertSettlementReceiptShape(receipt);
+    if (ids.has(receipt.idempotency_key)) throw new ArgumentError(`learning settlement receipt snapshot contains duplicate key ${receipt.idempotency_key}`);
+    ids.add(receipt.idempotency_key);
+  }
+}
+
+/** Validate a receipt restart image without mutating a caller-owned receipt store. */
+export function validateAutonomousLearningSettlementReceiptSnapshot(raw: unknown): AutonomousLearningSettlementReceiptSnapshot {
+  assertSettlementReceiptSnapshotShape(raw);
+  return clone(raw);
 }
 
 function assertStageEvidence(value: unknown): asserts value is AutonomousStageSignalEvidence {
@@ -1030,6 +1085,140 @@ export class InMemoryAutonomousLearningSettlementReceiptStore implements Autonom
 
   rows(): AutonomousLearningSettlementReceipt[] {
     return [...this.receipts.values()].map((receipt) => clone(receipt));
+  }
+
+  snapshot(): AutonomousLearningSettlementReceiptSnapshot {
+    const descriptor = {
+      schema: AUTONOMOUS_LEARNING_SETTLEMENT_RECEIPT_SNAPSHOT_SCHEMA,
+      receipts: this.rows().sort((left, right) => left.idempotency_key.localeCompare(right.idempotency_key)),
+      retention: PRIVATE_RETENTION,
+      secret_material: "never_returned" as const,
+    };
+    const snapshot = { ...descriptor, snapshot_digest: digestJsonSync(descriptor) };
+    assertSettlementReceiptSnapshotShape(snapshot);
+    return clone(snapshot);
+  }
+
+  restore(snapshot: AutonomousLearningSettlementReceiptSnapshot): void {
+    const validated = validateAutonomousLearningSettlementReceiptSnapshot(snapshot);
+    this.receipts.clear();
+    for (const receipt of validated.receipts) this.receipts.set(receipt.idempotency_key, clone(receipt));
+  }
+}
+
+/** Strict canonical JSON persistence for value-only settlement receipt snapshots. */
+export class JsonAutonomousLearningSettlementReceiptPersistence implements AutonomousLearningSettlementReceiptSnapshotPersistence {
+  constructor(readonly textStore: AutonomousLearningSettlementReceiptTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new ArgumentError("learning settlement receipt text store is malformed");
+  }
+
+  async read(): Promise<AutonomousLearningSettlementReceiptSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_LEARNING_MAX_SETTLEMENT_RECEIPT_SNAPSHOT_BYTES) throw new ArgumentError("learning settlement receipt JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new ArgumentError("learning settlement receipt JSON is invalid"); }
+    return validateAutonomousLearningSettlementReceiptSnapshot(parsed);
+  }
+
+  async write(snapshot: AutonomousLearningSettlementReceiptSnapshot): Promise<void> {
+    const validated = validateAutonomousLearningSettlementReceiptSnapshot(snapshot);
+    await this.textStore.write(canonicalJson(validated));
+  }
+}
+
+/** Canonical receipt persistence with atomic compare-and-swap for concurrent settlement workers. */
+export class TransactionalJsonAutonomousLearningSettlementReceiptPersistence extends JsonAutonomousLearningSettlementReceiptPersistence {
+  declare readonly textStore: AutonomousLearningSettlementReceiptTransactionalTextStore;
+
+  constructor(textStore: AutonomousLearningSettlementReceiptTransactionalTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new ArgumentError("learning settlement receipt text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: Digest | null, snapshot: AutonomousLearningSettlementReceiptSnapshot): Promise<boolean> {
+    const validated = validateAutonomousLearningSettlementReceiptSnapshot(snapshot);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(validated));
+  }
+}
+
+/** Browser-compatible receipt text storage; the embedding application owns encryption and retention. */
+export class WebStorageAutonomousLearningSettlementReceiptTextStore implements AutonomousLearningSettlementReceiptTextStore {
+  constructor(readonly storage: { getItem(key: string): string | null; setItem(key: string, value: string): void }, readonly key: string) {
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") throw new ArgumentError("learning settlement receipt Web Storage adapter is malformed");
+    boundedIdentifier("learning settlement receipt storage key", key);
+  }
+
+  read(): string | null { return this.storage.getItem(this.key); }
+  write(value: string): void { this.storage.setItem(this.key, value); }
+}
+
+/** Restart-aware receipt store that flushes every publication and fences stale writers. */
+export class AutonomousLearningSettlementReceiptPersistenceCoordinator implements AutonomousLearningSettlementReceiptStore {
+  private expectedSnapshotDigest: Digest | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
+  constructor(readonly store: AutonomousLearningSettlementReceiptSnapshotStore, readonly persistence: AutonomousLearningSettlementReceiptSnapshotPersistence) {
+    if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new ArgumentError("learning settlement receipt snapshot store is malformed");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("learning settlement receipt persistence is malformed");
+  }
+
+  async restore(): Promise<AutonomousLearningSettlementReceiptSnapshot | null> {
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        const empty = new InMemoryAutonomousLearningSettlementReceiptStore().snapshot();
+        this.store.restore(empty);
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = validateAutonomousLearningSettlementReceiptSnapshot(raw);
+      this.store.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return clone(snapshot);
+    });
+  }
+
+  async flush(): Promise<AutonomousLearningSettlementReceiptSnapshot> {
+    return this.enqueue(() => this.flushCurrent());
+  }
+
+  async load(idempotencyKey: string): Promise<AutonomousLearningSettlementReceipt | null> {
+    return this.enqueue(() => this.store.load(idempotencyKey));
+  }
+
+  async save(receipt: AutonomousLearningSettlementReceipt): Promise<void> {
+    await this.mutate(() => this.store.save(receipt));
+  }
+
+  private async flushCurrent(): Promise<AutonomousLearningSettlementReceiptSnapshot> {
+    const snapshot = validateAutonomousLearningSettlementReceiptSnapshot(this.store.snapshot());
+    if (typeof this.persistence.writeIfUnchanged === "function") {
+      if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ArgumentError("learning settlement receipt persistence compare-and-swap conflict");
+    } else await this.persistence.write(snapshot);
+    this.expectedSnapshotDigest = snapshot.snapshot_digest;
+    return clone(snapshot);
+  }
+
+  private async mutate<T>(operation: () => T | Promise<T>): Promise<T> {
+    return this.enqueue(async () => {
+      const before = this.store.snapshot();
+      const result = await operation();
+      try {
+        await this.flushCurrent();
+        return result;
+      } catch (error) {
+        this.store.restore(before);
+        throw error;
+      }
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T> | T): Promise<T> {
+    const queued = this.operationTail.then(operation);
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }
 

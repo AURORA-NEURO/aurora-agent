@@ -79,6 +79,14 @@ fenced before they can overwrite another learner's queue. This closes local eval
 recovery across all domains without persisting prompts, provider output, credentials, tool arguments,
 or evidence; the embedding deployment still owns the backing store and distributed scheduling.
 
+Settlement receipts now have a matching TypeScript persistence seam. Receipt snapshots are
+allow-listed, digest-bound, duplicate-resistant, value-only, and byte-bounded; canonical JSON,
+browser storage, transactional CAS, and a mutation-flushing coordinator are exported. The
+coordinator can be supplied directly to `AutonomousLearningController`, fences stale receipt
+writers, and rolls back local state after a failed durable write. Private episode/trajectory
+material remains in its separate caller-owned state store, and production storage/replication
+remain deployment responsibilities.
+
 The objective layer now has the same restart discipline. Goal snapshots are strictly allow-listed,
 canonical-digest validated, hash-chain checked, retention checked, and bounded before restore;
 `JsonAutonomousGoalPersistence`, `TransactionalJsonAutonomousGoalPersistence`, and
