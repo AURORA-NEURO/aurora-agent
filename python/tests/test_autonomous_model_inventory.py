@@ -231,3 +231,25 @@ def test_inventory_store_rejects_tampered_rehydrated_catalogue(tmp_path):
 
     with pytest.raises(AutonomousModelInventoryError):
         store.load_catalogue()
+
+
+def test_inventory_store_fences_stale_refreshes_and_requires_canonical_json(tmp_path):
+    runtime = _runtime([{"id": "offline-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}])
+    agent = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    store = AutonomousModelInventoryStore(tmp_path / "inventory-cas.json")
+    agent.refresh_model_inventory(
+        providers=("offline",),
+        priors=_prior("offline/offline-model"),
+        domain_requirements={"coding": ("reasoning",)},
+        snapshot_store=store,
+        refresh_id="inventory-cas",
+    )
+    snapshot = store.load()
+    assert snapshot is not None
+    catalogue = store.load_catalogue()
+    assert catalogue is not None
+    assert not store.save_if_unchanged(snapshot, "0" * 64, catalogue=catalogue)
+    assert store.save_if_unchanged(snapshot, snapshot.digest, catalogue=catalogue)
+    store.path.write_text(json.dumps(json.loads(store.path.read_text(encoding="utf-8")), indent=2), encoding="utf-8")
+    with pytest.raises(AutonomousModelInventoryError, match="canonical"):
+        store.load()

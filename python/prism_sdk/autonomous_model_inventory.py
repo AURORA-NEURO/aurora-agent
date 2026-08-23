@@ -501,6 +501,30 @@ class AutonomousModelInventoryStore:
                 raise
         return {"schema": AUTONOMOUS_MODEL_INVENTORY_STORE_SCHEMA, "snapshot_digest": snapshot.digest, "bytes": len(encoded)}
 
+    def save_if_unchanged(
+        self,
+        snapshot: AutonomousModelInventorySnapshot,
+        expected_snapshot_digest: str | None,
+        *,
+        catalogue: ModelCatalogue | None = None,
+    ) -> bool:
+        """Atomically save only when the on-disk inventory still has ``expected_snapshot_digest``.
+
+        ``None`` is the create-if-absent expectation.  This is intentionally separate from
+        :meth:`save`, whose unconditional replacement behavior remains useful for a single
+        coordinator that owns the inventory path.
+        """
+
+        if expected_snapshot_digest is not None:
+            _digest("inventory expected_snapshot_digest", expected_snapshot_digest)
+        with self._lock:
+            current = self._read_envelope()
+            observed = None if current is None else current.get("snapshot_digest")
+            if observed != expected_snapshot_digest:
+                return False
+            self.save(snapshot, catalogue=catalogue)
+            return True
+
     def _read_envelope(self) -> Mapping[str, Any] | None:
         with self._lock:
             if not self.path.exists():
@@ -508,9 +532,12 @@ class AutonomousModelInventoryStore:
             if self.path.stat().st_size > self.max_bytes:
                 raise AutonomousModelInventoryError("inventory store exceeds its bound")
             try:
-                envelope = json.loads(self.path.read_text(encoding="utf-8"))
+                encoded = self.path.read_bytes()
+                envelope = json.loads(encoded.decode("utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError) as error:
                 raise AutonomousModelInventoryError("inventory store contains invalid JSON") from error
+        if canonical_bytes(envelope) != encoded:
+            raise AutonomousModelInventoryError("inventory store JSON is not canonical")
         if not isinstance(envelope, Mapping) or envelope.get("schema") != AUTONOMOUS_MODEL_INVENTORY_STORE_SCHEMA:
             raise AutonomousModelInventoryError("inventory store schema is invalid")
         allowed = {

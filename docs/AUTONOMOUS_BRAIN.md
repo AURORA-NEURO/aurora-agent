@@ -1595,6 +1595,12 @@ circuit, economics, and semantic quality remain live selection gates.
 bounded metadata. It rejects tampered snapshots and never stores prompts, response bodies,
 authorization headers, keys, or opaque credential handles.
 
+Overlapping refresh workers can use `save_if_unchanged(snapshot, expected_snapshot_digest,
+catalogue=...)`. The operation is serialized with the atomic replacement and uses `None` as a
+create-if-absent expectation, so a stale inventory refresh returns `False` instead of replacing a
+newer catalogue. Reads also require the store's canonical JSON encoding; whitespace or field
+normalization drift is surfaced before model selection consumes the image.
+
 The TypeScript façade now exposes the same inventory boundary through
 `AutonomousModelInventoryCoordinator`. It wraps the bounded multi-provider refresh, then emits
 one coverage row for every built-in domain with required capabilities, compatible model arms,
