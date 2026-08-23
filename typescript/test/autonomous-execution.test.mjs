@@ -6,6 +6,7 @@ import {
   AutonomousExecutionPersistenceCoordinator,
   AutonomousExecutionPolicyError,
   InMemoryAutonomousExecutionJournal,
+  TransactionalJsonAutonomousExecutionSnapshotPersistence,
 } from "../dist/index.js";
 
 const digest = (character) => character.repeat(64);
@@ -143,4 +144,24 @@ test("execution journal snapshots restore resumable state through a durable adap
   assert.equal(resumed.state.provider_calls, 1);
   assert.equal(resumed.state.status, "resumed");
   assert.equal((await restoredJournal.verifyIntegrity()).verified, true);
+
+  let encodedExecution = null;
+  const transactionalTextStore = {
+    read: () => encodedExecution,
+    write: (value) => { encodedExecution = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = encodedExecution === null ? null : JSON.parse(encodedExecution).snapshot_digest;
+      if (observed !== expected) return false;
+      encodedExecution = value;
+      return true;
+    },
+  };
+  const transactionalPersistence = new TransactionalJsonAutonomousExecutionSnapshotPersistence(transactionalTextStore);
+  const transactionalCoordinator = new AutonomousExecutionPersistenceCoordinator(sourceJournal, transactionalPersistence);
+  await transactionalCoordinator.flush();
+  const staleCoordinator = new AutonomousExecutionPersistenceCoordinator(new InMemoryAutonomousExecutionJournal(), transactionalPersistence);
+  await assert.rejects(() => staleCoordinator.flush(), /compare-and-swap/);
+  const recoveredCoordinator = new AutonomousExecutionPersistenceCoordinator(new InMemoryAutonomousExecutionJournal(), transactionalPersistence);
+  const recovered = await recoveredCoordinator.restore();
+  assert.equal(recovered.snapshot_digest, JSON.parse(encodedExecution).snapshot_digest);
 });

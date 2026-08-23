@@ -1682,7 +1682,10 @@ export {
   AutonomousExecutionPolicy,
   AutonomousExecutionPolicyError,
   InMemoryAutonomousExecutionJournal,
+  JsonAutonomousExecutionSnapshotPersistence,
   normalizeAutonomousExecutionPolicy,
+  TransactionalJsonAutonomousExecutionSnapshotPersistence,
+  validateAutonomousExecutionJournalSnapshot,
 } from "./autonomous-execution.js";
 export type {
   AutonomousExecutionControllerOptions,
@@ -1694,6 +1697,8 @@ export type {
   AutonomousExecutionJournalSnapshot,
   AutonomousExecutionSnapshotJournal,
   AutonomousExecutionSnapshotPersistence,
+  AutonomousExecutionSnapshotTextStore,
+  AutonomousExecutionTransactionalSnapshotTextStore,
   AutonomousExecutionPolicyInput,
   AutonomousExecutionPolicyProjection,
   AutonomousExecutionState,

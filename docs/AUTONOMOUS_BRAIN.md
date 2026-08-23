@@ -3020,6 +3020,12 @@ execution_persistence.restore()
 execution_persistence.flush()
 ```
 
+The TypeScript execution boundary now provides the same portable contract through
+`TransactionalJsonAutonomousExecutionSnapshotPersistence`. It validates the complete event
+chain before reading or writing, serializes overlapping restore/flush calls, and carries the
+verified `snapshot_digest` into the next conditional write. A stale effect worker therefore gets
+a typed conflict instead of replacing newer reconciliation or checkpoint history.
+
 The snapshot digest covers every normalized envelope, sequence number, previous digest, timestamp,
 and redacted event field. Extra envelope fields, malformed event digests, broken chains, invalid
 retention markers, tampered head digests, oversized JSON, and stale conditional writes are refused.

@@ -1,5 +1,5 @@
 import { ArgumentError, isObject } from "./errors.js";
-import { digestJson } from "./tooling.js";
+import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
 export const AUTONOMOUS_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-execution-policy/0.1" as const;
@@ -259,6 +259,16 @@ export interface AutonomousExecutionJournalSnapshot {
 export interface AutonomousExecutionSnapshotPersistence {
   read(): Promise<AutonomousExecutionJournalSnapshot | null> | AutonomousExecutionJournalSnapshot | null;
   write(snapshot: AutonomousExecutionJournalSnapshot): Promise<void> | void;
+  writeIfUnchanged?(expectedSnapshotDigest: string | null, snapshot: AutonomousExecutionJournalSnapshot): Promise<boolean> | boolean;
+}
+
+export interface AutonomousExecutionSnapshotTextStore {
+  read(): Promise<string | null> | string | null;
+  write(value: string): Promise<void> | void;
+}
+
+export interface AutonomousExecutionTransactionalSnapshotTextStore extends AutonomousExecutionSnapshotTextStore {
+  writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): Promise<boolean> | boolean;
 }
 
 export interface AutonomousExecutionSnapshotJournal extends AutonomousExecutionJournal {
@@ -331,6 +341,40 @@ function validateEvent(event: AutonomousExecutionEvent, policy: AutonomousExecut
   if (event.metadata !== undefined) assertMetadataBytes("event metadata", event.metadata, 64_000);
   assertMetadataBytes("autonomous execution event", event, AUTONOMOUS_EXECUTION_MAX_EVENT_BYTES);
   return clone(event);
+}
+
+/** Validate a complete execution journal snapshot before it reaches a live journal or store. */
+export async function validateAutonomousExecutionJournalSnapshot(value: unknown): Promise<AutonomousExecutionJournalSnapshot> {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_EXECUTION_SNAPSHOT_SCHEMA || !Array.isArray(value.rows) || value.retention !== "metadata_only_hash_chained" || value.secret_material !== "never_returned") throw new AutonomousExecutionError("execution journal snapshot is malformed");
+  if (value.rows.length > AUTONOMOUS_EXECUTION_MAX_JOURNAL_EVENTS) throw new AutonomousExecutionError("execution journal snapshot event count exceeds its capacity");
+  boundedHeadDigest("snapshot head_digest", value.head_digest);
+  boundedDigest("snapshot snapshot_digest", value.snapshot_digest);
+  const { snapshot_digest: observed, ...descriptor } = value;
+  if (await digestJson(descriptor) !== observed) throw new AutonomousExecutionError("execution journal snapshot digest does not match");
+  const policy = new AutonomousExecutionPolicy({
+    max_steps: AUTONOMOUS_EXECUTION_MAX_STEPS,
+    max_provider_calls: AUTONOMOUS_EXECUTION_MAX_PROVIDER_CALLS,
+    max_provider_failovers: AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS,
+    max_tool_calls: AUTONOMOUS_EXECUTION_MAX_TOOL_CALLS,
+    max_effectful_calls: AUTONOMOUS_EXECUTION_MAX_EFFECTFUL_CALLS,
+    max_replans: AUTONOMOUS_EXECUTION_MAX_REPLANS,
+    max_cost_units: AUTONOMOUS_EXECUTION_MAX_COST_UNITS,
+    allow_side_effects: true,
+  });
+  let previous = "";
+  let totalBytes = 0;
+  for (let index = 0; index < value.rows.length; index += 1) {
+    const row = value.rows[index] as unknown as AutonomousExecutionJournalRow;
+    if (!isObject(row) || row.schema !== AUTONOMOUS_EXECUTION_EVENT_SCHEMA || row.sequence !== index + 1 || row.previous_digest !== previous || typeof row.event_digest !== "string" || !/^[0-9a-f]{64}$/.test(row.event_digest) || !Number.isSafeInteger(row.created_at) || row.created_at < 0) throw new AutonomousExecutionError("execution journal hash chain sequence is invalid");
+    const event = validateEvent(row.event as AutonomousExecutionEvent, policy);
+    const rowDescriptor = { schema: AUTONOMOUS_EXECUTION_EVENT_SCHEMA, sequence: row.sequence, event, previous_digest: row.previous_digest, created_at: row.created_at };
+    if (await digestJson(rowDescriptor) !== row.event_digest) throw new AutonomousExecutionError("execution journal hash chain digest is invalid");
+    totalBytes += new TextEncoder().encode(JSON.stringify(row)).byteLength;
+    if (totalBytes > AUTONOMOUS_EXECUTION_MAX_JOURNAL_BYTES) throw new AutonomousExecutionError("execution journal snapshot exceeds its byte capacity");
+    previous = row.event_digest;
+  }
+  if (value.head_digest !== previous) throw new AutonomousExecutionError("execution journal snapshot head does not match its rows");
+  return clone(value) as unknown as AutonomousExecutionJournalSnapshot;
 }
 
 /** In-memory reference journal; applications can supply SQLite, IndexedDB, or object-store adapters through the journal interface. */
@@ -454,21 +498,79 @@ export class InMemoryAutonomousExecutionJournal implements AutonomousExecutionSn
 
 /** Coordinates an integrity-checked execution journal with a caller-owned durable adapter. */
 export class AutonomousExecutionPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly journal: AutonomousExecutionSnapshotJournal, readonly persistence: AutonomousExecutionSnapshotPersistence) {
     if (!journal || typeof journal.snapshot !== "function" || typeof journal.restore !== "function") throw new AutonomousExecutionError("execution persistence requires a snapshot-capable journal");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new AutonomousExecutionError("execution persistence adapter is malformed");
   }
 
   async restore(): Promise<AutonomousExecutionJournalSnapshot | null> {
-    const snapshot = await this.persistence.read();
-    if (snapshot) await this.journal.restore(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const raw = await this.persistence.read();
+      if (raw === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const snapshot = await validateAutonomousExecutionJournalSnapshot(raw);
+      await this.journal.restore(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
   }
 
   async flush(): Promise<AutonomousExecutionJournalSnapshot> {
-    const snapshot = await this.journal.snapshot();
-    await this.persistence.write(snapshot);
-    return snapshot;
+    return this.enqueue(async () => {
+      const snapshot = await validateAutonomousExecutionJournalSnapshot(await this.journal.snapshot());
+      if (typeof this.persistence.writeIfUnchanged === "function") {
+        if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new AutonomousExecutionError("execution persistence compare-and-swap conflict");
+      } else await this.persistence.write(snapshot);
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return snapshot;
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}
+
+export class JsonAutonomousExecutionSnapshotPersistence implements AutonomousExecutionSnapshotPersistence {
+  constructor(readonly textStore: AutonomousExecutionSnapshotTextStore) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") throw new AutonomousExecutionError("execution text store is malformed");
+  }
+
+  async read(): Promise<AutonomousExecutionJournalSnapshot | null> {
+    const encoded = await this.textStore.read();
+    if (encoded === null) return null;
+    if (new TextEncoder().encode(encoded).byteLength > AUTONOMOUS_EXECUTION_MAX_JOURNAL_BYTES) throw new AutonomousExecutionError("execution JSON exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new AutonomousExecutionError("execution JSON is invalid"); }
+    return validateAutonomousExecutionJournalSnapshot(parsed);
+  }
+
+  async write(raw: AutonomousExecutionJournalSnapshot): Promise<void> {
+    const snapshot = await validateAutonomousExecutionJournalSnapshot(raw);
+    await this.textStore.write(canonicalJson(snapshot));
+  }
+}
+
+export class TransactionalJsonAutonomousExecutionSnapshotPersistence extends JsonAutonomousExecutionSnapshotPersistence {
+  declare readonly textStore: AutonomousExecutionTransactionalSnapshotTextStore;
+
+  constructor(textStore: AutonomousExecutionTransactionalSnapshotTextStore) {
+    super(textStore);
+    this.textStore = textStore;
+    if (typeof textStore.writeIfUnchanged !== "function") throw new AutonomousExecutionError("execution text store lacks compare-and-swap");
+  }
+
+  async writeIfUnchanged(expectedSnapshotDigest: string | null, raw: AutonomousExecutionJournalSnapshot): Promise<boolean> {
+    if (expectedSnapshotDigest !== null && !/^[0-9a-f]{64}$/.test(expectedSnapshotDigest)) throw new AutonomousExecutionError("execution expected snapshot digest is invalid");
+    const snapshot = await validateAutonomousExecutionJournalSnapshot(raw);
+    return this.textStore.writeIfUnchanged(expectedSnapshotDigest, canonicalJson(snapshot));
   }
 }
 
