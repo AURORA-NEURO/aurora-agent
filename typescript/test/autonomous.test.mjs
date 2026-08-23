@@ -1146,6 +1146,9 @@ test("capability outcomes settle metadata-only evaluator credit across every dom
   });
   const flushed = await persistence.flush();
   assert.equal(flushed.receipts.length, profiles.length);
+  assert.equal(flushed.snapshot_generation, 1);
+  assert.equal(flushed.previous_snapshot_digest, null);
+  assert.equal((await persistence.flush()).snapshot_digest, flushed.snapshot_digest);
   assert.doesNotMatch(JSON.stringify(flushed), /must never enter learning/);
   const restoredStore = new InMemoryAutonomousCapabilityLearningSettlementStore();
   const restoredPersistence = new AutonomousCapabilityLearningPersistenceCoordinator(restoredStore, {
@@ -1159,6 +1162,21 @@ test("capability outcomes settle metadata-only evaluator credit across every dom
   await assert.rejects(() => validateAutonomousCapabilityLearningSnapshot(tamperedSnapshot), /digest/);
   await assert.rejects(() => restoredStore.restore(tamperedSnapshot), /digest/);
   assert.equal((await restoredStore.snapshot()).snapshot_digest, flushed.snapshot_digest);
+  const forgedGeneration = structuredClone(flushed);
+  forgedGeneration.snapshot_generation = 2;
+  forgedGeneration.previous_snapshot_digest = null;
+  const { snapshot_digest: _forgedSnapshotDigest, ...forgedSnapshotBody } = forgedGeneration;
+  forgedGeneration.snapshot_digest = await digestJson(forgedSnapshotBody);
+  await assert.rejects(() => validateAutonomousCapabilityLearningSnapshot(forgedGeneration), /generation and previous_snapshot_digest/);
+  const { snapshot_generation: _legacyGeneration, previous_snapshot_digest: _legacyPrevious, snapshot_digest: _legacyLearningDigest, ...legacyLearningBody } = structuredClone(flushed);
+  const legacyLearningSnapshot = { ...legacyLearningBody, schema: "bioprism-typescript-autonomous-capability-learning-snapshot/0.1" };
+  legacyLearningSnapshot.snapshot_digest = await digestJson(legacyLearningSnapshot);
+  const legacyLearningStore = new InMemoryAutonomousCapabilityLearningSettlementStore();
+  await legacyLearningStore.restore(legacyLearningSnapshot);
+  const upgradedLearningSnapshot = await legacyLearningStore.snapshot();
+  assert.equal(upgradedLearningSnapshot.schema, "bioprism-typescript-autonomous-capability-learning-snapshot/0.2");
+  assert.equal(upgradedLearningSnapshot.snapshot_generation, 1);
+  assert.equal(upgradedLearningSnapshot.previous_snapshot_digest, null);
   const tamperedReceipt = structuredClone(flushed);
   tamperedReceipt.receipts[0].settlement.reward = 0;
   await assert.rejects(() => validateAutonomousCapabilityLearningSnapshot(tamperedReceipt), /digest/);

@@ -23,7 +23,8 @@ export const MAX_AUTONOMOUS_CAPABILITY_HISTORY = 512;
 export const MAX_AUTONOMOUS_CAPABILITY_OBSERVATIONS = 128;
 export const AUTONOMOUS_CAPABILITY_LEARNING_SETTLEMENT_SCHEMA = "bioprism-typescript-autonomous-capability-learning-settlement/0.1" as const;
 export const AUTONOMOUS_CAPABILITY_LEARNING_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-capability-learning-receipt/0.1" as const;
-export const AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-capability-learning-snapshot/0.1" as const;
+const LEGACY_AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-capability-learning-snapshot/0.1" as const;
+export const AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-capability-learning-snapshot/0.2" as const;
 export const MAX_AUTONOMOUS_CAPABILITY_LEARNING_EVIDENCE_BYTES = 256_000;
 export const MAX_AUTONOMOUS_CAPABILITY_LEARNING_RECEIPTS = 8_192;
 export const MAX_AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_BYTES = 4_000_000;
@@ -225,7 +226,10 @@ export interface AutonomousCapabilityLearningSettlementStore {
 
 /** Digest-bound restart image for the metadata-only capability learning receipt journal. */
 export interface AutonomousCapabilityLearningSnapshot extends JsonObject {
-  schema: typeof AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA;
+  /** 0.1 remains readable; current images carry independent snapshot lineage in 0.2. */
+  schema: typeof AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA;
+  snapshot_generation?: number;
+  previous_snapshot_digest?: string | null;
   receipts: AutonomousCapabilityLearningSettlementReceipt[];
   retention: "value_only;capability_payloads_excluded";
   secret_material: "never_returned";
@@ -542,7 +546,8 @@ const CAPABILITY_LEARNING_RECEIPT_KEYS = [
   "settlement_digest", "settlement", "retention", "secret_material",
 ] as const;
 
-const CAPABILITY_LEARNING_SNAPSHOT_KEYS = ["schema", "receipts", "retention", "secret_material", "snapshot_digest"] as const;
+const LEGACY_CAPABILITY_LEARNING_SNAPSHOT_KEYS = ["schema", "receipts", "retention", "secret_material", "snapshot_digest"] as const;
+const CAPABILITY_LEARNING_SNAPSHOT_KEYS = ["schema", "snapshot_generation", "previous_snapshot_digest", "receipts", "retention", "secret_material", "snapshot_digest"] as const;
 
 function exactCapabilityLearningKeys(value: JsonObject, allowed: readonly string[], name: string): void {
   const expected = new Set(allowed);
@@ -642,8 +647,15 @@ export async function validateAutonomousCapabilityLearningSettlementReceipt(valu
 /** Validate and re-hash a complete capability-learning restart image. */
 export async function validateAutonomousCapabilityLearningSnapshot(value: unknown): Promise<AutonomousCapabilityLearningSnapshot> {
   if (!isObject(value)) throw new ArgumentError("capability learning snapshot must be an object");
-  exactCapabilityLearningKeys(value, CAPABILITY_LEARNING_SNAPSHOT_KEYS, "capability learning snapshot");
-  if (value.schema !== AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA || value.retention !== "value_only;capability_payloads_excluded" || value.secret_material !== "never_returned") throw new ArgumentError("capability learning snapshot markers are invalid");
+  const legacy = value.schema === LEGACY_AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA;
+  exactCapabilityLearningKeys(value, legacy ? LEGACY_CAPABILITY_LEARNING_SNAPSHOT_KEYS : CAPABILITY_LEARNING_SNAPSHOT_KEYS, "capability learning snapshot");
+  if (value.schema !== AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA && !legacy) throw new ArgumentError("capability learning snapshot schema is unsupported");
+  if (value.retention !== "value_only;capability_payloads_excluded" || value.secret_material !== "never_returned") throw new ArgumentError("capability learning snapshot markers are invalid");
+  if (!legacy) {
+    if (!Number.isSafeInteger(value.snapshot_generation) || (value.snapshot_generation as number) < 1) throw new ArgumentError("capability learning snapshot generation is outside its bound");
+    if (value.previous_snapshot_digest !== null && digestOrNull("capability learning previous_snapshot_digest", value.previous_snapshot_digest) === null) throw new ArgumentError("capability learning previous_snapshot_digest is invalid");
+    if (((value.snapshot_generation as number) === 1) !== (value.previous_snapshot_digest === null)) throw new ArgumentError("capability learning snapshot generation and previous_snapshot_digest are inconsistent");
+  }
   const snapshotDigest = digestOrNull("capability learning snapshot snapshot_digest", value.snapshot_digest);
   if (!Array.isArray(value.receipts) || value.receipts.length > MAX_AUTONOMOUS_CAPABILITY_LEARNING_RECEIPTS) throw new ArgumentError("capability learning snapshot receipt capacity is exhausted");
   const receipts: AutonomousCapabilityLearningSettlementReceipt[] = [];
@@ -654,7 +666,9 @@ export async function validateAutonomousCapabilityLearningSnapshot(value: unknow
     keys.add(receipt.settlement_key);
     receipts.push(receipt);
   }
-  const descriptor = { schema: AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA, receipts, retention: "value_only;capability_payloads_excluded" as const, secret_material: "never_returned" as const };
+  const descriptor = legacy
+    ? { schema: LEGACY_AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA, receipts, retention: "value_only;capability_payloads_excluded" as const, secret_material: "never_returned" as const }
+    : { schema: AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA, snapshot_generation: value.snapshot_generation as number, previous_snapshot_digest: value.previous_snapshot_digest as string | null, receipts, retention: "value_only;capability_payloads_excluded" as const, secret_material: "never_returned" as const };
   if (!snapshotDigest || await digestJson(descriptor) !== snapshotDigest) throw new ArgumentError("capability learning snapshot digest does not match");
   const normalized = { ...descriptor, snapshot_digest: snapshotDigest } satisfies AutonomousCapabilityLearningSnapshot;
   capabilityLearningJsonBytes(normalized, "capability learning snapshot", MAX_AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_BYTES);
@@ -664,6 +678,10 @@ export async function validateAutonomousCapabilityLearningSnapshot(value: unknow
 /** Process-local default store; production callers should provide a durable implementation. */
 export class InMemoryAutonomousCapabilityLearningSettlementStore implements AutonomousCapabilityLearningSnapshotStore {
   private readonly receipts = new Map<string, AutonomousCapabilityLearningSettlementReceipt>();
+  private snapshotGeneration = 0;
+  private previousSnapshotDigest: string | null = null;
+  private cachedSnapshot: AutonomousCapabilityLearningSnapshot | null = null;
+  private cachedReceiptSignature: string | null = null;
 
   async load(settlementKey: string): Promise<AutonomousCapabilityLearningSettlementReceipt | null> {
     const key = boundedText("capability settlement key", settlementKey, 256);
@@ -677,20 +695,35 @@ export class InMemoryAutonomousCapabilityLearningSettlementStore implements Auto
     const prior = this.receipts.get(key);
     if (prior && (prior.request_digest !== normalized.request_digest || prior.execution_record_digest !== normalized.execution_record_digest || prior.settlement_digest !== normalized.settlement_digest)) throw new ArgumentError(`capability settlement ${key} conflicts with an existing identity`);
     if (!prior && this.receipts.size >= MAX_AUTONOMOUS_CAPABILITY_LEARNING_RECEIPTS) throw new ArgumentError("capability learning settlement store is full");
+    if (!prior) {
+      this.cachedSnapshot = null;
+      this.cachedReceiptSignature = null;
+    }
     this.receipts.set(key, structuredClone(normalized));
   }
 
   async snapshot(): Promise<AutonomousCapabilityLearningSnapshot> {
     const receipts = [] as AutonomousCapabilityLearningSettlementReceipt[];
     for (const receipt of [...this.receipts.values()].sort((left, right) => left.settlement_key.localeCompare(right.settlement_key))) receipts.push(await validateAutonomousCapabilityLearningSettlementReceipt(structuredClone(receipt)));
-    const descriptor = { schema: AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA, receipts, retention: "value_only;capability_payloads_excluded" as const, secret_material: "never_returned" as const };
-    return validateAutonomousCapabilityLearningSnapshot({ ...descriptor, snapshot_digest: await digestJson(descriptor) });
+    const signature = receipts.map((receipt) => `${receipt.settlement_key}:${receipt.settlement_digest}`).join("|");
+    if (this.cachedSnapshot !== null && this.cachedReceiptSignature === signature) return structuredClone(this.cachedSnapshot);
+    const descriptor = { schema: AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA, snapshot_generation: this.snapshotGeneration + 1, previous_snapshot_digest: this.snapshotGeneration === 0 ? null : this.previousSnapshotDigest, receipts, retention: "value_only;capability_payloads_excluded" as const, secret_material: "never_returned" as const };
+    const snapshot = await validateAutonomousCapabilityLearningSnapshot({ ...descriptor, snapshot_digest: await digestJson(descriptor) });
+    this.snapshotGeneration = snapshot.snapshot_generation!;
+    this.previousSnapshotDigest = snapshot.snapshot_digest;
+    this.cachedSnapshot = structuredClone(snapshot);
+    this.cachedReceiptSignature = signature;
+    return structuredClone(snapshot);
   }
 
   async restore(snapshot: AutonomousCapabilityLearningSnapshot): Promise<void> {
     const validated = await validateAutonomousCapabilityLearningSnapshot(snapshot);
     this.receipts.clear();
     for (const receipt of validated.receipts) this.receipts.set(receipt.settlement_key, structuredClone(receipt));
+    this.snapshotGeneration = validated.snapshot_generation ?? 0;
+    this.previousSnapshotDigest = this.snapshotGeneration === 0 ? null : validated.snapshot_digest;
+    this.cachedSnapshot = validated.schema === AUTONOMOUS_CAPABILITY_LEARNING_SNAPSHOT_SCHEMA ? structuredClone(validated) : null;
+    this.cachedReceiptSignature = this.cachedSnapshot === null ? null : validated.receipts.map((receipt) => `${receipt.settlement_key}:${receipt.settlement_digest}`).join("|");
   }
 }
 

@@ -8049,6 +8049,14 @@ be used as an idempotent replay barrier. The twelve built-in domains therefore s
 restart/replay contract while keeping adapter values and raw evaluator evidence outside the
 learning journal.
 
+Current TypeScript learning snapshots use a `0.2` envelope with a strictly increasing
+`snapshot_generation` and `previous_snapshot_digest`. Repeated flushes without a new settlement
+return the same image; a newly credited settlement invalidates the cache and extends the prior
+snapshot digest. The legacy `0.1` image remains readable and upgrades to a generation-one `0.2`
+root on its next write. This prevents a stale capability evaluator worker from replaying a copied
+receipt image as a fresh learning state while preserving the value-only, payload-excluded
+contract.
+
 For an effectful tool, provide `tool_runtime=AutonomousDomainToolRuntime(...)` with an approval
 callback, or replace the default workspace adapter with an application executor that enforces
 identity, scope, idempotency, and operator policy. The agent never derives approval from the model,
