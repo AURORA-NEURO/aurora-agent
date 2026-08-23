@@ -1849,6 +1849,7 @@ export {
   AUTONOMOUS_WORKFLOW_EVENT_SCHEMA,
   AUTONOMOUS_WORKFLOW_EXECUTION_CONTRACT_SCHEMA,
   AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA,
+  AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA,
   AUTONOMOUS_WORKFLOW_MAX_EVENTS,
   AUTONOMOUS_WORKFLOW_MAX_JOBS,
   AUTONOMOUS_WORKFLOW_MAX_SNAPSHOT_BYTES,
@@ -1864,6 +1865,8 @@ export {
   TransactionalJsonAutonomousWorkflowSnapshotPersistence,
   AutonomousWorkflowExecutor,
   InMemoryAutonomousWorkflowCheckpointStore,
+  autonomousWorkflowExecutionReceipt,
+  validateAutonomousWorkflowExecutionReceipt,
   validateAutonomousWorkflowSnapshot,
 } from "./workflow-execution.js";
 export type {
@@ -1886,7 +1889,10 @@ export type {
   AutonomousWorkflowExecuteOptions,
   AutonomousWorkflowExecutorOptions,
   AutonomousWorkflowExecutionResult,
+  AutonomousWorkflowExecutionReceipt,
   AutonomousWorkflowExecutionStatus,
+  AutonomousWorkflowReceiptNextAction,
+  AutonomousWorkflowReceiptStageStatus,
   AutonomousWorkflowSemanticRouteStatus,
   AutonomousWorkflowSemanticRoutingOptions,
   AutonomousWorkflowSnapshotPersistence,

@@ -34,6 +34,7 @@ import type {
 } from "./types.js";
 
 export const AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-workflow-execution/0.1" as const;
+export const AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA = "bioprism-typescript-autonomous-workflow-execution-receipt/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_CHECKPOINT_SCHEMA = "bioprism-typescript-autonomous-workflow-checkpoint/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_EVENT_SCHEMA = "bioprism-typescript-autonomous-workflow-event/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-workflow-snapshot/0.1" as const;
@@ -48,6 +49,8 @@ export const AUTONOMOUS_DURABLE_JOB_WORKER_MAX_BATCH = 64;
 
 export type AutonomousWorkflowCheckpointStatus = "running" | "paused" | "completed" | "failed";
 export type AutonomousWorkflowExecutionStatus = "completed" | "paused" | "approval_required" | "failed" | "stage_blocked" | "stage_proposed" | "stage_not_attempted" | "route_review_required";
+export type AutonomousWorkflowReceiptStageStatus = "not_started" | "completed" | "approval_required" | "reconciliation_required" | "failed" | "proposed" | "blocked" | "not_attempted";
+export type AutonomousWorkflowReceiptNextAction = "review_route" | "approve_provider_call" | "continue_workflow" | "retry_stage" | "reconcile_stage" | "complete" | "inspect_failure";
 export type AutonomousWorkflowSemanticRouteStatus = AutonomousSemanticRouteResult["status"];
 export type AutonomousWorkflowEventType = "started" | "stage_completed" | "checkpointed" | "approval_required" | "stage_failed" | "completed";
 export const AUTONOMOUS_WORKFLOW_STAGE_STATUSES = ["completed", "proposed", "blocked", "not_attempted"] as const;
@@ -194,8 +197,39 @@ export interface AutonomousWorkflowExecutionResult {
   total_stage_count: number;
   plan_refinement_digest: string | null;
   learning_episode_ids: string[];
+  /** Value-only operational projection for UI progress, replay admission, and restart recovery. */
+  execution_receipt?: AutonomousWorkflowExecutionReceipt;
   recovery: "caller_rehydrates_task_and_credentials";
   retention: "provider_responses_local;checkpoint_metadata_only";
+}
+
+/**
+ * Metadata-only workflow execution projection. Stage objectives, prompts, provider responses,
+ * credentials, tool arguments, and structured output remain caller-owned and never enter it.
+ */
+export interface AutonomousWorkflowExecutionReceipt extends JsonObject {
+  schema: typeof AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA;
+  job_id: string | null;
+  domain: AutonomousDomainName | null;
+  task_digest: string | null;
+  workflow_id: string | null;
+  workflow_digest: string | null;
+  checkpoint_digest: string | null;
+  status: AutonomousWorkflowExecutionStatus;
+  execution_stage_ids: string[];
+  stage_statuses: Record<string, AutonomousWorkflowReceiptStageStatus>;
+  stage_result_digests: Record<string, string | null>;
+  completed_stage_ids: string[];
+  incomplete_stage_ids: string[];
+  completed_units: number;
+  total_units: number;
+  progress: number;
+  next_action: AutonomousWorkflowReceiptNextAction;
+  safe_to_continue: boolean;
+  reconciliation_required: boolean;
+  receipt_digest: string;
+  retention: "status_and_outcome_digests_only; provider_payloads_caller_owned";
+  secret_material: "never_returned";
 }
 
 export interface AutonomousWorkflowExecuteOptions extends AutonomousRunOptions {
@@ -331,6 +365,256 @@ function workflowLabel(value: unknown, label: string, maximum = 512): string {
 function workflowBoundedInteger(value: unknown, label: string, maximum: number, minimum = 0): number {
   if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) throw new ArgumentError(`${label} is outside its bounded integer contract`);
   return value as number;
+}
+
+type AutonomousWorkflowExecutionReceiptFields = {
+  schema: typeof AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA;
+  job_id: string | null;
+  domain: AutonomousDomainName | null;
+  task_digest: string | null;
+  workflow_id: string | null;
+  workflow_digest: string | null;
+  checkpoint_digest: string | null;
+  status: AutonomousWorkflowExecutionStatus;
+  execution_stage_ids: string[];
+  stage_statuses: Record<string, AutonomousWorkflowReceiptStageStatus>;
+  stage_result_digests: Record<string, string | null>;
+  completed_stage_ids: string[];
+  incomplete_stage_ids: string[];
+  completed_units: number;
+  total_units: number;
+  progress: number;
+  next_action: AutonomousWorkflowReceiptNextAction;
+  safe_to_continue: boolean;
+  reconciliation_required: boolean;
+  retention: "status_and_outcome_digests_only; provider_payloads_caller_owned";
+  secret_material: "never_returned";
+};
+
+const AUTONOMOUS_WORKFLOW_RECEIPT_STAGE_STATUSES = new Set<AutonomousWorkflowReceiptStageStatus>([
+  "not_started", "completed", "approval_required", "reconciliation_required", "failed", "proposed", "blocked", "not_attempted",
+]);
+const AUTONOMOUS_WORKFLOW_RECEIPT_ACTIONS = new Set<AutonomousWorkflowReceiptNextAction>([
+  "review_route", "approve_provider_call", "continue_workflow", "retry_stage", "reconcile_stage", "complete", "inspect_failure",
+]);
+const AUTONOMOUS_WORKFLOW_RECEIPT_EXECUTION_STATUSES = new Set<AutonomousWorkflowExecutionStatus>([
+  "completed", "paused", "approval_required", "failed", "stage_blocked", "stage_proposed", "stage_not_attempted", "route_review_required",
+]);
+
+function workflowReceiptDigestPayload(value: AutonomousWorkflowExecutionReceiptFields): JsonObject {
+  return {
+    schema: value.schema,
+    job_id: value.job_id,
+    domain: value.domain,
+    task_digest: value.task_digest,
+    workflow_id: value.workflow_id,
+    workflow_digest: value.workflow_digest,
+    checkpoint_digest: value.checkpoint_digest,
+    status: value.status,
+    stages: value.execution_stage_ids.map((id) => ({ id, status: value.stage_statuses[id] ?? null, result_digest: value.stage_result_digests[id] ?? null })),
+    completed_stage_ids: value.completed_stage_ids,
+    incomplete_stage_ids: value.incomplete_stage_ids,
+    completed_units: value.completed_units,
+    total_units: value.total_units,
+    progress: value.progress,
+    next_action: value.next_action,
+    safe_to_continue: value.safe_to_continue,
+    reconciliation_required: value.reconciliation_required,
+  };
+}
+
+function workflowReceiptDigest(name: string, value: unknown, allowNull = false): string | null {
+  if (allowNull && value === null) return null;
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+  return value;
+}
+
+function workflowReceiptIds(name: string, value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError(`${name} must be a bounded string array`);
+  return value.map((item, index) => workflowLabel(item, `${name}[${index}]`, 256));
+}
+
+function workflowReceiptDigestMap(value: unknown): Record<string, string | null> {
+  if (!isObject(value) || Object.keys(value).length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError("workflow stage_result_digests must be a bounded object");
+  const result: Record<string, string | null> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const id = workflowLabel(key, "workflow stage_result_digests key", 256);
+    result[id] = item === null ? null : workflowReceiptDigest(`workflow stage_result_digests.${id}`, item)!;
+  }
+  return result;
+}
+
+function workflowReceiptStatusMap(value: unknown): Record<string, AutonomousWorkflowReceiptStageStatus> {
+  if (!isObject(value) || Object.keys(value).length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError("workflow stage_statuses must be a bounded object");
+  const result: Record<string, AutonomousWorkflowReceiptStageStatus> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const id = workflowLabel(key, "workflow stage_statuses key", 256);
+    if (typeof item !== "string" || !AUTONOMOUS_WORKFLOW_RECEIPT_STAGE_STATUSES.has(item as AutonomousWorkflowReceiptStageStatus)) throw new ArgumentError(`workflow stage_statuses.${id} is invalid`);
+    result[id] = item as AutonomousWorkflowReceiptStageStatus;
+  }
+  return result;
+}
+
+function workflowReceiptMapKeys(value: Record<string, unknown>): string[] {
+  return Object.keys(value).sort();
+}
+
+function workflowReceiptStageProjection(
+  result: AutonomousWorkflowExecutionResult,
+  stageIds: readonly string[],
+): { statuses: Record<string, AutonomousWorkflowReceiptStageStatus>; digests: Record<string, string | null>; reconciliation: boolean } {
+  const statuses: Record<string, AutonomousWorkflowReceiptStageStatus> = Object.fromEntries(stageIds.map((id) => [id, "not_started"]));
+  const digests: Record<string, string | null> = Object.fromEntries(stageIds.map((id) => [id, null]));
+  let reconciliation = false;
+  const checkpoint = result.checkpoint;
+  if (checkpoint) {
+    for (const outcome of checkpoint.stage_outcomes) {
+      if (!Object.prototype.hasOwnProperty.call(statuses, outcome.stage_id)) throw new ArgumentError(`workflow checkpoint contains an unknown stage ${outcome.stage_id}`);
+      if (outcome.status === "completed") statuses[outcome.stage_id] = "completed";
+      else if (outcome.run_status === "approval_required") statuses[outcome.stage_id] = "approval_required";
+      else if (outcome.run_status === "reconciliation_required" || outcome.error_class === "evidence_reconciliation_required") {
+        statuses[outcome.stage_id] = "reconciliation_required";
+        reconciliation = true;
+      } else statuses[outcome.stage_id] = "failed";
+      digests[outcome.stage_id] = outcome.response_digest === null ? null : workflowReceiptDigest(`workflow checkpoint ${outcome.stage_id} response_digest`, outcome.response_digest);
+    }
+  }
+  for (const stageResult of result.stage_results) {
+    const id = stageResult.stage.id;
+    if (!Object.prototype.hasOwnProperty.call(statuses, id)) throw new ArgumentError(`workflow stage result contains an unknown stage ${id}`);
+    const runStatus = stageResult.run?.status ?? null;
+    if (runStatus === "reconciliation_required") {
+      statuses[id] = "reconciliation_required";
+      reconciliation = true;
+    } else if (runStatus === "approval_required") statuses[id] = "approval_required";
+    else if (stageResult.declared_status === "proposed") statuses[id] = "proposed";
+    else if (stageResult.declared_status === "blocked") statuses[id] = "blocked";
+    else if (stageResult.declared_status === "not_attempted") statuses[id] = "not_attempted";
+    else if (runStatus === "completed" && stageResult.declared_status === "completed" && stageResult.validation_errors.length === 0) statuses[id] = "completed";
+    else if (runStatus !== null) statuses[id] = "failed";
+    if (stageResult.output_digest !== null) digests[id] = workflowReceiptDigest(`workflow stage ${id} output_digest`, stageResult.output_digest);
+  }
+  return { statuses, digests, reconciliation };
+}
+
+function workflowReceiptNextActionFor(status: AutonomousWorkflowExecutionStatus, incomplete: readonly string[], reconciliation: boolean, statuses: Record<string, AutonomousWorkflowReceiptStageStatus>): AutonomousWorkflowReceiptNextAction {
+  if (status === "route_review_required") return "review_route";
+  if (reconciliation) return "reconcile_stage";
+  if (status === "approval_required") return "approve_provider_call";
+  if (status === "completed") return "complete";
+  if (status === "paused") return incomplete.length ? "continue_workflow" : "complete";
+  if (Object.values(statuses).some((status) => status === "proposed" || status === "blocked" || status === "not_attempted")) return "retry_stage";
+  if (status === "failed") return "inspect_failure";
+  return "retry_stage";
+}
+
+function workflowReceiptNextAction(result: AutonomousWorkflowExecutionResult, incomplete: readonly string[], reconciliation: boolean, statuses: Record<string, AutonomousWorkflowReceiptStageStatus>): AutonomousWorkflowReceiptNextAction {
+  return workflowReceiptNextActionFor(result.status, incomplete, reconciliation, statuses);
+}
+
+/** Build a digest-bound, payload-free operational receipt for a workflow execution result. */
+export async function autonomousWorkflowExecutionReceipt(result: AutonomousWorkflowExecutionResult): Promise<AutonomousWorkflowExecutionReceipt> {
+  if (!isObject(result) || result.schema !== AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA) throw new ArgumentError("workflow execution receipt requires a valid result envelope");
+  if (!AUTONOMOUS_WORKFLOW_RECEIPT_EXECUTION_STATUSES.has(result.status)) throw new ArgumentError("workflow execution result has an unsupported status");
+  if (!Array.isArray(result.stage_results)) throw new ArgumentError("workflow execution stage_results must be an array");
+  const blueprint = result.blueprint;
+  const stageIds = blueprint ? blueprint.workflow.stages.map((stage) => workflowLabel(stage.id, "workflow stage id", 256)) : [];
+  if (new Set(stageIds).size !== stageIds.length || stageIds.length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError("workflow stage ids must be unique and bounded");
+  const projection = workflowReceiptStageProjection(result, stageIds);
+  const completedStageIds = stageIds.filter((id) => projection.statuses[id] === "completed");
+  const incompleteStageIds = stageIds.filter((id) => projection.statuses[id] !== "completed");
+  const reconciliation = projection.reconciliation || result.stage_results.some((stage) => stage.run?.status === "reconciliation_required");
+  const totalUnits = Math.max(1, stageIds.length);
+  const completedUnits = completedStageIds.length;
+  const safeToContinue = result.status === "paused" && !reconciliation && incompleteStageIds.length > 0;
+  const fields: AutonomousWorkflowExecutionReceiptFields = {
+    schema: AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA,
+    job_id: result.job_id,
+    domain: blueprint?.domain_profile.domain ?? result.checkpoint?.domain ?? null,
+    task_digest: blueprint?.task_digest ?? result.route?.task_digest ?? null,
+    workflow_id: blueprint?.workflow.workflow_id ?? null,
+    workflow_digest: blueprint?.workflow.workflow_digest ?? null,
+    checkpoint_digest: result.checkpoint?.checkpoint_digest ?? null,
+    status: result.status,
+    execution_stage_ids: stageIds,
+    stage_statuses: projection.statuses,
+    stage_result_digests: projection.digests,
+    completed_stage_ids: completedStageIds,
+    incomplete_stage_ids: incompleteStageIds,
+    completed_units: completedUnits,
+    total_units: totalUnits,
+    progress: completedUnits / totalUnits,
+    next_action: workflowReceiptNextAction(result, incompleteStageIds, reconciliation, projection.statuses),
+    safe_to_continue: safeToContinue,
+    reconciliation_required: reconciliation,
+    retention: "status_and_outcome_digests_only; provider_payloads_caller_owned",
+    secret_material: "never_returned",
+  };
+  return { ...fields, receipt_digest: await digestJson(workflowReceiptDigestPayload(fields)) };
+}
+
+/** Validate a workflow receipt and reject tampering, stage drift, or inconsistent recovery flags. */
+export async function validateAutonomousWorkflowExecutionReceipt(value: unknown): Promise<AutonomousWorkflowExecutionReceipt> {
+  if (!isObject(value)) throw new ArgumentError("workflow execution receipt must be an object");
+  const allowed = new Set(["schema", "job_id", "domain", "task_digest", "workflow_id", "workflow_digest", "checkpoint_digest", "status", "execution_stage_ids", "stage_statuses", "stage_result_digests", "completed_stage_ids", "incomplete_stage_ids", "completed_units", "total_units", "progress", "next_action", "safe_to_continue", "reconciliation_required", "receipt_digest", "retention", "secret_material"]);
+  if (Object.keys(value).length !== allowed.size || Object.keys(value).some((key) => !allowed.has(key))) throw new ArgumentError("workflow execution receipt contains unexpected or missing fields");
+  if (value.schema !== AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA) throw new ArgumentError("workflow execution receipt schema is invalid");
+  if (typeof value.status !== "string" || !AUTONOMOUS_WORKFLOW_RECEIPT_EXECUTION_STATUSES.has(value.status as AutonomousWorkflowExecutionStatus)) throw new ArgumentError("workflow execution receipt status is invalid");
+  const jobId = value.job_id === null ? null : workflowLabel(value.job_id, "workflow receipt job_id");
+  const domain = value.domain === null ? null : AUTONOMOUS_DOMAIN_NAMES.includes(value.domain as AutonomousDomainName) ? value.domain as AutonomousDomainName : (() => { throw new ArgumentError("workflow receipt domain is invalid"); })();
+  const taskDigest = workflowReceiptDigest("workflow receipt task_digest", value.task_digest, true);
+  const workflowId = value.workflow_id === null ? null : workflowLabel(value.workflow_id, "workflow receipt workflow_id");
+  const workflowDigestValue = workflowReceiptDigest("workflow receipt workflow_digest", value.workflow_digest, true);
+  const checkpointDigest = workflowReceiptDigest("workflow receipt checkpoint_digest", value.checkpoint_digest, true);
+  const stageIds = workflowReceiptIds("execution_stage_ids", value.execution_stage_ids);
+  if (new Set(stageIds).size !== stageIds.length) throw new ArgumentError("workflow receipt execution_stage_ids must be unique");
+  const completed = workflowReceiptIds("completed_stage_ids", value.completed_stage_ids);
+  const incomplete = workflowReceiptIds("incomplete_stage_ids", value.incomplete_stage_ids);
+  if (new Set([...completed, ...incomplete]).size !== stageIds.length || new Set([...completed, ...incomplete]).size !== completed.length + incomplete.length || [...completed, ...incomplete].some((id) => !stageIds.includes(id))) throw new ArgumentError("workflow receipt completed and incomplete stage ids must partition execution_stage_ids");
+  const statuses = workflowReceiptStatusMap(value.stage_statuses);
+  const digests = workflowReceiptDigestMap(value.stage_result_digests);
+  const expectedKeys = [...stageIds].sort();
+  if (JSON.stringify(workflowReceiptMapKeys(statuses)) !== JSON.stringify(expectedKeys) || JSON.stringify(workflowReceiptMapKeys(digests)) !== JSON.stringify(expectedKeys)) throw new ArgumentError("workflow receipt stage maps must cover exactly execution_stage_ids");
+  for (const id of stageIds) {
+    if ((statuses[id] === "completed") !== completed.includes(id) || (statuses[id] !== "completed") !== incomplete.includes(id)) throw new ArgumentError(`workflow receipt stage partition does not match ${id}`);
+  }
+  if (typeof value.completed_units !== "number" || !Number.isSafeInteger(value.completed_units) || value.completed_units !== completed.length) throw new ArgumentError("workflow receipt completed_units is inconsistent");
+  const totalUnits = Math.max(1, stageIds.length);
+  if (typeof value.total_units !== "number" || !Number.isSafeInteger(value.total_units) || value.total_units !== totalUnits) throw new ArgumentError("workflow receipt total_units is inconsistent");
+  if (typeof value.progress !== "number" || !Number.isFinite(value.progress) || value.progress < 0 || value.progress > 1 || value.progress !== value.completed_units / value.total_units) throw new ArgumentError("workflow receipt progress is inconsistent");
+  const reconciliation = Object.values(statuses).some((status) => status === "reconciliation_required");
+  if (typeof value.next_action !== "string" || !AUTONOMOUS_WORKFLOW_RECEIPT_ACTIONS.has(value.next_action as AutonomousWorkflowReceiptNextAction)) throw new ArgumentError("workflow receipt next_action is invalid");
+  if (value.next_action !== workflowReceiptNextActionFor(value.status as AutonomousWorkflowExecutionStatus, incomplete, reconciliation, statuses)) throw new ArgumentError("workflow receipt next_action is inconsistent");
+  if (value.reconciliation_required !== reconciliation) throw new ArgumentError("workflow receipt reconciliation_required is inconsistent");
+  const safeToContinue = value.status === "paused" && !reconciliation && incomplete.length > 0;
+  if (value.safe_to_continue !== safeToContinue) throw new ArgumentError("workflow receipt safe_to_continue is inconsistent");
+  if (value.retention !== "status_and_outcome_digests_only; provider_payloads_caller_owned" || value.secret_material !== "never_returned") throw new ArgumentError("workflow receipt retention markers are invalid");
+  const fields: AutonomousWorkflowExecutionReceiptFields = {
+    schema: value.schema,
+    job_id: jobId,
+    domain,
+    task_digest: taskDigest,
+    workflow_id: workflowId,
+    workflow_digest: workflowDigestValue,
+    checkpoint_digest: checkpointDigest,
+    status: value.status as AutonomousWorkflowExecutionStatus,
+    execution_stage_ids: stageIds,
+    stage_statuses: statuses,
+    stage_result_digests: digests,
+    completed_stage_ids: completed,
+    incomplete_stage_ids: incomplete,
+    completed_units: value.completed_units,
+    total_units: value.total_units,
+    progress: value.progress,
+    next_action: value.next_action as AutonomousWorkflowReceiptNextAction,
+    safe_to_continue: value.safe_to_continue,
+    reconciliation_required: value.reconciliation_required,
+    retention: value.retention,
+    secret_material: value.secret_material,
+  };
+  const receiptDigest = workflowReceiptDigest("workflow receipt receipt_digest", value.receipt_digest)!;
+  if (receiptDigest !== await digestJson(workflowReceiptDigestPayload(fields))) throw new ArgumentError("workflow execution receipt digest does not match its fields");
+  return { ...fields, receipt_digest: receiptDigest };
 }
 
 async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWorkflowCheckpoint> {
@@ -898,11 +1182,11 @@ export class AutonomousWorkflowExecutor {
       ? await this.resolveExistingRoute(taskText, existing, options)
       : await this.resolveStartRoute(taskText, options);
     const route = routeResolution.route;
-    if (routeResolution.semantic_status !== null && routeResolution.semantic_status !== "completed") return this.routeReviewResult(route, routeResolution.semantic_status);
-    if (route.abstained || !route.primary_domain || route.cross_domain) return this.routeReviewResult(route, routeResolution.semantic_status);
+    if (routeResolution.semantic_status !== null && routeResolution.semantic_status !== "completed") return await this.routeReviewResult(route, routeResolution.semantic_status);
+    if (route.abstained || !route.primary_domain || route.cross_domain) return await this.routeReviewResult(route, routeResolution.semantic_status);
     const blueprintEnvelope = await this.agent.blueprint(taskText, { domain: route.primary_domain, capability: options.capability, context: options.context, hints: options.hints, maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name) });
     const blueprint = blueprintEnvelope.blueprint;
-    if (!blueprint) return this.routeReviewResult(route, routeResolution.semantic_status);
+    if (!blueprint) return await this.routeReviewResult(route, routeResolution.semantic_status);
     const acceptedPlan = await acceptedWorkflowPlan(blueprint, options.acceptedPlanRefinement);
     const contractDigest = await workflowExecutionContractDigest(this.agent, options);
     if (existing) {
@@ -979,8 +1263,9 @@ export class AutonomousWorkflowExecutor {
     return { route, semantic_status: null };
   }
 
-  private routeReviewResult(route: AutonomousRouteProposal | null = null, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null = null): AutonomousWorkflowExecutionResult {
-    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, blueprint: null, checkpoint: null, route, semantic_route_status: semanticStatus, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+  private async routeReviewResult(route: AutonomousRouteProposal | null = null, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null = null): Promise<AutonomousWorkflowExecutionResult> {
+    const base: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "route_review_required", job_id: null, blueprint: null, checkpoint: null, route, semantic_route_status: semanticStatus, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+    return { ...base, execution_receipt: await autonomousWorkflowExecutionReceipt(base) };
   }
 
   private async makeCheckpoint(jobId: string, blueprint: AutonomousTaskBlueprint, completed: string[], outcomes: AutonomousWorkflowStageOutcome[], status: AutonomousWorkflowCheckpointStatus, executionContractDigest: string, previous: AutonomousWorkflowCheckpoint | null, stageOrder: readonly string[] = blueprint.workflow.stages.map((stage) => stage.id), planRefinementDigest: string | null = previous?.plan_refinement_digest ?? null, routeDigest: string | null = previous?.route_digest ?? null): Promise<AutonomousWorkflowCheckpoint> {
@@ -1195,7 +1480,8 @@ export class AutonomousWorkflowExecutor {
   }
 
   private async result(status: AutonomousWorkflowExecutionStatus, checkpoint: AutonomousWorkflowCheckpoint, blueprint: AutonomousTaskBlueprint, stageResults: AutonomousWorkflowStageResult[], route: AutonomousRouteProposal, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null): Promise<AutonomousWorkflowExecutionResult> {
-    return { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, route, semantic_route_status: semanticStatus, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, plan_refinement_digest: checkpoint.plan_refinement_digest ?? null, learning_episode_ids: checkpoint.stage_outcomes.flatMap((outcome) => outcome.learning_episode_id ? [outcome.learning_episode_id] : []), recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+    const base: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, route, semantic_route_status: semanticStatus, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, plan_refinement_digest: checkpoint.plan_refinement_digest ?? null, learning_episode_ids: checkpoint.stage_outcomes.flatMap((outcome) => outcome.learning_episode_id ? [outcome.learning_episode_id] : []), recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+    return { ...base, execution_receipt: await autonomousWorkflowExecutionReceipt(base) };
   }
 }
 
@@ -1309,7 +1595,8 @@ export class AutonomousDurableJobController {
     const normalizedJobId = boundedJobId(jobId);
     let server = await this.status(normalizedJobId);
     if (server.job.state === "waiting_approval") {
-      return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, route: null, semantic_route_status: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
+      const localBase: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, route: null, semantic_route_status: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+      return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { ...localBase, execution_receipt: await autonomousWorkflowExecutionReceipt(localBase) }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
     }
     const lifecycle = this.lifecycleAvailable();
     if (lifecycle) {

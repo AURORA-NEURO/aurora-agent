@@ -2739,6 +2739,17 @@ The runner verifies its task, base-plan, workflow, and dependency digests, uses 
 among currently-ready stages, and binds its digest into every checkpoint so a different plan
 cannot be substituted during resume.
 
+The TypeScript `AutonomousWorkflowExecutor` also exposes an
+`AutonomousWorkflowExecutionReceipt` on every result, including route review, provider approval,
+bounded pauses, stage failures, reconciliation pauses, and completion. The receipt contains the
+ordered stage IDs, status/digest maps, completed and incomplete stage partitions, bounded
+progress, a deterministic `next_action`, and `safe_to_continue`/`reconciliation_required`
+signals. `validateAutonomousWorkflowExecutionReceipt()` checks the allow-listed shape, stage
+partition, digest pairing, progress arithmetic, retention markers, and canonical receipt digest.
+It never stores stage objectives, prompts, structured output, provider responses, tool arguments,
+credentials, or task text. This gives UI progress, evaluator admission, and restart handlers one
+truthful value-only view across all built-in domain workflows.
+
 The automatic entrypoint can also perform that planning step itself when the caller opts into
 `planning_mode="provider"`:
 

@@ -10,6 +10,8 @@ import {
   AutonomousWorkflowPersistenceCoordinator,
   TransactionalJsonAutonomousWorkflowSnapshotPersistence,
   AutonomousWorkflowExecutor,
+  AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA,
+  validateAutonomousWorkflowExecutionReceipt,
   CredentialStore,
   InMemoryAutonomousWorkflowCheckpointStore,
   LLMRuntime,
@@ -171,6 +173,12 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   assert.equal(first.completed_stage_count, 2);
   assert.equal(first.total_stage_count, 5);
   assert.equal(first.checkpoint.status, "paused");
+  assert.equal(first.execution_receipt.next_action, "continue_workflow");
+  assert.equal(first.execution_receipt.completed_stage_ids.length, 2);
+  assert.equal(first.execution_receipt.incomplete_stage_ids.length, 3);
+  assert.equal(first.execution_receipt.progress, 0.4);
+  assert.equal(first.execution_receipt.safe_to_continue, true);
+  await validateAutonomousWorkflowExecutionReceipt(first.execution_receipt);
   assert.equal(JSON.stringify(first.checkpoint).includes(task), false);
   assert.equal(calls, 2);
   assert.match(JSON.stringify(bodies[1].messages), /evidence-scope/, "dependent stages receive bounded prior-stage evidence");
@@ -179,6 +187,10 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   assert.equal(resumed.status, "completed");
   assert.equal(resumed.completed_stage_count, 5);
   assert.equal(resumed.checkpoint.next_stage_id, null);
+  assert.equal(resumed.execution_receipt.next_action, "complete");
+  assert.equal(resumed.execution_receipt.progress, 1);
+  assert.equal(resumed.execution_receipt.safe_to_continue, false);
+  await validateAutonomousWorkflowExecutionReceipt(resumed.execution_receipt);
   assert.equal(calls, 5);
   assert.deepEqual(resumed.checkpoint.completed_stage_ids, ["scope", "inspect", "implement", "verify", "handoff"]);
   assert.ok(resumed.events.length >= 6);
@@ -684,6 +696,11 @@ test("workflow executor exposes approval pauses and checkpoint readiness for eve
     assert.equal(result.checkpoint.workflow_digest, profile.workflow.workflow_digest);
     assert.equal(result.checkpoint.completed_stage_ids.length, 0);
     assert.equal(result.events.at(-1).event_type, "approval_required");
+    assert.equal(result.execution_receipt.schema, AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA, profile.domain);
+    assert.equal(result.execution_receipt.next_action, "approve_provider_call", profile.domain);
+    assert.equal(result.execution_receipt.progress, 0, profile.domain);
+    assert.equal(result.execution_receipt.safe_to_continue, false, profile.domain);
+    await validateAutonomousWorkflowExecutionReceipt(result.execution_receipt);
   }
 });
 
@@ -713,6 +730,19 @@ test("workflow executor runs every built-in single-domain workflow through the s
     assert.equal(result.completed_stage_count, profile.workflow.stages.length, profile.domain);
     assert.equal(result.stage_results.length, profile.workflow.stages.length, profile.domain);
     assert.ok(result.stage_results.every((stage) => stage.declared_status === "completed" && stage.validation_errors.length === 0), profile.domain);
+    assert.equal(result.execution_receipt.next_action, "complete", profile.domain);
+    assert.equal(result.execution_receipt.completed_stage_ids.length, profile.workflow.stages.length, profile.domain);
+    assert.equal(result.execution_receipt.incomplete_stage_ids.length, 0, profile.domain);
+    assert.equal(result.execution_receipt.progress, 1, profile.domain);
+    assert.equal(result.execution_receipt.safe_to_continue, false, profile.domain);
+    assert.equal(Object.hasOwn(result.execution_receipt, "response"), false, profile.domain);
+    await validateAutonomousWorkflowExecutionReceipt(result.execution_receipt);
+    if (profile.domain === "coding") {
+      await assert.rejects(
+        () => validateAutonomousWorkflowExecutionReceipt({ ...result.execution_receipt, next_action: "retry_stage" }),
+        /inconsistent|digest/,
+      );
+    }
   }
 });
 
@@ -980,11 +1010,15 @@ test("durable job controller sends only metadata, preserves server approval, and
   await controller.approval("server-job-1", "request", { reason: "operator review" });
   const blocked = await controller.execute("server-job-1", task, { candidates: agent.models(), approveProviderCall: true });
   assert.equal(blocked.local.status, "approval_required");
+  assert.equal(blocked.local.execution_receipt.next_action, "approve_provider_call");
+  await validateAutonomousWorkflowExecutionReceipt(blocked.local.execution_receipt);
   assert.equal(calls, 0);
   await controller.approval("server-job-1", "approve", { authorizationDigest: "e".repeat(64) });
   const executed = await controller.execute("server-job-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 1 });
   assert.equal(executed.local.status, "paused");
   assert.equal(executed.local.completed_stage_count, 1);
+  assert.equal(executed.local.execution_receipt.next_action, "continue_workflow");
+  await validateAutonomousWorkflowExecutionReceipt(executed.local.execution_receipt);
   assert.equal(calls, 1);
   assert.equal(executed.job.state, "running");
   assert.ok(seen.some((row) => row.operation === "claim"));
