@@ -54,6 +54,11 @@ from .autonomous_task_lens import (
     AutonomousDomainTaskLens,
     autonomous_domain_task_lens,
 )
+from .autonomous_task_intent import (
+    AUTONOMOUS_TASK_INTENT_SCHEMA,
+    AutonomousTaskIntent,
+    infer_autonomous_task_intent,
+)
 from .brain import (
     AutonomousBrain,
     BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
@@ -3182,6 +3187,8 @@ class AutonomousTaskBlueprint:
     domain_policy: AutonomousDomainPolicy | None = None
     # Domain-specific planning posture; this is guidance metadata, not authority.
     task_lens: AutonomousDomainTaskLens | None = None
+    # Provider-free task interpretation; this is classification metadata, not authority.
+    task_intent: AutonomousTaskIntent | None = None
 
     def evidence_plan(self) -> AutonomousEvidencePlan:
         """Return the deterministic evidence contract for this blueprint's workflow."""
@@ -3225,6 +3232,20 @@ class AutonomousTaskBlueprint:
             "required_capabilities": list(self.required_capabilities),
             "domain_policy": (self.domain_policy or autonomous_domain_policy(self.profile.domain)).to_dict(),
             "task_lens": (self.task_lens or autonomous_domain_task_lens(self.profile.domain)).to_dict(),
+            "task_intent": (
+                self.task_intent
+                or infer_autonomous_task_intent(
+                    task=self.spec.task,
+                    task_digest=self.spec.task_digest,
+                    domain=self.spec.domain,
+                    capability=self.spec.capability,
+                    risk_class=self.spec.risk_class,
+                    workflow_id=self.workflow.workflow_id,
+                    lens=self.task_lens or autonomous_domain_task_lens(self.profile.domain),
+                    constraints=self.spec.constraints,
+                    desired_outputs=self.spec.desired_outputs,
+                )
+            ).to_dict(),
             "prompt": prompt_public,
             "plan": plan_public,
             "execution": "not_started",
@@ -3238,12 +3259,29 @@ def _memory_selection_context(blueprint: AutonomousTaskBlueprint) -> dict[str, A
     return {
         key: value
         for key, value in blueprint.selection_context.items()
-        if not key.startswith("task_lens_")
+        if not key.startswith(("task_lens_", "task_intent_"))
     }
 
 
 def _memory_task_lens_digest(blueprint: AutonomousTaskBlueprint) -> str:
     return (blueprint.task_lens or autonomous_domain_task_lens(blueprint.spec.domain)).lens_digest
+
+
+def _memory_task_intent_digest(blueprint: AutonomousTaskBlueprint) -> str:
+    return (
+        blueprint.task_intent
+        or infer_autonomous_task_intent(
+            task=blueprint.spec.task,
+            task_digest=blueprint.spec.task_digest,
+            domain=blueprint.spec.domain,
+            capability=blueprint.spec.capability,
+            risk_class=blueprint.spec.risk_class,
+            workflow_id=blueprint.workflow.workflow_id,
+            lens=blueprint.task_lens or autonomous_domain_task_lens(blueprint.spec.domain),
+            constraints=blueprint.spec.constraints,
+            desired_outputs=blueprint.spec.desired_outputs,
+        )
+    ).intent_digest
 
 
 @dataclass(frozen=True, slots=True)
@@ -6414,6 +6452,17 @@ class AutonomousPromptBuilder:
         evidence_plan = build_autonomous_evidence_plan((workflow,))
         domain_policy = autonomous_domain_policy(profile.domain)
         task_lens = autonomous_domain_task_lens(profile.domain)
+        task_intent = infer_autonomous_task_intent(
+            task=spec.task,
+            task_digest=spec.task_digest,
+            domain=spec.domain,
+            capability=spec.capability,
+            risk_class=spec.risk_class,
+            workflow_id=workflow.workflow_id,
+            lens=task_lens,
+            constraints=spec.constraints,
+            desired_outputs=spec.desired_outputs,
+        )
         context: list[dict[str, Any]] = [
             {
                 "id": "autonomy-domain-policy",
@@ -6447,6 +6496,15 @@ class AutonomousPromptBuilder:
                 "content": _json_text(task_lens.prompt_contract()),
                 "required": True,
                 "priority": 998,
+            }
+        )
+        context.append(
+            {
+                "id": "autonomy-task-intent",
+                "role": "developer",
+                "content": _json_text(task_intent.prompt_contract()),
+                "required": True,
+                "priority": 997,
             }
         )
         if domain_pack is not None:
@@ -6664,6 +6722,17 @@ class AutonomousPlanBuilder:
         workflow = workflow or _builtin_workflow_strategy(spec.domain)
         domain_policy = autonomous_domain_policy(spec.domain)
         task_lens = autonomous_domain_task_lens(spec.domain)
+        task_intent = infer_autonomous_task_intent(
+            task=spec.task,
+            task_digest=spec.task_digest,
+            domain=spec.domain,
+            capability=spec.capability,
+            risk_class=spec.risk_class,
+            workflow_id=workflow.workflow_id,
+            lens=task_lens,
+            constraints=spec.constraints,
+            desired_outputs=spec.desired_outputs,
+        )
         if domain_pack is not None:
             if not isinstance(domain_pack, AutonomousDomainPack):
                 raise BrainRunError("domain_pack must be an AutonomousDomainPack or None")
@@ -6703,6 +6772,12 @@ class AutonomousPlanBuilder:
                         "task_lens_digest": task_lens.lens_digest,
                         "task_lens_decision_checks": list(task_lens.decision_checks),
                         "task_lens_evidence_priorities": list(task_lens.evidence_priorities),
+                        "task_intent_id": task_intent.intent_id,
+                        "task_intent_digest": task_intent.intent_digest,
+                        "task_intent_action_mode": task_intent.action_mode,
+                        "task_intent_requested_effect": task_intent.requested_effect,
+                        "task_intent_evidence_mode": task_intent.evidence_mode,
+                        "task_intent_ambiguity_flags": list(task_intent.ambiguity_flags),
                     },
                     "depends_on": [],
                     "effect": "provider_call",
@@ -6713,6 +6788,7 @@ class AutonomousPlanBuilder:
             "max_cost": min(max(1, spec.max_steps), domain_policy.max_total_cost_units),
             "domain_policy_digest": domain_policy.policy_digest,
             "task_lens_digest": task_lens.lens_digest,
+            "task_intent_digest": task_intent.intent_digest,
             "require_approval_for_effects": True,
         }
 
@@ -8091,6 +8167,17 @@ class AutonomousTaskOrchestrator:
         )
         evidence_plan = build_autonomous_evidence_plan((workflow,))
         task_lens = autonomous_domain_task_lens(spec.domain)
+        task_intent = infer_autonomous_task_intent(
+            task=spec.task,
+            task_digest=spec.task_digest,
+            domain=spec.domain,
+            capability=spec.capability,
+            risk_class=spec.risk_class,
+            workflow_id=workflow.workflow_id,
+            lens=task_lens,
+            constraints=spec.constraints,
+            desired_outputs=spec.desired_outputs,
+        )
         selection_context = {
             "schema": AUTONOMY_SCHEMA,
             "workflow": "autonomous_task",
@@ -8102,6 +8189,12 @@ class AutonomousTaskOrchestrator:
             "task_lens_model_capability_hints": list(task_lens.model_capability_hints),
             "task_lens_evaluator_signals": list(task_lens.evaluator_signals),
             "task_lens_planning_dimensions": list(task_lens.planning_dimensions),
+            "task_intent_id": task_intent.intent_id,
+            "task_intent_digest": task_intent.intent_digest,
+            "task_intent_action_mode": task_intent.action_mode,
+            "task_intent_requested_effect": task_intent.requested_effect,
+            "task_intent_evidence_mode": task_intent.evidence_mode,
+            "task_intent_ambiguity_flags": list(task_intent.ambiguity_flags),
             "execution_mode": spec.execution_mode,
             "domain_capabilities": list(profile.capabilities),
             "domain_pack_id": domain_pack.pack_id,
@@ -8170,6 +8263,7 @@ class AutonomousTaskOrchestrator:
             required_capabilities=required,
             domain_policy=autonomous_domain_policy(spec.domain),
             task_lens=task_lens,
+            task_intent=task_intent,
         )
 
     def evidence_plan(
@@ -9079,6 +9173,7 @@ class AutonomousTaskOrchestrator:
                 required_capabilities=blueprint.required_capabilities,
                 domain_policy=blueprint.domain_policy,
                 task_lens=blueprint.task_lens,
+                task_intent=blueprint.task_intent,
             )
         else:
             replacement = blueprint
@@ -11036,6 +11131,7 @@ class AutonomousTaskOrchestrator:
                             "evaluator_id": decision.evaluator_id,
                             "evaluator_version": decision.evaluator_version,
                             "task_lens_digest": _memory_task_lens_digest(blueprint),
+                            "task_intent_digest": _memory_task_intent_digest(blueprint),
                         },
                         memory=memory_store,
                     )
@@ -11267,6 +11363,7 @@ class AutonomousTaskOrchestrator:
                             "evaluator_id": decision.evaluator_id,
                             "evaluator_version": decision.evaluator_version,
                             "task_lens_digest": _memory_task_lens_digest(blueprint),
+                            "task_intent_digest": _memory_task_intent_digest(blueprint),
                         },
                         memory=memory_store,
                     )
@@ -11826,6 +11923,7 @@ class AutonomousTaskOrchestrator:
                     "evaluator_id": decision.evaluator_id,
                     "evaluator_version": decision.evaluator_version,
                     "task_lens_digest": _memory_task_lens_digest(blueprint_item),
+                    "task_intent_digest": _memory_task_intent_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12156,6 +12254,7 @@ class AutonomousTaskOrchestrator:
                     "evaluator_id": decision.evaluator_id,
                     "evaluator_version": decision.evaluator_version,
                     "task_lens_digest": _memory_task_lens_digest(blueprint_item),
+                    "task_intent_digest": _memory_task_intent_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12319,6 +12418,7 @@ class AutonomousTaskOrchestrator:
                     "evaluator_id": decision.evaluator_id,
                     "evaluator_version": decision.evaluator_version,
                     "task_lens_digest": _memory_task_lens_digest(blueprint_item),
+                    "task_intent_digest": _memory_task_intent_digest(blueprint_item),
                 },
                 memory=memory_store,
             )
@@ -12787,6 +12887,7 @@ class AutonomousTaskOrchestrator:
                     "evaluator_id": decision.evaluator_id,
                     "evaluator_version": decision.evaluator_version,
                     "task_lens_digest": _memory_task_lens_digest(blueprint),
+                    "task_intent_digest": _memory_task_intent_digest(blueprint),
                 },
                 memory=store,
             )
@@ -19100,6 +19201,7 @@ __all__ = [
     "AUTONOMOUS_EXECUTION_PLAN_SCHEMA",
     "AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA",
     "AUTONOMOUS_TASK_LENS_SCHEMA",
+    "AUTONOMOUS_TASK_INTENT_SCHEMA",
     "AUTONOMOUS_EXECUTION_PLAN_STATUSES",
     "MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES",
     "AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA",
@@ -19142,6 +19244,8 @@ __all__ = [
     "AutonomousRouteCandidate",
     "AutonomousRouteProposal",
     "AutonomousTaskRouter",
+    "AutonomousTaskIntent",
+    "infer_autonomous_task_intent",
     "AutonomousDomainTool",
     "AutonomousDomainToolBinding",
     "AutonomousDomainToolRegistry",

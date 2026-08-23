@@ -364,6 +364,17 @@ from .autonomous_task_lens import (
     builtin_autonomous_domain_task_lenses,
     autonomous_domain_task_lens,
 )
+from .autonomous_task_intent import (
+    AUTONOMOUS_TASK_INTENT_SCHEMA,
+    AUTONOMOUS_TASK_INTENT_VERSION,
+    AUTONOMOUS_TASK_INTENT_DOMAINS,
+    AUTONOMOUS_TASK_INTENT_ACTION_MODES,
+    AUTONOMOUS_TASK_INTENT_EFFECTS,
+    AUTONOMOUS_TASK_INTENT_EVIDENCE_MODES,
+    MAX_AUTONOMOUS_TASK_INTENT_ITEMS,
+    AutonomousTaskIntent,
+    infer_autonomous_task_intent,
+)
 from .autonomy_scenarios import (
     AUTONOMOUS_OFFLINE_SCENARIO_SCHEMA,
     AUTONOMOUS_OFFLINE_SCENARIO_REPLAY_SCHEMA,
@@ -5454,6 +5465,15 @@ __all__ = [
     "AutonomousDomainTaskLens",
     "builtin_autonomous_domain_task_lenses",
     "autonomous_domain_task_lens",
+    "AUTONOMOUS_TASK_INTENT_SCHEMA",
+    "AUTONOMOUS_TASK_INTENT_VERSION",
+    "AUTONOMOUS_TASK_INTENT_DOMAINS",
+    "AUTONOMOUS_TASK_INTENT_ACTION_MODES",
+    "AUTONOMOUS_TASK_INTENT_EFFECTS",
+    "AUTONOMOUS_TASK_INTENT_EVIDENCE_MODES",
+    "MAX_AUTONOMOUS_TASK_INTENT_ITEMS",
+    "AutonomousTaskIntent",
+    "infer_autonomous_task_intent",
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",

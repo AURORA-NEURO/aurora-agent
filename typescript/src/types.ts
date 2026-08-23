@@ -203,6 +203,12 @@ export interface BrainModelSelectionContext extends JsonObject {
   task_lens_model_capability_hints?: string[];
   task_lens_evaluator_signals?: string[];
   task_lens_planning_dimensions?: string[];
+  task_intent_id?: string;
+  task_intent_digest?: string;
+  task_intent_action_mode?: string;
+  task_intent_requested_effect?: string;
+  task_intent_evidence_mode?: string;
+  task_intent_ambiguity_flags?: string[];
 }
 
 export interface BrainContextualModelObservation extends JsonObject {

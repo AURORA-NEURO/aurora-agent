@@ -44,12 +44,14 @@ test("task lenses bind to prompts and provider plans without changing authority"
     selectedToolNames: ["repository_catalog"],
   });
   assert.equal(plan.task_lens_digest, lens.lens_digest);
+  assert.equal(typeof plan.task_intent_digest, "string");
   assert.ok(plan.steps.every((step) => step.arguments.task_lens_id === lens.lens_id));
   assert.ok(plan.steps.every((step) => step.arguments.task_lens_digest === lens.lens_digest));
+  assert.ok(plan.steps.every((step) => typeof step.arguments.task_intent_digest === "string"));
   assert.equal(plan.requires_approval, true);
   assert.equal(plan.execution, "not_started");
 
-  const prompt = await assembleAutonomousPrompt(profile, "Implement and verify the change.", { maxInputTokens: 2_048 });
+  const prompt = await assembleAutonomousPrompt(profile, "Implement and verify the change.", { maxInputTokens: 4_096 });
   assert.ok(prompt.messages.some((message) => message.content.includes(lens.lens_id)));
   assert.ok(prompt.messages.some((message) => message.content.includes(lens.lens_digest)));
 });

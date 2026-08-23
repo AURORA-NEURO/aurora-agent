@@ -1325,9 +1325,12 @@ def test_builtin_domain_registry_covers_every_autonomous_domain_and_blueprint_re
         public = blueprint.to_dict()
         assert public["task"]["task_digest"]
         assert "private api key" not in json.dumps(public).lower()
+        assert public["task_intent"]["task_digest"] == public["task"]["task_digest"]
+        assert public["task_intent"]["authorization"] == "classification_only;no_provider_tool_or_effect_authority"
         assert public["prompt"]["context_ids"] == [
             "autonomy-domain-policy",
             "autonomy-task-lens",
+            "autonomy-task-intent",
             "autonomy-domain-pack",
             "autonomy-capability-contract",
             "autonomy-workflow-contract",

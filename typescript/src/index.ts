@@ -99,6 +99,18 @@ export {
   autonomousTaskLensPromptContract,
 } from "./autonomous-task-lens.js";
 export type { AutonomousDomainTaskLens } from "./autonomous-task-lens.js";
+export {
+  AUTONOMOUS_TASK_INTENT_SCHEMA,
+  AUTONOMOUS_TASK_INTENT_VERSION,
+  AUTONOMOUS_TASK_INTENT_DOMAINS,
+  AUTONOMOUS_TASK_INTENT_ACTION_MODES,
+  AUTONOMOUS_TASK_INTENT_EFFECTS,
+  AUTONOMOUS_TASK_INTENT_EVIDENCE_MODES,
+  MAX_AUTONOMOUS_TASK_INTENT_ITEMS,
+  autonomousTaskIntentPromptContract,
+  inferAutonomousTaskIntent,
+} from "./autonomous-task-intent.js";
+export type { AutonomousTaskIntent } from "./autonomous-task-intent.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,

@@ -163,6 +163,11 @@ import {
   autonomousTaskLensPromptContract,
   type AutonomousDomainTaskLens,
 } from "./autonomous-task-lens.js";
+import {
+  autonomousTaskIntentPromptContract,
+  inferAutonomousTaskIntent,
+  type AutonomousTaskIntent,
+} from "./autonomous-task-intent.js";
 import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson, digestJsonSync } from "./tooling.js";
 import {
   autonomousDomainPolicy,
@@ -674,6 +679,8 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   domain_policy: AutonomousDomainPolicy;
   /** Domain-specific planning posture; guidance metadata never authorizes execution. */
   task_lens: AutonomousDomainTaskLens;
+  /** Provider-free task interpretation; classification metadata never authorizes execution. */
+  task_intent: AutonomousTaskIntent;
   prompt: AutonomousPromptResult;
   plan: AutonomousPlan;
   /** Present only when the caller explicitly enables the reviewed structured domain response. */
@@ -2590,6 +2597,15 @@ async function buildTaskBlueprint(
   const selectedToolNames = [...new Set(options.selectedToolNames ?? activeToolNames)];
   const domainPolicy = autonomousDomainPolicy(profile.domain);
   const taskLens = autonomousDomainTaskLens(profile.domain);
+  const taskIntent = inferAutonomousTaskIntent({
+    task: taskText,
+    taskDigest,
+    domain: profile.domain,
+    capability: options.capability ?? profile.default_capability,
+    riskClass: profile.risk_class,
+    workflowId: profile.workflow.workflow_id,
+    lens: taskLens,
+  });
   const pack = await buildDomainPack(profile);
   const evidencePlan = await buildAutonomousEvidencePlan([profile.workflow]);
   const responseContract = options.structuredDomainResponse === true
@@ -2619,6 +2635,12 @@ async function buildTaskBlueprint(
     task_lens_model_capability_hints: [...taskLens.model_capability_hints],
     task_lens_evaluator_signals: [...taskLens.evaluator_signals],
     task_lens_planning_dimensions: [...taskLens.planning_dimensions],
+    task_intent_id: taskIntent.intent_id,
+    task_intent_digest: taskIntent.intent_digest,
+    task_intent_action_mode: taskIntent.action_mode,
+    task_intent_requested_effect: taskIntent.requested_effect,
+    task_intent_evidence_mode: taskIntent.evidence_mode,
+    task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags],
   };
   // Match the Rust/Python context identity byte-for-byte: field order is part of this
   // cross-language value contract, while task text and provider payloads stay outside it.
@@ -2645,6 +2667,7 @@ async function buildTaskBlueprint(
     required_capabilities: profile.required_model_capabilities,
     domain_policy: domainPolicy,
     task_lens: taskLens,
+    task_intent: taskIntent,
     prompt,
     plan,
     ...(responseContract ? { response_contract: responseContract } : {}),
@@ -3030,8 +3053,19 @@ export async function assembleAutonomousPrompt(
   const stageIds = options.stageIds ?? profile.workflow.stages.map((stage) => stage.id);
   const evidencePlan = options.evidencePlan ?? await buildAutonomousEvidencePlan([profile.workflow]);
   const taskLens = autonomousDomainTaskLens(profile.domain);
+  const taskDigest = await digestJson({ task: taskText });
+  const taskIntent = inferAutonomousTaskIntent({
+    task: taskText,
+    taskDigest,
+    domain: profile.domain,
+    capability: profile.default_capability,
+    riskClass: profile.risk_class,
+    workflowId: profile.workflow.workflow_id,
+    lens: taskLens,
+  });
   const system = `${profile.system_instructions}\n\nGuardrails:\n${profile.guardrails.map((guardrail) => `- ${guardrail}`).join("\n")}`;
-  const developer = `Domain: ${profile.domain}\nRisk class: ${profile.risk_class}\nCapability: ${profile.default_capability}\nWorkflow: ${profile.workflow.workflow_id}\nStages: ${stageIds.join(", ")}\nTask lens: ${JSON.stringify(autonomousTaskLensPromptContract(taskLens, maxInputTokens < 2_048))}\n\n${outputContract}`;
+  const intentPrompt = maxInputTokens < 1_024 ? "" : `\nTask intent: ${JSON.stringify(autonomousTaskIntentPromptContract(taskIntent, maxInputTokens < 2_048))}`;
+  const developer = `Domain: ${profile.domain}\nRisk class: ${profile.risk_class}\nCapability: ${profile.default_capability}\nWorkflow: ${profile.workflow.workflow_id}\nStages: ${stageIds.join(", ")}\nTask lens: ${JSON.stringify(autonomousTaskLensPromptContract(taskLens, maxInputTokens < 2_048))}${intentPrompt}\n\n${outputContract}`;
   const requiredMessages: AutonomousPromptMessage[] = [
     { role: "system", content: system, source_id: "domain-system" },
     { role: "developer", content: developer, source_id: "domain-developer" },
@@ -3255,7 +3289,17 @@ export async function compileAutonomousPlan(
 ): Promise<AutonomousPlan> {
   const taskText = boundedText("autonomous plan objective", task, 32_000);
   const taskDigest = options.taskDigest ?? await digestJson({ task: taskText });
+  const intentTaskDigest = await digestJson({ task: taskText });
   const taskLens = autonomousDomainTaskLens(profile.domain);
+  const taskIntent = inferAutonomousTaskIntent({
+    task: taskText,
+    taskDigest: intentTaskDigest,
+    domain: profile.domain,
+    capability: profile.default_capability,
+    riskClass: profile.risk_class,
+    workflowId: profile.workflow.workflow_id,
+    lens: taskLens,
+  });
   const active = new Set(options.activeToolNames ?? []);
   const selected = new Set(options.selectedToolNames ?? []);
   const selectedOrder = new Map((options.selectedToolOrder ?? options.selectedToolNames ?? []).map((name, index) => [name, index]));
@@ -3274,7 +3318,7 @@ export async function compileAutonomousPlan(
       id: stage.id,
       objective: stage.objective,
       tool: binding?.name ?? "provider.invoke",
-      arguments: { domain: profile.domain, capability: profile.default_capability, stage_id: stage.id, task_digest: taskDigest, task_lens_id: taskLens.lens_id, task_lens_digest: taskLens.lens_digest },
+      arguments: { domain: profile.domain, capability: profile.default_capability, stage_id: stage.id, task_digest: taskDigest, task_lens_id: taskLens.lens_id, task_lens_digest: taskLens.lens_digest, task_intent_id: taskIntent.intent_id, task_intent_digest: taskIntent.intent_digest, task_intent_action_mode: taskIntent.action_mode, task_intent_requested_effect: taskIntent.requested_effect, task_intent_evidence_mode: taskIntent.evidence_mode, task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags] },
       depends_on: [...stage.depends_on],
       effect,
       estimated_cost: index + 1,
@@ -3294,6 +3338,7 @@ export async function compileAutonomousPlan(
     ...(options.responseContractDigest === undefined ? {} : { response_contract_digest: boundedModelDigest("autonomous plan response contract digest", options.responseContractDigest) }),
     domain_policy_digest: autonomousDomainPolicy(profile.domain).policy_digest,
     task_lens_digest: taskLens.lens_digest,
+    task_intent_digest: taskIntent.intent_digest,
     does_not_claim: ["the plan has not executed any provider or tool", "tool registration is not authorization", "a provider response is not external-effect evidence"],
   };
   return { ...descriptor, plan_digest: await digestJson(descriptor) };

@@ -2252,6 +2252,49 @@ the user objective, model response, credentials, tool arguments, or hidden autho
 lens version or digest is observable during review and replay, but cannot by itself authorize a
 provider invocation or external effect.
 
+### Task intent: make the agent's first interpretation inspectable
+
+Routing alone answers “which domain might own this work?” It does not answer “what kind of work
+does the request appear to ask for?” Before model selection, each blueprint now derives a bounded
+`bioprism-autonomous-task-intent/0.1` projection. It classifies the task into a reviewed action
+mode (`observe`, `investigate`, `analyze`, `create`, `modify`, `compare`, `plan`, `coordinate`,
+`evaluate`, or `synthesize`), records whether the language suggests no effect, a local change,
+or an external effect, and binds the domain's evidence posture.
+
+The intent also exposes alternative action modes, ambiguity flags, planning signals, evaluator
+success signals, risk signals, requested-output count, and digests of caller constraints and
+desired outputs. The classifier uses deterministic reviewed vocabulary and domain defaults; it
+does not call a provider and it never becomes an authorization decision. Explicit effect language
+adds an approval-review signal, but cannot grant permission. Missing output criteria or competing
+action cues remain visible so a UI or caller can ask for clarification instead of silently
+committing to an interpretation.
+
+```python
+from prism_sdk import autonomous_domain_task_lens, content_digest, infer_autonomous_task_intent
+
+task = "deploy the biomedical report and verify safety"
+intent = infer_autonomous_task_intent(
+    task=task,
+    task_digest=content_digest({"task": task}),
+    domain="biomedical",
+    capability="biomedical_analysis",
+    risk_class="clinical_review",
+    workflow_id="biomedical_review",
+    lens=autonomous_domain_task_lens("biomedical"),
+    desired_outputs=("safety boundary",),
+)
+# intent.requested_effect == "external_effect"
+# "effect_requires_explicit_approval" is retained in intent.ambiguity_flags
+```
+
+The intent digest is canonical across Python and TypeScript and includes the task digest, reviewed
+lens digest, domain/workflow identity, classification, bounded signals, and constraint/output
+digests. Raw task text is not included in the public intent projection. Normal prompts receive the
+full contract; very small TypeScript prompt budgets use a compact marker or rely on the blueprint
+and plan projection so the evidence contract still fits. Plan steps carry the intent ID and digest,
+selection context carries the action/effect/evidence/ambiguity projection, and replay or episodic
+memory can retain the digest without retaining the task or provider response.
+
 ### Provider-assisted mission ordering with replay-safe acceptance
 
 Mission execution now has the same planner boundary as workflow and portfolio execution. The
