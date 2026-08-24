@@ -228,6 +228,15 @@ pub const QUERY_ADAPTIVE_FIELD_PATHS: &[&str] = &[
 pub const REFERENCE_GOAL: &str =
     "Determine whether the proposed radiogenomic split supports a valid external-generalization analysis.";
 
+/// The goal echoed when a post-reference query declares none.
+///
+/// `fiber-query/0.1` and `/0.2` are the versions the CPython reference accepts, so for those the
+/// radiogenomic [`REFERENCE_GOAL`] substitution is reproduced byte for byte. The reference does
+/// not accept any later version, so no parity claim reaches them, and substituting another
+/// domain's sentence there would be an invention rather than a compatibility: a missing goal is
+/// reported as missing.
+pub const NO_DECLARED_GOAL: &str = "The query declares no goal.";
+
 /// Whether the query's matrix is written as a loss to minimise or a utility to maximise.
 ///
 /// The epistemic kernel uses loss internally. Utility input is negated exactly once at the QIR
@@ -310,6 +319,7 @@ pub struct Query {
     pub decision_contract: Option<DecisionContract>,
     pub rate_distortion: Option<RateDistortionContract>,
     pub adaptive_acquisition: Option<AdaptiveAcquisitionContract>,
+    schema_version: String,
     raw: Value,
 }
 
@@ -434,6 +444,7 @@ impl Query {
             decision_contract,
             rate_distortion,
             adaptive_acquisition,
+            schema_version: schema_version.to_string(),
             raw,
         })
     }
@@ -442,8 +453,28 @@ impl Query {
         &self.raw
     }
 
+    /// The wire version this query was parsed from.
+    pub fn schema_version(&self) -> &str {
+        &self.schema_version
+    }
+
+    /// The goal echoed into the Decision Section.
+    ///
+    /// The CPython reference accepts only `fiber-query/0.1` and `/0.2` and hard-codes
+    /// [`REFERENCE_GOAL`] into every section without reading this key; that substitution is
+    /// reproduced for those two versions so sections stay byte-comparable, and it is a recorded
+    /// defect in the reference. Later versions carry no parity claim, so a missing goal is
+    /// reported as [`NO_DECLARED_GOAL`] rather than replaced by another domain's sentence.
     pub fn goal_text(&self) -> &str {
-        self.goal.as_deref().unwrap_or(REFERENCE_GOAL)
+        match &self.goal {
+            Some(goal) => goal,
+            None if self.schema_version == "fiber-query/0.1"
+                || self.schema_version == QUERY_SCHEMA_VERSION =>
+            {
+                REFERENCE_GOAL
+            }
+            None => NO_DECLARED_GOAL,
+        }
     }
 
     pub fn has_decision_contract(&self) -> bool {
