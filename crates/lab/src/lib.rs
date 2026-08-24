@@ -130,53 +130,30 @@
 //! ```
 
 pub mod context_value;
-pub mod experiment_design;
+pub mod design_frontier;
 pub mod error;
 pub mod evolution;
+pub mod experiment_design;
 pub mod holdout;
 pub mod hypothesis;
-pub mod pareto;
-pub mod protocol_simulation;
 pub mod instrument_preflight;
+pub mod pareto;
 pub mod protocol_matrix;
-pub mod design_frontier;
+pub mod protocol_simulation;
 pub mod report;
 pub mod risk;
 pub mod rollback;
+pub mod semantic_parity;
 pub mod space;
 
 pub use context_value::{
     expand, AcquisitionAction, AcquisitionCost, AcquisitionKind, ExclusionReason, Expansion,
     PlannedAcquisition, PrivacyBoundary, StopReason,
 };
-pub use experiment_design::{
-    compile_experiment_design, AcceptanceGate, ArmKind, BlindingScheme, DesignArm,
-    DesignPlanPayload, ExperimentDesignError, ExperimentDesignPlan, ExperimentDesignRequest,
-    NullResultPolicy, PowerProjection, RandomizationScheme, SampleAllocation, StudyPopulation,
-    TestTail,
-};
-pub use protocol_simulation::{
-    simulate_protocol, ProtocolOperation, ProtocolScenario, ProtocolSimulationError,
-    ProtocolSimulationPayload, ProtocolSimulationReport, ProtocolSimulationRequest, ProtocolStep,
-    ScenarioResult, ScenarioStatus,
-};
-pub use instrument_preflight::{
-    instrument_preflight, instrument_preflight_manifest, InstrumentAction,
-    InstrumentPreflightError, InstrumentPreflightReceipt, InstrumentPreflightRequest,
-    PreflightDecision, FEATURE_CONTRACT_VERSION as INSTRUMENT_PREFLIGHT_FEATURE_VERSION,
-    FEATURE_ID as INSTRUMENT_PREFLIGHT_FEATURE_ID,
-};
-pub use protocol_matrix::{
-    protocol_matrix_manifest, simulate_protocol_matrix, MatrixCondition, MatrixFactor,
-    MatrixCellResult, ProtocolMatrixError, ProtocolMatrixReceipt, ProtocolMatrixRequest,
-    FEATURE_ID as PROTOCOL_MATRIX_FEATURE_ID,
-    FEATURE_VERSION as PROTOCOL_MATRIX_FEATURE_VERSION,
-};
 pub use design_frontier::{
-    design_frontier_manifest, evaluate_design_frontier, DesignFrontierError,
-    DesignFrontierReceipt, DesignFrontierRequest, DesignScenario, DesignScenarioResult,
-    ScenarioDisposition, FEATURE_ID as DESIGN_FRONTIER_FEATURE_ID,
-    FEATURE_VERSION as DESIGN_FRONTIER_FEATURE_VERSION,
+    design_frontier_manifest, evaluate_design_frontier, DesignFrontierError, DesignFrontierReceipt,
+    DesignFrontierRequest, DesignScenario, DesignScenarioResult, ScenarioDisposition,
+    FEATURE_ID as DESIGN_FRONTIER_FEATURE_ID, FEATURE_VERSION as DESIGN_FRONTIER_FEATURE_VERSION,
 };
 pub use error::{
     EvolutionError, HoldoutError, LabError, ParetoError, RollbackError, SeparationError, SpaceError,
@@ -184,6 +161,12 @@ pub use error::{
 pub use evolution::{
     ChangeProposal, ContaminationRecord, EvolutionArchive, EvolutionCard, ImprovementClaim,
     MeasurementSurface,
+};
+pub use experiment_design::{
+    compile_experiment_design, AcceptanceGate, ArmKind, BlindingScheme, DesignArm,
+    DesignPlanPayload, ExperimentDesignError, ExperimentDesignPlan, ExperimentDesignRequest,
+    NullResultPolicy, PowerProjection, RandomizationScheme, SampleAllocation, StudyPopulation,
+    TestTail,
 };
 pub use holdout::{
     CleanMeasurement, ExposureEvent, ExposureKind, ExposureWatermark, Holdout, HoldoutId,
@@ -193,9 +176,25 @@ pub use hypothesis::{
     separate, DisagreementPoint, DischargedSeparator, Hypothesis, HypothesisSet, Locus,
     NotSeparableReason, Observations, PendingSeparator, Retirement, SeparationVerdict, Stance,
 };
+pub use instrument_preflight::{
+    instrument_preflight, instrument_preflight_manifest, InstrumentAction,
+    InstrumentPreflightError, InstrumentPreflightReceipt, InstrumentPreflightRequest,
+    PreflightDecision, FEATURE_CONTRACT_VERSION as INSTRUMENT_PREFLIGHT_FEATURE_VERSION,
+    FEATURE_ID as INSTRUMENT_PREFLIGHT_FEATURE_ID,
+};
 pub use pareto::{
     compare, Admission, AxisValue, Direction, Dominance, Incomparability, Objective, ParetoFront,
     Profile, Selection, Unresolved,
+};
+pub use protocol_matrix::{
+    protocol_matrix_manifest, simulate_protocol_matrix, MatrixCellResult, MatrixCondition,
+    MatrixFactor, ProtocolMatrixError, ProtocolMatrixReceipt, ProtocolMatrixRequest,
+    FEATURE_ID as PROTOCOL_MATRIX_FEATURE_ID, FEATURE_VERSION as PROTOCOL_MATRIX_FEATURE_VERSION,
+};
+pub use protocol_simulation::{
+    simulate_protocol, ProtocolOperation, ProtocolScenario, ProtocolSimulationError,
+    ProtocolSimulationPayload, ProtocolSimulationReport, ProtocolSimulationRequest, ProtocolStep,
+    ScenarioResult, ScenarioStatus,
 };
 pub use report::LabReport;
 pub use risk::{
@@ -205,6 +204,11 @@ pub use risk::{
 };
 pub use rollback::{
     Checkpoint, Deployment, DeploymentEvent, ExposureSinceCheckpoint, RollbackReceipt,
+};
+pub use semantic_parity::{
+    evaluate_semantic_parity, LabInstitutionReport, LabSemanticParityReceipt,
+    LabSemanticParityRequest, SemanticParityDisposition, SemanticParityError,
+    CONTRACT_VERSION as SEMANTIC_PARITY_CONTRACT_VERSION, FEATURE_ID as SEMANTIC_PARITY_FEATURE_ID,
 };
 pub use space::{
     ArchitectureSpace, CandidateArchitecture, ComponentKind, ComponentSpec, ConfigurationId,

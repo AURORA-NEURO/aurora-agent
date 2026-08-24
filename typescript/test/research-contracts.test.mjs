@@ -102,6 +102,10 @@ import {
   FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION,
   federatedLensAssuranceReceiptDigest,
   validateFederatedLensAssuranceReceipt,
+  SEMANTIC_PARITY_FEATURE_ID,
+  SEMANTIC_PARITY_CONTRACT_VERSION,
+  labSemanticParityReceiptDigest,
+  validateLabSemanticParityReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -735,4 +739,25 @@ test("federated lens assurance keeps missing lens unknown", () => {
   };
   assert.doesNotThrow(() => validateFederatedLensAssuranceReceipt(receipt));
   assert.equal(federatedLensAssuranceReceiptDigest(receipt), federatedLensAssuranceReceiptDigest(receipt));
+});
+
+test("lab semantic parity keeps disagreement unknown", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: SEMANTIC_PARITY_FEATURE_ID,
+    contract_version: SEMANTIC_PARITY_CONTRACT_VERSION,
+    request_id: "request:parity",
+    federation_id: "federation:lab",
+    protocol_id: "protocol:organoid",
+    benchmark_id: "benchmark:lab",
+    institution_ids: ["site:a", "site:b"],
+    disposition: "unknown",
+    semantic_digest: null,
+    checks: ["semantic disagreement remains unknown rather than a consensus"],
+    omissions: ["institution semantic or scenario identities disagree"],
+    artifact: { content_hash: "b".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateLabSemanticParityReceipt(receipt));
+  assert.equal(labSemanticParityReceiptDigest(receipt), labSemanticParityReceiptDigest(receipt));
 });

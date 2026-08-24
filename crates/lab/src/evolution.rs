@@ -499,7 +499,9 @@ mod tests {
         .unwrap();
         let claim = card.claim_improvement(Direction::HigherIsBetter).unwrap();
         assert!((claim.delta() - 0.13).abs() < 1e-9);
-        assert!(claim.to_sentence().contains("rotating_private_certification"));
+        assert!(claim
+            .to_sentence()
+            .contains("rotating_private_certification"));
     }
 
     #[test]

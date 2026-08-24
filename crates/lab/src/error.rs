@@ -38,7 +38,9 @@ pub enum SpaceError {
     #[error("candidate `{candidate}` omits a required component kind: {kind}")]
     MissingRequiredComponent { candidate: String, kind: String },
 
-    #[error("candidate `{candidate}` declares {cost_units} cost units against a ceiling of {ceiling}")]
+    #[error(
+        "candidate `{candidate}` declares {cost_units} cost units against a ceiling of {ceiling}"
+    )]
     CostCeilingExceeded {
         candidate: String,
         cost_units: u64,
@@ -128,7 +130,9 @@ pub enum HoldoutError {
     #[error("the two measurements compare `{left}` against `{right}`; a delta needs one metric")]
     MetricMismatch { left: String, right: String },
 
-    #[error("the two measurements come from holdouts `{left}` and `{right}`; a delta needs one surface")]
+    #[error(
+        "the two measurements come from holdouts `{left}` and `{right}`; a delta needs one surface"
+    )]
     SurfaceMismatch { left: String, right: String },
 }
 
@@ -217,7 +221,9 @@ pub enum LabError {
     #[error("branch policy would spend {requested} branches against a hard ceiling of {ceiling}")]
     BranchCeilingExceeded { requested: u32, ceiling: u32 },
 
-    #[error("branch policy would spend {requested} verifier calls against a hard ceiling of {ceiling}")]
+    #[error(
+        "branch policy would spend {requested} verifier calls against a hard ceiling of {ceiling}"
+    )]
     VerifierCeilingExceeded { requested: u32, ceiling: u32 },
 
     #[error("branch rule `{0}` states no trigger predicate; an unconditional escalation is not risk-triggered")]

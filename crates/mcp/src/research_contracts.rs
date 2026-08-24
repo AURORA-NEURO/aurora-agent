@@ -30,10 +30,12 @@ use bioprism_governance::{
     RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
 };
 use bioprism_lab::{
-    evaluate_design_frontier, instrument_preflight, simulate_protocol_matrix,
-    DesignFrontierReceipt, DesignFrontierRequest, InstrumentPreflightReceipt,
-    InstrumentPreflightRequest, ProtocolMatrixReceipt, ProtocolMatrixRequest,
+    evaluate_design_frontier, evaluate_semantic_parity, instrument_preflight,
+    simulate_protocol_matrix, DesignFrontierReceipt, DesignFrontierRequest,
+    InstrumentPreflightReceipt, InstrumentPreflightRequest, LabSemanticParityReceipt,
+    LabSemanticParityRequest, ProtocolMatrixReceipt, ProtocolMatrixRequest,
     DESIGN_FRONTIER_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID,
+    SEMANTIC_PARITY_FEATURE_ID,
 };
 use bioprism_lens::{
     assure_federated_lens, FederatedLensAssuranceReceipt, FederatedLensAssuranceRequest,
@@ -93,6 +95,7 @@ pub const PROTOCOL_ASSURANCE_TOOL: &str = "protocol_assurance_harness";
 pub const FEDERATED_MULTIMODAL_ASSURANCE_TOOL: &str = "federated_multimodal_assurance";
 pub const FEDERATED_KNOWLEDGE_GATEWAY_TOOL: &str = "federated_knowledge_gateway";
 pub const FEDERATED_LENS_ASSURANCE_TOOL: &str = "federated_lens_assurance";
+pub const SEMANTIC_PARITY_TOOL: &str = "lab_semantic_parity";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -534,6 +537,24 @@ pub fn validate_federated_lens_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FEDERATED_LENS_ASSURANCE_FEATURE_ID {
         return Err("federated lens assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn evaluate_semantic_parity_json(value: &Value) -> Result<Value, String> {
+    let request: LabSemanticParityRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid lab semantic parity request: {error}"))?;
+    let receipt = evaluate_semantic_parity(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize lab semantic parity receipt: {error}"))
+}
+
+pub fn validate_semantic_parity_json(value: &Value) -> Result<LabSemanticParityReceipt, String> {
+    let receipt: LabSemanticParityReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid lab semantic parity receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != SEMANTIC_PARITY_FEATURE_ID {
+        return Err("lab semantic parity feature id mismatch".into());
     }
     Ok(receipt)
 }

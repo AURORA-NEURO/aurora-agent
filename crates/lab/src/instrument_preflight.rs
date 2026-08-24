@@ -77,7 +77,10 @@ impl InstrumentPreflightReceipt {
                 "research contract schema mismatch".into(),
             ));
         }
-        if self.feature_id != FEATURE_ID || self.run_id.trim().is_empty() || self.study_id.trim().is_empty() {
+        if self.feature_id != FEATURE_ID
+            || self.run_id.trim().is_empty()
+            || self.study_id.trim().is_empty()
+        {
             return Err(InstrumentPreflightError::InvalidRequest(
                 "feature, run, and study identity are required".into(),
             ));
@@ -87,7 +90,10 @@ impl InstrumentPreflightReceipt {
                 "instrument preflight crossed the preclinical boundary".into(),
             ));
         }
-        if self.ordered_actions.is_empty() || self.action_digests.is_empty() || self.reasons.is_empty() {
+        if self.ordered_actions.is_empty()
+            || self.action_digests.is_empty()
+            || self.reasons.is_empty()
+        {
             return Err(InstrumentPreflightError::InvalidRequest(
                 "preflight actions, digests, and reasons are required".into(),
             ));
@@ -248,7 +254,10 @@ pub fn instrument_preflight(
         run_id: request.run_id.clone(),
         study_id: request.study_id.clone(),
         decision,
-        ordered_actions: actions.iter().map(|action| action.action_id.clone()).collect(),
+        ordered_actions: actions
+            .iter()
+            .map(|action| action.action_id.clone())
+            .collect(),
         action_digests,
         remaining_budget,
         omissions,
@@ -261,7 +270,10 @@ pub fn instrument_preflight(
 }
 
 fn validate_request(request: &InstrumentPreflightRequest) -> Result<(), InstrumentPreflightError> {
-    if request.run_id.trim().is_empty() || request.study_id.trim().is_empty() || request.actions.is_empty() {
+    if request.run_id.trim().is_empty()
+        || request.study_id.trim().is_empty()
+        || request.actions.is_empty()
+    {
         return Err(InstrumentPreflightError::InvalidRequest(
             "run, study, and at least one action are required".into(),
         ));
@@ -270,7 +282,11 @@ fn validate_request(request: &InstrumentPreflightRequest) -> Result<(), Instrume
         .policy
         .validate()
         .map_err(|error| InstrumentPreflightError::Contract(error.to_string()))?;
-    if request.required_interlocks.iter().any(|interlock| !request.declared_interlocks.contains(interlock)) {
+    if request
+        .required_interlocks
+        .iter()
+        .any(|interlock| !request.declared_interlocks.contains(interlock))
+    {
         let missing = request
             .required_interlocks
             .iter()
@@ -278,7 +294,11 @@ fn validate_request(request: &InstrumentPreflightRequest) -> Result<(), Instrume
             .expect("missing interlock exists");
         return Err(InstrumentPreflightError::MissingInterlock(missing.clone()));
     }
-    if request.resource_budget.values().any(|value| !value.is_finite() || *value < 0.0) {
+    if request
+        .resource_budget
+        .values()
+        .any(|value| !value.is_finite() || *value < 0.0)
+    {
         return Err(InstrumentPreflightError::InvalidRequest(
             "resource budgets must be finite and non-negative".into(),
         ));
@@ -286,13 +306,19 @@ fn validate_request(request: &InstrumentPreflightRequest) -> Result<(), Instrume
     let mut action_ids = BTreeSet::new();
     let mut totals = BTreeMap::<String, f64>::new();
     for action in &request.actions {
-        if action.action_id.trim().is_empty() || action.instrument_id.trim().is_empty() || action.operation.trim().is_empty() || action.resource.trim().is_empty() {
+        if action.action_id.trim().is_empty()
+            || action.instrument_id.trim().is_empty()
+            || action.operation.trim().is_empty()
+            || action.resource.trim().is_empty()
+        {
             return Err(InstrumentPreflightError::InvalidRequest(
                 "instrument action identity and operation are required".into(),
             ));
         }
         if !action_ids.insert(action.action_id.clone()) {
-            return Err(InstrumentPreflightError::DuplicateAction(action.action_id.clone()));
+            return Err(InstrumentPreflightError::DuplicateAction(
+                action.action_id.clone(),
+            ));
         }
         if !action.cost.is_finite() || action.cost < 0.0 {
             return Err(InstrumentPreflightError::InvalidRequest(format!(
@@ -301,7 +327,9 @@ fn validate_request(request: &InstrumentPreflightRequest) -> Result<(), Instrume
             )));
         }
         if !action.reversible && action.evidence_digest.is_none() {
-            return Err(InstrumentPreflightError::MissingEvidence(action.action_id.clone()));
+            return Err(InstrumentPreflightError::MissingEvidence(
+                action.action_id.clone(),
+            ));
         }
         *totals.entry(action.resource.clone()).or_default() += action.cost;
     }
@@ -387,7 +415,10 @@ mod tests {
         request.emergency_stop_asserted = true;
         let receipt = instrument_preflight(&request).unwrap();
         assert_eq!(receipt.decision, PreflightDecision::EmergencyStop);
-        assert!(receipt.reasons.iter().any(|reason| reason.contains("emergency stop")));
+        assert!(receipt
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("emergency stop")));
     }
 
     #[test]

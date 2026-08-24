@@ -304,10 +304,7 @@ impl HypothesisSet {
                         .map(|commitment| (hypothesis.id.clone(), commitment))
                 })
                 .collect();
-            let point = DisagreementPoint {
-                locus,
-                commitments,
-            };
+            let point = DisagreementPoint { locus, commitments };
             if point.sides().len() >= 2 {
                 points.push(point);
             }
@@ -611,7 +608,9 @@ mod tests {
     fn graph_with(states: &[(&str, ObligationState, &[&str])]) -> ObligationGraph {
         let mut graph = ObligationGraph::new("distinguish the two explanations");
         for (id, _, _) in states {
-            graph.insert(Obligation::new(*id, format!("is `{id}` true?"))).unwrap();
+            graph
+                .insert(Obligation::new(*id, format!("is `{id}` true?")))
+                .unwrap();
         }
         for (id, state, evidence) in states {
             if *state == ObligationState::Unseen {
@@ -630,15 +629,23 @@ mod tests {
     fn two_rival_hypotheses() -> HypothesisSet {
         let mut set = HypothesisSet::new();
         set.insert(
-            Hypothesis::new("retry", "the retry path double-writes", "template:structural")
-                .asserting("idempotency_key_stable")
-                .predicting("duplicate_rows", "present"),
+            Hypothesis::new(
+                "retry",
+                "the retry path double-writes",
+                "template:structural",
+            )
+            .asserting("idempotency_key_stable")
+            .predicting("duplicate_rows", "present"),
         )
         .unwrap();
         set.insert(
-            Hypothesis::new("clock", "the clock skew reorders writes", "template:structural")
-                .denying("idempotency_key_stable")
-                .predicting("duplicate_rows", "absent"),
+            Hypothesis::new(
+                "clock",
+                "the clock skew reorders writes",
+                "template:structural",
+            )
+            .denying("idempotency_key_stable")
+            .predicting("duplicate_rows", "absent"),
         )
         .unwrap();
         set
@@ -650,13 +657,21 @@ mod tests {
     fn two_rivals_on_one_assumption() -> HypothesisSet {
         let mut set = HypothesisSet::new();
         set.insert(
-            Hypothesis::new("retry", "the retry path double-writes", "template:structural")
-                .asserting("idempotency_key_stable"),
+            Hypothesis::new(
+                "retry",
+                "the retry path double-writes",
+                "template:structural",
+            )
+            .asserting("idempotency_key_stable"),
         )
         .unwrap();
         set.insert(
-            Hypothesis::new("clock", "the clock skew reorders writes", "template:structural")
-                .denying("idempotency_key_stable"),
+            Hypothesis::new(
+                "clock",
+                "the clock skew reorders writes",
+                "template:structural",
+            )
+            .denying("idempotency_key_stable"),
         )
         .unwrap();
         set
@@ -783,11 +798,7 @@ mod tests {
     #[test]
     fn an_unresolvable_discriminator_leaves_the_pair_not_separable_rather_than_tied() {
         let set = two_rivals_on_one_assumption();
-        let graph = graph_with(&[(
-            "idempotency_key_stable",
-            ObligationState::Unresolvable,
-            &[],
-        )]);
+        let graph = graph_with(&[("idempotency_key_stable", ObligationState::Unresolvable, &[])]);
         let verdict = separate(&set, &graph, &Observations::new()).unwrap();
         assert!(matches!(
             verdict,
@@ -835,12 +846,8 @@ mod tests {
     #[test]
     fn separation_on_one_locus_reports_the_disagreements_that_remain_among_survivors() {
         let mut set = HypothesisSet::new();
-        set.insert(
-            Hypothesis::new("a", "a", "t")
-                .asserting("k")
-                .asserting("m"),
-        )
-        .unwrap();
+        set.insert(Hypothesis::new("a", "a", "t").asserting("k").asserting("m"))
+            .unwrap();
         set.insert(Hypothesis::new("b", "b", "t").asserting("k").denying("m"))
             .unwrap();
         set.insert(Hypothesis::new("c", "c", "t").denying("k").denying("m"))

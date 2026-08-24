@@ -46,6 +46,8 @@ export const FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-store-P04-F24" as con
 export const FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "federated-knowledge-gateway/1.0" as const;
 export const FEDERATED_LENS_ASSURANCE_FEATURE_ID = "AFA-lens-P04-F28" as const;
 export const FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION = "federated-lens-assurance/1.0" as const;
+export const SEMANTIC_PARITY_FEATURE_ID = "AFA-lab-P28-F12" as const;
+export const SEMANTIC_PARITY_CONTRACT_VERSION = "lab-semantic-parity/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -935,6 +937,37 @@ export function validateFederatedLensAssuranceReceipt(receipt: FederatedLensAssu
 
 export function federatedLensAssuranceReceiptDigest(receipt: FederatedLensAssuranceReceipt): string {
   validateFederatedLensAssuranceReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface LabSemanticParityReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  federation_id: string;
+  protocol_id: string;
+  benchmark_id: string;
+  institution_ids: string[];
+  disposition: "passed" | "blocked" | "unknown";
+  semantic_digest: string | null;
+  checks: string[];
+  omissions: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateLabSemanticParityReceipt(receipt: LabSemanticParityReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== SEMANTIC_PARITY_FEATURE_ID || receipt.contract_version !== SEMANTIC_PARITY_CONTRACT_VERSION) throw new Error("lab semantic parity schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.protocol_id.trim() || !receipt.benchmark_id.trim()) throw new Error("lab semantic parity identity or boundary is invalid");
+  if (receipt.institution_ids.length < 2 || JSON.stringify([...new Set(receipt.institution_ids)].sort()) !== JSON.stringify(receipt.institution_ids)) throw new Error("lab semantic parity institution ordering is invalid");
+  if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition) || receipt.checks.length === 0) throw new Error("lab semantic parity disposition or checks is incomplete");
+  if (receipt.semantic_digest !== null && !/^[0-9a-f]{64}$/.test(receipt.semantic_digest)) throw new Error("lab semantic parity semantic digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("lab semantic parity artifact digest is invalid");
+}
+
+export function labSemanticParityReceiptDigest(receipt: LabSemanticParityReceipt): string {
+  validateLabSemanticParityReceipt(receipt);
   return digestJsonSync(receipt);
 }
 
