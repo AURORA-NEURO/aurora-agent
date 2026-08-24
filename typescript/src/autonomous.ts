@@ -4220,7 +4220,37 @@ export class AutonomousAgent {
     this.capabilityLearningSettlementStore = options.capabilityLearningSettlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
     this.connectorRegistry = options.connectorRegistry ?? options.connectorRuntime?.registry;
     this.connectorRuntime = options.connectorRuntime;
-    const baseSelector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
+    const remoteHealthSelector = this.modelHealthBridge?.selector();
+    const learnedSelector: AutonomousModelSelector | undefined = options.learner === undefined
+      ? undefined
+      : async (request: AutonomousSelectionRequest): Promise<AutonomousSelectionDecision> => {
+        let learnedRequest = request;
+        if (this.modelHealthController) {
+          // Persisted health is a safety/availability prior, not a replacement for evaluator
+          // learning. Merge it before the learner scores arms so circuits and observed quality
+          // remain gates while contextual bandit rewards still adapt the chosen model.
+          const persistentHealth = await this.modelHealthController.store.selectorHealth();
+          learnedRequest = { ...request, model_health: { ...request.model_health, ...persistentHealth } };
+        } else if (remoteHealthSelector) {
+          // The remote bridge exposes only a value-only ranking. Preserve its eligibility gate
+          // locally, then let the local learner choose among the remotely admissible candidates.
+          // This keeps remote circuits authoritative without replaying or importing raw health.
+          const healthDecision = await remoteHealthSelector(request);
+          const remotelyEligible = new Set(
+            healthDecision.ranking
+              .filter((row) => row.eligible)
+              .map((row) => `${row.provider}/${row.model}`),
+          );
+          if (healthDecision.selected_model) remotelyEligible.add(`${healthDecision.selected_model.provider}/${healthDecision.selected_model.model}`);
+          if (remotelyEligible.size === 0) return healthDecision;
+          learnedRequest = {
+            ...request,
+            candidates: request.candidates.filter((candidate) => remotelyEligible.has(`${candidate.provider}/${candidate.model}`)),
+          };
+        }
+        return options.learner!.select(learnedRequest);
+      };
+    const baseSelector = options.selector ?? (learnedSelector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.apiClient ? contextualSelector(options.apiClient) : remoteHealthSelector));
     const selector = options.learner !== undefined && this.selectionPromotion !== undefined
       ? async (request: AutonomousSelectionRequest): Promise<AutonomousSelectionDecision> => {
         if (!this.selectionPromotion!.isAdmitted()) {

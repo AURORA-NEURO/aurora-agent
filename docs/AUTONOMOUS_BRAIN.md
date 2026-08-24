@@ -6448,8 +6448,11 @@ The worker deliberately does not duplicate model-health observers. Construct the
 `AutonomousAgent` with the caller-owned `InMemoryAutonomousModelHealthStore` or durable store, for
 example `new AutonomousAgent(runtime, { modelHealthStore: healthStore })`. The agent then records
 bounded invocation outcomes at the provider boundary and folds persisted health into subsequent
-model selection. This keeps direct, cycle, adaptive, and all-domain worker jobs on the same health
-and bandit-selection path without retaining prompts, responses, credentials, or evaluator values.
+model selection. When the agent also has an `AutonomousOnlineLearner`, the health projection is
+merged into the learner request rather than replacing it: provider readiness, circuits, and
+availability remain hard gates while explicit evaluator rewards adapt the eligible model arm.
+This keeps direct, cycle, adaptive, and all-domain worker jobs on the same health-and-bandit path
+without retaining prompts, responses, credentials, or evaluator values.
 The worker is still a single-process scheduler adapter: multi-host transactions, provider-side
 idempotency, and secret manager/session ownership remain deployment responsibilities.
 

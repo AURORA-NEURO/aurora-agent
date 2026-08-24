@@ -1018,7 +1018,10 @@ prompts or responses to a provider. `AutonomousOfflineReplayEngine` re-evaluates
 numeric signal cases for all twelve domains, compares expected reward/pass/digest witnesses, and
 never invokes a provider or turns a replay mismatch into authorization.
 For the high-level facade, pass `modelHealthStore` in `AutonomousAgent` options; it automatically
-uses the persisted selector and records invocation observations for single- and cross-domain runs.
+records invocation observations for single- and cross-domain runs. When `learner` is supplied as
+well, persisted health is merged into the learner's selection request: circuits, credential and
+availability gates remain authoritative, while contextual evaluator rewards still adapt the chosen
+model. Health therefore constrains the bandit rather than silently replacing it.
 
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
