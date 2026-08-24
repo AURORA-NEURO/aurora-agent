@@ -1,5 +1,5 @@
 ---
-name: aurora-backend-setup
+name: aurora-setup
 description: Set up, build, or troubleshoot the AURORA Agent (bioprism) MCP server used by the aurora-backend plugin. Use when the aurora-agent MCP server fails to start, when its tools are missing from a session, when asked to install or build the aurora-agent backend, or when a bioprism build or test behaves strangely on Windows.
 ---
 
