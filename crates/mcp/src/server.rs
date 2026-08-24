@@ -1813,6 +1813,7 @@ impl Server {
             "quality_drift_evaluate" => self.quality_drift_evaluate(&arguments),
             "design_frontier_evaluate" => self.design_frontier_evaluate(&arguments),
             "autonomy_batch_admit" => self.autonomy_batch_admit(&arguments),
+            "workflow_batch_execute" => self.workflow_batch_execute(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24597,6 +24598,28 @@ impl Server {
         }))
     }
 
+    fn workflow_batch_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized WorkflowBatchRequest")?;
+        let receipt = crate::research_contracts::execute_workflow_batch_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_runtime::WORKFLOW_BATCH_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "workflow requests are canonicalized by workflow id and each receipt retains ordered nodes and reasons",
+                "dry-run and execute modes are explicit and every blocked workflow remains visible",
+                "the batch is content-addressed and replayable through the existing typed workflow executor"
+            ],
+            "limitations": [
+                "execute mode does not bypass runtime grants, budgets, or declared-effect checks",
+                "the route does not contact instruments or move protected raw data outside the institution"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35914,7 +35937,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "safety_privacy_and_policy",
             "domains": ["consent", "privacy", "information flow", "threat modeling", "sandbox posture"],
             "crates": ["bioprism-policy", "bioprism-safety", "bioprism-bioethics", "bioprism-governance"],
-            "mcp_tools": ["policy_screen", "autonomy_batch_admit", "safety_posture", "security_redteam_simulate", "safety_release_gate", "medical_boundary_check", "bioethics_action_review", "bioethics_human_subject_screen", "bioethics_dual_use_review", "bioethics_validation_check", "bioethics_representation_audit"],
+            "mcp_tools": ["policy_screen", "autonomy_batch_admit", "workflow_batch_execute", "safety_posture", "security_redteam_simulate", "safety_release_gate", "medical_boundary_check", "bioethics_action_review", "bioethics_human_subject_screen", "bioethics_dual_use_review", "bioethics_validation_check", "bioethics_representation_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -38393,6 +38416,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-policy BatchAdmissionRequest with one AutonomyGrant and action contracts." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "workflow_batch_execute",
+            "description": "Preflight and execute a canonical batch of typed research workflows, retaining per-workflow dry-run, success, blocked, digest, and failure-reason records.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-runtime WorkflowBatchRequest with typed workflow requests and an explicit dry_run or execute mode." }
                 },
                 "required": ["request"]
             }

@@ -68,6 +68,7 @@ pub mod provider;
 pub mod research_run;
 pub mod replay_audit;
 pub mod workflow_execution;
+pub mod workflow_batch;
 pub mod sandbox;
 pub mod seam;
 pub mod secret;
@@ -109,6 +110,12 @@ pub use workflow_execution::{
     WorkflowExecutionMode, WorkflowExecutionReceipt, WorkflowExecutionRequest,
     WorkflowExecutionStatus, FEATURE_CONTRACT_VERSION as WORKFLOW_EXECUTION_FEATURE_VERSION,
     FEATURE_ID as WORKFLOW_EXECUTION_FEATURE_ID,
+};
+pub use workflow_batch::{
+    execute_workflow_batch, workflow_batch_manifest, WorkflowBatchDisposition,
+    WorkflowBatchEntry, WorkflowBatchError, WorkflowBatchMode, WorkflowBatchReceipt,
+    WorkflowBatchRequest, FEATURE_ID as WORKFLOW_BATCH_FEATURE_ID,
+    FEATURE_VERSION as WORKFLOW_BATCH_FEATURE_VERSION,
 };
 pub use sandbox::{Fault, FileChange, InProcessWorld};
 pub use seam::{Clock, ExternalActions, Network, Randomness, Sandbox};

@@ -50,6 +50,8 @@ from .research_contracts import (
     DesignFrontierReceipt,
     AUTONOMY_BATCH_FEATURE_ID,
     BatchAdmissionReceipt,
+    WORKFLOW_BATCH_FEATURE_ID,
+    WorkflowBatchReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

@@ -33,6 +33,7 @@ MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02"
 QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02"
 DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02"
 AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02"
+WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11"
 
 
 class ResearchContractError(ValueError):
@@ -468,6 +469,48 @@ class BatchAdmissionReceipt:
             "approval_actions": self.approval_actions,
             "denied_actions": self.denied_actions,
             "actions": [dict(action) for action in self.actions],
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class WorkflowBatchReceipt:
+    """Transport validator for high-throughput workflow execution ledgers."""
+
+    total_workflows: int
+    succeeded_workflows: int
+    dry_run_workflows: int
+    blocked_workflows: int
+    entries: tuple[Mapping[str, Any], ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = WORKFLOW_BATCH_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != WORKFLOW_BATCH_FEATURE_ID:
+            raise ResearchContractError("workflow batch schema or feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or self.total_workflows <= 0 or self.total_workflows != len(self.entries):
+            raise ResearchContractError("workflow batch identity or boundary is invalid")
+        if self.succeeded_workflows < 0 or self.dry_run_workflows < 0 or self.blocked_workflows < 0 or self.succeeded_workflows + self.dry_run_workflows + self.blocked_workflows != self.total_workflows:
+            raise ResearchContractError("workflow batch counts are inconsistent")
+        if any(not entry.get("workflow_id") or entry.get("disposition") not in {"succeeded", "dry_run", "blocked"} or not entry.get("reasons") for entry in self.entries):
+            raise ResearchContractError("workflow batch entry is incomplete")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("workflow batch artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "total_workflows": self.total_workflows,
+            "succeeded_workflows": self.succeeded_workflows,
+            "dry_run_workflows": self.dry_run_workflows,
+            "blocked_workflows": self.blocked_workflows,
+            "entries": [dict(entry) for entry in self.entries],
             "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })

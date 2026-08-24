@@ -28,6 +28,7 @@ export const MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02" as con
 export const QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02" as const;
 export const DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02" as const;
 export const AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02" as const;
+export const WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -601,6 +602,31 @@ export function validateBatchAdmissionReceipt(receipt: BatchAdmissionReceipt): v
 
 export function batchAdmissionReceiptDigest(receipt: BatchAdmissionReceipt): string {
   validateBatchAdmissionReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface WorkflowBatchReceipt {
+  schema_version: string;
+  feature_id: string;
+  total_workflows: number;
+  succeeded_workflows: number;
+  dry_run_workflows: number;
+  blocked_workflows: number;
+  entries: readonly Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateWorkflowBatchReceipt(receipt: WorkflowBatchReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== WORKFLOW_BATCH_FEATURE_ID) throw new Error("workflow batch schema or feature mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || receipt.total_workflows <= 0 || receipt.total_workflows !== receipt.entries.length) throw new Error("workflow batch identity or boundary is invalid");
+  if ([receipt.succeeded_workflows, receipt.dry_run_workflows, receipt.blocked_workflows].some((value) => !Number.isInteger(value) || value < 0) || receipt.succeeded_workflows + receipt.dry_run_workflows + receipt.blocked_workflows !== receipt.total_workflows) throw new Error("workflow batch counts are inconsistent");
+  if (receipt.entries.some((entry) => typeof entry.workflow_id !== "string" || !entry.workflow_id.trim() || !new Set(["succeeded", "dry_run", "blocked"]).has(String(entry.disposition)) || !Array.isArray(entry.reasons) || entry.reasons.length === 0)) throw new Error("workflow batch entry is incomplete");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("workflow batch artifact digest is invalid");
+}
+
+export function workflowBatchReceiptDigest(receipt: WorkflowBatchReceipt): string {
+  validateWorkflowBatchReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

@@ -62,6 +62,9 @@ import {
   AUTONOMY_BATCH_FEATURE_ID,
   batchAdmissionReceiptDigest,
   validateBatchAdmissionReceipt,
+  WORKFLOW_BATCH_FEATURE_ID,
+  workflowBatchReceiptDigest,
+  validateWorkflowBatchReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -470,4 +473,23 @@ test("autonomy batch receipt retains denied action", () => {
   };
   assert.doesNotThrow(() => validateBatchAdmissionReceipt(receipt));
   assert.equal(batchAdmissionReceiptDigest(receipt), batchAdmissionReceiptDigest(receipt));
+});
+
+test("workflow batch receipt retains blocked run", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: WORKFLOW_BATCH_FEATURE_ID,
+    total_workflows: 2,
+    succeeded_workflows: 1,
+    dry_run_workflows: 0,
+    blocked_workflows: 1,
+    entries: [
+      { workflow_id: "workflow:a", disposition: "succeeded", reasons: ["completed"], ordered_nodes: ["a"] },
+      { workflow_id: "workflow:b", disposition: "blocked", reasons: ["budget exceeded"], ordered_nodes: [] },
+    ],
+    artifact: { content_hash: "e".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateWorkflowBatchReceipt(receipt));
+  assert.equal(workflowBatchReceiptDigest(receipt), workflowBatchReceiptDigest(receipt));
 });

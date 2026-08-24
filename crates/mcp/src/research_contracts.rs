@@ -28,7 +28,8 @@ use bioprism_lab::{
     PROTOCOL_MATRIX_FEATURE_ID,
 };
 use bioprism_runtime::{
-    execute_workflow, WorkflowExecutionReceipt, WorkflowExecutionRequest,
+    execute_workflow, execute_workflow_batch, WorkflowBatchReceipt, WorkflowBatchRequest,
+    WorkflowExecutionReceipt, WorkflowExecutionRequest, WORKFLOW_BATCH_FEATURE_ID,
     WORKFLOW_EXECUTION_FEATURE_ID,
 };
 use bioprism_services::{ResearchReleaseReceipt, RESEARCH_RELEASE_FEATURE_ID};
@@ -47,6 +48,7 @@ pub const MULTIMODAL_REPLICATION_TOOL: &str = "multimodal_replication_evaluate";
 pub const QUALITY_DRIFT_TOOL: &str = "quality_drift_evaluate";
 pub const DESIGN_FRONTIER_TOOL: &str = "design_frontier_evaluate";
 pub const AUTONOMY_BATCH_TOOL: &str = "autonomy_batch_admit";
+pub const WORKFLOW_BATCH_TOOL: &str = "workflow_batch_execute";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -266,6 +268,24 @@ pub fn validate_autonomy_batch_receipt_json(value: &Value) -> Result<BatchAdmiss
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != AUTONOMY_BATCH_FEATURE_ID {
         return Err("autonomy batch feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn execute_workflow_batch_json(value: &Value) -> Result<Value, String> {
+    let request: WorkflowBatchRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid workflow batch request: {error}"))?;
+    let receipt = execute_workflow_batch(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize workflow batch receipt: {error}"))
+}
+
+pub fn validate_workflow_batch_receipt_json(value: &Value) -> Result<WorkflowBatchReceipt, String> {
+    let receipt: WorkflowBatchReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid workflow batch receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != WORKFLOW_BATCH_FEATURE_ID {
+        return Err("workflow batch feature id mismatch".into());
     }
     Ok(receipt)
 }
