@@ -4,6 +4,25 @@
 //! This is the adoption wedge: an agent in any framework can compile a decision context, descend
 //! only as far into the evidence as it needs, and verify a certificate — without linking the
 //! engine or learning a new SDK.
+//!
+//! # Not implemented, deliberately
+//!
+//! * **One transport.** [`serve`] speaks newline-delimited JSON-RPC over a reader and a writer,
+//!   which in practice is stdio. There is no HTTP, SSE or WebSocket binding here.
+//! * **Six request methods and one notification's worth of protocol.** `initialize`, `ping`,
+//!   `tools/list`, `tools/call`, `resources/list` and `resources/read` are answered;
+//!   `notifications/initialized` advances the lifecycle and every other notification is dropped
+//!   silently. Prompts, sampling, roots, completion and progress are absent, not stubbed.
+//! * **No cancellation.** `notifications/cancelled` is one of the notifications dropped, so an
+//!   in-flight tool call always runs to completion. The mission executor's own cancellation flag
+//!   is internal and is not reachable from the protocol.
+//! * **No sessions, no authentication, no per-caller isolation.** A server is one root and one
+//!   lifecycle, served to whoever holds the pipe. Confinement to that root
+//!   ([`Server::resolve`]) is the only access control in the crate.
+//! * **No concurrency.** The event loop reads, answers, and only then reads again. Tool
+//!   dispatch runs on its own thread for stack headroom, never for parallelism.
+//! * **No state of its own.** Nothing persists across a process except what a tool was
+//!   explicitly asked to write to an explicitly named path inside the root.
 
 mod brain_control;
 pub mod rpc;

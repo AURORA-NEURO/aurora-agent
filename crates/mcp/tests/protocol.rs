@@ -208,6 +208,12 @@ fn call(server: &mut Server, name: &str, arguments: Value) -> Value {
 /// records; a body that walks every capability group through the devplat library directly —
 /// without the server's guarded dispatch thread in between — overflows the default test stack,
 /// which aborts the whole test process instead of failing one test.
+///
+/// `tool_definitions()` is the same case: its single `vec![...]` literal materialises every
+/// advertised tool's schema in one activation record, so a direct call from a default 2 MiB
+/// test thread aborts with `STATUS_STACK_OVERFLOW` while the same call through `tools/call`
+/// or `tools/list` is safe, because dispatch already runs on a 16 MiB thread. Measured on the
+/// 262-tool catalogue: 2 MiB overflows, 4 MiB does not.
 fn on_a_dispatch_sized_stack<T: Send>(body: impl FnOnce() -> T + Send) -> T {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
@@ -341,8 +347,8 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
-    let tools = tool_definitions();
-    assert_eq!(tools.len(), 260);
+    let tools = on_a_dispatch_sized_stack(tool_definitions);
+    assert_eq!(tools.len(), 262);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3322,7 +3328,7 @@ fn domain_workflow_scaffolds_are_actionable_and_execution_disabled_for_every_gro
 #[test]
 fn domain_workflow_bindings_cover_every_available_capability_group() {
     let capabilities = bioprism_mcp::workspace_capabilities();
-    let definitions = Value::Array(tool_definitions());
+    let definitions = Value::Array(on_a_dispatch_sized_stack(tool_definitions));
     let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
     let workflows = catalogue["workflows"].as_array().unwrap();
     assert_eq!(workflows.len(), 30);
@@ -8662,12 +8668,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(30));
-    assert_eq!(result["unique_catalog_tools"], json!(260));
-    assert_eq!(result["advertised_tool_count"], json!(260));
+    assert_eq!(result["unique_catalog_tools"], json!(262));
+    assert_eq!(result["advertised_tool_count"], json!(262));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(260));
-    assert_eq!(result["schema_quality"]["valid"], json!(260));
+    assert_eq!(result["schema_quality"]["checked"], json!(262));
+    assert_eq!(result["schema_quality"]["valid"], json!(262));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -9416,6 +9422,36 @@ fn repository_bundle_fails_instead_of_truncating_oversized_markdown() {
         .contains("max_markdown_chars"));
 }
 
+/// A truncated mandatory set is indistinguishable at the point of use from a complete one, so a
+/// budget that cannot hold it must surface as a refusal naming the shortfall — never as a
+/// smaller bundle that still claims to be the route.
+#[test]
+fn a_repository_bundle_under_budget_refuses_and_names_the_shortfall() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "repository_bundle",
+        json!({
+            "route": {
+                "id": "orientation-underfunded",
+                "intent": "understand the repository before choosing a domain",
+                "must_read": ["README.md"],
+                "budget": 1
+            }
+        }),
+    );
+    assert_eq!(payload["__isError"], json!(true));
+    let error = payload["error"].as_str().unwrap();
+    assert!(
+        error.contains("cannot close its mandatory set within budget"),
+        "the refusal must say the mandatory set did not fit; got {error}"
+    );
+    assert!(
+        error.contains("short by"),
+        "the refusal must quantify the shortfall so a caller can raise the budget once; got {error}"
+    );
+}
+
 #[test]
 fn repository_catalog_is_bounded_and_reports_graph_health() {
     let mut server = server();
@@ -9438,6 +9474,12 @@ fn repository_catalog_is_bounded_and_reports_graph_health() {
     assert!(payload["lint"]["counts"].is_object());
 }
 
+/// Both limits here are headroom, not measurements. The mandatory closure of `README.md` under
+/// the normative policy grows whenever the repository's normative documents do — it passed
+/// 30000 estimated tokens when the project-modeling documents landed — so a limit pinned just
+/// above today's closure turns every documentation edit into a failure of this test. The two
+/// refusals the old tight limits covered incidentally are each asserted on their own, above and
+/// below, so the headroom costs no coverage.
 #[test]
 fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
     let mut server = server();
@@ -9449,14 +9491,14 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 30000
+                "budget": 40000
             },
             "policy": "normative",
             "include_markdown": true,
-            "max_markdown_chars": 120000
+            "max_markdown_chars": 400000
         }),
     );
-    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["ok"], json!(true), "{payload}");
     assert_eq!(payload["bundle"]["route"], json!("orientation"));
     assert!(!payload["bundle"]["entries"].as_array().unwrap().is_empty());
     assert!(payload["bundle"]["traversal"].is_object());
@@ -10081,6 +10123,426 @@ fn a_domain_path_escaping_the_root_is_refused() {
     );
     assert_eq!(validate["__isError"], json!(true));
     assert!(validate["error"].as_str().unwrap().contains("refused"));
+}
+
+const DEMO_PROJECT: &str = "fixtures/projects/demo-app";
+const DEMO_PROJECT_ISSUES: &str = "fixtures/projects/demo-app/issues.json";
+
+/// A whole software project crosses MCP as a world judged by a declared rule oracle, and the
+/// reason it failed is a checkable object — the dependency's own declaration string — rather
+/// than a readiness score. The pinned dependency must stay out of that set, or the witness
+/// would be naming the tree instead of the defect.
+#[test]
+fn a_project_audit_of_the_demo_app_is_invalid_with_a_witness_naming_the_unpinned_dependency() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "project_audit",
+        json!({ "root": DEMO_PROJECT }),
+    );
+
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["verdict"]["status"], json!("invalid"));
+    assert_eq!(
+        payload["verdict"]["oracle_kind"],
+        json!("rule/project-release-readiness-v1")
+    );
+
+    let witnesses = payload["verdict"]["witnesses"].as_array().unwrap();
+    let unpinned = witnesses
+        .iter()
+        .find(|witness| {
+            witness["type"] == json!("domain_check")
+                && witness["check"] == json!("unpinned_dependency")
+        })
+        .unwrap_or_else(|| panic!("expected the unpinned_dependency witness, got {witnesses:?}"));
+    let observed = unpinned["observed"]["unpinned_dependencies"]
+        .as_str()
+        .expect("the witness carries the bindings the rule read");
+    assert!(
+        observed.contains("loose-gadget"),
+        "the witness must name the unpinned dependency; got {observed}"
+    );
+    assert!(
+        !observed.contains("exact-widget"),
+        "the exactly pinned dependency must not appear in the unpinned set; got {observed}"
+    );
+
+    assert!(
+        payload["loss"]["total"].as_u64().unwrap() > 0,
+        "a scan reporting zero loss would be claiming it understood every byte of the tree"
+    );
+    assert!(!payload["limitations"].as_array().unwrap().is_empty());
+}
+
+/// An issue's evidence region comes from the components it *declares*, resolved syntactically:
+/// the issue naming `src/lib.rs` gets the src inventory and not the unrelated assets one, and
+/// the issue naming nothing gets the aggregates alone rather than a guessed region. There is no
+/// semantic relevance step behind either result, so both must be visible on the wire.
+#[test]
+fn a_project_audit_reports_the_compiled_region_of_each_declared_issue() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "project_audit",
+        json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES }),
+    );
+
+    let issues = payload["issues"].as_object().expect("issues object");
+    assert_eq!(
+        issues.keys().collect::<Vec<_>>(),
+        vec!["ISSUE-1", "ISSUE-2"],
+        "both declared issues must be reported, in a stable order"
+    );
+
+    let region = |issue: &str| -> Vec<String> {
+        issues[issue]["selected_facts"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{issue} has no selected_facts"))
+            .iter()
+            .map(|fact| fact.as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let naming_a_component = region("ISSUE-1");
+    assert!(
+        issues["ISSUE-1"]["query_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("issue-ISSUE-1-"),
+        "the region must be traceable to the query that produced it"
+    );
+    assert!(
+        naming_a_component.iter().any(|id| id == "fact.component.src"),
+        "ISSUE-1 names src/lib.rs, so the src inventory belongs to its region; got {naming_a_component:?}"
+    );
+    assert!(
+        !naming_a_component
+            .iter()
+            .any(|id| id == "fact.component.assets"),
+        "the assets component is named by no issue and must be excluded; got {naming_a_component:?}"
+    );
+    assert!(
+        naming_a_component
+            .iter()
+            .any(|id| id == "fact.issue.ISSUE-1"),
+        "the issue's own record belongs to its region; got {naming_a_component:?}"
+    );
+
+    let naming_nothing = region("ISSUE-2");
+    assert!(
+        !naming_nothing
+            .iter()
+            .any(|id| id.starts_with("fact.component.")),
+        "ISSUE-2 declares no components, so no inventory may be guessed into its region; got {naming_nothing:?}"
+    );
+    assert!(
+        naming_nothing
+            .iter()
+            .any(|id| id == "fact.aggregate.dependency_declarations"),
+        "the aggregate decision inputs are the whole of an undeclared issue's region; got {naming_nothing:?}"
+    );
+}
+
+/// The write is confined to the server root and reports every path it created, so a caller can
+/// check the claim against the filesystem rather than trusting the summary counts.
+#[test]
+fn project_ingest_writes_the_assembled_documents_into_a_root_confined_out_dir_and_names_them() {
+    let out_dir = "target/mcp-project-ingest";
+    let _ = std::fs::remove_dir_all(repo_root().join(out_dir));
+
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "project_ingest",
+        json!({ "root": DEMO_PROJECT, "out_dir": out_dir, "confirm": true }),
+    );
+
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["performed"], json!(true));
+    assert_eq!(
+        payload["written"],
+        json!([
+            "target/mcp-project-ingest/world.json",
+            "target/mcp-project-ingest/pack.json",
+            "target/mcp-project-ingest/dimensions.json",
+            "target/mcp-project-ingest/query.release.json",
+        ])
+    );
+    for reported in payload["written"].as_array().unwrap() {
+        let path = repo_root().join(reported.as_str().unwrap());
+        assert!(
+            path.is_file(),
+            "{} was reported written but is not on disk",
+            path.display()
+        );
+    }
+
+    let world: Value = serde_json::from_slice(
+        &std::fs::read(repo_root().join(out_dir).join("world.json")).unwrap(),
+    )
+    .expect("the written world is JSON");
+    assert_eq!(
+        world["world_id"], payload["world_id"],
+        "the reported world id must be the one in the written document"
+    );
+    assert!(payload["facts"].as_u64().unwrap() > 0);
+
+    let _ = std::fs::remove_dir_all(repo_root().join(out_dir));
+}
+
+/// A preview whose file list does not match what confirming actually writes is worse than no
+/// preview, because the caller approves one effect and receives another. So the claim under test
+/// is not "performed is false" but the equality itself: the unconfirmed call names exactly the
+/// paths the confirmed call creates, and creates none of them. Issues are supplied because the
+/// per-issue query documents are the part a preview built from a fixed list would silently omit
+/// — the set of writes depends on the input, so it has to be computed, not assumed.
+#[test]
+fn project_ingest_previews_exactly_the_paths_confirming_writes_and_creates_none_of_them() {
+    let out_dir = "target/mcp-project-ingest-preview";
+    let _ = std::fs::remove_dir_all(repo_root().join(out_dir));
+
+    let mut server = server();
+    let arguments = json!({
+        "root": DEMO_PROJECT,
+        "issues": DEMO_PROJECT_ISSUES,
+        "out_dir": out_dir,
+    });
+
+    let preview = call(&mut server, "project_ingest", arguments.clone());
+    assert_eq!(preview["performed"], json!(false));
+    assert_eq!(
+        preview["written"],
+        json!([]),
+        "an unconfirmed call has written nothing, so it may claim nothing"
+    );
+    assert!(preview["preview"]["effect"]
+        .as_str()
+        .unwrap()
+        .contains("would write"));
+    assert!(
+        !repo_root().join(out_dir).exists(),
+        "the preview created {}, so it was not a preview",
+        repo_root().join(out_dir).display()
+    );
+
+    let previewed = preview["preview"]["writes"].as_array().unwrap().clone();
+    assert!(
+        previewed
+            .iter()
+            .any(|path| path == "target/mcp-project-ingest-preview/query.issue.ISSUE-1.json"),
+        "a per-issue query is one of the writes and must appear in the preview; got {previewed:?}"
+    );
+
+    let mut confirmed_arguments = arguments;
+    confirmed_arguments["confirm"] = json!(true);
+    let performed = call(&mut server, "project_ingest", confirmed_arguments);
+    assert_eq!(performed["performed"], json!(true));
+    assert_eq!(
+        performed["written"],
+        Value::Array(previewed.clone()),
+        "confirming wrote a different set of files than the preview promised"
+    );
+    for reported in &previewed {
+        let path = repo_root().join(reported.as_str().unwrap());
+        assert!(
+            path.is_file(),
+            "{} was previewed and confirmed but is not on disk",
+            path.display()
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(repo_root().join(out_dir));
+}
+
+/// Every path parameter of both project tools is root-confined, on both separators, for
+/// traversal and for absolute paths alike — a project tool must never become a scanner of, or a
+/// writer into, arbitrary directories. The refused write is checked against the filesystem,
+/// because a refusal that still created the directory would be a refusal in name only.
+#[test]
+fn a_root_escaping_path_is_refused_by_both_project_tools() {
+    let mut server = server();
+    let escape_attempts = [
+        ("project_audit", json!({ "root": "fixtures/../../etc" })),
+        ("project_audit", json!({ "root": "fixtures\\..\\..\\etc" })),
+        ("project_audit", json!({ "root": "/etc" })),
+        ("project_audit", json!({ "root": "C:\\Windows" })),
+        (
+            "project_audit",
+            json!({ "root": DEMO_PROJECT, "issues": "../outside-issues.json" }),
+        ),
+        (
+            "project_audit",
+            json!({ "root": DEMO_PROJECT, "issues": "\\etc\\outside-issues.json" }),
+        ),
+        ("project_ingest", json!({ "root": "..\\..\\etc" })),
+        ("project_ingest", json!({ "root": "/etc" })),
+        (
+            "project_ingest",
+            json!({ "root": DEMO_PROJECT, "out_dir": "../mcp-outside-out", "confirm": true }),
+        ),
+        (
+            "project_ingest",
+            json!({ "root": DEMO_PROJECT, "out_dir": "C:/mcp-outside-out", "confirm": true }),
+        ),
+    ];
+
+    for (tool, arguments) in escape_attempts {
+        let payload = call(&mut server, tool, arguments.clone());
+        assert_eq!(
+            payload["__isError"],
+            json!(true),
+            "{tool} accepted the escaping arguments {arguments}"
+        );
+        assert!(
+            payload["error"].as_str().unwrap().contains("refused"),
+            "{tool} refused {arguments} without saying so: {}",
+            payload["error"]
+        );
+    }
+
+    for outside in [
+        repo_root().join("..").join("mcp-outside-out"),
+        PathBuf::from("C:/mcp-outside-out"),
+    ] {
+        assert!(
+            !outside.exists(),
+            "the refused out_dir {} was created anyway",
+            outside.display()
+        );
+    }
+}
+
+/// Determinism has to survive the whole server surface, not just the library: the same tree
+/// ingested twice must produce the same world bytes, or a certificate over those bytes would
+/// change for reasons no reader could name.
+#[test]
+fn project_ingest_run_twice_writes_byte_identical_world_documents() {
+    let first_dir = "target/mcp-project-ingest-first";
+    let second_dir = "target/mcp-project-ingest-second";
+    for dir in [first_dir, second_dir] {
+        let _ = std::fs::remove_dir_all(repo_root().join(dir));
+    }
+
+    let mut server = server();
+    let ingest = |server: &mut Server, out_dir: &str| {
+        call(
+            server,
+            "project_ingest",
+            json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "out_dir": out_dir, "confirm": true }),
+        )
+    };
+
+    let first = ingest(&mut server, first_dir);
+    let second = ingest(&mut server, second_dir);
+    assert_eq!(first["performed"], json!(true));
+    assert_eq!(second["performed"], json!(true));
+    assert_eq!(first["world_id"], second["world_id"]);
+
+    let first_bytes = std::fs::read(repo_root().join(first_dir).join("world.json")).unwrap();
+    let second_bytes = std::fs::read(repo_root().join(second_dir).join("world.json")).unwrap();
+    assert!(
+        !first_bytes.is_empty(),
+        "an empty world would compare equal to an empty world"
+    );
+    assert_eq!(
+        first_bytes, second_bytes,
+        "two ingests of the same tree must write identical world bytes"
+    );
+
+    for dir in [first_dir, second_dir] {
+        let _ = std::fs::remove_dir_all(repo_root().join(dir));
+    }
+}
+
+/// `decision_time` reaches the world's scan event and every generated query, so an ungated
+/// malformed value comes back as the *assembled world* failing the reference validator — a
+/// message that blames the emitter for a string only the caller can edit. The refusal has to
+/// name the parameter instead.
+#[test]
+fn a_malformed_decision_time_is_refused_by_name_rather_than_as_a_world_validation_failure() {
+    let mut server = server();
+    for tool in ["project_audit", "project_ingest"] {
+        let payload = call(
+            &mut server,
+            tool,
+            json!({ "root": DEMO_PROJECT, "decision_time": "yesterday" }),
+        );
+        assert_eq!(payload["__isError"], json!(true), "{tool} accepted it");
+        let error = payload["error"].as_str().unwrap();
+        assert!(
+            error.contains("decision_time must be RFC 3339"),
+            "{tool} must name the parameter the caller has to edit; got {error}"
+        );
+        assert!(
+            !error.contains("reference validator"),
+            "{tool} blamed the emitter for the caller's value; got {error}"
+        );
+    }
+}
+
+/// An issue whose every declaration resolved to nothing compiles to the same region as an issue
+/// that declared nothing at all. Without the declarations on the wire a reader takes the second
+/// reading — the one that looks deliberate — so the two must be distinguishable in the response
+/// itself, not only inside the world document the response does not carry.
+#[test]
+fn a_region_built_from_an_unresolvable_declaration_is_distinguishable_from_one_declaring_nothing() {
+    let issues_dir = "target/mcp-project-unresolvable";
+    let issues_path = format!("{issues_dir}/issues.json");
+    std::fs::create_dir_all(repo_root().join(issues_dir)).unwrap();
+    std::fs::write(
+        repo_root().join(&issues_path),
+        serde_json::to_vec(&json!([
+            { "id": "TYPO", "title": "names a component that is not there", "components": ["srcc"] },
+            { "id": "SILENT", "title": "names nothing at all" }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "project_audit",
+        json!({ "root": DEMO_PROJECT, "issues": issues_path }),
+    );
+
+    let issues = payload["issues"].as_object().expect("issues object");
+    assert_eq!(
+        issues["TYPO"]["unresolved_components"],
+        json!(["srcc"]),
+        "the declaration that resolved to nothing must be reported verbatim, not dropped"
+    );
+    assert_eq!(issues["TYPO"]["resolved_components"], json!([]));
+    assert_eq!(
+        issues["SILENT"]["unresolved_components"],
+        json!([]),
+        "an issue that declared nothing has nothing unresolved, which is a different claim"
+    );
+    let region = |issue: &str| -> Vec<String> {
+        issues[issue]["selected_facts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|fact| fact.as_str().unwrap().to_string())
+            .collect()
+    };
+    let typo = region("TYPO");
+    let silent = region("SILENT");
+    assert_eq!(
+        typo.len(),
+        silent.len(),
+        "the two regions are the same size and neither carries a component inventory, which is \
+         exactly why the declarations have to be reported: {typo:?} vs {silent:?}"
+    );
+    for selected in [&typo, &silent] {
+        assert!(
+            !selected.iter().any(|id| id.starts_with("fact.component.")),
+            "no component inventory may be guessed into either region; got {selected:?}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(repo_root().join(issues_dir));
 }
 
 #[test]

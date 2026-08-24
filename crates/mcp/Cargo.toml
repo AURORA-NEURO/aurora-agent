@@ -65,6 +65,7 @@ bioprism-oraclex = { workspace = true }
 bioprism-policy = { workspace = true }
 bioprism-packs = { workspace = true }
 bioprism-prism = { workspace = true }
+bioprism-project = { workspace = true }
 bioprism-registry = { workspace = true }
 bioprism-routing = { workspace = true }
 bioprism-runtime = { workspace = true }

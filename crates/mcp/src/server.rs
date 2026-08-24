@@ -354,6 +354,10 @@ use bioprism_packs::portfolio::{
 use bioprism_packs::{coverage as pack_coverage, matrix as pack_coverage_matrix};
 use bioprism_policy::{PolicyLabel, PolicyLattice, PolicyRule, Request as PolicyRequest};
 use bioprism_prism::{minimize, minimize_world, preserves};
+use bioprism_project::{
+    AssemblyOptions as ProjectAssemblyOptions, Issue as ProjectIssue, ProjectScan, ProjectWorld,
+    ScanOptions as ProjectScanOptions,
+};
 use bioprism_registry::{
     gate_document, BenchmarkPack, Policy as RegistryPolicy, RegistryIndex, TierPolicy, TrustTier,
 };
@@ -780,6 +784,31 @@ const MAX_MISSION_SCHEMA_ISSUES: usize = 64;
 /// aborted with `STATUS_STACK_OVERFLOW`. Sixteen mebibytes is double the reservation the CLI
 /// worker thread uses for a single (non re-entrant) dispatch chain.
 const TOOL_DISPATCH_STACK_BYTES: usize = 16 * 1024 * 1024;
+
+/// Run `body` on a scoped thread carrying [`TOOL_DISPATCH_STACK_BYTES`], resuming any panic on
+/// the caller so panic behaviour is unchanged; only a failure to *start* the thread is returned.
+///
+/// Building the tool catalogue needs this guard as much as dispatching a tool does.
+/// [`tool_definitions`] materialises every advertised schema in one activation record, so its
+/// frame grows with the catalogue: at 262 tools an unoptimised build overflows a default 2 MiB
+/// thread and aborts the process. Answering `tools/list` on whatever stack the transport happens
+/// to own would make the server's ability to describe itself depend on its caller's thread.
+fn on_dispatch_stack<T: Send>(
+    name: &'static str,
+    body: impl FnOnce() -> T + Send,
+) -> Result<T, std::io::Error> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name(name.into())
+            .stack_size(TOOL_DISPATCH_STACK_BYTES)
+            .spawn_scoped(scope, body)
+            .map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+            })
+    })
+}
 
 #[derive(Debug, Clone)]
 struct MissionSchemaIssue {
@@ -1557,7 +1586,18 @@ impl Server {
             }
             "ping" => Response::result(id, json!({})),
             "tools/list" if self.ready() => {
-                Response::result(id, json!({ "tools": tool_definitions() }))
+                match on_dispatch_stack(
+                    "bioprism-mcp-catalogue",
+                    || json!({ "tools": tool_definitions() }),
+                ) {
+                    Ok(catalogue) => Response::result(id, catalogue),
+                    Err(error) => Response::error(
+                        id,
+                        code::INTERNAL_ERROR,
+                        format!("cannot start the tool catalogue thread: {error}"),
+                        None,
+                    ),
+                }
             }
             "tools/call" if self.ready() => self.call_tool(request),
             "resources/list" if self.ready() => {
@@ -1655,23 +1695,15 @@ impl Server {
     /// the caller so panic behaviour is unchanged; only a failure to start the thread becomes a
     /// new, explicit error response.
     fn call_tool(&self, request: &Request) -> Response {
-        std::thread::scope(|scope| {
-            match std::thread::Builder::new()
-                .name("bioprism-mcp-dispatch".into())
-                .stack_size(TOOL_DISPATCH_STACK_BYTES)
-                .spawn_scoped(scope, || self.call_tool_inner(request))
-            {
-                Ok(handle) => handle
-                    .join()
-                    .unwrap_or_else(|payload| std::panic::resume_unwind(payload)),
-                Err(error) => Response::error(
-                    request.id.clone(),
-                    code::INTERNAL_ERROR,
-                    format!("cannot start the tool dispatch thread: {error}"),
-                    None,
-                ),
-            }
-        })
+        match on_dispatch_stack("bioprism-mcp-dispatch", || self.call_tool_inner(request)) {
+            Ok(response) => response,
+            Err(error) => Response::error(
+                request.id.clone(),
+                code::INTERNAL_ERROR,
+                format!("cannot start the tool dispatch thread: {error}"),
+                None,
+            ),
+        }
     }
 
     fn call_tool_inner(&self, request: &Request) -> Response {
@@ -1702,6 +1734,8 @@ impl Server {
             "world_validate" => self.world_validate(&arguments),
             "domain_validate" => self.domain_validate(&arguments),
             "world_generate" => self.world_generate(&arguments),
+            "project_ingest" => self.project_ingest(&arguments),
+            "project_audit" => self.project_audit(&arguments),
             "factory_lifecycle_simulate" => self.factory_lifecycle_simulate(&arguments),
             "factory_authority_verify" => self.factory_authority_verify(&arguments),
             "artifact_registry_audit" => self.artifact_registry_audit(&arguments),
@@ -2816,6 +2850,246 @@ impl Server {
                 "both generated documents are parsed by their typed runtime models before success",
                 "world and query digests bind the exact generated JSON documents returned or withheld",
                 "generation performs no file, network, model, clinical, or publication side effect",
+            ],
+        }))
+    }
+
+    /// Shared front half of the two project tools: a root-confined scan and assembly.
+    ///
+    /// `root` and the optional `issues` file resolve through the same [`Server::resolve`]
+    /// confinement every other path parameter uses (`fiber_compile`'s `domain` included), so a
+    /// project tool can never turn the server into a scanner of arbitrary directories. The
+    /// project label is the root's last path segment — a display name for scopes, not an
+    /// identity claim; the world id stays content-derived.
+    fn project_scan_and_assemble(
+        &self,
+        arguments: &Value,
+    ) -> Result<(ProjectScan, ProjectWorld), String> {
+        let relative = arguments
+            .get("root")
+            .and_then(Value::as_str)
+            .ok_or("root is required (a directory path relative to the server root)")?;
+        let root = self.resolve(relative)?;
+        if !root.is_dir() {
+            return Err(format!(
+                "root must name an existing directory inside the server root: {relative:?}"
+            ));
+        }
+        let project = relative
+            .split(['/', '\\'])
+            .rfind(|segment| !segment.is_empty() && *segment != ".")
+            .unwrap_or("project")
+            .to_string();
+
+        let issues = match arguments.get("issues") {
+            None => Vec::new(),
+            Some(value) => {
+                let issues_relative = value
+                    .as_str()
+                    .ok_or("issues must be a string path relative to the server root")?;
+                let issues_path = self.resolve(issues_relative)?;
+                ProjectIssue::load(&issues_path).map_err(|error| error.to_string())?
+            }
+        };
+        let decision_time = match arguments.get("decision_time") {
+            None => String::new(),
+            Some(value) => {
+                let text = value
+                    .as_str()
+                    .ok_or("decision_time must be an RFC 3339 string")?;
+                // Gated here, not inside assembly. A malformed timestamp reaches the world's
+                // `event.scan` and the generated queries, so left ungated it surfaces as the
+                // assembled world failing the reference validator — a message that blames the
+                // emitter for a value only the caller can edit. The caller's exact bytes are
+                // kept: this is a gate, not a normalisation.
+                bioprism_scope::Timestamp::parse(text)
+                    .map_err(|error| format!("decision_time must be RFC 3339: {error}"))?;
+                text.to_string()
+            }
+        };
+
+        let (scan, _ingestion) = ProjectScan::scan(&root, &ProjectScanOptions::new(project))
+            .map_err(|error| error.to_string())?;
+        let assembled = ProjectWorld::assemble(
+            &scan,
+            &ProjectAssemblyOptions {
+                decision_time,
+                issues,
+                thresholds: Default::default(),
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        Ok((scan, assembled))
+    }
+
+    /// Scan a project tree into a fiber world and optionally write the emitted documents.
+    ///
+    /// Writing follows the server's one side-effect convention (see `world_index`): with
+    /// `out_dir` but without `confirm: true` the call previews exactly which files it would
+    /// create and writes nothing. Written documents are canonical bytes, so re-ingesting the
+    /// same tree overwrites with identical content rather than churning diffs.
+    ///
+    /// `performed` therefore carries three states, not two, and the third is the reason it is not
+    /// a bool: `null` when no `out_dir` was named at all, `false` when one was named and the
+    /// write is waiting on `confirm`, `true` when the files are on disk. Collapsing "nobody asked
+    /// for a write" into "a write was declined" would report a refusal that never happened.
+    fn project_ingest(&self, arguments: &Value) -> Result<Value, String> {
+        let (scan, assembled) = self.project_scan_and_assemble(arguments)?;
+
+        let fact_count = assembled.world["facts"].as_array().map_or(0, Vec::len);
+        let factor_count = assembled.world["factors"].as_array().map_or(0, Vec::len);
+        let component_count = assembled.world["facts"].as_array().map_or(0, |facts| {
+            facts
+                .iter()
+                .filter(|fact| {
+                    fact["id"]
+                        .as_str()
+                        .is_some_and(|id| id.starts_with("fact.component."))
+                })
+                .count()
+        });
+
+        let mut documents: Vec<(String, &Value)> = vec![
+            ("world.json".to_string(), &assembled.world),
+            ("pack.json".to_string(), &assembled.pack),
+            ("dimensions.json".to_string(), &assembled.dimensions),
+            ("query.release.json".to_string(), &assembled.release_query),
+        ];
+        for (issue_id, query) in &assembled.issue_queries {
+            documents.push((format!("query.issue.{issue_id}.json"), query));
+        }
+
+        let mut written: Vec<String> = Vec::new();
+        let mut performed = Value::Null;
+        if let Some(out_value) = arguments.get("out_dir") {
+            let out_relative = out_value
+                .as_str()
+                .ok_or("out_dir must be a string path relative to the server root")?;
+            let out_dir = self.resolve(out_relative)?;
+            let display_dir = out_relative
+                .replace('\\', "/")
+                .trim_end_matches('/')
+                .to_string();
+            let confirmed = arguments
+                .get("confirm")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !confirmed {
+                return Ok(json!({
+                    "ok": true,
+                    "performed": false,
+                    "world_id": assembled.world_id,
+                    "facts": fact_count,
+                    "factors": factor_count,
+                    "components": component_count,
+                    "losses_by_kind": scan.loss_kind_counts(),
+                    "written": [],
+                    "preview": {
+                        "effect": "would write the assembled world, pack, dimension and query documents",
+                        "writes": documents
+                            .iter()
+                            .map(|(name, _)| format!("{display_dir}/{name}"))
+                            .collect::<Vec<_>>(),
+                    },
+                    "hint": "call again with confirm=true to perform this write",
+                }));
+            }
+            std::fs::create_dir_all(&out_dir)
+                .map_err(|error| format!("cannot create out_dir {}: {error}", out_dir.display()))?;
+            for (name, document) in &documents {
+                let bytes = bioprism_ids::to_canonical_bytes(document)
+                    .map_err(|error| format!("cannot canonicalise {name}: {error}"))?;
+                std::fs::write(out_dir.join(name), bytes).map_err(|error| {
+                    format!("cannot write {}: {error}", out_dir.join(name).display())
+                })?;
+                written.push(format!("{display_dir}/{name}"));
+            }
+            performed = Value::Bool(true);
+        }
+
+        Ok(json!({
+            "ok": true,
+            "performed": performed,
+            "world_id": assembled.world_id,
+            "facts": fact_count,
+            "factors": factor_count,
+            "components": component_count,
+            "losses_by_kind": scan.loss_kind_counts(),
+            "written": written,
+            "limitations": [
+                "the scan is static: tests are counted never run, markers are substring proxies, and requirement strings are never resolved",
+                "every skipped or unread byte is declared in losses_by_kind; unmeasured is reported as absent, never as zero",
+            ],
+        }))
+    }
+
+    /// Scan, assemble, and judge a project end to end, with no filesystem writes.
+    ///
+    /// The verdict ships with its witnesses verbatim — checkable objects, never scores — and
+    /// with the scan's loss summary, because a release verdict computed without seeing what the
+    /// scan skipped would be a verdict about a tree nobody scanned. Each declared issue's query
+    /// is compiled too, so the response names the exact fact region each issue would receive.
+    fn project_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let (scan, assembled) = self.project_scan_and_assemble(arguments)?;
+
+        let world = World::from_json(assembled.world.clone()).map_err(|e| e.to_string())?;
+        let pack = DomainPack::from_json(&assembled.pack).map_err(|e| e.to_string())?;
+        let release_query =
+            Query::from_json(assembled.release_query.clone()).map_err(|e| e.to_string())?;
+        let out = compile_with_oracle(&world, &release_query, pack.oracle())
+            .map_err(|e| e.to_string())?;
+
+        // An issue's region is defined by the components it declares and nothing else, so the
+        // declarations that produced it travel with it. Without `unresolved_components` on the
+        // wire a region built from a component name that resolved to nothing is indistinguishable
+        // from the region of an issue that declared nothing at all, and a reader will take the
+        // second reading — which is the one that looks deliberate.
+        let issue_declarations = |issue_id: &str, field: &str| -> Value {
+            world
+                .facts
+                .iter()
+                .find(|fact| fact.id.as_str() == format!("fact.issue.{issue_id}"))
+                .and_then(|fact| fact.value.get(field))
+                .cloned()
+                .unwrap_or_else(|| Value::Array(Vec::new()))
+        };
+
+        let mut issues = Map::new();
+        for (issue_id, document) in &assembled.issue_queries {
+            let query = Query::from_json(document.clone())
+                .map_err(|error| format!("issue {issue_id:?} query: {error}"))?;
+            let compiled = compile_with_oracle(&world, &query, pack.oracle())
+                .map_err(|error| format!("issue {issue_id:?} compile: {error}"))?;
+            issues.insert(
+                issue_id.clone(),
+                json!({
+                    "query_id": document["query_id"],
+                    "resolved_components": issue_declarations(issue_id, "components"),
+                    "unresolved_components": issue_declarations(issue_id, "unresolved_components"),
+                    "selected_facts": compiled.certificate.selected_facts,
+                }),
+            );
+        }
+
+        let loss_counts = scan.loss_kind_counts();
+        Ok(json!({
+            "ok": true,
+            "world_id": assembled.world_id,
+            "verdict": {
+                "status": out.certificate.oracle.status.as_str(),
+                "oracle_kind": out.certificate.oracle.oracle_kind,
+                "witnesses": out.certificate.oracle.witnesses,
+            },
+            "facts": world.facts.len(),
+            "selected_facts": out.certificate.selected_facts,
+            "loss": {
+                "total": loss_counts.values().sum::<u64>(),
+                "by_kind": loss_counts,
+            },
+            "issues": issues,
+            "limitations": [
+                "every check is a static-scan proxy and says so in its witness detail; nothing is executed or resolved",
+                "issue regions come from declared components only, resolved syntactically; there is no semantic relevance search, and a declaration that resolved to nothing is reported in unresolved_components rather than guessed at",
             ],
         }))
     }
@@ -35725,16 +35999,16 @@ pub fn workspace_capabilities() -> Value {
         {
             "id": "world_and_ingestion",
             "domains": ["world modeling", "data ingestion", "provenance"],
-            "crates": ["bioprism-world", "bioprism-adapter", "bioprism-worldfactory", "bioprism-standards"],
-            "mcp_tools": ["world_validate", "world_index", "adapter_plan", "tabular_ingest", "observed_world_declare", "world_claim_check", "lineage_audit", "preanalytic_apply"],
+            "crates": ["bioprism-world", "bioprism-adapter", "bioprism-worldfactory", "bioprism-standards", "bioprism-project"],
+            "mcp_tools": ["world_validate", "world_index", "adapter_plan", "tabular_ingest", "observed_world_declare", "world_claim_check", "lineage_audit", "preanalytic_apply", "project_ingest"],
             "cli_entrypoints": ["world validate", "world show", "world generate", "world index"],
             "status": "available"
         },
         {
             "id": "decision_context",
             "domains": ["typed queries", "evidence selection", "omission accounting"],
-            "crates": ["bioprism-fiber", "bioprism-section", "bioprism-obligation", "bioprism-scope", "bioprism-graph", "bioprism-domain"],
-            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle", "obligation_gate_check", "domain_validate"],
+            "crates": ["bioprism-fiber", "bioprism-section", "bioprism-obligation", "bioprism-scope", "bioprism-graph", "bioprism-domain", "bioprism-project"],
+            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle", "obligation_gate_check", "domain_validate", "project_audit"],
             "cli_entrypoints": ["context explain", "context compile", "context verify", "context compare"],
             "status": "available"
         },
@@ -36019,6 +36293,19 @@ pub fn workspace_capabilities() -> Value {
     catalogue
 }
 
+/// Every advertised tool's schema, in catalogue order.
+///
+/// **This call needs more stack than a default thread has, and the shortfall aborts rather than
+/// unwinds.** The body is a single `vec![...]` literal, so every schema in the catalogue lives in
+/// one activation record and the frame grows with the tool count: measured on the 262-tool
+/// catalogue in an unoptimised build, 2 MiB overflows and 4 MiB does not. A stack overflow is not
+/// a `Result` — it takes the process down — so a caller cannot detect this and recover.
+///
+/// The server itself never calls this on a thread it did not size: `tools/list` goes through the
+/// same 16 MiB dispatch guard `tools/call` uses. But the function is `pub` and the requirement is
+/// invisible at the call site, so it is stated here rather than left for each consumer to
+/// discover as a crash. **A caller on a thread of unknown size should run this on one it sized
+/// itself.**
 pub fn tool_definitions() -> Vec<Value> {
     let world_and_query = json!({
         "type": "object",
@@ -40007,6 +40294,34 @@ pub fn tool_definitions() -> Vec<Value> {
                     "observations": { "type": "object", "description": "Required when metric is supplied: serialized Observations with observed or asserted Sample provenance." }
                 },
                 "required": ["event", "policy", "trace"]
+            }
+        }),
+        json!({
+            "name": "project_ingest",
+            "description": "Scan a root-confined project directory into a fiber-world/0.1 document with its release-readiness pack, scope-dimension document, and generated queries. The scan is static and deterministic: tests are counted never run, markers are substring proxies, manifests go through narrow readers, and every skipped or unread byte is declared in losses_by_kind. With out_dir the emitted documents are written as canonical bytes — without confirm=true the call previews the exact paths and writes nothing. The 'performed' field is null when no out_dir was named, false when one was named and the write awaits confirm=true, and true when the files are on disk.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "root": { "type": "string", "description": "Project directory to scan, relative to the server root. Absolute paths, traversal, and symlink escapes are refused." },
+                    "issues": { "type": "string", "description": "Optional path to a strict JSON issues file (array of {id, title, body?, components?}), relative to the server root. Each issue becomes a fact plus a review factor and query." },
+                    "decision_time": { "type": "string", "description": "Optional RFC 3339 timestamp for the scan event and generated queries. No clock is ever read; omitted means the fixed epoch 1970-01-01T00:00:00Z." },
+                    "out_dir": { "type": "string", "description": "Optional directory to write world.json, pack.json, dimensions.json, query.release.json, and query.issue.<id>.json into, relative to the server root." },
+                    "confirm": { "type": "boolean", "description": "Must be true for out_dir to actually write; otherwise the call previews the effect." }
+                },
+                "required": ["root"]
+            }
+        }),
+        json!({
+            "name": "project_audit",
+            "description": "Scan a root-confined project directory, assemble its world, and compile the release query under the emitted pack's rule oracle end to end. The response carries the verdict with its checkable witnesses (every check a declared static-scan proxy), the scan's loss summary counted by kind, and the compiled evidence region of every declared issue. Nothing is executed, resolved against a registry, or written to disk.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "root": { "type": "string", "description": "Project directory to scan, relative to the server root. Absolute paths, traversal, and symlink escapes are refused." },
+                    "issues": { "type": "string", "description": "Optional path to a strict JSON issues file (array of {id, title, body?, components?}), relative to the server root. Each issue's query is compiled and its selected fact ids returned." },
+                    "decision_time": { "type": "string", "description": "Optional RFC 3339 timestamp for the scan event and generated queries. No clock is ever read; omitted means the fixed epoch 1970-01-01T00:00:00Z." }
+                },
+                "required": ["root"]
             }
         }),
     ];
