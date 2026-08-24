@@ -372,6 +372,16 @@ approval, and optional learning remain independent. A caller-owned prompt builde
 bridge transient values, while the result projection remains digest-only and rejects catalogue,
 route, profile, or normalizer drift before dispatch.
 
+The Python façade now provides the matching `AutonomousAgent.run_with_domain_evidence_catalogue(...)`
+composition. It prepares every requirement for the selected domains, executes bounded catalogue
+fan-out, carries plan/catalogue/normalizer digests into the result, and routes settled evidence
+through domain, cross-domain, or automatic provider invocation. Source dispatch, evidence
+settlement, and provider approval remain independent; the default prompt is metadata-only and an
+explicit prompt builder is the sole opt-in for transient raw values. The Python result is also
+metadata-only when serialized and preserves the existing memory/learning options at the provider
+boundary. Offline parity tests cover all twelve domains, approval pauses, dissent blocking, raw
+value retention, and catalogue drift.
+
 The TypeScript SDK now also exposes `registerAutonomousDomainHttpEvidenceSource`, which composes
 the bounded HTTP transport with a typed domain source profile and catalogue route. It binds optional
 adapter manifests, source/provider identities, endpoint/request/header resolvers, and explicit

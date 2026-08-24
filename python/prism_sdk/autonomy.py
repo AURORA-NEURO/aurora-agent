@@ -14780,6 +14780,63 @@ class AutonomousAgent:
             **kwargs,
         )
 
+    def run_with_domain_evidence_catalogue(
+        self,
+        *,
+        task: str,
+        catalogue: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        domains: Sequence[str] | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        prepare_options: Mapping[str, Any] | None = None,
+        prepare_for_requirement: Callable[[Any], Mapping[str, Any]] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        max_parallel_requirements: int | None = None,
+        allow_incomplete_evidence: bool = False,
+        approve_source_dispatch: bool = False,
+        approve_provider_call: bool = False,
+        provider_run_override: Any | None = None,
+        before_provider_run: Callable[[Any], None] | None = None,
+        prompt_builder: Callable[[Any], Mapping[str, Any]] | None = None,
+        run_mode: str = "auto",
+        run_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Compose reviewed catalogue routes with the ordinary autonomous brain lifecycle.
+
+        Each workflow evidence requirement gets its own digest-bound catalogue reconciliation.
+        Source dispatch, evidence acceptance, and provider approval remain separate; the default
+        prompt contains only reconciliation metadata, while ``prompt_builder`` is the explicit
+        transient bridge for caller-owned values. The resulting envelope keeps typed preparation
+        and reconciliation objects available to the caller but serializes only digests and status.
+        """
+
+        from .autonomous_domain_evidence_brain import run_autonomous_domain_evidence_backed
+
+        return run_autonomous_domain_evidence_backed(
+            self,
+            task=task,
+            catalogue=catalogue,
+            credentials=credentials,
+            domains=domains,
+            model_candidates=model_candidates,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            prepare_options=prepare_options,
+            prepare_for_requirement=prepare_for_requirement,
+            execute_options=execute_options,
+            max_parallel_requirements=max_parallel_requirements,
+            allow_incomplete_evidence=allow_incomplete_evidence,
+            approve_source_dispatch=approve_source_dispatch,
+            approve_provider_call=approve_provider_call,
+            provider_run_override=provider_run_override,
+            before_provider_run=before_provider_run,
+            prompt_builder=prompt_builder,
+            run_mode=run_mode,
+            run_options=run_options,
+        )
+
     def run_resumable_evidence_backed(self, **kwargs: Any) -> Any:
         """Run or resume reviewed evidence-backed work through a caller checkpoint sink.
 
