@@ -114,6 +114,17 @@ flush, atomic reload/CAS coordination, and caller-owned workers are exported and
 all twelve domains. The queue still does not provide distributed consensus, source/evaluator
 authority, credential storage, or effect authorization; those remain deployment responsibilities.
 
+Python evaluator calibration is now wired to the same learning gate. The provider-free
+`calibrate_autonomous_evaluators()` harness normalizes caller-owned evidence through the reviewed
+domain registry, uses deterministic calibration/holdout splits, computes bounded reliability bins,
+Brier/ECE/MCE and coverage metrics, and returns aggregate-only digests. Replay detects evaluator
+catalogue and case-set drift, while `admit_autonomous_evaluator_calibration()` is the explicit
+domain-scoped `admit_learning`/`hold_learning` decision. `AutonomousAgent.readiness()` and
+portfolio `readiness_options` accept the report so `require_calibrated_learning` cannot mistake
+observed bandit pulls for calibrated evaluator quality. Canonical JSON, CAS JSON, SQLite, registry,
+and restore/flush seams are included; labels, evidence, prompts, credentials, and provider values
+remain caller-owned and are never persisted by the calibration subsystem.
+
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
 the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson

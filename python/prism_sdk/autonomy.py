@@ -16551,12 +16551,16 @@ class AutonomousAgent:
         selection_promotion_report: Mapping[str, Any] | None = None,
         require_promoted_selection: bool = False,
         evidence_readiness: Mapping[str, Any] | None = None,
+        calibration_report: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Project provider/model readiness plus optional evidence-route admission without secrets.
+        """Project provider/model readiness plus optional evidence and calibration gates.
 
         ``evidence_readiness`` is a caller-owned configuration mapping with a typed adapter
-        registry, an optional health store, and optional auditor options.  Supplying it performs
-        only a local projection; it never dispatches an evidence source or invokes a provider.
+        registry, an optional health store, and optional auditor options.  ``calibration_report``
+        is a validated, aggregate-only evaluator report produced by
+        :func:`calibrate_autonomous_evaluators`.  Supplying either option performs only a local
+        projection; it never dispatches an evidence source, mutates learning, or invokes a
+        provider.
         """
 
         if not isinstance(require_promoted_selection, bool):
@@ -16570,6 +16574,23 @@ class AutonomousAgent:
             and (promotion_report is None or promotion_state.active_promotion_digest == promotion_report["promotion_digest"])
         )
         promotion_blocks = require_promoted_selection and not promotion_admitted
+
+        evaluator_calibration_report = None
+        if calibration_report is not None:
+            from .autonomous_evaluator_calibration import validate_autonomous_evaluator_calibration_report
+
+            try:
+                evaluator_calibration_report = validate_autonomous_evaluator_calibration_report(calibration_report)
+            except (ArgumentError, TypeError, ValueError) as error:
+                raise BrainRunError("evaluator calibration report was rejected") from error
+        calibration_by_domain = (
+            {}
+            if evaluator_calibration_report is None
+            else {
+                row["domain"]: row
+                for row in evaluator_calibration_report["domains"]
+            }
+        )
 
         evidence_readiness_report = None
         if evidence_readiness is not None:
@@ -16698,7 +16719,15 @@ class AutonomousAgent:
                 if evidence_row is None:
                     raise BrainRunError(f"evidence readiness report does not cover domain: {domain}")
             evidence_blocks = evidence_row is not None and evidence_row.status != "ready"
-            if promotion_blocks or (evidence_blocks and base_state == "ready_for_caller_approval"):
+            calibration_row = calibration_by_domain.get(domain)
+            calibration_blocks = evaluator_calibration_report is not None and (
+                evaluator_calibration_report["status"] != "ready"
+                or calibration_row is None
+                or calibration_row.get("status") != "ready"
+            )
+            if promotion_blocks or (evidence_blocks and base_state == "ready_for_caller_approval") or (
+                calibration_blocks and base_state == "ready_for_caller_approval"
+            ):
                 state = "partial"
             else:
                 state = base_state
@@ -16728,6 +16757,22 @@ class AutonomousAgent:
                     "execution": "readiness_projection_only;does_not_dispatch_source",
                     "secret_material": "never_returned",
                 }
+            if calibration_row is not None:
+                row["evaluator_calibration"] = {
+                    "status": calibration_row["status"],
+                    "evaluator_id": calibration_row["evaluator_id"],
+                    "evaluator_version": calibration_row["evaluator_version"],
+                    "pass_threshold": calibration_row["pass_threshold"],
+                    "calibration_scored_count": calibration_row["calibration"]["scored_count"],
+                    "holdout_scored_count": calibration_row["holdout"]["scored_count"],
+                    "holdout_expected_calibration_error": calibration_row["holdout"]["expected_calibration_error"],
+                    "holdout_brier_score": calibration_row["holdout"]["brier_score"],
+                    "case_set_digest": calibration_row["case_set_digest"],
+                    "evaluation_digest": calibration_row["evaluation_digest"],
+                    "report_digest": evaluator_calibration_report["report_digest"],
+                    "execution": "readiness_projection_only;no_learning_mutation",
+                    "secret_material": "never_returned",
+                }
             row_next_actions = set(row.get("next_actions", ()))
             if state == "model_catalogue_required":
                 row_next_actions.add("register at least one model candidate with the reviewed domain capabilities")
@@ -16748,6 +16793,10 @@ class AutonomousAgent:
             if evidence_row is not None and evidence_row.status != "ready":
                 row_next_actions.add(
                     "resolve evidence routing readiness before source dispatch: " + evidence_row.reason
+                )
+            if calibration_blocks:
+                row_next_actions.add(
+                    "hold learned evaluator updates until calibration and independent holdout evidence are ready"
                 )
             row["next_actions"] = sorted(row_next_actions)
             row["selection_promotion"] = {
@@ -16775,6 +16824,37 @@ class AutonomousAgent:
                 else f"resolve selection promotion lifecycle hold: {promotion_state.last_reason or promotion_state.status}"
             )
         learning = self.domain_learning_coverage()
+        if evaluator_calibration_report is not None:
+            learning["evaluator_calibration"] = {
+                "configured": True,
+                "report_digest": evaluator_calibration_report["report_digest"],
+                "status": evaluator_calibration_report["status"],
+                "decision": evaluator_calibration_report["gate"]["decision"],
+                "missing_domains": list(evaluator_calibration_report["missing_domains"]),
+                "non_ready_domains": list(evaluator_calibration_report["gate"]["non_ready_domains"]),
+                "execution": "readiness_projection_only;no_learning_mutation",
+                "secret_material": "never_returned",
+            }
+            for learning_row in learning["rows"]:
+                calibration_row = calibration_by_domain.get(learning_row["domain"])
+                learning_row["calibration_status"] = None if calibration_row is None else calibration_row["status"]
+                learning_row["calibration_report_digest"] = evaluator_calibration_report["report_digest"]
+                learning_row["calibration_admit_learning"] = bool(
+                    evaluator_calibration_report["gate"]["decision"] == "admit_learning"
+                    and calibration_row is not None
+                    and calibration_row["status"] == "ready"
+                )
+        else:
+            learning["evaluator_calibration"] = {
+                "configured": False,
+                "report_digest": None,
+                "status": "unconfigured",
+                "decision": "hold_learning",
+                "missing_domains": [],
+                "non_ready_domains": [],
+                "execution": "readiness_projection_only;no_learning_mutation",
+                "secret_material": "never_returned",
+            }
         learning["selection_promotion"] = {
             "configured": promotion_report is not None or promotion_state is not None,
             "required": require_promoted_selection,
@@ -16803,6 +16883,15 @@ class AutonomousAgent:
             "domains": domain_rows,
             "model_capability_coverage": self.model_capability_coverage(),
             "domain_learning_coverage": learning,
+            "evaluator_calibration": None if evaluator_calibration_report is None else {
+                "report_digest": evaluator_calibration_report["report_digest"],
+                "status": evaluator_calibration_report["status"],
+                "decision": evaluator_calibration_report["gate"]["decision"],
+                "missing_domains": list(evaluator_calibration_report["missing_domains"]),
+                "non_ready_domains": list(evaluator_calibration_report["gate"]["non_ready_domains"]),
+                "execution": "readiness_projection_only;no_learning_mutation",
+                "secret_material": "never_returned",
+            },
             "workflows": self.workflows(),
             "domain_packs": self.domain_packs(),
             "domain_pack_registry_digest": self.orchestrator.pack_registry.digest,
@@ -17405,6 +17494,77 @@ class AutonomousAgent:
             "state_access": "agent.domain_learning_state(domain, capability, risk_class)",
             "secret_material": "never_returned",
         }
+
+    def calibrate_evaluators(
+        self,
+        cases: Sequence[Mapping[str, Any]],
+        *,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+        domains: Sequence[str] | None = None,
+        seed: str = "default",
+        holdout_fraction: float = 0.2,
+        bins: int = 10,
+        min_calibration_cases_per_domain: int = 4,
+        min_holdout_cases_per_domain: int = 2,
+        max_expected_calibration_error: float = 0.15,
+        max_brier_score: float = 0.15,
+        require_all_domains: bool = True,
+    ) -> dict[str, Any]:
+        """Calibrate the reviewed domain evaluator catalogue without provider calls.
+
+        The caller owns the evidence cases and labels.  The agent returns only aggregate metrics
+        and digests, so this method is safe to use as a pre-admission gate before enabling
+        evaluator-linked online learning or learned model selection.
+        """
+
+        from .autonomous_evaluator_calibration import calibrate_autonomous_evaluators
+
+        try:
+            return calibrate_autonomous_evaluators(
+                cases,
+                registry=evaluator_registry,
+                domains=domains,
+                seed=seed,
+                holdout_fraction=holdout_fraction,
+                bins=bins,
+                min_calibration_cases_per_domain=min_calibration_cases_per_domain,
+                min_holdout_cases_per_domain=min_holdout_cases_per_domain,
+                max_expected_calibration_error=max_expected_calibration_error,
+                max_brier_score=max_brier_score,
+                require_all_domains=require_all_domains,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration was rejected") from error
+
+    def replay_evaluator_calibration(
+        self,
+        report: Mapping[str, Any],
+        cases: Sequence[Mapping[str, Any]],
+        *,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+    ) -> dict[str, Any]:
+        """Replay calibration against caller-owned cases and expose catalogue/case drift."""
+
+        from .autonomous_evaluator_calibration import replay_autonomous_evaluator_calibration
+
+        try:
+            return replay_autonomous_evaluator_calibration(
+                report,
+                cases,
+                registry=evaluator_registry,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration replay was rejected") from error
+
+    def admit_evaluator_calibration(self, report: Mapping[str, Any], domain: str) -> dict[str, Any]:
+        """Return a digest-bound, domain-scoped decision for enabling learned updates."""
+
+        from .autonomous_evaluator_calibration import admit_autonomous_evaluator_calibration
+
+        try:
+            return admit_autonomous_evaluator_calibration(report, domain)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration admission was rejected") from error
 
     def domain_evaluator(
         self,

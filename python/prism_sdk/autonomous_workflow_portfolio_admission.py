@@ -658,6 +658,8 @@ def _eligible_model_ids(
 def _learning_calibrated(row: Mapping[str, Any] | None) -> bool:
     if row is None:
         return False
+    if "calibration_admit_learning" in row:
+        return bool(row.get("calibration_admit_learning"))
     return (
         bool(row.get("observed"))
         and isinstance(row.get("evaluation_count"), int)
@@ -841,7 +843,12 @@ def admit_autonomous_workflow_portfolio(
         readiness_kwargs = dict(readiness_options)
     else:
         raise BrainRunError("workflow portfolio admission readiness_options must be a mapping")
-    allowed_readiness = {"selection_promotion_report", "require_promoted_selection", "evidence_readiness"}
+    allowed_readiness = {
+        "selection_promotion_report",
+        "require_promoted_selection",
+        "evidence_readiness",
+        "calibration_report",
+    }
     unknown_readiness = sorted(set(readiness_kwargs).difference(allowed_readiness))
     if unknown_readiness:
         raise BrainRunError("workflow portfolio admission readiness_options contain unsupported fields: " + ", ".join(unknown_readiness))

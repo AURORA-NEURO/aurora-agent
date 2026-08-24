@@ -8568,6 +8568,25 @@ adapter supplies a local transactional snapshot seam. The atomic coordinator sti
 real compare-and-swap backend for multi-host safety; queue admission does not authorize sources,
 providers, tools, effects, or evaluator truth.
 
+Python now exposes the evaluator-calibration gate used by the learning and portfolio boundaries.
+`agent.calibrate_evaluators()` accepts caller-owned normalized evidence plus reviewed binary
+labels, runs the exact per-domain evaluator adapters on deterministic calibration/holdout splits,
+and returns only aggregate coverage, abstention, reliability-bin, Brier, expected-calibration-error,
+threshold-accuracy, and evaluator/case-set digests. It never persists the evidence cases, labels,
+prompts, provider output, credentials, or raw evaluator values. `agent.replay_evaluator_calibration()`
+recomputes the same contract and reports evaluator-catalogue or case-set drift; a report is not
+trusted merely because it is signed by its own digest.
+
+Learning admission is explicit and scoped. `agent.admit_evaluator_calibration(report, domain)`
+returns `admit_learning` only when that domain and the report-wide holdout gate are ready;
+insufficient calibration, insufficient holdout, miscalibration, missing coverage, and evaluator
+errors remain holds. Pass the validated report as `calibration_report` in `agent.readiness()` or
+`readiness_options` for `agent.admit_workflow_portfolio(..., require_calibrated_learning=True)`.
+This projects calibration status into each domain learning row and makes portfolio dependency
+closure respect the hold. The registry includes in-memory, canonical JSON, CAS JSON, SQLite, and
+restore/flush coordinator seams for restartable workers; backing-store encryption, tenancy, label
+authority, and external-world correctness remain caller/deployment responsibilities.
+
 When the application already knows the capability, use focused dispatch to narrow provider-visible
 tools and bind the evidence contract into the developer prompt:
 
