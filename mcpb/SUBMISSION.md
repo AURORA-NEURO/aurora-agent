@@ -12,7 +12,18 @@ A `.mcpb` file installs into Claude Desktop with a double-click (Settings →
 Extensions also accepts it). Distributing `aurora-agent.mcpb` directly — a
 release asset, a website link — requires no review or approval from anyone.
 
-## 1. Official MCP registry (registry.modelcontextprotocol.io) — instant, minimal exposure
+## 1. Official MCP registry — ✅ DONE (published 2026-08-24)
+
+Live listing: `io.github.MurariAmbati/aurora-agent` v0.1.0 (status: active) —
+verify with `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=aurora-agent"`.
+Public artifact: https://github.com/MurariAmbati/aurora-agent-releases/releases/download/v0.1.0/aurora-agent.mcpb
+(sha256 a572f4aa02ed63608ecd7bd0b95e5fce27c326c79df4b6fea34a24bbe4d4e4f2; the
+public download was re-hashed and matches). Source remains private. Future
+releases: repack, upload a new release asset, bump version + fileSha256 in
+mcpb/server.json, re-publish (POST /v0.1/auth/github-at with a GitHub token →
+registry JWT → POST /v0.1/publish; note description max length is 100 chars).
+
+### Original steps (for reference)
 
 Metadata-only registry, automated validation, no human review. The listed
 artifact must be publicly downloadable; **the source can stay private** — only
