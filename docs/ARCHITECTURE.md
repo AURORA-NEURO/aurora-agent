@@ -32,6 +32,7 @@ reaches something that can act on it.
                                        │
    compilation          ┌──────────────┴────────────────┐
                         │  fiber    section    domain   │
+                        │  project                      │
                         └──────────────┬────────────────┘
                                        │
    world and storage    ┌──────────────┴────────────────┐
