@@ -104,6 +104,7 @@ jobs:
         working-directory: python
         run: python -m pytest -q tests/test_autonomous_selection_promotion.py tests/test_autonomous_selection_lifecycle.py
       - name: test GitHub Actions evidence exporter
+        working-directory: .
         run: python -m pytest -q tools/test_github_actions_evidence.py
       - name: exercise reusable GitHub Actions evidence action
         id: github-actions-evidence
