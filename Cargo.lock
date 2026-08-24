@@ -63,6 +63,7 @@ dependencies = [
 name = "bioprism-atlashub"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-hub",
  "bioprism-hubapi",
  "bioprism-ids",

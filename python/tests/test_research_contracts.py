@@ -1,4 +1,5 @@
 from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, RESEARCH_RELEASE_BATCH_FEATURE_ID, FEDERATED_EVALUATION_FEATURE_ID, RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID, RESOURCE_DISCOVERY_CONTRACT_VERSION, GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID, GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION, RELEASE_HARNESS_FEATURE_ID, RELEASE_HARNESS_CONTRACT_VERSION, PROTOCOL_ASSURANCE_FEATURE_ID, PROTOCOL_ASSURANCE_CONTRACT_VERSION, FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID, FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION, FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID, FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION, FEDERATED_LENS_ASSURANCE_FEATURE_ID, FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION, SEMANTIC_PARITY_FEATURE_ID, SEMANTIC_PARITY_CONTRACT_VERSION, FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID, FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID, MULTIMODAL_REPLICATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID, DESIGN_FRONTIER_FEATURE_ID, AUTONOMY_BATCH_FEATURE_ID, WORKFLOW_BATCH_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, FederatedMultimodalAssuranceReceipt, FederatedKnowledgeGatewayReceipt, FederatedLensAssuranceReceipt, LabSemanticParityReceipt, FederatedRetrievalAssuranceReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport, research_artifact_digest
+from prism_sdk.research_contracts import FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID, FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION, FederatedContinualRetrievalReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -614,4 +615,23 @@ def test_federated_retrieval_assurance_keeps_missing_evidence_unknown():
     receipt.validate()
     assert receipt.feature_id == FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_federated_continual_retrieval_keeps_unanchored_refresh_unknown():
+    receipt = FederatedContinualRetrievalReceipt(
+        request_id="request:continuum",
+        federation_id="federation:evidence",
+        query_id="query:mechanism",
+        selected_source_ids=("source:a",),
+        stale_source_ids=("source:a",),
+        disposition="unknown",
+        prior_synthesis_digest=None,
+        checks=("stale or unanchored evidence remains unknown rather than synthesized",),
+        omissions=("prior synthesis digest is absent",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID
+    assert receipt.contract_version == FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

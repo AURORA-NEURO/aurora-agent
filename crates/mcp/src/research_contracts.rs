@@ -12,6 +12,10 @@ use bioprism_adapter::{
     MultimodalHarmonizationRequest, QualityDriftReceipt, QualityDriftRequest,
     MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
 };
+use bioprism_atlashub::{
+    synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
+    FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
+};
 use bioprism_evalengine::{
     compile_evaluation_card, evaluate_federated_evaluation, evaluate_multimodal_replication,
     qualify_analysis, AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
@@ -98,6 +102,7 @@ pub const FEDERATED_KNOWLEDGE_GATEWAY_TOOL: &str = "federated_knowledge_gateway"
 pub const FEDERATED_LENS_ASSURANCE_TOOL: &str = "federated_lens_assurance";
 pub const SEMANTIC_PARITY_TOOL: &str = "lab_semantic_parity";
 pub const FEDERATED_RETRIEVAL_ASSURANCE_TOOL: &str = "federated_retrieval_assurance";
+pub const FEDERATED_CONTINUAL_RETRIEVAL_TOOL: &str = "federated_continual_retrieval_copilot";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -577,6 +582,26 @@ pub fn validate_federated_retrieval_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID {
         return Err("federated retrieval assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn synthesize_federated_continuum_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedContinualRetrievalRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated continual retrieval request: {error}"))?;
+    let receipt = synthesize_federated_continuum(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federated continual retrieval receipt: {error}"))
+}
+
+pub fn validate_federated_continual_retrieval_json(
+    value: &Value,
+) -> Result<FederatedContinualRetrievalReceipt, String> {
+    let receipt: FederatedContinualRetrievalReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated continual retrieval receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID {
+        return Err("federated continual retrieval feature id mismatch".into());
     }
     Ok(receipt)
 }

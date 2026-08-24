@@ -137,6 +137,7 @@ pub mod ci;
 pub mod connector;
 pub mod error;
 pub mod federated;
+pub mod federated_copilot;
 pub mod voe;
 
 pub use card::{
@@ -154,6 +155,13 @@ pub use error::{CardError, CiError, ConnectorError, FederatedError, ValueError};
 pub use federated::{
     pool, Aggregate, DataOrigin, Evaluation, FederatedResult, Reported, SiteParticipation,
     SiteResult, SmallCellPolicy, Unchecked,
+};
+pub use federated_copilot::{
+    synthesize_federated_continuum, ContinualSynthesisDisposition,
+    ContinualSynthesisError, FederatedContinualRetrievalReceipt,
+    FederatedContinualRetrievalRequest, RetrievalSourceUpdate,
+    CONTRACT_VERSION as FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
 };
 pub use voe::{
     pareto_front, rank_with, Budget, Calibration, DeclaredValue, ExchangeRate, ExclusionReason,

@@ -50,6 +50,8 @@ export const SEMANTIC_PARITY_FEATURE_ID = "AFA-lab-P28-F12" as const;
 export const SEMANTIC_PARITY_CONTRACT_VERSION = "lab-semantic-parity/1.0" as const;
 export const FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID = "AFA-fiber-P02-F28" as const;
 export const FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION = "federated-retrieval-assurance/1.0" as const;
+export const FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID = "AFA-atlashub-P02-F12" as const;
+export const FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION = "federated-continual-retrieval-copilot/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1000,6 +1002,45 @@ export function validateFederatedRetrievalAssuranceReceipt(receipt: FederatedRet
 
 export function federatedRetrievalAssuranceReceiptDigest(receipt: FederatedRetrievalAssuranceReceipt): string {
   validateFederatedRetrievalAssuranceReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface RetrievalSourceUpdate {
+  source_id: string;
+  version: string;
+  digest: string;
+  evidence_state: string;
+  stale: boolean;
+}
+
+export interface FederatedContinualRetrievalReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  federation_id: string;
+  query_id: string;
+  selected_source_ids: string[];
+  stale_source_ids: string[];
+  disposition: "passed" | "blocked" | "unknown";
+  prior_synthesis_digest: string | null;
+  checks: string[];
+  omissions: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateFederatedContinualRetrievalReceipt(receipt: FederatedContinualRetrievalReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID || receipt.contract_version !== FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION) throw new Error("federated continual retrieval schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.query_id.trim() || receipt.checks.length === 0) throw new Error("federated continual retrieval identity, boundary, or checks are incomplete");
+  if (!receipt.selected_source_ids.length || JSON.stringify([...new Set(receipt.selected_source_ids)].sort()) !== JSON.stringify(receipt.selected_source_ids)) throw new Error("federated continual retrieval source ordering is invalid");
+  if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition)) throw new Error("federated continual retrieval disposition is unknown");
+  if (receipt.prior_synthesis_digest !== null && !/^[0-9a-f]{64}$/.test(receipt.prior_synthesis_digest)) throw new Error("federated continual retrieval prior digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("federated continual retrieval artifact digest is invalid");
+}
+
+export function federatedContinualRetrievalReceiptDigest(receipt: FederatedContinualRetrievalReceipt): string {
+  validateFederatedContinualRetrievalReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

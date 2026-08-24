@@ -110,6 +110,10 @@ import {
   FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
   federatedRetrievalAssuranceReceiptDigest,
   validateFederatedRetrievalAssuranceReceipt,
+  FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
+  FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
+  federatedContinualRetrievalReceiptDigest,
+  validateFederatedContinualRetrievalReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -784,4 +788,25 @@ test("federated retrieval assurance keeps missing evidence unknown", () => {
   };
   assert.doesNotThrow(() => validateFederatedRetrievalAssuranceReceipt(receipt));
   assert.equal(federatedRetrievalAssuranceReceiptDigest(receipt), federatedRetrievalAssuranceReceiptDigest(receipt));
+});
+
+test("federated continual retrieval keeps unanchored refresh unknown", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
+    contract_version: FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
+    request_id: "request:continuum",
+    federation_id: "federation:evidence",
+    query_id: "query:mechanism",
+    selected_source_ids: ["source:a"],
+    stale_source_ids: ["source:a"],
+    disposition: "unknown",
+    prior_synthesis_digest: null,
+    checks: ["stale or unanchored evidence remains unknown rather than synthesized"],
+    omissions: ["prior synthesis digest is absent"],
+    artifact: { content_hash: "b".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateFederatedContinualRetrievalReceipt(receipt));
+  assert.equal(federatedContinualRetrievalReceiptDigest(receipt), federatedContinualRetrievalReceiptDigest(receipt));
 });

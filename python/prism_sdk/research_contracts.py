@@ -55,6 +55,8 @@ SEMANTIC_PARITY_FEATURE_ID = "AFA-lab-P28-F12"
 SEMANTIC_PARITY_CONTRACT_VERSION = "lab-semantic-parity/1.0"
 FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID = "AFA-fiber-P02-F28"
 FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION = "federated-retrieval-assurance/1.0"
+FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID = "AFA-atlashub-P02-F12"
+FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION = "federated-continual-retrieval-copilot/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -1627,6 +1629,79 @@ class ProtocolMatrixReceipt:
                 "failed_closed_cells": self.failed_closed_cells,
                 "approval_cells": self.approval_cells,
                 "cells": [dict(cell) for cell in self.cells],
+                "artifact": dict(self.artifact),
+                "boundary": self.boundary,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class RetrievalSourceUpdate:
+    source_id: str
+    version: str
+    digest: str
+    evidence_state: str
+    stale: bool
+
+
+@dataclass(frozen=True)
+class FederatedContinualRetrievalReceipt:
+    """Transport validator for continual federated evidence refreshes."""
+
+    request_id: str
+    federation_id: str
+    query_id: str
+    selected_source_ids: tuple[str, ...]
+    stale_source_ids: tuple[str, ...]
+    disposition: str
+    prior_synthesis_digest: str | None
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID
+    contract_version: str = FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID:
+            raise ResearchContractError("federated continual retrieval feature mismatch")
+        if self.contract_version != FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION:
+            raise ResearchContractError("federated continual retrieval contract mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        if not self.request_id.strip() or not self.federation_id.strip() or not self.query_id.strip():
+            raise ResearchContractError("continual retrieval identity is incomplete")
+        if not self.selected_source_ids or len(set(self.selected_source_ids)) != len(self.selected_source_ids):
+            raise ResearchContractError("continual retrieval source identities are not unique")
+        if self.disposition not in {"passed", "blocked", "unknown"} or not self.checks:
+            raise ResearchContractError("continual retrieval disposition and checks are required")
+        if self.prior_synthesis_digest is not None and (
+            len(self.prior_synthesis_digest) != 64
+            or any(char not in "0123456789abcdef" for char in self.prior_synthesis_digest)
+        ):
+            raise ResearchContractError("continual retrieval prior digest is not canonical")
+        if not isinstance(self.artifact.get("content_hash"), str) or len(self.artifact["content_hash"]) != 64:
+            raise ResearchContractError("continual retrieval artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest(
+            {
+                "schema_version": self.schema_version,
+                "feature_id": self.feature_id,
+                "contract_version": self.contract_version,
+                "request_id": self.request_id,
+                "federation_id": self.federation_id,
+                "query_id": self.query_id,
+                "selected_source_ids": list(self.selected_source_ids),
+                "stale_source_ids": list(self.stale_source_ids),
+                "disposition": self.disposition,
+                "prior_synthesis_digest": self.prior_synthesis_digest,
+                "checks": list(self.checks),
+                "omissions": list(self.omissions),
                 "artifact": dict(self.artifact),
                 "boundary": self.boundary,
             }
