@@ -36,10 +36,12 @@
 //! asked. [`ExitCode::retryability`] returns `None` for both rather than inventing a third state
 //! that consumers would have to special-case anyway.
 
+use bioprism_adapter::AdapterError;
 use bioprism_baseline::CompareError;
 use bioprism_fiber::{FiberError, PolicyViolation};
 use bioprism_mutation::MutationError;
 use bioprism_prism::MinimizeError;
+use bioprism_project::ProjectError;
 use bioprism_store::StoreError;
 use std::fmt;
 
@@ -339,6 +341,50 @@ impl CliError {
             MinimizeError::OracleRefusedCandidate { .. } => ExitCode::Indeterminate,
         };
         CliError::new(code, error.to_string())
+    }
+
+    /// Routes a project scan, assembly or audit failure to the code carrying its 40.36 class.
+    ///
+    /// The split follows who has to move. A root that cannot be read is a dependency failure
+    /// (`io`, retryable as-is once the path exists). A malformed issues file, a source the
+    /// adapter refuses, and a tree whose component directories collide on one slug are all
+    /// conversations about the operator's input (`invalid_input`): re-sending the identical
+    /// command cannot succeed until the input is edited. An emitted fact the sealed ingestion
+    /// rejects, or an assembled world, pack or query that fails its own strict parser, is this
+    /// binary's fault — the emitter and the parser ship together, so the operator supplied
+    /// nothing that could be edited — and lands on [`CliError::internal`], exactly as
+    /// `world sweep` routes a generated world its own loader rejects.
+    ///
+    /// The fiber case defers to [`CliError::from_compile`] rather than naming a code, so the
+    /// paths that surface the same [`FiberError`] cannot drift apart. Written against the error
+    /// types rather than at the call site so a new variant on either enum fails to compile
+    /// until somebody decides which code it belongs under.
+    pub fn from_project(error: ProjectError) -> Self {
+        let message = error.to_string();
+        match error {
+            ProjectError::Adapter(adapter) => {
+                let code = match &adapter {
+                    AdapterError::Io { .. } => ExitCode::Io,
+                    AdapterError::UnsupportedSource { .. }
+                    | AdapterError::UnsupportedFormat { .. }
+                    | AdapterError::Csv(_)
+                    | AdapterError::AmbiguousIdentity { .. }
+                    | AdapterError::SchemaDrift { .. }
+                    | AdapterError::ValueTypeMismatch { .. }
+                    | AdapterError::Identifier { .. } => ExitCode::InvalidInput,
+                    AdapterError::MalformedFact { .. }
+                    | AdapterError::DuplicateFactId { .. }
+                    | AdapterError::Canonical { .. } => return CliError::internal(message),
+                };
+                CliError::new(code, message)
+            }
+            ProjectError::Issues(_) | ProjectError::Assembly(_) => CliError::invalid(message),
+            ProjectError::Io { .. } => CliError::new(ExitCode::Io, message),
+            ProjectError::World(_) | ProjectError::Domain(_) => CliError::internal(message),
+            ProjectError::Fiber(source) => {
+                CliError::new(CliError::from_compile(source).code, message)
+            }
+        }
     }
 
     /// Routes a comparison failure to the code carrying its 40.36 class.

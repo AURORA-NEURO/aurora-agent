@@ -93,6 +93,21 @@ COMMANDS
                     Apply the standard metamorphic suite, validate every postcondition against
                     the oracle, deduplicate by content, and report effective diversity.
 
+  project ingest    --root <dir> [--issues <path>] [--decision-time <rfc3339>]
+                    --world-out <path> --pack-out <path> --dimensions-out <path>
+                    [--queries-out <dir or .json path>] [--dry-run]
+                    Scan a software project tree into a fiber-world/0.1 document, its
+                    bioprism-scope-dimensions/0.1 classification, the release-readiness pack
+                    and the generated fiber-query/0.2 documents. Static scan only: nothing is
+                    executed or resolved, and every skipped byte ships as declared loss.
+                    --queries-out ending in .json writes one document carrying the release query
+                    and every issue query; otherwise a directory of release.json plus
+                    issue-<id>.json.
+  project audit     --root <dir> [--issues <path>] [--decision-time <rfc3339>]
+                    Scan, assemble and judge the project under the release-readiness pack's
+                    rule oracle. Exit 1 when the verdict is invalid. With --issues, also
+                    compiles and prints each issue's declared evidence region.
+
   evidence verify   --bundle <path>
                     Verify a portable mission evidence bundle's schema, retention claims and
                     content digests. Exit 1 when the bundle is well-formed but unverifiable.
@@ -255,6 +270,12 @@ pub enum Command {
     MutateFamily {
         world: PathBuf,
         out_dir: Option<PathBuf>,
+    },
+    ProjectIngest(ProjectIngestOptions),
+    ProjectAudit {
+        root: PathBuf,
+        issues: Option<PathBuf>,
+        decision_time: Option<String>,
     },
     EvidenceBundleVerify {
         bundle: PathBuf,
@@ -424,6 +445,20 @@ pub enum Family {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct ProjectIngestOptions {
+    pub root: PathBuf,
+    pub issues: Option<PathBuf>,
+    /// Already validated as RFC 3339 by the parser; kept as the caller's exact string so the
+    /// emitted world carries their bytes, not a re-rendering.
+    pub decision_time: Option<String>,
+    pub world_out: PathBuf,
+    pub pack_out: PathBuf,
+    pub dimensions_out: PathBuf,
+    pub queries_out: Option<PathBuf>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct CompileOptions {
     pub world: PathBuf,
     pub query: PathBuf,
@@ -556,6 +591,21 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         },
         ("prism", "minimize") => Command::PrismMinimize {
             world: options.take_path("--world")?,
+        },
+        ("project", "ingest") => Command::ProjectIngest(ProjectIngestOptions {
+            root: options.take_path("--root")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
+            world_out: options.take_path("--world-out")?,
+            pack_out: options.take_path("--pack-out")?,
+            dimensions_out: options.take_path("--dimensions-out")?,
+            queries_out: options.take_optional_path("--queries-out"),
+            dry_run: options.take_switch("--dry-run"),
+        }),
+        ("project", "audit") => Command::ProjectAudit {
+            root: options.take_path("--root")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
         },
         // `--domain` is refused here rather than silently accepted-and-ignored. The comparison
         // harness (`bioprism_baseline::compare`) judges every strategy's selection against the
@@ -811,6 +861,24 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
     Ok(Parsed::Run(Invocation { json, command }))
 }
 
+/// Takes `--decision-time`, refusing anything the workspace's own RFC 3339 parser refuses.
+///
+/// Validated here rather than deep inside assembly, because there the malformed string would
+/// surface as the emitted world failing the reference validator — which reads as a bug in this
+/// binary, when in fact the flag value is the thing that needs editing. The caller's exact
+/// string is kept: the parse is a gate, not a normalisation.
+fn take_decision_time(options: &mut Options) -> CliResult<Option<String>> {
+    match options.take_optional("--decision-time") {
+        None => Ok(None),
+        Some(text) => {
+            bioprism_scope::Timestamp::parse(&text).map_err(|error| {
+                usage(format!("--decision-time must be RFC 3339: {error}"))
+            })?;
+            Ok(Some(text))
+        }
+    }
+}
+
 fn extract_flag(tokens: &mut Vec<String>, flag: &str) -> bool {
     let present = tokens.iter().any(|t| t == flag);
     tokens.retain(|t| t != flag);
@@ -921,6 +989,97 @@ mod tests {
         );
         assert!(text.contains("world validate    --world <path> [--dimensions <path>]"));
         assert!(text.contains("world sweep       [--distractors <n,n,...>] [--seed <n>] [--markdown]"));
+    }
+
+    #[test]
+    fn help_documents_both_project_commands_and_every_flag_they_parse() {
+        let text = super::help();
+        assert!(text.contains("project ingest    --root <dir>"));
+        assert!(text.contains("project audit     --root <dir>"));
+        for flag in [
+            "--issues",
+            "--decision-time",
+            "--world-out",
+            "--pack-out",
+            "--dimensions-out",
+            "--queries-out",
+        ] {
+            assert!(
+                text.contains(flag),
+                "a flag the project parser accepts must be documented: {flag}"
+            );
+        }
+        assert!(
+            text.contains("Exit 1 when the verdict is invalid"),
+            "the audit's exit contract is the reason to run it and must be stated"
+        );
+    }
+
+    #[test]
+    fn project_ingest_parses_every_declared_output_path_and_the_dry_run_switch() {
+        let parsed = parse(
+            [
+                "project",
+                "ingest",
+                "--root",
+                "tree",
+                "--issues",
+                "issues.json",
+                "--decision-time",
+                "2024-01-01T00:00:00Z",
+                "--world-out",
+                "world.json",
+                "--pack-out",
+                "pack.json",
+                "--dimensions-out",
+                "dimensions.json",
+                "--queries-out",
+                "queries",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project ingest");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ProjectIngest(super::ProjectIngestOptions {
+                    root: PathBuf::from("tree"),
+                    issues: Some(PathBuf::from("issues.json")),
+                    decision_time: Some("2024-01-01T00:00:00Z".into()),
+                    world_out: PathBuf::from("world.json"),
+                    pack_out: PathBuf::from("pack.json"),
+                    dimensions_out: PathBuf::from("dimensions.json"),
+                    queries_out: Some(PathBuf::from("queries")),
+                    dry_run: true,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn a_decision_time_that_is_not_rfc_3339_is_refused_at_the_flag_rather_than_inside_assembly() {
+        let error = parse(
+            [
+                "project",
+                "audit",
+                "--root",
+                "tree",
+                "--decision-time",
+                "yesterday",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("a malformed decision time must be a usage error");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(
+            error.message.contains("--decision-time must be RFC 3339"),
+            "the message must name the flag the operator has to edit: {}",
+            error.message
+        );
     }
 
     #[test]
