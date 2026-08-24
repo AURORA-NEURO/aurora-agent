@@ -1045,6 +1045,12 @@ bounded UCB-style value update by domain and feeds validated priority/urgency si
 admission cycle; custom learners return only the same bounded signal projection and a learning-state
 digest. Public cycles expose counts and digests only, while evaluator values, evidence, tasks,
 prompts, credentials, and live executor results remain transient.
+`AutonomousGoalAgentRuntime` is the high-level bridge to `AutonomousAgent`: the caller rehydrates
+task text with `task_resolver`, while `run_options_factory` supplies transient candidates, opaque
+credential handles, approval/tool callbacks, memory, and policy only after the worker claims the
+goal. Single-domain and `cross_domain` goals then use the same routing, prompt, model-selection,
+provider, evaluator, and online-learning paths as direct runs. The callbacks and all live values
+remain outside goal, worker, control-loop, and evaluator projections.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,

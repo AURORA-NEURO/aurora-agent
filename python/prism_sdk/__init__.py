@@ -166,6 +166,13 @@ from .autonomous_goal_control_loop import (
     GoalLoopLearner,
     GoalLoopOptionsFactory,
 )
+from .autonomous_goal_agent import (
+    GOAL_AGENT_RUNTIME_RETENTION,
+    GOAL_AGENT_RUNTIME_SCHEMA,
+    AutonomousGoalAgentRuntime,
+    GoalAgentRunOptionsFactory,
+    GoalAgentTaskResolver,
+)
 from .jobs import (
     JOB_EVENT_SCHEMA,
     JOB_SCHEMA,
@@ -3496,6 +3503,11 @@ __all__ = [
     "GoalLoopEvaluator",
     "GoalLoopLearner",
     "GoalLoopOptionsFactory",
+    "GOAL_AGENT_RUNTIME_RETENTION",
+    "GOAL_AGENT_RUNTIME_SCHEMA",
+    "AutonomousGoalAgentRuntime",
+    "GoalAgentRunOptionsFactory",
+    "GoalAgentTaskResolver",
     "BRAIN_CONTROL_SCHEMA",
     "AsyncBrainControlClient",
     "BrainApprovalCommand",

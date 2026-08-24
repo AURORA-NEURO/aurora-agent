@@ -200,6 +200,12 @@ custom learner, `AutonomousGoalBanditLearner` updates domain admission prioritie
 UCB-style value state. Custom learners can return only validated scheduling signals and a learning
 state digest. Goal records receive evaluator/learning digests through an optimistic revision fence;
 raw evidence, evaluator values, tasks, prompts, credentials, and live results stay transient.
+`AutonomousGoalAgentRuntime` connects this loop to the real `AutonomousTaskOrchestrator`. A
+caller-owned task resolver rehydrates each goal's text only after admission, and a run-options
+factory supplies transient model candidates, opaque credential handles, approval callbacks,
+memory, tools, and policy at execution time. All twelve domains, including `cross_domain`, use
+the same direct routing, prompt, provider, evaluator, and learning boundaries; no resolver or
+provider value is copied into goal or loop metadata.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

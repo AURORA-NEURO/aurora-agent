@@ -7,6 +7,7 @@ import {
   AutonomousGoalWorker,
   AutonomousGoalControlLoop,
   AutonomousGoalBanditLearner,
+  AutonomousGoalAgentRuntime,
   AutonomousGoalWorkerJournal,
   AutonomousGoalWorkerJournalPersistenceCoordinator,
   AutonomousAgent,
@@ -317,6 +318,46 @@ test("goal control loop settles explicit evaluator credit and adapts every domai
     worker: new AutonomousGoalWorker({ ledger: invalidLedger, resolver: () => ({ task: "private invalid evaluator task" }), executor: async () => ({ status: "completed" }) }),
     evaluator: () => [{ goal_id: "invalid-eval", evaluator_id: "bad", evaluator_version: "1", reward: 2, passed: true }],
   }).run({ schedule_options: { now_ns: 500, max_selected: 1, max_concurrent: 1 } }), /reward/);
+});
+
+test("goal agent runtime bridges the real facade across every domain without retaining runtime values", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 600 });
+  for (const domain of domains) ledger.create({ goal_id: `agent-${domain}`, task_digest: goalTaskDigest(`private agent task ${domain}`), domain, now_ns: 0 });
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in bridge test"); } }));
+  const calls = [];
+  agent.run = async (task, options) => {
+    calls.push({ kind: "single", task, options });
+    return { status: "completed" };
+  };
+  agent.runCrossDomain = async (task, options) => {
+    calls.push({ kind: "cross", task, options });
+    return { status: "completed" };
+  };
+  const runtime = new AutonomousGoalAgentRuntime({
+    agent,
+    ledger,
+    task_resolver: (goal) => `private agent task ${goal.domain}`,
+    run_options_factory: (goal) => ({
+      private_runtime_handle: { token: `private-${goal.goal_id}` },
+      ...(goal.domain === "cross_domain" ? { subtasks: [{ domain: "coding", task: "private child task" }] } : {}),
+    }),
+    evaluator: (cycle) => cycle.batch.runs.map((run) => ({ goal_id: run.goal_id, evaluator_id: "agent-runtime-evaluator", evaluator_version: "1", reward: 0.75, passed: true })),
+  });
+  const result = await runtime.run({ schedule_options: { now_ns: 600, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains } });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.equal(result.evaluation_count, domains.length);
+  assert.equal(calls.length, domains.length);
+  assert.deepEqual(new Set(calls.map((call) => call.kind)), new Set(["single", "cross"]));
+  const crossCall = calls.find((call) => call.kind === "cross");
+  assert.equal(crossCall.options.subtasks[0].task, "private child task");
+  assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.status)), new Set(["completed"]));
+  const serialized = JSON.stringify(result.toJSON());
+  assert.equal(serialized.includes("private agent task"), false);
+  assert.equal(serialized.includes("private child task"), false);
+  assert.equal(serialized.includes("private_runtime_handle"), false);
+  assert.equal(runtime.metadata().domain_count, domains.length);
+  assert.equal(ledger.verifyIntegrity().ok, true);
 });
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {

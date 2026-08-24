@@ -2602,6 +2602,15 @@ export type {
   AutonomousGoalEvaluation,
 } from "./autonomous-goal-control-loop.js";
 export {
+  AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION,
+  AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA,
+  AutonomousGoalAgentRuntime,
+} from "./autonomous-goal-agent.js";
+export type {
+  AutonomousGoalAgentRunOptionsFactory,
+  AutonomousGoalAgentTaskResolver,
+} from "./autonomous-goal-agent.js";
+export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,
   AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS,
   AUTONOMOUS_MODEL_HEALTH_MAX_QUERY_LIMIT,

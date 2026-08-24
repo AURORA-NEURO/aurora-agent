@@ -25,6 +25,7 @@ from prism_sdk.autonomous_goal_scheduler import (
 )
 from prism_sdk.autonomous_goal_worker import AutonomousGoalWorker
 from prism_sdk.autonomous_goal_control_loop import AutonomousGoalBanditLearner, AutonomousGoalControlLoop
+from prism_sdk.autonomous_goal_agent import AutonomousGoalAgentRuntime
 from prism_sdk.autonomous_goal_worker_journal import (
     AutonomousGoalWorkerJournal,
     JsonAutonomousGoalWorkerJournalPersistence,
@@ -395,6 +396,64 @@ def test_goal_control_loop_settles_explicit_evaluator_credit_and_adapts_all_doma
     tampered_reward.worker.ledger.create(goal_id="invalid-eval", task_digest=_digest("private invalid evaluator task"), domain="coding", now_ns=0)
     with pytest.raises(AutonomousGoalError, match="reward"):
         tampered_reward.run(schedule_options={"now_ns": 500, "max_selected": 1, "max_concurrent": 1})
+
+
+def test_goal_agent_runtime_bridges_model_facade_across_every_domain_without_retaining_runtime_values() -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def run_single(**kwargs):
+        calls.append(("single", kwargs))
+        return SimpleNamespace(status="completed")
+
+    def run_cross(**kwargs):
+        calls.append(("cross", kwargs))
+        return SimpleNamespace(status="completed")
+
+    orchestrator.run = run_single
+    orchestrator.run_cross_domain = run_cross
+    ledger = AutonomousGoalLedger(clock=lambda: 600, max_goals=len(AUTONOMOUS_DOMAINS))
+    for domain in AUTONOMOUS_DOMAINS:
+        ledger.create(goal_id=f"agent-{domain}", task_digest=_digest(f"private agent task {domain}"), domain=domain, now_ns=0)
+
+    def run_options(goal, _row):
+        options = {"private_runtime_handle": object()}
+        if goal.domain == "cross_domain":
+            options["subtasks"] = ({"domain": "coding", "task": "private child task"},)
+        return options
+
+    runtime = AutonomousGoalAgentRuntime(
+        orchestrator,
+        ledger,
+        task_resolver=lambda goal, _row: f"private agent task {goal.domain}",
+        run_options_factory=run_options,
+        evaluator=lambda cycle: [
+            {"goal_id": run.goal_id, "evaluator_id": "agent-runtime-evaluator", "evaluator_version": "1", "reward": 0.75, "passed": True}
+            for run in cycle.batch.runs
+        ],
+    )
+    result = runtime.run(
+        schedule_options={
+            "now_ns": 600,
+            "max_selected": len(AUTONOMOUS_DOMAINS),
+            "max_concurrent": len(AUTONOMOUS_DOMAINS),
+            "required_domains": list(AUTONOMOUS_DOMAINS),
+        }
+    )
+
+    assert result.stop_reason == "all_terminal"
+    assert result.evaluation_count == len(AUTONOMOUS_DOMAINS)
+    assert len(calls) == len(AUTONOMOUS_DOMAINS)
+    assert {kind for kind, _ in calls} == {"single", "cross"}
+    cross_call = next(kwargs for kind, kwargs in calls if kind == "cross")
+    assert cross_call["subtasks"][0]["task"] == "private child task"
+    assert all(record.status == "completed" for record in ledger.list(limit=len(AUTONOMOUS_DOMAINS)))
+    serialized = json.dumps(result.to_dict(), sort_keys=True)
+    assert "private agent task" not in serialized
+    assert "private child task" not in serialized
+    assert "private_runtime_handle" not in serialized
+    assert runtime.metadata()["domain_count"] == len(AUTONOMOUS_DOMAINS)
+    assert ledger.verify_integrity()["ok"] is True
 
 
 class _CasTextStore:

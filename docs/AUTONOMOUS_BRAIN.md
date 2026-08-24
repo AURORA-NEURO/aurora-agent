@@ -5223,6 +5223,16 @@ domain-scoped value update to future admission signals; a custom learner may ret
 priority/urgency/dependency signals plus a learning-state digest. Feedback and learner state are
 retained as digests/counts only, with evaluator values and live results remaining process-local.
 
+`AutonomousGoalAgentRuntime` is the production composition bridge for long-horizon work. It binds
+the goal worker to the real `AutonomousTaskOrchestrator`: an application-owned task resolver
+rehydrates text after admission, and an execution-options factory can supply model candidates,
+opaque credential handles, memory, policy approvals, tool callbacks, and provider observers only
+at the execution boundary. Single-domain goals enter the same routing, prompt, model-selection,
+provider, and learning path as direct runs; `cross_domain` goals enter the bounded specialist/fan-in
+path. Neither callback, its values, nor provider output enters the goal, schedule, worker, control,
+or evaluator projections. This makes the loop usable as an actual agent service while retaining
+the caller's authority over keys and effect approvals.
+
 ## Resumable learning jobs
 
 For work that must survive a worker restart, `BrainJobStore` adds a separate orchestration journal.
