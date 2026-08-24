@@ -1521,6 +1521,64 @@ mod drive {
 
 mod persistence {
     use super::*;
+
+    /// The snapshot's retained *values*, without the structural vocabulary that names them.
+    ///
+    /// A leak scan over the serialised document greps its own field names and policy sentences.
+    /// Two of these assertions failed against a projection that was leaking nothing: `retention`
+    /// is the literal `metadata_only_autopilot;missions_arguments_provider_output_credentials_and_evidence_not_retained`,
+    /// which contains `arguments` inside the clause promising arguments are *not* retained; and
+    /// the field name `result_metadata_digest` contains `data`, which is one of the twelve
+    /// built-in domain names. The guard was tripping on the sentence that declares the guarantee
+    /// and on the key that carries the digest.
+    ///
+    /// Keys and the policy constants are compile-time strings that no mission, attempt or report
+    /// can influence, so the scan belongs on the values alone — which is also the stronger claim,
+    /// since leaked material would have to arrive as a value. `leak_scan_still_fires_on_planted_payload`
+    /// holds this honest: a scan that cannot fail is worth nothing.
+    fn retained_values(snapshot: &Value) -> String {
+        fn collect(value: &Value, into: &mut Vec<String>) {
+            match value {
+                Value::String(text) => into.push(text.clone()),
+                Value::Number(number) => into.push(number.to_string()),
+                Value::Bool(flag) => into.push(flag.to_string()),
+                Value::Array(items) => items.iter().for_each(|item| collect(item, into)),
+                Value::Object(entries) => {
+                    entries.values().for_each(|entry| collect(entry, into))
+                }
+                Value::Null => {}
+            }
+        }
+        let mut scanned = snapshot.clone();
+        if let Some(map) = scanned.as_object_mut() {
+            for declaration in ["schema", "retention", "secret_material"] {
+                map.remove(declaration);
+            }
+        }
+        let mut values = Vec::new();
+        collect(&scanned, &mut values);
+        values.join("\u{1f}")
+    }
+
+    #[test]
+    fn leak_scan_still_fires_on_planted_payload() {
+        let snapshot = json!({
+            "retention": bioprism_autopilot::AUTOPILOT_CHECKPOINT_RETENTION,
+            "secret_material": "never_returned",
+            "attempts": [{ "mission_digest": "aa" }],
+        });
+        assert!(
+            !retained_values(&snapshot).contains("private_task"),
+            "a clean snapshot must scan clean"
+        );
+
+        let mut planted = snapshot.clone();
+        planted["attempts"][0]["mission_digest"] = json!("private_task text");
+        assert!(
+            retained_values(&planted).contains("private_task"),
+            "the scan must catch payload planted where an attempt projection would carry it"
+        );
+    }
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -1621,7 +1679,7 @@ mod persistence {
         assert_eq!(snapshots.len(), 1);
         let snapshot = snapshots.last().unwrap();
         validate_autopilot_checkpoint(snapshot).unwrap();
-        let encoded = snapshot.to_string();
+        let encoded = retained_values(snapshot);
         assert!(!encoded.contains("private_task"));
         assert!(!encoded.contains("provider_secret"));
         assert!(!encoded.contains("arguments"));
@@ -1758,7 +1816,7 @@ mod persistence {
         validate_autopilot_checkpoint(&checkpoint).unwrap();
         assert_eq!(checkpoint["base_step_count"], json!(domains.len()));
         assert_eq!(checkpoint["attempts"][0]["step_count"], json!(domains.len()));
-        let encoded = checkpoint.to_string();
+        let encoded = retained_values(&checkpoint);
         for domain in domains {
             assert!(!encoded.contains(domain), "raw domain material leaked: {domain}");
         }
