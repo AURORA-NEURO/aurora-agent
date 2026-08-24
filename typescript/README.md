@@ -734,7 +734,10 @@ learning digests, bounded IDs, statuses, and a generation-linked state digest. I
 task or mode contracts, stale generations, unsupported fields, credential-shaped metadata, raw
 payload keys, oversized snapshots, and digest tampering. The same options work on
 `runAutonomousCrossDomainReplanCycle()`; its state also records the exact specialist/synthesis
-episode and trajectory identities.
+episode and trajectory identities. When `structuredDomainResponse: true` is enabled, it records a
+second response-quality episode ledger for each completed specialist and synthesis result; those
+episodes are replay-validated and settled independently on every bounded attempt, and the ledger
+survives terminal restart replay without retaining provider responses.
 
 When `providerPlanning` is enabled on a replan cycle, a plan-review pause is represented as an
 `execution_pending` attempt with a `plan_refinement_digest`; this keeps the outer ledger resumable
@@ -1538,6 +1541,10 @@ digest-bound domain response contract before settling those episodes and returns
 `response_settlements`, independently from the delayed task-quality trajectory. This keeps
 cross-domain formatting/composition adaptation useful without treating a child or synthesis
 response as external-world truth; mutating a caller-owned response after execution fails replay.
+The evaluator-guided `runAutonomousCrossDomainReplanCycle()` applies the same split per attempt:
+its `response_learning_episode_ids` and flattened `response_settlements` remain separate from
+task-quality rewards, while its metadata-only replan state persists the response ledger alongside
+ordinary episode IDs and trajectory/settlement digests.
 The restart-safe `AutonomousCrossDomainExecutor` uses the same split through
 `settleCrossDomainExecution()`: episode ledgers and result digests remain in the checkpoint, while
 raw completed responses must be rehydrated by the caller and are never persisted by the executor.

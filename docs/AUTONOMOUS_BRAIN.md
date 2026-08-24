@@ -4312,7 +4312,9 @@ orchestration boundary. Enabling `structuredDomainResponse` forwards the reviewe
 every specialist and synthesis invocation; the result exposes separate
 `response_learning_episode_ids` and `response_settlements` beside the ordinary delayed-credit
 trajectory. Contract-quality feedback remains replay-bound and is never treated as task truth or
-external-effect evidence.
+external-effect evidence. The evaluator-guided cross-domain replan loop creates the same
+independent response-quality ledger for every completed attempt, carries it through each bounded
+settlement, and exposes the flattened receipts without merging them into task-quality credit.
 
 The replan façade accepts a stable caller-owned `cycleId` and an
 `AutonomousCycleReplanStateStore`. The metadata-only state machine is:
@@ -4337,9 +4339,10 @@ replan_handoff      terminal
 
 Every state is content-addressed and generation-linked to its predecessor. The state table keeps
 only the task digest, mode, attempt/status rows, route/plan/selection/outcome/evaluation digests,
-learning episode and trajectory IDs, settlement digests, context digests, and bounded terminal
-status. It explicitly rejects task text, prompts, provider messages, tool arguments, evaluator
-instructions, credentials, raw evaluator evidence, and raw learning payloads. Snapshot restore
+ordinary and structured-response learning episode IDs, trajectory IDs, settlement digests, context
+digests, and bounded terminal status. It explicitly rejects task text, prompts, provider messages,
+tool arguments, evaluator instructions, credentials, raw evaluator evidence, and raw learning
+payloads. Snapshot restore
 validates field allow-lists, capacities, metadata depth, secret-shaped strings, every state digest,
 and the aggregate snapshot digest before replacing in-memory rows.
 

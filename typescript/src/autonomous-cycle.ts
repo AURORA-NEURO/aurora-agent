@@ -634,6 +634,7 @@ async function openCyclePersistence(
     attempts: [],
     evaluations: [],
     learning_episode_ids: [],
+    response_learning_episode_ids: [],
     settlement_digests: [],
     trajectory_ids: [],
     context_digests: [],
@@ -2102,7 +2103,9 @@ export interface AutonomousCrossDomainReplanCycleResult {
   evaluations: AutonomousCrossDomainReplanEvaluationProjection[];
   planner_evaluations: AutonomousReplanPlanningEvaluationProjection[];
   learning_episode_ids: string[];
+  response_learning_episode_ids: string[];
   settlements: AutonomousCrossDomainLearningSettlement[];
+  response_settlements: AutonomousLearningSettlement[];
   planner_settlements: AutonomousPlanningQualitySettlement[];
   retention: "provider_responses_local; replan_instructions_transient; value_only_evaluation_and_learning_projection";
   authorization: "semantic_routing_and_fanout_require_separate_explicit_approval";
@@ -2214,20 +2217,31 @@ async function prepareCrossDomainReplanEpisodes(
   attempt: number,
 ): Promise<AutonomousCrossDomainRunResult> {
   const ids: string[] = [];
+  const responseIds: string[] = [];
   const parentJobId = boundedReplanIdentifier("cross-domain replan parent job", `${episodePrefix}:${run.route.task_digest}:attempt-${attempt}`);
   for (const child of run.child_runs) {
     if (child.result.status !== "completed") continue;
     const episodeId = boundedReplanIdentifier("cross-domain replan episode", `${parentJobId}:${child.id}`);
     const episode = await controller.prepareRun(child.result, { episodeId, runId: episodeId, stageId: child.id, parentJobId });
     ids.push(episode.episode_id);
+    if (child.result.response_evaluation) {
+      const responseEpisodeId = boundedReplanIdentifier("cross-domain replan response episode", `${parentJobId}:response:${(await digestJson({ episode_id: episode.episode_id })).slice(0, 64)}`);
+      const responseEpisode = await controller.prepareRun(child.result, { episodeId: responseEpisodeId, runId: responseEpisodeId, stageId: child.id, parentJobId });
+      responseIds.push(responseEpisode.episode_id);
+    }
   }
   if (run.synthesis?.status === "completed") {
     const episodeId = boundedReplanIdentifier("cross-domain replan episode", `${parentJobId}:synthesis`);
     const episode = await controller.prepareRun(run.synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId });
     ids.push(episode.episode_id);
+    if (run.synthesis.response_evaluation) {
+      const responseEpisodeId = boundedReplanIdentifier("cross-domain replan response episode", `${parentJobId}:response:${(await digestJson({ episode_id: episode.episode_id })).slice(0, 64)}`);
+      const responseEpisode = await controller.prepareRun(run.synthesis, { episodeId: responseEpisodeId, runId: responseEpisodeId, stageId: "synthesis", parentJobId });
+      responseIds.push(responseEpisode.episode_id);
+    }
   }
   if (!ids.length) throw new ArgumentError("cross-domain replan requires at least one completed learning episode");
-  return { ...run, learning_episode_ids: ids, learning: "online_bandit_feedback_available" };
+  return { ...run, learning_episode_ids: ids, response_learning_episode_ids: responseIds, learning: "online_bandit_feedback_available" };
 }
 
 async function crossDomainReplanContextChunk(
@@ -2276,6 +2290,7 @@ function crossDomainReplanResult(
   learningEpisodeIds: string[],
   settlements: AutonomousCrossDomainLearningSettlement[],
   plannerSettlements: AutonomousPlanningQualitySettlement[],
+  responseLearningEpisodeIds: string[] = settlements.flatMap((settlement) => settlement.response_settlements.map((item) => item.episode.episode_id)),
 ): AutonomousCrossDomainReplanCycleResult {
   return {
     schema: AUTONOMOUS_CROSS_DOMAIN_REPLAN_CYCLE_SCHEMA,
@@ -2286,7 +2301,9 @@ function crossDomainReplanResult(
     evaluations,
     planner_evaluations: plannerEvaluations,
     learning_episode_ids: learningEpisodeIds,
+    response_learning_episode_ids: [...new Set(responseLearningEpisodeIds)],
     settlements,
+    response_settlements: settlements.flatMap((settlement) => settlement.response_settlements),
     planner_settlements: plannerSettlements,
     retention: CROSS_REPLAN_RETENTION,
     authorization: CROSS_AUTHORIZATION,
@@ -2315,12 +2332,13 @@ export async function runAutonomousCrossDomainReplanCycle(
   const costBudget = cycleCostBudget(options);
   const persistence = await openCyclePersistence(options, task, "cross_domain", maxReplans);
   if (persistence?.state.phase === "terminal") {
-    return crossDomainReplanResult(persistence.state.terminal_status as AutonomousCrossDomainReplanCycleStatus, null, persistedCrossAttempts(persistence.state), persistence.state.evaluations as unknown as AutonomousCrossDomainReplanEvaluationProjection[], [], [...persistence.state.learning_episode_ids], [], []);
+    return crossDomainReplanResult(persistence.state.terminal_status as AutonomousCrossDomainReplanCycleStatus, null, persistedCrossAttempts(persistence.state), persistence.state.evaluations as unknown as AutonomousCrossDomainReplanEvaluationProjection[], [], [...persistence.state.learning_episode_ids], [], [], [...(persistence.state.response_learning_episode_ids ?? [])]);
   }
   const attempts: AutonomousCrossDomainReplanAttempt[] = [];
   const evaluations: AutonomousCrossDomainReplanEvaluationProjection[] = [];
   const plannerEvaluations: AutonomousReplanPlanningEvaluationProjection[] = [];
   const learningEpisodeIds: string[] = [];
+  const responseLearningEpisodeIds: string[] = [];
   const settlements: AutonomousCrossDomainLearningSettlement[] = [];
   const plannerSettlements: AutonomousPlanningQualitySettlement[] = [];
   let context = [...(options.context ?? [])];
@@ -2342,6 +2360,7 @@ export async function runAutonomousCrossDomainReplanCycle(
       attempts.push(...persistedCrossAttempts(persistence.state));
       evaluations.push(...persistence.state.evaluations as unknown as AutonomousCrossDomainReplanEvaluationProjection[]);
       learningEpisodeIds.push(...persistence.state.learning_episode_ids);
+      responseLearningEpisodeIds.push(...(persistence.state.response_learning_episode_ids ?? []));
     } else {
       startAttempt = persistence.state.attempt - 1;
       if (persistence.state.phase === "execution_pending" && persistence.state.route_digest) routeOverride = await rehydrateCycleRoute(persistence, options.rehydrateRoute);
@@ -2349,6 +2368,7 @@ export async function runAutonomousCrossDomainReplanCycle(
       attempts.push(...persistedCrossAttempts(persistence.state));
       evaluations.push(...persistence.state.evaluations as unknown as AutonomousCrossDomainReplanEvaluationProjection[]);
       learningEpisodeIds.push(...persistence.state.learning_episode_ids);
+      responseLearningEpisodeIds.push(...(persistence.state.response_learning_episode_ids ?? []));
     }
   }
 
@@ -2406,7 +2426,7 @@ export async function runAutonomousCrossDomainReplanCycle(
       const attemptRecord = { attempt: attempt + 1, status: cycle.status, run_status: null, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: null, evaluation_digest: null, evaluation: null, learning_episode_ids: [], trajectory_id: null } satisfies AutonomousCrossDomainReplanAttempt;
       upsertResultAttempt(attempts, attemptRecord);
       if (persistence) await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "execution_pending", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: null, evaluation_digest: null, replan_instruction_digest: null, terminal_status: null, attempts: upsertCycleAttempt(persistence.state.attempts, cycleAttemptState(attempt + 1, cycle.status, null, cycle.route.route_digest, null, null, null, [], null, planRefinementDigest)) });
-      return crossDomainReplanResult("plan_review_required", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
+      return crossDomainReplanResult("plan_review_required", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements, responseLearningEpisodeIds);
     }
     if (!terminalRun || !run) {
       try {
@@ -2418,16 +2438,18 @@ export async function runAutonomousCrossDomainReplanCycle(
       const attemptRecord = { attempt: attempt + 1, status: cycle.status, run_status: run?.status ?? null, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: null, evaluation: null, learning_episode_ids: [], trajectory_id: null } satisfies AutonomousCrossDomainReplanAttempt;
       upsertResultAttempt(attempts, attemptRecord);
       if (persistence) await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "terminal", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: null, replan_instruction_digest: null, terminal_status: cycle.status, attempts: upsertCycleAttempt(persistence.state.attempts, cycleAttemptState(attempt + 1, cycle.status, run?.status ?? null, cycle.route.route_digest, null, outcomeDigest, null, [], null, planRefinementDigest)) });
-      return crossDomainReplanResult(cycle.status, final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
+      return crossDomainReplanResult(cycle.status, final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements, responseLearningEpisodeIds);
     }
 
     let runForEvaluation = run;
     let pendingEpisodeIds: string[] = [];
+    let pendingResponseEpisodeIds: string[] = [];
     let trajectoryId: string | null = null;
     try {
       if (options.learning) {
         runForEvaluation = await prepareCrossDomainReplanEpisodes(options.learning.controller, run, episodePrefix!, attempt + 1);
         pendingEpisodeIds = [...runForEvaluation.learning_episode_ids];
+        pendingResponseEpisodeIds = [...(runForEvaluation.response_learning_episode_ids ?? [])];
         trajectoryId = boundedReplanIdentifier("cross-domain replan trajectory", `${trajectoryIdPrefix}:${run.route.task_digest}:attempt-${attempt + 1}`);
       }
       const resumedSettlement = persistedPhase === "settlement_pending";
@@ -2462,7 +2484,7 @@ export async function runAutonomousCrossDomainReplanCycle(
       if (resumedSettlement && evaluationDigest !== persistence?.state.evaluation_digest) throw new ArgumentError("rehydrated cross-domain evaluator packet does not match the persisted evaluation digest");
       if (persistence && !resumedSettlement) {
         const persistedAttempt = cycleAttemptState(attempt + 1, cycle.status, run.status, cycle.route.route_digest, null, outcomeDigest, evaluationDigest, pendingEpisodeIds, trajectoryId, planRefinementDigest);
-        await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "settlement_pending", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: evaluationDigest, replan_instruction_digest: projection.replan_instruction_digest, evaluations: [...persistence.state.evaluations, projection], attempts: upsertCycleAttempt(persistence.state.attempts, persistedAttempt), learning_episode_ids: [...new Set([...persistence.state.learning_episode_ids, ...pendingEpisodeIds])] });
+        await commitCyclePersistence(persistence, { attempt: attempt + 1, phase: "settlement_pending", route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: evaluationDigest, replan_instruction_digest: projection.replan_instruction_digest, evaluations: [...persistence.state.evaluations, projection], attempts: upsertCycleAttempt(persistence.state.attempts, persistedAttempt), learning_episode_ids: [...new Set([...persistence.state.learning_episode_ids, ...pendingEpisodeIds])], response_learning_episode_ids: [...new Set([...(persistence.state.response_learning_episode_ids ?? []), ...pendingResponseEpisodeIds])] });
       }
       if (!resumedSettlement) await options.execution?.recordEvaluation({ evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evaluationDigest: executionEvaluationDigest, failureClass: evaluation.failure_class });
       let settlement: AutonomousCrossDomainLearningSettlement | null = null;
@@ -2470,6 +2492,7 @@ export async function runAutonomousCrossDomainReplanCycle(
         settlement = await options.learning.controller.settleCrossDomain(runForEvaluation, evaluation.rewards, { trajectoryId: trajectoryId!, discount: options.learning.discount, remote: options.learning.remote, outbox: options.learning.outbox });
         settlements.push(settlement);
         for (const episodeId of pendingEpisodeIds) if (!learningEpisodeIds.includes(episodeId)) learningEpisodeIds.push(episodeId);
+        for (const episodeId of pendingResponseEpisodeIds) if (!responseLearningEpisodeIds.includes(episodeId)) responseLearningEpisodeIds.push(episodeId);
         if (attempt === 0 && options.memory && cycle.memory) {
           const settlementItems = settlement.trajectory.settlements;
           for (let index = 0; index < cycle.memory.recorded_episode_ids.length; index += 1) {
@@ -2494,7 +2517,7 @@ export async function runAutonomousCrossDomainReplanCycle(
         });
         plannerSettlements.push(plannerSettlement);
       }
-      final = { ...cycle, run: runForEvaluation, learning_episode_ids: pendingEpisodeIds, evaluation: settlement ? projectedEvaluations(settlement) : null, settlement, planner_evaluation: plannerEvaluation, planner_settlement: plannerSettlement };
+      final = { ...cycle, run: runForEvaluation, learning_episode_ids: pendingEpisodeIds, response_learning_episode_ids: pendingResponseEpisodeIds, evaluation: settlement ? projectedEvaluations(settlement) : null, settlement, response_settlements: settlement?.response_settlements ?? [], planner_evaluation: plannerEvaluation, planner_settlement: plannerSettlement };
       if (resumedSettlement && evaluations.length > 0) evaluations[evaluations.length - 1] = projection;
       else evaluations.push(projection);
       upsertResultAttempt(attempts, { attempt: attempt + 1, status: cycle.status, run_status: run.status, route_digest: cycle.route.route_digest, plan_refinement_digest: planRefinementDigest, outcome_digest: outcomeDigest, evaluation_digest: evaluationDigest, evaluation: projection, learning_episode_ids: pendingEpisodeIds, trajectory_id: trajectoryId });
@@ -2518,6 +2541,7 @@ export async function runAutonomousCrossDomainReplanCycle(
           terminal_status: shouldReplan ? null : (evaluation.replan_requested ? "replan_limit_reached" : (evaluation.passed ? "completed" : "completed_without_replan")),
           attempts: upsertCycleAttempt(persistence.state.attempts, cycleAttemptState(attempt + 1, cycle.status, run.status, cycle.route.route_digest, null, outcomeDigest, evaluationDigest, pendingEpisodeIds, trajectoryId, planRefinementDigest)),
           learning_episode_ids: [...new Set([...persistence.state.learning_episode_ids, ...pendingEpisodeIds])],
+          response_learning_episode_ids: [...new Set([...(persistence.state.response_learning_episode_ids ?? []), ...pendingResponseEpisodeIds])],
           settlement_digests: stateSettlementDigests,
           trajectory_ids: trajectoryId && !persistence.state.trajectory_ids.includes(trajectoryId) ? [...persistence.state.trajectory_ids, trajectoryId] : [...persistence.state.trajectory_ids],
         });
@@ -2525,11 +2549,11 @@ export async function runAutonomousCrossDomainReplanCycle(
 
       if (!evaluation.replan_requested) {
         await options.execution?.complete(evaluation.passed ? "completed" : "completed_without_replan");
-        return crossDomainReplanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
+        return crossDomainReplanResult(evaluation.passed ? "completed" : "completed_without_replan", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements, responseLearningEpisodeIds);
       }
       if (attempt >= maxReplans) {
         await options.execution?.complete("replan_limit_reached");
-        return crossDomainReplanResult("replan_limit_reached", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements);
+        return crossDomainReplanResult("replan_limit_reached", final, attempts, evaluations, plannerEvaluations, learningEpisodeIds, settlements, plannerSettlements, responseLearningEpisodeIds);
       }
       const nextContext = await crossDomainReplanContextChunk(attempt + 2, cycle.route.route_digest, outcomeDigest!, evaluation);
       await options.execution?.replan({ instructionDigest: projection.replan_instruction_digest, attempt: attempt + 2, reason: "cross_domain_evaluator_requested" });
