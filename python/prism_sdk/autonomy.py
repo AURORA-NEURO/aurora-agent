@@ -17167,6 +17167,35 @@ class AutonomousAgent:
             progress_sink=progress_sink,
         )
 
+    def admit_workflow_portfolio_evidence_work(
+        self,
+        queue: Any,
+        execution: Any,
+        *,
+        job_id: str,
+        evidence_plan_digest: str,
+        item_request_digests: Sequence[str],
+        checkpoint_digest: str | None = None,
+        max_attempts: int = 3,
+        now: int | None = None,
+    ) -> tuple[Any, ...]:
+        """Admit reviewed provider items into a lease-fenced evidence work queue."""
+
+        from .autonomous_workflow_portfolio_evidence_queue import (
+            admit_autonomous_workflow_portfolio_evidence_work_items,
+        )
+
+        return admit_autonomous_workflow_portfolio_evidence_work_items(
+            queue,
+            job_id=job_id,
+            execution=execution,
+            evidence_plan_digest=evidence_plan_digest,
+            item_request_digests=item_request_digests,
+            checkpoint_digest=checkpoint_digest,
+            max_attempts=max_attempts,
+            now=now,
+        )
+
     def prepare_auto_with_provider(
         self,
         *,

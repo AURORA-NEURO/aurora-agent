@@ -8538,6 +8538,36 @@ exported in-memory, canonical JSON, transactional JSON, and controller adapters 
 single-writer/CAS seams; multi-host storage, encryption, tenancy, and source retention remain
 deployment responsibilities.
 
+For service workers that need to distribute those evidence items, Python also exposes
+`InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue` and its CAS-backed companion. Use
+`agent.admit_workflow_portfolio_evidence_work()` (or the exported admission function) after the
+provider execution and evidence request set have been reviewed. Each admitted row binds the
+portfolio plan, optional admission, provider execution checkpoint, evidence plan, request digest,
+and dependency wave; it contains no task text, source payload, prompt, credential, or raw value.
+`AutonomousWorkflowPortfolioEvidenceWorkWorker` executes caller-owned item callbacks under a
+lease, while `AutonomousWorkflowPortfolioEvidenceAtomicWorkWorker` reloads and CAS-commits each
+claim/renew/settle transition for shared workers. Completed and evaluator-pending outcomes carry
+only result digests, retryable failures are delayed and bounded, lease expiry becomes explicit
+reconciliation, and pending/reconciliation work requires an explicit requeue before retry:
+
+```python
+queue = InMemoryAutonomousWorkflowPortfolioEvidenceWorkQueue()
+agent.admit_workflow_portfolio_evidence_work(
+    queue,
+    execution,
+    job_id="evidence-workers-2026-08-24",
+    evidence_plan_digest=evidence_plan.plan_digest,
+    item_request_digests=item_request_digests,
+)
+worker = AutonomousWorkflowPortfolioEvidenceWorkWorker(queue, execute_item)
+worker_projection = worker.run(worker_id="worker-a", limit=16)
+```
+
+Canonical JSON and transactional JSON persistence are available for text stores, and the SQLite
+adapter supplies a local transactional snapshot seam. The atomic coordinator still requires a
+real compare-and-swap backend for multi-host safety; queue admission does not authorize sources,
+providers, tools, effects, or evaluator truth.
+
 When the application already knows the capability, use focused dispatch to narrow provider-visible
 tools and bind the evidence contract into the developer prompt:
 

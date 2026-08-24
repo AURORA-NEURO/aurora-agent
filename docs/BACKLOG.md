@@ -104,6 +104,16 @@ so source adapters are never silently reacquired after a completed item. Local i
 storage and controller seams are included; distributed transactions, source retention, and
 tenant-level authorization remain embedding-deployment work.
 
+Python now closes the next operational gap with a lease-fenced portfolio evidence work queue.
+`admit_autonomous_workflow_portfolio_evidence_work_items()` binds every item to the reviewed
+portfolio, optional admission, provider execution, evidence plan, request digest, checkpoint, and
+dependency wave. The local and CAS-backed queues enforce dependency closure, provider-status
+holds, lease ownership/renewal, expiry reconciliation, bounded retry/backoff, evaluator-pending
+requeue, cancellation, and metadata-only snapshots. JSON, transactional JSON, SQLite, local
+flush, atomic reload/CAS coordination, and caller-owned workers are exported and exercised over
+all twelve domains. The queue still does not provide distributed consensus, source/evaluator
+authority, credential storage, or effect authorization; those remain deployment responsibilities.
+
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
 the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson
