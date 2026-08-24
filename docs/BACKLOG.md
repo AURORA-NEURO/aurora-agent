@@ -94,6 +94,16 @@ restart without the same reviewed gate fails closed before rehydration or new wo
 approval UX, persistence encryption, distributed leases, and external authorization remain deployment
 responsibilities.
 
+Python now also has portfolio-level evidence supervision parity. `execute_workflow_portfolio_evidence`
+composes the existing evidence runtime across provider dependency waves, enforces item-domain and
+request-plan alignment, carries direct predecessor evidence digests, and keeps provider failure,
+pending evaluation, reconciliation, and dependency omission explicit. The resumable variant binds
+provider execution, evidence plan, request digests, evaluator identity, runtime policy, and item
+metadata into metadata-only checkpoints; journals and value rehydration are required for replay,
+so source adapters are never silently reacquired after a completed item. Local in-memory/JSON/CAS
+storage and controller seams are included; distributed transactions, source retention, and
+tenant-level authorization remain embedding-deployment work.
+
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
 the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson

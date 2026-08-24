@@ -8504,6 +8504,40 @@ otherwise replay fails closed before rehydration or a new provider call. Runtime
 rechecks health and policy after caller approval, so admission is a review gate rather than a
 stale model-selection authorization.
 
+After provider execution, Python can supervise the evidence boundary for the same portfolio with
+`agent.execute_workflow_portfolio_evidence()`. The caller supplies typed per-item acquisition
+requests plus its own acquirer, projector, and versioned evaluator. The supervisor rejects
+requests outside the reviewed domain plan, scopes each `AutonomousEvidenceRuntime` to one item,
+propagates only direct predecessor evidence digests, and runs dependency waves with bounded
+parallelism. Provider failures, missing evidence, evaluator handoff, reconciliation, and
+downstream omission remain distinct statuses; a successful provider result is never treated as
+evidence truth:
+
+```python
+evidence = agent.execute_workflow_portfolio_evidence(
+    execution,
+    items=caller_owned_evidence_requests,
+    runtime={
+        "acquirer": source_adapter,
+        "projector": evidence_projector,
+        "evaluator": reviewed_evaluator,
+    },
+    journal_for=lambda item_id, **_: journal_by_item[item_id],
+    max_parallelism=4,
+)
+```
+
+The returned object keeps raw values only as a transient caller handoff. `to_dict()` and every
+portfolio-evidence checkpoint contain bounded counts, receipt/assessment/result digests,
+evaluator identity, request-set identity, provider-execution identity, and retention markers—not
+task text, prompts, source payloads, credentials, or raw values. For restartable workers,
+`agent.execute_workflow_portfolio_evidence_resumable()` flushes a checkpoint after each evidence
+wave. Completed items must have their caller-owned append-only journals and a `rehydrate_value`
+callback on resume, so a restart replays receipts instead of silently reacquiring sources. The
+exported in-memory, canonical JSON, transactional JSON, and controller adapters provide local
+single-writer/CAS seams; multi-host storage, encryption, tenancy, and source retention remain
+deployment responsibilities.
+
 When the application already knows the capability, use focused dispatch to narrow provider-visible
 tools and bind the evidence contract into the developer prompt:
 

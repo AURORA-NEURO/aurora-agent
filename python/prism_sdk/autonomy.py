@@ -17087,6 +17087,86 @@ class AutonomousAgent:
             workflow_options_factory=workflow_options_factory,
         )
 
+    def execute_workflow_portfolio_evidence(
+        self,
+        execution: Any,
+        *,
+        items: Sequence[Any],
+        runtime: Any,
+        plan: Any | None = None,
+        evidence_plan: Any | None = None,
+        journal_for: Any | None = None,
+        max_parallelism: int = 4,
+        stop_on_failure: bool = False,
+        progress_sink: Any | None = None,
+    ) -> Any:
+        """Supervise caller-owned evidence across a completed provider portfolio.
+
+        Provider execution and evidence truth remain separate boundaries.  This method composes
+        the existing evidence runtime across portfolio dependency waves, propagating only
+        provider/result digests and parent evidence digests between items.  Acquirers, projectors,
+        evaluators, journals, and transient values remain caller-owned.
+        """
+
+        from .autonomous_workflow_portfolio_evidence import (
+            execute_autonomous_workflow_portfolio_evidence,
+        )
+
+        return execute_autonomous_workflow_portfolio_evidence(
+            self,
+            execution,
+            items=items,
+            runtime=runtime,
+            plan=plan,
+            evidence_plan=evidence_plan,
+            journal_for=journal_for,
+            max_parallelism=max_parallelism,
+            stop_on_failure=stop_on_failure,
+            progress_sink=progress_sink,
+        )
+
+    def execute_workflow_portfolio_evidence_resumable(
+        self,
+        execution: Any,
+        *,
+        job_id: str,
+        items: Sequence[Any],
+        runtime: Any,
+        checkpoint_sink: Any,
+        checkpoint: Any | None = None,
+        plan: Any | None = None,
+        evidence_plan: Any | None = None,
+        require_admission: bool = True,
+        runtime_policy_digest: str | None = None,
+        journal_for: Any | None = None,
+        max_parallelism: int = 4,
+        stop_on_failure: bool = False,
+        progress_sink: Any | None = None,
+    ) -> Any:
+        """Run portfolio evidence with digest-bound checkpoints and journal replay."""
+
+        from .autonomous_workflow_portfolio_evidence import (
+            execute_autonomous_workflow_portfolio_evidence_resumable,
+        )
+
+        return execute_autonomous_workflow_portfolio_evidence_resumable(
+            self,
+            execution,
+            job_id=job_id,
+            items=items,
+            runtime=runtime,
+            checkpoint_sink=checkpoint_sink,
+            checkpoint=checkpoint,
+            plan=plan,
+            evidence_plan=evidence_plan,
+            require_admission=require_admission,
+            runtime_policy_digest=runtime_policy_digest,
+            journal_for=journal_for,
+            max_parallelism=max_parallelism,
+            stop_on_failure=stop_on_failure,
+            progress_sink=progress_sink,
+        )
+
     def prepare_auto_with_provider(
         self,
         *,
