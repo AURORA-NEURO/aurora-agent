@@ -56,6 +56,9 @@ import {
   QUALITY_DRIFT_FEATURE_ID,
   qualityDriftReceiptDigest,
   validateQualityDriftReceipt,
+  DESIGN_FRONTIER_FEATURE_ID,
+  designFrontierReceiptDigest,
+  validateDesignFrontierReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -425,4 +428,22 @@ test("quality drift receipt keeps unknown metric and baseline digest", () => {
   };
   assert.doesNotThrow(() => validateQualityDriftReceipt(receipt));
   assert.equal(qualityDriftReceiptDigest(receipt), qualityDriftReceiptDigest(receipt));
+});
+
+test("design frontier receipt retains blocked scenario", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: DESIGN_FRONTIER_FEATURE_ID,
+    study_id: "study:frontier",
+    feasible_scenarios: 1,
+    blocked_scenarios: 1,
+    scenarios: [
+      { scenario_id: "nominal", disposition: "feasible", reasons: ["compiled"] },
+      { scenario_id: "underpowered", disposition: "blocked", reasons: ["resource limit"] },
+    ],
+    artifact: { content_hash: "c".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateDesignFrontierReceipt(receipt));
+  assert.equal(designFrontierReceiptDigest(receipt), designFrontierReceiptDigest(receipt));
 });

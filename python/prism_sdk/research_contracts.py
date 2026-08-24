@@ -31,6 +31,7 @@ ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01"
 PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02"
 MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02"
 QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02"
+DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02"
 
 
 class ResearchContractError(ValueError):
@@ -383,6 +384,46 @@ class QualityDriftReceipt:
             "metrics": [dict(metric) for metric in self.metrics],
             "artifact": dict(self.artifact),
             "raw_data_local": self.raw_data_local,
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class DesignFrontierReceipt:
+    """Transport validator for scenario-replayed power-aware experiment designs."""
+
+    study_id: str
+    feasible_scenarios: int
+    blocked_scenarios: int
+    scenarios: tuple[Mapping[str, Any], ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = DESIGN_FRONTIER_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != DESIGN_FRONTIER_FEATURE_ID:
+            raise ResearchContractError("design frontier schema or feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.study_id.strip() or not self.scenarios:
+            raise ResearchContractError("design frontier identity or boundary is invalid")
+        if self.feasible_scenarios < 0 or self.blocked_scenarios < 0 or self.feasible_scenarios + self.blocked_scenarios != len(self.scenarios):
+            raise ResearchContractError("design frontier scenario counts are inconsistent")
+        if any(not scenario.get("scenario_id") or scenario.get("disposition") not in {"feasible", "blocked"} or not scenario.get("reasons") for scenario in self.scenarios):
+            raise ResearchContractError("design frontier scenario record is incomplete")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("design frontier artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "study_id": self.study_id,
+            "feasible_scenarios": self.feasible_scenarios,
+            "blocked_scenarios": self.blocked_scenarios,
+            "scenarios": [dict(scenario) for scenario in self.scenarios],
+            "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })
 

@@ -139,6 +139,7 @@ pub mod pareto;
 pub mod protocol_simulation;
 pub mod instrument_preflight;
 pub mod protocol_matrix;
+pub mod design_frontier;
 pub mod report;
 pub mod risk;
 pub mod rollback;
@@ -170,6 +171,12 @@ pub use protocol_matrix::{
     MatrixCellResult, ProtocolMatrixError, ProtocolMatrixReceipt, ProtocolMatrixRequest,
     FEATURE_ID as PROTOCOL_MATRIX_FEATURE_ID,
     FEATURE_VERSION as PROTOCOL_MATRIX_FEATURE_VERSION,
+};
+pub use design_frontier::{
+    design_frontier_manifest, evaluate_design_frontier, DesignFrontierError,
+    DesignFrontierReceipt, DesignFrontierRequest, DesignScenario, DesignScenarioResult,
+    ScenarioDisposition, FEATURE_ID as DESIGN_FRONTIER_FEATURE_ID,
+    FEATURE_VERSION as DESIGN_FRONTIER_FEATURE_VERSION,
 };
 pub use error::{
     EvolutionError, HoldoutError, LabError, ParetoError, RollbackError, SeparationError, SpaceError,

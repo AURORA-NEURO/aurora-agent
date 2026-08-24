@@ -1811,6 +1811,7 @@ impl Server {
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
             "quality_drift_evaluate" => self.quality_drift_evaluate(&arguments),
+            "design_frontier_evaluate" => self.design_frontier_evaluate(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24551,6 +24552,28 @@ impl Server {
         }))
     }
 
+    fn design_frontier_evaluate(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized DesignFrontierRequest")?;
+        let receipt = crate::research_contracts::evaluate_design_frontier_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_lab::DESIGN_FRONTIER_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "effect, variance, attrition, and budget scenarios are replayed through the deterministic design compiler",
+                "scenario order is canonicalized and blocked cells retain compiler reasons",
+                "the route performs local computation only and does not authorize laboratory execution"
+            ],
+            "limitations": [
+                "scenario assumptions are caller-declared and no power model can establish biological truth",
+                "a feasible design still requires independent policy, protocol, and instrument approvals"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35941,7 +35964,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "inference_lab",
             "domains": ["hypothesis separation", "evidence acquisition", "holdout-aware improvement", "risk-triggered research"],
             "crates": ["bioprism-lab", "bioprism-obligation", "bioprism-routing", "bioprism-evalengine"],
-            "mcp_tools": ["lab_plan", "lab_space_audit", "lab_pareto_audit", "lab_branch_audit", "lab_holdout_audit", "lab_evolution_audit", "routing_decide", "routing_lab_run"],
+            "mcp_tools": ["lab_plan", "lab_space_audit", "lab_pareto_audit", "lab_branch_audit", "lab_holdout_audit", "lab_evolution_audit", "design_frontier_evaluate", "routing_decide", "routing_lab_run"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -38325,6 +38348,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-adapter QualityDriftRequest with baseline/current metrics, tolerances, conformance, and locality policy." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "design_frontier_evaluate",
+            "description": "Replay a typed power-aware experiment design across declared effect, variance, attrition, and resource scenarios, retaining feasible and blocked frontier cells with deterministic plan digests.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-lab DesignFrontierRequest containing a base ExperimentDesignRequest and scenario assumptions." }
                 },
                 "required": ["request"]
             }

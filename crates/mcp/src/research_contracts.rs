@@ -17,9 +17,11 @@ use bioprism_evalengine::{
 };
 use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
 use bioprism_lab::{
-    instrument_preflight, simulate_protocol_matrix, InstrumentPreflightReceipt,
-    InstrumentPreflightRequest, ProtocolMatrixReceipt, ProtocolMatrixRequest,
-    INSTRUMENT_PREFLIGHT_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID,
+    evaluate_design_frontier, instrument_preflight,
+    DesignFrontierReceipt, DesignFrontierRequest, simulate_protocol_matrix,
+    InstrumentPreflightReceipt, InstrumentPreflightRequest, ProtocolMatrixReceipt,
+    ProtocolMatrixRequest, DESIGN_FRONTIER_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID,
+    PROTOCOL_MATRIX_FEATURE_ID,
 };
 use bioprism_runtime::{
     execute_workflow, WorkflowExecutionReceipt, WorkflowExecutionRequest,
@@ -39,6 +41,7 @@ pub const ANALYSIS_QUALIFICATION_TOOL: &str = "analysis_qualify";
 pub const PROTOCOL_MATRIX_TOOL: &str = "protocol_matrix_simulate";
 pub const MULTIMODAL_REPLICATION_TOOL: &str = "multimodal_replication_evaluate";
 pub const QUALITY_DRIFT_TOOL: &str = "quality_drift_evaluate";
+pub const DESIGN_FRONTIER_TOOL: &str = "design_frontier_evaluate";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -222,6 +225,24 @@ pub fn validate_quality_drift_receipt_json(value: &Value) -> Result<QualityDrift
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != QUALITY_DRIFT_FEATURE_ID {
         return Err("quality drift feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn evaluate_design_frontier_json(value: &Value) -> Result<Value, String> {
+    let request: DesignFrontierRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid design frontier request: {error}"))?;
+    let receipt = evaluate_design_frontier(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize design frontier receipt: {error}"))
+}
+
+pub fn validate_design_frontier_receipt_json(value: &Value) -> Result<DesignFrontierReceipt, String> {
+    let receipt: DesignFrontierReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid design frontier receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != DESIGN_FRONTIER_FEATURE_ID {
+        return Err("design frontier feature id mismatch".into());
     }
     Ok(receipt)
 }

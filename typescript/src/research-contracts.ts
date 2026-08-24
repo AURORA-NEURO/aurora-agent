@@ -26,6 +26,7 @@ export const ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01" as con
 export const PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02" as const;
 export const MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02" as const;
 export const QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02" as const;
+export const DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -549,6 +550,30 @@ export function validateQualityDriftReceipt(receipt: QualityDriftReceipt): void 
 
 export function qualityDriftReceiptDigest(receipt: QualityDriftReceipt): string {
   validateQualityDriftReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface DesignFrontierReceipt {
+  schema_version: string;
+  feature_id: string;
+  study_id: string;
+  feasible_scenarios: number;
+  blocked_scenarios: number;
+  scenarios: readonly Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateDesignFrontierReceipt(receipt: DesignFrontierReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== DESIGN_FRONTIER_FEATURE_ID) throw new Error("design frontier schema or feature mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.study_id.trim() || !receipt.scenarios.length) throw new Error("design frontier identity or boundary is invalid");
+  if (receipt.feasible_scenarios < 0 || receipt.blocked_scenarios < 0 || receipt.feasible_scenarios + receipt.blocked_scenarios !== receipt.scenarios.length) throw new Error("design frontier scenario counts are inconsistent");
+  if (receipt.scenarios.some((scenario) => typeof scenario.scenario_id !== "string" || !scenario.scenario_id.trim() || !new Set(["feasible", "blocked"]).has(String(scenario.disposition)) || !Array.isArray(scenario.reasons) || scenario.reasons.length === 0)) throw new Error("design frontier scenario record is incomplete");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("design frontier artifact digest is invalid");
+}
+
+export function designFrontierReceiptDigest(receipt: DesignFrontierReceipt): string {
+  validateDesignFrontierReceipt(receipt);
   return digestJsonSync(receipt);
 }
 
