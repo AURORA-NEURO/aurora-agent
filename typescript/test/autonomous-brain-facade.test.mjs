@@ -60,6 +60,19 @@ function localRuntime(onRequest = () => {}) {
   return runtime;
 }
 
+function semanticRuntime(payloads, onRequest = () => {}) {
+  let calls = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("semantic HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("offline", (request) => {
+    calls += 1;
+    onRequest(request);
+    const isRouter = request.messages.some((message) => String(message.content).includes("bounded autonomous task router"));
+    if (isRouter) return { structured: payloads.shift() };
+    return { output_text: "bounded facade execution" };
+  });
+  return { runtime, calls: () => calls };
+}
+
 test("brain facade creates request-free plans for every built-in domain and executes a bounded batch", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);
@@ -87,6 +100,81 @@ test("brain facade creates request-free plans for every built-in domain and exec
   assert.ok(batch.items.every((item) => item.status === "succeeded" && item.execution?.run?.status === "completed"));
   assert.equal(runtime.providerStatus("offline").successes, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.doesNotMatch(JSON.stringify(batch.items.map((item) => item.execution?.plan ?? null)), /debug and verify a bounded repository change/);
+});
+
+test("brain facade composes semantic routing across every built-in domain and keeps execution approval separate", async () => {
+  const payloads = AUTONOMOUS_DOMAIN_NAMES.map((domain) => ({
+    selected_domains: [{ domain, score: 0.94, rationale: `catalogue route for ${domain}` }],
+    confidence: 0.93,
+    abstain: false,
+    abstain_reason: null,
+  }));
+  const { runtime, calls } = semanticRuntime(payloads);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const execution = await brain.execute({ task: tasks[domain] }, {
+      semanticRouting: { enabled: true, approveProviderCall: true },
+      approveProviderCall: false,
+    });
+    assert.equal(execution.semantic_route.status, "completed", domain);
+    assert.equal(execution.plan.semantic_route.status, "completed", domain);
+    assert.equal(execution.plan.route.route_digest, execution.plan.semantic_route.route.route_digest, domain);
+    assert.equal(execution.status, "approval_required", domain);
+    assert.equal(execution.run?.status, "approval_required", domain);
+  }
+  assert.equal(calls(), AUTONOMOUS_DOMAIN_NAMES.length, "only the approved classifier should have run");
+});
+
+test("brain facade retains semantic route identity through persisted plan replay without reclassifying", async () => {
+  const payloads = [{ selected_domains: [{ domain: "coding", score: 0.94, rationale: "implementation" }], confidence: 0.93, abstain: false, abstain_reason: null }];
+  const { runtime, calls } = semanticRuntime(payloads);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const task = tasks.coding;
+  const held = await brain.execute({ task }, { semanticRouting: { enabled: true, approveProviderCall: true }, approveProviderCall: false });
+  assert.equal(held.status, "approval_required");
+  const restored = AutonomousBrainPlan.fromJSON(held.plan);
+  assert.equal(restored.semantic_route.status, "completed");
+  const resumed = await brain.executePlanned(restored, { task }, { approveProviderCall: true });
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.semantic_route.route.route_digest, restored.route.route_digest);
+  assert.equal(calls(), 2, "plan replay must reuse the classifier route and only invoke execution");
+});
+
+test("brain facade classifier approval is a distinct gate for cycles and adaptive loops", async () => {
+  const payloads = [
+    { selected_domains: [{ domain: "coding", score: 0.94, rationale: "implementation" }], confidence: 0.93, abstain: false, abstain_reason: null },
+    { selected_domains: [{ domain: "coding", score: 0.94, rationale: "implementation" }], confidence: 0.93, abstain: false, abstain_reason: null },
+  ];
+  const { runtime, calls } = semanticRuntime(payloads);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const cycle = await brain.executeCycle({ task: tasks.coding }, {
+    semanticRouting: { enabled: true, approveProviderCall: true },
+    approveProviderCall: false,
+  });
+  assert.equal(cycle.semantic_route.status, "completed");
+  assert.equal(cycle.status, "approval_required");
+  assert.equal(cycle.cycle.status, "approval_required");
+  assert.equal(cycle.cycle.run.status, "approval_required");
+
+  const adaptive = await brain.executeAdaptiveCycle({ task: tasks.coding }, {
+    semanticRouting: { enabled: true, approveProviderCall: true },
+    approveProviderCall: false,
+    adaptive: {
+      evaluate: () => { throw new Error("adaptive evaluator must not run before execution approval"); },
+    },
+  });
+  assert.equal(adaptive.semantic_route.status, "completed");
+  assert.equal(adaptive.status, "approval_required");
+  assert.equal(adaptive.adaptive.final.status, "approval_required");
+  assert.equal(adaptive.adaptive.final.run.status, "approval_required");
+  assert.equal(calls(), 2);
 });
 
 test("brain facade previews provider-free model selection for every built-in domain", async () => {

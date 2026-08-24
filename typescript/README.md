@@ -519,6 +519,31 @@ if (result.semantic_route?.status !== "completed") {
 }
 ```
 
+`AutonomousBrainFacade` exposes the same boundary for application code that uses the composed
+plan/connector/provider surface. Pass `semanticRouting` to `execute()` or `executeWithTrace()`;
+for durable feedback loops, pass it at the top level of `executeCycle()` or
+`executeAdaptiveCycle()`. The classifier approval is independent from the enclosing execution
+approval, and the returned metadata-only `plan.semantic_route` is route-digest bound. A planned
+replay reuses that route and does not invoke the classifier again:
+
+```typescript
+const held = await brain.execute(
+  { task: "route this unfamiliar request to the reviewed specialist catalogue" },
+  { semanticRouting: { enabled: true, approveProviderCall: true } },
+);
+const resumed = await brain.executePlanned(
+  AutonomousBrainPlan.fromJSON(held.plan),
+  { task: "route this unfamiliar request to the reviewed specialist catalogue" },
+  { approveProviderCall: true },
+);
+```
+
+The classifier, provider failovers, fan-out, and cycle attempts can share one caller-owned
+`AutonomousCostBudget`; no route proposal authorizes tools, effects, evaluator credit, or
+execution. Abstention, disagreement, malformed output, policy holds, and missing approval remain
+typed review states. Cycle/adaptive facade callers configure semantic routing only at the
+top-level boundary so the exact reviewed route is handed into the durable loop.
+
 Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
 `minQuality`, and the optional `minSelectionConfidence` rank-separation floor. The same gates are
 enforced by local health-aware ranking, contextual

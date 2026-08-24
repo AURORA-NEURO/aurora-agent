@@ -1,6 +1,7 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  validateAutonomousRouteOverride,
   type AutonomousAgent,
   type AutonomousApprovedModelSelectionOptions,
   type AutonomousAutoBlueprint,
@@ -19,6 +20,11 @@ import {
   type AutonomousTaskBlueprint,
 } from "./autonomous.js";
 import {
+  semanticRouteAutonomousTask,
+  type AutonomousSemanticRouteOptions,
+  type AutonomousSemanticRouteResult,
+} from "./autonomous-routing.js";
+import {
   AutonomousConnectorOperationFacade,
   AutonomousConnectorOperationPlan,
   AutonomousConnectorIntentFacade,
@@ -32,6 +38,7 @@ import {
   runAutonomousReplanCycle,
   type AutonomousCrossDomainDecisionCycleOptions,
   type AutonomousCrossDomainDecisionCycleResult,
+  type AutonomousDecisionCycleSemanticOptions,
   type AutonomousCrossDomainReplanCycleOptions,
   type AutonomousCrossDomainReplanCycleResult,
   type AutonomousDecisionCycleOptions,
@@ -48,6 +55,7 @@ import {
 } from "./autonomous-run-trace.js";
 import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { ProviderInvocationObserver } from "./llm.js";
+import { AutonomousCostBudget } from "./llm.js";
 import type { JsonObject, JsonValue } from "./types.js";
 import type {
   AutonomousWorkflowPortfolioAdmission,
@@ -146,6 +154,8 @@ export interface AutonomousBrainPlanJSON {
   schema: typeof AUTONOMOUS_BRAIN_FACADE_SCHEMA;
   status: AutonomousBrainPlanStatus;
   route: AutonomousRouteProposal;
+  /** Provider-assisted routing remains a proposal projection; it never grants execution authority. */
+  semantic_route?: AutonomousSemanticRouteResult | null;
   domain_plan: AutonomousBrainDomainPlanSummary | null;
   cross_domain_plan: AutonomousBrainCrossDomainPlanSummary | null;
   connector_plan: ReturnType<AutonomousConnectorOperationPlan["toJSON"]> | null;
@@ -160,6 +170,8 @@ export interface AutonomousBrainExecution {
   schema: typeof AUTONOMOUS_BRAIN_FACADE_SCHEMA;
   status: AutonomousBrainExecutionStatus;
   plan: AutonomousBrainPlanJSON;
+  /** The semantic classifier projection used to produce the route, when enabled. */
+  semantic_route?: AutonomousSemanticRouteResult | null;
   run: AutonomousRunResult | AutonomousCrossDomainRunResult | null;
   connector: AutonomousConnectorOperationExecution | null;
   error: { error_class: string; failure_code: string } | null;
@@ -203,6 +215,8 @@ export interface AutonomousBrainTracedAdaptiveCycleExecution {
 export interface AutonomousBrainExecuteOptions {
   /** Explicit provider approval; defaults to false even when a model is registered. */
   approveProviderCall?: boolean;
+  /** Optional provider-assisted route proposal; classifier and execution approval remain separate. */
+  semanticRouting?: AutonomousRunOptions["semanticRouting"];
   /** Run the optional connector operation before invoking the provider; defaults to true. */
   connectorFirst?: boolean;
   /** Include the connector's transient bounded observation in the provider context. */
@@ -231,6 +245,8 @@ export interface AutonomousBrainCycleOptions {
   connectorFirst?: boolean;
   /** Include the connector's transient bounded observation in the cycle context. */
   includeConnectorObservation?: boolean;
+  /** Optional provider-assisted route proposal before the durable cycle owns the route. */
+  semanticRouting?: AutonomousDecisionCycleSemanticOptions;
   /** Evaluator, memory, learning, provider-planning, persistence, and budget controls. */
   cycle?: AutonomousBrainSingleCycleOptions | AutonomousBrainCrossDomainCycleOptions;
 }
@@ -242,6 +258,7 @@ export interface AutonomousBrainCycleExecution {
   schema: typeof AUTONOMOUS_BRAIN_FACADE_SCHEMA;
   status: AutonomousBrainCycleStatus;
   plan: AutonomousBrainPlanJSON;
+  semantic_route?: AutonomousSemanticRouteResult | null;
   cycle: AutonomousBrainCycleResult | null;
   connector: AutonomousConnectorOperationExecution | null;
   error: { error_class: string; failure_code: string } | null;
@@ -264,6 +281,8 @@ export interface AutonomousBrainAdaptiveCycleOptions {
   connectorFirst?: boolean;
   /** Include the connector's transient bounded observation in every attempt's context. */
   includeConnectorObservation?: boolean;
+  /** Optional provider-assisted route proposal before the adaptive loop owns the route. */
+  semanticRouting?: AutonomousDecisionCycleSemanticOptions;
   /** Evaluator, bounded replan, learning, persistence, memory, and budget controls. */
   adaptive: AutonomousBrainSingleAdaptiveCycleOptions | AutonomousBrainCrossDomainAdaptiveCycleOptions;
 }
@@ -275,6 +294,7 @@ export interface AutonomousBrainAdaptiveCycleExecution {
   schema: typeof AUTONOMOUS_BRAIN_FACADE_SCHEMA;
   status: AutonomousBrainAdaptiveCycleStatus;
   plan: AutonomousBrainPlanJSON;
+  semantic_route?: AutonomousSemanticRouteResult | null;
   adaptive: AutonomousBrainAdaptiveCycleResult | null;
   connector: AutonomousConnectorOperationExecution | null;
   error: { error_class: string; failure_code: string } | null;
@@ -442,6 +462,8 @@ export type AutonomousBrainBatchControllerRunOptions = Omit<AutonomousBrainResum
 interface PreparedBrainRequest {
   readonly request: AutonomousBrainRequest;
   readonly route: AutonomousRouteProposal;
+  readonly semanticRoute: AutonomousSemanticRouteResult | null;
+  readonly semanticBudget: AutonomousCostBudget | null;
   readonly plan: AutonomousBrainPlan;
   readonly connectorPlan: AutonomousConnectorOperationPlan | null;
 }
@@ -659,6 +681,98 @@ function validateRequest(input: AutonomousBrainRequest): AutonomousBrainRequest 
   return { task, ...(selectedDomain === undefined ? {} : { domain: selectedDomain }), ...(capability === undefined ? {} : { capability }), ...(hints === undefined ? {} : { hints }), ...(input.allow_cross_domain === undefined ? {} : { allow_cross_domain: input.allow_cross_domain }), ...(input.context === undefined ? {} : { context: [...input.context] }), ...(input.connector === undefined ? {} : { connector: input.connector }) };
 }
 
+function assertBrainPlanTask(plan: AutonomousBrainPlan, request: AutonomousBrainRequest, message: string): void {
+  if (plan.task_digest !== digestJsonSync({ task: request.task })) throw new ArgumentError(message);
+}
+
+type AutonomousBrainSemanticRoutingInput = AutonomousRunOptions["semanticRouting"] | AutonomousDecisionCycleSemanticOptions | undefined;
+type AutonomousBrainSemanticSource = Partial<Omit<AutonomousRunOptions, "learning">>;
+
+const AUTONOMOUS_BRAIN_SEMANTIC_ROUTING_FIELDS = new Set([
+  "enabled",
+  "approveProviderCall",
+  "minSemanticConfidence",
+  "maxDomains",
+  "allowCrossDomain",
+  "maxOutputTokens",
+  "temperature",
+  "maxCostPerMillionTokens",
+  "maxLatencyMs",
+  "minQuality",
+  "execution",
+  "executionAttempt",
+  "maxProviderFailovers",
+  "executionLifecycle",
+  "signal",
+  "observer",
+  "domainPolicyMode",
+  "domainPolicyEvidenceReady",
+  "domainPolicyEvaluatorConfigured",
+  "domainPolicyEffectsRequested",
+  "domainPolicyEffectsApproved",
+]);
+
+function normalizeBrainSemanticRouting(value: AutonomousBrainSemanticRoutingInput): Record<string, unknown> | null {
+  if (value === undefined || value === false) return null;
+  if (value === true) return {};
+  if (!isObject(value)) throw new ArgumentError("autonomous brain semanticRouting must be a boolean or object");
+  if (value.enabled !== undefined && typeof value.enabled !== "boolean") throw new ArgumentError("autonomous brain semanticRouting.enabled must be boolean");
+  if (value.enabled === false) return null;
+  const unsupported = Object.keys(value).find((key) => !AUTONOMOUS_BRAIN_SEMANTIC_ROUTING_FIELDS.has(key));
+  if (unsupported) throw new ArgumentError(`autonomous brain semanticRouting contains unsupported field: ${unsupported}`);
+  return value;
+}
+
+function selectBrainSemanticRouting(primary: AutonomousBrainSemanticRoutingInput, nested: AutonomousBrainSemanticRoutingInput): AutonomousBrainSemanticRoutingInput {
+  if (primary !== undefined && nested !== undefined) throw new ArgumentError("autonomous brain semanticRouting must be configured at one boundary");
+  return primary ?? nested;
+}
+
+function prepareBrainSemanticRoute(
+  request: AutonomousBrainRequest,
+  routing: AutonomousBrainSemanticRoutingInput,
+  source: AutonomousBrainSemanticSource,
+  defaultApproval: boolean | undefined,
+): { options: AutonomousSemanticRouteOptions; budget: AutonomousCostBudget | null } | null {
+  const config = normalizeBrainSemanticRouting(routing);
+  if (config === null) return null;
+  if (request.domain !== undefined) throw new ArgumentError("autonomous brain semanticRouting cannot be combined with an explicit domain");
+  if (source.costBudget !== undefined && !(source.costBudget instanceof AutonomousCostBudget)) throw new ArgumentError("autonomous brain semanticRouting costBudget must be an AutonomousCostBudget");
+  if (source.costBudget !== undefined && source.maxTotalCostUnits !== undefined) throw new ArgumentError("autonomous brain semanticRouting costBudget and maxTotalCostUnits cannot both be supplied");
+  const budget = source.costBudget ?? (source.maxTotalCostUnits === undefined ? null : new AutonomousCostBudget(source.maxTotalCostUnits));
+  const value = (key: string): unknown => config[key];
+  return {
+    budget,
+    options: {
+      candidates: source.candidates,
+      credential: source.credential,
+      credentialFor: source.credentialFor,
+      hints: request.hints,
+      approveProviderCall: (value("approveProviderCall") as boolean | undefined) ?? defaultApproval ?? source.approveProviderCall ?? false,
+      minSemanticConfidence: value("minSemanticConfidence") as number | undefined,
+      maxDomains: (value("maxDomains") as number | undefined) ?? 3,
+      allowCrossDomain: (value("allowCrossDomain") as boolean | undefined) ?? request.allow_cross_domain ?? true,
+      maxOutputTokens: (value("maxOutputTokens") as number | undefined) ?? source.maxOutputTokens ?? 1_024,
+      temperature: (value("temperature") as number | undefined) ?? source.temperature,
+      maxCostPerMillionTokens: (value("maxCostPerMillionTokens") as number | undefined) ?? source.maxCostPerMillionTokens,
+      maxLatencyMs: (value("maxLatencyMs") as number | undefined) ?? source.maxLatencyMs,
+      minQuality: (value("minQuality") as number | undefined) ?? source.minQuality,
+      costBudget: budget ?? undefined,
+      execution: (value("execution") as AutonomousSemanticRouteOptions["execution"] | undefined) ?? source.execution,
+      executionAttempt: (value("executionAttempt") as number | undefined) ?? source.executionAttempt,
+      maxProviderFailovers: (value("maxProviderFailovers") as number | undefined) ?? source.maxProviderFailovers,
+      executionLifecycle: (value("executionLifecycle") as AutonomousSemanticRouteOptions["executionLifecycle"] | undefined) ?? source.executionLifecycle,
+      signal: (value("signal") as AbortSignal | undefined) ?? source.signal,
+      observer: (value("observer") as ProviderInvocationObserver | undefined) ?? source.observer,
+      domainPolicyMode: (value("domainPolicyMode") as AutonomousSemanticRouteOptions["domainPolicyMode"] | undefined) ?? source.domainPolicyMode,
+      domainPolicyEvidenceReady: (value("domainPolicyEvidenceReady") as boolean | undefined) ?? source.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: (value("domainPolicyEvaluatorConfigured") as boolean | undefined) ?? source.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: (value("domainPolicyEffectsRequested") as boolean | undefined) ?? source.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: (value("domainPolicyEffectsApproved") as boolean | undefined) ?? source.domainPolicyEffectsApproved,
+    },
+  };
+}
+
 function observationChunk(execution: AutonomousConnectorOperationExecution): AutonomousPromptChunk {
   const metadata: JsonObject = {
     schema: "bioprism-typescript-autonomous-connector-observation-context/0.1",
@@ -678,6 +792,7 @@ function observationChunk(execution: AutonomousConnectorOperationExecution): Aut
 export class AutonomousBrainPlan {
   readonly status: AutonomousBrainPlanStatus;
   readonly route: AutonomousRouteProposal;
+  readonly semantic_route: AutonomousSemanticRouteResult | null;
   readonly domain_plan: AutonomousBrainDomainPlanSummary | null;
   readonly cross_domain_plan: AutonomousBrainCrossDomainPlanSummary | null;
   readonly connector_plan: ReturnType<AutonomousConnectorOperationPlan["toJSON"]> | null;
@@ -688,6 +803,7 @@ export class AutonomousBrainPlan {
   constructor(input: {
     status: AutonomousBrainPlanStatus;
     route: AutonomousRouteProposal;
+    semantic_route?: AutonomousSemanticRouteResult | null;
     domain_plan: AutonomousBrainDomainPlanSummary | null;
     cross_domain_plan: AutonomousBrainCrossDomainPlanSummary | null;
     connector_plan: ReturnType<AutonomousConnectorOperationPlan["toJSON"]> | null;
@@ -696,6 +812,8 @@ export class AutonomousBrainPlan {
     if (!isObject(input.route) || typeof input.route.route_digest !== "string") throw new ArgumentError("autonomous brain plan route is malformed");
     this.status = input.status;
     this.route = structuredClone(input.route);
+    this.semantic_route = input.semantic_route === undefined || input.semantic_route === null ? null : structuredClone(input.semantic_route);
+    if (this.semantic_route !== null && this.semantic_route.route.route_digest !== this.route.route_digest) throw new ArgumentError("autonomous brain semantic route does not match the plan route");
     this.domain_plan = input.domain_plan === null ? null : structuredClone(input.domain_plan);
     this.cross_domain_plan = input.cross_domain_plan === null ? null : structuredClone(input.cross_domain_plan);
     this.connector_plan = input.connector_plan === null ? null : structuredClone(input.connector_plan);
@@ -705,7 +823,7 @@ export class AutonomousBrainPlan {
   }
 
   private descriptor(): Omit<AutonomousBrainPlanJSON, "plan_digest"> {
-    return {
+    const descriptor = {
       schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
       status: this.status,
       route: structuredClone(this.route),
@@ -715,8 +833,9 @@ export class AutonomousBrainPlan {
       selected_domains: [...this.selected_domains],
       task_digest: this.task_digest,
       retention: PLAN_RETENTION,
-      secret_material: "never_returned",
+      secret_material: "never_returned" as const,
     };
+    return this.semantic_route === null ? descriptor : { ...descriptor, semantic_route: structuredClone(this.semantic_route) };
   }
 
   toJSON(): AutonomousBrainPlanJSON {
@@ -728,6 +847,7 @@ export class AutonomousBrainPlan {
     const plan = new AutonomousBrainPlan({
       status: value.status as AutonomousBrainPlanStatus,
       route: value.route as AutonomousRouteProposal,
+      semantic_route: value.semantic_route === undefined || value.semantic_route === null ? null : value.semantic_route as AutonomousSemanticRouteResult,
       domain_plan: (value.domain_plan as AutonomousBrainDomainPlanSummary | null) ?? null,
       cross_domain_plan: (value.cross_domain_plan as AutonomousBrainCrossDomainPlanSummary | null) ?? null,
       connector_plan: (value.connector_plan as ReturnType<AutonomousConnectorOperationPlan["toJSON"]> | null) ?? null,
@@ -764,9 +884,17 @@ export class AutonomousBrainFacade {
   async plan(input: AutonomousBrainRequest): Promise<AutonomousBrainPlan> {
     const request = validateRequest(input);
     const route = await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true });
+    return this.buildPlanForRoute(request, route, null);
+  }
+
+  private async buildPlanForRoute(
+    request: AutonomousBrainRequest,
+    route: AutonomousRouteProposal,
+    semanticRoute: AutonomousSemanticRouteResult | null,
+  ): Promise<AutonomousBrainPlan> {
     let domainPlan: AutonomousBrainDomainPlanSummary | null = null;
     let crossDomainPlan: AutonomousBrainCrossDomainPlanSummary | null = null;
-    if (!route.abstained && route.primary_domain !== null) {
+    if ((semanticRoute === null || semanticRoute.status === "completed") && !route.abstained && route.primary_domain !== null) {
       const blueprint = await this.agent.blueprint(request.task, {
         routeOverride: route,
         capability: request.capability,
@@ -778,6 +906,9 @@ export class AutonomousBrainFacade {
     }
     let connectorPlan: ReturnType<AutonomousConnectorOperationPlan["toJSON"]> | null = null;
     let connectorStatus: AutonomousBrainPlanStatus | null = null;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      return new AutonomousBrainPlan({ status: "route_review_required", route, semantic_route: semanticRoute, domain_plan: null, cross_domain_plan: null, connector_plan: null });
+    }
     if (request.connector !== undefined) {
       if (!this.connectorOperations) throw new ArgumentError("autonomous brain connector input requires connectorOperations");
       if (route.abstained || route.primary_domain === null || !route.selected_domains.includes(request.connector.domain)) throw new ArgumentError("autonomous brain connector domain is outside the reviewed route");
@@ -788,12 +919,12 @@ export class AutonomousBrainFacade {
     const status: AutonomousBrainPlanStatus = route.abstained || route.primary_domain === null
       ? "route_review_required"
       : connectorStatus ?? "ready";
-    return new AutonomousBrainPlan({ status, route, domain_plan: domainPlan, cross_domain_plan: crossDomainPlan, connector_plan: connectorPlan });
+    return new AutonomousBrainPlan({ status, route, semantic_route: semanticRoute, domain_plan: domainPlan, cross_domain_plan: crossDomainPlan, connector_plan: connectorPlan });
   }
 
   /** Execute a fresh request after compiling its request-free plan. */
   async execute(input: AutonomousBrainRequest, options: AutonomousBrainExecuteOptions = {}): Promise<AutonomousBrainExecution> {
-    const prepared = await this.prepare(input);
+    const prepared = await this.prepare(input, selectBrainSemanticRouting(options.semanticRouting, options.run?.semanticRouting), options.run, options.approveProviderCall);
     return this.executePrepared(prepared, options);
   }
 
@@ -804,14 +935,16 @@ export class AutonomousBrainFacade {
   async executeWithTrace(input: AutonomousBrainRequest, options: AutonomousBrainTraceOptions): Promise<AutonomousBrainTracedExecution> {
     const request = validateRequest(input);
     if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeWithTrace options must be an object");
-    const prepared = await this.prepare(request);
+    const prepared = await this.prepare(request, selectBrainSemanticRouting(options.semanticRouting, options.run?.semanticRouting), options.run, options.approveProviderCall);
     return this.executePreparedWithTrace(prepared, options);
   }
 
   /** Recompile and verify a persisted metadata-only plan before supplying transient task values. */
   async executePlanned(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainExecuteOptions = {}): Promise<AutonomousBrainExecution> {
     if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlanned requires a typed plan");
-    const prepared = await this.prepare(input);
+    const request = validateRequest(input);
+    assertBrainPlanTask(plan, request, "autonomous brain plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain plan does not match the transient request");
     return this.executePrepared(prepared, options);
   }
@@ -820,21 +953,24 @@ export class AutonomousBrainFacade {
   async executePlannedWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainTraceOptions): Promise<AutonomousBrainTracedExecution> {
     if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedWithTrace requires a typed plan");
     const request = validateRequest(input);
-    const prepared = await this.prepare(request);
+    assertBrainPlanTask(plan, request, "autonomous brain traced plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain traced plan does not match the transient request");
     return this.executePreparedWithTrace(prepared, options);
   }
 
   /** Execute the closed-loop route -> invoke -> evaluate -> learn cycle behind the same plan boundary. */
   async executeCycle(input: AutonomousBrainRequest, options: AutonomousBrainCycleOptions = {}): Promise<AutonomousBrainCycleExecution> {
-    const prepared = await this.prepare(input);
+    const prepared = await this.prepare(input, options.semanticRouting, options.cycle, options.approveProviderCall);
     return this.executeCyclePrepared(prepared, options);
   }
 
   /** Rehydrate a persisted brain plan, then run the closed-loop evaluator/learning cycle. */
   async executePlannedCycle(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainCycleOptions = {}): Promise<AutonomousBrainCycleExecution> {
     if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedCycle requires a typed plan");
-    const prepared = await this.prepare(input);
+    const request = validateRequest(input);
+    assertBrainPlanTask(plan, request, "autonomous brain cycle plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain cycle plan does not match the transient request");
     return this.executeCyclePrepared(prepared, options);
   }
@@ -843,7 +979,7 @@ export class AutonomousBrainFacade {
   async executeCycleWithTrace(input: AutonomousBrainRequest, options: AutonomousBrainCycleTraceOptions): Promise<AutonomousBrainTracedCycleExecution> {
     const request = validateRequest(input);
     if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeCycleWithTrace options must be an object");
-    const prepared = await this.prepare(request);
+    const prepared = await this.prepare(request, options.semanticRouting, options.cycle, options.approveProviderCall);
     return this.executeCyclePreparedWithTrace(prepared, options);
   }
 
@@ -851,7 +987,8 @@ export class AutonomousBrainFacade {
   async executePlannedCycleWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainCycleTraceOptions): Promise<AutonomousBrainTracedCycleExecution> {
     if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedCycleWithTrace requires a typed plan");
     const request = validateRequest(input);
-    const prepared = await this.prepare(request);
+    assertBrainPlanTask(plan, request, "autonomous brain traced cycle plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain traced cycle plan does not match the transient request");
     return this.executeCyclePreparedWithTrace(prepared, options);
   }
@@ -862,14 +999,16 @@ export class AutonomousBrainFacade {
    * the lower-level capped loop, so evaluator feedback cannot silently widen authority.
    */
   async executeAdaptiveCycle(input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleOptions): Promise<AutonomousBrainAdaptiveCycleExecution> {
-    const prepared = await this.prepare(input);
+    const prepared = await this.prepare(input, options.semanticRouting, options.adaptive, options.approveProviderCall);
     return this.executeAdaptiveCyclePrepared(prepared, options);
   }
 
   /** Rehydrate a persisted metadata-only plan, then run the bounded adaptive loop. */
   async executePlannedAdaptiveCycle(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleOptions): Promise<AutonomousBrainAdaptiveCycleExecution> {
     if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedAdaptiveCycle requires a typed plan");
-    const prepared = await this.prepare(input);
+    const request = validateRequest(input);
+    assertBrainPlanTask(plan, request, "autonomous brain adaptive cycle plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain adaptive cycle plan does not match the transient request");
     return this.executeAdaptiveCyclePrepared(prepared, options);
   }
@@ -878,7 +1017,7 @@ export class AutonomousBrainFacade {
   async executeAdaptiveCycleWithTrace(input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleTraceOptions): Promise<AutonomousBrainTracedAdaptiveCycleExecution> {
     const request = validateRequest(input);
     if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeAdaptiveCycleWithTrace options must be an object");
-    const prepared = await this.prepare(request);
+    const prepared = await this.prepare(request, options.semanticRouting, options.adaptive, options.approveProviderCall);
     return this.executeAdaptiveCyclePreparedWithTrace(prepared, options);
   }
 
@@ -886,7 +1025,8 @@ export class AutonomousBrainFacade {
   async executePlannedAdaptiveCycleWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleTraceOptions): Promise<AutonomousBrainTracedAdaptiveCycleExecution> {
     if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedAdaptiveCycleWithTrace requires a typed plan");
     const request = validateRequest(input);
-    const prepared = await this.prepare(request);
+    assertBrainPlanTask(plan, request, "autonomous brain traced adaptive cycle plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain traced adaptive cycle plan does not match the transient request");
     return this.executeAdaptiveCyclePreparedWithTrace(prepared, options);
   }
@@ -1252,19 +1392,40 @@ export class AutonomousBrainFacade {
     };
   }
 
-  private async prepare(input: AutonomousBrainRequest): Promise<PreparedBrainRequest> {
+  private async prepare(
+    input: AutonomousBrainRequest,
+    semanticRouting?: AutonomousBrainSemanticRoutingInput,
+    source: AutonomousBrainSemanticSource = {},
+    defaultApproval?: boolean,
+    routeOverride?: AutonomousRouteProposal,
+    semanticRouteOverride?: AutonomousSemanticRouteResult | null,
+  ): Promise<PreparedBrainRequest> {
     const request = validateRequest(input);
-    const route = await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true });
-    const plan = await this.plan(request);
-    let connectorPlan: AutonomousConnectorOperationPlan | null = null;
-    if (request.connector !== undefined) {
-      if (!this.connectorOperations) throw new ArgumentError("autonomous brain connector input requires connectorOperations");
-      connectorPlan = this.connectorOperations.plan(request.connector);
-    }
+    const semanticConfig = routeOverride === undefined
+      ? prepareBrainSemanticRoute(request, semanticRouting, source, defaultApproval)
+      : null;
+    const semanticRoute = semanticRouteOverride === undefined
+      ? semanticConfig === null ? null : await semanticRouteAutonomousTask(this.agent, request.task, semanticConfig.options)
+      : semanticRouteOverride;
+    const route = routeOverride === undefined
+      ? semanticRoute === null
+        ? await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true })
+        : await validateAutonomousRouteOverride(request.task, semanticRoute.route)
+      : await validateAutonomousRouteOverride(request.task, routeOverride);
+    const plan = semanticRouteOverride === undefined
+      ? await this.buildPlanForRoute(request, route, semanticRoute)
+      : await this.buildPlanForRoute(request, route, semanticRouteOverride);
+    const connectorPlan: AutonomousConnectorOperationPlan | null = plan.connector_plan === null
+      ? null
+      : this.connectorOperations === undefined
+        ? null
+        : this.connectorOperations.plan(request.connector!);
+    const semanticBudget = semanticConfig?.budget ?? null;
     // Requiring the route digest to agree here catches an accidental route recomputation change
     // between plan construction and the returned prepared request without retaining task text.
     if (plan.route.route_digest !== route.route_digest) throw new ProviderRuntimeError("autonomous brain route changed while preparing execution", { code: "configuration" });
-    return { request, route, plan, connectorPlan };
+    if (semanticRoute !== null && semanticRoute.route.route_digest !== route.route_digest) throw new ProviderRuntimeError("autonomous brain semantic route changed while preparing execution", { code: "configuration" });
+    return { request, route, semanticRoute, semanticBudget, plan, connectorPlan };
   }
 
   private traceDomains(prepared: PreparedBrainRequest): AutonomousDomainName[] {
@@ -1368,8 +1529,8 @@ export class AutonomousBrainFacade {
 
   private async executePrepared(prepared: PreparedBrainRequest, options: AutonomousBrainExecuteOptions, trace?: AutonomousRunTraceSession): Promise<AutonomousBrainExecution> {
     const { request, route, plan } = prepared;
-    if (plan.status === "route_review_required") return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: "route_review_required", plan: plan.toJSON(), run: null, connector: null, error: null, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
-    if (plan.status === "connector_review_required" || (prepared.connectorPlan && prepared.connectorPlan.status !== "ready")) return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: "connector_blocked", plan: plan.toJSON(), run: null, connector: null, error: { error_class: "ConnectorOperationError", failure_code: "configuration" }, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
+    if (plan.status === "route_review_required") return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: "route_review_required", plan: plan.toJSON(), semantic_route: prepared.semanticRoute, run: null, connector: null, error: null, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
+    if (plan.status === "connector_review_required" || (prepared.connectorPlan && prepared.connectorPlan.status !== "ready")) return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: "connector_blocked", plan: plan.toJSON(), semantic_route: prepared.semanticRoute, run: null, connector: null, error: { error_class: "ConnectorOperationError", failure_code: "configuration" }, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
     let connector: AutonomousConnectorOperationExecution | null = null;
     if (request.connector !== undefined && options.connectorFirst !== false) {
       if (!this.connectorOperations || !prepared.connectorPlan) throw new ArgumentError("autonomous brain connector plan is unavailable");
@@ -1378,18 +1539,18 @@ export class AutonomousBrainFacade {
         request.connector,
         { traceEventCallback: trace === undefined ? undefined : (event) => trace.record(event) },
       );
-      if (!connectorSucceeded(connector.status)) return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: "connector_blocked", plan: plan.toJSON(), run: null, connector, error: { error_class: "ConnectorOperationError", failure_code: connector.status }, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
+      if (!connectorSucceeded(connector.status)) return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: "connector_blocked", plan: plan.toJSON(), semantic_route: prepared.semanticRoute, run: null, connector, error: { error_class: "ConnectorOperationError", failure_code: connector.status }, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
     }
     const context = [
       ...(request.context ?? []),
       ...(connector && options.includeConnectorObservation !== false ? [observationChunk(connector)] : []),
     ];
     const approved = options.approveProviderCall ?? options.run?.approveProviderCall ?? false;
-    const runOptions = { ...(options.run ?? {}), routeOverride: route, capability: request.capability, context, hints: request.hints, allowCrossDomain: request.allow_cross_domain, approveProviderCall: approved, observer: composeBrainObservers(options.run?.observer, trace?.providerObserver()), selectionEventCallback: trace === undefined ? options.run?.selectionEventCallback : trace.selectionEventCallback(options.run?.selectionEventCallback) } as AutonomousRunOptions;
+    const runOptions = { ...(options.run ?? {}), routeOverride: route, ...(prepared.semanticBudget === null ? {} : { costBudget: prepared.semanticBudget, maxTotalCostUnits: undefined }), semanticRouting: undefined, capability: request.capability, context, hints: request.hints, allowCrossDomain: request.allow_cross_domain, approveProviderCall: approved, observer: composeBrainObservers(options.run?.observer, trace?.providerObserver()), selectionEventCallback: trace === undefined ? options.run?.selectionEventCallback : trace.selectionEventCallback(options.run?.selectionEventCallback) } as AutonomousRunOptions;
     const run = route.cross_domain
       ? await this.agent.runCrossDomain(request.task, runOptions as AutonomousCrossDomainRunOptions)
       : await this.agent.run(request.task, { ...runOptions, domain: route.primary_domain ?? undefined });
-    return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: run.status, plan: plan.toJSON(), run, connector, error: null, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA, status: run.status, plan: plan.toJSON(), semantic_route: prepared.semanticRoute, run, connector, error: null, retention: "plan_metadata_only;run_and_connector_values_transient_to_caller", secret_material: "never_returned" };
   }
 
   private async executeCyclePrepared(prepared: PreparedBrainRequest, options: AutonomousBrainCycleOptions, trace?: AutonomousRunTraceSession): Promise<AutonomousBrainCycleExecution> {
@@ -1398,6 +1559,7 @@ export class AutonomousBrainFacade {
       schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
       status,
       plan: plan.toJSON(),
+      semantic_route: prepared.semanticRoute,
       cycle,
       connector,
       error,
@@ -1426,6 +1588,8 @@ export class AutonomousBrainFacade {
     const cycleOptions = {
       ...(options.cycle ?? {}),
       routeOverride: route,
+      ...(prepared.semanticBudget === null ? {} : { costBudget: prepared.semanticBudget, maxTotalCostUnits: undefined }),
+      semanticRouting: undefined,
       domain: route.primary_domain ?? undefined,
       capability: request.capability,
       context,
@@ -1448,6 +1612,7 @@ export class AutonomousBrainFacade {
       schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
       status,
       plan: plan.toJSON(),
+      semantic_route: prepared.semanticRoute,
       adaptive,
       connector,
       error,
@@ -1476,6 +1641,8 @@ export class AutonomousBrainFacade {
     const adaptiveOptions = {
       ...(options.adaptive ?? {}),
       routeOverride: route,
+      ...(prepared.semanticBudget === null ? {} : { costBudget: prepared.semanticBudget, maxTotalCostUnits: undefined }),
+      semanticRouting: undefined,
       domain: route.primary_domain ?? undefined,
       capability: request.capability,
       context,

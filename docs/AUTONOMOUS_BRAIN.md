@@ -7413,6 +7413,43 @@ the caller-owned runtime/provider handle. The façade never reads an environment
 credential, or contacts a live provider by itself; deterministic in-memory providers and the
 built-in offline connectors are sufficient for tests and local integration development.
 
+For ambiguous intake, the façade can opt into the same provider-assisted semantic router used by
+the lower-level agent and decision-cycle APIs. Set `semanticRouting` on `execute()` or
+`executeWithTrace()`, or on the top-level options for `executeCycle()` and
+`executeAdaptiveCycle()`:
+
+```typescript
+const originalRequest = {
+  task: "triage this unfamiliar request and choose the safest specialist",
+};
+const reviewed = await brain.execute(
+  originalRequest,
+  {
+    semanticRouting: { enabled: true, approveProviderCall: true },
+    approveProviderCall: false,
+  },
+);
+
+// The classifier may be approved while execution remains paused.
+if (reviewed.status === "approval_required") {
+  const plan = AutonomousBrainPlan.fromJSON(reviewed.plan);
+  const resumed = await brain.executePlanned(plan, originalRequest, {
+    approveProviderCall: true,
+  });
+}
+```
+
+The classifier is a proposal boundary, not an execution grant. Its value-only
+`semantic_route` projection is stored on the plan and returned envelope, its route digest is
+bound to the deterministic blueprint, and its aggregate classifier budget is shared with the
+later run, fan-out, or cycle. Provider abstention, disagreement, malformed output, strict policy
+holds, and missing approval remain review outcomes. Planned direct, traced, cycle, and adaptive
+replay reuses the persisted route and does not classify again; the caller must still provide the
+separate execution approval and any transient provider/evaluator state. Cycle and adaptive
+facade options accept semantic routing only at their top level because the façade owns the
+reviewed route before entering the durable loop; nested cycle semantic-routing fields are
+rejected rather than silently ignored.
+
 The same surface supports explicit cross-domain work. If routing selects a reviewed multi-domain
 route, the façade calls `runCrossDomain()` and preserves the route's selected-domain order and
 digest. A single-domain route calls `run()` with the exact route override, preventing an
@@ -7518,9 +7555,10 @@ The façade chooses `runAutonomousDecisionCycle()` for a single-domain route and
 the evaluator and learning controller through `cycle`; the façade supplies the already-reviewed
 route, capability, hints, and connector observation so the cycle cannot silently re-route or
 drop evidence between planning and execution. Provider planning remains a separate optional
-review phase, and semantic routing is intentionally excluded from `executeCycle()` because this
-entry point already owns a deterministic reviewed route. Call the lower-level decision-cycle
-functions when provider-assisted semantic routing itself is the desired experiment.
+review phase. When `executeCycle()` or `executeAdaptiveCycle()` receives top-level
+`semanticRouting`, the façade completes the classifier review first, then hands the exact route
+to the durable cycle; classifier approval and execution approval remain separate. Planned cycle
+replay reuses the route receipt without replaying the classifier.
 
 Cycle persistence records only the task/route/plan/outcome/evaluation/settlement digests and
 bounded lifecycle state. If a worker restarts after a terminal transition, the caller rehydrates
