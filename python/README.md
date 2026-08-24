@@ -246,6 +246,18 @@ malformed prompt, argument, and credential failures stop immediately. Health sna
 failover events contain adapter/model manifest digests, statuses, bounded timings, and error
 classes only—never keys, prompts, requests, provider responses, or raw error messages.
 
+`AutonomousLLMEvidenceReadinessAuditor` adds the provider-free operational audit for that route.
+It evaluates coverage, the exact selection-plan digest, selected-manifest health, circuit state,
+and the caller's `AutonomousLLMEvidenceReadinessPolicy` across all twelve domains. Strict startup
+policy reports unobserved or below-threshold routes as `blocked`; a caller can explicitly use
+`require_health=False` to show the same routes as `degraded` for onboarding. A healthy route is
+reported `ready`, while absent adapter coverage is `missing`. The report is canonical,
+digest-addressed, byte-bounded, and restorable with strict field/aggregate checks. Pass
+`evidence_readiness={"registry": registry, "health_store": health, "options": {...}}` to
+`AutonomousAgent.readiness()` to compose those rows with model, credential, tool, and learning
+readiness. This remains a projection only: it never dispatches a source, invokes an LLM, or
+converts route health into evidence truth.
+
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

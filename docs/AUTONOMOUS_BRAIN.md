@@ -6053,6 +6053,19 @@ discover models, collect keys, invent a source query, or decide whether a model-
 is true. `ProviderSetup`/`CredentialSession` owns protected key intake, and the evidence projector
 and evaluator remain responsible for provenance, source interpretation, and domain acceptance.
 
+The Python surface adds the matching operational audit with
+`AutonomousLLMEvidenceReadinessAuditor`. Given the typed registry, optional health store, selected
+plan (or an explicit adaptive-selection request), and `AutonomousLLMEvidenceReadinessPolicy`, it
+returns digest-bound coverage and health rows for all twelve domains. A missing adapter is
+`missing`; an open circuit or an unobserved/below-threshold route is `blocked` under strict policy;
+the same unobserved route is `degraded` only when the caller explicitly chooses
+`require_health=False`; a selected route with sufficient observed health is `ready`. The report
+also binds the failover-policy digest and health-snapshot digest, supports strict canonical
+round-trip validation, and can be included in `AutonomousAgent.readiness()` through
+`evidence_readiness`. This is an audit projection only: it performs no source dispatch, provider
+invocation, credential resolution, model discovery, or reward mutation, and retains no prompts,
+requests, provider values, responses, keys, or raw errors.
+
 ### Source truth, freshness, and provenance admission
 
 `createAutonomousEvidenceSourceAcquirer` is the strict source-truth boundary for adapters that

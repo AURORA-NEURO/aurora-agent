@@ -1306,3 +1306,14 @@ errors, records fallback metadata, and exposes explicit evaluator reward credit 
 adaptation. The failover adapter implements the existing `acquire`/`project` contract, so it can
 be passed directly to `AutonomousAgent.acquire_evidence`, `run_with_llm_evidence`, or the
 resumable evidence boundary without widening durable state.
+
+Python now closes the adjacent operational-readiness gap with
+`AutonomousLLMEvidenceReadinessAuditor`. It projects coverage, the exact registry and selection
+digests, selected-manifest health, open-circuit state, bounded failover policy, and explicit
+`ready`/`degraded`/`blocked`/`missing` rows for every requested domain. Strict default policy
+requires observed health and a minimum success rate; `require_health=False` is an explicit
+degraded startup posture rather than an authorization shortcut. The canonical report supports
+strict round-trip validation and is composed into `AutonomousAgent.readiness()` through the
+caller-owned `evidence_readiness` configuration. No source, provider, model discovery, credential,
+or learner mutation occurs during the audit, and the report excludes prompts, requests, values,
+responses, keys, and raw errors.
