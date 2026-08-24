@@ -10,7 +10,7 @@ use bioprism_autopilot::{
     verify_autopilot_report, AttemptKind, AttemptRecord, AutonomyGrant, AutopilotCheckpointStore,
     AutopilotCheckpointPersistence, AutopilotError, DriveHistory, FinalDisposition, FinalStatus,
     GrantError, JsonAutopilotCheckpointPersistence,
-    NextAction, RetryClass, StepClass, TransactionalAutopilotCheckpointPersistence,
+    NextAction, RetryClass, StepClass,
     TransactionalAutopilotCheckpointPersistenceCoordinator,
     TransactionalAutopilotCheckpointStore, TransactionalJsonAutopilotCheckpointPersistence,
     RetrySchedule, REQUIRED_LIMITATIONS,
@@ -1512,8 +1512,7 @@ mod drive {
                 |_delay| Err("worker shutdown".into()),
                 |_history| Ok(()),
             )
-            .expect_err("wait failure must not be swallowed");
-            error
+            .expect_err("wait failure must not be swallowed")
         };
         assert_eq!(calls, 1);
         assert_eq!(error, AutopilotError::Scheduling { reason: "worker shutdown".into() });

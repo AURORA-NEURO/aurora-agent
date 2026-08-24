@@ -277,7 +277,7 @@ pub fn drive_mission_with_checkpoint<D, C>(
     grant: &AutonomyGrant,
     base_mission: Value,
     dispatcher: &mut D,
-    mut checkpoint: C,
+    checkpoint: C,
 ) -> Result<DriveOutcome, AutopilotError>
 where
     D: MissionDispatch,
@@ -321,7 +321,7 @@ pub fn resume_mission_with_checkpoint<D, C>(
     base_mission: Value,
     attempts: Vec<AttemptRecord>,
     dispatcher: &mut D,
-    mut checkpoint: C,
+    checkpoint: C,
 ) -> Result<DriveOutcome, AutopilotError>
 where
     D: MissionDispatch,
@@ -382,7 +382,7 @@ pub fn drive_instantiation_with_checkpoint<D, C>(
     grant: &AutonomyGrant,
     instantiation: &Value,
     dispatcher: &mut D,
-    mut checkpoint: C,
+    checkpoint: C,
 ) -> Result<DriveOutcome, AutopilotError>
 where
     D: MissionDispatch,
@@ -424,7 +424,7 @@ pub fn resume_instantiation_with_checkpoint<D, C>(
     instantiation: &Value,
     attempts: Vec<AttemptRecord>,
     dispatcher: &mut D,
-    mut checkpoint: C,
+    checkpoint: C,
 ) -> Result<DriveOutcome, AutopilotError>
 where
     D: MissionDispatch,
