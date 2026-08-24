@@ -6273,10 +6273,19 @@ Routes are registered with an acquirer, source/contract/adapter digests, require
 metadata, and an opaque provider identity. Registration validates profile scope and rejects
 credential-shaped metadata. `prepare()` selects eligible routes for one typed evidence requirement
 without dispatch, binds the profile digest into the route metadata, and returns the existing
-reconciliation plan. `execute()` revalidates the profile and every route digest before delegating
-to bounded fan-out; it still requires explicit source-dispatch approval and a caller-owned
-normalizer. A changed profile, route, source contract, or adapter identity therefore cannot be
-silently reused after review.
+reconciliation plan. `execute()` revalidates the profile, every route digest, and the
+normalizer-registry digest before delegating to bounded fan-out; it still requires explicit
+source-dispatch approval. With no callback supplied, the catalogue resolves its built-in
+digest-bound normalizer registry. A caller may provide an explicit process-local callback for a
+custom profile, but a changed profile, route, source contract, adapter identity, or registry
+cannot be silently reused after review.
+
+The TypeScript catalogue ships the same `AutonomousEvidenceNormalizerRegistry` contract as the
+Python SDK: every domain has `identity/1` and `builtin.<domain>.claim-projection/1` entries. The
+claim projection records only operation, observation kind, bounded item/byte counts, a transient
+value digest, and a response-shape digest; it never puts raw values, source identity, credentials,
+or field contents into the normalized claim. Registry replacement is version-aware and
+transactional, and unsafe callback output is rejected before it can participate in quorum.
 
 ```typescript
 const catalogue = createBuiltinAutonomousDomainEvidenceSourceCatalogue();

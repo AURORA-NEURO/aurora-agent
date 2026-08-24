@@ -356,6 +356,13 @@ profiles, required metadata, capability scope, approval, dissent, typed failures
 and restart drift. This closes the practical domain-to-source composition gap while leaving source
 clients, credential sessions, evaluators, and truth authority caller-owned.
 
+The TypeScript catalogue now also has a digest-bound `AutonomousEvidenceNormalizerRegistry`, with
+`identity/1` and `builtin.<domain>.claim-projection/1` entries for all twelve domains. Default
+catalogue execution resolves the registry rather than requiring an ad hoc callback, and prepared
+plans fail closed when the registry changes. Claim projections retain only operation, bounded
+shape/count/byte metadata, transient value and shape digests, and explicit limitations; unsafe
+normalizer output and same-spec callback replacement are rejected before quorum.
+
 The TypeScript SDK now also exposes `registerAutonomousDomainHttpEvidenceSource`, which composes
 the bounded HTTP transport with a typed domain source profile and catalogue route. It binds optional
 adapter manifests, source/provider identities, endpoint/request/header resolvers, and explicit
