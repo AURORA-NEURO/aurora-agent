@@ -65,6 +65,9 @@ import {
   WORKFLOW_BATCH_FEATURE_ID,
   workflowBatchReceiptDigest,
   validateWorkflowBatchReceipt,
+  RESEARCH_RELEASE_BATCH_FEATURE_ID,
+  researchReleaseBatchReceiptDigest,
+  validateResearchReleaseBatchReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -492,4 +495,22 @@ test("workflow batch receipt retains blocked run", () => {
   };
   assert.doesNotThrow(() => validateWorkflowBatchReceipt(receipt));
   assert.equal(workflowBatchReceiptDigest(receipt), workflowBatchReceiptDigest(receipt));
+});
+
+test("research-release batch receipt retains blocked release", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: RESEARCH_RELEASE_BATCH_FEATURE_ID,
+    total_releases: 2,
+    published_releases: 1,
+    blocked_releases: 1,
+    entries: [
+      { release_id: "release:a", disposition: "published", release_digest: "f".repeat(64), reasons: ["signed"] },
+      { release_id: "release:b", disposition: "blocked", release_digest: null, reasons: ["policy denied"] },
+    ],
+    artifact: { content_hash: "a".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateResearchReleaseBatchReceipt(receipt));
+  assert.equal(researchReleaseBatchReceiptDigest(receipt), researchReleaseBatchReceiptDigest(receipt));
 });

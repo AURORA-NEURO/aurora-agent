@@ -52,6 +52,8 @@ from .research_contracts import (
     BatchAdmissionReceipt,
     WORKFLOW_BATCH_FEATURE_ID,
     WorkflowBatchReceipt,
+    RESEARCH_RELEASE_BATCH_FEATURE_ID,
+    ResearchReleaseBatchReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

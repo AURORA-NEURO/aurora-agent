@@ -34,6 +34,7 @@ QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02"
 DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02"
 AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02"
 WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11"
+RESEARCH_RELEASE_BATCH_FEATURE_ID = "AFA-services-P16-F03"
 
 
 class ResearchContractError(ValueError):
@@ -510,6 +511,46 @@ class WorkflowBatchReceipt:
             "succeeded_workflows": self.succeeded_workflows,
             "dry_run_workflows": self.dry_run_workflows,
             "blocked_workflows": self.blocked_workflows,
+            "entries": [dict(entry) for entry in self.entries],
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class ResearchReleaseBatchReceipt:
+    """Transport validator for high-throughput signed research-release publication."""
+
+    total_releases: int
+    published_releases: int
+    blocked_releases: int
+    entries: tuple[Mapping[str, Any], ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RESEARCH_RELEASE_BATCH_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RESEARCH_RELEASE_BATCH_FEATURE_ID:
+            raise ResearchContractError("research-release batch schema or feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or self.total_releases <= 0 or self.total_releases != len(self.entries):
+            raise ResearchContractError("research-release batch identity or boundary is invalid")
+        if self.published_releases < 0 or self.blocked_releases < 0 or self.published_releases + self.blocked_releases != self.total_releases:
+            raise ResearchContractError("research-release batch counts are inconsistent")
+        if any(not entry.get("release_id") or entry.get("disposition") not in {"published", "blocked"} or not entry.get("reasons") or (entry.get("disposition") == "published" and not entry.get("release_digest")) for entry in self.entries):
+            raise ResearchContractError("research-release batch entry is incomplete")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("research-release batch artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "total_releases": self.total_releases,
+            "published_releases": self.published_releases,
+            "blocked_releases": self.blocked_releases,
             "entries": [dict(entry) for entry in self.entries],
             "artifact": dict(self.artifact),
             "boundary": self.boundary,

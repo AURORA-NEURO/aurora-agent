@@ -120,6 +120,7 @@ pub mod graph;
 pub mod implementations;
 pub mod research;
 pub mod research_release;
+pub mod research_release_batch;
 pub mod topology;
 pub mod workspace;
 
@@ -142,6 +143,13 @@ pub use research_release::{
     ResearchReleaseError, ResearchReleaseReceipt, ResearchReleaseRequest, SignedResearchObject,
     FEATURE_CONTRACT_VERSION as RESEARCH_RELEASE_FEATURE_VERSION,
     FEATURE_ID as RESEARCH_RELEASE_FEATURE_ID,
+};
+pub use research_release_batch::{
+    build_research_release_batch, research_release_batch_manifest,
+    ResearchReleaseBatchDisposition, ResearchReleaseBatchEntry, ResearchReleaseBatchError,
+    ResearchReleaseBatchReceipt, ResearchReleaseBatchRequest,
+    FEATURE_ID as RESEARCH_RELEASE_BATCH_FEATURE_ID,
+    FEATURE_VERSION as RESEARCH_RELEASE_BATCH_FEATURE_VERSION,
 };
 pub use topology::{Deployment, Placement, Topology, TopologyError};
 

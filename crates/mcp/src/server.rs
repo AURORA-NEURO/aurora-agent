@@ -1805,6 +1805,7 @@ impl Server {
             "evaluation_trajectory_check" => self.evaluation_trajectory_check(&arguments),
             "evaluation_observability_card" => self.evaluation_observability_card(&arguments),
             "research_release_validate" => self.research_release_validate(&arguments),
+            "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
@@ -24421,6 +24422,30 @@ impl Server {
         }))
     }
 
+    fn research_release_batch_validate(&self, arguments: &Value) -> Result<Value, String> {
+        let receipt = arguments
+            .get("receipt")
+            .ok_or("receipt is required and must be a serialized ResearchReleaseBatchReceipt")?;
+        let validated = crate::research_contracts::validate_research_release_batch_receipt_json(receipt)?;
+        let serialized = serde_json::to_value(&validated)
+            .map_err(|error| format!("cannot serialize validated research release batch: {error}"))?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_services::RESEARCH_RELEASE_BATCH_FEATURE_ID,
+            "receipt": serialized,
+            "guarantees": [
+                "published and blocked releases are retained with canonical release ordering and per-release reasons",
+                "a published entry carries a release digest while a blocked entry cannot masquerade as published",
+                "the route validates the signed batch artifact without accepting private keys or raw source data"
+            ],
+            "limitations": [
+                "signing and federation effects occur only in the institution-local services API",
+                "cryptographic signature verification still requires each origin public-key verifier"
+            ]
+        }))
+    }
+
     fn instrument_preflight(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -36059,7 +36084,7 @@ pub fn workspace_capabilities() -> Value {
             "domains": ["diagnostics", "conformance", "cookbook", "SDK contracts", "signed bundles"],
             "crates": ["bioprism-devx", "bioprism-devplat", "bioprism-conformance", "bioprism-cookbook", "bioprism-sdk", "bioprism-bundle", "bioprism-scale", "bioprism-stewardship"],
             "python_artifacts": ["python/prism_sdk"],
-            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_workbench_verify", "developer_workbench_import", "developer_workbench_query", "developer_workbench_get", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_provider_evidence_import", "ci_provider_evidence_query", "ci_provider_evidence_get", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "research_release_validate", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
+            "mcp_tools": ["governance_schema_check", "developer_platform_status", "engineering_manifest_audit", "engineering_execution_plan", "release_pipeline_audit", "operational_readiness_audit", "security_privacy_audit", "sandbox_admission_audit", "sandbox_runtime_simulate", "security_program_audit", "agent_mission", "developer_workbench", "developer_workbench_verify", "developer_workbench_import", "developer_workbench_query", "developer_workbench_get", "ci_provider_normalize", "ci_provider_evidence_audit", "ci_provider_evidence_import", "ci_provider_evidence_query", "ci_provider_evidence_get", "ci_execution_evidence_audit", "execution_provenance_audit", "developer_delivery_audit", "developer_delivery_receipt", "developer_delivery_receipt_verify", "release_audit", "research_release_validate", "research_release_batch_validate", "sdk_registry_check", "conformance_run", "provider_capability_gate", "scale_family_split_verify", "stewardship_review_check"],
             "cli_entrypoints": ["--help", "--json"],
             "status": "available"
         }
@@ -38328,6 +38353,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "receipt": { "type": "object", "description": "Serialized bioprism-services ResearchReleaseReceipt produced by an authorized local signer." }
+                },
+                "required": ["receipt"]
+            }
+        }),
+        json!({
+            "name": "research_release_batch_validate",
+            "description": "Validate a high-throughput signed research-release batch, preserving canonical published/blocked entries, per-release digests, and federation-localization guarantees without private keys or raw data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "receipt": { "type": "object", "description": "Serialized bioprism-services ResearchReleaseBatchReceipt produced by the institution-local batch signer." }
                 },
                 "required": ["receipt"]
             }

@@ -32,7 +32,10 @@ use bioprism_runtime::{
     WorkflowExecutionReceipt, WorkflowExecutionRequest, WORKFLOW_BATCH_FEATURE_ID,
     WORKFLOW_EXECUTION_FEATURE_ID,
 };
-use bioprism_services::{ResearchReleaseReceipt, RESEARCH_RELEASE_FEATURE_ID};
+use bioprism_services::{
+    ResearchReleaseBatchReceipt, ResearchReleaseReceipt, RESEARCH_RELEASE_BATCH_FEATURE_ID,
+    RESEARCH_RELEASE_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
@@ -40,6 +43,7 @@ pub const RESEARCH_COMPILE_TOOL: &str = "aurora_research_compile_evidence";
 pub const WORKFLOW_EXECUTION_TOOL: &str = "runtime_workflow_execute";
 pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
 pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
+pub const RESEARCH_RELEASE_BATCH_VALIDATE_TOOL: &str = "research_release_batch_validate";
 pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
 pub const MULTIMODAL_HARMONIZATION_TOOL: &str = "multimodal_harmonize";
 pub const ANALYSIS_QUALIFICATION_TOOL: &str = "analysis_qualify";
@@ -114,6 +118,18 @@ pub fn validate_research_release_receipt_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RESEARCH_RELEASE_FEATURE_ID {
         return Err("research-release feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn validate_research_release_batch_receipt_json(
+    value: &Value,
+) -> Result<ResearchReleaseBatchReceipt, String> {
+    let receipt: ResearchReleaseBatchReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid research-release batch receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RESEARCH_RELEASE_BATCH_FEATURE_ID {
+        return Err("research-release batch feature id mismatch".into());
     }
     Ok(receipt)
 }

@@ -29,6 +29,7 @@ export const QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02" as const;
 export const DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02" as const;
 export const AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02" as const;
 export const WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11" as const;
+export const RESEARCH_RELEASE_BATCH_FEATURE_ID = "AFA-services-P16-F03" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -627,6 +628,30 @@ export function validateWorkflowBatchReceipt(receipt: WorkflowBatchReceipt): voi
 
 export function workflowBatchReceiptDigest(receipt: WorkflowBatchReceipt): string {
   validateWorkflowBatchReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface ResearchReleaseBatchReceipt {
+  schema_version: string;
+  feature_id: string;
+  total_releases: number;
+  published_releases: number;
+  blocked_releases: number;
+  entries: readonly Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateResearchReleaseBatchReceipt(receipt: ResearchReleaseBatchReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RESEARCH_RELEASE_BATCH_FEATURE_ID) throw new Error("research-release batch schema or feature mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || receipt.total_releases <= 0 || receipt.total_releases !== receipt.entries.length) throw new Error("research-release batch identity or boundary is invalid");
+  if (![receipt.published_releases, receipt.blocked_releases].every((value) => Number.isInteger(value) && value >= 0) || receipt.published_releases + receipt.blocked_releases !== receipt.total_releases) throw new Error("research-release batch counts are inconsistent");
+  if (receipt.entries.some((entry) => typeof entry.release_id !== "string" || !entry.release_id.trim() || !new Set(["published", "blocked"]).has(String(entry.disposition)) || !Array.isArray(entry.reasons) || entry.reasons.length === 0 || (entry.disposition === "published" && typeof entry.release_digest !== "string"))) throw new Error("research-release batch entry is incomplete");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("research-release batch artifact digest is invalid");
+}
+
+export function researchReleaseBatchReceiptDigest(receipt: ResearchReleaseBatchReceipt): string {
+  validateResearchReleaseBatchReceipt(receipt);
   return digestJsonSync(receipt);
 }
 
