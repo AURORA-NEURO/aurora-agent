@@ -173,6 +173,11 @@ import {
   inferAutonomousTaskDecision,
   type AutonomousTaskDecision,
 } from "./autonomous-task-decision.js";
+import {
+  semanticRouteAutonomousTask,
+  type AutonomousSemanticRouteOptions,
+  type AutonomousSemanticRouteResult,
+} from "./autonomous-routing.js";
 import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson, digestJsonSync } from "./tooling.js";
 import {
   autonomousDomainPolicy,
@@ -881,6 +886,8 @@ export interface AutonomousRunResult {
   schema: "bioprism-typescript-autonomous-run/0.1";
   status: AutonomousRunStatus;
   route: AutonomousRouteProposal;
+  /** Optional provider-assisted routing proposal used by the high-level execution path. */
+  semantic_route?: AutonomousSemanticRouteResult | null;
   blueprint: AutonomousTaskBlueprint | null;
   /** Digest of the explicitly accepted provider planning proposal that shaped invocation. */
   plan_refinement_digest: string | null;
@@ -1119,6 +1126,8 @@ export interface AutonomousCrossDomainRunResult {
   schema: typeof AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA;
   status: AutonomousCrossDomainRunStatus;
   route: AutonomousRouteProposal;
+  /** Optional provider-assisted routing proposal used by the high-level execution path. */
+  semantic_route?: AutonomousSemanticRouteResult | null;
   blueprint: AutonomousCrossDomainBlueprint | null;
   child_runs: AutonomousCrossDomainChildRun[];
   synthesis: AutonomousRunResult | null;
@@ -1302,12 +1311,41 @@ export interface AutonomousModelCataloguePersistence {
   write(snapshot: AutonomousModelCatalogueSnapshot): Promise<void> | void;
 }
 
+/**
+ * Per-run controls for the optional provider-assisted semantic router. Candidate models,
+ * credentials, context, execution controllers, and the aggregate cost budget are inherited
+ * from the enclosing run so routing cannot silently escape its caller-owned boundaries.
+ */
+export interface AutonomousRunSemanticRoutingOptions {
+  approveProviderCall?: boolean;
+  minSemanticConfidence?: number;
+  maxDomains?: number;
+  allowCrossDomain?: boolean;
+  maxOutputTokens?: number;
+  temperature?: number;
+  maxCostPerMillionTokens?: number;
+  maxLatencyMs?: number;
+  minQuality?: number;
+  maxProviderFailovers?: number;
+  domainPolicyMode?: AutonomousDomainPolicyExecutionMode;
+  domainPolicyEvidenceReady?: boolean;
+  domainPolicyEvaluatorConfigured?: boolean;
+  domainPolicyEffectsRequested?: boolean;
+  domainPolicyEffectsApproved?: boolean;
+}
+
 export interface AutonomousRunOptions {
   domain?: AutonomousDomainName;
   /** Internal reviewed-stage identity; workflow executors populate this before provider dispatch. */
   workflowContext?: AutonomousWorkflowToolContext;
   /** Reuse a route already approved by a caller-owned semantic router. */
   routeOverride?: AutonomousRouteProposal;
+  /**
+   * Opt into provider-assisted semantic routing for the high-level execution path. The
+   * classifier is a proposal only; it shares this run's credential, policy, approval, and
+   * aggregate cost boundary, and execution remains fail-closed on review outcomes.
+   */
+  semanticRouting?: boolean | AutonomousRunSemanticRoutingOptions;
   capability?: string;
   candidates?: readonly AutonomousModelCandidate[];
   credential?: CredentialHandle;
@@ -1455,11 +1493,54 @@ export interface AutonomousPlanAndRunResult {
   schema: typeof AUTONOMOUS_PLAN_AND_RUN_SCHEMA;
   status: AutonomousPlanAndRunStatus;
   route: AutonomousRouteProposal;
+  /** Optional provider-assisted routing proposal used before planning. */
+  semantic_route?: AutonomousSemanticRouteResult | null;
   blueprint: AutonomousAutoBlueprint | null;
   plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | null;
   result: AutonomousRunResult | AutonomousCrossDomainRunResult | null;
   retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned";
   authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval";
+}
+
+const AUTONOMOUS_RUN_SEMANTIC_ROUTING_FIELDS = new Set([
+  "approveProviderCall",
+  "minSemanticConfidence",
+  "maxDomains",
+  "allowCrossDomain",
+  "maxOutputTokens",
+  "temperature",
+  "maxCostPerMillionTokens",
+  "maxLatencyMs",
+  "minQuality",
+  "maxProviderFailovers",
+  "domainPolicyMode",
+  "domainPolicyEvidenceReady",
+  "domainPolicyEvaluatorConfigured",
+  "domainPolicyEffectsRequested",
+  "domainPolicyEffectsApproved",
+]);
+
+function normalizeRunSemanticRouting(value: AutonomousRunOptions["semanticRouting"]): AutonomousRunSemanticRoutingOptions | null {
+  if (value === undefined || value === false) return null;
+  if (value === true) return {};
+  if (!isObject(value)) throw new ArgumentError("semanticRouting must be a boolean or object");
+  const unsupported = Object.keys(value).find((key) => !AUTONOMOUS_RUN_SEMANTIC_ROUTING_FIELDS.has(key));
+  if (unsupported) throw new ArgumentError(`semanticRouting contains unsupported field: ${unsupported}`);
+  return value as unknown as AutonomousRunSemanticRoutingOptions;
+}
+
+function semanticRouteRunStatus(status: AutonomousSemanticRouteResult["status"]): AutonomousRunStatus {
+  if (status === "approval_required") return "approval_required";
+  if (status === "policy_review_required") return "policy_review_required";
+  if (status === "policy_blocked") return "policy_blocked";
+  return "route_review_required";
+}
+
+function semanticRouteCrossDomainStatus(status: AutonomousSemanticRouteResult["status"]): AutonomousCrossDomainRunStatus {
+  if (status === "approval_required") return "approval_required";
+  if (status === "policy_review_required") return "policy_review_required";
+  if (status === "policy_blocked") return "policy_blocked";
+  return "route_review_required";
 }
 
 function composeInvocationObservers(...observers: readonly (ProviderInvocationObserver | undefined)[]): ProviderInvocationObserver | undefined {
@@ -5166,6 +5247,58 @@ export class AutonomousAgent {
     return routeAutonomousTask(taskText, options);
   }
 
+  /**
+   * Resolve the route authority for a high-level execution call. Semantic routing is opt-in,
+   * inherits all caller-owned boundaries, and returns its proposal separately so callers can
+   * audit the classifier without confusing it with task evidence or execution authorization.
+   */
+  private async resolveExecutionRoute(
+    taskText: string,
+    options: AutonomousRunOptions,
+    costBudget: AutonomousCostBudget | undefined,
+  ): Promise<{ route: AutonomousRouteProposal; semanticRoute: AutonomousSemanticRouteResult | null }> {
+    if (options.routeOverride !== undefined) {
+      return { route: await validateAutonomousRouteOverride(taskText, options.routeOverride), semanticRoute: null };
+    }
+    const semanticRouting = normalizeRunSemanticRouting(options.semanticRouting);
+    if (semanticRouting === null) {
+      return {
+        route: await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain }),
+        semanticRoute: null,
+      };
+    }
+    if (options.domain !== undefined) throw new ArgumentError("semanticRouting cannot be combined with an explicit domain");
+    const semanticOptions: AutonomousSemanticRouteOptions = {
+      candidates: options.candidates,
+      credential: options.credential,
+      credentialFor: options.credentialFor,
+      hints: options.hints,
+      approveProviderCall: semanticRouting.approveProviderCall ?? options.approveProviderCall ?? false,
+      minSemanticConfidence: semanticRouting.minSemanticConfidence,
+      maxDomains: semanticRouting.maxDomains ?? 3,
+      allowCrossDomain: semanticRouting.allowCrossDomain ?? options.allowCrossDomain,
+      maxOutputTokens: semanticRouting.maxOutputTokens ?? options.maxOutputTokens ?? 1_024,
+      temperature: semanticRouting.temperature ?? options.temperature,
+      maxCostPerMillionTokens: semanticRouting.maxCostPerMillionTokens ?? options.maxCostPerMillionTokens,
+      maxLatencyMs: semanticRouting.maxLatencyMs ?? options.maxLatencyMs,
+      minQuality: semanticRouting.minQuality ?? options.minQuality,
+      costBudget,
+      execution: options.execution,
+      executionAttempt: options.executionAttempt,
+      maxProviderFailovers: semanticRouting.maxProviderFailovers ?? options.maxProviderFailovers,
+      executionLifecycle: options.executionLifecycle,
+      signal: options.signal,
+      observer: options.observer,
+      domainPolicyMode: semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
+      domainPolicyEvidenceReady: semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: semanticRouting.domainPolicyEffectsRequested ?? options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
+    };
+    const semanticRoute = await semanticRouteAutonomousTask(this, taskText, semanticOptions);
+    return { route: semanticRoute.route, semanticRoute };
+  }
+
   /** Resolve the bounded policy for a domain without provider, tool, or source activity. */
   domainPolicy(domain: AutonomousDomainName, overrides: AutonomousDomainPolicyOverrides = {}): AutonomousDomainPolicy {
     return autonomousDomainPolicy(domain, overrides);
@@ -5795,7 +5928,22 @@ export class AutonomousAgent {
     if (options.acceptedSingleDomainPlanRefinement !== undefined || options.acceptedCrossDomainPlanRefinement !== undefined) throw new ArgumentError("planAndRun creates its own accepted proposal; use run or runCrossDomain to apply an existing proposal");
     const planning = options.planning;
     const sharedBudget = resolvePlanAndRunBudget(options, planning);
-    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, sharedBudget);
+    const route = routeResolution.route;
+    const semanticRoute = routeResolution.semanticRoute;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      return {
+        schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA,
+        status: semanticRouteRunStatus(semanticRoute.status),
+        route,
+        semantic_route: semanticRoute,
+        blueprint: null,
+        plan_refinement: null,
+        result: null,
+        retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned",
+        authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval",
+      };
+    }
     const envelope = await this.blueprint(taskText, {
       domain: route.primary_domain ?? undefined,
       routeOverride: route,
@@ -5807,7 +5955,7 @@ export class AutonomousAgent {
       structuredDomainResponse: options.structuredDomainResponse,
     });
     if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
-      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "route_review_required", route, blueprint: envelope, plan_refinement: null, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "route_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: null, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
     const planningOptions: AutonomousProviderPlanningOptions = {
       ...(planning ?? {}),
@@ -5832,22 +5980,22 @@ export class AutonomousAgent {
       const proposal = await this.planCrossDomainWithProvider(envelope.cross_domain_blueprint, planningOptions);
       if (proposal.status !== "completed") {
         const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
-        return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+        return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
       }
-      if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
       const result = await this.runCrossDomain(taskText, { ...executionOptions, acceptedCrossDomainPlanRefinement: proposal });
-      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
     const blueprint = envelope.blueprint;
     if (!blueprint) throw new ProviderRuntimeError("planAndRun single-domain blueprint is missing");
     const proposal = await this.planWithProvider(blueprint, planningOptions);
     if (proposal.status !== "completed") {
       const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
-      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
-    if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+    if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     const result = await this.run(taskText, { ...executionOptions, acceptedSingleDomainPlanRefinement: proposal });
-    return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+    return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
   }
 
   /** Build a bounded fan-out/fan-in plan without contacting a provider or executing a tool. */
@@ -6368,14 +6516,33 @@ export class AutonomousAgent {
       ? undefined
       : normalizeProviderContentParts(options.contentParts);
     let costBudget = resolveAutonomousCostBudget(options);
-    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, costBudget);
+    const route = routeResolution.route;
+    const semanticRoute = routeResolution.semanticRoute;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      return {
+        schema: "bioprism-typescript-autonomous-run/0.1",
+        status: semanticRouteRunStatus(semanticRoute.status),
+        route,
+        semantic_route: semanticRoute,
+        blueprint: null,
+        plan_refinement_digest: null,
+        selection: null,
+        response: null,
+        tool_loop: null,
+        cross_domain: null,
+        learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only",
+        retention: "provider_response_local; value_only_learning_projection",
+      };
+    }
     if (route.cross_domain && options.domain === undefined) {
       if (options.acceptedSingleDomainPlanRefinement !== undefined) throw new ArgumentError("single-domain plan refinement cannot be applied to a cross-domain route");
-      const cross = await this.runCrossDomain(taskText, { ...options, contentParts, maxTotalCostUnits: undefined, costBudget });
+      const cross = await this.runCrossDomain(taskText, { ...options, routeOverride: route, contentParts, maxTotalCostUnits: undefined, costBudget });
       return {
         schema: "bioprism-typescript-autonomous-run/0.1",
         status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "reconciliation_required" ? "reconciliation_required" : cross.status === "turn_limit_reached" ? "turn_limit_reached" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
         route,
+        semantic_route: semanticRoute,
         blueprint: cross.blueprint?.synthesis_blueprint ?? null,
         plan_refinement_digest: cross.plan_refinement_digest,
         selection: cross.synthesis?.selection ?? null,
@@ -6388,15 +6555,16 @@ export class AutonomousAgent {
         retention: "provider_response_local; value_only_learning_projection",
       };
     }
-    if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, semantic_route: semanticRoute, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     const memory = await this.prepareMemory(taskText, route, options, [route.primary_domain]);
     const finish = async (result: AutonomousRunResult): Promise<AutonomousRunResult> => {
       const memoryProjection = memory.store ? await this.recordMemory(taskText, route, result, options, memory) : null;
       const withMemory = memoryProjection ? { ...result, memory: memoryProjection } : result;
-      if (!options.learning) return withMemory;
-      return { ...withMemory, ...(await this.prepareDirectLearning(withMemory, route, { ...options, memoryEpisodeId: memoryProjection?.recorded_episode_id ?? null })) };
+      const withSemanticRoute = semanticRoute === null ? withMemory : { ...withMemory, semantic_route: semanticRoute };
+      if (!options.learning) return withSemanticRoute;
+      return { ...withSemanticRoute, ...(await this.prepareDirectLearning(withSemanticRoute, route, { ...options, memoryEpisodeId: memoryProjection?.recorded_episode_id ?? null })) };
     };
-    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration });
+    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: route, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     assertAutonomousTaskDecisionAllowsProvider(blueprint.task_decision, "autonomous execution");
@@ -6491,15 +6659,38 @@ export class AutonomousAgent {
       ? undefined
       : normalizeProviderContentParts(options.contentParts);
     let costBudget = resolveAutonomousCostBudget(options);
-    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, costBudget);
+    const route = routeResolution.route;
+    const semanticRoute = routeResolution.semanticRoute;
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      const reviewed: AutonomousCrossDomainRunResult = {
+        schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA,
+        status: semanticRouteCrossDomainStatus(semanticRoute.status),
+        route,
+        semantic_route: semanticRoute,
+        blueprint: null,
+        child_runs: [],
+        synthesis: null,
+        completed_children: 0,
+        total_children: route.selected_domains.length,
+        partial: false,
+        plan_refinement_digest: null,
+        learning_episode_ids: [],
+        response_learning_episode_ids: [],
+        learning,
+        retention: "provider_responses_local; child_digests_only_in_synthesis_metadata",
+      };
+      return { ...reviewed, execution_receipt: await autonomousCrossDomainExecutionReceipt(reviewed) };
+    }
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
-      const reviewed: AutonomousCrossDomainRunResult = { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, plan_refinement_digest: null, learning_episode_ids: [], response_learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      const reviewed: AutonomousCrossDomainRunResult = { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, semantic_route: semanticRoute, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, plan_refinement_digest: null, learning_episode_ids: [], response_learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
       return { ...reviewed, execution_receipt: await autonomousCrossDomainExecutionReceipt(reviewed) };
     }
     const memory = await this.prepareMemory(taskText, route, options, [...route.selected_domains, "cross_domain"]);
     const finish = async (result: AutonomousCrossDomainRunResult): Promise<AutonomousCrossDomainRunResult> => {
-      const withReceipt: AutonomousCrossDomainRunResult = { ...result, execution_receipt: await autonomousCrossDomainExecutionReceipt(result) };
+      const withSemanticRoute = semanticRoute === null ? result : { ...result, semantic_route: semanticRoute };
+      const withReceipt: AutonomousCrossDomainRunResult = { ...withSemanticRoute, execution_receipt: await autonomousCrossDomainExecutionReceipt(withSemanticRoute) };
       if (!memory.store) return withReceipt;
       return { ...withReceipt, memory: await this.recordMemory(taskText, route, withReceipt, options, memory) };
     };

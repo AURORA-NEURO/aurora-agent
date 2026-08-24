@@ -283,6 +283,11 @@ neither; the registry it found them in is retained there as the audit's known-po
 - **Claude Code**: this repo is a plugin marketplace —
   `claude plugin marketplace add AURORA-NEURO/aurora-agent` then
   `claude plugin install aurora-agent@aurora` (see [plugins/README.md](plugins/README.md)).
+- **VS Code**: sideload `aurora-agent-0.1.3.vsix` from the
+  [v0.1.3 release](https://github.com/AURORA-NEURO/aurora-agent/releases/tag/v0.1.3)
+  (`code --install-extension aurora-agent-0.1.3.vsix`). The extension registers the MCP
+  server with VS Code (1.101+) so Copilot agent mode can call the 259 tools, and adds
+  workflow/autopilot/pipeline views (see [editors/vscode](editors/vscode/)).
 - **MCP registry**: listed as `io.github.MurariAmbati/aurora-agent` on
   [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/).
 - Privacy: local program, no network, no data collection — [PRIVACY.md](PRIVACY.md).
@@ -292,6 +297,36 @@ neither; the registry it found them in is retained there as the audit's known-po
 Project site: [aurora-neuro.github.io/aurora-agent](https://aurora-neuro.github.io/aurora-agent/).
 The full reference lives in [docs/](docs/); contribution workflow in
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Autonomous workflows, with receipts
+
+`bioprism autopilot` drives an instantiated workflow's mission autonomously under an explicit
+**AutonomyGrant** — the only source of authority; there is no default grant. The driver dispatches
+the mission in-process, classifies every failed step by its declared 40.36 retry class
+(`terminal`, `retryable_after_change`, `retryable_as_is`, or unknown), and re-dispatches only what
+the grant authorises, as a repair subset with rematerialised bindings. Terminal and cancelled
+steps are never re-dispatched; an `unknown` failure is never retried unless the grant explicitly
+opts in.
+
+Success is never inferred: it requires full step coverage, a succeeded mission report, and — by
+default — a complete workflow reconciliation with valid integrity. Every drive emits a
+**digest-sealed autopilot report** chaining the grant digest, every mission and report digest, and
+every reconciliation digest; `bioprism autopilot verify` recomputes it and detects a single
+tampered byte. `--dry-run` plans attempt 1 only — no dispatch, zero writes.
+
+```bash
+bioprism workflow instantiate --workflow decision_context --mission-id demo --goal "compile and verify" --steps steps.json
+bioprism autopilot grant-template --json > grant.json
+bioprism autopilot run --instantiation instantiation.json --grant grant.json --report-out report.json
+bioprism autopilot verify --report report.json
+```
+
+What it deliberately does not do: no recurrence, no MCP tool exposure of the driver itself, and
+no ownership of wall-clock deadlines. Grants can authorize deterministic logical-tick retry
+backoff; the host supplies the wait/deadline implementation. Restart is supported only through a caller-owned, metadata-only
+checkpoint: mission/report material is rehydrated by the host and matched by digest before the
+planner can continue. Full reference:
+[docs/AUTOPILOT.md](docs/AUTOPILOT.md).
 
 ## Using it from an agent
 

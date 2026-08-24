@@ -63,6 +63,7 @@ export interface AutonomousSemanticRouteOptions {
   maxDomains?: number;
   allowCrossDomain?: boolean;
   maxOutputTokens?: number;
+  temperature?: number;
   /** Hard caller-owned model-selection gates for the routing classifier itself. */
   maxCostPerMillionTokens?: number;
   maxLatencyMs?: number;
@@ -182,6 +183,7 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
       { role: "user" as const, content: taskText },
     ],
     maxOutputTokens: options.maxOutputTokens ?? 512,
+    temperature: options.temperature,
     requireJson: true,
     responseSchema: routeSchema(),
   };

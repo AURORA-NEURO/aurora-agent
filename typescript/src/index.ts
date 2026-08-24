@@ -804,6 +804,7 @@ export type {
   AutonomousPlanAndRunOptions,
   AutonomousPlanAndRunResult,
   AutonomousPlanAndRunStatus,
+  AutonomousRunSemanticRoutingOptions,
   AutonomousRunResult,
   AutonomousMemoryRunProjection,
   AutonomousGoalStepResult,
@@ -2577,22 +2578,60 @@ export type {
   AutonomousGoalWorkerJournalTextStore,
 } from "./autonomous-goal-worker-journal.js";
 export {
+  AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA,
+  AUTONOMOUS_GOAL_CONTROL_EVALUATION_SCHEMA,
   AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_BATCH_PREFIX_BYTES,
   AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES,
   AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS,
+  AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS,
+  AUTONOMOUS_GOAL_CONTROL_MAX_SIGNALS,
   AUTONOMOUS_GOAL_CONTROL_LOOP_RETENTION,
   AUTONOMOUS_GOAL_CONTROL_LOOP_SCHEMA,
   AutonomousGoalControlLoop,
+  AutonomousGoalBanditLearner,
   AutonomousGoalControlLoopCycle,
   AutonomousGoalControlLoopResult,
 } from "./autonomous-goal-control-loop.js";
 export type {
+  AutonomousGoalControlLoopEvaluator,
+  AutonomousGoalControlLoopLearner,
   AutonomousGoalControlLoopContext,
   AutonomousGoalControlLoopCycleJSON,
   AutonomousGoalControlLoopJSON,
   AutonomousGoalControlLoopOptionsFactory,
   AutonomousGoalControlLoopStopReason,
+  AutonomousGoalEvaluation,
 } from "./autonomous-goal-control-loop.js";
+export {
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_RUNS,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_EVALUATIONS,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SIGNALS,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SNAPSHOT_BYTES,
+  AutonomousGoalControlLoopPersistenceCoordinator,
+  JsonAutonomousGoalControlLoopSnapshotPersistence,
+  TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
+  sealAutonomousGoalControlLoopSnapshot,
+  validateAutonomousGoalControlLoopSnapshot,
+} from "./autonomous-goal-control-persistence.js";
+export type {
+  AutonomousGoalControlLoopCheckpoint,
+  AutonomousGoalControlLoopSnapshotTextStore,
+  TransactionalAutonomousGoalControlLoopSnapshotTextStore,
+  AutonomousGoalControlLoopSnapshotPersistence,
+  TransactionalAutonomousGoalControlLoopSnapshotPersistence,
+} from "./autonomous-goal-control-persistence.js";
+export {
+  AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION,
+  AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA,
+  AutonomousGoalAgentRuntime,
+} from "./autonomous-goal-agent.js";
+export type {
+  AutonomousGoalAgentRunOptionsFactory,
+  AutonomousGoalAgentTaskResolver,
+} from "./autonomous-goal-agent.js";
 export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,
   AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS,

@@ -6,6 +6,12 @@ import {
   AutonomousGoalScheduler,
   AutonomousGoalWorker,
   AutonomousGoalControlLoop,
+  AutonomousGoalBanditLearner,
+  AutonomousGoalControlLoopPersistenceCoordinator,
+  TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
+  sealAutonomousGoalControlLoopSnapshot,
+  validateAutonomousGoalControlLoopSnapshot,
+  AutonomousGoalAgentRuntime,
   AutonomousGoalWorkerJournal,
   AutonomousGoalWorkerJournalPersistenceCoordinator,
   AutonomousAgent,
@@ -264,6 +270,216 @@ test("goal control loop continues all domains and re-admits paused work with fre
   }).run({ schedule_options: { now_ns: 300, max_selected: 1, max_concurrent: 1 }, max_cycles: 2 });
   assert.equal(failed.stop_reason, "no_admissible_work");
   assert.equal(failureLedger.get("failed-loop").status, "failed");
+});
+
+test("goal control loop settles explicit evaluator credit and adapts every domain", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 400 });
+  for (const domain of domains) ledger.create({ goal_id: `eval-${domain}`, task_digest: goalTaskDigest(`private evaluator task ${domain}`), domain, now_ns: 0 });
+  const learner = new AutonomousGoalBanditLearner({ exploration: 0.4 });
+  const evaluatorCycles = [];
+  const result = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      resolver: (goal) => ({ task: `private evaluator task ${goal.domain}` }),
+      executor: async () => ({ status: "completed" }),
+    }),
+    evaluator: (cycle) => {
+      evaluatorCycles.push(cycle.cycle);
+      return cycle.batch.runs.map((run) => ({
+        goal_id: run.goal_id,
+        evaluator_id: "domain-quality-evaluator",
+        evaluator_version: "2026.08",
+        reward: run.domain === "coding" ? 1 : 0.25,
+        passed: true,
+        evidence_digest: goalTaskDigest(`private evidence ${run.goal_id}`),
+      }));
+    },
+    learner,
+    batch_id_prefix: "explicit-evaluator-loop",
+  }).run({
+    schedule_options: { now_ns: 400, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    max_cycles: 2,
+  });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.deepEqual(evaluatorCycles, [1]);
+  assert.equal(result.evaluation_count, domains.length);
+  assert.ok(result.evaluation_digest);
+  assert.ok(result.learning_state_digest);
+  assert.equal(learner.snapshot().generation, 1);
+  assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.evaluator_digest !== null)), new Set([true]));
+  assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.learning_state_digest)), new Set([result.learning_state_digest]));
+  assert.equal(result.cycles[0].evaluations.length, domains.length);
+  const publicResult = JSON.stringify(result.toJSON());
+  assert.equal(publicResult.includes("private evaluator task"), false);
+  assert.equal(publicResult.includes("private evidence"), false);
+  assert.equal(publicResult.includes("domain-quality-evaluator"), false);
+  assert.equal(ledger.verifyIntegrity().ok, true);
+
+  const invalidLedger = new InMemoryAutonomousGoalLedger({ clock: () => 500 });
+  invalidLedger.create({ goal_id: "invalid-eval", task_digest: goalTaskDigest("private invalid evaluator task"), domain: "coding", now_ns: 0 });
+  await assert.rejects(() => new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({ ledger: invalidLedger, resolver: () => ({ task: "private invalid evaluator task" }), executor: async () => ({ status: "completed" }) }),
+    evaluator: () => [{ goal_id: "invalid-eval", evaluator_id: "bad", evaluator_version: "1", reward: 2, passed: true }],
+  }).run({ schedule_options: { now_ns: 500, max_selected: 1, max_concurrent: 1 } }), /reward/);
+});
+
+test("goal control checkpoints restart bandit state and fence tampering across every domain", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 550 });
+  for (const domain of domains) ledger.create({ goal_id: `checkpoint-${domain}`, task_digest: goalTaskDigest(`private checkpoint task ${domain}`), domain, now_ns: 0 });
+  let paused = true;
+  const snapshots = [];
+  const evaluate = (cycle) => cycle.batch.runs.map((run) => ({
+    goal_id: run.goal_id,
+    evaluator_id: "checkpoint-evaluator",
+    evaluator_version: "1",
+    reward: 0.75,
+    passed: !paused,
+  }));
+
+  const first = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      resolver: (goal) => ({ task: `private checkpoint task ${goal.domain}` }),
+      executor: async () => ({ status: paused ? "paused" : "completed" }),
+    }),
+    evaluator: evaluate,
+    batch_id_prefix: "checkpoint-all-domains",
+  }).run({
+    run_id: "checkpoint-all-domains",
+    schedule_options: { now_ns: 550, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    max_cycles: 1,
+    checkpoint: (snapshot) => { snapshots.push(snapshot); },
+  });
+  assert.equal(first.stop_reason, "cycle_budget_exhausted");
+  assert.equal(first.cycles[0].cycle, 1);
+  assert.equal(snapshots[0].completed_cycles, 1);
+  assert.equal(snapshots[0].learner_state.generation, 1);
+  assert.equal(JSON.stringify(snapshots[0]).includes("private checkpoint task"), false);
+  assert.equal(JSON.stringify(snapshots[0]).includes("checkpoint-evaluator"), false);
+
+  paused = false;
+  const resumed = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      resolver: (goal) => ({ task: `private checkpoint task ${goal.domain}` }),
+      executor: async () => ({ status: "completed" }),
+    }),
+    evaluator: evaluate,
+    batch_id_prefix: "checkpoint-all-domains",
+  }).run({
+    run_id: "checkpoint-all-domains",
+    resume_snapshot: snapshots.at(-1),
+    schedule_options: { now_ns: 551, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    max_cycles: 3,
+    checkpoint: (snapshot) => { snapshots.push(snapshot); },
+  });
+  assert.equal(resumed.stop_reason, "all_terminal");
+  assert.equal(resumed.restored_cycle_count, 1);
+  assert.equal(resumed.cycles[0].cycle, 2);
+  assert.equal(resumed.evaluation_count, domains.length * 2);
+  assert.equal(snapshots.at(-1).generation, 2);
+  assert.equal(snapshots.at(-1).previous_snapshot_digest, snapshots[0].snapshot_digest);
+  assert.equal(snapshots.at(-1).learner_state.generation, 2);
+  assert.ok(ledger.list({ limit: domains.length }).every((goal) => goal.status === "completed"));
+
+  let encoded = null;
+  const persistence = new TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence({
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    write_if_unchanged: (expected, value) => {
+      const actual = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (actual !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  });
+  const coordinator = new AutonomousGoalControlLoopPersistenceCoordinator(persistence);
+  await coordinator.flush(snapshots[0]);
+  const restored = await coordinator.restore();
+  assert.equal(restored.snapshot_digest, snapshots[0].snapshot_digest);
+  const tampered = structuredClone(restored);
+  tampered.total_runs += 1;
+  assert.throws(() => validateAutonomousGoalControlLoopSnapshot(tampered), /digest mismatch|aggregate counts/);
+
+  const stale = new AutonomousGoalControlLoopPersistenceCoordinator(persistence);
+  assert.equal((await stale.restore()).snapshot_digest, restored.snapshot_digest);
+  const nextDescriptor = structuredClone(restored);
+  delete nextDescriptor.snapshot_digest;
+  nextDescriptor.generation = 2;
+  nextDescriptor.previous_snapshot_digest = restored.snapshot_digest;
+  nextDescriptor.stop_reason = "cycle_budget_exhausted";
+  const nextSnapshot = sealAutonomousGoalControlLoopSnapshot(nextDescriptor);
+  await coordinator.flush(nextSnapshot);
+  await assert.rejects(() => stale.flush(nextSnapshot), /compare-and-swap/);
+});
+
+test("goal control checkpoint digest matches the Python reference", () => {
+  const snapshot = sealAutonomousGoalControlLoopSnapshot({
+    schema: "bioprism-autonomous-goal-control-checkpoint/0.1",
+    run_id: "parity-fixture",
+    next_cycle: 1,
+    cycle_summaries: [],
+    previous_cycle: null,
+    completed_cycles: 0,
+    total_selected: 0,
+    total_claimed: 0,
+    total_runs: 0,
+    status_counts: {},
+    domain_counts: {},
+    evaluation_count: 0,
+    evaluation_digests: [],
+    learning_state_digest: null,
+    learned_signals: [],
+    learner_state: null,
+    stop_reason: "cycle_budget_exhausted",
+    generation: 1,
+    previous_snapshot_digest: null,
+    retention: "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
+    secret_material: "never_returned",
+  });
+  assert.equal(snapshot.snapshot_digest, "6781485690bc2aa87d5c4992de3017de959f236084f37f0d285cb1cd897ec5fb");
+});
+
+test("goal agent runtime bridges the real facade across every domain without retaining runtime values", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 600 });
+  for (const domain of domains) ledger.create({ goal_id: `agent-${domain}`, task_digest: goalTaskDigest(`private agent task ${domain}`), domain, now_ns: 0 });
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in bridge test"); } }));
+  const calls = [];
+  agent.run = async (task, options) => {
+    calls.push({ kind: "single", task, options });
+    return { status: "completed" };
+  };
+  agent.runCrossDomain = async (task, options) => {
+    calls.push({ kind: "cross", task, options });
+    return { status: "completed" };
+  };
+  const runtime = new AutonomousGoalAgentRuntime({
+    agent,
+    ledger,
+    task_resolver: (goal) => `private agent task ${goal.domain}`,
+    run_options_factory: (goal) => ({
+      private_runtime_handle: { token: `private-${goal.goal_id}` },
+      ...(goal.domain === "cross_domain" ? { subtasks: [{ domain: "coding", task: "private child task" }] } : {}),
+    }),
+    evaluator: (cycle) => cycle.batch.runs.map((run) => ({ goal_id: run.goal_id, evaluator_id: "agent-runtime-evaluator", evaluator_version: "1", reward: 0.75, passed: true })),
+  });
+  const result = await runtime.run({ schedule_options: { now_ns: 600, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains } });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.equal(result.evaluation_count, domains.length);
+  assert.equal(calls.length, domains.length);
+  assert.deepEqual(new Set(calls.map((call) => call.kind)), new Set(["single", "cross"]));
+  const crossCall = calls.find((call) => call.kind === "cross");
+  assert.equal(crossCall.options.subtasks[0].task, "private child task");
+  assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.status)), new Set(["completed"]));
+  const serialized = JSON.stringify(result.toJSON());
+  assert.equal(serialized.includes("private agent task"), false);
+  assert.equal(serialized.includes("private child task"), false);
+  assert.equal(serialized.includes("private_runtime_handle"), false);
+  assert.equal(runtime.metadata().domain_count, domains.length);
+  assert.equal(ledger.verifyIntegrity().ok, true);
 });
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {

@@ -231,6 +231,33 @@ project raw values transiently, and the returned digest projection excludes thos
 provider response. Unsettled evidence blocks invocation unless the caller opts into the bounded
 incomplete-evidence mode; offline tests cover the default, refusal, and all-domain paths.
 
+The Python façade now exposes the same source-to-brain composition through
+`AutonomousAgent.run_with_reviewed_evidence(...)`. It accepts a reviewed domain set, bounded
+acquisition requests, caller-owned `acquirer`/`projector`/`evaluator` adapters, an optional
+`AutonomousEvidenceRuntimeJournal`, and opaque credential/model handles. Three decisions remain
+independent: `approve_source_dispatch` gates source calls, accepted evaluator settlement gates
+the provider unless `allow_incomplete_evidence=True`, and `approve_provider_call` is forwarded to
+the normal model-selection/provider boundary. `run_mode="domain"` gives deterministic single
+domain execution, `run_mode="cross_domain"` binds 2--8 reviewed specialists, and the default
+`run_mode="auto"` reuses route-first intake. `to_dict()` retains only digests, statuses, route
+metadata, and retention posture; raw evidence values, prompt projections, and provider responses
+remain transient caller-owned objects. Journal replay requires `rehydrate_value`, and missing
+values become `reconciliation_required` rather than silently reacquiring a source. Credentialless
+tests cover refusal, replay, redaction, and provider-backed execution across all twelve domain
+plans, bringing the Python and TypeScript source-to-brain contracts into parity.
+
+Python evidence-backed execution now also has the restart boundary that previously existed only
+in the TypeScript façade. `run_resumable_evidence_backed(...)` and
+`AutonomousEvidenceBackedController` persist a digest-bound checkpoint immediately before the
+provider boundary, retain only plan/request/policy/result digests, and require the caller-owned
+evidence journal for replay. `InMemoryAutonomousEvidenceBackedCheckpointStore`, canonical JSON
+persistence, and transactional compare-and-swap persistence are available for local, browser,
+and service adapters. A restored provider result must pass the exact checkpoint digest through
+`rehydrate_provider_run`; otherwise the run remains `provider_reconciliation_required` until the
+caller explicitly opts into `resume_provider=True`. All twelve domain plans are exercised
+credentiallessly, including source replay, provider-pending recovery, tamper rejection, and the
+no-duplicate-dispatch invariant.
+
 The evidence-backed brain operation now has a restart-safe controller and checkpoint boundary.
 `runAutonomousEvidenceBackedResumable()` and `AutonomousEvidenceBackedController` bind the task,
 request set, run policy, evidence plan, prompt projection, and provider result to a bounded
@@ -1250,3 +1277,15 @@ provider/model observations can be snapshotted, restored atomically, and handed 
 conditional-write/HTTP adapter with stale-writer fencing. Its all-domain tests cover restart and
 tamper refusal while keeping request messages, response text, headers, credential handles, and
 model prompts outside historical transport evidence.
+
+The Python reviewed-evidence surface now also has a provider-backed LLM acquisition seam. The
+`AutonomousLLMEvidenceAdapter` binds a reviewed requirement to the existing `LLMRuntime`, supports
+static or context-selected models, structured response parsing, caller-owned prompt builders,
+credential handles or explicitly credentialless local providers, and metadata-only projections.
+`AutonomousLLMEvidenceAdapterRouter` requires an explicit per-domain mapping for cross-domain runs,
+and `AutonomousAgent.run_with_llm_evidence` / `run_resumable_llm_evidence` compose that mapping with
+source approval, evidence evaluation, provider approval, journaling, and restart checkpoints.
+The adapter rejects secret-shaped response fields and malformed provider output; no credential,
+prompt, or provider response is placed in durable evidence state. This closes the Python gap with
+the TypeScript LLM evidence adapter while leaving provider registration, credential onboarding,
+model selection policy, and external network authorization caller-owned.

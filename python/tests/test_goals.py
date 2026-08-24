@@ -24,7 +24,14 @@ from prism_sdk.autonomous_goal_scheduler import (
     validate_goal_schedule,
 )
 from prism_sdk.autonomous_goal_worker import AutonomousGoalWorker
-from prism_sdk.autonomous_goal_control_loop import AutonomousGoalControlLoop
+from prism_sdk.autonomous_goal_control_loop import AutonomousGoalBanditLearner, AutonomousGoalControlLoop
+from prism_sdk.autonomous_goal_control_persistence import (
+    AutonomousGoalControlLoopPersistenceCoordinator,
+    TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
+    seal_autonomous_goal_control_loop_snapshot,
+    validate_autonomous_goal_control_loop_snapshot,
+)
+from prism_sdk.autonomous_goal_agent import AutonomousGoalAgentRuntime
 from prism_sdk.autonomous_goal_worker_journal import (
     AutonomousGoalWorkerJournal,
     JsonAutonomousGoalWorkerJournalPersistence,
@@ -325,6 +332,272 @@ def test_goal_control_loop_continues_all_domains_and_retries_paused_work_with_fr
     ).run(schedule_options={"now_ns": 300, "max_selected": 1, "max_concurrent": 1}, max_cycles=2)
     assert failed.stop_reason == "no_admissible_work"
     assert failure_ledger.get("failed-loop").status == "failed"
+
+
+def test_goal_control_loop_settles_explicit_evaluator_credit_and_adapts_all_domains() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 400, max_goals=len(domains))
+    for domain in domains:
+        ledger.create(goal_id=f"eval-{domain}", task_digest=_digest(f"private evaluator task {domain}"), domain=domain, now_ns=0)
+    learner = AutonomousGoalBanditLearner(exploration=0.4)
+    evaluator_cycles: list[int] = []
+
+    def evaluate(cycle):
+        evaluator_cycles.append(cycle.cycle)
+        return [
+            {
+                "goal_id": run.goal_id,
+                "evaluator_id": "domain-quality-evaluator",
+                "evaluator_version": "2026.08",
+                "reward": 1.0 if run.domain == "coding" else 0.25,
+                "passed": True,
+                "evidence_digest": _digest(f"private evidence {run.goal_id}"),
+            }
+            for run in cycle.batch.runs
+        ]
+
+    loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            ledger,
+            resolver=lambda goal, _row: {"task": f"private evaluator task {goal.domain}"},
+            executor=lambda _request: {"status": "completed"},
+        ),
+        evaluator=evaluate,
+        learner=learner,
+        batch_id_prefix="explicit-evaluator-loop",
+    )
+    result = loop.run(
+        schedule_options={
+            "now_ns": 400,
+            "max_selected": len(domains),
+            "max_concurrent": len(domains),
+            "required_domains": list(domains),
+        },
+        max_cycles=2,
+    )
+
+    assert result.stop_reason == "all_terminal"
+    assert evaluator_cycles == [1]
+    assert result.evaluation_count == len(domains)
+    assert result.evaluation_digest is not None
+    assert result.learning_state_digest is not None
+    assert learner.snapshot()["generation"] == 1
+    assert all(record.evaluator_digest is not None for record in ledger.list(limit=len(domains)))
+    assert all(record.learning_state_digest == result.learning_state_digest for record in ledger.list(limit=len(domains)))
+    assert all(len(cycle.evaluations) == len(domains) for cycle in result.cycles)
+    public = json.dumps(result.to_dict(), sort_keys=True)
+    assert "private evaluator task" not in public
+    assert "private evidence" not in public
+    assert "domain-quality-evaluator" not in public
+    assert ledger.verify_integrity()["goals"] == len(domains)
+
+    tampered_reward = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            AutonomousGoalLedger(clock=lambda: 500),
+            resolver=lambda _goal, _row: {"task": "private invalid evaluator task"},
+            executor=lambda _request: {"status": "completed"},
+        ),
+        evaluator=lambda _cycle: [{"goal_id": "invalid-eval", "evaluator_id": "bad", "evaluator_version": "1", "reward": 2.0, "passed": True}],
+    )
+    tampered_reward.worker.ledger.create(goal_id="invalid-eval", task_digest=_digest("private invalid evaluator task"), domain="coding", now_ns=0)
+    with pytest.raises(AutonomousGoalError, match="reward"):
+        tampered_reward.run(schedule_options={"now_ns": 500, "max_selected": 1, "max_concurrent": 1})
+
+
+def test_goal_control_loop_checkpoints_restart_bandit_and_fences_tampering_across_all_domains() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 550, max_goals=len(domains))
+    for domain in domains:
+        ledger.create(goal_id=f"checkpoint-{domain}", task_digest=_digest(f"private checkpoint task {domain}"), domain=domain, now_ns=0)
+    phase = {"paused": True}
+    snapshots: list[dict[str, object]] = []
+
+    def evaluate(cycle):
+        return [
+            {
+                "goal_id": run.goal_id,
+                "evaluator_id": "checkpoint-evaluator",
+                "evaluator_version": "1",
+                "reward": 0.75,
+                "passed": not phase["paused"],
+            }
+            for run in cycle.batch.runs
+        ]
+
+    first = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            ledger,
+            resolver=lambda goal, _row: {"task": f"private checkpoint task {goal.domain}"},
+            executor=lambda _request: {"status": "paused" if phase["paused"] else "completed"},
+        ),
+        evaluator=evaluate,
+        batch_id_prefix="checkpoint-all-domains",
+    ).run(
+        run_id="checkpoint-all-domains",
+        schedule_options={"now_ns": 550, "max_selected": len(domains), "max_concurrent": len(domains), "required_domains": list(domains)},
+        max_cycles=1,
+        checkpoint=snapshots.append,
+    )
+    assert first.stop_reason == "cycle_budget_exhausted"
+    assert first.cycles[0].cycle == 1
+    assert snapshots[0]["completed_cycles"] == 1
+    assert snapshots[0]["learner_state"]["generation"] == 1
+    encoded = json.dumps(snapshots[0], sort_keys=True)
+    assert "private checkpoint task" not in encoded
+    assert "checkpoint-evaluator" not in encoded
+    assert "paused" in encoded
+
+    phase["paused"] = False
+    resumed = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            ledger,
+            resolver=lambda goal, _row: {"task": f"private checkpoint task {goal.domain}"},
+            executor=lambda _request: {"status": "completed"},
+        ),
+        evaluator=evaluate,
+        batch_id_prefix="checkpoint-all-domains",
+    ).run(
+        run_id="checkpoint-all-domains",
+        resume_snapshot=snapshots[-1],
+        schedule_options={"now_ns": 551, "max_selected": len(domains), "max_concurrent": len(domains), "required_domains": list(domains)},
+        max_cycles=3,
+        checkpoint=snapshots.append,
+    )
+    assert resumed.stop_reason == "all_terminal"
+    assert resumed.restored_cycle_count == 1
+    assert resumed.cycles[0].cycle == 2
+    assert resumed.evaluation_count == len(domains) * 2
+    assert snapshots[-1]["generation"] == 2
+    assert snapshots[-1]["previous_snapshot_digest"] == snapshots[0]["snapshot_digest"]
+    assert snapshots[-1]["learner_state"]["generation"] == 2
+    assert all(record.status == "completed" for record in ledger.list(limit=len(domains)))
+
+    class Store:
+        value: str | None = None
+
+        def read(self) -> str | None:
+            return self.value
+
+        def write(self, value: str) -> None:
+            self.value = value
+
+        def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+            actual = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+            if actual != expected_snapshot_digest:
+                return False
+            self.value = value
+            return True
+
+    store = Store()
+    persistence = TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence(store)
+    coordinator = AutonomousGoalControlLoopPersistenceCoordinator(persistence)
+    coordinator.flush(snapshots[0])
+    restored = coordinator.restore()
+    assert restored is not None
+    assert restored["snapshot_digest"] == snapshots[0]["snapshot_digest"]
+    tampered = dict(restored)
+    tampered["total_runs"] = int(tampered["total_runs"]) + 1
+    with pytest.raises(AutonomousGoalError, match="digest mismatch|aggregate counts"):
+        validate_autonomous_goal_control_loop_snapshot(tampered)
+
+    stale = AutonomousGoalControlLoopPersistenceCoordinator(persistence)
+    assert stale.restore()["snapshot_digest"] == restored["snapshot_digest"]
+    next_descriptor = dict(restored)
+    next_descriptor.pop("snapshot_digest")
+    next_descriptor["generation"] = 2
+    next_descriptor["previous_snapshot_digest"] = restored["snapshot_digest"]
+    next_descriptor["stop_reason"] = "cycle_budget_exhausted"
+    next_snapshot = seal_autonomous_goal_control_loop_snapshot(next_descriptor)
+    coordinator.flush(next_snapshot)
+    with pytest.raises(AutonomousGoalError, match="compare-and-swap"):
+        stale.flush(next_snapshot)
+
+
+def test_goal_control_checkpoint_digest_matches_typescript_reference() -> None:
+    snapshot = seal_autonomous_goal_control_loop_snapshot(
+        {
+            "schema": "bioprism-autonomous-goal-control-checkpoint/0.1",
+            "run_id": "parity-fixture",
+            "next_cycle": 1,
+            "cycle_summaries": [],
+            "previous_cycle": None,
+            "completed_cycles": 0,
+            "total_selected": 0,
+            "total_claimed": 0,
+            "total_runs": 0,
+            "status_counts": {},
+            "domain_counts": {},
+            "evaluation_count": 0,
+            "evaluation_digests": [],
+            "learning_state_digest": None,
+            "learned_signals": [],
+            "learner_state": None,
+            "stop_reason": "cycle_budget_exhausted",
+            "generation": 1,
+            "previous_snapshot_digest": None,
+            "retention": "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
+            "secret_material": "never_returned",
+        }
+    )
+    assert snapshot["snapshot_digest"] == "6781485690bc2aa87d5c4992de3017de959f236084f37f0d285cb1cd897ec5fb"
+
+
+def test_goal_agent_runtime_bridges_model_facade_across_every_domain_without_retaining_runtime_values() -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def run_single(**kwargs):
+        calls.append(("single", kwargs))
+        return SimpleNamespace(status="completed")
+
+    def run_cross(**kwargs):
+        calls.append(("cross", kwargs))
+        return SimpleNamespace(status="completed")
+
+    orchestrator.run = run_single
+    orchestrator.run_cross_domain = run_cross
+    ledger = AutonomousGoalLedger(clock=lambda: 600, max_goals=len(AUTONOMOUS_DOMAINS))
+    for domain in AUTONOMOUS_DOMAINS:
+        ledger.create(goal_id=f"agent-{domain}", task_digest=_digest(f"private agent task {domain}"), domain=domain, now_ns=0)
+
+    def run_options(goal, _row):
+        options = {"private_runtime_handle": object()}
+        if goal.domain == "cross_domain":
+            options["subtasks"] = ({"domain": "coding", "task": "private child task"},)
+        return options
+
+    runtime = AutonomousGoalAgentRuntime(
+        orchestrator,
+        ledger,
+        task_resolver=lambda goal, _row: f"private agent task {goal.domain}",
+        run_options_factory=run_options,
+        evaluator=lambda cycle: [
+            {"goal_id": run.goal_id, "evaluator_id": "agent-runtime-evaluator", "evaluator_version": "1", "reward": 0.75, "passed": True}
+            for run in cycle.batch.runs
+        ],
+    )
+    result = runtime.run(
+        schedule_options={
+            "now_ns": 600,
+            "max_selected": len(AUTONOMOUS_DOMAINS),
+            "max_concurrent": len(AUTONOMOUS_DOMAINS),
+            "required_domains": list(AUTONOMOUS_DOMAINS),
+        }
+    )
+
+    assert result.stop_reason == "all_terminal"
+    assert result.evaluation_count == len(AUTONOMOUS_DOMAINS)
+    assert len(calls) == len(AUTONOMOUS_DOMAINS)
+    assert {kind for kind, _ in calls} == {"single", "cross"}
+    cross_call = next(kwargs for kind, kwargs in calls if kind == "cross")
+    assert cross_call["subtasks"][0]["task"] == "private child task"
+    assert all(record.status == "completed" for record in ledger.list(limit=len(AUTONOMOUS_DOMAINS)))
+    serialized = json.dumps(result.to_dict(), sort_keys=True)
+    assert "private agent task" not in serialized
+    assert "private child task" not in serialized
+    assert "private_runtime_handle" not in serialized
+    assert runtime.metadata()["domain_count"] == len(AUTONOMOUS_DOMAINS)
+    assert ledger.verify_integrity()["ok"] is True
 
 
 class _CasTextStore:

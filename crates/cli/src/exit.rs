@@ -37,6 +37,7 @@
 //! that consumers would have to special-case anyway.
 
 use bioprism_adapter::AdapterError;
+use bioprism_autopilot::{AutopilotError, GrantError};
 use bioprism_baseline::CompareError;
 use bioprism_fiber::{FiberError, PolicyViolation};
 use bioprism_mutation::MutationError;
@@ -408,6 +409,57 @@ impl CliError {
         }
     }
 
+    /// Routes an autopilot failure to the code carrying its 40.36 class.
+    ///
+    /// [`AutopilotError`] keeps the one distinction this registry cannot recover after the fact:
+    /// a grant that does not authorise the mission it was asked to drive is a policy refusal —
+    /// the mission is well-formed and the platform behaved correctly, so the caller's next
+    /// conversation is with whoever issues grants, which is exit 7. A mission, mission report,
+    /// workflow instantiation, or autopilot report that does not satisfy its contract is exit 3:
+    /// the document must change before any re-send can succeed. Canonicalisation is the one
+    /// failure that is this binary's fault rather than the caller's, so it lands where
+    /// [`CliError::internal`] lands. Written against the error type rather than at each call
+    /// site so a new variant fails to compile until somebody decides which code it belongs
+    /// under.
+    pub fn from_autopilot(error: AutopilotError) -> Self {
+        let message = error.to_string();
+        match error {
+            AutopilotError::GrantDoesNotAuthorise { .. } => {
+                CliError::new(ExitCode::PolicyDenied, message)
+            }
+            AutopilotError::InvalidMission { .. }
+            | AutopilotError::InvalidReport { .. }
+            | AutopilotError::InvalidInstantiation { .. }
+            | AutopilotError::InvalidAutopilotReport { .. }
+            | AutopilotError::InvalidCheckpoint { .. } => CliError::invalid(message),
+            AutopilotError::Canonicalisation { .. }
+            | AutopilotError::Persistence { .. }
+            | AutopilotError::CompareAndSwapConflict
+            | AutopilotError::Scheduling { .. } => CliError::internal(message),
+        }
+    }
+
+    /// Routes an autonomy-grant refusal to `invalid_input`.
+    ///
+    /// Every [`GrantError`] names a field of the grant document that must change — an empty
+    /// allow-list, a recursive tool, an attempt budget outside its bounds — so all of them are
+    /// exit 3 rather than exit 7: nothing was refused *by* a policy here, the authority document
+    /// itself failed its schema, and sending the operator to obtain a grant would send them to
+    /// fix the wrong document. The match is exhaustive so a new refusal fails to compile until
+    /// somebody decides whether it still describes a document defect.
+    pub fn from_grant(error: GrantError) -> Self {
+        match &error {
+            GrantError::NoTools
+            | GrantError::TooManyTools { .. }
+            | GrantError::InvalidToolName { .. }
+            | GrantError::DuplicateTool { .. }
+            | GrantError::RecursiveTool
+            | GrantError::InvalidAttemptBudget { .. }
+            | GrantError::InvalidRetrySchedule { .. }
+            | GrantError::UnsupportedStopOption => CliError::invalid(error.to_string()),
+        }
+    }
+
     /// The failure as the `--json` envelope publishes it.
     ///
     /// `retryable` is the boolean that was already on the wire and keeps its meaning. `retryability`
@@ -555,6 +607,29 @@ mod tests {
         );
         assert_eq!(error.code, ExitCode::Stale);
         assert!(error.code.is_retryable());
+    }
+
+    #[test]
+    fn an_unauthorised_mission_is_policy_denied_and_a_malformed_grant_is_invalid_input() {
+        let refused = CliError::from_autopilot(AutopilotError::GrantDoesNotAuthorise {
+            reason: "step `a` uses tool `b`, which the grant does not allow".into(),
+        });
+        assert_eq!(refused.code, ExitCode::PolicyDenied);
+
+        let malformed_instantiation = CliError::from_autopilot(AutopilotError::InvalidInstantiation {
+            reason: "workflow must be domain_workflow_instantiate".into(),
+        });
+        assert_eq!(malformed_instantiation.code, ExitCode::InvalidInput);
+
+        let malformed_grant = CliError::from_grant(GrantError::NoTools);
+        assert_eq!(malformed_grant.code, ExitCode::InvalidInput);
+        let recursive_grant = CliError::from_grant(GrantError::RecursiveTool);
+        assert_eq!(
+            recursive_grant.code,
+            ExitCode::InvalidInput,
+            "a grant naming agent_mission is a defect in the authority document, not a refusal \
+             a further grant could clear"
+        );
     }
 
     #[test]

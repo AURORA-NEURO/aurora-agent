@@ -85,6 +85,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-autopilot"
+version = "0.1.0"
+dependencies = [
+ "bioprism-devplat",
+ "bioprism-ids",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-backends"
 version = "0.1.0"
 dependencies = [
@@ -246,6 +257,7 @@ name = "bioprism-cli"
 version = "0.1.0"
 dependencies = [
  "bioprism-adapter",
+ "bioprism-autopilot",
  "bioprism-baseline",
  "bioprism-devplat",
  "bioprism-domain",

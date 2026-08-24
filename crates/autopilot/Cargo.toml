@@ -1,0 +1,15 @@
+[package]
+name = "bioprism-autopilot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Grant-gated autonomous mission driver: plan, dispatch, classify, repair — with mission-report and reconciliation receipts for every attempt"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+bioprism-ids = { workspace = true }
+bioprism-devplat = { workspace = true }

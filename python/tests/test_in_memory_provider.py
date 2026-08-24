@@ -276,7 +276,7 @@ class _OfflineWorkspace:
                     {"role": "system", "content": str(args.get("system"))},
                     {"role": "user", "content": str(args.get("task"))},
                 ],
-                "prompt_digest": "p" * 64,
+                "prompt_digest": "a" * 64,
             }
         if name == "brain_plan":
             return {
@@ -652,6 +652,119 @@ def test_agent_run_resumable_batch_rehydrates_successes_and_rejects_tampering() 
             options_factory=options_factory,
             checkpoint=tampered,
             rehydrate_result=lambda context: restored.results[context.index],
+        )
+
+
+def test_agent_run_resumable_auto_batch_binds_semantic_policy_and_rejects_drift() -> None:
+    runtime = LLMRuntime()
+    domains = tuple(AUTONOMOUS_DOMAINS)
+
+    def handler(request: ProviderRequest) -> Mapping[str, Any]:
+        if request.require_json:
+            return {
+                "output_text": json.dumps({
+                    "candidates": [
+                        {"domain": domain, "score": 0.95 if domain == "coding" else 0.01}
+                        for domain in domains
+                    ],
+                    "selected_domains": ["coding"],
+                    "confidence": 0.95,
+                    "abstain": False,
+                })
+            }
+        return {"output_text": "offline semantic batch answer"}
+
+    runtime.register_in_memory_provider("offline", handler)
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [{
+                "provider": "offline",
+                "model": "offline-model",
+                "capabilities": sorted(required),
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.9,
+                "latency_ms": 1,
+                "cost_per_million_tokens": 0,
+                "reliability": 0.99,
+            }]
+        ),
+    )
+    requests = (
+        {"task": "perform a bounded coding review"},
+        {"task": "perform another bounded coding review"},
+    )
+    fail_second = True
+    semantic_weight = 0.65
+    checkpoints: list[AutonomousBatchCheckpoint] = []
+
+    def options_factory(_request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+        return {
+            "approve_provider_call": True,
+            "semantic_routing": True,
+            "semantic_weight": semantic_weight,
+            "max_steps": 0 if fail_second and index == 1 else 32,
+        }
+
+    first = agent.run_resumable_batch(
+        requests,
+        job_id="semantic-policy-batch",
+        mode="auto",
+        credentials={},
+        max_parallelism=1,
+        options_factory=options_factory,
+        checkpoint_sink=checkpoints.append,
+    )
+    assert first.status == "partial"
+    assert first.items[0].status == "succeeded"
+    assert checkpoints[-1].semantic_routing_policy_digest is not None
+    public = json.dumps(checkpoints[-1].to_dict())
+    assert "perform a bounded coding review" not in public
+    assert "offline semantic batch answer" not in public
+
+    semantic_weight = 0.85
+    with pytest.raises(BrainRunError, match="semantic-routing policy|execution policy|checkpoint"):
+        agent.run_resumable_batch(
+            requests,
+            job_id="semantic-policy-batch",
+            mode="auto",
+            credentials={},
+            max_parallelism=1,
+            options_factory=options_factory,
+            checkpoint=checkpoints[-1].to_dict(),
+            rehydrate_result=lambda context: first.items[context.index].result,
+        )
+
+    legacy_checkpoints: list[AutonomousBatchCheckpoint] = []
+    legacy = agent.run_resumable_batch(
+        ({"task": "legacy deterministic review"},),
+        job_id="legacy-semantic-policy-batch",
+        mode="auto",
+        credentials={},
+        options_factory=lambda _request, _index: {"approve_provider_call": False},
+        checkpoint_sink=legacy_checkpoints.append,
+    )
+    assert legacy.status == "failed"
+    assert legacy_checkpoints[-1].semantic_routing_policy_digest is None
+    with pytest.raises(BrainRunError, match="legacy.*semantic-routing|checkpoint"):
+        agent.run_resumable_batch(
+            ({"task": "legacy deterministic review"},),
+            job_id="legacy-semantic-policy-batch",
+            mode="auto",
+            credentials={},
+            options_factory=lambda _request, _index: {
+                "approve_provider_call": True,
+                "semantic_routing": True,
+            },
+            checkpoint=legacy_checkpoints[-1].to_dict(),
         )
 
 

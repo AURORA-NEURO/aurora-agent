@@ -493,6 +493,61 @@ deterministic route remains the safety baseline: provider/deterministic disagree
 malformed output remain explicit refusals. Routing still requires `approveProviderCall: true` and
 never authorizes a tool, effect, or domain claim.
 
+The same classifier can be composed directly into the high-level TypeScript execution paths by
+passing `semanticRouting: true` (or a bounded `AutonomousRunSemanticRoutingOptions` object) to
+`run()`, `runCrossDomain()`, or `planAndRun()`. The façade performs one provider-assisted route
+proposal, binds its digest into the blueprint, and exposes the value-only proposal as
+`semantic_route` on the returned envelope. A successful classifier still does not authorize the
+execution call: the enclosing `approveProviderCall`, policy, execution controller, credential,
+abort, failover, and aggregate `AutonomousCostBudget` boundaries remain in force. Classifier
+approval can be controlled independently with `semanticRouting: { approveProviderCall: true }`.
+Provider abstention, disagreement with deterministic routing, malformed output, and policy
+holds return a typed route-review result before blueprint/provider execution. When a semantic
+route selects multiple domains, the outer run hands the already-resolved `routeOverride` to
+cross-domain fan-out so child calls do not reclassify the task or consume a second routing budget.
+
+```typescript
+const result = await agent.run(task, {
+  candidates,
+  credential,
+  semanticRouting: { approveProviderCall: true, minSemanticConfidence: 0.55 },
+  approveProviderCall: true, // separate execution approval
+  costBudget,
+});
+if (result.semantic_route?.status !== "completed") {
+  await reviewQueue.enqueue(result); // caller-owned review; no execution was authorized
+}
+```
+
+`AutonomousBrainFacade` exposes the same boundary for application code that uses the composed
+plan/connector/provider surface. Pass `semanticRouting` to `execute()` or `executeWithTrace()`;
+for durable feedback loops, pass it at the top level of `executeCycle()` or
+`executeAdaptiveCycle()`. The classifier approval is independent from the enclosing execution
+approval, and the returned metadata-only `plan.semantic_route` is route-digest bound. A planned
+replay reuses that route and does not invoke the classifier again:
+
+```typescript
+const held = await brain.execute(
+  { task: "route this unfamiliar request to the reviewed specialist catalogue" },
+  { semanticRouting: { enabled: true, approveProviderCall: true } },
+);
+const resumed = await brain.executePlanned(
+  AutonomousBrainPlan.fromJSON(held.plan),
+  { task: "route this unfamiliar request to the reviewed specialist catalogue" },
+  { approveProviderCall: true },
+);
+```
+
+The classifier, provider failovers, fan-out, and cycle attempts can share one caller-owned
+`AutonomousCostBudget`; no route proposal authorizes tools, effects, evaluator credit, or
+execution. Abstention, disagreement, malformed output, policy holds, and missing approval remain
+typed review states. Cycle/adaptive facade callers configure semantic routing only at the
+top-level boundary so the exact reviewed route is handed into the durable loop.
+For `executeBatchResumable()`, the checkpoint adds a non-secret digest of the semantic-routing
+thresholds, inherited selection gates, and candidate metadata. A changed policy—or adding
+semantic routing to a legacy deterministic checkpoint—is rejected before rehydration or a new
+provider dispatch.
+
 Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
 `minQuality`, and the optional `minSelectionConfidence` rank-separation floor. The same gates are
 enforced by local health-aware ranking, contextual
@@ -509,10 +564,11 @@ workers; provider attempts that reach dispatch remain charged, while pre-dispatc
 failures release their reservation. This aggregate ceiling complements, rather than replaces, the
 optional `AutonomousExecutionController` cost policy.
 
-The provider-assisted semantic classifier used by `semanticRouting.enabled` is also a model
-invocation, so decision cycles forward the caller's cost, latency, and quality gates to it before
-transport. A successful classifier result does not authorize execution: the cycle still requires
-the separate execution approval and applies the same gates again to the routed domain run.
+The provider-assisted semantic classifier used by `semanticRouting` and decision-cycle semantic
+routing is also a model invocation, so those callers forward cost, latency, and quality gates to
+it before transport. A successful classifier result does not authorize execution: the cycle still
+requires the separate execution approval and applies the same gates again to the routed domain
+run.
 
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
@@ -1037,6 +1093,41 @@ provider payloads. It stops explicitly with `all_terminal`, `no_admissible_work`
 `cycle_budget_exhausted`, or `run_budget_exhausted`. Paused goals can be re-admitted when the
 schedule policy permits them, while failed, blocked, or concurrently running goals remain visible
 as held work rather than being mislabeled as completed.
+Pass `evaluator(cycle)` to require one explicit reward packet per worker run. The loop validates the
+goal, attempt, outcome digest, evaluator identity/version, finite reward in `[-1, 1]`, and optional
+evidence/failure digests before revision-fenced settlement. It never derives reward from transport
+success or executor status. When no learner is supplied, `AutonomousGoalBanditLearner` applies a
+bounded UCB-style value update by domain and feeds validated priority/urgency signals into the next
+admission cycle; custom learners return only the same bounded signal projection and a learning-state
+digest. Public cycles expose counts and digests only, while evaluator values, evidence, tasks,
+prompts, credentials, and live executor results remain transient.
+`AutonomousGoalAgentRuntime` is the high-level bridge to `AutonomousAgent`: the caller rehydrates
+task text with `task_resolver`, while `run_options_factory` supplies transient candidates, opaque
+credential handles, approval/tool callbacks, memory, and policy only after the worker claims the
+goal. Single-domain and `cross_domain` goals then use the same routing, prompt, model-selection,
+provider, evaluator, and online-learning paths as direct runs. The callbacks and all live values
+remain outside goal, worker, control-loop, and evaluator projections.
+
+Long-running loops can add `run_id`, `checkpoint`, and `resume_snapshot` to make the outer
+decision process restart-safe:
+
+```typescript
+const coordinator = new AutonomousGoalControlLoopPersistenceCoordinator(
+  new TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence(store),
+);
+await loop.run({ run_id: "research-mission-001", checkpoint: (snapshot) => coordinator.flush(snapshot), max_cycles: 128 });
+
+// In a new process, restore before creating fresh task/model/credential callbacks.
+const snapshot = await coordinator.restore();
+await freshLoop.run({ run_id: "research-mission-001", resume_snapshot: snapshot, checkpoint: (next) => coordinator.flush(next), max_cycles: 128 });
+```
+The sealed checkpoint contains contiguous cycle metadata, aggregate counts, evaluator digests,
+learned scheduling signals, and value-only bandit arms. It excludes task text, prompts,
+parameters, credentials, callbacks, provider output, and evaluator evidence. Restore continues at
+the next cycle and rehydrates the built-in bandit without replaying prior worker batches. Canonical
+JSON persistence, digest chaining, strict bounds, and optional `write_if_unchanged` fencing reject
+tampering, stale writers, identity drift, and non-contiguous recovery before another provider or
+executor call is admitted.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,

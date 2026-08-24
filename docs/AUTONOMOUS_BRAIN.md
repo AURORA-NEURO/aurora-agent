@@ -3257,6 +3257,22 @@ blueprint. `run_auto(..., semantic_routing=True)` performs the same routing step
 execution. The routing call and the eventual execution call each retain their own approval and
 budget boundary.
 
+The TypeScript façade exposes the same boundary directly on its primary entry points. Setting
+`semanticRouting: true` (or supplying `AutonomousRunSemanticRoutingOptions`) on `run()`,
+`runCrossDomain()`, or `planAndRun()` invokes one approved classifier and carries the resulting
+`semantic_route` projection through the returned envelope. The classifier inherits the enclosing
+candidate catalogue, opaque credential resolver, execution controller, policy gates, abort
+signal, failover ceiling, and aggregate `AutonomousCostBudget`; a nested semantic-routing budget
+cannot be introduced to bypass the run budget. `semanticRouting.approveProviderCall` is an
+independent classifier approval, while the enclosing `approveProviderCall` remains the separate
+execution approval. A completed classifier proposal is still only a route hypothesis: provider
+abstention, malformed output, disagreement with the deterministic baseline, policy review, or
+policy block returns before blueprint/provider execution. For a successful cross-domain route,
+the outer call passes the validated route as `routeOverride` into fan-out, preventing child
+reclassification and duplicate classifier charges. Route, blueprint, and semantic-route
+digests therefore remain auditable as one identity while the task, prompt, and provider output
+remain transient.
+
 For a routed single-domain task that should follow the domain workflow instead of one provider
 decision, opt into the staged runner explicitly:
 
@@ -5212,6 +5228,46 @@ distinct bounded batch identity when worker journaling is enabled, while the loo
 only schedule/claim/worker digests, status counts, domain coverage, and its own digest. This makes
 the control loop useful as a service-worker heartbeat across all twelve domains without allowing a
 policy callback to inject task text, provider payloads, credentials, or execution authority.
+
+For explicit quality feedback, pass an `evaluator(cycle)` callback. It must return exactly one
+bounded packet per worker run: evaluator identity/version, a finite reward in `[-1, 1]`, pass/fail,
+and optional evidence/failure digests. The loop binds each packet to the worker's goal, attempt, and
+outcome digest, rejects duplicates or unsupported fields, then revision-fences the evaluator digest
+back onto the goal. Transport success, HTTP status, or executor completion is never converted into
+reward. If no learner is supplied, `AutonomousGoalBanditLearner` applies an explicit UCB-style,
+domain-scoped value update to future admission signals; a custom learner may return only bounded
+priority/urgency/dependency signals plus a learning-state digest. Feedback and learner state are
+retained as digests/counts only, with evaluator values and live results remaining process-local.
+
+The outer loop now has its own crash/restart boundary rather than relying on the worker journal
+alone. Supply a stable `run_id` and a checkpoint callback (or use
+`AutonomousGoalControlLoopPersistenceCoordinator` with the canonical JSON adapter) to persist a
+sealed image after every completed cycle. The image binds the next cycle number, the complete
+bounded cycle-summary history, aggregate selected/claimed/run counters, evaluator digest history,
+learned scheduling signals, stop reason, and the value-only `AutonomousGoalBanditLearner` arm
+snapshot. It is content-addressed with `snapshot_digest`, linked to its predecessor through
+`previous_snapshot_digest`, and fenced by generation plus optional compare-and-swap storage.
+
+On restart, call `restore()` and pass the result as `resume_snapshot` to a freshly constructed
+loop. The loop resumes at the next cycle, restores the built-in bandit's generation/arms, carries
+forward the run and cycle budgets, and exposes the restored history only as digest/count metadata
+on the result. It does not replay completed worker batches. The caller must still recreate the
+task resolver, model candidates, prompt policy, opaque credential handles, tools, memory, approval
+callbacks, and evaluator implementation; those process-local values are obtained only after the
+new worker claim. Strict validation rejects tampered digests, identity drift, missing/extra fields,
+non-contiguous cycles, invalid bandit arms, oversized signals, and stale writers before execution.
+Python and TypeScript use the same schema, retention posture, canonical JSON, and generation chain
+so a checkpoint can be handed across runtimes without copying private execution state.
+
+`AutonomousGoalAgentRuntime` is the production composition bridge for long-horizon work. It binds
+the goal worker to the real `AutonomousTaskOrchestrator`: an application-owned task resolver
+rehydrates text after admission, and an execution-options factory can supply model candidates,
+opaque credential handles, memory, policy approvals, tool callbacks, and provider observers only
+at the execution boundary. Single-domain goals enter the same routing, prompt, model-selection,
+provider, and learning path as direct runs; `cross_domain` goals enter the bounded specialist/fan-in
+path. Neither callback, its values, nor provider output enters the goal, schedule, worker, control,
+or evaluator projections. This makes the loop usable as an actual agent service while retaining
+the caller's authority over keys and effect approvals.
 
 ## Resumable learning jobs
 
@@ -7357,6 +7413,43 @@ the caller-owned runtime/provider handle. The façade never reads an environment
 credential, or contacts a live provider by itself; deterministic in-memory providers and the
 built-in offline connectors are sufficient for tests and local integration development.
 
+For ambiguous intake, the façade can opt into the same provider-assisted semantic router used by
+the lower-level agent and decision-cycle APIs. Set `semanticRouting` on `execute()` or
+`executeWithTrace()`, or on the top-level options for `executeCycle()` and
+`executeAdaptiveCycle()`:
+
+```typescript
+const originalRequest = {
+  task: "triage this unfamiliar request and choose the safest specialist",
+};
+const reviewed = await brain.execute(
+  originalRequest,
+  {
+    semanticRouting: { enabled: true, approveProviderCall: true },
+    approveProviderCall: false,
+  },
+);
+
+// The classifier may be approved while execution remains paused.
+if (reviewed.status === "approval_required") {
+  const plan = AutonomousBrainPlan.fromJSON(reviewed.plan);
+  const resumed = await brain.executePlanned(plan, originalRequest, {
+    approveProviderCall: true,
+  });
+}
+```
+
+The classifier is a proposal boundary, not an execution grant. Its value-only
+`semantic_route` projection is stored on the plan and returned envelope, its route digest is
+bound to the deterministic blueprint, and its aggregate classifier budget is shared with the
+later run, fan-out, or cycle. Provider abstention, disagreement, malformed output, strict policy
+holds, and missing approval remain review outcomes. Planned direct, traced, cycle, and adaptive
+replay reuses the persisted route and does not classify again; the caller must still provide the
+separate execution approval and any transient provider/evaluator state. Cycle and adaptive
+facade options accept semantic routing only at their top level because the façade owns the
+reviewed route before entering the durable loop; nested cycle semantic-routing fields are
+rejected rather than silently ignored.
+
 The same surface supports explicit cross-domain work. If routing selects a reviewed multi-domain
 route, the façade calls `runCrossDomain()` and preserves the route's selected-domain order and
 digest. A single-domain route calls `run()` with the exact route override, preventing an
@@ -7395,7 +7488,11 @@ batch. Its `checkpointSink` receives a digest-bound `AutonomousBrainBatchCheckpo
 verifies every successful execution before any new provider or connector dispatch; unfinished
 items are retried with the same input-order accounting. The checkpoint is deliberately not a
 provider conversation snapshot, so the application retains transient executions and credentials
-in its own protected store.
+in its own protected store. When semantic routing is enabled, the checkpoint also carries a
+non-secret semantic-routing policy digest covering classifier thresholds, inherited selection
+gates, and candidate metadata. Resuming with changed routing policy is refused before
+rehydration or dispatch; a legacy deterministic checkpoint cannot silently opt into semantic
+routing without an explicit new batch boundary.
 
 ```typescript
 const first = await brain.executeBatchResumable(requests, {
@@ -7420,6 +7517,9 @@ const resumed = await brain.executeBatchResumable(requests, {
 The Python and TypeScript checkpoint projections intentionally use language-qualified schemas
 but the same security contract: ordered request identity, successful-index replay, caller-owned
 rehydration, bounded controls, tamper-evident content digests, and no raw payload retention.
+TypeScript semantic-routing checkpoints add a non-secret policy digest for classifier thresholds,
+inherited selection gates, and candidate metadata; changing that policy or adding semantic
+routing to a legacy deterministic checkpoint fails closed before rehydration.
 Closed-loop cycle batches continue to use their existing cycle/decision persistence surfaces;
 applications needing resumable evaluator settlement should persist those cycle checkpoints
 alongside the batch job rather than treating a provider response as a reward.
@@ -7462,9 +7562,10 @@ The façade chooses `runAutonomousDecisionCycle()` for a single-domain route and
 the evaluator and learning controller through `cycle`; the façade supplies the already-reviewed
 route, capability, hints, and connector observation so the cycle cannot silently re-route or
 drop evidence between planning and execution. Provider planning remains a separate optional
-review phase, and semantic routing is intentionally excluded from `executeCycle()` because this
-entry point already owns a deterministic reviewed route. Call the lower-level decision-cycle
-functions when provider-assisted semantic routing itself is the desired experiment.
+review phase. When `executeCycle()` or `executeAdaptiveCycle()` receives top-level
+`semanticRouting`, the façade completes the classifier review first, then hands the exact route
+to the durable cycle; classifier approval and execution approval remain separate. Planned cycle
+replay reuses the route receipt without replaying the classifier.
 
 Cycle persistence records only the task/route/plan/outcome/evaluation/settlement digests and
 bounded lifecycle state. If a worker restarts after a terminal transition, the caller rehydrates

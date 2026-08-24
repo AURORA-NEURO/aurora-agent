@@ -186,6 +186,7 @@ from .llm_runtime import (
     ProviderOnboarding,
     ProviderConfig,
     ProviderContentPart,
+    ProviderError,
     ProviderInvocationObserver,
     ProviderTool,
     normalize_provider_content_parts,
@@ -3764,6 +3765,85 @@ def _batch_request_digest(descriptor: Mapping[str, Any], mode: str) -> str:
     return content_digest(payload)
 
 
+_BATCH_SEMANTIC_POLICY_SCALARS = (
+    "semantic_weight",
+    "min_confidence",
+    "min_margin",
+    "max_domains",
+    "allow_cross_domain",
+    "semantic_input_tokens",
+    "semantic_requested_output_tokens",
+    "semantic_max_cost_per_million_tokens",
+    "semantic_max_latency_ms",
+    "semantic_min_quality",
+    "semantic_run_id",
+    "semantic_max_output_tokens",
+    "semantic_temperature",
+    "domain_policy_mode",
+    "domain_policy_evidence_ready",
+    "domain_policy_evaluator_configured",
+    "domain_policy_effects_requested",
+    "domain_policy_effects_approved",
+    "approve_provider_call",
+)
+_BATCH_SEMANTIC_POLICY_DIGESTS = (
+    "semantic_bandit_state",
+    "semantic_contextual_observations",
+    "semantic_selection_overrides",
+)
+
+
+def _batch_semantic_routing_policy_digest(
+    prepared: Sequence[Mapping[str, Any]],
+    mode: str,
+) -> str | None:
+    """Digest per-item semantic routing policy without retaining private option values.
+
+    The batch descriptor already contains normalized, secret-free model candidates. We bind their
+    digest together with every semantic classifier control that can change a route proposal. Raw
+    contextual observations, bandit state, and selection overrides are represented only by their
+    content digests.
+    """
+
+    rows: list[dict[str, Any]] = []
+    enabled_any = False
+    for descriptor in prepared:
+        options = descriptor.get("options", {})
+        if not isinstance(options, Mapping):
+            raise BrainRunError("autonomous batch semantic-routing options must be a mapping")
+        enabled = options.get("semantic_routing", False)
+        if not isinstance(enabled, bool):
+            raise BrainRunError("autonomous batch semantic_routing must be boolean")
+        row: dict[str, Any] = {"enabled": enabled}
+        if enabled:
+            enabled_any = True
+            candidates = descriptor.get("model_candidates", ())
+            try:
+                candidate_projection = [
+                    candidate.to_dict()
+                    if isinstance(candidate, ModelCandidate)
+                    else ModelCandidate.from_mapping(candidate).to_dict()
+                    for candidate in candidates
+                ]
+                row["candidates_digest"] = content_digest(candidate_projection)
+                for name in _BATCH_SEMANTIC_POLICY_SCALARS:
+                    if name in options:
+                        row[name] = options[name]
+                for name in _BATCH_SEMANTIC_POLICY_DIGESTS:
+                    if name in options:
+                        row[f"{name}_digest"] = content_digest(options[name])
+            except (TypeError, ValueError, ProviderError) as error:
+                raise BrainRunError("autonomous batch semantic-routing policy is not JSON-safe") from error
+        rows.append(row)
+    if not enabled_any:
+        return None
+    return content_digest({
+        "schema": "bioprism-python-autonomous-batch-semantic-routing-policy/0.1",
+        "mode": mode,
+        "items": rows,
+    })
+
+
 def _batch_item_digest(item: "AutonomousBatchItem") -> str:
     """Digest the redacted item projection used for restart validation."""
 
@@ -3796,7 +3876,8 @@ class AutonomousBatchRehydrationContext:
 class AutonomousBatchCheckpoint:
     """Metadata-only, restart-safe progress for one bounded task batch.
 
-    The checkpoint deliberately stores only request and result digests. A caller-owned
+    The checkpoint deliberately stores only request and result digests plus an optional
+    non-secret semantic-routing policy digest. A caller-owned
     ``rehydrate_result`` callback must provide the transient result for every completed item;
     the callback never receives a task, prompt, credential, provider response, or tool payload.
     """
@@ -3810,12 +3891,15 @@ class AutonomousBatchCheckpoint:
     max_parallelism: int = 4
     stop_on_error: bool = False
     status: str = "running"
+    semantic_routing_policy_digest: str | None = None
 
     def __post_init__(self) -> None:
         _identifier("batch checkpoint job_id", self.job_id)
         if self.mode not in AUTONOMOUS_BATCH_MODES:
             raise BrainRunError("batch checkpoint mode is unsupported")
         _route_digest(self.batch_input_digest, "batch checkpoint batch_input_digest")
+        if self.semantic_routing_policy_digest is not None:
+            _route_digest(self.semantic_routing_policy_digest, "batch checkpoint semantic_routing_policy_digest")
         requests = _sequence("batch checkpoint request_digests", self.request_digests, maximum=MAX_AUTONOMOUS_AGENT_BATCH)
         for digest in requests:
             _route_digest(digest, "batch checkpoint request digest")
@@ -3864,6 +3948,11 @@ class AutonomousBatchCheckpoint:
             "job_id": self.job_id,
             "mode": self.mode,
             "batch_input_digest": self.batch_input_digest,
+            **(
+                {"semantic_routing_policy_digest": self.semantic_routing_policy_digest}
+                if self.semantic_routing_policy_digest is not None
+                else {}
+            ),
             "request_digests": list(self.request_digests if requests is None else requests),
             "completed_indices": list(self.completed_indices if indices is None else indices),
             "completed_result_digests": list(self.completed_result_digests if result_digests is None else result_digests),
@@ -3892,6 +3981,7 @@ class AutonomousBatchCheckpoint:
             job_id=value.get("job_id"),
             mode=value.get("mode"),
             batch_input_digest=value.get("batch_input_digest"),
+            semantic_routing_policy_digest=value.get("semantic_routing_policy_digest"),
             request_digests=tuple(value.get("request_digests", ())),
             completed_indices=tuple(value.get("completed_indices", ())),
             completed_result_digests=tuple(value.get("completed_result_digests", ())),
@@ -3951,7 +4041,8 @@ def _normalize_batch_checkpoint(value: Mapping[str, Any]) -> dict[str, Any]:
         "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest",
         "retention", "secret_material",
     }
-    if set(value) != expected:
+    optional = {"semantic_routing_policy_digest"}
+    if not expected.issubset(value) or set(value) - expected - optional:
         raise BrainRunError("autonomous batch checkpoint contains unsupported or missing fields")
     if value.get("retention") != "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted" or value.get("secret_material") != "never_returned":
         raise BrainRunError("autonomous batch checkpoint retention markers are invalid")
@@ -14586,6 +14677,158 @@ class AutonomousAgent:
             journal=journal,
         )
 
+    def run_with_reviewed_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        acquirer: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        domains: Sequence[str] | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        projector: Any | None = None,
+        evaluator: Any | None = None,
+        rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None,
+        parent_evidence_digests: Sequence[str] = (),
+        stop_on_failure: bool = False,
+        reevaluate_pending: bool = False,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        journal: AutonomousEvidenceRuntimeJournal | None = None,
+        approve_source_dispatch: bool = False,
+        allow_incomplete_evidence: bool = False,
+        approve_provider_call: bool = False,
+        provider_run_override: Any | None = None,
+        before_provider_run: Callable[[Any], None] | None = None,
+        prompt_builder: Callable[[AutonomousEvidenceRuntimeResult], Mapping[str, Any]] | None = None,
+        run_mode: str = "auto",
+        run_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Acquire accepted evidence and compose it with the ordinary autonomous run.
+
+        This is the façade-level bridge between the provider-free evidence runtime and model
+        execution.  The bridge keeps source dispatch approval, evidence acceptance, and provider
+        approval independent.  Its serialized result is metadata-only; raw evidence values,
+        prompt projections, and provider responses remain transient caller-owned objects.
+        """
+
+        from .autonomous_evidence_brain import run_autonomous_evidence_backed
+
+        return run_autonomous_evidence_backed(
+            self,
+            task=task,
+            requests=requests,
+            acquirer=acquirer,
+            credentials=credentials,
+            domains=domains,
+            model_candidates=model_candidates,
+            projector=projector,
+            evaluator=evaluator,
+            rehydrate_value=rehydrate_value,
+            parent_evidence_digests=parent_evidence_digests,
+            stop_on_failure=stop_on_failure,
+            reevaluate_pending=reevaluate_pending,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            journal=journal,
+            approve_source_dispatch=approve_source_dispatch,
+            allow_incomplete_evidence=allow_incomplete_evidence,
+            approve_provider_call=approve_provider_call,
+            provider_run_override=provider_run_override,
+            before_provider_run=before_provider_run,
+            prompt_builder=prompt_builder,
+            run_mode=run_mode,
+            run_options=run_options,
+        )
+
+    def run_with_llm_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        adapter: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        projector: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run reviewed evidence acquisition through a provider-backed adapter or router.
+
+        ``AutonomousLLMEvidenceAdapter`` and ``AutonomousLLMEvidenceAdapterRouter`` both expose
+        ``acquire``.  A router also exposes ``project``; a single adapter uses its
+        ``project_value`` method.  The remaining keyword arguments are passed to
+        :meth:`run_with_reviewed_evidence`, so source approval, evidence acceptance, provider
+        approval, journaling, and model-routing policy stay visible at the call site.
+        """
+
+        if not callable(getattr(adapter, "acquire", None)):
+            raise ArgumentError("LLM evidence adapter must expose a callable acquire method")
+        selected_projector = projector
+        if selected_projector is None:
+            candidate = getattr(adapter, "project", None)
+            if callable(candidate):
+                selected_projector = candidate
+            else:
+                candidate = getattr(adapter, "project_value", None)
+                if callable(candidate):
+                    selected_projector = candidate
+        return self.run_with_reviewed_evidence(
+            task=task,
+            requests=requests,
+            acquirer=adapter,
+            credentials=credentials,
+            projector=selected_projector,
+            **kwargs,
+        )
+
+    def run_resumable_evidence_backed(self, **kwargs: Any) -> Any:
+        """Run or resume reviewed evidence-backed work through a caller checkpoint sink.
+
+        The resumable boundary never replays a provider result implicitly.  Callers must provide
+        a caller-owned evidence journal and either rehydrate an observed provider result or pass
+        an explicit provider-resume decision.
+        """
+
+        from .autonomous_evidence_backed_resumable import run_autonomous_evidence_backed_resumable
+
+        return run_autonomous_evidence_backed_resumable(self, **kwargs)
+
+    def run_resumable_llm_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        adapter: Any,
+        projector: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run or resume provider-backed reviewed evidence with the same explicit adapter seam."""
+
+        if not callable(getattr(adapter, "acquire", None)):
+            raise ArgumentError("LLM evidence adapter must expose a callable acquire method")
+        selected_projector = projector
+        if selected_projector is None:
+            candidate = getattr(adapter, "project", None)
+            if callable(candidate):
+                selected_projector = candidate
+            else:
+                candidate = getattr(adapter, "project_value", None)
+                if callable(candidate):
+                    selected_projector = candidate
+        return self.run_resumable_evidence_backed(
+            task=task,
+            requests=requests,
+            acquirer=adapter,
+            projector=selected_projector,
+            **kwargs,
+        )
+
+    def evidence_backed_controller(self, job_id: str, persistence: Any) -> Any:
+        """Create a serialized, optionally CAS-fenced evidence-backed restart controller."""
+
+        from .autonomous_evidence_backed_resumable import AutonomousEvidenceBackedController
+
+        return AutonomousEvidenceBackedController(self, job_id, persistence)
+
     def workflows(self) -> list[dict[str, Any]]:
         """Return the deterministic workflow contracts available to automatic intake."""
 
@@ -18390,7 +18633,17 @@ class AutonomousAgent:
                 )
 
         request_digests = tuple(_batch_request_digest(descriptor, mode) for descriptor in prepared)
-        batch_input_digest = content_digest({"schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA, "mode": mode, "request_digests": list(request_digests)})
+        semantic_routing_policy_digest = _batch_semantic_routing_policy_digest(prepared, mode)
+        batch_input_digest = content_digest({
+            "schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA,
+            "mode": mode,
+            "request_digests": list(request_digests),
+            **(
+                {"semantic_routing_policy_digest": semantic_routing_policy_digest}
+                if semantic_routing_policy_digest is not None
+                else {}
+            ),
+        })
         current_checkpoint: AutonomousBatchCheckpoint | None
         if checkpoint is None:
             current_checkpoint = None
@@ -18405,8 +18658,14 @@ class AutonomousAgent:
                 raise BrainRunError("autonomous batch checkpoint job_id does not match")
             if current_checkpoint.mode != mode:
                 raise BrainRunError("autonomous batch checkpoint mode does not match")
-            if current_checkpoint.batch_input_digest != batch_input_digest or current_checkpoint.request_digests != request_digests:
+            if current_checkpoint.request_digests != request_digests:
                 raise BrainRunError("autonomous batch checkpoint requests do not match the current batch")
+            if semantic_routing_policy_digest is not None and current_checkpoint.semantic_routing_policy_digest is None:
+                raise BrainRunError("legacy autonomous batch checkpoint requires explicit semantic-routing policy rebinding")
+            if current_checkpoint.semantic_routing_policy_digest != semantic_routing_policy_digest:
+                raise BrainRunError("autonomous batch checkpoint semantic-routing policy does not match")
+            if current_checkpoint.batch_input_digest != batch_input_digest:
+                raise BrainRunError("autonomous batch checkpoint does not match the current execution policy")
             if current_checkpoint.max_parallelism != max_parallelism or current_checkpoint.stop_on_error != stop_on_error:
                 raise BrainRunError("autonomous batch checkpoint execution controls do not match")
             if current_checkpoint.completed_indices and rehydrate_result is None:
@@ -18457,6 +18716,7 @@ class AutonomousAgent:
                 mode=mode,
                 batch_input_digest=batch_input_digest,
                 request_digests=request_digests,
+                semantic_routing_policy_digest=semantic_routing_policy_digest,
                 completed_indices=tuple(index for index, _item in completed_items),
                 completed_result_digests=tuple(_batch_item_digest(item) for _index, item in completed_items),
                 max_parallelism=max_parallelism,
