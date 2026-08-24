@@ -88,6 +88,7 @@ pub mod inventory;
 pub mod location;
 pub mod loss;
 pub mod probe;
+pub mod quality_control;
 pub mod research_ingest;
 pub mod registry;
 pub mod source;
@@ -103,6 +104,11 @@ pub use inventory::{InventoryAdapter, InventoryProfile};
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
 pub use probe::{field_inventory, Inventory};
+pub use quality_control::{
+    evaluate_quality_control, manifest as quality_control_manifest, MetricDirection, MetricStatus,
+    QualityControlError, QualityControlReceipt, QualityControlRequest, QualityControlSummary,
+    QualityDisposition, QualityMetric,
+};
 pub use research_ingest::{
     certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
 };

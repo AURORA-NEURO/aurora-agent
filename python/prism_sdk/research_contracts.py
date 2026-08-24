@@ -19,6 +19,7 @@ RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01"
 EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01"
 PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01"
 REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01"
+QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01"
 
 
 class ResearchContractError(ValueError):
@@ -254,6 +255,36 @@ class ReplicationReport:
         digest = self.artifact.get("content_hash")
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ResearchContractError("replication artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})
+
+
+@dataclass(frozen=True)
+class QualityControlReceipt:
+    """Transport validator for modality quality gates and explicit unknown outcomes."""
+
+    payload: Mapping[str, Any]
+    artifact: Mapping[str, Any]
+
+    def validate(self) -> None:
+        if self.payload.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.payload.get("feature_id") != QUALITY_CONTROL_FEATURE_ID:
+            raise ResearchContractError("quality-control feature mismatch")
+        if self.payload.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        summary = self.payload.get("summary")
+        if not isinstance(summary, Mapping) or not isinstance(summary.get("reasons"), list) or not summary["reasons"]:
+            raise ResearchContractError("quality-control summary is incomplete")
+        if summary.get("disposition") not in {"pass", "pass_with_warnings", "blocked", "unknown"}:
+            raise ResearchContractError("quality-control disposition is unknown")
+        if self.payload.get("raw_data_local") is False:
+            raise ResearchContractError("raw research data must remain local")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("quality-control artifact digest is invalid")
 
     def digest(self) -> str:
         self.validate()

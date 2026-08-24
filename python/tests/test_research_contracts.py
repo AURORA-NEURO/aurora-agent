@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -111,3 +111,18 @@ def test_replication_report_preserves_null_and_contradiction_dispositions():
     )
     report.validate()
     assert report.digest() == report.digest()
+
+
+def test_quality_control_receipt_preserves_unknown_and_locality_gate():
+    receipt = QualityControlReceipt(
+        payload={
+            "schema_version": "aurora-research-contract/1.0",
+            "feature_id": QUALITY_CONTROL_FEATURE_ID,
+            "boundary": PRECLINICAL_BOUNDARY,
+            "raw_data_local": True,
+            "summary": {"disposition": "unknown", "reasons": ["metric unmeasured"]},
+        },
+        artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()

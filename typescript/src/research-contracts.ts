@@ -14,6 +14,7 @@ export const RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01" as const;
 export const EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01" as const;
 export const PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01" as const;
 export const REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01" as const;
+export const QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -164,6 +165,32 @@ export function validateReplicationReport(report: ReplicationReport): void {
 export function replicationReportDigest(report: ReplicationReport): string {
   validateReplicationReport(report);
   return digestJsonSync(report);
+}
+
+export interface QualityControlReceipt {
+  payload: Record<string, unknown> & {
+    summary: {
+      disposition: "pass" | "pass_with_warnings" | "blocked" | "unknown";
+      reasons: readonly string[];
+    };
+    raw_data_local: boolean;
+  };
+  artifact: Record<string, unknown>;
+}
+
+export function validateQualityControlReceipt(receipt: QualityControlReceipt): void {
+  if (receipt.payload.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (receipt.payload.feature_id !== QUALITY_CONTROL_FEATURE_ID) throw new Error("quality-control feature mismatch");
+  if (receipt.payload.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!receipt.payload.summary.reasons.length) throw new Error("quality-control summary is incomplete");
+  if (!["pass", "pass_with_warnings", "blocked", "unknown"].includes(receipt.payload.summary.disposition)) throw new Error("quality-control disposition is unknown");
+  if (!receipt.payload.raw_data_local) throw new Error("raw research data must remain local");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("quality-control artifact digest is invalid");
+}
+
+export function qualityControlReceiptDigest(receipt: QualityControlReceipt): string {
+  validateQualityControlReceipt(receipt);
+  return digestJsonSync(receipt);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {

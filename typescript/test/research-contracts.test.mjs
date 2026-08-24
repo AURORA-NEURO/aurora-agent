@@ -20,6 +20,9 @@ import {
   REPLICATION_FEATURE_ID,
   replicationReportDigest,
   validateReplicationReport,
+  QUALITY_CONTROL_FEATURE_ID,
+  qualityControlReceiptDigest,
+  validateQualityControlReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -143,4 +146,19 @@ test("replication report preserves null-result disposition", () => {
   };
   assert.doesNotThrow(() => validateReplicationReport(report));
   assert.equal(replicationReportDigest(report), replicationReportDigest(report));
+});
+
+test("quality-control receipt preserves unknown and local-only gates", () => {
+  const receipt = {
+    payload: {
+      schema_version: "aurora-research-contract/1.0",
+      feature_id: QUALITY_CONTROL_FEATURE_ID,
+      boundary: PRECLINICAL_BOUNDARY,
+      raw_data_local: true,
+      summary: { disposition: "unknown", reasons: ["metric unmeasured"] },
+    },
+    artifact: { content_hash: "f".repeat(64) },
+  };
+  assert.doesNotThrow(() => validateQualityControlReceipt(receipt));
+  assert.equal(qualityControlReceiptDigest(receipt), qualityControlReceiptDigest(receipt));
 });

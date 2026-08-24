@@ -22,6 +22,8 @@ from .research_contracts import (
     ProtocolSimulationReport,
     REPLICATION_FEATURE_ID,
     ReplicationReport,
+    QUALITY_CONTROL_FEATURE_ID,
+    QualityControlReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

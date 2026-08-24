@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/quality-control-receipt.json",
+  "title": "AURORA multimodal quality-control receipt",
+  "description": "Typed modality gates with explicit unknowns, fail-closed conformance, and local-only raw data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "artifact"],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "feature_id", "dataset_id", "modality", "source_digest", "request_digest", "summary", "metrics", "boundary"],
+      "properties": {
+        "schema_version": { "const": "aurora-research-contract/1.0" },
+        "feature_id": { "const": "AFA-adapter-P07-F01" },
+        "dataset_id": { "type": "string", "minLength": 1 },
+        "modality": { "type": "string", "minLength": 1 },
+        "source_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "request_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "summary": { "type": "object", "required": ["disposition", "passed", "warnings", "blocked", "unknown", "reasons"], "properties": { "disposition": { "enum": ["pass", "pass_with_warnings", "blocked", "unknown"] }, "passed": { "type": "integer", "minimum": 0 }, "warnings": { "type": "integer", "minimum": 0 }, "blocked": { "type": "integer", "minimum": 0 }, "unknown": { "type": "integer", "minimum": 0 }, "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } } },
+        "metrics": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["metric_id", "threshold", "direction", "required", "status"], "properties": { "metric_id": { "type": "string", "minLength": 1 }, "value": { "type": ["number", "null"] }, "threshold": { "type": "number" }, "direction": { "enum": ["at_least", "at_most"] }, "required": { "type": "boolean" }, "status": { "enum": ["pass", "warning", "blocked", "unknown"] } } } },
+        "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }
+  }
+}
