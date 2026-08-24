@@ -5,15 +5,13 @@
 use bioprism_autopilot::{
     build_autopilot_report, classify_step_result, drive_instantiation, drive_mission,
     drive_mission_with_checkpoint, drive_mission_with_schedule, plan_next_action,
-    preview_first_action,
-    resume_mission_with_checkpoint, seal_autopilot_checkpoint, validate_autopilot_checkpoint,
-    verify_autopilot_report, AttemptKind, AttemptRecord, AutonomyGrant, AutopilotCheckpointStore,
-    AutopilotCheckpointPersistence, AutopilotError, DriveHistory, FinalDisposition, FinalStatus,
-    GrantError, JsonAutopilotCheckpointPersistence,
-    NextAction, RetryClass, StepClass,
-    TransactionalAutopilotCheckpointPersistenceCoordinator,
-    TransactionalAutopilotCheckpointStore, TransactionalJsonAutopilotCheckpointPersistence,
-    RetrySchedule, REQUIRED_LIMITATIONS,
+    preview_first_action, resume_mission_with_checkpoint, seal_autopilot_checkpoint,
+    validate_autopilot_checkpoint, verify_autopilot_report, AttemptKind, AttemptRecord,
+    AutonomyGrant, AutopilotCheckpointPersistence, AutopilotCheckpointStore, AutopilotError,
+    DriveHistory, FinalDisposition, FinalStatus, GrantError, JsonAutopilotCheckpointPersistence,
+    NextAction, RetryClass, RetrySchedule, StepClass,
+    TransactionalAutopilotCheckpointPersistenceCoordinator, TransactionalAutopilotCheckpointStore,
+    TransactionalJsonAutopilotCheckpointPersistence, REQUIRED_LIMITATIONS,
 };
 use bioprism_devplat::{
     plan_mission, MissionReport, MissionRequest, MissionStepResult, MISSION_SCHEMA_VERSION,
@@ -269,8 +267,7 @@ fn push_full(
     let mission = expect_full_dispatch(grant, history);
     let report = report_for(&mission, results, status_override);
     history.push(
-        AttemptRecord::delivered(AttemptKind::Full, mission, report, reconciliation, None)
-            .unwrap(),
+        AttemptRecord::delivered(AttemptKind::Full, mission, report, reconciliation, None).unwrap(),
     );
 }
 
@@ -339,8 +336,7 @@ mod grant {
 
     #[test]
     fn a_grant_naming_agent_mission_is_refused_as_recursive() {
-        let error =
-            grant_error(json!({ "allowed_tools": ["agent_mission"], "max_attempts": 3 }));
+        let error = grant_error(json!({ "allowed_tools": ["agent_mission"], "max_attempts": 3 }));
         assert!(error.contains("recursive"), "{error}");
     }
 
@@ -353,8 +349,7 @@ mod grant {
 
     #[test]
     fn a_grant_with_an_invalid_tool_name_is_refused() {
-        let error =
-            grant_error(json!({ "allowed_tools": ["not a tool"], "max_attempts": 3 }));
+        let error = grant_error(json!({ "allowed_tools": ["not a tool"], "max_attempts": 3 }));
         assert!(error.contains("bare tool name"), "{error}");
     }
 
@@ -382,7 +377,10 @@ mod grant {
             "max_attempts": 3,
             "retry": { "retry_terminal": true },
         }));
-        assert!(refused.is_err(), "an unknown retry field must not be ignored");
+        assert!(
+            refused.is_err(),
+            "an unknown retry field must not be ignored"
+        );
     }
 
     #[test]
@@ -445,9 +443,7 @@ mod grant {
         }));
         let message = refused.expect_err("false must be refused").to_string();
         assert!(message.contains("not supported"), "{message}");
-        assert!(
-            format!("{}", GrantError::UnsupportedStopOption).contains("only true is accepted")
-        );
+        assert!(format!("{}", GrantError::UnsupportedStopOption).contains("only true is accepted"));
     }
 
     #[test]
@@ -619,7 +615,13 @@ mod planner {
     fn a_confirmation_flag_without_side_effect_authority_is_a_policy_refusal() {
         let grant = default_grant(&["tool_a"]);
         let mission = mission_of(
-            vec![step("a", "tool_a", &[], json!({ "confirm": true }), json!([]))],
+            vec![step(
+                "a",
+                "tool_a",
+                &[],
+                json!({ "confirm": true }),
+                json!([]),
+            )],
             None,
         );
         let history = DriveHistory::new(mission).unwrap();
@@ -745,7 +747,10 @@ mod planner {
             None,
         );
         let accounting = expect_exhausted(&grant, &history);
-        assert_eq!(accounting["reason"], json!("unresolved_steps_not_retryable"));
+        assert_eq!(
+            accounting["reason"],
+            json!("unresolved_steps_not_retryable")
+        );
         let rows = accounting["unresolved_steps"].as_array().unwrap();
         let row_b = rows
             .iter()
@@ -878,7 +883,10 @@ mod planner {
             None,
         );
         let accounting = expect_exhausted(&grant, &history);
-        assert_eq!(accounting["reason"], json!("unresolved_steps_not_retryable"));
+        assert_eq!(
+            accounting["reason"],
+            json!("unresolved_steps_not_retryable")
+        );
         let rows = accounting["unresolved_steps"].as_array().unwrap();
         let row_b = rows
             .iter()
@@ -1013,7 +1021,10 @@ mod planner {
             None,
         );
         let accounting = expect_exhausted(&grant, &history);
-        assert_eq!(accounting["reason"], json!("unresolved_steps_not_retryable"));
+        assert_eq!(
+            accounting["reason"],
+            json!("unresolved_steps_not_retryable")
+        );
         let rows = accounting["unresolved_steps"].as_array().unwrap();
         let row_b = rows
             .iter()
@@ -1515,7 +1526,12 @@ mod drive {
             .expect_err("wait failure must not be swallowed")
         };
         assert_eq!(calls, 1);
-        assert_eq!(error, AutopilotError::Scheduling { reason: "worker shutdown".into() });
+        assert_eq!(
+            error,
+            AutopilotError::Scheduling {
+                reason: "worker shutdown".into()
+            }
+        );
     }
 }
 
@@ -1543,9 +1559,7 @@ mod persistence {
                 Value::Number(number) => into.push(number.to_string()),
                 Value::Bool(flag) => into.push(flag.to_string()),
                 Value::Array(items) => items.iter().for_each(|item| collect(item, into)),
-                Value::Object(entries) => {
-                    entries.values().for_each(|entry| collect(entry, into))
-                }
+                Value::Object(entries) => entries.values().for_each(|entry| collect(entry, into)),
                 Value::Null => {}
             }
         }
@@ -1607,7 +1621,12 @@ mod persistence {
                 .borrow()
                 .as_ref()
                 .and_then(|encoded| serde_json::from_str::<Value>(encoded).ok())
-                .and_then(|snapshot| snapshot.get("snapshot_digest").and_then(Value::as_str).map(str::to_owned));
+                .and_then(|snapshot| {
+                    snapshot
+                        .get("snapshot_digest")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                });
             if actual_snapshot_digest.as_deref() != expected_snapshot_digest {
                 return Ok(false);
             }
@@ -1641,7 +1660,11 @@ mod persistence {
             let mut dispatcher = |dispatched: &Value| -> Result<Value, String> {
                 let report = report_for(
                     dispatched,
-                    vec![ok_result("a", "tool_a", Some(&json!({ "provider_secret": "do not persist" })))],
+                    vec![ok_result(
+                        "a",
+                        "tool_a",
+                        Some(&json!({ "provider_secret": "do not persist" })),
+                    )],
                     None,
                 );
                 rehydrated_attempts.push(
@@ -1656,23 +1679,14 @@ mod persistence {
                 );
                 Ok(report)
             };
-            drive_mission_with_checkpoint(
-                &grant,
-                mission.clone(),
-                &mut dispatcher,
-                |history| {
-                    let snapshot = seal_autopilot_checkpoint(
-                        &grant,
-                        history,
-                        generation,
-                        predecessor.as_deref(),
-                    )?;
-                    predecessor = snapshot["snapshot_digest"].as_str().map(str::to_owned);
-                    generation += 1;
-                    snapshots.push(snapshot);
-                    Ok(())
-                },
-            )
+            drive_mission_with_checkpoint(&grant, mission.clone(), &mut dispatcher, |history| {
+                let snapshot =
+                    seal_autopilot_checkpoint(&grant, history, generation, predecessor.as_deref())?;
+                predecessor = snapshot["snapshot_digest"].as_str().map(str::to_owned);
+                generation += 1;
+                snapshots.push(snapshot);
+                Ok(())
+            })
             .unwrap()
         };
         assert_eq!(outcome.final_status, FinalStatus::Succeeded);
@@ -1710,7 +1724,13 @@ mod persistence {
             "require_reconciliation_complete": false,
         }));
         let mission = mission_of(
-            vec![step("a", "tool_a", &[], json!({ "private": true }), json!([]))],
+            vec![step(
+                "a",
+                "tool_a",
+                &[],
+                json!({ "private": true }),
+                json!([]),
+            )],
             None,
         );
         let attempt_mission = mission.clone();
@@ -1719,14 +1739,9 @@ mod persistence {
             vec![ok_result("a", "tool_a", Some(&json!({ "result": true })))],
             None,
         );
-        let attempt = AttemptRecord::delivered(
-            AttemptKind::Full,
-            attempt_mission,
-            report,
-            None,
-            None,
-        )
-        .unwrap();
+        let attempt =
+            AttemptRecord::delivered(AttemptKind::Full, attempt_mission, report, None, None)
+                .unwrap();
         let history = DriveHistory::from_attempts(mission, vec![attempt]).unwrap();
         let snapshot = seal_autopilot_checkpoint(&grant, &history, 1, None).unwrap();
         let shared = SharedStore::default();
@@ -1815,10 +1830,16 @@ mod persistence {
         let checkpoint = seal_autopilot_checkpoint(&grant, &history, 1, None).unwrap();
         validate_autopilot_checkpoint(&checkpoint).unwrap();
         assert_eq!(checkpoint["base_step_count"], json!(domains.len()));
-        assert_eq!(checkpoint["attempts"][0]["step_count"], json!(domains.len()));
+        assert_eq!(
+            checkpoint["attempts"][0]["step_count"],
+            json!(domains.len())
+        );
         let encoded = retained_values(&checkpoint);
         for domain in domains {
-            assert!(!encoded.contains(domain), "raw domain material leaked: {domain}");
+            assert!(
+                !encoded.contains(domain),
+                "raw domain material leaked: {domain}"
+            );
         }
     }
 }
