@@ -3,24 +3,24 @@
 //! The MCP transport accepts JSON, but it does not own scientific semantics. These helpers perform
 //! the same schema/boundary/policy checks as the Rust service before a tool result is returned.
 
-use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
-use bioprism_runtime::{
-    execute_workflow, WorkflowExecutionReceipt, WorkflowExecutionRequest,
-    WORKFLOW_EXECUTION_FEATURE_ID,
-};
-use bioprism_evalengine::{
-    compile_evaluation_card, qualify_analysis,
-    AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
-    QualifiedAnalysisResult, ANALYSIS_QUALIFICATION_FEATURE_ID,
-    EVALUATION_OBSERVABILITY_FEATURE_ID,
-};
-use bioprism_lab::{
-    instrument_preflight, InstrumentPreflightReceipt, InstrumentPreflightRequest,
-    INSTRUMENT_PREFLIGHT_FEATURE_ID,
-};
 use bioprism_adapter::{
     harmonize_multimodal, HarmonizedResearchObject, MultimodalHarmonizationRequest,
     MULTIMODAL_HARMONIZATION_FEATURE_ID,
+};
+use bioprism_evalengine::{
+    compile_evaluation_card, qualify_analysis, AnalysisQualificationRequest, EvaluationCardReceipt,
+    EvaluationCardRequest, QualifiedAnalysisResult, ANALYSIS_QUALIFICATION_FEATURE_ID,
+    EVALUATION_OBSERVABILITY_FEATURE_ID,
+};
+use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
+use bioprism_lab::{
+    instrument_preflight, simulate_protocol_matrix, InstrumentPreflightReceipt,
+    InstrumentPreflightRequest, ProtocolMatrixReceipt, ProtocolMatrixRequest,
+    INSTRUMENT_PREFLIGHT_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID,
+};
+use bioprism_runtime::{
+    execute_workflow, WorkflowExecutionReceipt, WorkflowExecutionRequest,
+    WORKFLOW_EXECUTION_FEATURE_ID,
 };
 use bioprism_services::{ResearchReleaseReceipt, RESEARCH_RELEASE_FEATURE_ID};
 use serde_json::Value;
@@ -33,6 +33,7 @@ pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
 pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
 pub const MULTIMODAL_HARMONIZATION_TOOL: &str = "multimodal_harmonize";
 pub const ANALYSIS_QUALIFICATION_TOOL: &str = "analysis_qualify";
+pub const PROTOCOL_MATRIX_TOOL: &str = "protocol_matrix_simulate";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -160,6 +161,26 @@ pub fn validate_qualified_analysis_result_json(
         return Err("analysis qualification feature id mismatch".into());
     }
     Ok(result)
+}
+
+pub fn simulate_protocol_matrix_json(value: &Value) -> Result<Value, String> {
+    let request: ProtocolMatrixRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid protocol matrix request: {error}"))?;
+    let receipt = simulate_protocol_matrix(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize protocol matrix receipt: {error}"))
+}
+
+pub fn validate_protocol_matrix_receipt_json(
+    value: &Value,
+) -> Result<ProtocolMatrixReceipt, String> {
+    let receipt: ProtocolMatrixReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid protocol matrix receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != PROTOCOL_MATRIX_FEATURE_ID {
+        return Err("protocol matrix feature id mismatch".into());
+    }
+    Ok(receipt)
 }
 
 #[cfg(test)]

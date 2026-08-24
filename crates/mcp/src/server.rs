@@ -1808,6 +1808,7 @@ impl Server {
             "instrument_preflight" => self.instrument_preflight(&arguments),
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
+            "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24482,6 +24483,28 @@ impl Server {
         }))
     }
 
+    fn protocol_matrix_simulate(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized ProtocolMatrixRequest")?;
+        let receipt = crate::research_contracts::simulate_protocol_matrix_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_lab::PROTOCOL_MATRIX_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "factor order is canonicalized before cell enumeration and receipt hashing",
+                "network partitions, step failures, budget multipliers, retries, and compensation are simulated fail-closed",
+                "the factorial matrix is bounded to 4096 cells and performs no physical instrument effect"
+            ],
+            "limitations": [
+                "the route simulates caller-declared protocol steps and does not execute hardware or inspect raw study data",
+                "a passing cell is a preflight simulation result, not evidence of scientific validity or operational success"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35888,7 +35911,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "laboratory_integration",
             "domains": ["instrument preflight", "interlocks", "physical-effect authorization", "protocol evidence"],
             "crates": ["bioprism-lab", "bioprism-runtime", "bioprism-policy"],
-            "mcp_tools": ["instrument_preflight"],
+            "mcp_tools": ["instrument_preflight", "protocol_matrix_simulate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -38223,6 +38246,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-evalengine AnalysisQualificationRequest." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "protocol_matrix_simulate",
+            "description": "Run a bounded deterministic factorial simulation of protocol failure, network partition, and budget conditions before physical execution. The receipt preserves every cell, status, reason, and report digest without touching hardware.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-lab ProtocolMatrixRequest with protocol steps, factor levels, retries, budget, and compensation policy." }
                 },
                 "required": ["request"]
             }

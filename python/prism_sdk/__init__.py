@@ -40,6 +40,8 @@ from .research_contracts import (
     HarmonizedResearchObject,
     ANALYSIS_QUALIFICATION_FEATURE_ID,
     QualifiedAnalysisResult,
+    PROTOCOL_MATRIX_FEATURE_ID,
+    ProtocolMatrixReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

@@ -23,6 +23,7 @@ export const RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02" as const;
 export const INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01" as const;
 export const MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02" as const;
 export const ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01" as const;
+export const PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -459,6 +460,37 @@ export function validateQualifiedAnalysisResult(result: QualifiedAnalysisResult)
 export function qualifiedAnalysisResultDigest(result: QualifiedAnalysisResult): string {
   validateQualifiedAnalysisResult(result);
   return digestJsonSync(result);
+}
+
+export interface ProtocolMatrixReceipt {
+  schema_version: string;
+  feature_id: string;
+  protocol_id: string;
+  total_cells: number;
+  passed_cells: number;
+  failed_closed_cells: number;
+  approval_cells: number;
+  cells: readonly Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateProtocolMatrixReceipt(receipt: ProtocolMatrixReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (receipt.feature_id !== PROTOCOL_MATRIX_FEATURE_ID || !receipt.protocol_id.trim()) throw new Error("protocol matrix identity is incomplete");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!Number.isInteger(receipt.total_cells) || receipt.total_cells <= 0 || receipt.total_cells !== receipt.cells.length) throw new Error("protocol matrix cell count is invalid");
+  if ([receipt.passed_cells, receipt.failed_closed_cells, receipt.approval_cells].some((value) => !Number.isInteger(value) || value < 0)) throw new Error("protocol matrix status count is invalid");
+  if (receipt.passed_cells + receipt.failed_closed_cells + receipt.approval_cells !== receipt.total_cells) throw new Error("protocol matrix status counts do not partition cells");
+  if (!receipt.cells.length || receipt.cells.some((cell) => typeof cell.cell_id !== "string" || !cell.cell_id.trim() || !Array.isArray(cell.reasons) || (cell.reasons as unknown[]).length === 0)) throw new Error("protocol matrix cells need ids and reasons");
+  const statuses = new Set(["passed", "failed_closed", "requires_approval"]);
+  if (receipt.cells.some((cell) => typeof cell.status !== "string" || !statuses.has(cell.status))) throw new Error("protocol matrix cell status is unknown");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("protocol matrix artifact digest is invalid");
+}
+
+export function protocolMatrixReceiptDigest(receipt: ProtocolMatrixReceipt): string {
+  validateProtocolMatrixReceipt(receipt);
+  return digestJsonSync(receipt);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {

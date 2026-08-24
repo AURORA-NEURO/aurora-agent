@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/protocol-matrix-receipt.json",
+  "title": "AURORA protocol robustness matrix receipt",
+  "description": "Deterministic, bounded factorial simulation of protocol failure, partition, and budget conditions before physical execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "protocol_id", "total_cells", "passed_cells", "failed_closed_cells", "approval_cells", "cells", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-lab-P10-F02" },
+    "protocol_id": { "type": "string", "minLength": 1 },
+    "total_cells": { "type": "integer", "minimum": 1 },
+    "passed_cells": { "type": "integer", "minimum": 0 },
+    "failed_closed_cells": { "type": "integer", "minimum": 0 },
+    "approval_cells": { "type": "integer", "minimum": 0 },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cell_id", "assignments", "status", "consumed_units", "reasons", "report_digest"],
+        "properties": {
+          "cell_id": { "type": "string", "minLength": 1 },
+          "assignments": { "type": "object", "additionalProperties": { "type": "string" } },
+          "status": { "enum": ["passed", "failed_closed", "requires_approval"] },
+          "consumed_units": { "type": "number", "minimum": 0 },
+          "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "report_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

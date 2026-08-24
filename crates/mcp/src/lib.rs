@@ -10,19 +10,19 @@ pub mod research_contracts;
 pub mod rpc;
 pub mod server;
 
-pub use rpc::{Request, Response};
 pub use research_contracts::{
-    compile_evaluation_card_json, execute_workflow_json, validate_evaluation_card_receipt_json,
-    validate_evidence_receipt_json, validate_policy_receipt_json,
-    validate_research_release_receipt_json,
-    validate_workflow_execution_receipt_json, EVALUATION_OBSERVABILITY_TOOL,
-    instrument_preflight_json, validate_instrument_preflight_receipt_json,
-    harmonize_multimodal_json, validate_harmonized_research_object_json,
-    qualify_analysis_json, validate_qualified_analysis_result_json,
-    ANALYSIS_QUALIFICATION_TOOL, INSTRUMENT_PREFLIGHT_TOOL, MULTIMODAL_HARMONIZATION_TOOL,
-    RESEARCH_COMPILE_TOOL, RESEARCH_CONTRACT_SCHEMA_VERSION, RESEARCH_RELEASE_VALIDATE_TOOL,
-    WORKFLOW_EXECUTION_TOOL,
+    compile_evaluation_card_json, execute_workflow_json, harmonize_multimodal_json,
+    instrument_preflight_json, qualify_analysis_json, simulate_protocol_matrix_json,
+    validate_evaluation_card_receipt_json, validate_evidence_receipt_json,
+    validate_harmonized_research_object_json, validate_instrument_preflight_receipt_json,
+    validate_policy_receipt_json, validate_protocol_matrix_receipt_json,
+    validate_qualified_analysis_result_json, validate_research_release_receipt_json,
+    validate_workflow_execution_receipt_json, ANALYSIS_QUALIFICATION_TOOL,
+    EVALUATION_OBSERVABILITY_TOOL, INSTRUMENT_PREFLIGHT_TOOL, MULTIMODAL_HARMONIZATION_TOOL,
+    PROTOCOL_MATRIX_TOOL, RESEARCH_COMPILE_TOOL, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    RESEARCH_RELEASE_VALIDATE_TOOL, WORKFLOW_EXECUTION_TOOL,
 };
+pub use rpc::{Request, Response};
 pub use server::{
     resource_definitions, tool_definitions, workspace_capabilities, Lifecycle, Server,
     ADAPTIVE_QUERY_SCHEMA_URI, CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI,

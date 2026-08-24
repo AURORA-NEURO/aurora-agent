@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -285,3 +285,21 @@ def test_qualified_analysis_result_cannot_hide_unidentified_status():
     result.validate()
     assert result.feature_id == ANALYSIS_QUALIFICATION_FEATURE_ID
     assert result.digest() == result.digest()
+
+
+def test_protocol_matrix_receipt_partitions_statuses_and_preserves_digest():
+    receipt = ProtocolMatrixReceipt(
+        protocol_id="protocol:matrix-1",
+        total_cells=2,
+        passed_cells=1,
+        failed_closed_cells=1,
+        approval_cells=0,
+        cells=(
+            {"cell_id": "matrix-cell-0000", "status": "passed", "reasons": ["simulation passed"]},
+            {"cell_id": "matrix-cell-0001", "status": "failed_closed", "reasons": ["budget exhausted"]},
+        ),
+        artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == PROTOCOL_MATRIX_FEATURE_ID
+    assert receipt.digest() == receipt.digest()

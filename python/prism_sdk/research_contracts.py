@@ -28,6 +28,7 @@ RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02"
 INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01"
 MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02"
 ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01"
+PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02"
 
 
 class ResearchContractError(ValueError):
@@ -722,6 +723,60 @@ class QualifiedAnalysisResult:
                 "reasons": list(self.reasons),
                 "artifact": dict(self.artifact),
                 "raw_data_local": self.raw_data_local,
+                "boundary": self.boundary,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class ProtocolMatrixReceipt:
+    """Transport validator for bounded protocol robustness matrices."""
+
+    protocol_id: str
+    total_cells: int
+    passed_cells: int
+    failed_closed_cells: int
+    approval_cells: int
+    cells: tuple[Mapping[str, Any], ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = PROTOCOL_MATRIX_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != PROTOCOL_MATRIX_FEATURE_ID:
+            raise ResearchContractError("protocol matrix feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.protocol_id.strip():
+            raise ResearchContractError("protocol matrix identity or boundary is invalid")
+        if self.total_cells <= 0 or self.total_cells != len(self.cells):
+            raise ResearchContractError("protocol matrix cell count is invalid")
+        if any(value < 0 for value in (self.passed_cells, self.failed_closed_cells, self.approval_cells)):
+            raise ResearchContractError("protocol matrix status count is invalid")
+        if self.passed_cells + self.failed_closed_cells + self.approval_cells != self.total_cells:
+            raise ResearchContractError("protocol matrix status counts do not partition cells")
+        if not self.cells or any(not cell.get("cell_id") or not cell.get("reasons") for cell in self.cells):
+            raise ResearchContractError("protocol matrix cells need ids and reasons")
+        if any(cell.get("status") not in {"passed", "failed_closed", "requires_approval"} for cell in self.cells):
+            raise ResearchContractError("protocol matrix cell status is unknown")
+        for digest in (self.artifact.get("content_hash"),):
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("protocol matrix artifact digest is not a canonical sha256")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest(
+            {
+                "schema_version": self.schema_version,
+                "feature_id": self.feature_id,
+                "protocol_id": self.protocol_id,
+                "total_cells": self.total_cells,
+                "passed_cells": self.passed_cells,
+                "failed_closed_cells": self.failed_closed_cells,
+                "approval_cells": self.approval_cells,
+                "cells": [dict(cell) for cell in self.cells],
+                "artifact": dict(self.artifact),
                 "boundary": self.boundary,
             }
         )

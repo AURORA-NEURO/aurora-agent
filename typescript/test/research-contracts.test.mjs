@@ -47,6 +47,9 @@ import {
   ANALYSIS_QUALIFICATION_FEATURE_ID,
   qualifiedAnalysisResultDigest,
   validateQualifiedAnalysisResult,
+  PROTOCOL_MATRIX_FEATURE_ID,
+  protocolMatrixReceiptDigest,
+  validateProtocolMatrixReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -356,4 +359,24 @@ test("qualified analysis result preserves omission-aware qualification", () => {
   };
   assert.doesNotThrow(() => validateQualifiedAnalysisResult(result));
   assert.equal(qualifiedAnalysisResultDigest(result), qualifiedAnalysisResultDigest(result));
+});
+
+test("protocol matrix receipt partitions statuses and preserves digest", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: PROTOCOL_MATRIX_FEATURE_ID,
+    protocol_id: "protocol:matrix-1",
+    total_cells: 2,
+    passed_cells: 1,
+    failed_closed_cells: 1,
+    approval_cells: 0,
+    cells: [
+      { cell_id: "matrix-cell-0000", status: "passed", reasons: ["simulation passed"] },
+      { cell_id: "matrix-cell-0001", status: "failed_closed", reasons: ["budget exhausted"] },
+    ],
+    artifact: { content_hash: "f".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateProtocolMatrixReceipt(receipt));
+  assert.equal(protocolMatrixReceiptDigest(receipt), protocolMatrixReceiptDigest(receipt));
 });

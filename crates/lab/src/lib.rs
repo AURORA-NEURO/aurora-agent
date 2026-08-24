@@ -138,6 +138,7 @@ pub mod hypothesis;
 pub mod pareto;
 pub mod protocol_simulation;
 pub mod instrument_preflight;
+pub mod protocol_matrix;
 pub mod report;
 pub mod risk;
 pub mod rollback;
@@ -163,6 +164,12 @@ pub use instrument_preflight::{
     InstrumentPreflightError, InstrumentPreflightReceipt, InstrumentPreflightRequest,
     PreflightDecision, FEATURE_CONTRACT_VERSION as INSTRUMENT_PREFLIGHT_FEATURE_VERSION,
     FEATURE_ID as INSTRUMENT_PREFLIGHT_FEATURE_ID,
+};
+pub use protocol_matrix::{
+    protocol_matrix_manifest, simulate_protocol_matrix, MatrixCondition, MatrixFactor,
+    MatrixCellResult, ProtocolMatrixError, ProtocolMatrixReceipt, ProtocolMatrixRequest,
+    FEATURE_ID as PROTOCOL_MATRIX_FEATURE_ID,
+    FEATURE_VERSION as PROTOCOL_MATRIX_FEATURE_VERSION,
 };
 pub use error::{
     EvolutionError, HoldoutError, LabError, ParetoError, RollbackError, SeparationError, SpaceError,

@@ -287,7 +287,8 @@ section.
 The invariant that makes that safe: **omissions are reported at every layer**, so an agent that
 stops at L0 still knows what it does not have. Layering hides volume, never the fact of an
 omission. Paths are confined to `--root`; absolute paths, `..`, and symlink escapes are refused.
-The three shipped JSON schemas and the capability catalog are available through read-only MCP
+The shipped research-contract JSON schemas (including evaluation, release, instrument preflight,
+multimodal harmonization, analysis qualification, and protocol-matrix receipts) and the capability catalog are available through read-only MCP
 resources, so a client can build valid documents and route work without reading arbitrary files.
 `world_index` previews its write unless called with `confirm: true`.
 
