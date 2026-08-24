@@ -406,6 +406,7 @@ version = "0.1.0"
 dependencies = [
  "bioprism-backends",
  "bioprism-epistemic",
+ "bioprism-foundation",
  "bioprism-governance",
  "bioprism-ids",
  "bioprism-influence",

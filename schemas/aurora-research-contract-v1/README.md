@@ -11,6 +11,8 @@ The protocol-simulation schema carries deterministic preflight outcomes, and the
 schema carries independent-site dispositions while preserving null and contradictory results.
 The quality-control schema carries modality thresholds and distinguishes blocked, warning, pass,
 and unknown data states.
+The research-context schema carries Decision Section and certificate identities, protected-closure
+proof, sufficiency state, and unresolved-obligation counts.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.

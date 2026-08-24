@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/research-context-receipt.json",
+  "title": "AURORA omission-certified research context receipt",
+  "description": "Question-to-Decision-Section compilation identity, protected closure, sufficiency, and unresolved obligations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "artifact"],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "feature_id", "context_id", "intent", "query_id", "section_digest", "certificate_digest", "protected_closure_satisfied", "supports_sufficiency_claim", "unresolved_obligations", "boundary"],
+      "properties": {
+        "schema_version": { "const": "aurora-research-contract/1.0" },
+        "feature_id": { "const": "AFA-fiber-P03-F01" },
+        "context_id": { "type": "string", "minLength": 1 },
+        "intent": { "type": "string", "minLength": 1 },
+        "query_id": { "type": "string", "minLength": 1 },
+        "section_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "certificate_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "protected_closure_satisfied": { "const": true },
+        "supports_sufficiency_claim": { "type": "boolean" },
+        "unresolved_obligations": { "type": "integer", "minimum": 0 },
+        "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }
+  }
+}

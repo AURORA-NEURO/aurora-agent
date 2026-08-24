@@ -20,6 +20,7 @@ EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01"
 PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01"
 REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01"
 QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01"
+RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01"
 
 
 class ResearchContractError(ValueError):
@@ -285,6 +286,39 @@ class QualityControlReceipt:
         digest = self.artifact.get("content_hash")
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ResearchContractError("quality-control artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})
+
+
+@dataclass(frozen=True)
+class ResearchContextReceipt:
+    """Transport validator for omission-certified Decision Section compilation."""
+
+    payload: Mapping[str, Any]
+    artifact: Mapping[str, Any]
+
+    def validate(self) -> None:
+        if self.payload.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.payload.get("feature_id") != RESEARCH_CONTEXT_FEATURE_ID:
+            raise ResearchContractError("research-context feature mismatch")
+        if self.payload.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        if self.payload.get("protected_closure_satisfied") is not True:
+            raise ResearchContractError("protected closure is not satisfied")
+        if not isinstance(self.payload.get("supports_sufficiency_claim"), bool):
+            raise ResearchContractError("sufficiency state is missing")
+        if not isinstance(self.payload.get("unresolved_obligations"), int) or self.payload["unresolved_obligations"] < 0:
+            raise ResearchContractError("unresolved-obligation count is invalid")
+        for key in ("section_digest", "certificate_digest"):
+            digest = self.payload.get(key)
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError(f"{key} is not a canonical sha256")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("research-context artifact digest is invalid")
 
     def digest(self) -> str:
         self.validate()

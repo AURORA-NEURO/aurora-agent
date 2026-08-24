@@ -50,6 +50,7 @@ pub mod oracle;
 pub mod plan;
 pub mod policy;
 pub mod qir;
+pub mod research_context;
 pub mod slice;
 pub mod temporal;
 
@@ -67,6 +68,10 @@ pub use qir::{
     QUERY_ADAPTIVE_SCHEMA_VERSION, QUERY_DECISION_FIELD_PATHS, QUERY_DECISION_SCHEMA_VERSION,
     QUERY_FIELD_PATHS, QUERY_RATE_DISTORTION_FIELD_PATHS, QUERY_RATE_DISTORTION_SCHEMA_VERSION,
     QUERY_SCHEMA_VERSION, REFERENCE_GOAL,
+};
+pub use research_context::{
+    compile_research_context, research_context_manifest, ResearchContextError,
+    ResearchContextReceipt, ResearchContextRequest,
 };
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};

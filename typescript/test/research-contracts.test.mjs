@@ -23,6 +23,9 @@ import {
   QUALITY_CONTROL_FEATURE_ID,
   qualityControlReceiptDigest,
   validateQualityControlReceipt,
+  RESEARCH_CONTEXT_FEATURE_ID,
+  researchContextReceiptDigest,
+  validateResearchContextReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -161,4 +164,22 @@ test("quality-control receipt preserves unknown and local-only gates", () => {
   };
   assert.doesNotThrow(() => validateQualityControlReceipt(receipt));
   assert.equal(qualityControlReceiptDigest(receipt), qualityControlReceiptDigest(receipt));
+});
+
+test("research-context receipt preserves closure and omission state", () => {
+  const receipt = {
+    payload: {
+      schema_version: "aurora-research-contract/1.0",
+      feature_id: RESEARCH_CONTEXT_FEATURE_ID,
+      boundary: PRECLINICAL_BOUNDARY,
+      protected_closure_satisfied: true,
+      supports_sufficiency_claim: false,
+      unresolved_obligations: 2,
+      section_digest: "a".repeat(64),
+      certificate_digest: "b".repeat(64),
+    },
+    artifact: { content_hash: "c".repeat(64) },
+  };
+  assert.doesNotThrow(() => validateResearchContextReceipt(receipt));
+  assert.equal(researchContextReceiptDigest(receipt), researchContextReceiptDigest(receipt));
 });

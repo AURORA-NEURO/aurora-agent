@@ -15,6 +15,7 @@ export const EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01" as const;
 export const PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01" as const;
 export const REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01" as const;
 export const QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01" as const;
+export const RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -190,6 +191,32 @@ export function validateQualityControlReceipt(receipt: QualityControlReceipt): v
 
 export function qualityControlReceiptDigest(receipt: QualityControlReceipt): string {
   validateQualityControlReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface ResearchContextReceipt {
+  payload: Record<string, unknown> & {
+    protected_closure_satisfied: boolean;
+    supports_sufficiency_claim: boolean;
+    unresolved_obligations: number;
+    section_digest: string;
+    certificate_digest: string;
+  };
+  artifact: Record<string, unknown>;
+}
+
+export function validateResearchContextReceipt(receipt: ResearchContextReceipt): void {
+  if (receipt.payload.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (receipt.payload.feature_id !== RESEARCH_CONTEXT_FEATURE_ID) throw new Error("research-context feature mismatch");
+  if (receipt.payload.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!receipt.payload.protected_closure_satisfied) throw new Error("protected closure is not satisfied");
+  if (!Number.isInteger(receipt.payload.unresolved_obligations) || receipt.payload.unresolved_obligations < 0) throw new Error("unresolved-obligation count is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.payload.section_digest) || !/^[0-9a-f]{64}$/.test(receipt.payload.certificate_digest)) throw new Error("research-context source digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("research-context artifact digest is invalid");
+}
+
+export function researchContextReceiptDigest(receipt: ResearchContextReceipt): string {
+  validateResearchContextReceipt(receipt);
   return digestJsonSync(receipt);
 }
 
