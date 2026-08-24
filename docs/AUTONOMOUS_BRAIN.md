@@ -4494,7 +4494,12 @@ identity used by the controller. The result exposes `learning_episode_status` an
 `controller.settleRun()`; no reward is inferred from transport success, approval, or provider
 self-report. An approval pause or incomplete result is `not_eligible`, while adapter failure is
 explicitly `failed` without replaying or relabeling the valid provider outcome. The cross-domain
-path retains its existing specialist/synthesis trajectory and delayed-credit semantics.
+path retains its existing specialist/synthesis trajectory and delayed-credit semantics. When
+`structuredDomainResponse` is enabled with learning, a direct run prepares a second
+`response_learning_episode_id`; it is deliberately separate from the task-quality episode and
+`settleStructuredResponse()` can only settle that response episode. The high-level
+`evaluateAndSettleRun()` and `runLearning()` helpers settle both streams independently and return
+`response_settlement` beside the ordinary task settlement.
 
 When the agent owns an episodic `memoryStore`, the learning controller adopts that store by
 default, or callers can pass an explicit `memoryStore` to the controller. A completed direct run

@@ -538,6 +538,8 @@ export interface AutonomousEvaluatedRunResult {
   run: AutonomousRunResult;
   evaluation: AutonomousEvaluatorRewardInput | null;
   settlement: AutonomousLearningSettlement | null;
+  /** Independent structured-response contract settlement, when the run opted into that signal. */
+  response_settlement: AutonomousLearningSettlement | null;
   reason: "run_not_completed" | "learning_episode_not_prepared" | null;
   retention: "run_caller_owned; evaluation_and_settlement_value_only";
 }
@@ -575,6 +577,8 @@ export interface AutonomousEvaluatedPlanAndRunResult {
   execution_evaluation: AutonomousEvaluatorRewardInput | null;
   /** Single-domain settlement or the value-only cross-domain trajectory settlement. */
   execution_settlement: AutonomousLearningSettlement | AutonomousTrajectorySettlement | null;
+  /** Independent structured-response settlements; never merged into task-quality credit. */
+  response_settlements: AutonomousLearningSettlement[];
   rewards: Record<string, AutonomousEvaluatorRewardInput>;
   reason: "plan_not_completed" | "execution_not_completed" | "learning_episode_not_prepared" | "trajectory_id_required" | "planner_evaluator_not_provided" | "planner_sink_not_configured" | null;
   retention: "plan_and_run_caller_owned; planner_and_execution_settlements_value_only";
@@ -2017,8 +2021,8 @@ export class AutonomousLearningController {
       outbox?: AutonomousLearningOutboxSettlementOptions;
     } = {},
   ): Promise<AutonomousEvaluatedRunResult> {
-    if (result.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, reason: "run_not_completed", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
-    if (!result.learning_episode_id) return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, reason: "learning_episode_not_prepared", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+    if (result.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, response_settlement: null, reason: "run_not_completed", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+    if (!result.learning_episode_id) return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, response_settlement: null, reason: "learning_episode_not_prepared", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
     const evaluation = await this.evaluateRun(result, options.evaluator);
     const settlement = await this.settleRun(result.learning_episode_id, evaluation, {
       creditedReward: options.creditedReward,
@@ -2027,7 +2031,14 @@ export class AutonomousLearningController {
       memoryStore: options.memoryStore,
       outbox: options.outbox,
     });
-    return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "settled", run: result, evaluation, settlement, reason: null, retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+    const responseSettlement = result.response_learning_episode_id
+      ? await this.settleStructuredResponse(result, {
+        remote: options.remote,
+        idempotencyKey: options.idempotencyKey ? `response:${options.idempotencyKey}` : undefined,
+        outbox: options.outbox,
+      })
+      : null;
+    return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "settled", run: result, evaluation, settlement, response_settlement: responseSettlement, reason: null, retention: "run_caller_owned; evaluation_and_settlement_value_only" };
   }
 
   /**
@@ -2054,6 +2065,7 @@ export class AutonomousLearningController {
       planner_settlement: null,
       execution_evaluation: null,
       execution_settlement: null,
+      response_settlements: [],
       rewards: {},
       reason,
       retention,
@@ -2072,6 +2084,7 @@ export class AutonomousLearningController {
     const isCrossDomain = "child_runs" in execution;
     let executionEvaluation: AutonomousEvaluatorRewardInput | null = null;
     let executionSettlement: AutonomousLearningSettlement | AutonomousTrajectorySettlement | null = null;
+    let responseSettlements: AutonomousLearningSettlement[] = [];
     const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
 
     if (isCrossDomain) {
@@ -2083,13 +2096,15 @@ export class AutonomousLearningController {
       const candidates = [...crossDomain.child_runs.map((child) => child.result), ...(crossDomain.synthesis ? [crossDomain.synthesis] : [])].filter((candidate) => candidate.status === "completed");
       if (candidates.length !== crossDomain.learning_episode_ids.length) throw new ArgumentError("plan-and-run learning episode order does not match completed specialist and synthesis results");
       for (const [index, candidate] of candidates.entries()) rewards[crossDomain.learning_episode_ids[index]!] = normalizeRewardInput(await evaluate(candidate));
-      executionSettlement = (await this.settleCrossDomain(crossDomain, rewards, {
+      const crossSettlement = await this.settleCrossDomain(crossDomain, rewards, {
         trajectoryId: options.trajectoryId,
         discount: options.discount,
         remote: options.remote,
         idempotencyKey: options.idempotencyKey ?? `plan-and-run:${options.trajectoryId}`,
         outbox: options.outbox,
-      })).trajectory;
+      });
+      executionSettlement = crossSettlement.trajectory;
+      responseSettlements = crossSettlement.response_settlements;
     } else {
       const single = execution as AutonomousRunResult;
       if (!single.learning_episode_id) return { ...empty("not_eligible", "learning_episode_not_prepared"), planner_evaluation: plannerEvaluation };
@@ -2101,6 +2116,13 @@ export class AutonomousLearningController {
         memoryStore: options.memoryStore,
         outbox: options.outbox,
       });
+      if (single.response_learning_episode_id) {
+        responseSettlements = [await this.settleStructuredResponse(single, {
+          remote: options.remote,
+          idempotencyKey: options.idempotencyKey ? `response:${options.idempotencyKey}` : `plan-and-run:response:${single.response_learning_episode_id}`,
+          outbox: options.outbox,
+        })];
+      }
     }
 
     const plannerSettlement = await this.settlePlanningQuality(plan, {
@@ -2119,6 +2141,7 @@ export class AutonomousLearningController {
       planner_settlement: plannerSettlement,
       execution_evaluation: executionEvaluation,
       execution_settlement: executionSettlement,
+      response_settlements: responseSettlements,
       rewards,
       reason: "planner_sink_not_configured",
       retention,
@@ -2131,6 +2154,7 @@ export class AutonomousLearningController {
       planner_settlement: plannerSettlement,
       execution_evaluation: executionEvaluation,
       execution_settlement: executionSettlement,
+      response_settlements: responseSettlements,
       rewards,
       reason: null,
       retention,
@@ -2814,8 +2838,8 @@ export class AutonomousLearningController {
   ): Promise<AutonomousLearningSettlement> {
     const evaluation = result.response_evaluation as AutonomousDomainResponseEvaluation | null | undefined;
     if (!evaluation) throw new ArgumentError("structured-response settlement requires a completed structured domain response evaluation");
-    if (!result.learning_episode_id) throw new ArgumentError("structured-response settlement requires a pending learning episode on the run result");
-    return this.settleRun(result.learning_episode_id, evaluation.reward_input, options);
+    if (!result.response_learning_episode_id) throw new ArgumentError("structured-response settlement requires an independent response learning episode on the run result");
+    return this.settleRun(result.response_learning_episode_id, evaluation.reward_input, options);
   }
 
   async prepareTrajectory(episodeIds: readonly string[], options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {

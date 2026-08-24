@@ -450,6 +450,33 @@ test("provider planning quality settles the planner arm separately and replays w
   assert.equal(health.health({ model: "planner" })[0]?.quality_observations, 1);
 });
 
+test("ordered-step provider planning preserves learner context identity without a health override", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("ordered-learner", (request) => {
+    const planningMessage = request.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+    const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+    const ids = contract.step_catalogue.map((step) => step.id);
+    return { structured: { priority_order: ids, focus_step_ids: ids.slice(0, 1), review_required: false, confidence: 0.91, abstain: false } };
+  }, { structuredOutputMode: "json_schema" });
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(candidate("ordered-learner", "ordered-planner", ["reasoning", "code", "structured_output", "planning"]));
+  const plan = await agent.planOrderedStepsWithProvider({
+    task: "Order the reviewed coding steps.",
+    domain: "coding",
+    steps: [
+      { id: "inspect", domain: "coding", capability: "code", objective: "Inspect the repository." },
+      { id: "verify", domain: "coding", capability: "code", objective: "Verify the resulting change.", depends_on: ["inspect"] },
+    ],
+  }, { approveProviderCall: true });
+  assert.equal(plan.status, "completed");
+  const settlement = await new AutonomousLearningController(agent).settlePlanningQuality(plan, {
+    domain: "coding",
+    evaluator: { evaluator_id: "ordered-planner-reviewer", evaluator_version: "1", reward: 0.82, passed: true },
+  });
+  assert.equal(settlement.status, "settled");
+  assert.equal(agent.learner.snapshot().generation, 1);
+});
+
 test("planAndRun applies the same accepted planning contract to cross-domain fan-out and synthesis", async () => {
   const calls = [];
   const llm = new LLMRuntime({

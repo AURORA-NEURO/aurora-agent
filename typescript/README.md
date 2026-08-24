@@ -642,16 +642,20 @@ const result = await agent.run("Review this change and return a verifiable hando
 const answer = result.response?.structured; // transient, validated domain response
 const contract = result.blueprint?.response_contract; // safe digest-bound metadata
 const compositionReward = result.response_evaluation?.reward_input; // value-only format/composition signal
-await learning.settleStructuredResponse(result); // explicit bandit settlement; never task truth
+await learning.settleStructuredResponse(result); // independent response-bandit settlement; never task truth
 ```
 
 When a learning controller is supplied on the run, `response_evaluation` is a deterministic,
 replayable value-only assessment of answer presence, stage reporting, domain-field coverage,
 uncertainty/evidence-gap disclosure, and next-action coverage. It intentionally excludes the raw
-response from the evaluation projection. `AutonomousLearningController.settleStructuredResponse`
-can settle that signal through the normal idempotent learning/outbox boundary; this adapts response
+response from the evaluation projection. The run prepares `learning_episode_id` for task quality
+and a distinct `response_learning_episode_id` for contract quality; settling the latter never
+settles or overwrites the former. `AutonomousLearningController.settleStructuredResponse` can
+settle that signal through the normal idempotent learning/outbox boundary; this adapts response
 composition and model selection without treating formatting or self-reported findings as task
-correctness, source truth, or proof of an external effect.
+correctness, source truth, or proof of an external effect. `evaluateAndSettleRun()` and
+`runLearning()` settle both streams when both are prepared and return the response receipt
+separately.
 
 The composed execution wrappers preserve these options instead of rebuilding a weaker request:
 decision-cycle attempts and replans forward the cost, latency, quality, JSON, and schema policy;

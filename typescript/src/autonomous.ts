@@ -896,6 +896,10 @@ export interface AutonomousRunResult {
   learning_episode_id?: string | null;
   learning_episode_status?: "prepared" | "not_eligible" | "failed";
   learning_error_class?: string | null;
+  /** Independent pending episode for the reviewed structured-response contract signal. */
+  response_learning_episode_id?: string | null;
+  response_learning_episode_status?: "prepared" | "not_eligible" | "failed";
+  response_learning_error_class?: string | null;
   /** Strict-mode provider-free admission; absent for ordinary audit-mode runs. */
   domain_policy_admission?: AutonomousDomainPolicyAdmission | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
@@ -2790,6 +2794,16 @@ async function prepareProviderPlanning(
   });
   const responseSchema = planningResponseSchema(ids, focusField);
   const requiredCapabilities = [...new Set([...blueprint.required_capabilities, "structured_output"])];
+  // Provider planning is its own learner context. The execution blueprint's digest is keyed
+  // by the execution capability, while this request is selected as a planning decision; using
+  // the blueprint digest here makes learner-backed planning reject its own request identity.
+  const planningLearnerContext = {
+    domain: profile.domain,
+    capability: "planning",
+    risk_class: profile.risk_class,
+    task_family: profile.workflow.workflow_id,
+  };
+  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(planningLearnerContext));
   const request: ProviderRequest = {
     model: "selection-delegated",
     messages: prompt.messages.map(({ role, content }) => ({ role, content })),
@@ -2807,7 +2821,7 @@ async function prepareProviderPlanning(
       capability: "planning",
       riskClass: profile.risk_class,
       taskFamily: profile.workflow.workflow_id,
-      learningContextDigest: blueprint.learning_context_digest,
+      learningContextDigest,
       requiredCapabilities,
       maxCostPerMillionTokens: options.maxCostPerMillionTokens,
       maxLatencyMs: options.maxLatencyMs,
@@ -2913,7 +2927,15 @@ async function prepareOrderedStepPlanning(
     risk_class: profile.risk_class,
     task_family: "ordered_step_plan",
   };
-  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(selectionContext));
+  // Only the stable four-field learner identity is hashed. Descriptive selection metadata
+  // cannot be passed through this digest because the local, Rust, and Python learners all
+  // normalize the same bounded BrainBanditContext shape before selecting or settling.
+  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify({
+    domain: selectionContext.domain,
+    capability: selectionContext.capability,
+    risk_class: selectionContext.risk_class,
+    task_family: selectionContext.task_family ?? null,
+  }));
   const requiredCapabilities = [...new Set([...profile.required_model_capabilities, "structured_output"])]
   const plan: AutonomousExecutionPlan = {
     task: plannerTask,
@@ -6682,10 +6704,10 @@ export class AutonomousAgent {
     result: AutonomousRunResult,
     route: AutonomousRouteProposal,
     options: Pick<AutonomousRunOptions, "learning" | "learningEpisodeId" | "memoryRunId"> & { memoryEpisodeId?: string | null },
-  ): Promise<Pick<AutonomousRunResult, "learning_episode_id" | "learning_episode_status" | "learning_error_class">> {
+  ): Promise<Pick<AutonomousRunResult, "learning_episode_id" | "learning_episode_status" | "learning_error_class" | "response_learning_episode_id" | "response_learning_episode_status" | "response_learning_error_class">> {
     if (!options.learning) return {};
     if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) {
-      return { learning_episode_id: null, learning_episode_status: "not_eligible", learning_error_class: null };
+      return { learning_episode_id: null, learning_episode_status: "not_eligible", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
     }
     try {
       const derivedId = options.learningEpisodeId
@@ -6694,11 +6716,18 @@ export class AutonomousAgent {
           : `learning:${route.task_digest.slice(0, 24)}:${++autonomousLearningEpisodeSequence}`);
       const episodeId = memoryIdentity("learning episode id", derivedId);
       const episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId, memoryEpisodeId: options.memoryEpisodeId ?? null });
-      return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null };
+      if (!result.response_evaluation) return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
+      try {
+        const responseEpisodeId = memoryIdentity("response learning episode id", `response:${digestJsonSync({ episode_id: episode.episode_id }).slice(0, 64)}`);
+        const responseEpisode = await options.learning.prepareRun(result, { episodeId: responseEpisodeId, runId: responseEpisodeId, memoryEpisodeId: null });
+        return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: responseEpisode.episode_id, response_learning_episode_status: "prepared", response_learning_error_class: null };
+      } catch (error) {
+        return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "failed", response_learning_error_class: memoryErrorClass(error) };
+      }
     } catch (error) {
       // A requested learning adapter must be observable as failed, but it must not turn a valid
       // provider result into a fabricated provider failure or cause a provider replay.
-      return { learning_episode_id: null, learning_episode_status: "failed", learning_error_class: memoryErrorClass(error) };
+      return { learning_episode_id: null, learning_episode_status: "failed", learning_error_class: memoryErrorClass(error), response_learning_episode_id: null, response_learning_episode_status: result.response_evaluation ? "failed" : "not_eligible", response_learning_error_class: result.response_evaluation ? memoryErrorClass(error) : null };
     }
   }
 
