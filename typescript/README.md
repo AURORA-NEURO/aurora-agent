@@ -543,6 +543,10 @@ The classifier, provider failovers, fan-out, and cycle attempts can share one ca
 execution. Abstention, disagreement, malformed output, policy holds, and missing approval remain
 typed review states. Cycle/adaptive facade callers configure semantic routing only at the
 top-level boundary so the exact reviewed route is handed into the durable loop.
+For `executeBatchResumable()`, the checkpoint adds a non-secret digest of the semantic-routing
+thresholds, inherited selection gates, and candidate metadata. A changed policy—or adding
+semantic routing to a legacy deterministic checkpoint—is rejected before rehydration or a new
+provider dispatch.
 
 Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
 `minQuality`, and the optional `minSelectionConfidence` rank-separation floor. The same gates are

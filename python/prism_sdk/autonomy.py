@@ -186,6 +186,7 @@ from .llm_runtime import (
     ProviderOnboarding,
     ProviderConfig,
     ProviderContentPart,
+    ProviderError,
     ProviderInvocationObserver,
     ProviderTool,
     normalize_provider_content_parts,
@@ -3764,6 +3765,85 @@ def _batch_request_digest(descriptor: Mapping[str, Any], mode: str) -> str:
     return content_digest(payload)
 
 
+_BATCH_SEMANTIC_POLICY_SCALARS = (
+    "semantic_weight",
+    "min_confidence",
+    "min_margin",
+    "max_domains",
+    "allow_cross_domain",
+    "semantic_input_tokens",
+    "semantic_requested_output_tokens",
+    "semantic_max_cost_per_million_tokens",
+    "semantic_max_latency_ms",
+    "semantic_min_quality",
+    "semantic_run_id",
+    "semantic_max_output_tokens",
+    "semantic_temperature",
+    "domain_policy_mode",
+    "domain_policy_evidence_ready",
+    "domain_policy_evaluator_configured",
+    "domain_policy_effects_requested",
+    "domain_policy_effects_approved",
+    "approve_provider_call",
+)
+_BATCH_SEMANTIC_POLICY_DIGESTS = (
+    "semantic_bandit_state",
+    "semantic_contextual_observations",
+    "semantic_selection_overrides",
+)
+
+
+def _batch_semantic_routing_policy_digest(
+    prepared: Sequence[Mapping[str, Any]],
+    mode: str,
+) -> str | None:
+    """Digest per-item semantic routing policy without retaining private option values.
+
+    The batch descriptor already contains normalized, secret-free model candidates. We bind their
+    digest together with every semantic classifier control that can change a route proposal. Raw
+    contextual observations, bandit state, and selection overrides are represented only by their
+    content digests.
+    """
+
+    rows: list[dict[str, Any]] = []
+    enabled_any = False
+    for descriptor in prepared:
+        options = descriptor.get("options", {})
+        if not isinstance(options, Mapping):
+            raise BrainRunError("autonomous batch semantic-routing options must be a mapping")
+        enabled = options.get("semantic_routing", False)
+        if not isinstance(enabled, bool):
+            raise BrainRunError("autonomous batch semantic_routing must be boolean")
+        row: dict[str, Any] = {"enabled": enabled}
+        if enabled:
+            enabled_any = True
+            candidates = descriptor.get("model_candidates", ())
+            try:
+                candidate_projection = [
+                    candidate.to_dict()
+                    if isinstance(candidate, ModelCandidate)
+                    else ModelCandidate.from_mapping(candidate).to_dict()
+                    for candidate in candidates
+                ]
+                row["candidates_digest"] = content_digest(candidate_projection)
+                for name in _BATCH_SEMANTIC_POLICY_SCALARS:
+                    if name in options:
+                        row[name] = options[name]
+                for name in _BATCH_SEMANTIC_POLICY_DIGESTS:
+                    if name in options:
+                        row[f"{name}_digest"] = content_digest(options[name])
+            except (TypeError, ValueError, ProviderError) as error:
+                raise BrainRunError("autonomous batch semantic-routing policy is not JSON-safe") from error
+        rows.append(row)
+    if not enabled_any:
+        return None
+    return content_digest({
+        "schema": "bioprism-python-autonomous-batch-semantic-routing-policy/0.1",
+        "mode": mode,
+        "items": rows,
+    })
+
+
 def _batch_item_digest(item: "AutonomousBatchItem") -> str:
     """Digest the redacted item projection used for restart validation."""
 
@@ -3796,7 +3876,8 @@ class AutonomousBatchRehydrationContext:
 class AutonomousBatchCheckpoint:
     """Metadata-only, restart-safe progress for one bounded task batch.
 
-    The checkpoint deliberately stores only request and result digests. A caller-owned
+    The checkpoint deliberately stores only request and result digests plus an optional
+    non-secret semantic-routing policy digest. A caller-owned
     ``rehydrate_result`` callback must provide the transient result for every completed item;
     the callback never receives a task, prompt, credential, provider response, or tool payload.
     """
@@ -3810,12 +3891,15 @@ class AutonomousBatchCheckpoint:
     max_parallelism: int = 4
     stop_on_error: bool = False
     status: str = "running"
+    semantic_routing_policy_digest: str | None = None
 
     def __post_init__(self) -> None:
         _identifier("batch checkpoint job_id", self.job_id)
         if self.mode not in AUTONOMOUS_BATCH_MODES:
             raise BrainRunError("batch checkpoint mode is unsupported")
         _route_digest(self.batch_input_digest, "batch checkpoint batch_input_digest")
+        if self.semantic_routing_policy_digest is not None:
+            _route_digest(self.semantic_routing_policy_digest, "batch checkpoint semantic_routing_policy_digest")
         requests = _sequence("batch checkpoint request_digests", self.request_digests, maximum=MAX_AUTONOMOUS_AGENT_BATCH)
         for digest in requests:
             _route_digest(digest, "batch checkpoint request digest")
@@ -3864,6 +3948,11 @@ class AutonomousBatchCheckpoint:
             "job_id": self.job_id,
             "mode": self.mode,
             "batch_input_digest": self.batch_input_digest,
+            **(
+                {"semantic_routing_policy_digest": self.semantic_routing_policy_digest}
+                if self.semantic_routing_policy_digest is not None
+                else {}
+            ),
             "request_digests": list(self.request_digests if requests is None else requests),
             "completed_indices": list(self.completed_indices if indices is None else indices),
             "completed_result_digests": list(self.completed_result_digests if result_digests is None else result_digests),
@@ -3892,6 +3981,7 @@ class AutonomousBatchCheckpoint:
             job_id=value.get("job_id"),
             mode=value.get("mode"),
             batch_input_digest=value.get("batch_input_digest"),
+            semantic_routing_policy_digest=value.get("semantic_routing_policy_digest"),
             request_digests=tuple(value.get("request_digests", ())),
             completed_indices=tuple(value.get("completed_indices", ())),
             completed_result_digests=tuple(value.get("completed_result_digests", ())),
@@ -3951,7 +4041,8 @@ def _normalize_batch_checkpoint(value: Mapping[str, Any]) -> dict[str, Any]:
         "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest",
         "retention", "secret_material",
     }
-    if set(value) != expected:
+    optional = {"semantic_routing_policy_digest"}
+    if not expected.issubset(value) or set(value) - expected - optional:
         raise BrainRunError("autonomous batch checkpoint contains unsupported or missing fields")
     if value.get("retention") != "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted" or value.get("secret_material") != "never_returned":
         raise BrainRunError("autonomous batch checkpoint retention markers are invalid")
@@ -18390,7 +18481,17 @@ class AutonomousAgent:
                 )
 
         request_digests = tuple(_batch_request_digest(descriptor, mode) for descriptor in prepared)
-        batch_input_digest = content_digest({"schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA, "mode": mode, "request_digests": list(request_digests)})
+        semantic_routing_policy_digest = _batch_semantic_routing_policy_digest(prepared, mode)
+        batch_input_digest = content_digest({
+            "schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA,
+            "mode": mode,
+            "request_digests": list(request_digests),
+            **(
+                {"semantic_routing_policy_digest": semantic_routing_policy_digest}
+                if semantic_routing_policy_digest is not None
+                else {}
+            ),
+        })
         current_checkpoint: AutonomousBatchCheckpoint | None
         if checkpoint is None:
             current_checkpoint = None
@@ -18405,8 +18506,14 @@ class AutonomousAgent:
                 raise BrainRunError("autonomous batch checkpoint job_id does not match")
             if current_checkpoint.mode != mode:
                 raise BrainRunError("autonomous batch checkpoint mode does not match")
-            if current_checkpoint.batch_input_digest != batch_input_digest or current_checkpoint.request_digests != request_digests:
+            if current_checkpoint.request_digests != request_digests:
                 raise BrainRunError("autonomous batch checkpoint requests do not match the current batch")
+            if semantic_routing_policy_digest is not None and current_checkpoint.semantic_routing_policy_digest is None:
+                raise BrainRunError("legacy autonomous batch checkpoint requires explicit semantic-routing policy rebinding")
+            if current_checkpoint.semantic_routing_policy_digest != semantic_routing_policy_digest:
+                raise BrainRunError("autonomous batch checkpoint semantic-routing policy does not match")
+            if current_checkpoint.batch_input_digest != batch_input_digest:
+                raise BrainRunError("autonomous batch checkpoint does not match the current execution policy")
             if current_checkpoint.max_parallelism != max_parallelism or current_checkpoint.stop_on_error != stop_on_error:
                 raise BrainRunError("autonomous batch checkpoint execution controls do not match")
             if current_checkpoint.completed_indices and rehydrate_result is None:
@@ -18457,6 +18564,7 @@ class AutonomousAgent:
                 mode=mode,
                 batch_input_digest=batch_input_digest,
                 request_digests=request_digests,
+                semantic_routing_policy_digest=semantic_routing_policy_digest,
                 completed_indices=tuple(index for index, _item in completed_items),
                 completed_result_digests=tuple(_batch_item_digest(item) for _index, item in completed_items),
                 max_parallelism=max_parallelism,

@@ -7488,7 +7488,11 @@ batch. Its `checkpointSink` receives a digest-bound `AutonomousBrainBatchCheckpo
 verifies every successful execution before any new provider or connector dispatch; unfinished
 items are retried with the same input-order accounting. The checkpoint is deliberately not a
 provider conversation snapshot, so the application retains transient executions and credentials
-in its own protected store.
+in its own protected store. When semantic routing is enabled, the checkpoint also carries a
+non-secret semantic-routing policy digest covering classifier thresholds, inherited selection
+gates, and candidate metadata. Resuming with changed routing policy is refused before
+rehydration or dispatch; a legacy deterministic checkpoint cannot silently opt into semantic
+routing without an explicit new batch boundary.
 
 ```typescript
 const first = await brain.executeBatchResumable(requests, {
@@ -7513,6 +7517,9 @@ const resumed = await brain.executeBatchResumable(requests, {
 The Python and TypeScript checkpoint projections intentionally use language-qualified schemas
 but the same security contract: ordered request identity, successful-index replay, caller-owned
 rehydration, bounded controls, tamper-evident content digests, and no raw payload retention.
+TypeScript semantic-routing checkpoints add a non-secret policy digest for classifier thresholds,
+inherited selection gates, and candidate metadata; changing that policy or adding semantic
+routing to a legacy deterministic checkpoint fails closed before rehydration.
 Closed-loop cycle batches continue to use their existing cycle/decision persistence surfaces;
 applications needing resumable evaluator settlement should persist those cycle checkpoints
 alongside the batch job rather than treating a provider response as a reward.

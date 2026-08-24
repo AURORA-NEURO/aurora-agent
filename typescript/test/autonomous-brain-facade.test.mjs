@@ -494,6 +494,72 @@ test("brain facade resumes metadata-only batches through caller-owned rehydratio
   );
 });
 
+test("brain batch checkpoints bind semantic-routing policy and refuse drift or legacy rebinding", async () => {
+  const payloads = [
+    { selected_domains: [{ domain: "coding", score: 0.94, rationale: "implementation" }], confidence: 0.93, abstain: false, abstain_reason: null },
+    { selected_domains: [{ domain: "science", score: 0.94, rationale: "evidence" }], confidence: 0.93, abstain: false, abstain_reason: null },
+  ];
+  const { runtime } = semanticRuntime(payloads);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const requests = [
+    { task: tasks.coding },
+    {
+      task: tasks.science,
+      connector: {
+        domain: "science",
+        capability: "literature",
+        operation_id: "science.reproducible_evidence_acquisition",
+        subject_digest: "a".repeat(64),
+        request: { hypothesis: "h1", evidence_digests: ["b".repeat(64)], analysis_digest: "c".repeat(64) },
+        approved: true,
+      },
+    },
+  ];
+  const checkpoints = [];
+  const execution = { semanticRouting: { enabled: true, approveProviderCall: true, minSemanticConfidence: 0.5 }, approveProviderCall: true };
+  const first = await brain.executeBatchResumable(requests, {
+    jobId: "semantic-routing-policy-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution,
+    checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+  });
+  assert.equal(first.status, "partial");
+  const checkpoint = checkpoints.at(-1);
+  assert.match(checkpoint.semantic_routing_policy_digest, /^[0-9a-f]{64}$/);
+  assert.doesNotMatch(JSON.stringify(checkpoint), /debug and verify|implementation|hypothesis|offline-model/);
+  await assert.rejects(
+    brain.executeBatchResumable(requests, {
+      jobId: "semantic-routing-policy-batch",
+      maxParallelism: 1,
+      stopOnError: true,
+      execution: { semanticRouting: { enabled: true, approveProviderCall: true, minSemanticConfidence: 0.8 }, approveProviderCall: true },
+      checkpoint,
+      rehydrateExecution: (context) => first.items[context.index].execution,
+    }),
+    /semantic-routing policy|execution policy|checkpoint/i,
+  );
+
+  const legacyCheckpoints = [];
+  const legacy = await brain.executeBatchResumable([{ task: tasks.coding }], {
+    jobId: "legacy-semantic-routing-batch",
+    execution: { approveProviderCall: false },
+    checkpointSink: (value) => legacyCheckpoints.push(value),
+  });
+  assert.equal(legacy.status, "failed");
+  assert.equal(legacyCheckpoints.at(-1).semantic_routing_policy_digest, undefined);
+  await assert.rejects(
+    brain.executeBatchResumable([{ task: tasks.coding }], {
+      jobId: "legacy-semantic-routing-batch",
+      execution: { semanticRouting: { enabled: true, approveProviderCall: true } },
+      checkpoint: legacyCheckpoints.at(-1),
+    }),
+    /legacy.*semantic-routing|checkpoint/i,
+  );
+});
+
 test("brain batch controller owns restore, persistence, restart rehydration, and checkpoint tamper rejection", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);
