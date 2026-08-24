@@ -59,6 +59,7 @@
 //! kernel that surrounds it.
 
 pub mod consent;
+pub mod autonomy;
 pub mod decision;
 pub mod error;
 pub mod flow;
@@ -71,6 +72,7 @@ pub mod residency;
 pub mod trace;
 
 pub use consent::{Consent, ConsentStatus};
+pub use autonomy::{admit_autonomy, AutonomyAdmissionReceipt, AutonomyAdmissionRequest, AutonomyError};
 pub use decision::{Admission, Decision, ExecutionMode, Obligation, Refusal};
 pub use error::PolicyError;
 pub use flow::{
