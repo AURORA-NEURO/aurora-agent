@@ -16493,8 +16493,14 @@ class AutonomousAgent:
         *,
         selection_promotion_report: Mapping[str, Any] | None = None,
         require_promoted_selection: bool = False,
+        evidence_readiness: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Project provider/model readiness plus learned-selection admission without secrets."""
+        """Project provider/model readiness plus optional evidence-route admission without secrets.
+
+        ``evidence_readiness`` is a caller-owned configuration mapping with a typed adapter
+        registry, an optional health store, and optional auditor options.  Supplying it performs
+        only a local projection; it never dispatches an evidence source or invokes a provider.
+        """
 
         if not isinstance(require_promoted_selection, bool):
             raise BrainRunError("require_promoted_selection must be a boolean")
@@ -16507,6 +16513,27 @@ class AutonomousAgent:
             and (promotion_report is None or promotion_state.active_promotion_digest == promotion_report["promotion_digest"])
         )
         promotion_blocks = require_promoted_selection and not promotion_admitted
+
+        evidence_readiness_report = None
+        if evidence_readiness is not None:
+            from .autonomous_evidence_readiness import AutonomousLLMEvidenceReadinessAuditor
+
+            if not isinstance(evidence_readiness, Mapping):
+                raise BrainRunError("evidence_readiness must be a mapping or None")
+            evidence_registry = evidence_readiness.get("registry")
+            if evidence_registry is None:
+                raise BrainRunError("evidence_readiness requires a typed adapter registry")
+            evidence_health_store = evidence_readiness.get("health_store")
+            evidence_options = evidence_readiness.get("options", {})
+            if not isinstance(evidence_options, Mapping):
+                raise BrainRunError("evidence_readiness options must be a mapping")
+            try:
+                evidence_readiness_report = AutonomousLLMEvidenceReadinessAuditor(
+                    evidence_registry,
+                    evidence_health_store,
+                ).audit(AUTONOMOUS_DOMAINS, **dict(evidence_options))
+            except (ArgumentError, TypeError, ValueError) as error:
+                raise BrainRunError("evidence readiness audit was rejected") from error
 
         provider_names = {
             candidate["provider"]
@@ -16605,7 +16632,19 @@ class AutonomousAgent:
                 if provider_missing
                 else "partial"
             )
-            state = "partial" if promotion_blocks else base_state
+            evidence_row = None
+            if evidence_readiness_report is not None:
+                evidence_row = next(
+                    (item for item in evidence_readiness_report.domains if item.domain == domain),
+                    None,
+                )
+                if evidence_row is None:
+                    raise BrainRunError(f"evidence readiness report does not cover domain: {domain}")
+            evidence_blocks = evidence_row is not None and evidence_row.status != "ready"
+            if promotion_blocks or (evidence_blocks and base_state == "ready_for_caller_approval"):
+                state = "partial"
+            else:
+                state = base_state
             readiness_states.add(state)
             row.update(
                 {
@@ -16615,6 +16654,23 @@ class AutonomousAgent:
                     "state": state,
                 }
             )
+            if evidence_row is not None:
+                row["evidence_readiness"] = {
+                    "status": evidence_row.status,
+                    "coverage_state": evidence_row.coverage_state,
+                    "selected_adapter_id": evidence_row.selected_adapter_id,
+                    "selected_manifest_digest": evidence_row.selected_manifest_digest,
+                    "candidate_count": evidence_row.candidate_count,
+                    "eligible_candidate_count": evidence_row.eligible_candidate_count,
+                    "selection_reason": evidence_row.selection_reason,
+                    "selection_strategy": evidence_row.selection_strategy,
+                    "health": evidence_row.health.to_dict(),
+                    "failover_policy_digest": evidence_row.failover_policy_digest,
+                    "reason": evidence_row.reason,
+                    "report_digest": evidence_readiness_report.report_digest,
+                    "execution": "readiness_projection_only;does_not_dispatch_source",
+                    "secret_material": "never_returned",
+                }
             row_next_actions = set(row.get("next_actions", ()))
             if state == "model_catalogue_required":
                 row_next_actions.add("register at least one model candidate with the reviewed domain capabilities")
@@ -16631,6 +16687,10 @@ class AutonomousAgent:
                     "attach and apply an admitted all-domain selection promotion report before enabling learned selection"
                     if promotion_state is None
                     else f"resolve selection promotion lifecycle hold: {promotion_state.last_reason or promotion_state.status}"
+                )
+            if evidence_row is not None and evidence_row.status != "ready":
+                row_next_actions.add(
+                    "resolve evidence routing readiness before source dispatch: " + evidence_row.reason
                 )
             row["next_actions"] = sorted(row_next_actions)
             row["selection_promotion"] = {
@@ -16675,7 +16735,7 @@ class AutonomousAgent:
             readiness_state = next(iter(readiness_states))
         else:
             readiness_state = "partial"
-        return {
+        result = {
             "schema": "bioprism-autonomous-agent-readiness/0.1",
             "providers": providers,
             "models": models,
@@ -16713,6 +16773,29 @@ class AutonomousAgent:
             "secret_material": "never_returned",
             "credential_posture": "caller_supplied_opaque_handles",
         }
+        if evidence_readiness_report is not None:
+            result["evidence"] = {
+                "configured": True,
+                "registry_digest": evidence_readiness_report.registry_digest,
+                "report_digest": evidence_readiness_report.report_digest,
+                "status": evidence_readiness_report.status,
+                "complete": evidence_readiness_report.complete,
+                "ready_count": evidence_readiness_report.ready_count,
+                "degraded_count": evidence_readiness_report.degraded_count,
+                "blocked_count": evidence_readiness_report.blocked_count,
+                "missing_count": evidence_readiness_report.missing_count,
+                "domains": [row.to_dict() for row in evidence_readiness_report.domains],
+                "execution": "readiness_projection_only;no_source_dispatch",
+                "secret_material": "never_returned",
+            }
+            if evidence_readiness_report.status != "ready":
+                result["next_actions"] = sorted(
+                    {
+                        *result["next_actions"],
+                        "resolve evidence routing readiness before source dispatch",
+                    }
+                )
+        return result
 
     @staticmethod
     def _credential_mapping(

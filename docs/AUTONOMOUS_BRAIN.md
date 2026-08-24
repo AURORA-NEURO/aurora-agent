@@ -906,6 +906,98 @@ interpretation, or domain truth has been independently validated.
 
 ### Bounded provider-neutral HTTP connector transport
 
+The Python SDK now exposes the reviewed all-domain evidence catalogue that composes a typed
+evidence requirement with caller-owned source routes. `create_builtin_autonomous_domain_evidence_source_catalogue()`
+loads one versioned profile for each of the twelve autonomous domains. Profiles declare source
+kinds, capabilities, operations, required metadata, freshness, authentication posture, pagination,
+normalizer identity, quorum defaults, and explicit limitations. They are digest-bound metadata and
+never discover a provider or retain a key.
+
+```python
+from prism_sdk import (
+    create_builtin_autonomous_domain_evidence_source_catalogue,
+    builtin_autonomous_domain_http_source_presets,
+    register_autonomous_domain_http_source_matrix,
+)
+
+catalogue = create_builtin_autonomous_domain_evidence_source_catalogue()
+presets = {preset.domain: preset for preset in builtin_autonomous_domain_http_source_presets()}
+matrix = register_autonomous_domain_http_source_matrix(
+    catalogue=catalogue,
+    entries=[
+        {
+            "preset": presets[domain].preset_id,
+            "source_id": f"caller-{domain}",
+            "acquirer": caller_owned_acquirer_for(domain),
+        }
+        for domain in presets
+    ],
+)
+```
+
+Matrix registration validates complete domain coverage, profile/preset digests, route identity,
+capability and operation subsets, required operation metadata, and the secret-shaped metadata
+boundary. It is metadata-only: every acquirer call count remains zero until a caller prepares a
+requirement, reviews the returned reconciliation plan, and passes `approve_source_dispatch=True`.
+`catalogue.prepare(...)` binds one exact profile and route set to the existing bounded reconciliation
+runtime; `catalogue.execute(...)` rechecks profile and route digests and requires the profile's
+normalizer callback or the matching built-in registry entry. Prepared plans fail closed if a route
+disappears, a profile is replaced, or the normalizer registry changes.
+
+For a policy-gated HTTP route, `create_autonomous_domain_http_source_acquirer()` wraps the existing
+bounded HTTP connector and keeps endpoint construction, short-lived header/credential resolution,
+response interpretation, pagination, and transport ownership with the caller. The wrapper returns
+only observed JSON to the transient reconciliation result; refusals and transient transport
+classes become typed acquisition failures. Use a provider-contract registry at route registration
+when the deployment has an adapter manifest: the route records the contract and adapter digests,
+and registration verifies that provider, domain, capability, operation, and manifest bindings agree.
+
+The Python catalogue also ships an `AutonomousEvidenceNormalizerRegistry`. The built-in registry
+contains an exact `identity/1` normalizer and a versioned `builtin.<domain>.claim-projection/1`
+normalizer for every autonomous domain. The claim projection retains no source value or field
+contents: it records only the declared operation, observation kind, bounded item count and byte
+count, a digest of the transient value, and a digest of its response shape. Source identity is not
+part of the normalized value, so two independent routes can reach quorum when they report the same
+observation. The projection remains evidence metadata rather than a truth, safety, or evaluation
+verdict.
+
+The normalizer registry digest is included in the catalogue and prepared reconciliation identity.
+Replacing a callback without changing its versioned spec is refused; adding, removing, or changing
+a normalizer after preparation causes execution to stop before source dispatch. Deployments may
+register a custom normalizer for a custom profile, but the callback remains process-local and its
+output must stay within the SDK's JSON, depth, byte, and credential-shaped-field bounds.
+
+The TypeScript catalogue can now be composed directly into the autonomous brain through
+`AutonomousAgent.runWithDomainEvidenceCatalogue()`. The method compiles the selected domain
+workflows into one evidence plan, prepares one digest-bound catalogue reconciliation per required
+output, executes those reconciliations with bounded parallelism, and then passes the resulting
+metadata into the ordinary route, prompt, model-selection, provider, memory, and optional learning
+path. Source dispatch approval and provider approval remain separate. The default prompt contains
+only source/result digests, normalized-claim metadata, evaluator posture, and limitations; a
+caller-owned `promptBuilder` receives transient values when an application explicitly needs to
+format them into the provider prompt. The returned result keeps typed reconciliation objects
+available transiently while `toJSON()` excludes values, prompt text, and provider output:
+
+```ts
+const result = await agent.runWithDomainEvidenceCatalogue(task, {
+  catalogue,
+  domains: ["science", "data"],
+  execute: { approveSourceDispatch: true },
+  promptBuilder: ({ values }) => buildCallerOwnedEvidencePrompt(values),
+  run: {
+    candidates: callerOwnedModels,
+    approveProviderCall: true,
+    learning: callerOwnedLearningController,
+  },
+});
+```
+
+Every route and normalizer identity is rechecked before source dispatch. A disagreement,
+insufficient quorum, or failed source blocks the provider by default; `allowIncompleteEvidence`
+is an explicit opt-in and does not convert the evidence into a truth or evaluator verdict. The
+bridge is provider-neutral and remains keyless: applications supply their own route acquirers,
+credential sessions, prompt formatting, evaluator authority, and persistence/replay adapters.
+
 The connector registry remains provider-neutral, but applications that need a real external
 evidence call can now compose the same reviewed registration with a policy-gated HTTP executor.
 `create_autonomous_http_connector_executor()` exists in both SDKs. It takes a caller-owned endpoint
@@ -1734,6 +1826,38 @@ When this option is omitted, the existing readiness shape is preserved. The evid
 contains only adapter/manifest, health, policy, and digest metadata; it excludes credentials,
 requests, prompts, errors, and acquired values. A caller must still use the reviewed evidence
 execution controller and explicit source-dispatch approval to acquire anything.
+
+The Python provider-backed evidence path adds a second, executable admission layer for the
+provider/source boundary. `AutonomousEvidenceProviderContractRegistry` binds each selected adapter
+to its exact manifest digest, provider, protocol, operation set, domain, capability set, source
+kind, authentication posture, freshness, pagination, and required request metadata. Its acquirer
+checks those bindings immediately before invocation and refuses manifest drift or missing operation
+metadata. `create_autonomous_evidence_source_acquirer()` then evaluates a caller-owned metadata-only
+source descriptor for authority, freshness, future skew, partial/unverified status, citation and
+source digests, and records accepted or refused observations in a hash-chained ledger. JSON and
+compare-and-swap persistence restore the ledger across process boundaries; neither projection nor
+ledger stores credentials, prompts, provider responses, raw source values, or locators. This is a
+provenance/admission contract, not an authenticity oracle: callers remain responsible for provider
+registration, credential onboarding, network authorization, and the truth of a source declaration.
+
+Python failover now composes `AutonomousEvidenceRetryPolicy` inside each reviewed candidate route.
+The retry wrapper replays only the exact route, accepts only classified transient failures, caps
+exponential backoff, and emits metadata-only attempt observations. Candidate failover is a separate
+budget: it advances only when the classification is permitted by the same policy. When the optional
+`AutonomousLLMEvidenceSourceBoundary` is configured, contract and provenance admission run inside
+each retry attempt for every domain, so no raw response can bypass source freshness, authority,
+digest, or citation requirements. Refusals and malformed/credential failures remain non-retryable.
+
+When one provider is not enough, Python exposes `AutonomousEvidenceSourceReconciler` for reviewed
+fan-out/fan-in. `prepare()` binds the exact evidence plan, requirement, source IDs, source digests,
+request metadata digests, quorum, concurrency cap, parent evidence digests, and normalizer contract;
+it performs no dispatch. `execute()` requires explicit source approval, runs the caller-owned
+acquirers with bounded concurrency, treats each acquisition or normalization failure as a typed
+metadata-only source result, and computes deterministic consensus/dissent/disagreement status.
+Values are available only through the transient result object. The strict plan/result projections
+are restart-safe and contain no source payloads, prompts, credentials, locators, or exception text.
+This is a conflict/adjudication signal, not a truth or authenticity oracle; the caller's evaluator
+and source authority remain independent.
 
 For a deeper contract-level startup check, the TypeScript SDK also exposes
 `auditAutonomousDomainContracts()` and the same method through `AutonomousBrainFacade.domainAudit()`:
@@ -6053,6 +6177,19 @@ discover models, collect keys, invent a source query, or decide whether a model-
 is true. `ProviderSetup`/`CredentialSession` owns protected key intake, and the evidence projector
 and evaluator remain responsible for provenance, source interpretation, and domain acceptance.
 
+The Python surface adds the matching operational audit with
+`AutonomousLLMEvidenceReadinessAuditor`. Given the typed registry, optional health store, selected
+plan (or an explicit adaptive-selection request), and `AutonomousLLMEvidenceReadinessPolicy`, it
+returns digest-bound coverage and health rows for all twelve domains. A missing adapter is
+`missing`; an open circuit or an unobserved/below-threshold route is `blocked` under strict policy;
+the same unobserved route is `degraded` only when the caller explicitly chooses
+`require_health=False`; a selected route with sufficient observed health is `ready`. The report
+also binds the failover-policy digest and health-snapshot digest, supports strict canonical
+round-trip validation, and can be included in `AutonomousAgent.readiness()` through
+`evidence_readiness`. This is an audit projection only: it performs no source dispatch, provider
+invocation, credential resolution, model discovery, or reward mutation, and retains no prompts,
+requests, provider values, responses, keys, or raw errors.
+
 ### Source truth, freshness, and provenance admission
 
 `createAutonomousEvidenceSourceAcquirer` is the strict source-truth boundary for adapters that
@@ -6167,10 +6304,19 @@ Routes are registered with an acquirer, source/contract/adapter digests, require
 metadata, and an opaque provider identity. Registration validates profile scope and rejects
 credential-shaped metadata. `prepare()` selects eligible routes for one typed evidence requirement
 without dispatch, binds the profile digest into the route metadata, and returns the existing
-reconciliation plan. `execute()` revalidates the profile and every route digest before delegating
-to bounded fan-out; it still requires explicit source-dispatch approval and a caller-owned
-normalizer. A changed profile, route, source contract, or adapter identity therefore cannot be
-silently reused after review.
+reconciliation plan. `execute()` revalidates the profile, every route digest, and the
+normalizer-registry digest before delegating to bounded fan-out; it still requires explicit
+source-dispatch approval. With no callback supplied, the catalogue resolves its built-in
+digest-bound normalizer registry. A caller may provide an explicit process-local callback for a
+custom profile, but a changed profile, route, source contract, adapter identity, or registry
+cannot be silently reused after review.
+
+The TypeScript catalogue ships the same `AutonomousEvidenceNormalizerRegistry` contract as the
+Python SDK: every domain has `identity/1` and `builtin.<domain>.claim-projection/1` entries. The
+claim projection records only operation, observation kind, bounded item/byte counts, a transient
+value digest, and a response-shape digest; it never puts raw values, source identity, credentials,
+or field contents into the normalized claim. Registry replacement is version-aware and
+transactional, and unsafe callback output is rejected before it can participate in quorum.
 
 ```typescript
 const catalogue = createBuiltinAutonomousDomainEvidenceSourceCatalogue();

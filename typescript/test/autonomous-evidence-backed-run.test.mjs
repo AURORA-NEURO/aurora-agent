@@ -8,6 +8,8 @@ import {
   AutonomousEvidenceReadinessPolicy,
   CredentialStore,
   LLMRuntime,
+  builtinAutonomousDomainEvidenceSourceProfiles,
+  createBuiltinAutonomousDomainEvidenceSourceCatalogue,
   registerAutonomousEvidenceAdaptersForAllDomains,
   builtinAutonomousDomainProfiles,
   openaiCompatibleProvider,
@@ -178,4 +180,139 @@ test("evidence-backed execution defaults to metadata-only prompting and blocks u
   assert.equal(unsettled.evidence.status, "awaiting_evaluation");
   assert.equal(unsettled.run, null);
   assert.equal(calls.provider, 1);
+});
+
+async function catalogueSetup() {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const sourceProfiles = builtinAutonomousDomainEvidenceSourceProfiles();
+  const calls = { evidence: 0, provider: 0 };
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls.provider += 1;
+      const body = JSON.parse(String(init.body));
+      return jsonResponse({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: JSON.stringify(body.messages).includes("catalogue-transient-evidence") ? "catalogue evidence reached provider" : "catalogue metadata reached provider",
+          },
+          finish_reason: "stop",
+        }],
+      });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("catalogue-provider", "https://catalogue-provider.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({ ...model(), provider: "catalogue-provider", model: "catalogue-model" });
+  const catalogue = createBuiltinAutonomousDomainEvidenceSourceCatalogue();
+  for (const profile of sourceProfiles) {
+    catalogue.registerRoute({
+      sourceId: `catalogue-${profile.domain}`,
+      profileId: profile.profile_id,
+      provider: `fixture-${profile.domain}`,
+      sourceDigest: "a".repeat(64),
+      requestId: `request-${profile.domain}`,
+      metadata: { operation: profile.operations[0] },
+      acquirer: {
+        acquire: async () => {
+          calls.evidence += 1;
+          return { claim: `catalogue-transient-evidence-${profile.domain}`, domain: profile.domain };
+        },
+      },
+    });
+  }
+  return { agent, catalogue, calls };
+}
+
+test("catalogue-backed brain composes normalizers, reconciliation, model selection, and prompting for every domain", async () => {
+  const { agent, catalogue, calls } = await catalogueSetup();
+  let expectedEvidenceCalls = 0;
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const profile = builtinAutonomousDomainEvidenceSourceProfiles().find((candidate) => candidate.domain === domain);
+    expectedEvidenceCalls += (await agent.evidencePlan([domain])).requirements.length;
+    const result = await agent.runWithDomainEvidenceCatalogue(`Review a bounded ${domain} task with catalogue evidence.`, {
+      catalogue,
+      domains: [domain],
+      prepare: { profileId: profile.profile_id, quorum: 1 },
+      execute: { approveSourceDispatch: true },
+      promptBuilder: ({ values }) => [{
+        id: "catalogue-transient-value",
+        content: JSON.stringify({ transient: Object.values(values)[0][`catalogue-${domain}`].claim }),
+        required: true,
+        priority: 970,
+      }],
+      run: {
+        domain,
+        candidates: [{ ...model(), provider: "catalogue-provider", model: "catalogue-model" }],
+        approveProviderCall: true,
+      },
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.prepared.every((item) => item.result?.toJSON().status === "consensus"), true, domain);
+    assert.equal(result.run?.status, "completed", domain);
+    assert.match(result.run?.response?.text ?? "", /catalogue evidence reached provider/);
+    assert.doesNotMatch(JSON.stringify(result.toJSON()), /catalogue-transient-evidence/);
+  }
+  assert.equal(calls.evidence, expectedEvidenceCalls);
+  assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("catalogue-backed brain keeps source approval, provider approval, and evidence settlement independent", async () => {
+  const { agent, catalogue, calls } = await catalogueSetup();
+  const codingPlan = await agent.evidencePlan(["coding"]);
+  const reviewRequired = await agent.runWithDomainEvidenceCatalogue("Review a coding catalogue task.", {
+    catalogue,
+    domains: ["coding"],
+    prepare: { profileId: "builtin.coding.evidence", quorum: 1 },
+    execute: { approveSourceDispatch: false },
+    run: { domain: "coding", approveProviderCall: true },
+  });
+  assert.equal(reviewRequired.status, "evidence_review_required");
+  assert.equal(reviewRequired.prepared[0].result, null);
+  assert.equal(calls.evidence, 0);
+  assert.equal(calls.provider, 0);
+
+  const providerReviewRequired = await agent.runWithDomainEvidenceCatalogue("Review a coding catalogue task after source approval.", {
+    catalogue,
+    domains: ["coding"],
+    prepare: { profileId: "builtin.coding.evidence", quorum: 1 },
+    execute: { approveSourceDispatch: true },
+    run: { domain: "coding", approveProviderCall: false },
+  });
+  assert.equal(providerReviewRequired.status, "approval_required");
+  assert.equal(providerReviewRequired.prepared[0].result?.toJSON().status, "consensus");
+  assert.equal(providerReviewRequired.run?.status, "approval_required");
+  assert.equal(calls.evidence, codingPlan.requirements.length);
+  assert.equal(calls.provider, 0);
+});
+
+test("catalogue-backed brain blocks provider invocation on unresolved source disagreement", async () => {
+  const { agent, catalogue, calls } = await catalogueSetup();
+  const coding = catalogue.profile("builtin.coding.evidence");
+  catalogue.registerRoute({
+    sourceId: "catalogue-coding-dissent",
+    profileId: coding.profile_id,
+    provider: "fixture-coding-dissent",
+    sourceDigest: "b".repeat(64),
+    requestId: "request-coding-dissent",
+    metadata: { operation: coding.operations[0] },
+    acquirer: { acquire: async () => ({ claim: "catalogue-conflicting-evidence", domain: "coding" }) },
+  });
+  const result = await agent.runWithDomainEvidenceCatalogue("Review a coding task with conflicting catalogue evidence.", {
+    catalogue,
+    domains: ["coding"],
+    prepare: {
+      profileId: coding.profile_id,
+      sourceIds: ["catalogue-coding", "catalogue-coding-dissent"],
+      quorum: 2,
+      maxConcurrency: 2,
+    },
+    execute: { approveSourceDispatch: true },
+    run: { domain: "coding", candidates: [{ ...model(), provider: "catalogue-provider", model: "catalogue-model" }], approveProviderCall: true },
+  });
+  assert.equal(result.status, "evidence_incomplete");
+  assert.equal(result.prepared.every((item) => item.result?.toJSON().status === "disagreement"), true);
+  assert.equal(result.run, null);
+  assert.equal(calls.provider, 0);
 });

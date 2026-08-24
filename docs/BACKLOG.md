@@ -356,6 +356,22 @@ profiles, required metadata, capability scope, approval, dissent, typed failures
 and restart drift. This closes the practical domain-to-source composition gap while leaving source
 clients, credential sessions, evaluators, and truth authority caller-owned.
 
+The TypeScript catalogue now also has a digest-bound `AutonomousEvidenceNormalizerRegistry`, with
+`identity/1` and `builtin.<domain>.claim-projection/1` entries for all twelve domains. Default
+catalogue execution resolves the registry rather than requiring an ad hoc callback, and prepared
+plans fail closed when the registry changes. Claim projections retain only operation, bounded
+shape/count/byte metadata, transient value and shape digests, and explicit limitations; unsafe
+normalizer output and same-spec callback replacement are rejected before quorum.
+
+The catalogue is now a first-class brain input through TypeScript
+`AutonomousAgent.runWithDomainEvidenceCatalogue()`. It composes all selected workflow evidence
+requirements into digest-bound catalogue reconciliations, applies bounded parallel source
+dispatch, uses the built-in normalizer registry, and feeds a metadata-only evidence context into
+the ordinary routing/prompt/model/provider path. Source approval, evidence settlement, provider
+approval, and optional learning remain independent. A caller-owned prompt builder may explicitly
+bridge transient values, while the result projection remains digest-only and rejects catalogue,
+route, profile, or normalizer drift before dispatch.
+
 The TypeScript SDK now also exposes `registerAutonomousDomainHttpEvidenceSource`, which composes
 the bounded HTTP transport with a typed domain source profile and catalogue route. It binds optional
 adapter manifests, source/provider identities, endpoint/request/header resolvers, and explicit
@@ -1289,3 +1305,66 @@ The adapter rejects secret-shaped response fields and malformed provider output;
 prompt, or provider response is placed in durable evidence state. This closes the Python gap with
 the TypeScript LLM evidence adapter while leaving provider registration, credential onboarding,
 model selection policy, and external network authorization caller-owned.
+
+The next Python increment makes that seam an explicit autonomous decision boundary rather than a
+caller-owned callback convention. `AutonomousLLMEvidenceAdapterRegistry` freezes bounded,
+digest-addressed adapter manifests across all twelve built-in domains; a registry replacement
+invalidates prior selection plans instead of silently redirecting a run.
+`AutonomousLLMEvidenceAdapterSelector` supports deterministic lexicographic selection for
+reproducible operation and weighted adaptive selection from a validated health signal projection.
+`InMemoryAutonomousLLMEvidenceAdapterHealthStore` records a hash-chained acquisition/evaluation
+ledger, derives bounded success-quality-latency signals, and opens failing adapter circuits
+without persisting prompts, provider payloads, credentials, or raw error text. JSON and
+conditional-write coordinators provide restart recovery with compare-and-swap fencing.
+`AutonomousLLMEvidenceAdapterFailoverAcquirer` verifies the selection digest before every run,
+retries only bounded retryable provider failures, fails closed on malformed prompts or credential
+errors, records fallback metadata, and exposes explicit evaluator reward credit for online
+adaptation. The failover adapter implements the existing `acquire`/`project` contract, so it can
+be passed directly to `AutonomousAgent.acquire_evidence`, `run_with_llm_evidence`, or the
+resumable evidence boundary without widening durable state.
+
+Python now closes the adjacent operational-readiness gap with
+`AutonomousLLMEvidenceReadinessAuditor`. It projects coverage, the exact registry and selection
+digests, selected-manifest health, open-circuit state, bounded failover policy, and explicit
+`ready`/`degraded`/`blocked`/`missing` rows for every requested domain. Strict default policy
+requires observed health and a minimum success rate; `require_health=False` is an explicit
+degraded startup posture rather than an authorization shortcut. The canonical report supports
+strict round-trip validation and is composed into `AutonomousAgent.readiness()` through the
+caller-owned `evidence_readiness` configuration. No source, provider, model discovery, credential,
+or learner mutation occurs during the audit, and the report excludes prompts, requests, values,
+responses, keys, and raw errors.
+
+The next Python evidence increment now makes provider and source assumptions executable. Each
+`AutonomousEvidenceProviderContract` is digest-bound to one adapter manifest and declares the
+provider protocol, operations, domains, capabilities, source kinds, auth posture, freshness,
+pagination, and required request metadata. The registry verifies those bindings immediately before
+each selected failover candidate is invoked, so stale manifests, undeclared capabilities, and
+missing operations fail closed without entering the provider boundary. The source admission layer
+adds a caller-owned descriptor contract for source identity, digest, authority, status, observation
+time, expiry, citation, and limitations; its freshness/authority policy records accepted and
+refused decisions in a metadata-only hash chain. Canonical JSON and compare-and-swap persistence
+support process restart and stale-writer rejection. All twelve domains are covered by offline
+tests for contract coverage, failover, refusal, secret-shaped values, tamper resistance, and
+restart recovery. This remains an admission and provenance boundary—not provider authentication,
+source authenticity, or truth validation—and retains no credentials, prompts, responses, source
+values, or locators.
+
+The Python failover path now closes the retry-versus-failover distinction. A typed
+`AutonomousEvidenceRetryPolicy` classifies bounded transient failures, retries one exact reviewed
+route with capped exponential backoff, and emits attempt number, status, failure class, delay, and
+latency without persisting error text or values. `AutonomousLLMEvidenceSourceBoundary` composes the
+provider contract and metadata-only source admission inside every candidate route, including each
+retry, while the separate failover budget advances only for classifications permitted by the retry
+policy. Readiness serialization now round-trips the nested retry policy, and all-domain tests cover
+recovery, source receipts, refusal boundaries, no-raw projections, and retry telemetry.
+
+Python now adds the missing multi-source evidence adjudication layer. `AutonomousEvidenceSourceReconciler`
+creates a request-free, digest-bound plan for up to sixteen caller-owned routes, explicit quorum,
+bounded concurrency, parent evidence lineage, and a named normalizer version. Execution is approval-
+gated and produces deterministic `consensus`, `consensus_with_dissent`, `disagreement`,
+`insufficient_evidence`, or `failed` status without converting provider agreement into truth. Source
+acquisition and normalization failures become value-free per-route metadata, while transient source
+and normalized values remain available only to the caller. Strict plan/result round trips reject
+route drift, normalizer drift, tampering, credential-shaped metadata, oversized values, and missing
+approval. All twelve domains are covered by consensus/dissent, disagreement, failure, and bounded
+fan-out tests.

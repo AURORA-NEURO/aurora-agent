@@ -1017,6 +1017,29 @@ export {
   AutonomousEvidenceReconciliationResult,
 } from "./autonomous-evidence-reconciliation.js";
 export {
+  AUTONOMOUS_EVIDENCE_NORMALIZER_SCHEMA,
+  AUTONOMOUS_EVIDENCE_NORMALIZER_REGISTRY_SCHEMA,
+  AUTONOMOUS_EVIDENCE_CLAIM_PROJECTION_SCHEMA,
+  MAX_AUTONOMOUS_EVIDENCE_NORMALIZERS,
+  MAX_AUTONOMOUS_EVIDENCE_NORMALIZER_LIMITATIONS,
+  MAX_AUTONOMOUS_EVIDENCE_NORMALIZER_TEXT_BYTES,
+  MAX_AUTONOMOUS_EVIDENCE_NORMALIZER_VALUE_BYTES,
+  MAX_AUTONOMOUS_EVIDENCE_NORMALIZER_OUTPUT_BYTES,
+  MAX_AUTONOMOUS_EVIDENCE_NORMALIZER_REGISTRY_BYTES,
+  AutonomousEvidenceNormalizerSpec,
+  AutonomousEvidenceNormalizerRegistration,
+  AutonomousEvidenceClaimProjector,
+  AutonomousEvidenceNormalizerRegistry,
+  createBuiltinAutonomousEvidenceNormalizerRegistry,
+  builtinAutonomousEvidenceNormalizerSpecs,
+} from "./autonomous-evidence-normalizers.js";
+export type {
+  AutonomousEvidenceNormalizer,
+  AutonomousEvidenceNormalizerSpecJSON,
+  AutonomousEvidenceNormalizerRegistryJSON,
+  AutonomousEvidenceClaimProjectionJSON,
+} from "./autonomous-evidence-normalizers.js";
+export {
   AUTONOMOUS_DOMAIN_EVIDENCE_PROFILE_SCHEMA,
   AUTONOMOUS_DOMAIN_EVIDENCE_CATALOGUE_SCHEMA,
   AUTONOMOUS_DOMAIN_EVIDENCE_ROUTE_SCHEMA,
@@ -1036,6 +1059,26 @@ export {
   createBuiltinAutonomousDomainEvidenceSourceCatalogue,
   domainEvidenceRequestIdentity,
 } from "./autonomous-domain-evidence-catalogue.js";
+export {
+  AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_RUN_SCHEMA,
+  AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_CONTEXT_SCHEMA,
+  MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_REQUIREMENTS,
+  MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_PARALLEL_REQUIREMENTS,
+  MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_CONTEXT_BYTES,
+  MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_RESULT_BYTES,
+  runAutonomousDomainEvidenceBacked,
+} from "./autonomous-domain-evidence-brain.js";
+export type {
+  AutonomousDomainEvidenceBrainStatus,
+  AutonomousDomainEvidenceBrainPreparation,
+  AutonomousDomainEvidenceBrainPromptProjection,
+  AutonomousDomainEvidenceBrainPromptBuilder,
+  AutonomousDomainEvidenceBrainPreflight,
+  AutonomousDomainEvidenceBrainPreflightHook,
+  AutonomousDomainEvidenceBrainRunOptions,
+  AutonomousDomainEvidenceBrainRunProjection,
+  AutonomousDomainEvidenceBrainRunResult,
+} from "./autonomous-domain-evidence-brain.js";
 export {
   AUTONOMOUS_DOMAIN_HTTP_SOURCE_SCHEMA,
   MAX_AUTONOMOUS_DOMAIN_HTTP_SOURCE_METADATA_BYTES,

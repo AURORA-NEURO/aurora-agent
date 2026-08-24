@@ -230,6 +230,72 @@ the completed worker batch. The caller still rehydrates task text, model candida
 credentials, tools, memory, and approval policy after each new claim. Checkpoint generations are
 content-addressed and linked to their predecessor; a tampered image, non-contiguous cycle, changed
 run identity, or compare-and-swap conflict fails closed before execution.
+
+For provider-backed evidence that must choose and recover across multiple approved adapters, use
+`AutonomousLLMEvidenceAdapterRegistry` with `AutonomousLLMEvidenceAdapterSelector`. The selector
+returns a digest-bound plan that can be persisted alongside a run;
+`select_adaptive_for_domains` accepts only metadata-only health signals and can promote a
+provider/model route after explicit evaluator credit. `InMemoryAutonomousLLMEvidenceAdapterHealthStore`
+is a hash-chained learning ledger for acquisition outcomes and evaluator rewards, while
+`JsonAutonomousLLMEvidenceAdapterHealthPersistence` and its transactional coordinator provide
+restart-safe conditional persistence. Pass the plan, registry, and
+`AutonomousLLMEvidenceFailoverAcquirer` created by
+`create_autonomous_llm_evidence_adapter_failover_acquirer` to the existing evidence runtime or
+agent façade. Failover is bounded and retries only retryable provider transport failures;
+malformed prompt, argument, and credential failures stop immediately. Health snapshots and
+failover events contain adapter/model manifest digests, statuses, bounded timings, and error
+classes only—never keys, prompts, requests, provider responses, or raw error messages.
+
+`AutonomousLLMEvidenceReadinessAuditor` adds the provider-free operational audit for that route.
+It evaluates coverage, the exact selection-plan digest, selected-manifest health, circuit state,
+and the caller's `AutonomousLLMEvidenceReadinessPolicy` across all twelve domains. Strict startup
+policy reports unobserved or below-threshold routes as `blocked`; a caller can explicitly use
+`require_health=False` to show the same routes as `degraded` for onboarding. A healthy route is
+reported `ready`, while absent adapter coverage is `missing`. The report is canonical,
+digest-addressed, byte-bounded, and restorable with strict field/aggregate checks. Pass
+`evidence_readiness={"registry": registry, "health_store": health, "options": {...}}` to
+`AutonomousAgent.readiness()` to compose those rows with model, credential, tool, and learning
+readiness. This remains a projection only: it never dispatches a source, invokes an LLM, or
+converts route health into evidence truth.
+
+The provider-contract boundary makes that route executable without making the SDK a provider
+client. `AutonomousEvidenceProviderContractRegistry` binds each approved adapter to its provider,
+protocol, operation vocabulary, domain, capability, source kind, authentication posture, freshness,
+pagination mode, and required request metadata. `create_acquirer_for_adapter()` verifies the
+registry and contract immediately before invocation, so a changed adapter manifest, missing
+operation, unsupported capability, or stale registry fails closed before a provider call. The
+contract projection contains only digests and bounded metadata; credentials, prompts, requests,
+and responses remain caller-owned.
+
+`create_autonomous_evidence_source_acquirer()` adds the provenance admission boundary around that
+contract acquirer. A caller supplies a source descriptor callback that returns only source identity,
+source digest, authority, status, observation time, expiry, citation digest, and bounded limitations.
+`AutonomousEvidenceSourcePolicy` evaluates freshness, future skew, authority, partial status, and
+digest requirements, while `AutonomousEvidenceSourceLedger` records a metadata-only hash chain of
+accepted and refused observations. JSON and compare-and-swap persistence coordinators support
+restart recovery without retaining raw source values or locators. The contract/source tests exercise
+all twelve domains, failover, refusal, secret-shaped output rejection, canonical round trips, and
+stale-writer protection.
+
+`AutonomousEvidenceRetryPolicy` separates bounded same-route retry from candidate failover. The
+retry wrapper classifies only typed transient failures, applies capped exponential backoff, and
+emits attempt number, status, failure class, delay, and latency as value-free telemetry. The
+failover acquirer now applies that policy to every selected candidate and can compose the source
+boundary inside each retry route, so a successful source receipt is admitted only after the exact
+provider contract and source policy pass. Credential, argument, source-admission, and malformed
+response failures do not get retried or silently promoted to another provider.
+
+For explicit multi-source adjudication, `AutonomousEvidenceSourceReconciler` prepares a
+digest-bound `AutonomousEvidenceReconciliationPlan` from caller-owned routes. Execution requires
+`approve_source_dispatch=True`, fans out at a bounded concurrency, optionally normalizes values
+under a named/versioned callback, and classifies the result as `consensus`,
+`consensus_with_dissent`, `disagreement`, `insufficient_evidence`, or `failed`. The returned
+`AutonomousEvidenceReconciliationResult` keeps source values and normalized values transient while
+its canonical projection retains route/request/value/normalization digests, failure classes,
+quorum, and disagreement metadata. Plan and result projections round-trip strictly and reject
+route drift, normalizer drift, tampering, secret-shaped metadata, and oversized values. The
+all-domain tests exercise consensus, dissent, disagreement, explicit approval, and bounded fan-out.
+
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

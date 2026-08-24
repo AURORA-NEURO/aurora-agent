@@ -5,10 +5,13 @@ import {
   AutonomousDomainEvidenceSourceCatalogue,
   AutonomousEvidenceAcquisitionError,
   AutonomousDomainEvidenceSourceProfile,
+  AutonomousEvidenceNormalizerRegistration,
+  AutonomousEvidenceNormalizerSpec,
   buildAutonomousEvidencePlan,
   builtinAutonomousDomainEvidenceSourceProfiles,
   builtinAutonomousDomainProfiles,
   createBuiltinAutonomousDomainEvidenceSourceCatalogue,
+  createBuiltinAutonomousEvidenceNormalizerRegistry,
   digestJsonSync,
 } from "../dist/index.js";
 
@@ -228,4 +231,117 @@ test("custom domain profiles can be validated without allowing unbound routes", 
   const catalogue = new AutonomousDomainEvidenceSourceCatalogue([profile]);
   assert.equal(catalogue.coverage().find((row) => row.domain === "coding").state, "missing");
   assert.equal(catalogue.profiles()[0].profile_digest, profile.profile_digest);
+});
+
+test("built-in evidence normalizers project every domain without retaining values", async () => {
+  const registry = createBuiltinAutonomousEvidenceNormalizerRegistry();
+  const profiles = builtinAutonomousDomainEvidenceSourceProfiles();
+  const plan = await evidencePlan();
+  assert.equal(registry.registrations().length, AUTONOMOUS_DOMAIN_NAMES.length * 2);
+
+  for (const profile of profiles) {
+    const registration = registry.resolve(profile.domain, profile.normalizer_id, profile.normalizer_version);
+    const requirement = plan.requirements.find((candidate) => candidate.domain === profile.domain);
+    assert.ok(requirement);
+    const value = { answer: `transient-${profile.domain}`, records: [{ status: "observed" }] };
+    const projected = await registry.normalize(profile.domain, profile.normalizer_id, profile.normalizer_version, value, {
+      plan_digest: "a".repeat(64),
+      requirement,
+      request: { requirement_id: requirement.requirement_id, source_id: `${profile.domain}-source`, metadata: { operation: profile.operations[0] } },
+      attempt: 1,
+      parent_evidence_digests: [],
+      execution: "caller_owned_adapter;raw_value_transient",
+    });
+    assert.equal(projected.schema, "bioprism-typescript-autonomous-evidence-claim-projection/0.1");
+    assert.equal(projected.domain, profile.domain);
+    assert.equal(projected.operation, profile.operations[0]);
+    assert.equal(projected.value_digest, digest(value));
+    assert.equal(JSON.stringify(projected).includes(`transient-${profile.domain}`), false);
+    assert.equal(typeof registration.spec.spec_digest, "string");
+  }
+});
+
+test("catalogue executes all domains with the default registry and fences registry drift", async () => {
+  const catalogue = createBuiltinAutonomousDomainEvidenceSourceCatalogue();
+  const profiles = builtinAutonomousDomainEvidenceSourceProfiles();
+  const plan = await evidencePlan();
+  for (const profile of profiles) {
+    const requirement = plan.requirements.find((candidate) => candidate.domain === profile.domain);
+    assert.ok(requirement);
+    for (const suffix of ["a", "b"]) {
+      catalogue.registerRoute({
+        sourceId: `${profile.domain}-default-${suffix}`,
+        profileId: profile.profile_id,
+        provider: `default-${suffix}`,
+        metadata: { operation: profile.operations[0] },
+        acquirer: { acquire: async () => ({ claim: `${profile.domain}:stable` }) },
+      });
+    }
+    const prepared = catalogue.prepare(plan, requirement.requirement_id, { profileId: profile.profile_id, quorum: 2, maxConcurrency: 2 });
+    const result = await catalogue.execute(plan, prepared, { approveSourceDispatch: true });
+    assert.equal(result.json.status, "consensus");
+    assert.equal(result.normalizedValues[`${profile.domain}-default-a`].domain, profile.domain);
+    assert.equal(result.normalizedValues[`${profile.domain}-default-a`].claim_posture, "projection_only;truth_and_evaluation_caller_owned");
+  }
+
+  const registry = createBuiltinAutonomousEvidenceNormalizerRegistry();
+  const driftCatalogue = new AutonomousDomainEvidenceSourceCatalogue(profiles, { normalizerRegistry: registry });
+  const coding = profiles.find((profile) => profile.domain === "coding");
+  const codingRequirement = plan.requirements.find((candidate) => candidate.domain === "coding");
+  assert.ok(coding);
+  assert.ok(codingRequirement);
+  driftCatalogue.registerRoute({
+    sourceId: "drift-route",
+    profileId: coding.profile_id,
+    provider: "fixture",
+    metadata: { operation: coding.operations[0] },
+    acquirer: { acquire: async () => ({ claim: "stable" }) },
+  });
+  const prepared = driftCatalogue.prepare(plan, codingRequirement.requirement_id, { profileId: coding.profile_id, quorum: 1 });
+  const extraSpec = new AutonomousEvidenceNormalizerSpec({
+    domain: "coding",
+    normalizerId: "caller.coding.test",
+    version: "1",
+    purpose: "A registry drift fixture.",
+    limitations: ["test-only"],
+  });
+  registry.register(new AutonomousEvidenceNormalizerRegistration(extraSpec, (value) => value));
+  await assert.rejects(() => driftCatalogue.execute(plan, prepared, { approveSourceDispatch: true }), /normalizer registry changed/);
+});
+
+test("normalizer registry rejects tampered specs, callback replacement, and unsafe default output", async () => {
+  const registry = createBuiltinAutonomousEvidenceNormalizerRegistry();
+  const registration = registry.resolve("coding", "builtin.coding.claim-projection", "1");
+  const wire = registration.spec.toJSON();
+  assert.deepEqual(AutonomousEvidenceNormalizerSpec.fromJSON(wire).toJSON(), wire);
+  const tampered = { ...wire, purpose: "tampered" };
+  assert.throws(() => AutonomousEvidenceNormalizerSpec.fromJSON(tampered), /digest|canonical/);
+  assert.throws(() => registry.register(new AutonomousEvidenceNormalizerRegistration(registration.spec, (value) => value), { replace: true }), /callback changed/);
+
+  registry.register(new AutonomousEvidenceNormalizerRegistration(
+    new AutonomousEvidenceNormalizerSpec({
+      domain: "coding",
+      normalizerId: "builtin.coding.claim-projection",
+      version: "1",
+      purpose: "A test replacement that must be rejected at output validation.",
+      limitations: ["test-only"],
+    }),
+    () => ({ authorization: "should-fail" }),
+  ), { replace: true });
+  const catalogue = new AutonomousDomainEvidenceSourceCatalogue(builtinAutonomousDomainEvidenceSourceProfiles(), { normalizerRegistry: registry });
+  const plan = await evidencePlan();
+  const profile = catalogue.profile("builtin.coding.evidence");
+  const requirement = plan.requirements.find((candidate) => candidate.domain === "coding");
+  assert.ok(requirement);
+  catalogue.registerRoute({
+    sourceId: "unsafe-normalizer-route",
+    profileId: profile.profile_id,
+    provider: "fixture",
+    metadata: { operation: profile.operations[0] },
+    acquirer: { acquire: async () => ({ claim: "stable" }) },
+  });
+  const prepared = catalogue.prepare(plan, requirement.requirement_id, { profileId: profile.profile_id, quorum: 1 });
+  const result = await catalogue.execute(plan, prepared, { approveSourceDispatch: true });
+  assert.equal(result.json.status, "failed");
+  assert.equal(result.json.source_results[0].failure_class, "unknown");
 });

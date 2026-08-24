@@ -17,6 +17,10 @@ import {
   AutonomousEvidenceReconciliationResult,
   type AutonomousEvidenceReconciliationExecuteOptions,
 } from "./autonomous-evidence-reconciliation.js";
+import {
+  AutonomousEvidenceNormalizerRegistry,
+  createBuiltinAutonomousEvidenceNormalizerRegistry,
+} from "./autonomous-evidence-normalizers.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
@@ -161,6 +165,8 @@ export interface AutonomousDomainEvidenceCatalogueJSON extends JsonObject {
   profile_count: number;
   route_count: number;
   covered_domain_count: number;
+  normalizer_registry_digest: string;
+  normalizer_count: number;
   registry_digest: string;
   execution: "catalogue_and_route_validation_only;source_dispatch_requires_review";
   retention: typeof RETENTION;
@@ -184,6 +190,7 @@ export interface AutonomousDomainEvidenceCatalogueReconciliation {
   profile: AutonomousDomainEvidenceProfileJSON;
   plan: AutonomousEvidenceReconciliationPlan;
   routes: AutonomousDomainEvidenceRouteJSON[];
+  normalizer_registry_digest: string;
 }
 
 function bytes(value: string): number {
@@ -775,9 +782,15 @@ function routeClone(route: AutonomousDomainEvidenceRoute): AutonomousDomainEvide
 export class AutonomousDomainEvidenceSourceCatalogue {
   private readonly profileEntries = new Map<string, AutonomousDomainEvidenceSourceProfile>();
   private readonly routeEntries = new Map<string, AutonomousDomainEvidenceRoute>();
+  readonly normalizerRegistry: AutonomousEvidenceNormalizerRegistry;
 
-  constructor(profiles: readonly AutonomousDomainEvidenceSourceProfile[] = builtinProfiles(), options: { requireAllDomains?: boolean } = {}) {
+  constructor(
+    profiles: readonly AutonomousDomainEvidenceSourceProfile[] = builtinProfiles(),
+    options: { requireAllDomains?: boolean; normalizerRegistry?: AutonomousEvidenceNormalizerRegistry } = {},
+  ) {
     if (!Array.isArray(profiles) || profiles.length < 1 || profiles.length > MAX_AUTONOMOUS_DOMAIN_EVIDENCE_PROFILES) throw new ArgumentError("domain evidence catalogue profiles are outside their bound");
+    this.normalizerRegistry = options.normalizerRegistry ?? createBuiltinAutonomousEvidenceNormalizerRegistry();
+    if (!(this.normalizerRegistry instanceof AutonomousEvidenceNormalizerRegistry)) throw new ArgumentError("domain evidence catalogue normalizer registry is malformed");
     for (const profile of profiles) this.registerProfile(profile);
     if (options.requireAllDomains === true && AUTONOMOUS_DOMAIN_NAMES.some((domain) => ![...this.profileEntries.values()].some((profile) => profile.domain === domain))) throw new ArgumentError("domain evidence catalogue must cover every autonomous domain");
   }
@@ -906,7 +919,12 @@ export class AutonomousDomainEvidenceSourceCatalogue {
       normalizerVersion: profile.normalizer_version,
       parentEvidenceDigests: options.parentEvidenceDigests,
     });
-    return { profile: structuredClone(profile.toJSON()), plan, routes: matching.map((route) => structuredClone(route.json)).sort((left, right) => left.source_id.localeCompare(right.source_id)) };
+    return {
+      profile: structuredClone(profile.toJSON()),
+      plan,
+      routes: matching.map((route) => structuredClone(route.json)).sort((left, right) => left.source_id.localeCompare(right.source_id)),
+      normalizer_registry_digest: this.normalizerRegistry.registryDigest,
+    };
   }
 
   /** Execute a prepared catalogue plan through the existing bounded reconciler. */
@@ -915,6 +933,7 @@ export class AutonomousDomainEvidenceSourceCatalogue {
     const profile = this.profile(prepared.profile.profile_id);
     if (options.profileId !== undefined && options.profileId !== profile.profile_id) throw new ArgumentError("domain evidence execution profile does not match the prepared reconciliation");
     if (prepared.profile.profile_digest !== profile.profile_digest || prepared.profile.normalizer_id !== profile.normalizer_id || prepared.profile.normalizer_version !== profile.normalizer_version) throw new ArgumentError("domain evidence profile changed after preparation");
+    if (prepared.normalizer_registry_digest !== this.normalizerRegistry.registryDigest) throw new ArgumentError("domain evidence normalizer registry changed after preparation");
     const routeIds = prepared.routes.map((route) => route.source_id);
     const routeEntries = routeIds.map((sourceId) => {
       const route = this.routeEntries.get(sourceId);
@@ -922,10 +941,21 @@ export class AutonomousDomainEvidenceSourceCatalogue {
       if (route.json.route_digest !== prepared.routes.find((candidate) => candidate.source_id === sourceId)?.route_digest) throw new ArgumentError(`domain evidence source route changed after preparation: ${sourceId}`);
       return this.reconciliationRoute(route);
     });
+    let normalizer = options.normalizer;
+    if (normalizer === undefined) {
+      this.normalizerRegistry.resolve(profile.domain, profile.normalizer_id, profile.normalizer_version);
+      normalizer = (value, context) => this.normalizerRegistry.normalize(
+        profile.domain,
+        profile.normalizer_id,
+        profile.normalizer_version,
+        value,
+        context,
+      );
+    }
     const reconciler = new AutonomousEvidenceSourceReconciler(evidencePlan);
     return reconciler.execute(prepared.plan, routeEntries, {
       approveSourceDispatch: options.approveSourceDispatch,
-      normalizer: options.normalizer,
+      normalizer,
       normalizerId: profile.normalizer_id,
       normalizerVersion: profile.normalizer_version,
     });
@@ -949,6 +979,8 @@ export class AutonomousDomainEvidenceSourceCatalogue {
       profile_count: profiles.length,
       route_count: routes.length,
       covered_domain_count: coverage.filter((row) => row.state !== "missing").length,
+      normalizer_registry_digest: this.normalizerRegistry.registryDigest,
+      normalizer_count: this.normalizerRegistry.registrations().length,
       execution: "catalogue_and_route_validation_only;source_dispatch_requires_review" as const,
       retention: RETENTION,
       secret_material: "never_returned" as const,
