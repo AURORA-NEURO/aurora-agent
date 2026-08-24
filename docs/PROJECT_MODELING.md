@@ -275,6 +275,13 @@ with `region_facts` beside it and carries the caller's raw `declared_components`
 `selected_facts` and carries `resolved_components`. `unresolved_components` is on both, because
 that is the field that tells a small region apart from a mistyped one.
 
+## From an issue's region to a checkable repair plan
+
+`bioprism-repair` takes the region compiled above for one issue and produces a typed repair plan
+bound to it, then checks a claimed repair against that plan's own declared criteria — three-valued,
+staleness-aware, and without ever claiming the issue is fixed. See
+[ISSUE_REPAIR](ISSUE_REPAIR.md).
+
 ## Dogfood: this repository, judged by its own pack
 
 The ignored test `dogfood_the_repository_scans_assembles_and_is_judged_by_its_own_pack` scans

@@ -32,7 +32,7 @@ reaches something that can act on it.
                                        │
    compilation          ┌──────────────┴────────────────┐
                         │  fiber    section    domain   │
-                        │  project                      │
+                        │  project   repair             │
                         └──────────────┬────────────────┘
                                        │
    world and storage    ┌──────────────┴────────────────┐
@@ -66,6 +66,11 @@ that carry the FIBER pipeline to non-biological decision questions. It depends o
 `section`, `scope` and `ids`, and plugs into `compile_with_oracle`; the default `compile()` and
 its parity bytes are untouched, so a pack changes certificate bytes only through the verdict it
 returns. See [GENERALIZATION](GENERALIZATION.md).
+
+**`repair` plans and checks, and never edits or executes.** It sits above `project` and `domain`,
+turning an issue's compiled evidence region into a plan bound to that region and verifying a
+claimed repair three-valued against the plan's own declared criteria — reporting which criteria
+held, never that the issue is resolved. See [ISSUE_REPAIR](ISSUE_REPAIR.md).
 
 **`weave`'s kernel is small on purpose.** It is a trusted computing base. Per 23.49 it enforces
 identity, protocol legality, authority, budgets and causal ordering, and explicitly does *not*
