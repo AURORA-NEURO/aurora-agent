@@ -17,6 +17,7 @@ RESEARCH_FEATURE_ID = "AFA-bioir-P02-F01"
 RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01"
 RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01"
 EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01"
+PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01"
 
 
 class ResearchContractError(ValueError):
@@ -189,6 +190,33 @@ class ExperimentDesignPlan:
         digest = self.artifact.get("content_hash")
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ResearchContractError("experiment design artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})
+
+
+@dataclass(frozen=True)
+class ProtocolSimulationReport:
+    payload: Mapping[str, Any]
+    artifact: Mapping[str, Any]
+
+    def validate(self) -> None:
+        if self.payload.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.payload.get("feature_id") != PROTOCOL_SIMULATION_FEATURE_ID:
+            raise ResearchContractError("protocol simulation feature mismatch")
+        if self.payload.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        results = self.payload.get("results")
+        if not isinstance(results, list) or not results:
+            raise ResearchContractError("protocol simulation results are incomplete")
+        allowed = {"passed", "failed_closed", "requires_approval"}
+        if any(item.get("status") not in allowed for item in results):
+            raise ResearchContractError("protocol simulation status is unknown")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("protocol simulation artifact digest is invalid")
 
     def digest(self) -> str:
         self.validate()

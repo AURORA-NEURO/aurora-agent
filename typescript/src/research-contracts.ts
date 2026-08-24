@@ -12,6 +12,7 @@ export const RESEARCH_FEATURE_ID = "AFA-bioir-P02-F01" as const;
 export const RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01" as const;
 export const RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01" as const;
 export const EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01" as const;
+export const PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -119,6 +120,24 @@ export function validateExperimentDesignPlan(plan: ExperimentDesignPlan): void {
 export function experimentDesignPlanDigest(plan: ExperimentDesignPlan): string {
   validateExperimentDesignPlan(plan);
   return digestJsonSync(plan);
+}
+
+export interface ProtocolSimulationReport {
+  payload: Record<string, unknown> & { results: readonly { status: "passed" | "failed_closed" | "requires_approval" }[] };
+  artifact: Record<string, unknown>;
+}
+
+export function validateProtocolSimulationReport(report: ProtocolSimulationReport): void {
+  if (report.payload.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (report.payload.feature_id !== PROTOCOL_SIMULATION_FEATURE_ID) throw new Error("protocol simulation feature mismatch");
+  if (report.payload.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!report.payload.results.length) throw new Error("protocol simulation results are incomplete");
+  if (typeof report.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(report.artifact.content_hash)) throw new Error("protocol simulation artifact digest is invalid");
+}
+
+export function protocolSimulationReportDigest(report: ProtocolSimulationReport): string {
+  validateProtocolSimulationReport(report);
+  return digestJsonSync(report);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {

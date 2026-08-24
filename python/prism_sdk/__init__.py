@@ -18,6 +18,8 @@ from .research_contracts import (
     ResearchIngestionBundle,
     EXPERIMENT_DESIGN_FEATURE_ID,
     ExperimentDesignPlan,
+    PROTOCOL_SIMULATION_FEATURE_ID,
+    ProtocolSimulationReport,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

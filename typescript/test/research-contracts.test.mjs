@@ -14,6 +14,9 @@ import {
   EXPERIMENT_DESIGN_FEATURE_ID,
   experimentDesignPlanDigest,
   validateExperimentDesignPlan,
+  PROTOCOL_SIMULATION_FEATURE_ID,
+  protocolSimulationReportDigest,
+  validateProtocolSimulationReport,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -109,4 +112,18 @@ test("experiment design plan preserves allocation total", () => {
   };
   assert.doesNotThrow(() => validateExperimentDesignPlan(plan));
   assert.equal(experimentDesignPlanDigest(plan), experimentDesignPlanDigest(plan));
+});
+
+test("protocol simulation report preserves fail-closed statuses", () => {
+  const report = {
+    payload: {
+      schema_version: "aurora-research-contract/1.0",
+      feature_id: PROTOCOL_SIMULATION_FEATURE_ID,
+      boundary: PRECLINICAL_BOUNDARY,
+      results: [{ scenario_id: "partition", status: "requires_approval" }],
+    },
+    artifact: { content_hash: "d".repeat(64) },
+  };
+  assert.doesNotThrow(() => validateProtocolSimulationReport(report));
+  assert.equal(protocolSimulationReportDigest(report), protocolSimulationReportDigest(report));
 });

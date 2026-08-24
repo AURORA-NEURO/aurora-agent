@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/protocol-simulation-report.json",
+  "title": "AURORA deterministic protocol simulation report",
+  "description": "Preflight simulation for retries, partitions, budgets, interlocks, and compensations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "artifact"],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "required": ["schema_version", "feature_id", "protocol_id", "request_digest", "results", "boundary"],
+      "properties": {
+        "schema_version": { "const": "aurora-research-contract/1.0" },
+        "feature_id": { "const": "AFA-lab-P10-F01" },
+        "protocol_id": { "type": "string", "minLength": 1 },
+        "request_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "results": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["scenario_id", "status"], "properties": { "scenario_id": { "type": "string", "minLength": 1 }, "status": { "enum": ["passed", "failed_closed", "requires_approval"] } } } },
+        "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }
+  }
+}

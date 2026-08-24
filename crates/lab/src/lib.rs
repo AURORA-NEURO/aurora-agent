@@ -136,6 +136,7 @@ pub mod evolution;
 pub mod holdout;
 pub mod hypothesis;
 pub mod pareto;
+pub mod protocol_simulation;
 pub mod report;
 pub mod risk;
 pub mod rollback;
@@ -150,6 +151,11 @@ pub use experiment_design::{
     DesignPlanPayload, ExperimentDesignError, ExperimentDesignPlan, ExperimentDesignRequest,
     NullResultPolicy, PowerProjection, RandomizationScheme, SampleAllocation, StudyPopulation,
     TestTail,
+};
+pub use protocol_simulation::{
+    simulate_protocol, ProtocolOperation, ProtocolScenario, ProtocolSimulationError,
+    ProtocolSimulationPayload, ProtocolSimulationReport, ProtocolSimulationRequest, ProtocolStep,
+    ScenarioResult, ScenarioStatus,
 };
 pub use error::{
     EvolutionError, HoldoutError, LabError, ParetoError, RollbackError, SeparationError, SpaceError,
