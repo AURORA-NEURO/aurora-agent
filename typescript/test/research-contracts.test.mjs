@@ -17,6 +17,9 @@ import {
   PROTOCOL_SIMULATION_FEATURE_ID,
   protocolSimulationReportDigest,
   validateProtocolSimulationReport,
+  REPLICATION_FEATURE_ID,
+  replicationReportDigest,
+  validateReplicationReport,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -126,4 +129,18 @@ test("protocol simulation report preserves fail-closed statuses", () => {
   };
   assert.doesNotThrow(() => validateProtocolSimulationReport(report));
   assert.equal(protocolSimulationReportDigest(report), protocolSimulationReportDigest(report));
+});
+
+test("replication report preserves null-result disposition", () => {
+  const report = {
+    payload: {
+      schema_version: "aurora-research-contract/1.0",
+      feature_id: REPLICATION_FEATURE_ID,
+      boundary: PRECLINICAL_BOUNDARY,
+      summary: { disposition: "null_result", total_observations: 2, reasons: ["null retained"] },
+    },
+    artifact: { content_hash: "e".repeat(64) },
+  };
+  assert.doesNotThrow(() => validateReplicationReport(report));
+  assert.equal(replicationReportDigest(report), replicationReportDigest(report));
 });

@@ -7,6 +7,8 @@ The release-review schema additionally makes a passing production verdict imposs
 complete provenance.
 The research-ingestion schema binds source and normalized-ingest digests to a
 conformance-verified artifact while requiring `raw_data_local: true`.
+The protocol-simulation schema carries deterministic preflight outcomes, and the replication
+schema carries independent-site dispositions while preserving null and contradictory results.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.

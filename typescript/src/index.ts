@@ -132,10 +132,12 @@ export {
   RESEARCH_INGESTION_FEATURE_ID,
   EXPERIMENT_DESIGN_FEATURE_ID,
   PROTOCOL_SIMULATION_FEATURE_ID,
+  REPLICATION_FEATURE_ID,
   researchArtifactDigest,
   researchIngestionBundleDigest,
   experimentDesignPlanDigest,
   protocolSimulationReportDigest,
+  replicationReportDigest,
   releaseReviewDigest,
   validateEvidenceReceipt,
   validatePolicyReceipt,
@@ -143,8 +145,9 @@ export {
   validateResearchIngestionBundle,
   validateExperimentDesignPlan,
   validateProtocolSimulationReport,
+  validateReplicationReport,
 } from "./research-contracts.js";
-export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport } from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport } from "./research-contracts.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,

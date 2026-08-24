@@ -18,6 +18,7 @@ RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01"
 RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01"
 EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01"
 PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01"
+REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01"
 
 
 class ResearchContractError(ValueError):
@@ -217,6 +218,42 @@ class ProtocolSimulationReport:
         digest = self.artifact.get("content_hash")
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ResearchContractError("protocol simulation artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})
+
+
+@dataclass(frozen=True)
+class ReplicationReport:
+    """Transport validator for a replication disposition and negative-result ledger."""
+
+    payload: Mapping[str, Any]
+    artifact: Mapping[str, Any]
+
+    def validate(self) -> None:
+        if self.payload.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.payload.get("feature_id") != REPLICATION_FEATURE_ID:
+            raise ResearchContractError("replication feature mismatch")
+        if self.payload.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        summary = self.payload.get("summary")
+        if not isinstance(summary, Mapping) or int(summary.get("total_observations", 0)) <= 0:
+            raise ResearchContractError("replication summary is incomplete")
+        if summary.get("disposition") not in {
+            "replicated",
+            "partially_replicated",
+            "contradicted",
+            "null_result",
+            "insufficient_evidence",
+        }:
+            raise ResearchContractError("replication disposition is unknown")
+        if not isinstance(summary.get("reasons"), list) or not summary["reasons"]:
+            raise ResearchContractError("replication reasons are required")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("replication artifact digest is invalid")
 
     def digest(self) -> str:
         self.validate()

@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -90,6 +90,24 @@ def test_protocol_simulation_report_preserves_fail_closed_statuses():
             "results": [{"scenario_id": "partition", "status": "requires_approval"}],
         },
         artifact={"content_hash": "d" * 64},
+    )
+    report.validate()
+    assert report.digest() == report.digest()
+
+
+def test_replication_report_preserves_null_and_contradiction_dispositions():
+    report = ReplicationReport(
+        payload={
+            "schema_version": "aurora-research-contract/1.0",
+            "feature_id": REPLICATION_FEATURE_ID,
+            "boundary": PRECLINICAL_BOUNDARY,
+            "summary": {
+                "disposition": "null_result",
+                "total_observations": 2,
+                "reasons": ["null result retained as evidence"],
+            },
+        },
+        artifact={"content_hash": "e" * 64},
     )
     report.validate()
     assert report.digest() == report.digest()

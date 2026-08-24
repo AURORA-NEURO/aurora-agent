@@ -20,6 +20,8 @@ from .research_contracts import (
     ExperimentDesignPlan,
     PROTOCOL_SIMULATION_FEATURE_ID,
     ProtocolSimulationReport,
+    REPLICATION_FEATURE_ID,
+    ReplicationReport,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

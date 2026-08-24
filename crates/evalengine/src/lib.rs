@@ -43,6 +43,7 @@ pub mod error;
 pub mod ladder;
 pub mod posterior;
 pub mod research_release;
+pub mod replication;
 pub mod score;
 
 pub use bridge::{contribution_from_verdict, digest, Provenance};
@@ -62,6 +63,11 @@ pub use posterior::{
 };
 pub use research_release::{
     review_release, AdversarialCheck, ReleaseReview, ReleaseReviewPolicy, ReplicationEvidence,
+};
+pub use replication::{
+    evaluate_replication, manifest as replication_manifest, ReplicationDisposition,
+    ReplicationError, ReplicationObservation, ReplicationOutcome, ReplicationPolicy,
+    ReplicationReport, ReplicationRequest, ReplicationSummary,
 };
 pub use score::{
     credit_for, Conclusion, Constraint, Credit, CreditBasis, CreditPolicy, Justification, Outcome,

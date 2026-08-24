@@ -13,6 +13,7 @@ export const RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01" as const;
 export const RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01" as const;
 export const EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01" as const;
 export const PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01" as const;
+export const REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -137,6 +138,31 @@ export function validateProtocolSimulationReport(report: ProtocolSimulationRepor
 
 export function protocolSimulationReportDigest(report: ProtocolSimulationReport): string {
   validateProtocolSimulationReport(report);
+  return digestJsonSync(report);
+}
+
+export interface ReplicationReport {
+  payload: Record<string, unknown> & {
+    summary: {
+      disposition: "replicated" | "partially_replicated" | "contradicted" | "null_result" | "insufficient_evidence";
+      total_observations: number;
+      reasons: readonly string[];
+    };
+  };
+  artifact: Record<string, unknown>;
+}
+
+export function validateReplicationReport(report: ReplicationReport): void {
+  if (report.payload.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (report.payload.feature_id !== REPLICATION_FEATURE_ID) throw new Error("replication feature mismatch");
+  if (report.payload.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (report.payload.summary.total_observations <= 0 || report.payload.summary.reasons.length === 0) throw new Error("replication summary is incomplete");
+  if (!["replicated", "partially_replicated", "contradicted", "null_result", "insufficient_evidence"].includes(report.payload.summary.disposition)) throw new Error("replication disposition is unknown");
+  if (typeof report.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(report.artifact.content_hash)) throw new Error("replication artifact digest is invalid");
+}
+
+export function replicationReportDigest(report: ReplicationReport): string {
+  validateReplicationReport(report);
   return digestJsonSync(report);
 }
 
