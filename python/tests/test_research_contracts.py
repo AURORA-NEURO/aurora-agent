@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EvidenceReceipt, PolicyReceipt, ReleaseReview, ResearchContractError, research_artifact_digest
+from prism_sdk.research_contracts import EvidenceReceipt, PolicyReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -50,3 +50,17 @@ def test_release_review_digest_is_stable():
         reasons=("replication floor unmet",),
     )
     assert review.digest() == review.digest()
+
+
+def test_research_ingestion_bundle_keeps_raw_data_local():
+    bundle = ResearchIngestionBundle(
+        source_id="study-a",
+        adapter="tabular",
+        adapter_version="0.1.0",
+        source_digest="a" * 64,
+        ingestion_digest="b" * 64,
+        artifact={"content_hash": "b" * 64},
+        conformance={"verified": True},
+    )
+    bundle.validate()
+    assert bundle.digest() == bundle.digest()

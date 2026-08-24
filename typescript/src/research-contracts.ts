@@ -10,6 +10,7 @@ export const RESEARCH_CONTRACT_SCHEMA_VERSION = "aurora-research-contract/1.0" a
 export const PRECLINICAL_BOUNDARY = "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" as const;
 export const RESEARCH_FEATURE_ID = "AFA-bioir-P02-F01" as const;
 export const RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01" as const;
+export const RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -69,6 +70,36 @@ export function validateReleaseReview(review: ReleaseReview): void {
 export function releaseReviewDigest(review: ReleaseReview): string {
   validateReleaseReview(review);
   return digestJsonSync(review);
+}
+
+export interface ResearchIngestionBundle {
+  schema_version: string;
+  feature_id: string;
+  source_id: string;
+  adapter: string;
+  adapter_version: string;
+  source_digest: string;
+  ingestion_digest: string;
+  artifact: Record<string, unknown>;
+  conformance: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateResearchIngestionBundle(bundle: ResearchIngestionBundle): void {
+  if (bundle.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (bundle.feature_id !== RESEARCH_INGESTION_FEATURE_ID || !bundle.source_id.trim()) throw new Error("research ingestion feature or source is missing");
+  if (bundle.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  for (const digest of [bundle.source_digest, bundle.ingestion_digest, bundle.artifact.content_hash]) {
+    if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) throw new Error("research ingestion digest is not a canonical sha256");
+  }
+  if (!bundle.raw_data_local) throw new Error("raw research data must remain local");
+  if (bundle.conformance.verified !== true) throw new Error("research ingestion is not conformance verified");
+}
+
+export function researchIngestionBundleDigest(bundle: ResearchIngestionBundle): string {
+  validateResearchIngestionBundle(bundle);
+  return digestJsonSync(bundle);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {

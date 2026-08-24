@@ -5,6 +5,8 @@ These JSON Schemas describe the public, versioned envelopes implemented by
 omissions, uncertainty, provenance and policy receipts remain mandatory parts of the wire model.
 The release-review schema additionally makes a passing production verdict impossible without
 complete provenance.
+The research-ingestion schema binds source and normalized-ingest digests to a
+conformance-verified artifact while requiring `raw_data_local: true`.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.

@@ -8,6 +8,9 @@ import {
   RELEASE_REVIEW_FEATURE_ID,
   releaseReviewDigest,
   validateReleaseReview,
+  RESEARCH_INGESTION_FEATURE_ID,
+  researchIngestionBundleDigest,
+  validateResearchIngestionBundle,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -70,4 +73,22 @@ test("release review digest is deterministic", () => {
     boundary: PRECLINICAL_BOUNDARY,
   };
   assert.equal(releaseReviewDigest(review), releaseReviewDigest(review));
+});
+
+test("research ingestion bundle keeps raw data local", () => {
+  const bundle = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: RESEARCH_INGESTION_FEATURE_ID,
+    source_id: "study-a",
+    adapter: "tabular",
+    adapter_version: "0.1.0",
+    source_digest: "a".repeat(64),
+    ingestion_digest: "b".repeat(64),
+    artifact: { content_hash: "b".repeat(64) },
+    conformance: { verified: true },
+    raw_data_local: true,
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateResearchIngestionBundle(bundle));
+  assert.equal(researchIngestionBundleDigest(bundle), researchIngestionBundleDigest(bundle));
 });

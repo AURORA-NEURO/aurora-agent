@@ -88,6 +88,7 @@ pub mod inventory;
 pub mod location;
 pub mod loss;
 pub mod probe;
+pub mod research_ingest;
 pub mod registry;
 pub mod source;
 pub mod tabular;
@@ -102,6 +103,9 @@ pub use inventory::{InventoryAdapter, InventoryProfile};
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
 pub use probe::{field_inventory, Inventory};
+pub use research_ingest::{
+    certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
+};
 pub use registry::{
     AdapterDescriptor, AdapterExecution, AdapterPlan, AdapterPlanCandidate, AdapterPlanRequest,
     AdapterRegistry, PlanStatus, RegistryError, SourceKind, ADAPTER_REGISTRY_SCHEMA_VERSION,

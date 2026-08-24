@@ -15,6 +15,7 @@ RESEARCH_CONTRACT_SCHEMA_VERSION = "aurora-research-contract/1.0"
 PRECLINICAL_BOUNDARY = "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
 RESEARCH_FEATURE_ID = "AFA-bioir-P02-F01"
 RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01"
+RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01"
 
 
 class ResearchContractError(ValueError):
@@ -114,5 +115,51 @@ class ReleaseReview:
             "replications": list(self.replications),
             "checks": list(self.checks),
             "provenance_complete": self.provenance_complete,
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class ResearchIngestionBundle:
+    """Portable QC certificate; raw source bytes stay institution-local."""
+
+    source_id: str
+    adapter: str
+    adapter_version: str
+    source_digest: str
+    ingestion_digest: str
+    artifact: Mapping[str, Any]
+    conformance: Mapping[str, Any]
+    raw_data_local: bool = True
+    feature_id: str = RESEARCH_INGESTION_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.boundary != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research contract schema or boundary mismatch")
+        if self.feature_id != RESEARCH_INGESTION_FEATURE_ID or not self.source_id.strip():
+            raise ResearchContractError("research ingestion feature or source is missing")
+        for digest in (self.source_digest, self.ingestion_digest, self.artifact.get("content_hash")):
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("research ingestion digest is not a canonical sha256")
+        if not self.raw_data_local:
+            raise ResearchContractError("raw research data must remain local")
+        if not self.conformance.get("verified", False):
+            raise ResearchContractError("research ingestion is not conformance verified")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "source_id": self.source_id,
+            "adapter": self.adapter,
+            "adapter_version": self.adapter_version,
+            "source_digest": self.source_digest,
+            "ingestion_digest": self.ingestion_digest,
+            "artifact": dict(self.artifact),
+            "conformance": dict(self.conformance),
+            "raw_data_local": self.raw_data_local,
             "boundary": self.boundary,
         })
