@@ -24,6 +24,11 @@ from prism_sdk.autonomous_goal_scheduler import (
     validate_goal_schedule,
 )
 from prism_sdk.autonomous_goal_worker import AutonomousGoalWorker
+from prism_sdk.autonomous_goal_worker_journal import (
+    AutonomousGoalWorkerJournal,
+    JsonAutonomousGoalWorkerJournalPersistence,
+    AutonomousGoalWorkerJournalPersistenceCoordinator,
+)
 
 
 def _digest(value: str) -> str:
@@ -181,6 +186,71 @@ def test_goal_worker_converts_executor_failure_into_redacted_retry_state() -> No
     assert "private provider response" not in json.dumps(batch.to_dict())
     assert ledger.get("failure").status == "failed"
     assert ledger.get("failure").next_action_digest == _digest("goal-retry")
+
+
+def test_goal_worker_journal_reconciles_pre_and_post_dispatch_restarts_without_replay() -> None:
+    ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=2)
+    ledger.create(goal_id="pre", task_digest=_digest("pre task"), domain="coding", now_ns=0)
+    ledger.create(goal_id="post", task_digest=_digest("post task"), domain="cross_domain", now_ns=0)
+    schedule = schedule_autonomous_goals(
+        ledger.list(limit=2),
+        {"now_ns": 100, "max_selected": 2, "max_concurrent": 2, "required_domains": ["coding", "cross_domain"]},
+    )
+    claims = claim_autonomous_goals(ledger, schedule, now_ns=100)
+    journal = AutonomousGoalWorkerJournal(clock=lambda: 101)
+    for claim in claims.claims:
+        current = ledger.get(claim.goal_id)
+        journal.record(
+            batch_id="restart-batch",
+            goal_id=claim.goal_id,
+            phase="claimed",
+            attempt=current.attempt,
+            revision=current.revision,
+            schedule_digest=schedule.schedule_digest,
+            claim_digest=claims.claim_digest,
+        )
+    post = ledger.get("post")
+    journal.record(
+        batch_id="restart-batch",
+        goal_id="post",
+        phase="dispatch_started",
+        attempt=post.attempt,
+        revision=post.revision,
+        schedule_digest=schedule.schedule_digest,
+        claim_digest=claims.claim_digest,
+    )
+    recovery = journal.recover(ledger, now_ns=200)
+    assert {row["goal_id"] for row in recovery["recovered"]} == {"pre", "post"}
+    assert ledger.get("pre").status == "paused"
+    assert ledger.get("pre").next_action_digest == _digest("goal-retry")
+    assert ledger.get("post").status == "blocked"
+    assert ledger.get("post").next_action_digest == _digest("goal-reconciliation-review")
+    assert journal.active() == ()
+    snapshot = journal.snapshot()
+    restored = AutonomousGoalWorkerJournal(clock=lambda: 300)
+    assert restored.restore(snapshot)["head_digest"] == snapshot["head_digest"]
+    tampered = json.loads(json.dumps(snapshot))
+    tampered["events"][0]["event_digest"] = "0" * 64
+    with pytest.raises(AutonomousGoalError, match="digest"):
+        restored.restore(tampered)
+
+    class _Store:
+        def __init__(self):
+            self.value = None
+
+        def read(self):
+            return self.value
+
+        def write(self, value):
+            self.value = value
+
+    store = _Store()
+    coordinator = AutonomousGoalWorkerJournalPersistenceCoordinator(
+        journal,
+        JsonAutonomousGoalWorkerJournalPersistence(store),
+    )
+    flushed = coordinator.flush()
+    assert coordinator.restore()["snapshot_digest"] == flushed["snapshot_digest"]
 
 
 class _CasTextStore:

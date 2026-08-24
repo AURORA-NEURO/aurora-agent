@@ -177,6 +177,14 @@ updates, evaluator digests, and retry-safe failure state. Rehydrated task text a
 remain transient; `AutonomousGoalWorkerBatch.to_dict()` contains only the schedule, claim, outcome
 digests, bounded error classes, and aggregate counts. The worker supports all twelve catalogue
 domains, including `cross_domain`, and its single-attempt digest is portable with TypeScript.
+For process-loss recovery at the executor boundary, pass an `AutonomousGoalWorkerJournal` and a
+stable `batch_id`. Its bounded hash chain records only prepared/claimed/dispatch/settlement
+metadata. `recover()` pauses a claim that died before dispatch so it can be retried, but blocks a
+claim that reached dispatch with `goal-reconciliation-review`; it never replays an uncertain
+provider effect. `JsonAutonomousGoalWorkerJournalPersistence` and
+`AutonomousGoalWorkerJournalPersistenceCoordinator` provide canonical caller-owned snapshot
+storage with optional compare-and-swap fencing. Journal snapshots exclude task text, prompts,
+parameters, credentials, and executor results just like the goal ledger.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

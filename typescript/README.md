@@ -1014,6 +1014,22 @@ only evaluator, learning-settlement, and progress digests. Supply a stable `cycl
 caller-owned cycle `stateStore` for restart rehydration. Provider responses, task text, evaluator
 instructions, credentials, and evidence remain transient, and provider approval is still
 required.
+For the lower-level worker boundary, `AutonomousGoalWorker` accepts an
+`AutonomousGoalWorkerJournal` and a bounded `batch_id`:
+
+```typescript
+const journal = new AutonomousGoalWorkerJournal();
+const worker = new AutonomousGoalWorker({ ledger, resolver, executor, journal });
+await worker.run({ batch_id: "goal-batch-42", schedule_options: { max_selected: 8 } });
+```
+
+The journal hash-chains `prepared`, `claimed`, `dispatch_started`, `settled`, `failed`, and
+`reconciled` metadata without retaining tasks, prompts, parameters, credentials, or results. After
+restart, call `journal.restore(snapshot)` before `journal.recover(ledger)`: pre-dispatch claims are
+paused for safe retry, while post-dispatch claims are blocked for explicit reconciliation so an
+uncertain provider effect is never replayed. Use `JsonAutonomousGoalWorkerJournalPersistence`
+and `AutonomousGoalWorkerJournalPersistenceCoordinator` for canonical caller-owned storage and
+optional compare-and-swap fencing.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,

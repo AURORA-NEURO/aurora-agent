@@ -5,6 +5,8 @@ import {
   AutonomousGoalPersistenceCoordinator,
   AutonomousGoalScheduler,
   AutonomousGoalWorker,
+  AutonomousGoalWorkerJournal,
+  AutonomousGoalWorkerJournalPersistenceCoordinator,
   AutonomousAgent,
   AutonomousLearningController,
   AutonomousOnlineLearner,
@@ -12,6 +14,7 @@ import {
   InMemoryAutonomousCycleReplanStateStore,
   InMemoryAutonomousGoalLedger,
   JsonAutonomousGoalPersistence,
+  JsonAutonomousGoalWorkerJournalPersistence,
   LLMRuntime,
   TransactionalJsonAutonomousGoalPersistence,
   WebStorageAutonomousGoalTextStore,
@@ -152,6 +155,55 @@ test("goal worker converts executor failure into redacted retry state", async ()
   assert.equal(JSON.stringify(batch.toJSON()).includes("private provider response"), false);
   assert.equal(ledger.get("failure").status, "failed");
   assert.equal(ledger.get("failure").next_action_digest, goalTaskDigest("goal-retry"));
+});
+
+test("goal worker journals the dispatch boundary and reconciles restart uncertainty", async () => {
+  const workerLedger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
+  workerLedger.create({ goal_id: "journal-worker", task_digest: goalTaskDigest("private journal task"), domain: "coding", now_ns: 0 });
+  const journal = new AutonomousGoalWorkerJournal({ clock: () => 123 });
+  const worker = new AutonomousGoalWorker({
+    ledger: workerLedger,
+    journal,
+    resolver: () => ({ task: "private journal task", parameters: { secret: true } }),
+    executor: async () => ({ status: "completed" }),
+  });
+  await worker.run({ batch_id: "batch-success", schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } });
+  assert.deepEqual(journal.events({ goal_id: "journal-worker" }).map((event) => event.phase), ["prepared", "claimed", "dispatch_started", "settled"]);
+  assert.equal(JSON.stringify(journal.snapshot()).includes("private journal task"), false);
+
+  const recoveryLedger = new InMemoryAutonomousGoalLedger({ clock: () => 200 });
+  recoveryLedger.create({ goal_id: "pre-dispatch", task_digest: goalTaskDigest("pre task"), domain: "coding", now_ns: 0 });
+  recoveryLedger.create({ goal_id: "post-dispatch", task_digest: goalTaskDigest("post task"), domain: "operations", now_ns: 0 });
+  recoveryLedger.transition("pre-dispatch", "running", { expected_revision: 0, now_ns: 1 });
+  recoveryLedger.transition("post-dispatch", "running", { expected_revision: 0, now_ns: 1 });
+  const recoveredJournal = new AutonomousGoalWorkerJournal({ clock: () => 201 });
+  const scheduleDigest = goalTaskDigest("schedule");
+  const claimDigest = goalTaskDigest("claim");
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "pre-dispatch", phase: "claimed", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "post-dispatch", phase: "claimed", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "post-dispatch", phase: "dispatch_started", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
+  const recovery = recoveredJournal.recover(recoveryLedger, { now_ns: 202 });
+  assert.deepEqual(recovery.recovered.map((item) => item.goal_status), ["paused", "blocked"]);
+  assert.equal(recoveryLedger.get("pre-dispatch").next_action_digest, goalTaskDigest("goal-retry"));
+  assert.equal(recoveryLedger.get("post-dispatch").next_action_digest, goalTaskDigest("goal-reconciliation-review"));
+  assert.deepEqual(recoveredJournal.active(), []);
+
+  const snapshot = recoveredJournal.snapshot();
+  const restored = new AutonomousGoalWorkerJournal();
+  restored.restore(snapshot);
+  assert.equal(restored.head_digest, snapshot.head_digest);
+  const tampered = structuredClone(snapshot);
+  tampered.events[0].goal_id = "tampered";
+  assert.throws(() => restored.restore(tampered), /digest does not match/);
+
+  let encoded = null;
+  const persistence = new JsonAutonomousGoalWorkerJournalPersistence({ read: () => encoded, write: (value) => { encoded = value; } });
+  const coordinator = new AutonomousGoalWorkerJournalPersistenceCoordinator(restored, persistence);
+  await coordinator.flush();
+  const roundTripped = new AutonomousGoalWorkerJournal();
+  await new AutonomousGoalWorkerJournalPersistenceCoordinator(roundTripped, persistence).restore();
+  assert.equal(roundTripped.head_digest, restored.head_digest);
+  assert.equal(JSON.stringify(encoded).includes("private journal task"), false);
 });
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {

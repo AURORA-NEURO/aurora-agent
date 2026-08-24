@@ -22,6 +22,7 @@ from .autonomous_goal_scheduler import (
     AutonomousGoalScheduler,
     AutonomousGoalClaimResult,
 )
+from .autonomous_goal_worker_journal import AutonomousGoalWorkerJournal
 from .goals import (
     GOAL_RETENTION,
     AutonomousGoalError,
@@ -206,6 +207,7 @@ class AutonomousGoalWorker:
         resolver: GoalResolver,
         executor: GoalExecutor,
         scheduler: AutonomousGoalScheduler | None = None,
+        journal: AutonomousGoalWorkerJournal | None = None,
     ) -> None:
         if not isinstance(ledger, AutonomousGoalLedger):
             _fail("ledger must be an AutonomousGoalLedger")
@@ -215,15 +217,21 @@ class AutonomousGoalWorker:
             _fail("executor must be callable")
         if scheduler is not None and not isinstance(scheduler, AutonomousGoalScheduler):
             _fail("scheduler must be an AutonomousGoalScheduler")
+        if journal is not None and not isinstance(journal, AutonomousGoalWorkerJournal):
+            _fail("journal must be an AutonomousGoalWorkerJournal")
         self.ledger = ledger
         self.resolver = resolver
         self.executor = executor
         self.scheduler = scheduler or AutonomousGoalScheduler()
+        self.journal = journal
 
-    def run(self, *, schedule_options: Mapping[str, Any] | None = None) -> AutonomousGoalWorkerBatch:
+    def run(self, *, schedule_options: Mapping[str, Any] | None = None, batch_id: str | None = None) -> AutonomousGoalWorkerBatch:
         if schedule_options is not None and not isinstance(schedule_options, Mapping):
             _fail("schedule_options must be a mapping or None")
         options = {} if schedule_options is None else dict(schedule_options)
+        if self.journal is not None:
+            if not isinstance(batch_id, str) or not batch_id.strip() or "\x00" in batch_id or len(batch_id.encode("utf-8")) > 256:
+                _fail("batch_id is required and bounded when a journal is configured")
         # The ledger intentionally caps one bounded listing at 512 rows.  The scheduler's
         # admission cap is smaller, so this is enough to make one worker pass deterministic.
         goals = self.ledger.list(limit=512)
@@ -252,6 +260,16 @@ class AutonomousGoalWorker:
                 parameters=dict(parameters),
                 schedule_digest=schedule.schedule_digest,
             )
+        if self.journal is not None and batch_id is not None:
+            for request in prepared.values():
+                self.journal.record(
+                    batch_id=batch_id,
+                    goal_id=request.goal.goal_id,
+                    phase="prepared",
+                    attempt=request.goal.attempt,
+                    revision=request.goal.revision,
+                    schedule_digest=schedule.schedule_digest,
+                )
         claim = self.scheduler.claim(
             self.ledger,
             schedule,
@@ -260,6 +278,20 @@ class AutonomousGoalWorker:
         runs: list[AutonomousGoalWorkerRun] = []
         if claim is not None:
             claim_by_id = {item.goal_id: item for item in claim.claims}
+            if self.journal is not None and batch_id is not None:
+                for item in claim.claims:
+                    current = self.ledger.get(item.goal_id)
+                    if current is None:
+                        _fail(f"claimed goal {item.goal_id} disappeared before journaling")
+                    self.journal.record(
+                        batch_id=batch_id,
+                        goal_id=item.goal_id,
+                        phase="claimed",
+                        attempt=current.attempt,
+                        revision=current.revision,
+                        schedule_digest=schedule.schedule_digest,
+                        claim_digest=claim.claim_digest,
+                    )
             for goal_id in schedule.selected_goal_ids:
                 claim_row = claim_by_id[goal_id]
                 request = prepared[goal_id]
@@ -267,10 +299,31 @@ class AutonomousGoalWorker:
                 if current is None or current.status != "running" or current.revision != claim_row.running_revision:
                     _fail(f"claimed goal {goal_id} changed before execution")
                 try:
+                    if self.journal is not None and batch_id is not None:
+                        self.journal.record(
+                            batch_id=batch_id,
+                            goal_id=goal_id,
+                            phase="dispatch_started",
+                            attempt=current.attempt,
+                            revision=current.revision,
+                            schedule_digest=schedule.schedule_digest,
+                            claim_digest=claim.claim_digest,
+                        )
                     live_result = self.executor(request)
                     result_status = _status(live_result)
                     updated = self._settle(current, result_status, live_result)
                     outcome_digest = _digest({"goal_id": goal_id, "attempt": current.attempt, "result_status": result_status})
+                    if self.journal is not None and batch_id is not None:
+                        self.journal.record(
+                            batch_id=batch_id,
+                            goal_id=goal_id,
+                            phase="settled",
+                            attempt=current.attempt,
+                            revision=updated.revision,
+                            schedule_digest=schedule.schedule_digest,
+                            claim_digest=claim.claim_digest,
+                            outcome_digest=outcome_digest,
+                        )
                     runs.append(
                         AutonomousGoalWorkerRun(
                             goal_id=goal_id,
@@ -298,6 +351,18 @@ class AutonomousGoalWorker:
                         )
                     except AutonomousGoalError as transition_error:
                         raise AutonomousGoalError(f"goal {goal_id} failed without a durable failure transition") from transition_error
+                    if self.journal is not None and batch_id is not None:
+                        self.journal.record(
+                            batch_id=batch_id,
+                            goal_id=goal_id,
+                            phase="failed",
+                            attempt=current.attempt,
+                            revision=updated.revision,
+                            schedule_digest=schedule.schedule_digest,
+                            claim_digest=claim.claim_digest,
+                            outcome_digest=outcome_digest,
+                            error_digest=_digest({"error_class": error_class}),
+                        )
                     runs.append(
                         AutonomousGoalWorkerRun(
                             goal_id=goal_id,

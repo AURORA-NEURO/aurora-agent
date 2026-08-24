@@ -2560,6 +2560,23 @@ export type {
   AutonomousGoalWorkerRunStatus,
 } from "./autonomous-goal-worker.js";
 export {
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_EVENT_SCHEMA,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_MAX_EVENTS,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_MAX_SNAPSHOT_BYTES,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_RETENTION,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_SCHEMA,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_SNAPSHOT_SCHEMA,
+  AutonomousGoalWorkerJournal,
+  AutonomousGoalWorkerJournalPersistenceCoordinator,
+  JsonAutonomousGoalWorkerJournalPersistence,
+} from "./autonomous-goal-worker-journal.js";
+export type {
+  AutonomousGoalWorkerEvent,
+  AutonomousGoalWorkerJournalPhase,
+  AutonomousGoalWorkerJournalSnapshot,
+  AutonomousGoalWorkerJournalTextStore,
+} from "./autonomous-goal-worker-journal.js";
+export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,
   AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS,
   AUTONOMOUS_MODEL_HEALTH_MAX_QUERY_LIMIT,

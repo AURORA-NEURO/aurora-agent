@@ -14,6 +14,7 @@ import {
   type AutonomousGoalScheduleRow,
   type AutonomousGoalClaimResult,
 } from "./autonomous-goal-scheduler.js";
+import { AutonomousGoalWorkerJournal } from "./autonomous-goal-worker-journal.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -175,20 +176,24 @@ export class AutonomousGoalWorker {
   readonly resolver: AutonomousGoalResolver;
   readonly executor: AutonomousGoalExecutor;
   readonly scheduler: AutonomousGoalScheduler;
+  readonly journal: AutonomousGoalWorkerJournal | undefined;
 
-  constructor(options: { ledger: InMemoryAutonomousGoalLedger; resolver: AutonomousGoalResolver; executor: AutonomousGoalExecutor; scheduler?: AutonomousGoalScheduler }) {
+  constructor(options: { ledger: InMemoryAutonomousGoalLedger; resolver: AutonomousGoalResolver; executor: AutonomousGoalExecutor; scheduler?: AutonomousGoalScheduler; journal?: AutonomousGoalWorkerJournal }) {
     if (!(options?.ledger instanceof InMemoryAutonomousGoalLedger)) fail("ledger must be an InMemoryAutonomousGoalLedger");
     if (typeof options.resolver !== "function") fail("resolver must be callable");
     if (typeof options.executor !== "function") fail("executor must be callable");
     if (options.scheduler !== undefined && !(options.scheduler instanceof AutonomousGoalScheduler)) fail("scheduler must be an AutonomousGoalScheduler");
+    if (options.journal !== undefined && !(options.journal instanceof AutonomousGoalWorkerJournal)) fail("journal must be an AutonomousGoalWorkerJournal");
     this.ledger = options.ledger;
     this.resolver = options.resolver;
     this.executor = options.executor;
     this.scheduler = options.scheduler ?? new AutonomousGoalScheduler();
+    this.journal = options.journal;
   }
 
-  async run(options: { schedule_options?: Record<string, unknown> } = {}): Promise<AutonomousGoalWorkerBatch> {
+  async run(options: { schedule_options?: Record<string, unknown>; batch_id?: string } = {}): Promise<AutonomousGoalWorkerBatch> {
     if (options.schedule_options !== undefined && !isObject(options.schedule_options)) fail("schedule_options must be an object");
+    if (this.journal !== undefined && (typeof options.batch_id !== "string" || !options.batch_id.trim() || options.batch_id.includes("\u0000") || new TextEncoder().encode(options.batch_id).byteLength > 256)) fail("batch_id is required and bounded when a journal is configured");
     const scheduleOptions = options.schedule_options ?? {};
     // The ledger intentionally caps one bounded listing at 512 rows.  The scheduler's
     // admission cap is smaller, so this is enough to make one worker pass deterministic.
@@ -207,20 +212,32 @@ export class AutonomousGoalWorker {
       if (!isObject(parameters)) fail(`resolver parameters must be an object for goal ${goalId}`);
       prepared.set(goalId, { goal, schedule_row: row, task: task(resolved.task), parameters: structuredClone(parameters), schedule_digest: schedule.schedule_digest });
     }
+    if (this.journal !== undefined && options.batch_id !== undefined) {
+      for (const request of prepared.values()) this.journal.record({ batch_id: options.batch_id, goal_id: request.goal.goal_id, phase: "prepared", attempt: request.goal.attempt, revision: request.goal.revision, schedule_digest: schedule.schedule_digest });
+    }
     const claim = schedule.selected_goal_ids.length === 0 ? null : this.scheduler.claim(this.ledger, schedule, { now_ns: typeof scheduleOptions.now_ns === "number" ? scheduleOptions.now_ns : undefined });
     const runs: LiveGoalWorkerRun[] = [];
     if (claim) {
       const claimById = new Map(claim.claims.map((item) => [item.goal_id, item]));
+      if (this.journal !== undefined && options.batch_id !== undefined) {
+        for (const item of claim.claims) {
+          const current = this.ledger.get(item.goal_id);
+          if (!current) fail(`claimed goal ${item.goal_id} disappeared before journaling`);
+          this.journal.record({ batch_id: options.batch_id, goal_id: item.goal_id, phase: "claimed", attempt: current.attempt, revision: current.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest });
+        }
+      }
       for (const goalId of schedule.selected_goal_ids) {
         const claimRow = claimById.get(goalId)!;
         const request = prepared.get(goalId)!;
         const current = this.ledger.get(goalId);
         if (!current || current.status !== "running" || current.revision !== claimRow.running_revision) fail(`claimed goal ${goalId} changed before execution`);
         try {
+          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "dispatch_started", attempt: current.attempt, revision: current.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest });
           const liveResult = await this.executor(request);
           const resultStatus = status(liveResult);
           const updated = this.settle(current, resultStatus, liveResult);
           const outcomeDigest = digest({ goal_id: goalId, attempt: current.attempt, result_status: resultStatus });
+          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "settled", attempt: current.attempt, revision: updated.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, outcome_digest: outcomeDigest });
           runs.push({ goal_id: goalId, domain: current.domain, attempt: current.attempt, execution_status: updated.status as AutonomousGoalWorkerRunStatus, goal_status: updated.status, outcome_digest: outcomeDigest, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, error_class: null, error_digest: null, live_result: liveResult as any });
         } catch (error) {
           const errorClass = error instanceof Error ? error.constructor.name : "UnknownError";
@@ -233,6 +250,7 @@ export class AutonomousGoalWorker {
             (wrapped as Error & { cause?: unknown }).cause = transitionError;
             throw wrapped;
           }
+          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "failed", attempt: current.attempt, revision: updated.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, outcome_digest: outcomeDigest, error_digest: digest({ error_class: errorClass }) });
           runs.push({ goal_id: goalId, domain: current.domain, attempt: current.attempt, execution_status: "failed", goal_status: updated.status, outcome_digest: outcomeDigest, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, error_class: errorClass, error_digest: digest({ error_class: errorClass }) });
         }
       }

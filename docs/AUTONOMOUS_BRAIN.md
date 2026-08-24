@@ -5165,6 +5165,21 @@ goal policy. The live task, parameters, and executor result exist only on the in
 single-attempt digest, so a worker can hand off a schedule or claim across the two SDKs without
 leaking the protected execution context.
 
+For process-loss recovery at this exact boundary, both SDKs expose
+`AutonomousGoalWorkerJournal`. It appends a bounded SHA-256 chain of `prepared`, `claimed`,
+`dispatch_started`, `settled`, `failed`, and `reconciled` metadata, and the worker accepts a caller-
+supplied `batch_id` to bind those events to one execution pass. The journal never stores the
+rehydrated task, prompt, parameters, credentials, provider/model payload, or executor result. A
+restart must restore the journal snapshot before resuming: a goal whose last event is `claimed`
+is moved to `paused` with a retry action because dispatch is known not to have started, while a
+goal whose last event is `dispatch_started` is moved to `blocked` with
+`goal-reconciliation-review` because the external outcome is uncertain and the provider is never
+silently replayed. `JsonAutonomousGoalWorkerJournalPersistence` validates canonical JSON, and
+`AutonomousGoalWorkerJournalPersistenceCoordinator` adds caller-owned restore/flush and optional
+compare-and-swap fencing. This journal complements, rather than replaces, the goal ledger: the
+ledger remains the authoritative objective state, while the journal explains whether an interrupted
+running claim crossed the irreversible execution boundary.
+
 The Python `AutonomousGoalLedger` now exposes the same portable restart contract as the other
 state boundaries. `snapshot()` exports the sorted current goal projection plus its complete
 hash-chained lifecycle, and `restore()` validates event order, created/transition lifecycle,
