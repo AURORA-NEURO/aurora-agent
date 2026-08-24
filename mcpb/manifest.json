@@ -1,0 +1,56 @@
+{
+  "manifest_version": "0.2",
+  "name": "aurora-agent",
+  "display_name": "AURORA Agent",
+  "version": "0.1.1",
+  "description": "The AURORA Agent (bioprism) MCP server: FIBER decision-context compilation with honest omission accounting, baseline comparison, missions, and 259 evidence-bearing tools.",
+  "long_description": "Compiles a world and query into a Decision Section plus a Context Certificate \u2014 a receipt stating exactly what was omitted and whether it could have changed the decision. Includes the FIBER compiler (compile/refine/explain/verify), equal-engineering baseline comparison, world validation and indexing, mission DAGs with least-authority policies, and capability/operations evidence tools. Bundled with the reference fixtures so it works out of the box; point the AURORA data root at a full aurora-agent checkout for everything else. Research and developer infrastructure: it does not diagnose an individual, recommend treatment, triage care, enroll participants, or claim medical-device functionality.",
+  "author": {
+    "name": "AURORA-NEURO"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AURORA-NEURO/aurora-agent"
+  },
+  "homepage": "https://github.com/AURORA-NEURO/aurora-agent",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mcp",
+    "fiber",
+    "decision-context",
+    "certificates",
+    "missions",
+    "honest-labelling"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/bioprism-mcp.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/bioprism-mcp.exe",
+      "args": [
+        "--root",
+        "${user_config.aurora_root}"
+      ],
+      "env": {}
+    }
+  },
+  "user_config": {
+    "aurora_root": {
+      "type": "directory",
+      "title": "AURORA data root",
+      "description": "Directory the server is confined to (worlds, queries, schemas). The bundled default carries the reference fixtures; point it at a full aurora-agent checkout for the complete tool surface.",
+      "default": "${__dirname}/root",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "win32"
+    ]
+  },
+  "privacy_policies": [
+    "https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md"
+  ],
+  "documentation": "https://github.com/AURORA-NEURO/aurora-agent/blob/main/README.md",
+  "support": "https://github.com/AURORA-NEURO/aurora-agent/issues"
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "aurora-agent",
+  "version": "0.1.0",
+  "description": "The AURORA Agent in one plugin: the bioprism MCP server (259 tools) wired into every session, FIBER decision-context commands (compile / explain / compare / validate / verify), mission preflight, an ops-auditor subagent, and skills for setup, the FIBER workflow, missions, and SDK integration. Requires a built aurora-agent checkout (AURORA_AGENT_ROOT or ~/aurora-agent).",
+  "author": {
+    "name": "AURORA-NEURO"
+  },
+  "homepage": "https://github.com/AURORA-NEURO/aurora-agent",
+  "license": "Apache-2.0",
+  "keywords": ["aurora", "bioprism", "mcp", "fiber", "decision-context", "missions", "operations"]
+}

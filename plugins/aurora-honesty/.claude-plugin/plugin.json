@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "aurora-honesty",
+  "version": "0.1.0",
+  "description": "The honest-labelling engineering discipline from the AURORA Agent workspace, packaged for any codebase: never collapse an error into a benign default, make invariants unrepresentable, prove your scanners fire, and recognise Windows test-runner lies.",
+  "author": {
+    "name": "AURORA-NEURO"
+  },
+  "homepage": "https://github.com/AURORA-NEURO/aurora-agent",
+  "license": "Apache-2.0",
+  "keywords": ["honesty", "code-review", "rust", "testing", "invariants"]
+}

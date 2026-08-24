@@ -131,7 +131,9 @@ compiled context without linking the engine that produced it.
 ### Skills
 
 `.agents/skills/` holds what agents working here have had to relearn. Read the relevant one before
-starting, not after.
+starting, not after. Several are also distributed as Claude Code plugins — this repo is a plugin
+marketplace (`.claude-plugin/marketplace.json`; see `plugins/README.md`); after editing a mirrored
+skill run `python tools/sync_plugin_skills.py`.
 
 | Skill | For |
 |---|---|

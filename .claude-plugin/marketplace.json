@@ -1,0 +1,39 @@
+{
+  "name": "aurora",
+  "owner": {
+    "name": "AURORA-NEURO"
+  },
+  "metadata": {
+    "description": "The AURORA Agent (bioprism) plugin marketplace. Install aurora-agent for the full backend — the FIBER decision-context compiler, 259 MCP tools, missions, and operations evidence — plus optional discipline and workspace skill packs.",
+    "version": "0.2.0"
+  },
+  "plugins": [
+    {
+      "name": "aurora-agent",
+      "source": "./plugins/aurora-agent",
+      "description": "THE plugin: bioprism MCP server (259 tools), FIBER compile/explain/compare/validate/verify commands, mission preflight, ops-auditor subagent, and setup/workflow/SDK skills. Requires a built aurora-agent checkout.",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["mcp", "fiber", "decision-context", "missions", "operations"],
+      "category": "integration"
+    },
+    {
+      "name": "aurora-honesty",
+      "source": "./plugins/aurora-honesty",
+      "description": "Optional: the honest-labelling discipline for any codebase (honest-labelling creed, keep-a-claim-honest, prove-a-scanner-fires, windows-test-truth).",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["honesty", "review", "testing"],
+      "category": "discipline"
+    },
+    {
+      "name": "aurora-workspace",
+      "source": "./plugins/aurora-workspace",
+      "description": "Optional: engineering skills for working inside the aurora-agent repo itself (add-module, check-parity, verify-crate, classify-blueprint-modules, measure-section-boilerplate).",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["workspace", "rust"],
+      "category": "workspace"
+    }
+  ]
+}
