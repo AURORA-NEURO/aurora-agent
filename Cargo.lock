@@ -164,6 +164,7 @@ dependencies = [
 name = "bioprism-bioir"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-world",
@@ -848,6 +849,7 @@ dependencies = [
 name = "bioprism-runtime"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-world",
@@ -914,7 +916,12 @@ dependencies = [
 name = "bioprism-services"
 version = "0.1.0"
 dependencies = [
+ "bioprism-bioir",
+ "bioprism-foundation",
  "bioprism-governance",
+ "bioprism-ids",
+ "bioprism-runtime",
+ "bioprism-scope",
  "serde",
  "serde_json",
  "thiserror",

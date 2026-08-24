@@ -125,6 +125,15 @@ export {
 export type { AutonomousTaskDecision } from "./autonomous-task-decision.js";
 export { parseSse } from "./sse.js";
 export {
+  PRECLINICAL_BOUNDARY,
+  RESEARCH_CONTRACT_SCHEMA_VERSION,
+  RESEARCH_FEATURE_ID,
+  researchArtifactDigest,
+  validateEvidenceReceipt,
+  validatePolicyReceipt,
+} from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt } from "./research-contracts.js";
+export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,
   LLM_RUNTIME_SCHEMA,

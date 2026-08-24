@@ -6,10 +6,15 @@
 //! engine or learning a new SDK.
 
 mod brain_control;
+pub mod research_contracts;
 pub mod rpc;
 pub mod server;
 
 pub use rpc::{Request, Response};
+pub use research_contracts::{
+    validate_evidence_receipt_json, validate_policy_receipt_json, RESEARCH_COMPILE_TOOL,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
+};
 pub use server::{
     resource_definitions, tool_definitions, workspace_capabilities, Lifecycle, Server,
     ADAPTIVE_QUERY_SCHEMA_URI, CAPABILITIES_URI, CERTIFICATE_SCHEMA_URI,

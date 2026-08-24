@@ -49,6 +49,7 @@ pub mod error;
 pub mod evidence;
 pub mod ids;
 pub mod invariants;
+pub mod knowledge;
 pub mod lens;
 pub mod lineage;
 pub mod quantity;
@@ -81,4 +82,9 @@ pub use lineage::{
 pub use uncertainty::{
     AdjudicationRecord, CalibrationBin, CalibrationCurve, Representation, ReviewerAssessment,
     ReviewerDistribution, UncertaintyBudget, UncertaintyComponent, UncertaintyKind,
+};
+
+pub use knowledge::{
+    EvidenceReferenceView, EvidenceSynthesis, KnowledgeCompiler, KnowledgeError,
+    ScopedRetrievalQuery, FEATURE_CONTRACT_VERSION, FEATURE_ID,
 };

@@ -9,6 +9,11 @@ description = "Build-ready service contracts: request/response shapes, error tax
 
 [dependencies]
 bioprism-governance = { workspace = true }
+bioprism-bioir = { workspace = true }
+bioprism-foundation = { workspace = true }
+bioprism-ids = { workspace = true }
+bioprism-runtime = { workspace = true }
+bioprism-scope = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

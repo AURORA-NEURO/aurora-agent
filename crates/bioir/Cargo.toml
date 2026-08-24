@@ -11,6 +11,7 @@ description = "Biological IR: BioWorld, specimen lineage, AssayLens, cohort and 
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-world = { workspace = true }
+bioprism-foundation = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

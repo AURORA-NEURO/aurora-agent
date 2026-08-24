@@ -1,0 +1,12 @@
+# AURORA research-contract/1.0
+
+These JSON Schemas describe the public, versioned envelopes implemented by
+`bioprism-foundation`. They are transport schemas, not scientific truth schemas: evidence state,
+omissions, uncertainty, provenance and policy receipts remain mandatory parts of the wire model.
+
+The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
+treatment, triage, enrollment and clinical decisions are outside the product.
+
+Rust (`foundation`), Python (`prism_sdk.research_contracts`) and TypeScript
+(`research-contracts.ts`) use the same version string and field names. Consumers must preserve
+unknown fields when forwarding a newer minor version and reject an unknown major version.

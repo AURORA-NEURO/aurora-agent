@@ -65,6 +65,7 @@ pub mod fork;
 pub mod host;
 pub mod orchestrator;
 pub mod provider;
+pub mod research_run;
 pub mod sandbox;
 pub mod seam;
 pub mod secret;
@@ -91,6 +92,11 @@ pub use orchestrator::{
 pub use provider::{
     Artifact, Capabilities, ContainerProvider, ExecutionPlan, ExecutorProvider, InProcessProvider,
     StateHandle, SubprocessProvider,
+};
+pub use research_run::{
+    ResearchExecutionSession, ResearchReplayBundle, ResearchRuntimeError,
+    FEATURE_CONTRACT_VERSION as RESEARCH_FEATURE_CONTRACT_VERSION,
+    FEATURE_ID as RESEARCH_FEATURE_ID,
 };
 pub use sandbox::{Fault, FileChange, InProcessWorld};
 pub use seam::{Clock, ExternalActions, Network, Randomness, Sandbox};

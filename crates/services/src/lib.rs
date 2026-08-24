@@ -117,6 +117,7 @@ pub mod contract;
 pub mod error;
 pub mod graph;
 pub mod implementations;
+pub mod research;
 pub mod topology;
 pub mod workspace;
 
@@ -130,6 +131,7 @@ pub use graph::{
     Call, Concern, Disclaimer, Domain, EdgeKind, GraphError, Ownership, ServiceGraph, ServiceId,
     ServiceNode,
 };
+pub use research::{EvidenceWorkflowResult, ResearchServiceError, ResearchWorkflowService};
 pub use topology::{Deployment, Placement, Topology, TopologyError};
 
 /// The measured share of these nine §40 modules that is template rather than content.

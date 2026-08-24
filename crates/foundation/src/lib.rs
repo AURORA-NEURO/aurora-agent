@@ -72,9 +72,22 @@ pub mod ledger;
 pub mod lens;
 pub mod maturity;
 pub mod reference;
+pub mod research;
 pub mod spine;
 pub mod stack;
 pub mod system;
 pub mod unit;
 pub mod worldclass;
 pub mod worldline;
+
+pub use error::ResearchContractError;
+pub use research::{
+    ApprovalRequirement, AutonomyGrant, AutonomyTier, CapabilityManifest, Compensation,
+    CompetingExplanation, DecisionImpact, Determinism, Effect, EvaluationCard, EvaluationMetric,
+    EvidenceAvailability, EvidenceReceipt, EvidenceReference, EvidenceSource, EvidenceState,
+    ExecutionCheckpoint, ExecutionEvent, ExecutionRun, ExecutionStatus, FederationEnvelope,
+    LossSeverity, NegativeEvidence, Omission, PolicyDecision, PolicyReceipt, ProvenanceLink,
+    ReleaseVerdict, ResearchSurface, ResearchWorkflowSpec, ResourceBudget, SemanticLoss, TypedPort,
+    TypedResearchArtifact, UncertaintyStatement, WorkflowCheckpoint, WorkflowEdge, WorkflowNode,
+    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+};

@@ -6,6 +6,16 @@ JSON without recreating domain semantics or silently converting refusals into or
 """
 
 from .async_client import AsyncClient
+from .research_contracts import (
+    EvidenceReceipt,
+    PolicyReceipt,
+    ResearchContractError,
+    PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
+    RESEARCH_FEATURE_ID,
+    canonical_json,
+    research_artifact_digest,
+)
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

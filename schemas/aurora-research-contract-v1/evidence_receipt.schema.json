@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/evidence_receipt.schema.json",
+  "title": "AURORA EvidenceReceipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "receipt_id", "intent", "sources", "derivation", "uncertainty", "omissions", "competing_explanations", "negative_evidence", "conclusion_state", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "receipt_id": {"type": "string", "minLength": 1},
+    "intent": {"type": "string", "minLength": 1},
+    "sources": {"type": "array", "items": {"type": "object", "required": ["source_id", "source_type", "locator", "digest", "availability"], "additionalProperties": false, "properties": {"source_id": {"type": "string", "minLength": 1}, "source_type": {"type": "string"}, "locator": {"type": "string"}, "digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}, "availability": {"enum": ["available", "stale", "contradictory", "missing", "protected"]}}}},
+    "derivation": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "uncertainty": {"type": "array", "items": {"type": "object", "required": ["kind", "statement"], "additionalProperties": false, "properties": {"kind": {"type": "string"}, "statement": {"type": "string"}}}},
+    "omissions": {"type": "array", "items": {"type": "object", "required": ["item", "reason", "could_change_decision"], "additionalProperties": false, "properties": {"item": {"type": "string"}, "reason": {"type": "string"}, "could_change_decision": {"enum": ["no_known_impact", "potentially_material", "unknown"]}}}},
+    "competing_explanations": {"type": "array"},
+    "negative_evidence": {"type": "array"},
+    "conclusion_state": {"enum": ["proven", "supported", "speculative", "contradicted", "unknown"]},
+    "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}
