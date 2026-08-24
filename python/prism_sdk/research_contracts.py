@@ -24,6 +24,7 @@ RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01"
 REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01"
 WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10"
 EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01"
+RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02"
 
 
 class ResearchContractError(ValueError):
@@ -485,6 +486,65 @@ class EvaluationCardReceipt:
                 "omissions": list(self.omissions),
                 "reasons": list(self.reasons),
                 "artifact": dict(self.artifact),
+                "boundary": self.boundary,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class ResearchReleaseReceipt:
+    """Transport validator for signed, local-first research-object publication."""
+
+    release_id: str
+    research_object: Mapping[str, Any]
+    release_digest: str
+    omissions: tuple[str, ...]
+    reasons: tuple[str, ...]
+    feature_id: str = RESEARCH_RELEASE_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != RESEARCH_RELEASE_FEATURE_ID:
+            raise ResearchContractError("research-release feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.release_id.strip():
+            raise ResearchContractError("research release identity or boundary is invalid")
+        if self.research_object.get("release_id") != self.release_id:
+            raise ResearchContractError("research object release identity does not match receipt")
+        artifact_ids = self.research_object.get("artifact_ids")
+        evidence_ids = self.research_object.get("evidence_receipt_ids")
+        if not isinstance(artifact_ids, list) or not artifact_ids or len(set(artifact_ids)) != len(artifact_ids):
+            raise ResearchContractError("research object artifact ids are incomplete or duplicated")
+        if not isinstance(evidence_ids, list) or not evidence_ids or len(set(evidence_ids)) != len(evidence_ids):
+            raise ResearchContractError("research object evidence ids are incomplete or duplicated")
+        federation = self.research_object.get("federation")
+        envelope = federation.get("envelope") if isinstance(federation, Mapping) else None
+        if not isinstance(envelope, Mapping) or envelope.get("raw_data_local") is not True:
+            raise ResearchContractError("research release must keep raw data local")
+        if not envelope.get("signature") or not envelope.get("localization_statement"):
+            raise ResearchContractError("research release signature and localization are required")
+        export = envelope.get("export")
+        if not isinstance(export, Mapping) or not export.get("provenance"):
+            raise ResearchContractError("research release provenance is incomplete")
+        if not self.reasons:
+            raise ResearchContractError("research release reasons are required")
+        for digest in (self.release_digest, export.get("content_hash")):
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("research release digest is not a canonical sha256")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest(
+            {
+                "schema_version": self.schema_version,
+                "feature_id": self.feature_id,
+                "release_id": self.release_id,
+                "research_object": dict(self.research_object),
+                "release_digest": self.release_digest,
+                "omissions": list(self.omissions),
+                "reasons": list(self.reasons),
                 "boundary": self.boundary,
             }
         )

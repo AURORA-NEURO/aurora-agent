@@ -12,12 +12,14 @@ use bioprism_evalengine::{
     compile_evaluation_card, EvaluationCardReceipt, EvaluationCardRequest,
     EVALUATION_OBSERVABILITY_FEATURE_ID,
 };
+use bioprism_services::{ResearchReleaseReceipt, RESEARCH_RELEASE_FEATURE_ID};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
 pub const RESEARCH_COMPILE_TOOL: &str = "aurora_research_compile_evidence";
 pub const WORKFLOW_EXECUTION_TOOL: &str = "runtime_workflow_execute";
 pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
+pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -71,6 +73,18 @@ pub fn validate_evaluation_card_receipt_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != EVALUATION_OBSERVABILITY_FEATURE_ID {
         return Err("evaluation-observability feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn validate_research_release_receipt_json(
+    value: &Value,
+) -> Result<ResearchReleaseReceipt, String> {
+    let receipt: ResearchReleaseReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid research-release receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RESEARCH_RELEASE_FEATURE_ID {
+        return Err("research-release feature id mismatch".into());
     }
     Ok(receipt)
 }

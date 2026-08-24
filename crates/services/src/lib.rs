@@ -119,6 +119,7 @@ pub mod federation;
 pub mod graph;
 pub mod implementations;
 pub mod research;
+pub mod research_release;
 pub mod topology;
 pub mod workspace;
 
@@ -128,12 +129,20 @@ pub use contract::{
     ContractChange, ContractId, Delivery, Effect, Idempotency, ServiceContract, VERSION_FIELD,
 };
 pub use error::{ErrorClass, FailureMode, Invalidates, Retryability, ServiceFault, ServicesError};
+pub use federation::{
+    verify_signed_federation, FederationError, FederationSigner, SignedFederationArtifact,
+};
 pub use graph::{
     Call, Concern, Disclaimer, Domain, EdgeKind, GraphError, Ownership, ServiceGraph, ServiceId,
     ServiceNode,
 };
 pub use research::{EvidenceWorkflowResult, ResearchServiceError, ResearchWorkflowService};
-pub use federation::{verify_signed_federation, FederationError, FederationSigner, SignedFederationArtifact};
+pub use research_release::{
+    build_research_release, research_release_manifest, verify_research_release,
+    ResearchReleaseError, ResearchReleaseReceipt, ResearchReleaseRequest, SignedResearchObject,
+    FEATURE_CONTRACT_VERSION as RESEARCH_RELEASE_FEATURE_VERSION,
+    FEATURE_ID as RESEARCH_RELEASE_FEATURE_ID,
+};
 pub use topology::{Deployment, Placement, Topology, TopologyError};
 
 /// The measured share of these nine §40 modules that is template rather than content.

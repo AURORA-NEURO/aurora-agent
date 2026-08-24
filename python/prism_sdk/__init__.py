@@ -32,6 +32,8 @@ from .research_contracts import (
     WorkflowExecutionReceipt,
     EVALUATION_OBSERVABILITY_FEATURE_ID,
     EvaluationCardReceipt,
+    RESEARCH_RELEASE_FEATURE_ID,
+    ResearchReleaseReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

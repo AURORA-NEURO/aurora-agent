@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/research-release-receipt.json",
+  "title": "AURORA signed research-release receipt",
+  "description": "Portable content-addressed research-object metadata with explicit policy, provenance, omissions, and local-data localization.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "release_id", "research_object", "release_digest", "omissions", "reasons", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-services-P16-F02" },
+    "release_id": { "type": "string", "minLength": 1 },
+    "research_object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_id", "federation", "artifact_ids", "evidence_receipt_ids", "boundary"],
+      "properties": {
+        "release_id": { "type": "string", "minLength": 1 },
+        "artifact_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "evidence_receipt_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "federation": {
+          "type": "object",
+          "required": ["envelope", "payload"],
+          "properties": {
+            "envelope": {
+              "type": "object",
+              "required": ["export", "localization_statement", "raw_data_local", "signature", "boundary"],
+              "properties": {
+                "export": { "type": "object", "required": ["content_hash", "provenance"] },
+                "localization_statement": { "type": "string", "minLength": 1 },
+                "raw_data_local": { "const": true },
+                "signature": { "type": "string", "minLength": 1 },
+                "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+              }
+            },
+            "payload": { "type": "object" }
+          }
+        },
+        "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+      }
+    },
+    "release_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "omissions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

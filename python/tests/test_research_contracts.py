@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -204,4 +204,30 @@ def test_evaluation_card_receipt_keeps_baseline_omissions_explicit():
     )
     receipt.validate()
     assert receipt.feature_id == EVALUATION_OBSERVABILITY_FEATURE_ID
+    assert receipt.digest() == receipt.digest()
+
+
+def test_research_release_receipt_preserves_localization_and_provenance():
+    receipt = ResearchReleaseReceipt(
+        release_id="release-1",
+        research_object={
+            "release_id": "release-1",
+            "artifact_ids": ["artifact:one"],
+            "evidence_receipt_ids": ["evidence:one"],
+            "boundary": PRECLINICAL_BOUNDARY,
+            "federation": {
+                "envelope": {
+                    "raw_data_local": True,
+                    "signature": "ed25519:key:signature",
+                    "localization_statement": "raw data remains local",
+                    "export": {"content_hash": "c" * 64, "provenance": [{"source_id": "artifact:one"}]},
+                }
+            },
+        },
+        release_digest="a" * 64,
+        omissions=("evidence:one:missing control",),
+        reasons=("omission retained",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == RESEARCH_RELEASE_FEATURE_ID
     assert receipt.digest() == receipt.digest()

@@ -35,6 +35,9 @@ import {
   EVALUATION_OBSERVABILITY_FEATURE_ID,
   evaluationCardReceiptDigest,
   validateEvaluationCardReceipt,
+  RESEARCH_RELEASE_FEATURE_ID,
+  researchReleaseReceiptDigest,
+  validateResearchReleaseReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -256,4 +259,32 @@ test("evaluation-card receipt keeps baseline omissions explicit", () => {
   };
   assert.doesNotThrow(() => validateEvaluationCardReceipt(receipt));
   assert.equal(evaluationCardReceiptDigest(receipt), evaluationCardReceiptDigest(receipt));
+});
+
+test("research-release receipt preserves localization and provenance", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: RESEARCH_RELEASE_FEATURE_ID,
+    release_id: "release-1",
+    research_object: {
+      release_id: "release-1",
+      artifact_ids: ["artifact:one"],
+      evidence_receipt_ids: ["evidence:one"],
+      boundary: PRECLINICAL_BOUNDARY,
+      federation: {
+        envelope: {
+          raw_data_local: true,
+          signature: "ed25519:key:signature",
+          localization_statement: "raw data remains local",
+          export: { content_hash: "c".repeat(64), provenance: [{ source_id: "artifact:one" }] },
+        },
+      },
+    },
+    release_digest: "a".repeat(64),
+    omissions: ["evidence:one:missing control"],
+    reasons: ["omission retained"],
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateResearchReleaseReceipt(receipt));
+  assert.equal(researchReleaseReceiptDigest(receipt), researchReleaseReceiptDigest(receipt));
 });

@@ -19,6 +19,7 @@ export const RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01" as const;
 export const REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01" as const;
 export const WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10" as const;
 export const EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01" as const;
+export const RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -319,6 +320,49 @@ export function validateEvaluationCardReceipt(receipt: EvaluationCardReceipt): v
 
 export function evaluationCardReceiptDigest(receipt: EvaluationCardReceipt): string {
   validateEvaluationCardReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface ResearchReleaseReceipt {
+  schema_version: string;
+  feature_id: string;
+  release_id: string;
+  research_object: {
+    release_id: string;
+    artifact_ids: readonly string[];
+    evidence_receipt_ids: readonly string[];
+    boundary: string;
+    federation: {
+      envelope: {
+        raw_data_local: boolean;
+        signature?: string | null;
+        localization_statement: string;
+        export: Record<string, unknown> & { content_hash: string; provenance: readonly Record<string, unknown>[] };
+      };
+    };
+  };
+  release_digest: string;
+  omissions: readonly string[];
+  reasons: readonly string[];
+  boundary: string;
+}
+
+export function validateResearchReleaseReceipt(receipt: ResearchReleaseReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (receipt.feature_id !== RESEARCH_RELEASE_FEATURE_ID || !receipt.release_id.trim()) throw new Error("research-release feature or identity is missing");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || receipt.research_object.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (receipt.research_object.release_id !== receipt.release_id) throw new Error("research object release identity does not match receipt");
+  if (!receipt.research_object.artifact_ids.length || new Set(receipt.research_object.artifact_ids).size !== receipt.research_object.artifact_ids.length) throw new Error("research object artifact ids are incomplete or duplicated");
+  if (!receipt.research_object.evidence_receipt_ids.length || new Set(receipt.research_object.evidence_receipt_ids).size !== receipt.research_object.evidence_receipt_ids.length) throw new Error("research object evidence ids are incomplete or duplicated");
+  const envelope = receipt.research_object.federation.envelope;
+  if (!envelope.raw_data_local || !envelope.signature || !envelope.localization_statement.trim()) throw new Error("research release signature and localization are required");
+  if (!envelope.export.provenance.length) throw new Error("research release provenance is incomplete");
+  if (!receipt.reasons.length) throw new Error("research release reasons are required");
+  if (!/^[0-9a-f]{64}$/.test(receipt.release_digest) || !/^[0-9a-f]{64}$/.test(envelope.export.content_hash)) throw new Error("research release digest is not a canonical sha256");
+}
+
+export function researchReleaseReceiptDigest(receipt: ResearchReleaseReceipt): string {
+  validateResearchReleaseReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

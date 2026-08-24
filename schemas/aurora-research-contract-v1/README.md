@@ -19,6 +19,8 @@ The workflow-execution schema carries deterministic node order, dry-run or succe
 execution identity, budget remainder, and the content-addressed artifact digest.
 The evaluation-card schema carries cost-normalized metrics, Wilson uncertainty, baseline counts,
 explicit omissions, and a measurement-only release verdict.
+The research-release schema carries signed content-addressed publication metadata, provenance,
+policy-bound localization, and explicit omissions while keeping raw data local.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.
