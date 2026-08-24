@@ -1289,3 +1289,20 @@ The adapter rejects secret-shaped response fields and malformed provider output;
 prompt, or provider response is placed in durable evidence state. This closes the Python gap with
 the TypeScript LLM evidence adapter while leaving provider registration, credential onboarding,
 model selection policy, and external network authorization caller-owned.
+
+The next Python increment makes that seam an explicit autonomous decision boundary rather than a
+caller-owned callback convention. `AutonomousLLMEvidenceAdapterRegistry` freezes bounded,
+digest-addressed adapter manifests across all twelve built-in domains; a registry replacement
+invalidates prior selection plans instead of silently redirecting a run.
+`AutonomousLLMEvidenceAdapterSelector` supports deterministic lexicographic selection for
+reproducible operation and weighted adaptive selection from a validated health signal projection.
+`InMemoryAutonomousLLMEvidenceAdapterHealthStore` records a hash-chained acquisition/evaluation
+ledger, derives bounded success-quality-latency signals, and opens failing adapter circuits
+without persisting prompts, provider payloads, credentials, or raw error text. JSON and
+conditional-write coordinators provide restart recovery with compare-and-swap fencing.
+`AutonomousLLMEvidenceAdapterFailoverAcquirer` verifies the selection digest before every run,
+retries only bounded retryable provider failures, fails closed on malformed prompts or credential
+errors, records fallback metadata, and exposes explicit evaluator reward credit for online
+adaptation. The failover adapter implements the existing `acquire`/`project` contract, so it can
+be passed directly to `AutonomousAgent.acquire_evidence`, `run_with_llm_evidence`, or the
+resumable evidence boundary without widening durable state.

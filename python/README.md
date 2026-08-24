@@ -230,6 +230,22 @@ the completed worker batch. The caller still rehydrates task text, model candida
 credentials, tools, memory, and approval policy after each new claim. Checkpoint generations are
 content-addressed and linked to their predecessor; a tampered image, non-contiguous cycle, changed
 run identity, or compare-and-swap conflict fails closed before execution.
+
+For provider-backed evidence that must choose and recover across multiple approved adapters, use
+`AutonomousLLMEvidenceAdapterRegistry` with `AutonomousLLMEvidenceAdapterSelector`. The selector
+returns a digest-bound plan that can be persisted alongside a run;
+`select_adaptive_for_domains` accepts only metadata-only health signals and can promote a
+provider/model route after explicit evaluator credit. `InMemoryAutonomousLLMEvidenceAdapterHealthStore`
+is a hash-chained learning ledger for acquisition outcomes and evaluator rewards, while
+`JsonAutonomousLLMEvidenceAdapterHealthPersistence` and its transactional coordinator provide
+restart-safe conditional persistence. Pass the plan, registry, and
+`AutonomousLLMEvidenceFailoverAcquirer` created by
+`create_autonomous_llm_evidence_adapter_failover_acquirer` to the existing evidence runtime or
+agent façade. Failover is bounded and retries only retryable provider transport failures;
+malformed prompt, argument, and credential failures stop immediately. Health snapshots and
+failover events contain adapter/model manifest digests, statuses, bounded timings, and error
+classes only—never keys, prompts, requests, provider responses, or raw error messages.
+
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.
