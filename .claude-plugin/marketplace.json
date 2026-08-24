@@ -4,41 +4,23 @@
     "name": "AURORA-NEURO"
   },
   "metadata": {
-    "description": "The AURORA Agent (bioprism) plugin marketplace: the FIBER decision-context compiler, 259 MCP tools, mission orchestration, operations evidence, SDK integration, and the honest-labelling engineering discipline — installable from the backend repo itself.",
-    "version": "0.1.0"
+    "description": "The AURORA Agent (bioprism) plugin marketplace. Install aurora-agent for the full backend — the FIBER decision-context compiler, 259 MCP tools, missions, and operations evidence — plus optional discipline and workspace skill packs.",
+    "version": "0.2.0"
   },
   "plugins": [
     {
-      "name": "aurora-backend",
-      "source": "./plugins/aurora-backend",
-      "description": "Wires the bioprism MCP server (259 tools) into Claude Code, with a setup skill. Requires a built aurora-agent checkout.",
+      "name": "aurora-agent",
+      "source": "./plugins/aurora-agent",
+      "description": "THE plugin: bioprism MCP server (259 tools), FIBER compile/explain/compare/validate/verify commands, mission preflight, ops-auditor subagent, and setup/workflow/SDK skills. Requires a built aurora-agent checkout.",
       "version": "0.1.0",
       "license": "Apache-2.0",
-      "keywords": ["mcp", "fiber", "decision-context"],
+      "keywords": ["mcp", "fiber", "decision-context", "missions", "operations"],
       "category": "integration"
-    },
-    {
-      "name": "aurora-context",
-      "source": "./plugins/aurora-context",
-      "description": "FIBER compiler workflow: compile / explain / compare / validate / verify slash commands, the decision-context skill, and a faithfulness eval.",
-      "version": "0.1.0",
-      "license": "Apache-2.0",
-      "keywords": ["fiber", "cli", "certificates"],
-      "category": "workflow"
-    },
-    {
-      "name": "aurora-missions",
-      "source": "./plugins/aurora-missions",
-      "description": "Mission DAG lifecycle: authoring shape, preflight (dispatch: not_started), fail-closed gate acceptance, sync vs async execution.",
-      "version": "0.1.0",
-      "license": "Apache-2.0",
-      "keywords": ["missions", "orchestration", "gates"],
-      "category": "workflow"
     },
     {
       "name": "aurora-honesty",
       "source": "./plugins/aurora-honesty",
-      "description": "The honest-labelling discipline for any codebase: honest-labelling creed, keep-a-claim-honest, prove-a-scanner-fires, windows-test-truth.",
+      "description": "Optional: the honest-labelling discipline for any codebase (honest-labelling creed, keep-a-claim-honest, prove-a-scanner-fires, windows-test-truth).",
       "version": "0.1.0",
       "license": "Apache-2.0",
       "keywords": ["honesty", "review", "testing"],
@@ -47,29 +29,11 @@
     {
       "name": "aurora-workspace",
       "source": "./plugins/aurora-workspace",
-      "description": "Engineering skills for working inside the aurora-agent workspace itself (add-module, check-parity, verify-crate, classify-blueprint-modules, measure-section-boilerplate).",
+      "description": "Optional: engineering skills for working inside the aurora-agent repo itself (add-module, check-parity, verify-crate, classify-blueprint-modules, measure-section-boilerplate).",
       "version": "0.1.0",
       "license": "Apache-2.0",
       "keywords": ["workspace", "rust"],
       "category": "workspace"
-    },
-    {
-      "name": "aurora-integrate",
-      "source": "./plugins/aurora-integrate",
-      "description": "Integration guide: bioprism-api HTTP gateway launch and envelope semantics, the zero-dependency TypeScript and Python SDKs, MCP wiring test harnesses.",
-      "version": "0.1.0",
-      "license": "Apache-2.0",
-      "keywords": ["sdk", "http", "typescript", "python"],
-      "category": "integration"
-    },
-    {
-      "name": "aurora-ops",
-      "source": "./plugins/aurora-ops",
-      "description": "Operations evidence: the ops-auditor subagent and /health command over snapshots, capability gates, and the recovery matrix — postures reported verbatim.",
-      "version": "0.1.0",
-      "license": "Apache-2.0",
-      "keywords": ["operations", "gates", "recovery"],
-      "category": "operations"
     }
   ]
 }
