@@ -1,0 +1,41 @@
+{
+  "name": "aurora-agent-mcp",
+  "version": "0.1.1",
+  "description": "Launcher for the AURORA Agent (bioprism) MCP server: FIBER decision-context compilation with honest omission accounting, baseline comparison, missions, and 259 evidence-bearing tools.",
+  "type": "module",
+  "bin": {
+    "aurora-agent-mcp": "bin/aurora-agent-mcp.mjs"
+  },
+  "files": [
+    "bin/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "win32"
+  ],
+  "license": "Apache-2.0",
+  "author": "AURORA-NEURO",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AURORA-NEURO/aurora-agent.git",
+    "directory": "npm"
+  },
+  "homepage": "https://github.com/AURORA-NEURO/aurora-agent#readme",
+  "bugs": {
+    "url": "https://github.com/AURORA-NEURO/aurora-agent/issues"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "modelcontextprotocol",
+    "fiber",
+    "decision-context",
+    "certificates",
+    "missions",
+    "honest-labelling",
+    "aurora"
+  ],
+  "mcpName": "io.github.MurariAmbati/aurora-agent"
+}
