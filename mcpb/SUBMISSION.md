@@ -14,11 +14,11 @@ release asset, a website link — requires no review or approval from anyone.
 
 ## 1. Official MCP registry — ✅ DONE (published 2026-08-24)
 
-Live listing: `io.github.MurariAmbati/aurora-agent` v0.1.0 (status: active) —
+Live listing: `io.github.MurariAmbati/aurora-agent` v0.1.1 (status: active) —
 verify with `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=aurora-agent"`.
-Public artifact: https://github.com/MurariAmbati/aurora-agent-releases/releases/download/v0.1.0/aurora-agent.mcpb
-(sha256 a572f4aa02ed63608ecd7bd0b95e5fce27c326c79df4b6fea34a24bbe4d4e4f2; the
-public download was re-hashed and matches). Source remains private. Future
+Public artifact: https://github.com/MurariAmbati/aurora-agent-releases/releases/download/v0.1.1/aurora-agent.mcpb
+(sha256 e987c396a01eb2ae812efa8226f6892fc3f70cb441102217476990816458f025; the
+public download was re-hashed and matches). The source is now public. Future
 releases: repack, upload a new release asset, bump version + fileSha256 in
 mcpb/server.json, re-publish (POST /v0.1/auth/github-at with a GitHub token →
 registry JWT → POST /v0.1/publish; note description max length is 100 chars).
@@ -84,3 +84,25 @@ product decision, not a packaging step.
 Do 1 now (instant, source stays private), decide on 2 when ready to open the
 source, treat 3 as a separate hosted-product decision. Whatever the listing
 state, the `.mcpb` already works for anyone you hand it to.
+
+## Distribution status (2026-08-24)
+
+| Surface | State |
+|---|---|
+| Official MCP registry | ✅ live — `io.github.MurariAmbati/aurora-agent` v0.1.1 |
+| GitHub release (this repo) | ✅ v0.1.1 with the `.mcpb` asset |
+| Mirror release repo | ✅ MurariAmbati/aurora-agent-releases v0.1.0 + v0.1.1 |
+| Claude Code plugin marketplace | ✅ in-repo (`claude plugin marketplace add AURORA-NEURO/aurora-agent`) |
+| Desktop Extensions directory | ⏳ form answers in `DIRECTORY_SUBMISSION.md`; owner submits (Google sign-in) |
+| npm (`aurora-agent-mcp` launcher) | ⏳ package authored in `npm/`; publish needs a granular token with 2FA bypass |
+| punkpeye/awesome-mcp-servers | ⏳ PR #12745 open |
+| mcp.so | ⏳ submission issue chatmcp/mcpso#3716 open |
+| mcpservers.org (wong2) | ⏳ no PRs accepted; owner submits at mcpservers.org/submit (contact email required) |
+| modelcontextprotocol/servers list | n/a — list retired in favor of the registry (already listed) |
+| Cline marketplace | deferred — requires a 400×400 logo and a tested-with-Cline attestation; npx path needs npm live first |
+| Glama / PulseMCP | auto-ingest from GitHub + registry; nothing to submit |
+| Remote Connectors Directory | n/a — stdio binary is categorically ineligible (see §3) |
+
+After the npm package is published: add the `registryType: npm` entry to
+`mcpb/server.json` (the published `package.json` already carries the required
+`mcpName` proof), bump the listing version, and re-publish the registry entry.
