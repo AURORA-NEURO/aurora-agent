@@ -531,6 +531,8 @@ name = "bioprism-lab"
 version = "0.1.0"
 dependencies = [
  "bioprism-atlas",
+ "bioprism-foundation",
+ "bioprism-ids",
  "bioprism-obligation",
  "bioprism-scope",
  "serde",

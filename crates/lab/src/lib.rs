@@ -130,6 +130,7 @@
 //! ```
 
 pub mod context_value;
+pub mod experiment_design;
 pub mod error;
 pub mod evolution;
 pub mod holdout;
@@ -143,6 +144,12 @@ pub mod space;
 pub use context_value::{
     expand, AcquisitionAction, AcquisitionCost, AcquisitionKind, ExclusionReason, Expansion,
     PlannedAcquisition, PrivacyBoundary, StopReason,
+};
+pub use experiment_design::{
+    compile_experiment_design, AcceptanceGate, ArmKind, BlindingScheme, DesignArm,
+    DesignPlanPayload, ExperimentDesignError, ExperimentDesignPlan, ExperimentDesignRequest,
+    NullResultPolicy, PowerProjection, RandomizationScheme, SampleAllocation, StudyPopulation,
+    TestTail,
 };
 pub use error::{
     EvolutionError, HoldoutError, LabError, ParetoError, RollbackError, SeparationError, SpaceError,

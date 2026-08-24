@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EvidenceReceipt, PolicyReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -64,3 +64,18 @@ def test_research_ingestion_bundle_keeps_raw_data_local():
     )
     bundle.validate()
     assert bundle.digest() == bundle.digest()
+
+
+def test_experiment_design_plan_preserves_allocation_total():
+    plan = ExperimentDesignPlan(
+        payload={
+            "schema_version": "aurora-research-contract/1.0",
+            "feature_id": EXPERIMENT_DESIGN_FEATURE_ID,
+            "boundary": PRECLINICAL_BOUNDARY,
+            "allocations": [{"arm_id": "control", "units": 4}, {"arm_id": "treatment", "units": 4}],
+            "total_units": 8,
+        },
+        artifact={"content_hash": "c" * 64},
+    )
+    plan.validate()
+    assert plan.digest() == plan.digest()

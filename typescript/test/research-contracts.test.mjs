@@ -11,6 +11,9 @@ import {
   RESEARCH_INGESTION_FEATURE_ID,
   researchIngestionBundleDigest,
   validateResearchIngestionBundle,
+  EXPERIMENT_DESIGN_FEATURE_ID,
+  experimentDesignPlanDigest,
+  validateExperimentDesignPlan,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -91,4 +94,19 @@ test("research ingestion bundle keeps raw data local", () => {
   };
   assert.doesNotThrow(() => validateResearchIngestionBundle(bundle));
   assert.equal(researchIngestionBundleDigest(bundle), researchIngestionBundleDigest(bundle));
+});
+
+test("experiment design plan preserves allocation total", () => {
+  const plan = {
+    payload: {
+      schema_version: "aurora-research-contract/1.0",
+      feature_id: EXPERIMENT_DESIGN_FEATURE_ID,
+      boundary: PRECLINICAL_BOUNDARY,
+      allocations: [{ arm_id: "control", units: 4 }, { arm_id: "treatment", units: 4 }],
+      total_units: 8,
+    },
+    artifact: { content_hash: "c".repeat(64) },
+  };
+  assert.doesNotThrow(() => validateExperimentDesignPlan(plan));
+  assert.equal(experimentDesignPlanDigest(plan), experimentDesignPlanDigest(plan));
 });

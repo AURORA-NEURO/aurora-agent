@@ -16,6 +16,8 @@ from .research_contracts import (
     RELEASE_REVIEW_FEATURE_ID,
     RESEARCH_INGESTION_FEATURE_ID,
     ResearchIngestionBundle,
+    EXPERIMENT_DESIGN_FEATURE_ID,
+    ExperimentDesignPlan,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

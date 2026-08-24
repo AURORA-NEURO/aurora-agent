@@ -16,6 +16,7 @@ PRECLINICAL_BOUNDARY = "preclinical-research-only; no human-subject or clinical-
 RESEARCH_FEATURE_ID = "AFA-bioir-P02-F01"
 RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01"
 RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01"
+EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01"
 
 
 class ResearchContractError(ValueError):
@@ -163,3 +164,32 @@ class ResearchIngestionBundle:
             "raw_data_local": self.raw_data_local,
             "boundary": self.boundary,
         })
+
+
+@dataclass(frozen=True)
+class ExperimentDesignPlan:
+    """Cross-language transport validator for a deterministic design plan."""
+
+    payload: Mapping[str, Any]
+    artifact: Mapping[str, Any]
+
+    def validate(self) -> None:
+        if self.payload.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.payload.get("feature_id") != EXPERIMENT_DESIGN_FEATURE_ID:
+            raise ResearchContractError("experiment design feature mismatch")
+        if self.payload.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        allocations = self.payload.get("allocations")
+        total = self.payload.get("total_units")
+        if not isinstance(allocations, list) or not allocations or not isinstance(total, int):
+            raise ResearchContractError("experiment design allocations are incomplete")
+        if sum(int(item.get("units", 0)) for item in allocations) != total:
+            raise ResearchContractError("experiment design allocation total is inconsistent")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("experiment design artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})

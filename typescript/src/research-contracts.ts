@@ -11,6 +11,7 @@ export const PRECLINICAL_BOUNDARY = "preclinical-research-only; no human-subject
 export const RESEARCH_FEATURE_ID = "AFA-bioir-P02-F01" as const;
 export const RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01" as const;
 export const RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01" as const;
+export const EXPERIMENT_DESIGN_FEATURE_ID = "AFA-lab-P09-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -100,6 +101,24 @@ export function validateResearchIngestionBundle(bundle: ResearchIngestionBundle)
 export function researchIngestionBundleDigest(bundle: ResearchIngestionBundle): string {
   validateResearchIngestionBundle(bundle);
   return digestJsonSync(bundle);
+}
+
+export interface ExperimentDesignPlan {
+  payload: Record<string, unknown> & { allocations: readonly { arm_id: string; units: number }[]; total_units: number };
+  artifact: Record<string, unknown>;
+}
+
+export function validateExperimentDesignPlan(plan: ExperimentDesignPlan): void {
+  if (plan.payload.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (plan.payload.feature_id !== EXPERIMENT_DESIGN_FEATURE_ID) throw new Error("experiment design feature mismatch");
+  if (plan.payload.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!plan.payload.allocations.length || plan.payload.allocations.reduce((sum, allocation) => sum + allocation.units, 0) !== plan.payload.total_units) throw new Error("experiment design allocation total is inconsistent");
+  if (typeof plan.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(plan.artifact.content_hash)) throw new Error("experiment design artifact digest is invalid");
+}
+
+export function experimentDesignPlanDigest(plan: ExperimentDesignPlan): string {
+  validateExperimentDesignPlan(plan);
+  return digestJsonSync(plan);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
