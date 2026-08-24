@@ -1305,6 +1305,24 @@ from .provider_conformance import (
     assert_provider_protocol_conformance,
     run_provider_protocol_conformance,
 )
+from .autonomous_workflow_portfolio import (
+    AUTONOMOUS_WORKFLOW_PORTFOLIO_SCHEMA,
+    AUTONOMOUS_WORKFLOW_PORTFOLIO_VERIFICATION_SCHEMA,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_CONTEXT_BYTES,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_DEPENDENCIES,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_HINTS,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ITEMS,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_STAGE_IDS,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_CAPABILITIES,
+    AutonomousWorkflowPortfolioCoverage,
+    AutonomousWorkflowPortfolioDependencyGraph,
+    AutonomousWorkflowPortfolioItem,
+    AutonomousWorkflowPortfolioItemRequest,
+    AutonomousWorkflowPortfolioPlan,
+    AutonomousWorkflowPortfolioVerification,
+    plan_autonomous_workflow_portfolio,
+    verify_autonomous_workflow_portfolio,
+)
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
 from .adapter_runtime import (
@@ -6657,4 +6675,20 @@ __all__ = [
     "ProviderProtocolConformanceReport",
     "assert_provider_protocol_conformance",
     "run_provider_protocol_conformance",
+    "AUTONOMOUS_WORKFLOW_PORTFOLIO_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_PORTFOLIO_VERIFICATION_SCHEMA",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_CONTEXT_BYTES",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_DEPENDENCIES",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_HINTS",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ITEMS",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_STAGE_IDS",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_CAPABILITIES",
+    "AutonomousWorkflowPortfolioCoverage",
+    "AutonomousWorkflowPortfolioDependencyGraph",
+    "AutonomousWorkflowPortfolioItem",
+    "AutonomousWorkflowPortfolioItemRequest",
+    "AutonomousWorkflowPortfolioPlan",
+    "AutonomousWorkflowPortfolioVerification",
+    "plan_autonomous_workflow_portfolio",
+    "verify_autonomous_workflow_portfolio",
 ]

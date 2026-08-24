@@ -16960,6 +16960,51 @@ class AutonomousAgent:
 
         return self.orchestrator.prepare_auto(**kwargs)
 
+    def plan_workflow_portfolio(
+        self,
+        requests: Sequence[Any],
+        *,
+        require_all_domains: bool = False,
+        allow_partial: bool = True,
+    ) -> dict[str, Any]:
+        """Compile multiple reviewed domain workflows into dependency waves without dispatch.
+
+        The portfolio compiler is intentionally provider-free.  It composes the same twelve
+        domain profiles, workflow DAGs, evidence plans, and task decisions used by ordinary
+        execution, but returns only request/task/route/workflow digests and bounded metadata.
+        Call :meth:`verify_workflow_portfolio` after caller-owned rehydration and hand individual
+        ready blueprints to the existing approved workflow runner.
+        """
+
+        from .autonomous_workflow_portfolio import plan_autonomous_workflow_portfolio
+
+        return plan_autonomous_workflow_portfolio(
+            self,
+            requests,
+            require_all_domains=require_all_domains,
+            allow_partial=allow_partial,
+        ).to_dict()
+
+    def verify_workflow_portfolio(
+        self,
+        plan: Mapping[str, Any],
+        requests: Sequence[Any],
+        *,
+        require_all_domains: bool | None = None,
+        allow_partial: bool | None = None,
+    ) -> dict[str, Any]:
+        """Replay a workflow portfolio plan and return a digest-bound metadata verification."""
+
+        from .autonomous_workflow_portfolio import verify_autonomous_workflow_portfolio
+
+        return verify_autonomous_workflow_portfolio(
+            self,
+            plan,
+            requests,
+            require_all_domains=require_all_domains,
+            allow_partial=allow_partial,
+        ).to_dict()
+
     def prepare_auto_with_provider(
         self,
         *,

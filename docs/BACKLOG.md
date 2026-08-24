@@ -73,6 +73,15 @@ credential and all request/response material are discarded before the digest is 
 still a local protocol gate, not live provider availability, quota, permission, or user-key
 verification.
 
+Python now also has a digest-bound workflow portfolio compiler. `AutonomousAgent.plan_workflow_portfolio`
+composes explicit requests across all twelve reviewed domains, preserves dependency waves and
+cycle/partial/required-domain coverage, and projects each task's workflow, evidence, model-capability,
+and route identities without retaining task text or making provider/tool calls. The matching
+`verify_workflow_portfolio` replay catches task, dependency, workflow, evidence, policy, and
+catalogue drift after restart. This is the planning/review boundary; the existing caller-approved
+workflow runner remains the execution authority, and durable portfolio queues/checkpoints are still
+deployment work.
+
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
 the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson

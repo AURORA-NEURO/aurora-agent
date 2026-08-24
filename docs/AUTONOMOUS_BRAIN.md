@@ -8405,6 +8405,38 @@ tool execution, or effects. The portfolio is sealed under
 `bioprism-python-autonomous-capability-portfolio/0.1` and is separate from the older focused
 `domain_capability_plan()` contract.
 
+For work that spans several independent requests, `agent.plan_workflow_portfolio()` composes
+the same reviewed workflow, domain-pack, evidence-plan, and task-decision contracts into one
+dependency-aware planning artifact. It accepts up to 64 explicit items, supports up to 16
+dependencies per item, emits deterministic topological waves, reports cycle/partial/required-domain
+coverage, and retains only task/request/route/workflow digests and stage metadata:
+
+```python
+portfolio = agent.plan_workflow_portfolio(
+    [
+        {"id": "code", "task": "review the implementation", "domain": "coding"},
+        {
+            "id": "evaluation",
+            "task": "design a bounded regression review",
+            "domain": "evaluation",
+            "depends_on": ["code"],
+        },
+    ],
+    allow_partial=True,
+)
+print(portfolio["dependency_graph"]["waves"])
+print(portfolio["coverage"])
+```
+
+The compiler is provider-, credential-, connector-, and tool-free. `portfolio["execution"]`
+remains `not_started;planning_and_verification_only`; the caller reviews the artifact before
+passing each ready item to the existing approved workflow runner. After restart, the caller can
+rehydrate the original requests and call `agent.verify_workflow_portfolio(portfolio, requests)`.
+Verification recompiles the twelve-domain contracts, detects task, dependency, workflow, evidence,
+policy, and catalogue drift, and returns only bounded mismatch codes and a verification digest.
+Cycles and failed items remain explicit blockers; `allow_partial` never turns a failed item into a
+successful portfolio-level claim.
+
 When the application already knows the capability, use focused dispatch to narrow provider-visible
 tools and bind the evidence contract into the developer prompt:
 
