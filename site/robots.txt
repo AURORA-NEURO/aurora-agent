@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://aurora-neuro.github.io/aurora-agent/sitemap.xml
+
+# Plain-text overview for language models:
+# https://aurora-neuro.github.io/aurora-agent/llms.txt

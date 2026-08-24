@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURORA Agent FAQ — Context Certificates, RAG comparison, platform support</title>
+<meta name="description" content="AURORA Agent FAQ: Context Certificates, how FIBER differs from RAG, privacy posture, platform support, the MCP registry listing, and the research boundary.">
+<link rel="canonical" href="https://aurora-neuro.github.io/aurora-agent/faq.html">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AURORA Agent FAQ">
+<meta property="og:description" content="Context Certificates, the RAG comparison, privacy posture, platform support, and the research boundary.">
+<meta property="og:url" content="https://aurora-neuro.github.io/aurora-agent/faq.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="AURORA Agent FAQ">
+<meta name="twitter:description" content="Context Certificates, the RAG comparison, privacy posture, platform support, and the research boundary.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    { "@type": "Question", "name": "What is AURORA Agent?", "acceptedAnswer": { "@type": "Answer", "text": "AURORA Agent is a local Model Context Protocol (MCP) server built on FIBER, a decision context compiler. A typed decision query is compiled into the smallest decision-sufficient evidence region, delivered as a Decision Section plus a Context Certificate stating exactly what was omitted and whether the omission could have changed the decision. It is a Rust workspace of 79 crates exposing 259 MCP tools, a CLI, and a local HTTP gateway, under Apache-2.0." } },
+    { "@type": "Question", "name": "What is a Context Certificate?", "acceptedAnswer": { "@type": "Answer", "text": "A Context Certificate is a machine-readable receipt that accompanies every compiled Decision Section. It states exactly which facts were omitted and whether each omission could have changed the decision. Certificates hash canonical bytes and can be verified without linking the compiler that produced them." } },
+    { "@type": "Question", "name": "What does 'context engineering, with receipts' mean?", "acceptedAnswer": { "@type": "Answer", "text": "Context engineering is the practice of selecting what an LLM sees. AURORA Agent adds a receipt: the Context Certificate, which states what was omitted from the compiled context and whether the omission could have changed the decision. The receipt is machine-checkable — the fiber_verify tool (or bioprism context verify) verifies a certificate without linking the engine that produced it." } },
+    { "@type": "Question", "name": "How is this different from RAG?", "acceptedAnswer": { "@type": "Answer", "text": "RAG ranks passages by similarity and hopes the top-k suffice. FIBER computes a mandatory protected closure before any relevance step, slices dependencies from a typed world, and fails rather than truncating when the budget is smaller than the closure. The output carries an explicit sufficiency claim and an omission account, not a similarity ranking." } },
+    { "@type": "Question", "name": "Does it need network access?", "acceptedAnswer": { "@type": "Answer", "text": "No. The MCP server and CLI open no network connections, call no external services, and collect no data. There is no telemetry, no analytics, and no account. The optional bioprism-api gateway binds to an address you choose, loopback by default." } },
+    { "@type": "Question", "name": "Why is the headline benchmark a tie?", "acceptedAnswer": { "@type": "Answer", "text": "On the shipped reference world a 5-hop graph walk, a BM25 retriever, and FIBER select the identical eleven facts of 761, so that world cannot tell the methods apart. FIBER separates from the baselines only on a generated discriminating world. The project publishes the tie because equal-engineering baselines are what make its central claim falsifiable." } },
+    { "@type": "Question", "name": "What does the MCP registry listing mean?", "acceptedAnswer": { "@type": "Answer", "text": "The server is listed as io.github.MurariAmbati/aurora-agent v0.1.1 on registry.modelcontextprotocol.io. The registry is a metadata listing with automated validation: it makes the server discoverable to registry-consuming tools, but installation happens via the .mcpb bundle, the Claude Code plugin marketplace, or a source build." } },
+    { "@type": "Question", "name": "What platforms are supported?", "acceptedAnswer": { "@type": "Answer", "text": "The prebuilt Claude Desktop .mcpb bundle is Windows-only. On other platforms, build from source with cargo build --release --offline and register the bioprism-mcp binary with any MCP client." } },
+    { "@type": "Question", "name": "What is the license?", "acceptedAnswer": { "@type": "Answer", "text": "Apache-2.0. The repository AURORA-NEURO/aurora-agent is public on GitHub." } },
+    { "@type": "Question", "name": "Is this a medical device or clinical tool?", "acceptedAnswer": { "@type": "Answer", "text": "No. It is research and developer infrastructure: it does not diagnose an individual, recommend treatment, triage care, enroll participants, or claim medical-device functionality." } },
+    { "@type": "Question", "name": "How do I know the implementation is correct?", "acceptedAnswer": { "@type": "Answer", "text": "Byte-level parity is enforced by test across three implementations — the CPython reference, the eager Rust path, and the Rust indexed store — which agree on the certificate digest c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4 for the reference compilation." } }
+  ]
+}
+</script>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="10" fill="var(--accent)"/><path d="M32 14 L50 50 L42 50 L32 28 L22 50 L14 50 Z" fill="var(--bg)"/><rect x="27" y="41" width="10" height="5" rx="1.5" fill="var(--bg)"/></svg>
+      AURORA Agent
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="./">Overview</a>
+      <a href="install.html">Install</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="explore.html">Explorer</a>
+      <a href="docs.html">Docs</a>
+      <a href="faq.html" aria-current="page">FAQ</a>
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <h1>Frequently asked questions</h1>
+
+    <div class="faq-item">
+      <h2>What is AURORA Agent?</h2>
+      <p>AURORA Agent is a local Model Context Protocol (MCP) server built on FIBER, a decision
+      context compiler. A typed decision query is compiled into the smallest decision-sufficient
+      evidence region, delivered as a Decision Section plus a Context Certificate stating exactly
+      what was omitted and whether the omission could have changed the decision. It is a Rust
+      workspace of 79 crates (engine crates prefixed <code>bioprism-</code>) exposing 259 MCP tools,
+      a CLI, and a local HTTP gateway, licensed Apache-2.0.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>What is a Context Certificate?</h2>
+      <p>A machine-readable receipt that accompanies every compiled Decision Section. It states
+      exactly which facts were omitted and whether each omission could have changed the decision —
+      distinguishing zero influence from unknown influence. Certificates hash canonical bytes, so a
+      consumer (an MCP client, a CI gate, an auditor) can read and verify a compiled context without
+      linking the engine that produced it.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>What does “context engineering, with receipts” mean?</h2>
+      <p>Context engineering is the practice of selecting what an LLM sees. AURORA Agent adds a
+      receipt: the Context Certificate, which states what was omitted from the compiled context and
+      whether the omission could have changed the decision. The receipt is machine-checkable — the
+      <code>fiber_verify</code> tool (or <code>bioprism context verify</code>) verifies a
+      certificate without linking the engine that produced it.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>How is this different from RAG?</h2>
+      <p>Retrieval-augmented generation ranks passages by similarity and hopes the top-k suffice.
+      FIBER computes a mandatory protected closure <em>before</em> any relevance step, slices
+      dependencies from a typed world, and fails rather than truncating when the budget is smaller
+      than the closure. The output carries an explicit sufficiency claim and an omission account,
+      not a similarity ranking. The benchmark findings show why the closure matters: on a world
+      built to discriminate, BM25 reached the correct verdict from an incomplete closure — right by
+      luck, having dropped a protected fact that happened not to matter.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>Does it need network access?</h2>
+      <p>No. The MCP server and CLI open no network connections, call no external services, and
+      collect, store, and transmit no personal data. There is no telemetry, no analytics, no crash
+      reporting, and no account. The optional <code>bioprism-api</code> gateway binds to an address
+      you choose — loopback by default — and likewise calls no external services. Full policy:
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">PRIVACY.md</a>.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>Why is the headline benchmark a tie?</h2>
+      <p>On the shipped reference world (761 facts), a 5-hop graph walk, a BM25 retriever at k=11,
+      and FIBER select the identical eleven facts, so that world cannot tell the methods apart.
+      FIBER separates from both baselines only on a generated discriminating world. The tie is
+      published deliberately: without equal-engineering baselines, “FIBER compiles a smaller
+      context” would be unfalsifiable. See <a href="benchmarks.html">the benchmarks page</a>.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>What does the MCP registry listing mean?</h2>
+      <p>The server is listed as <code>io.github.MurariAmbati/aurora-agent</code> v0.1.1 on
+      <a href="https://registry.modelcontextprotocol.io/">registry.modelcontextprotocol.io</a>. The
+      registry is a metadata listing with automated validation — it makes the server discoverable to
+      registry-consuming tools and aggregators. Installation happens through the
+      <code>.mcpb</code> bundle, the Claude Code plugin marketplace, or a source build.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>What platforms are supported?</h2>
+      <p>The prebuilt Claude Desktop bundle (<code>aurora-agent.mcpb</code>) is Windows-only. On
+      macOS and Linux, build from source — <code>cargo build --release --offline</code> — and
+      register the <code>bioprism-mcp</code> binary with any MCP client.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>What is the license?</h2>
+      <p>Apache-2.0. The repository
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">AURORA-NEURO/aurora-agent</a> is public
+      on GitHub.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>Is this a medical device or clinical tool?</h2>
+      <p>No. Research and developer infrastructure: it does not diagnose an individual, recommend
+      treatment, triage care, enroll participants, or claim medical-device functionality. The MCP
+      surface includes a <code>medical_boundary_check</code> tool that admits research use cases and
+      structurally refuses clinical outputs.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>How do I know the implementation is correct?</h2>
+      <p>Byte-level parity with the CPython reference runtime is enforced by test and holds across
+      three implementations: CPython, the eager Rust path, and the Rust indexed store. All three
+      agree on the certificate digest
+      <code>c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4</code> for the
+      reference compilation. The benchmark numbers on this site are likewise asserted by tests in
+      the repository.</p>
+    </div>
+
+    <div class="faq-item">
+      <h2>Can I use it without Claude?</h2>
+      <p>Yes. <code>bioprism-mcp</code> speaks standard JSON-RPC 2.0 over stdio and follows the MCP
+      lifecycle, so any MCP client can use it. The repository also ships a dependency-free Python
+      SDK, a dependency-free TypeScript SDK, and the <code>bioprism</code> CLI, whose
+      <code>--json</code> envelopes and ten-exit-code retryability matrix are designed for scripted
+      callers.</p>
+    </div>
+
+    <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
+    recommend treatment, triage care, enroll participants, or claim medical-device functionality.</div>
+
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>AURORA Agent — Apache-2.0 ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">Source</a> ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">Privacy</a> ·
+      MCP registry: <code>io.github.MurariAmbati/aurora-agent</code></p>
+    <p>Research and developer infrastructure: it does not diagnose an individual, recommend treatment,
+    triage care, enroll participants, or claim medical-device functionality.</p>
+  </div>
+</footer>
+
+</body>
+</html>
