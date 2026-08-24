@@ -2,7 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.MurariAmbati/aurora-agent",
   "description": "FIBER decision-context compiler with honest omission accounting: 259 evidence-bearing MCP tools.",
-  "version": "0.1.1",
+  "version": "0.1.2",
+  "websiteUrl": "https://aurora-neuro.github.io/aurora-agent/",
   "repository": {
     "url": "https://github.com/AURORA-NEURO/aurora-agent",
     "source": "github"
