@@ -26,6 +26,10 @@ from .autonomous_evidence_reconciliation import (
     AutonomousEvidenceReconciliationRoute,
     AutonomousEvidenceSourceReconciler,
 )
+from .autonomous_evidence_normalizers import (
+    AutonomousEvidenceNormalizerRegistry,
+    create_builtin_autonomous_evidence_normalizer_registry,
+)
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 from .errors import ArgumentError
 
@@ -372,10 +376,12 @@ class AutonomousDomainEvidenceCatalogueReconciliation:
     profile: Mapping[str, Any]
     plan: AutonomousEvidenceReconciliationPlan
     routes: tuple[Mapping[str, Any], ...]
+    normalizer_registry_digest: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.profile, Mapping) or not isinstance(self.plan, AutonomousEvidenceReconciliationPlan) or not isinstance(self.routes, Sequence):
             raise ArgumentError("domain evidence prepared reconciliation is malformed")
+        _digest("domain evidence prepared normalizer_registry_digest", self.normalizer_registry_digest)
         object.__setattr__(self, "profile", dict(self.profile))
         object.__setattr__(self, "routes", tuple(dict(route) for route in self.routes))
 
@@ -383,7 +389,13 @@ class AutonomousDomainEvidenceCatalogueReconciliation:
 class AutonomousDomainEvidenceSourceCatalogue:
     """All-domain profile and route catalogue with digest-bound reconciliation preparation."""
 
-    def __init__(self, profiles: Sequence[AutonomousDomainEvidenceSourceProfile] | None = None, *, require_all_domains: bool = False) -> None:
+    def __init__(
+        self,
+        profiles: Sequence[AutonomousDomainEvidenceSourceProfile] | None = None,
+        *,
+        require_all_domains: bool = False,
+        normalizer_registry: AutonomousEvidenceNormalizerRegistry | None = None,
+    ) -> None:
         if profiles is not None and (isinstance(profiles, (str, bytes, bytearray)) or not isinstance(profiles, Sequence)):
             raise ArgumentError("domain evidence catalogue profiles must be a sequence")
         selected = tuple(builtin_autonomous_domain_evidence_source_profiles() if profiles is None else profiles)
@@ -391,6 +403,9 @@ class AutonomousDomainEvidenceSourceCatalogue:
             raise ArgumentError("domain evidence catalogue profiles are outside their bound")
         self._profiles: dict[str, AutonomousDomainEvidenceSourceProfile] = {}
         self._routes: dict[str, AutonomousDomainEvidenceRoute] = {}
+        self.normalizer_registry = normalizer_registry or create_builtin_autonomous_evidence_normalizer_registry()
+        if not isinstance(self.normalizer_registry, AutonomousEvidenceNormalizerRegistry):
+            raise ArgumentError("domain evidence catalogue normalizer_registry is malformed")
         for profile in selected:
             self.register_profile(profile)
         if require_all_domains and any(domain not in {profile.domain for profile in self._profiles.values()} for domain in AUTONOMOUS_DOMAIN_NAMES):
@@ -610,6 +625,7 @@ class AutonomousDomainEvidenceSourceCatalogue:
         return AutonomousDomainEvidenceCatalogueReconciliation(
             profile=profile.to_dict(), plan=plan,
             routes=tuple(dict(route.json) for route in sorted(matching, key=lambda item: item.source_id)),
+            normalizer_registry_digest=self.normalizer_registry.registry_digest,
         )
 
     def execute(
@@ -629,6 +645,8 @@ class AutonomousDomainEvidenceSourceCatalogue:
             raise ArgumentError("domain evidence execution profile does not match prepared reconciliation")
         if prepared.profile.get("profile_digest") != profile.profile_digest or prepared.profile.get("normalizer_id") != profile.normalizer_id or prepared.profile.get("normalizer_version") != profile.normalizer_version:
             raise ArgumentError("domain evidence profile changed after preparation")
+        if prepared.normalizer_registry_digest != self.normalizer_registry.registry_digest:
+            raise ArgumentError("domain evidence normalizer registry changed after preparation")
         route_entries: list[AutonomousEvidenceReconciliationRoute] = []
         for planned in prepared.routes:
             source_id = _identifier("domain evidence prepared source_id", planned.get("source_id"))
@@ -640,6 +658,11 @@ class AutonomousDomainEvidenceSourceCatalogue:
             if current.route_digest != planned.get("route_digest"):
                 raise ArgumentError(f"domain evidence source route changed after preparation: {source_id}")
             route_entries.append(self._reconciliation_route(current))
+        if normalizer is None:
+            self.normalizer_registry.resolve(profile.domain, profile.normalizer_id, profile.normalizer_version)
+            normalizer = lambda value, context: self.normalizer_registry.normalize(
+                profile.domain, profile.normalizer_id, profile.normalizer_version, value, context,
+            )
         reconciler = AutonomousEvidenceSourceReconciler(evidence_plan)
         return reconciler.execute(
             prepared.plan, route_entries, approve_source_dispatch=approve_source_dispatch, normalizer=normalizer,
@@ -665,6 +688,8 @@ class AutonomousDomainEvidenceSourceCatalogue:
             "schema": AUTONOMOUS_DOMAIN_EVIDENCE_CATALOGUE_SCHEMA, "profiles": profiles, "routes": routes,
             "coverage": coverage, "profile_count": len(profiles), "route_count": len(routes),
             "covered_domain_count": sum(row["state"] != "missing" for row in coverage),
+            "normalizer_registry_digest": self.normalizer_registry.registry_digest,
+            "normalizer_count": len(self.normalizer_registry.registrations()),
             "execution": "catalogue_and_route_validation_only;source_dispatch_requires_review",
             "retention": _RETENTION, "secret_material": "never_returned",
         }

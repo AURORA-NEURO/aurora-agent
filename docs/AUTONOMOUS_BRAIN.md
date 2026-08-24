@@ -941,7 +941,8 @@ boundary. It is metadata-only: every acquirer call count remains zero until a ca
 requirement, reviews the returned reconciliation plan, and passes `approve_source_dispatch=True`.
 `catalogue.prepare(...)` binds one exact profile and route set to the existing bounded reconciliation
 runtime; `catalogue.execute(...)` rechecks profile and route digests and requires the profile's
-normalizer callback. Prepared plans fail closed if a route disappears or a profile is replaced.
+normalizer callback or the matching built-in registry entry. Prepared plans fail closed if a route
+disappears, a profile is replaced, or the normalizer registry changes.
 
 For a policy-gated HTTP route, `create_autonomous_domain_http_source_acquirer()` wraps the existing
 bounded HTTP connector and keeps endpoint construction, short-lived header/credential resolution,
@@ -950,6 +951,21 @@ only observed JSON to the transient reconciliation result; refusals and transien
 classes become typed acquisition failures. Use a provider-contract registry at route registration
 when the deployment has an adapter manifest: the route records the contract and adapter digests,
 and registration verifies that provider, domain, capability, operation, and manifest bindings agree.
+
+The Python catalogue also ships an `AutonomousEvidenceNormalizerRegistry`. The built-in registry
+contains an exact `identity/1` normalizer and a versioned `builtin.<domain>.claim-projection/1`
+normalizer for every autonomous domain. The claim projection retains no source value or field
+contents: it records only the declared operation, observation kind, bounded item count and byte
+count, a digest of the transient value, and a digest of its response shape. Source identity is not
+part of the normalized value, so two independent routes can reach quorum when they report the same
+observation. The projection remains evidence metadata rather than a truth, safety, or evaluation
+verdict.
+
+The normalizer registry digest is included in the catalogue and prepared reconciliation identity.
+Replacing a callback without changing its versioned spec is refused; adding, removing, or changing
+a normalizer after preparation causes execution to stop before source dispatch. Deployments may
+register a custom normalizer for a custom profile, but the callback remains process-local and its
+output must stay within the SDK's JSON, depth, byte, and credential-shaped-field bounds.
 
 The connector registry remains provider-neutral, but applications that need a real external
 evidence call can now compose the same reviewed registration with a policy-gated HTTP executor.

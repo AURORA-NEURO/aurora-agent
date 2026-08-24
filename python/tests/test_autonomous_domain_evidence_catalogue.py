@@ -7,6 +7,8 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousEvidencePlan,
+    AutonomousEvidenceNormalizerRegistration,
+    AutonomousEvidenceNormalizerSpec,
     AutonomousEvidenceRequirement,
     AutonomousDomainEvidenceSourceCatalogue,
     AutonomousDomainHttpSourcePreset,
@@ -15,6 +17,7 @@ from prism_sdk import (
     ArgumentError,
     builtin_autonomous_domain_evidence_source_profiles,
     builtin_autonomous_domain_http_source_presets,
+    create_builtin_autonomous_evidence_normalizer_registry,
     content_digest,
     create_builtin_autonomous_domain_evidence_source_catalogue,
     create_autonomous_domain_http_source_acquirer,
@@ -96,7 +99,7 @@ def test_catalogue_prepares_and_executes_a_profile_bound_reconciliation_only_aft
     assert acquirer.calls == 0
     with pytest.raises(ArgumentError):
         catalogue.execute(plan, prepared)
-    result = catalogue.execute(plan, prepared, approve_source_dispatch=True, normalizer=lambda value, _context: value)
+    result = catalogue.execute(plan, prepared, approve_source_dispatch=True)
     assert result.status == "consensus"
     assert acquirer.calls == 1
 
@@ -181,3 +184,99 @@ def test_http_preset_acquirer_keeps_transport_and_headers_transient() -> None:
     assert value == {"claim": "observed"}
     assert calls == ["https://example.test/evidence"]
     assert "transient-only" not in repr(value)
+
+
+def test_builtin_normalizers_project_every_domain_without_retaining_observation_values() -> None:
+    registry = create_builtin_autonomous_evidence_normalizer_registry()
+    assert len(registry.registrations()) == len(AUTONOMOUS_DOMAINS) * 2
+    for profile in builtin_autonomous_domain_evidence_source_profiles():
+        registration = registry.resolve(profile.domain, profile.normalizer_id, profile.normalizer_version)
+        projected = registration.normalizer(
+            {"answer": f"transient-{profile.domain}", "records": [{"status": "observed"}]},
+            {"request": {"metadata": {"operation": profile.operations[0]}}},
+        )
+        assert projected["schema"] == "bioprism-python-autonomous-evidence-claim-projection/0.1"
+        assert projected["domain"] == profile.domain
+        assert projected["operation"] == profile.operations[0]
+        assert f"transient-{profile.domain}" not in json.dumps(projected)
+        assert projected["value_digest"] == content_digest({"answer": f"transient-{profile.domain}", "records": [{"status": "observed"}]})
+
+
+def test_catalogue_executes_all_domains_with_default_normalizers_and_fences_registry_drift() -> None:
+    catalogue = create_builtin_autonomous_domain_evidence_source_catalogue()
+    acquirers: dict[str, _StaticAcquirer] = {}
+    for profile in builtin_autonomous_domain_evidence_source_profiles():
+        acquirer = _StaticAcquirer({"domain": profile.domain, "answer": "stable"})
+        acquirers[profile.domain] = acquirer
+        catalogue.register_route(
+            source_id=f"source-{profile.domain}", profile_id=profile.profile_id, provider=f"caller-{profile.domain}",
+            acquirer=acquirer, metadata={"operation": profile.operations[0]},
+        )
+    for profile in builtin_autonomous_domain_evidence_source_profiles():
+        plan = _plan(profile.domain, profile.capabilities[0])
+        prepared = catalogue.prepare(plan, plan.requirements[0].requirement_id, quorum=1)
+        result = catalogue.execute(plan, prepared, approve_source_dispatch=True)
+        assert result.status == "consensus"
+        assert acquirers[profile.domain].calls == 1
+    profile = next(profile for profile in builtin_autonomous_domain_evidence_source_profiles() if profile.domain == "coding")
+    drifted_spec = AutonomousEvidenceNormalizerSpec(
+        domain="coding", normalizer_id="caller.coding.claim-projection", version="1",
+        purpose="A changed caller normalizer used to test registry fencing.",
+        limitations=("caller owns the callback",),
+    )
+    registry = create_builtin_autonomous_evidence_normalizer_registry()
+    drifted_catalogue = AutonomousDomainEvidenceSourceCatalogue(normalizer_registry=registry)
+    drifted_acquirer = _StaticAcquirer({"answer": "stable"})
+    drifted_catalogue.register_route(
+        source_id="drift-route", profile_id=profile.profile_id, provider="caller", acquirer=drifted_acquirer,
+        capabilities=(profile.capabilities[0],), source_kinds=(profile.source_kinds[0],),
+        operations=(profile.operations[0],), metadata={"operation": profile.operations[0]},
+    )
+    drift_plan = _plan("coding", profile.capabilities[0])
+    drift_prepared = drifted_catalogue.prepare(drift_plan, drift_plan.requirements[0].requirement_id, quorum=1)
+    registry.register(AutonomousEvidenceNormalizerRegistration(drifted_spec, lambda value, _context: value))
+    with pytest.raises(ArgumentError):
+        drifted_catalogue.execute(drift_plan, drift_prepared, approve_source_dispatch=True)
+
+
+def test_normalizer_registry_rejects_secret_observations_and_tampered_specs() -> None:
+    registry = create_builtin_autonomous_evidence_normalizer_registry()
+    registration = registry.resolve("coding", "builtin.coding.claim-projection", "1")
+    with pytest.raises(ArgumentError):
+        registration.normalizer({"authorization": "transient"}, {"request": {"metadata": {"operation": "review"}}})
+    wire = registration.spec.to_dict()
+    assert type(registration.spec).from_dict(wire).to_dict() == wire
+    wire["purpose"] = "tampered"
+    with pytest.raises(ArgumentError):
+        AutonomousEvidenceNormalizerSpec.from_dict(wire)
+    with pytest.raises(ArgumentError):
+        registry.register(
+            AutonomousEvidenceNormalizerRegistration(registration.spec, lambda value, _context: value),
+            replace=True,
+        )
+
+
+def test_catalogue_default_normalizer_path_enforces_registry_output_contract() -> None:
+    profile = next(profile for profile in builtin_autonomous_domain_evidence_source_profiles() if profile.domain == "coding")
+    spec = AutonomousEvidenceNormalizerSpec(
+        domain="coding", normalizer_id=profile.normalizer_id, version=profile.normalizer_version,
+        purpose="A bounded test normalizer that emits a credential-shaped field.",
+        limitations=("test-only",),
+    )
+    registry = create_builtin_autonomous_evidence_normalizer_registry()
+    registry.register(
+        AutonomousEvidenceNormalizerRegistration(spec, lambda _value, _context: {"authorization": "should-fail"}),
+        replace=True,
+    )
+    catalogue = AutonomousDomainEvidenceSourceCatalogue(normalizer_registry=registry)
+    acquirer = _StaticAcquirer({"answer": "stable"})
+    catalogue.register_route(
+        source_id="contract-route", profile_id=profile.profile_id, provider="caller", acquirer=acquirer,
+        capabilities=(profile.capabilities[0],), source_kinds=(profile.source_kinds[0],),
+        operations=(profile.operations[0],), metadata={"operation": profile.operations[0]},
+    )
+    plan = _plan("coding", profile.capabilities[0])
+    prepared = catalogue.prepare(plan, plan.requirements[0].requirement_id, quorum=1)
+    result = catalogue.execute(plan, prepared, approve_source_dispatch=True)
+    assert result.status == "failed"
+    assert result.source_results[0].failure_class == "invalid_request"
