@@ -7,6 +7,16 @@
 //! * `--dry-run` performs no filesystem writes;
 //! * every command prints a reproducible follow-up command in human mode;
 //! * every failure maps to a documented exit code (see [`exit::ExitCode`]).
+//!
+//! # Not implemented
+//!
+//! * **`--domain` on `context compare`.** The comparison harness judges every strategy against
+//!   the reference split-integrity oracle directly rather than through the injectable
+//!   [`DecisionOracle`], so a pack oracle cannot yet be applied to the whole panel. The flag is
+//!   refused with that reason (exit 2) rather than accepted and half-applied.
+//! * **`world sweep` sweeps only the structural axes** (attachment, relay depth, tag style,
+//!   distractor count, seed). The decision-defining knobs are deliberately fixed, as
+//!   `bioprism_baseline::sweep` documents.
 
 mod args;
 mod exit;
@@ -23,7 +33,8 @@ use bioprism_devplat::{
 use bioprism_devplat::{
     verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
 };
-use bioprism_fiber::compile;
+use bioprism_domain::DomainPack;
+use bioprism_fiber::{compile, compile_with_oracle, DecisionOracle, Query};
 use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
 use bioprism_scope::DimensionRegistry;
 use bioprism_section::{CertificateProfile, ContextCertificate, OracleStatus};
@@ -129,8 +140,15 @@ impl Outcome {
 
 fn run(invocation: &Invocation) -> CliResult<Outcome> {
     match &invocation.command {
-        Command::WorldValidate { world } => world_validate(world),
+        Command::WorldValidate { world, dimensions } => {
+            world_validate(world, dimensions.as_deref())
+        }
         Command::WorldShow { world } => world_show(world),
+        Command::WorldSweep {
+            distractors,
+            seed,
+            markdown,
+        } => world_sweep(distractors.as_deref(), *seed, *markdown),
         Command::WorldGenerate(options) => world_generate(options),
         Command::WorldIndex {
             world,
@@ -145,7 +163,11 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
         } => prism_fork(world, query, bundle_out.as_deref(), *minimize),
         Command::PrismMinimize { world } => prism_minimize(world),
         Command::MutateFamily { world, out_dir } => mutate_family(world, out_dir.as_deref()),
-        Command::ContextExplain { world, query } => context_explain(world, query),
+        Command::ContextExplain {
+            world,
+            query,
+            domain,
+        } => context_explain(world, query, domain.as_deref()),
         Command::ContextCompile(options) => context_compile(options),
         Command::ContextVerify { certificate } => context_verify(certificate),
         Command::ContextCompare {
@@ -1136,6 +1158,7 @@ fn workflow_portfolio(
     Ok(Outcome::ok(report, human).failing_if(!valid))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn workflow_portfolio_verify(
     portfolio_path: &Path,
     replay_requests_path: Option<&Path>,
@@ -1538,6 +1561,7 @@ fn workflow_reconciliation_import(
     Ok(Outcome::ok(document, human))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn workflow_reconciliation_query(
     store_path: &Path,
     mission_id: Option<&str>,
@@ -1722,9 +1746,24 @@ fn evidence_bundle_query(
     Ok(Outcome::ok(report, human))
 }
 
-fn world_validate(world_path: &Path) -> CliResult<Outcome> {
+/// Validates a world, classifying scope dimensions from `--dimensions` when one is given.
+///
+/// The default registry knows only the reference dimensions, so a domain world's own dimensions
+/// (`venue`, `account`, …) surface as `unclassified_scope_dimension` warnings — which is correct
+/// when nobody declared them and noise when a `bioprism-scope-dimensions/0.1` document exists.
+/// The registry source is echoed into both outputs, because a clean report means something
+/// different under a caller-supplied classification than under the default one.
+fn world_validate(world_path: &Path, dimensions_path: Option<&Path>) -> CliResult<Outcome> {
     let world = io::load_world(world_path)?;
-    let report = validate(&world, &DimensionRegistry::default());
+    let registry = match dimensions_path {
+        None => DimensionRegistry::default(),
+        Some(path) => {
+            let raw = io::read_json(path)?;
+            DimensionRegistry::from_json(&raw)
+                .map_err(|e| CliError::invalid(e).about(path.display().to_string()))?
+        }
+    };
+    let report = validate(&world, &registry);
     let errors = report
         .diagnostics
         .iter()
@@ -1743,6 +1782,10 @@ fn world_validate(world_path: &Path) -> CliResult<Outcome> {
         },
         "errors": errors,
         "warnings": warnings,
+        "dimensions_source": match dimensions_path {
+            Some(path) => path.display().to_string(),
+            None => "default".to_string(),
+        },
         "diagnostics": report.diagnostics,
     });
 
@@ -1755,6 +1798,9 @@ fn world_validate(world_path: &Path) -> CliResult<Outcome> {
         errors,
         warnings
     );
+    if let Some(path) = dimensions_path {
+        human.push_str(&format!("  scope dimensions classified by {}\n", path.display()));
+    }
     for diagnostic in &report.diagnostics {
         let label = match diagnostic.severity {
             Severity::Error => "error",
@@ -1900,6 +1946,113 @@ Next: bioprism context compare --world <world.json> --query <query.json>
     Ok(Outcome::ok(document, human))
 }
 
+/// Routes a sweep failure to the code carrying its 40.36 class.
+///
+/// A generated world or query the loader rejects is this binary's fault — the generator and the
+/// loader ship together, so the operator supplied nothing that could be edited. A cell with no
+/// reference verdict defers to [`CliError::from_compare`], so the paths that surface the same
+/// oracle refusal cannot drift apart.
+fn sweep_error(error: bioprism_baseline::SweepError) -> CliError {
+    use bioprism_baseline::SweepError;
+    let message = error.to_string();
+    match error {
+        SweepError::WorldRejected { .. } | SweepError::QueryRejected { .. } => {
+            CliError::internal(message)
+        }
+        SweepError::NoReference { source, .. } => {
+            CliError::new(CliError::from_compare(source).code, message)
+        }
+    }
+}
+
+/// Runs the structural family sweep (43.39 grid, full baseline panel per cell).
+///
+/// `--distractors` and `--seed` override the default grid's distractor axis and seed; the other
+/// axes stay as declared, because varying the decision-defining knobs would compare strategies
+/// across different questions. Rows the oracle refused serialise with `judged: false` and no
+/// `sound` key at all, following `context compare`: an absent key cannot be read as a measured
+/// zero. Exit 1 applies the 43.41 stop rule — FIBER inadmissible in any cell blocks advancement.
+fn world_sweep(
+    distractors: Option<&[usize]>,
+    seed: Option<u64>,
+    markdown: bool,
+) -> CliResult<Outcome> {
+    use bioprism_baseline::sweep::{run_sweep, SweepGrid};
+    use bioprism_worldgen::{DistractorAttachment, TagStyle};
+
+    let mut grid = SweepGrid::default_grid();
+    if let Some(counts) = distractors {
+        grid.distractor_counts = counts.to_vec();
+    }
+    if let Some(seed) = seed {
+        grid.seed = seed;
+    }
+    let table = run_sweep(&grid).map_err(sweep_error)?;
+
+    let strategies: Vec<&str> = table
+        .cells
+        .first()
+        .map(|cell| cell.rows.iter().map(|row| row.strategy.as_str()).collect())
+        .unwrap_or_default();
+    let mut admissible_cells = serde_json::Map::new();
+    for strategy in &strategies {
+        admissible_cells.insert(
+            strategy.to_string(),
+            json!(table.admissible_cells(strategy)),
+        );
+    }
+    let fiber_admissible_everywhere = table
+        .cells
+        .iter()
+        .all(|cell| cell.row("fiber").is_some_and(|row| row.admissible));
+
+    let attachment_label = |attachment: DistractorAttachment| match attachment {
+        DistractorAttachment::Hub => "hub",
+        DistractorAttachment::NearTarget => "near_target",
+    };
+    let tag_label = |style: TagStyle| match style {
+        TagStyle::Distinct => "distinct",
+        TagStyle::Camouflaged => "camouflaged",
+    };
+
+    let document = json!({
+        "ok": fiber_admissible_everywhere,
+        "seed": table.seed,
+        "cells_total": table.cells.len(),
+        "admissible_cells": admissible_cells,
+        "cells": table.cells.iter().map(|cell| json!({
+            "world_id": cell.world_id,
+            "attachment": attachment_label(cell.attachment),
+            "relay_depth": cell.relay_depth,
+            "tag_style": tag_label(cell.tag_style),
+            "distractors": cell.distractors,
+            "total_facts": cell.total_facts,
+            "rows": cell.rows.iter().map(|row| {
+                let mut object = serde_json::Map::new();
+                object.insert("strategy".into(), json!(row.strategy));
+                object.insert("facts_selected".into(), json!(row.facts_selected));
+                object.insert("judged".into(), json!(row.sound.is_some()));
+                if let Some(sound) = row.sound {
+                    object.insert("sound".into(), json!(sound));
+                }
+                object.insert("protected_closure".into(), json!(row.protected_closure));
+                object.insert("admissible".into(), json!(row.admissible));
+                Value::Object(object)
+            }).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    });
+
+    let mut human = table.to_markdown();
+    if !markdown {
+        human.push_str(
+            "\nNext: bioprism world generate --family discriminating --world-out world.json \
+             --query-out query.json\n",
+        );
+    }
+
+    Ok(Outcome::ok(document, human).failing_if(!fiber_admissible_everywhere))
+}
+
 fn world_index(world_path: &Path, store_path: &Path, dry_run: bool) -> CliResult<Outcome> {
     let raw = io::read_json(world_path)?;
     io::refuse_to_rebind_store(store_path, &raw)?;
@@ -1947,6 +2100,67 @@ Next: bioprism context explain --world {} --query <query.json>
     Ok(Outcome::ok(document, human))
 }
 
+/// Loads and validates a domain pack, mapping a malformed document to `invalid_input`.
+///
+/// The pack is validated whole at this boundary (`DomainPack::from_json` consults nothing
+/// lazily), so a compile that proceeds past this call is judged by exactly the oracle the pack
+/// declared — a half-parsed pack cannot silently fall back to the reference oracle.
+fn load_domain_pack(path: &Path) -> CliResult<DomainPack> {
+    let raw = io::read_json(path)?;
+    DomainPack::from_json(&raw)
+        .map_err(|e| CliError::invalid(e.to_string()).about(path.display().to_string()))
+}
+
+/// What the pack declares that this query does not honour.
+///
+/// Advisories, not errors, because a pack cannot amend a query: the certificate binds the query's
+/// bytes by hash, so the query stays the sole author of its own contract and the pack can only
+/// point at the gap. An unprotected pack tag is the dangerous one — facts carrying it never enter
+/// protected closure, so nothing downstream will prove they were delivered.
+fn domain_advisories(pack: &DomainPack, query: &Query) -> Vec<String> {
+    let mut advisories = Vec::new();
+    for tag in pack.protected_tags() {
+        if !query.protected_tags.contains(tag) {
+            advisories.push(format!(
+                "the pack protects tag {tag:?} but the query does not, so facts tagged {tag:?} \
+                 never enter protected closure"
+            ));
+        }
+    }
+    if query.goal.is_none() {
+        match pack.goal() {
+            Some(goal) => advisories.push(format!(
+                "the query declares no goal; the pack declares the domain's: {goal:?}"
+            )),
+            None => advisories
+                .push("the query declares no goal, and the pack declares none either".to_string()),
+        }
+    }
+    advisories
+}
+
+/// The `domain` block both `--json` outputs carry when `--domain` was given.
+fn domain_block(pack: &DomainPack, advisories: &[String]) -> Value {
+    json!({
+        "name": pack.name(),
+        "oracle_kind": pack.oracle().kind(),
+        "advisories": advisories,
+    })
+}
+
+/// The human-mode rendering of the same block.
+fn render_domain(pack: &DomainPack, advisories: &[String]) -> String {
+    let mut text = format!(
+        "domain {} (oracle {})\n",
+        pack.name(),
+        pack.oracle().kind()
+    );
+    for advisory in advisories {
+        text.push_str(&format!("  advisory: {advisory}\n"));
+    }
+    text
+}
+
 fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
     let world = io::load_source(&options.world)?;
     let query = io::load_query(&options.query)?;
@@ -1955,7 +2169,12 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         Profile::Extended => CertificateProfile::Extended,
     };
 
-    let out = compile(world.as_ref(), &query).map_err(CliError::from_compile)?;
+    let pack = options.domain.as_deref().map(load_domain_pack).transpose()?;
+    let out = match &pack {
+        Some(pack) => compile_with_oracle(world.as_ref(), &query, pack.oracle()),
+        None => compile(world.as_ref(), &query),
+    }
+    .map_err(CliError::from_compile)?;
 
     let certificate_document = out
         .certificate
@@ -1984,7 +2203,12 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         .unwrap_or_default();
     let invalid = out.certificate.oracle.status == OracleStatus::Invalid;
 
-    let document = json!({
+    let advisories = pack
+        .as_ref()
+        .map(|pack| domain_advisories(pack, &query))
+        .unwrap_or_default();
+
+    let mut document = json!({
         "ok": true,
         "world_id": out.certificate.world_id,
         "query_id": out.certificate.query_id,
@@ -2014,6 +2238,12 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
             }))
             .collect::<Vec<_>>(),
     });
+    if let Some(pack) = &pack {
+        document
+            .as_object_mut()
+            .expect("compile document is an object")
+            .insert("domain".into(), domain_block(pack, &advisories));
+    }
 
     let mut human = format!(
         "compiled {} facts and {} factors, omitted {} facts\noracle {} → {}\ncertificate sha256 {}\n",
@@ -2024,6 +2254,9 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         out.certificate.oracle.status.as_str(),
         digest
     );
+    if let Some(pack) = &pack {
+        human.push_str(&render_domain(pack, &advisories));
+    }
     for witness in out.certificate.oracle.witness_kinds() {
         human.push_str(&format!("  witness {witness}\n"));
     }
@@ -2046,20 +2279,37 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         ));
     }
     human.push_str(&format!(
-        "\nNext: bioprism context explain --world {} --query {}\n",
+        "\nNext: bioprism context explain --world {} --query {}{}\n",
         options.world.display(),
-        options.query.display()
+        options.query.display(),
+        match &options.domain {
+            Some(path) => format!(" --domain {}", path.display()),
+            None => String::new(),
+        }
     ));
 
     Ok(Outcome::ok(document, human).failing_if(invalid && options.fail_on_invalid))
 }
 
-fn context_explain(world_path: &Path, query_path: &Path) -> CliResult<Outcome> {
+fn context_explain(
+    world_path: &Path,
+    query_path: &Path,
+    domain_path: Option<&Path>,
+) -> CliResult<Outcome> {
     let world = io::load_source(world_path)?;
     let query = io::load_query(query_path)?;
-    let out = compile(world.as_ref(), &query).map_err(CliError::from_compile)?;
+    let pack = domain_path.map(load_domain_pack).transpose()?;
+    let out = match &pack {
+        Some(pack) => compile_with_oracle(world.as_ref(), &query, pack.oracle()),
+        None => compile(world.as_ref(), &query),
+    }
+    .map_err(CliError::from_compile)?;
+    let advisories = pack
+        .as_ref()
+        .map(|pack| domain_advisories(pack, &query))
+        .unwrap_or_default();
 
-    let document = json!({
+    let mut document = json!({
         "ok": true,
         "world_id": out.certificate.world_id,
         "query_id": out.certificate.query_id,
@@ -2082,12 +2332,25 @@ fn context_explain(world_path: &Path, query_path: &Path) -> CliResult<Outcome> {
         "unmatched_protected_tags": out.trace.unmatched_protected_tags,
         "dropped_protected": out.trace.dropped_protected,
     });
+    if let Some(pack) = &pack {
+        document
+            .as_object_mut()
+            .expect("explain document is an object")
+            .insert("domain".into(), domain_block(pack, &advisories));
+    }
 
     let mut human = explain::render(&out);
+    if let Some(pack) = &pack {
+        human.push_str(&render_domain(pack, &advisories));
+    }
     human.push_str(&format!(
-        "\nNext: bioprism context compile --world {} --query {} --certificate-out cert.json\n",
+        "\nNext: bioprism context compile --world {} --query {} --certificate-out cert.json{}\n",
         world_path.display(),
-        query_path.display()
+        query_path.display(),
+        match domain_path {
+            Some(path) => format!(" --domain {}", path.display()),
+            None => String::new(),
+        }
     ));
 
     Ok(Outcome::ok(document, human))
