@@ -8470,6 +8470,40 @@ rejected before new work is dispatched. `execution.to_dict()` intentionally excl
 prompts, credentials, provider output, tool arguments, and raw runs, while the returned execution
 object keeps raw runs only for the caller's transient handoff.
 
+Python also exposes the same startup boundary through `agent.admit_workflow_portfolio()`. Admission
+is a provider-free, credential-free projection over a reviewed plan: it replays the plan, joins the
+keyless `agent.readiness()` image to each domain, filters caller-supplied model candidates against
+required capabilities and cost/latency/quality limits, and optionally enforces available tools,
+evidence readiness, and calibrated learning. Dependency closure is applied before an item becomes
+`eligible`, so a held predecessor cannot be bypassed by a later wave:
+
+```python
+admission = agent.admit_workflow_portfolio(
+    requests,
+    plan=portfolio,
+    model_candidates=approved_candidates,
+    require_calibrated_learning=True,
+    max_latency_ms=2_000,
+)
+if admission["status"] == "ready_for_approval":
+    execution = agent.execute_workflow_portfolio(
+        portfolio,
+        requests,
+        admission=admission,
+        credentials=credential_session,
+        model_candidates=approved_candidates,
+        job_id="review-batch-2026-08-24",
+    )
+```
+
+The admission artifact contains only model identities, gate states, dependency statuses, bounded
+remediation actions, and digests; it never resolves a key, invokes a provider, runs a tool or
+connector, or authorizes an effect. Passing it to execution binds `admission_digest` into the
+portfolio input digest. A restart must provide the same admission image alongside its checkpoint,
+otherwise replay fails closed before rehydration or a new provider call. Runtime selection still
+rechecks health and policy after caller approval, so admission is a review gate rather than a
+stale model-selection authorization.
+
 When the application already knows the capability, use focused dispatch to narrow provider-visible
 tools and bind the evidence contract into the developer prompt:
 

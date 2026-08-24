@@ -85,6 +85,15 @@ requires a caller-owned rehydration callback that proves each successful result 
 dependent work resumes. Durable multi-host queues, lease ownership, and external authorization
 are still deployment work.
 
+Python portfolio admission now has parity with that boundary. `AutonomousAgent.admit_workflow_portfolio`
+replays a reviewed plan, projects keyless readiness, model capability/constraint eligibility, optional
+tool/evidence/calibration holds, and dependency-closed remediation into a bounded digest. It never
+resolves credentials or dispatches a provider, tool, connector, source, learner, or effect. Passing
+the admission image to `execute_workflow_portfolio` binds its digest into checkpoint identity, so a
+restart without the same reviewed gate fails closed before rehydration or new work. Live model health,
+approval UX, persistence encryption, distributed leases, and external authorization remain deployment
+responsibilities.
+
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
 the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson

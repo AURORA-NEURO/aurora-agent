@@ -1098,6 +1098,7 @@ class AutonomousWorkflowPortfolioExecutionResult:
     approval_required_count: int
     next_action: str
     checkpoint: AutonomousWorkflowPortfolioExecutionCheckpoint
+    admission_digest: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {"completed", "partial", "blocked", "approval_required", "reconciliation_required"}:
@@ -1109,6 +1110,8 @@ class AutonomousWorkflowPortfolioExecutionResult:
             raise BrainRunError("workflow portfolio execution items do not match the plan")
         if self.checkpoint.plan_digest != self.plan.portfolio_digest:
             raise BrainRunError("workflow portfolio execution checkpoint does not match the plan")
+        if self.admission_digest is not None:
+            _assert_digest(self.admission_digest, "workflow portfolio execution admission_digest")
         _identifier("workflow portfolio execution next_action", self.next_action)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1124,6 +1127,7 @@ class AutonomousWorkflowPortfolioExecutionResult:
             "approval_required_count": self.approval_required_count,
             "next_action": self.next_action,
             "checkpoint": self.checkpoint.to_dict(),
+            "admission_digest": self.admission_digest,
             "execution": "provider_calls_are_caller_approved_per_item;raw_runs_not_serialized",
             "retention": "portfolio_metadata_and_result_digests_only",
             "secret_material": _PORTFOLIO_SECRET_MATERIAL,
@@ -1170,13 +1174,18 @@ def _failure_class(error: BaseException) -> str:
     return name if name and len(name) <= 128 and all(character in _IDENTIFIER_CHARS for character in name) else "WorkflowPortfolioExecutionError"
 
 
-def _portfolio_input_digest(requests: Sequence[AutonomousWorkflowPortfolioItemRequest]) -> str:
-    return content_digest(
-        {
-            "schema": "bioprism-python-autonomous-workflow-portfolio-input/0.1",
-            "requests": [request.request_payload(request.normalized_id(index)) for index, request in enumerate(requests)],
-        }
-    )
+def _portfolio_input_digest(
+    requests: Sequence[AutonomousWorkflowPortfolioItemRequest],
+    *,
+    admission_digest: str | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "schema": "bioprism-python-autonomous-workflow-portfolio-input/0.1",
+        "requests": [request.request_payload(request.normalized_id(index)) for index, request in enumerate(requests)],
+    }
+    if admission_digest is not None:
+        payload["admission_digest"] = admission_digest
+    return content_digest(payload)
 
 
 def execute_autonomous_workflow_portfolio(
@@ -1189,6 +1198,7 @@ def execute_autonomous_workflow_portfolio(
     job_id: str,
     max_parallelism: int = 4,
     stop_on_error: bool = False,
+    admission: Any | None = None,
     checkpoint: AutonomousWorkflowPortfolioExecutionCheckpoint | Mapping[str, Any] | None = None,
     checkpoint_sink: Any | None = None,
     rehydrate_result: Any | None = None,
@@ -1215,6 +1225,15 @@ def execute_autonomous_workflow_portfolio(
         raise BrainRunError("workflow portfolio workflow_options_factory must be callable or None")
 
     expected_plan = plan if isinstance(plan, AutonomousWorkflowPortfolioPlan) else AutonomousWorkflowPortfolioPlan.from_dict(plan)
+    admission_value = None
+    admission_by_id: dict[str, Any] = {}
+    if admission is not None:
+        from .autonomous_workflow_portfolio_admission import validate_autonomous_workflow_portfolio_admission
+
+        admission_value = validate_autonomous_workflow_portfolio_admission(admission)
+        if admission_value.plan.portfolio_digest != expected_plan.portfolio_digest:
+            raise BrainRunError("workflow portfolio admission does not match the reviewed plan")
+        admission_by_id = {item.item_id: item for item in admission_value.items}
     normalized = _normalize_requests(requests)
     replayed = plan_autonomous_workflow_portfolio(
         agent,
@@ -1229,7 +1248,10 @@ def execute_autonomous_workflow_portfolio(
     item_ids = tuple(item.item_id for item in expected_plan.items)
     request_digests = tuple(plan_by_id[item_id].request_digest for item_id in item_ids)
     task_digests = tuple(plan_by_id[item_id].task_digest for item_id in item_ids)
-    input_digest = _portfolio_input_digest(normalized)
+    input_digest = _portfolio_input_digest(
+        normalized,
+        admission_digest=None if admission_value is None else admission_value.admission_digest,
+    )
 
     current_checkpoint: AutonomousWorkflowPortfolioExecutionCheckpoint | None
     if checkpoint is None:
@@ -1336,6 +1358,22 @@ def execute_autonomous_workflow_portfolio(
             if plan_by_id[item_id].status == "ready" and item_id not in execution_by_id
         )
         if not candidates:
+            continue
+        if admission_by_id:
+            for item_id in candidates:
+                admission_item = admission_by_id[item_id]
+                if admission_item.status != "eligible":
+                    plan_item = plan_by_id[item_id]
+                    execution_by_id[item_id] = AutonomousWorkflowPortfolioExecutionItem(
+                        item_id=item_id,
+                        domain=plan_item.domain,
+                        depends_on=plan_item.depends_on,
+                        status="blocked",
+                        error_class=admission_item.blockers[0] if admission_item.blockers else "portfolio_admission_blocked",
+                    )
+            candidates = tuple(item_id for item_id in candidates if item_id not in execution_by_id)
+        if not candidates:
+            persist("blocked")
             continue
         if halted:
             for item_id in candidates:
@@ -1460,6 +1498,7 @@ def execute_autonomous_workflow_portfolio(
         approval_required_count=approvals,
         next_action=next_action,
         checkpoint=final_checkpoint,
+        admission_digest=None if admission_value is None else admission_value.admission_digest,
     )
 
 

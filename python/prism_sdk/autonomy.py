@@ -16985,6 +16985,47 @@ class AutonomousAgent:
             allow_partial=allow_partial,
         ).to_dict()
 
+    def admit_workflow_portfolio(
+        self,
+        requests: Sequence[Any],
+        *,
+        plan: Mapping[str, Any] | Any | None = None,
+        verify_plan: bool = True,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        require_available_tools: bool = False,
+        require_calibrated_learning: bool = False,
+        input_tokens: int = 4_096,
+        output_tokens: int = 1_024,
+        max_cost_per_million_tokens: float | None = None,
+        max_latency_ms: float | None = None,
+        min_quality: float | None = None,
+        readiness_options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Project provider-free readiness and model admission for a reviewed portfolio.
+
+        Admission is intentionally separate from execution. It checks current domain readiness,
+        model capability/constraint coverage, optional tool/evidence/calibration gates, and
+        dependency closure, while returning only a digest-bound metadata image for caller review.
+        """
+
+        from .autonomous_workflow_portfolio_admission import admit_autonomous_workflow_portfolio
+
+        return admit_autonomous_workflow_portfolio(
+            self,
+            requests,
+            plan=plan,
+            verify_plan=verify_plan,
+            model_candidates=model_candidates,
+            require_available_tools=require_available_tools,
+            require_calibrated_learning=require_calibrated_learning,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            readiness_options=readiness_options,
+        ).to_dict()
+
     def verify_workflow_portfolio(
         self,
         plan: Mapping[str, Any],
@@ -17015,6 +17056,7 @@ class AutonomousAgent:
         job_id: str,
         max_parallelism: int = 4,
         stop_on_error: bool = False,
+        admission: Mapping[str, Any] | Any | None = None,
         checkpoint: Mapping[str, Any] | Any | None = None,
         checkpoint_sink: Any | None = None,
         rehydrate_result: Any | None = None,
@@ -17038,6 +17080,7 @@ class AutonomousAgent:
             job_id=job_id,
             max_parallelism=max_parallelism,
             stop_on_error=stop_on_error,
+            admission=admission,
             checkpoint=checkpoint,
             checkpoint_sink=checkpoint_sink,
             rehydrate_result=rehydrate_result,

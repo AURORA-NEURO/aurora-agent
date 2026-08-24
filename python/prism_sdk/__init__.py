@@ -1328,6 +1328,22 @@ from .autonomous_workflow_portfolio import (
     verify_autonomous_workflow_portfolio,
     execute_autonomous_workflow_portfolio,
 )
+from .autonomous_workflow_portfolio_admission import (
+    AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_SCHEMA,
+    AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_EXECUTION,
+    AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_AUTHORIZATION,
+    AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_RETENTION,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ACTIONS,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BLOCKERS,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_MODELS,
+    MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES,
+    AutonomousWorkflowPortfolioAdmissionPolicy,
+    AutonomousWorkflowPortfolioAdmissionItem,
+    AutonomousWorkflowPortfolioAdmissionCounts,
+    AutonomousWorkflowPortfolioAdmission,
+    admit_autonomous_workflow_portfolio,
+    validate_autonomous_workflow_portfolio_admission,
+)
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
 from .adapter_runtime import (
@@ -6701,4 +6717,18 @@ __all__ = [
     "plan_autonomous_workflow_portfolio",
     "verify_autonomous_workflow_portfolio",
     "execute_autonomous_workflow_portfolio",
+    "AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_SCHEMA",
+    "AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_EXECUTION",
+    "AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_AUTHORIZATION",
+    "AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_RETENTION",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_ACTIONS",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BLOCKERS",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_MODELS",
+    "MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ADMISSION_BYTES",
+    "AutonomousWorkflowPortfolioAdmissionPolicy",
+    "AutonomousWorkflowPortfolioAdmissionItem",
+    "AutonomousWorkflowPortfolioAdmissionCounts",
+    "AutonomousWorkflowPortfolioAdmission",
+    "admit_autonomous_workflow_portfolio",
+    "validate_autonomous_workflow_portfolio_admission",
 ]
