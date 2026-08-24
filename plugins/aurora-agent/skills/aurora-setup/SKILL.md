@@ -6,7 +6,7 @@ description: Set up, build, or troubleshoot the AURORA Agent (bioprism) MCP serv
 # AURORA backend setup
 
 The `aurora-agent` plugin launches `bioprism-mcp`, the MCP server of the
-AURORA Agent workspace (262 tools; JSON-RPC 2.0 over newline-delimited stdio;
+AURORA Agent workspace (264 tools; JSON-RPC 2.0 over newline-delimited stdio;
 stdout is JSON-RPC only, diagnostics go to stderr).
 
 ## Where the backend lives

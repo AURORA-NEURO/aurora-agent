@@ -107,6 +107,22 @@ COMMANDS
                     Scan, assemble and judge the project under the release-readiness pack's
                     rule oracle. Exit 1 when the verdict is invalid. With --issues, also
                     compiles and prints each issue's declared evidence region.
+  project plan      --root <dir> --issues <path> --issue <id> [--decision-time <rfc3339>]
+                    [--criteria <path>] --out <path> [--dry-run]
+                    Derive a repair plan for one declared issue from its compiled evidence
+                    region and write it as a bioprism-repair-plan/0.1 document. --criteria loads
+                    a bioprism-repair-declarations/0.1 file whose criteria, obligations and
+                    falsifiers are recorded as declared by their author; the generator's own
+                    items are recorded as derived and the two never merge. Nothing is edited,
+                    built or run: the plan is a declaration of what would count as evidence.
+  project verify    --root <dir> --plan <path> [--issues <path>] [--decision-time <rfc3339>]
+                    Re-scan the tree and report which of the plan's declared criteria held,
+                    each with its own three-valued status and the obstruction that stopped it.
+                    Never reports that the issue is fixed. Exit 1 when the outcome is not_met
+                    or falsified, 8 when a criterion or falsifier could not be evaluated, and 9
+                    when the plan is bound to a different world — a stale plan evaluates
+                    nothing, so it is not a failed verification. Obligations are reported on
+                    their own admissibility axis and never move the exit code.
 
   evidence verify   --bundle <path>
                     Verify a portable mission evidence bundle's schema, retention claims and
@@ -290,6 +306,13 @@ pub enum Command {
     ProjectIngest(ProjectIngestOptions),
     ProjectAudit {
         root: PathBuf,
+        issues: Option<PathBuf>,
+        decision_time: Option<String>,
+    },
+    ProjectPlan(ProjectPlanOptions),
+    ProjectVerify {
+        root: PathBuf,
+        plan: PathBuf,
         issues: Option<PathBuf>,
         decision_time: Option<String>,
     },
@@ -484,6 +507,27 @@ pub struct ProjectIngestOptions {
     pub dry_run: bool,
 }
 
+/// `project plan`'s parsed invocation.
+///
+/// `issues` is required here although `project ingest` and `project audit` both take it
+/// optionally. Those two commands have something to say about a tree with no declared issues; a
+/// plan is *for* one issue, so an invocation naming none has no subject, and defaulting to an
+/// empty issue list would turn that into "issue not found in the world" — a diagnostic pointing
+/// at the tree rather than at the missing flag.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ProjectPlanOptions {
+    pub root: PathBuf,
+    pub issues: PathBuf,
+    pub issue: String,
+    /// Already validated as RFC 3339 by the parser; kept as the caller's exact string.
+    pub decision_time: Option<String>,
+    /// A `bioprism-repair-declarations/0.1` document, or nothing: a plan with no declared items
+    /// carries only what the generator could derive, and says so in its own limitations.
+    pub criteria: Option<PathBuf>,
+    pub out: PathBuf,
+    pub dry_run: bool,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct CompileOptions {
     pub world: PathBuf,
@@ -630,6 +674,23 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         }),
         ("project", "audit") => Command::ProjectAudit {
             root: options.take_path("--root")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
+        },
+        ("project", "plan") => Command::ProjectPlan(ProjectPlanOptions {
+            root: options.take_path("--root")?,
+            issues: options.take_path("--issues")?,
+            issue: options
+                .take_optional("--issue")
+                .ok_or_else(|| usage("--issue is required and takes a declared issue id"))?,
+            decision_time: take_decision_time(&mut options)?,
+            criteria: options.take_optional_path("--criteria"),
+            out: options.take_path("--out")?,
+            dry_run: options.take_switch("--dry-run"),
+        }),
+        ("project", "verify") => Command::ProjectVerify {
+            root: options.take_path("--root")?,
+            plan: options.take_path("--plan")?,
             issues: options.take_optional_path("--issues"),
             decision_time: take_decision_time(&mut options)?,
         },
@@ -1091,6 +1152,134 @@ mod tests {
                     queries_out: Some(PathBuf::from("queries")),
                     dry_run: true,
                 }),
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_the_repair_commands_and_the_exit_code_a_stale_plan_reports() {
+        let text = super::help();
+        assert!(text.contains("project plan      --root <dir>"));
+        assert!(text.contains("project verify    --root <dir>"));
+        for flag in ["--issue ", "--criteria", "--out ", "--plan "] {
+            assert!(
+                text.contains(flag),
+                "a flag the repair parser accepts must be documented: {flag:?}"
+            );
+        }
+        assert!(
+            text.contains("Exit 1 when the outcome is not_met")
+                && text.contains("a stale plan evaluates"),
+            "the three verdict-bearing exit codes are what a caller branches on and must be \
+             stated, staleness included:\n{text}"
+        );
+        assert!(
+            text.contains("Never reports that the issue is fixed"),
+            "the help must state the refusal the whole command exists for:\n{text}"
+        );
+    }
+
+    #[test]
+    fn project_plan_requires_the_issue_it_plans_for_rather_than_defaulting_to_none() {
+        let error = parse(
+            [
+                "project", "plan", "--root", "tree", "--issues", "issues.json", "--out", "plan.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("a plan with no subject must be refused");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(
+            error.message.contains("--issue is required"),
+            "the message must name the flag the operator has to add: {}",
+            error.message
+        );
+
+        let without_issues = parse(
+            [
+                "project", "plan", "--root", "tree", "--issue", "ISSUE-1", "--out", "plan.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("planning against a tree with no declared issues must be refused");
+        assert!(
+            without_issues.message.contains("--issues"),
+            "an absent issues file must point at the flag, not at the tree: {}",
+            without_issues.message
+        );
+    }
+
+    #[test]
+    fn project_plan_parses_its_declaration_file_output_path_and_dry_run_switch() {
+        let parsed = parse(
+            [
+                "project",
+                "plan",
+                "--root",
+                "tree",
+                "--issues",
+                "issues.json",
+                "--issue",
+                "ISSUE-1",
+                "--decision-time",
+                "2024-01-01T00:00:00Z",
+                "--criteria",
+                "declared.json",
+                "--out",
+                "plan.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project plan");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ProjectPlan(super::ProjectPlanOptions {
+                    root: PathBuf::from("tree"),
+                    issues: PathBuf::from("issues.json"),
+                    issue: "ISSUE-1".into(),
+                    decision_time: Some("2024-01-01T00:00:00Z".into()),
+                    criteria: Some(PathBuf::from("declared.json")),
+                    out: PathBuf::from("plan.json"),
+                    dry_run: true,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn project_verify_parses_the_plan_it_checks_and_the_tree_it_checks_it_against() {
+        let parsed = parse(
+            [
+                "--json",
+                "project",
+                "verify",
+                "--root",
+                "tree",
+                "--plan",
+                "plan.json",
+                "--issues",
+                "issues.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project verify");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::ProjectVerify {
+                    root: PathBuf::from("tree"),
+                    plan: PathBuf::from("plan.json"),
+                    issues: Some(PathBuf::from("issues.json")),
+                    decision_time: None,
+                },
             })
         );
     }

@@ -25,7 +25,7 @@ mod io;
 
 use args::{
     Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile,
-    ProjectIngestOptions,
+    ProjectIngestOptions, ProjectPlanOptions,
 };
 use bioprism_autopilot::{
     drive::instantiation_mission, drive_instantiation, preview_first_action,
@@ -46,6 +46,10 @@ use bioprism_fiber::{compile, compile_with_oracle, DecisionOracle, Query};
 use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
 use bioprism_project::{
     AssemblyOptions, AuditOptions, AuditReport, Issue, ProjectScan, ProjectWorld, ScanOptions,
+};
+use bioprism_repair::{
+    plan_for_issue, predicate_from_json, verify, AcceptanceReport, DeclaredItem, ItemStatus,
+    Outcome as RepairOutcome, PlanOptions, RepairPlan,
 };
 use bioprism_scope::DimensionRegistry;
 use bioprism_section::{CertificateProfile, ContextCertificate, LeakageWitness, OracleStatus};
@@ -148,6 +152,18 @@ impl Outcome {
         }
         self
     }
+
+    /// Reports a completed run under a code other than 0 or 1.
+    ///
+    /// [`Outcome::failing_if`] covers the two-valued case — the checked property held or it did
+    /// not — and every command before `project verify` had only that. Acceptance verification does
+    /// not: "a criterion could not be evaluated" and "the plan is bound to a different world" are
+    /// neither successes nor failed assertions, and folding either into exit 1 would tell a script
+    /// the criteria were adjudicated and came out against the tree. See [`verdict_code`].
+    fn under(mut self, code: ExitCode) -> Self {
+        self.code = code;
+        self
+    }
 }
 
 fn run(invocation: &Invocation) -> CliResult<Outcome> {
@@ -193,6 +209,13 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             issues,
             decision_time,
         } => project_audit(root, issues.as_deref(), decision_time.as_deref()),
+        Command::ProjectPlan(options) => project_plan(options),
+        Command::ProjectVerify {
+            root,
+            plan,
+            issues,
+            decision_time,
+        } => project_verify(root, plan, issues.as_deref(), decision_time.as_deref()),
         Command::EvidenceBundleVerify { bundle } => evidence_bundle_verify(bundle),
         Command::EvidenceBundleImport {
             bundle,
@@ -3075,6 +3098,434 @@ fn project_audit(
     ));
 
     Ok(Outcome::ok(document, human).failing_if(invalid))
+}
+
+/// The schema of the document `project plan --criteria` reads.
+const DECLARATIONS_SCHEMA_VERSION: &str = "bioprism-repair-declarations/0.1";
+
+/// Reads a caller's declared criteria, obligations and falsifiers.
+///
+/// A separate document rather than a pile of flags, because a criterion is a name, a sentence and
+/// a predicate, and three of those on a command line would be positional in all but syntax.
+///
+/// Strict in the same way `bioprism_repair::RepairPlan::from_json` is strict: an undeclared key is
+/// refused rather than ignored, so a misspelled `falsifier` does not silently become a plan with
+/// no falsifier that the admissibility gate then blames on the author. An *absent* list, by
+/// contrast, is accepted and means the author declared none of that kind — which is what
+/// `Admissibility::Undeclared` already reports for obligations, and what the generated plan's own
+/// limitations already state.
+///
+/// A declared criterion must carry a `rationale`; an obligation and a falsifier need none. That
+/// asymmetry is the plan document's, not this reader's invention: `AcceptanceCriterion` is the one
+/// item type with a rationale field, and a criterion is the item a plan marks as
+/// `Origin::Declared` precisely to say somebody is accountable for it. An accountable claim with
+/// no stated reason is the shape of a criterion added to make a verification pass.
+fn read_declarations(path: &Path) -> CliResult<PlanOptions> {
+    let document = io::read_json(path)?;
+    let blame = |message: String| CliError::invalid(message).about(path.display().to_string());
+
+    let map = document.as_object().ok_or_else(|| {
+        blame(format!("a {DECLARATIONS_SCHEMA_VERSION} document is an object"))
+    })?;
+    let declared = [
+        "schema_version",
+        "criteria",
+        "obligations",
+        "falsifiers",
+        "limitations",
+    ];
+    if let Some(unknown) = map.keys().find(|key| !declared.contains(&key.as_str())) {
+        return Err(blame(format!(
+            "undeclared field {unknown:?} on the declarations document; the declared fields are \
+             {declared:?}"
+        )));
+    }
+    match map.get("schema_version").and_then(Value::as_str) {
+        Some(version) if version == DECLARATIONS_SCHEMA_VERSION => {}
+        Some(other) => {
+            return Err(blame(format!(
+                "declarations document declares schema_version {other:?}, expected \
+                 {DECLARATIONS_SCHEMA_VERSION:?}"
+            )))
+        }
+        None => {
+            return Err(blame(format!(
+                "declarations document needs a string \"schema_version\" of \
+                 {DECLARATIONS_SCHEMA_VERSION:?}"
+            )))
+        }
+    }
+
+    let items = |field: &str, with_rationale: bool| -> CliResult<Vec<DeclaredItem>> {
+        let entries = match map.get(field) {
+            None => return Ok(Vec::new()),
+            Some(value) => value
+                .as_array()
+                .ok_or_else(|| blame(format!("{field:?} must be an array")))?,
+        };
+        entries
+            .iter()
+            .map(|entry| {
+                let fields: &[&str] = if with_rationale {
+                    &["name", "statement", "predicate", "rationale"]
+                } else {
+                    &["name", "statement", "predicate"]
+                };
+                let entry = entry.as_object().ok_or_else(|| {
+                    blame(format!("every entry in {field:?} is an object"))
+                })?;
+                if let Some(unknown) = entry.keys().find(|key| !fields.contains(&key.as_str())) {
+                    return Err(blame(format!(
+                        "undeclared field {unknown:?} on an entry in {field:?}; the declared \
+                         fields are {fields:?}"
+                    )));
+                }
+                let text = |key: &str| -> CliResult<String> {
+                    entry
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            blame(format!("an entry in {field:?} needs a string {key:?}"))
+                        })
+                };
+                let predicate = predicate_from_json(entry.get("predicate").ok_or_else(|| {
+                    blame(format!("an entry in {field:?} declares no \"predicate\""))
+                })?)
+                .map_err(|error| {
+                    blame(format!("an entry in {field:?} carries no predicate: {error}"))
+                })?;
+                let item = DeclaredItem::new(text("name")?, text("statement")?, predicate);
+                Ok(if with_rationale {
+                    item.with_rationale(text("rationale")?)
+                } else {
+                    item
+                })
+            })
+            .collect()
+    };
+
+    let limitations = match map.get("limitations") {
+        None => Vec::new(),
+        Some(value) => value
+            .as_array()
+            .ok_or_else(|| blame("\"limitations\" must be an array of strings".to_string()))?
+            .iter()
+            .map(|entry| {
+                entry
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| blame("\"limitations\" carries a non-string entry".to_string()))
+            })
+            .collect::<CliResult<Vec<String>>>()?,
+    };
+
+    Ok(PlanOptions {
+        declared_criteria: items("criteria", true)?,
+        declared_obligations: items("obligations", false)?,
+        declared_falsifiers: items("falsifiers", false)?,
+        limitations,
+    })
+}
+
+/// One `kind origin name` column block, so a reader can scan the origins down a single column.
+///
+/// The origin is on every line because a derived criterion is a proxy for something the release
+/// pack could see and a declared one is a claim someone is accountable for. Printing them in one
+/// undifferentiated list would let the tool's inferences borrow the author's authority.
+fn render_plan_items(plan: &RepairPlan) -> String {
+    let mut text = String::new();
+    for criterion in plan.criteria() {
+        text.push_str(&format!(
+            "    criterion  {:<8}  {}\n",
+            criterion.origin.as_str(),
+            criterion.name
+        ));
+    }
+    for obligation in plan.obligations() {
+        text.push_str(&format!(
+            "    obligation {:<8}  {}\n",
+            obligation.origin.as_str(),
+            obligation.name
+        ));
+    }
+    for falsifier in plan.falsifiers() {
+        text.push_str(&format!(
+            "    falsifier  {:<8}  {}\n",
+            falsifier.origin.as_str(),
+            falsifier.name
+        ));
+    }
+    text
+}
+
+/// `1 falsifier` / `2 falsifiers`.
+///
+/// A count line is the first thing a reader checks a plan against, and "1 criteria" is the kind of
+/// wrong that makes a reader wonder what else was assembled without being read.
+fn counted(n: usize, singular: &str, plural: &str) -> String {
+    format!("{n} {}", if n == 1 { singular } else { plural })
+}
+
+fn render_limitations(limitations: &[String]) -> String {
+    let mut text = String::from("  limitations:\n");
+    for line in limitations {
+        text.push_str(&format!("    - {line}\n"));
+    }
+    text
+}
+
+/// Derives a repair plan for one declared issue and writes it.
+///
+/// Nothing here edits a file in the scanned tree, applies a patch, builds, or runs a test. The one
+/// write is the plan document itself, and `--dry-run` suppresses it exactly as it does on
+/// `project ingest`.
+fn project_plan(options: &ProjectPlanOptions) -> CliResult<Outcome> {
+    let declared = match &options.criteria {
+        None => PlanOptions::default(),
+        Some(path) => read_declarations(path)?,
+    };
+    let issues = project_issues(Some(&options.issues))?;
+    let (_scan, assembled) =
+        project_assemble(&options.root, issues, options.decision_time.as_deref())?;
+
+    let query_document = assembled.issue_queries.get(&options.issue).ok_or_else(|| {
+        let declared_ids: Vec<&str> = assembled
+            .issue_queries
+            .keys()
+            .map(String::as_str)
+            .collect();
+        CliError::invalid(format!(
+            "no issue {:?} is declared in {}; it declares {}",
+            options.issue,
+            options.issues.display(),
+            if declared_ids.is_empty() {
+                "no issues at all".to_string()
+            } else {
+                declared_ids.join(", ")
+            }
+        ))
+        .about(options.issues.display().to_string())
+    })?;
+
+    let world = bioprism_world::World::from_json(assembled.world.clone())
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let pack = DomainPack::from_json(&assembled.pack)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let query = Query::from_json(query_document.clone()).map_err(|error| {
+        CliError::internal(format!("issue {:?} query: {error}", options.issue))
+    })?;
+    let compiled =
+        compile_with_oracle(&world, &query, pack.oracle()).map_err(CliError::from_compile)?;
+
+    let plan = plan_for_issue(
+        &world,
+        &pack,
+        &options.issue,
+        &compiled.certificate,
+        &declared,
+    )
+    .map_err(CliError::from_repair)?;
+    let plan_document = plan.to_json().map_err(CliError::from_repair)?;
+    let written = io::write_artifact(&options.out, &plan_document, options.dry_run)?;
+
+    let document = json!({
+        "ok": true,
+        "plan_id": plan.plan_id(),
+        "issue_id": plan.issue_id(),
+        "world_id": plan.evidence_binding().world_id,
+        // `region_fact_ids`, not `region_facts`: PROJECT_MODELING records that on this surface
+        // `region_facts` is the *count* beside the `region` list, and `project audit` emits it that
+        // way three hundred lines up. One name meaning a number in one `project` document and a
+        // list of ids in the next is the kind of drift a caller only finds by indexing into it. The
+        // name here is the plan document's own field name, which is also what `repair_plan` returns.
+        "region_fact_ids": plan.evidence_binding().region_fact_ids,
+        "region_facts": plan.evidence_binding().region_fact_ids.len(),
+        "criteria": plan.criteria().len(),
+        "obligations": plan.obligations().len(),
+        "falsifiers": plan.falsifiers().len(),
+        "plan": plan_document,
+        "dry_run": options.dry_run,
+        "artifacts": [json!({
+            "path": written.path.display().to_string(),
+            "bytes": written.bytes,
+            "written": written.written,
+        })],
+        "limitations": [
+            "this command plans and never repairs: no file is edited, no patch is produced, \
+             nothing is built and no test is run",
+            "a derived criterion is a proxy for something the release pack could see, never for \
+             what the issue means; the plan's own limitations enumerate the rest",
+        ],
+    });
+
+    let mut human = format!(
+        "planned {} for issue {} in world {}\n  goal: {}\n  {}, {}, {} over an evidence region \
+         of {}\n",
+        plan.plan_id(),
+        plan.issue_id(),
+        plan.evidence_binding().world_id,
+        plan.goal(),
+        counted(plan.criteria().len(), "criterion", "criteria"),
+        counted(plan.obligations().len(), "obligation", "obligations"),
+        counted(plan.falsifiers().len(), "falsifier", "falsifiers"),
+        counted(
+            plan.evidence_binding().region_fact_ids.len(),
+            "fact",
+            "facts"
+        ),
+    );
+    human.push_str(&render_plan_items(&plan));
+    human.push_str(&render_limitations(plan.limitations()));
+    human.push_str(&format!(
+        "  {} {} ({} bytes)\n",
+        if written.written {
+            "wrote"
+        } else {
+            "would write"
+        },
+        written.path.display(),
+        written.bytes
+    ));
+    human.push_str(&format!(
+        "\nNext: bioprism project verify --root {} --plan {} --issues {}\n",
+        options.root.display(),
+        options.out.display(),
+        options.issues.display(),
+    ));
+
+    Ok(Outcome::ok(document, human))
+}
+
+/// The exit code one acceptance report lands on.
+///
+/// Four states, four codes, and the two that would be cheapest to collapse are the two that must
+/// not be:
+///
+/// * **Stale is not a failed verification.** Nothing was evaluated, so exit 1 — "the checked
+///   property does not hold" — would report a verdict the run never reached. Exit 9 is the one
+///   failure in the registry whose remedy touches nothing in the request: re-read the tree, or
+///   re-plan against it, and re-send.
+/// * **Underdetermined is not `not_met`.** Exit 1 invites the reader to conclude that clearing
+///   the listed failures is the whole remaining distance to a pass, and when a criterion never ran
+///   that conclusion is false. Exit 8 already means "ran correctly; the evidence does not decide",
+///   which is exactly what the report says.
+///
+/// `falsified` and `not_met` share exit 1 with `project audit`'s invalid verdict, because both are
+/// determinate adverse verdicts about a run that completed. Admissibility is deliberately absent
+/// from this function: an obligation asks whether the change was admissible *to make*, checked
+/// here only retrospectively, and letting a weaker check move the process status would contaminate
+/// it exactly as it would contaminate the outcome.
+fn verdict_code(report: &AcceptanceReport) -> ExitCode {
+    match report.outcome() {
+        None => ExitCode::Stale,
+        Some(RepairOutcome::Met) => ExitCode::Ok,
+        Some(RepairOutcome::Underdetermined) => ExitCode::Indeterminate,
+        Some(RepairOutcome::NotMet) | Some(RepairOutcome::Falsified) => ExitCode::AssertionFailed,
+    }
+}
+
+/// Re-scans the tree and reports which of a plan's declared criteria held.
+///
+/// # Not implemented here
+///
+/// **A repaired tree cannot be given a verdict on this surface.** A project world id is derived
+/// from the file listing, so any edit produces a different world and this command reports `stale`
+/// — correctly, and unhelpfully for the case the feature exists for.
+/// `bioprism_repair::verify_successor` exists for it and takes a `Succession`: a named person's
+/// assertion that the new world is the repaired successor of the planned one, recorded verbatim
+/// and never verified. No flag here mints one. That is a gap in this command, not in the crate,
+/// and it is stated rather than worked around by verifying against the new world and calling the
+/// difference immaterial.
+fn project_verify(
+    root: &Path,
+    plan_path: &Path,
+    issues_path: Option<&Path>,
+    decision_time: Option<&str>,
+) -> CliResult<Outcome> {
+    let plan = RepairPlan::from_json(&io::read_json(plan_path)?)
+        .map_err(|error| CliError::from_repair(error).about(plan_path.display().to_string()))?;
+    let issues = project_issues(issues_path)?;
+    let (_scan, assembled) = project_assemble(root, issues, decision_time)?;
+    let world = bioprism_world::World::from_json(assembled.world.clone())
+        .map_err(|error| CliError::internal(error.to_string()))?;
+
+    let report = verify(&plan, &world);
+    let code = verdict_code(&report);
+
+    let document = json!({
+        "ok": true,
+        "exit_code": code.as_i32(),
+        "report": report.to_json(),
+    });
+
+    let mut human = match &report {
+        AcceptanceReport::Stale {
+            plan_id,
+            issue_id,
+            expected_world_id,
+            found_world_id,
+            expected_world_sha256,
+            found_world_sha256,
+            ..
+        } => format!(
+            "{plan_id} for issue {issue_id}: STALE — nothing was evaluated\n  planned against \
+             world {expected_world_id} ({expected_world_sha256})\n  offered world \
+             {found_world_id} ({found_world_sha256})\n"
+        ),
+        AcceptanceReport::Evaluated {
+            plan_id,
+            issue_id,
+            goal,
+            world_id,
+            outcome,
+            admissibility,
+            missing_region_facts,
+            ..
+        } => {
+            let mut text = format!(
+                "{plan_id} for issue {issue_id}: {} (admissibility {})\n  goal: {goal}\n  world \
+                 {world_id}\n",
+                outcome.as_str(),
+                admissibility.as_str(),
+            );
+            if !missing_region_facts.is_empty() {
+                text.push_str(&format!(
+                    "  the plan binds {} that the verified world no longer carries: {}\n",
+                    counted(
+                        missing_region_facts.len(),
+                        "region fact",
+                        "region facts"
+                    ),
+                    missing_region_facts.join(", ")
+                ));
+            }
+            text
+        }
+    };
+    for item in report.items() {
+        human.push_str(&format!(
+            "  {:<10} {:<8}  {:<13}  {}\n      {}\n",
+            item.kind.as_str(),
+            item.origin.as_str(),
+            item.status.as_str(),
+            item.name,
+            item.statement
+        ));
+        if let ItemStatus::NotEvaluable(obstruction) = &item.status {
+            human.push_str(&format!(
+                "      blocked: {} {}\n",
+                obstruction.variable, obstruction.reason
+            ));
+        }
+    }
+    human.push_str(&render_limitations(report.limitations()));
+    human.push_str(&format!(
+        "\nNext: bioprism project audit --root {}\n",
+        root.display()
+    ));
+
+    Ok(Outcome::ok(document, human).under(code))
 }
 
 fn prism_fork(

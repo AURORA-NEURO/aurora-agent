@@ -361,6 +361,10 @@ use bioprism_project::{
 use bioprism_registry::{
     gate_document, BenchmarkPack, Policy as RegistryPolicy, RegistryIndex, TierPolicy, TrustTier,
 };
+use bioprism_repair::{
+    plan_for_issue, predicate_from_json, verify as verify_repair, AcceptanceReport,
+    DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
+};
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
     EvidenceLedger, Fingerprint, RoutingPolicy,
@@ -451,6 +455,14 @@ pub const ADAPTIVE_QUERY_SCHEMA_URI: &str = "bioprism://schema/fiber-query/0.5";
 pub const CERTIFICATE_SCHEMA_URI: &str = "bioprism://schema/fiber-context-certificate/0.1";
 pub const WORLD_SCHEMA_URI: &str = "bioprism://schema/fiber-world/0.1";
 pub const CAPABILITIES_URI: &str = "bioprism://capabilities/0.1";
+
+/// The schema of the document `repair_plan`'s `criteria` parameter names.
+///
+/// Its own version rather than the plan's: it is an *authoring* document, carrying the items a
+/// caller declares before a plan exists, and versioning it with `bioprism-repair-plan/0.1` would
+/// tie an input format to an output format that has no reason to move with it. The same document
+/// is read by `bioprism project plan --criteria`.
+pub const REPAIR_DECLARATIONS_SCHEMA_VERSION: &str = "bioprism-repair-declarations/0.1";
 
 const QUERY_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -790,9 +802,10 @@ const TOOL_DISPATCH_STACK_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// Building the tool catalogue needs this guard as much as dispatching a tool does.
 /// [`tool_definitions`] materialises every advertised schema in one activation record, so its
-/// frame grows with the catalogue: at 262 tools an unoptimised build overflows a default 2 MiB
-/// thread and aborts the process. Answering `tools/list` on whatever stack the transport happens
-/// to own would make the server's ability to describe itself depend on its caller's thread.
+/// frame grows with the catalogue: measured at 262 tools, an unoptimised build overflows a default
+/// 2 MiB thread and aborts the process, and the catalogue has only grown since. Answering
+/// `tools/list` on whatever stack the transport happens to own would make the server's ability to
+/// describe itself depend on its caller's thread.
 fn on_dispatch_stack<T: Send>(
     name: &'static str,
     body: impl FnOnce() -> T + Send,
@@ -1736,6 +1749,8 @@ impl Server {
             "world_generate" => self.world_generate(&arguments),
             "project_ingest" => self.project_ingest(&arguments),
             "project_audit" => self.project_audit(&arguments),
+            "repair_plan" => self.repair_plan(&arguments),
+            "repair_verify" => self.repair_verify(&arguments),
             "factory_lifecycle_simulate" => self.factory_lifecycle_simulate(&arguments),
             "factory_authority_verify" => self.factory_authority_verify(&arguments),
             "artifact_registry_audit" => self.artifact_registry_audit(&arguments),
@@ -3090,6 +3105,335 @@ impl Server {
             "limitations": [
                 "every check is a static-scan proxy and says so in its witness detail; nothing is executed or resolved",
                 "issue regions come from declared components only, resolved syntactically; there is no semantic relevance search, and a declaration that resolved to nothing is reported in unresolved_components rather than guessed at",
+            ],
+        }))
+    }
+
+    /// Reads the optional `criteria` document a caller declares its own plan items in.
+    ///
+    /// The same `bioprism-repair-declarations/0.1` document `bioprism project plan --criteria`
+    /// reads, resolved through [`Server::resolve`] like every other path parameter, so declaring
+    /// criteria cannot become a way to read a file outside the server root.
+    ///
+    /// Strict in the same way the plan reader is strict: an undeclared key is refused rather than
+    /// ignored, because a misspelled `falsifier` would otherwise become a plan with no falsifier
+    /// whose refusal then blames the author for something the reader dropped. An *absent* list is
+    /// accepted and means the author declared none of that kind, which is a claim
+    /// `Admissibility::Undeclared` already makes for obligations.
+    ///
+    /// A declared criterion must carry a `rationale`; obligations and falsifiers need none. That
+    /// asymmetry is the plan document's own — `AcceptanceCriterion` is the one item type with the
+    /// field — and it is enforced because a criterion is what a plan marks `declared` in order to
+    /// say a person is accountable for it. An accountable claim with no stated reason is the shape
+    /// of a criterion added to make a verification pass.
+    fn repair_declarations(&self, arguments: &Value) -> Result<RepairPlanOptions, String> {
+        let Some(value) = arguments.get("criteria") else {
+            return Ok(RepairPlanOptions::default());
+        };
+        let relative = value
+            .as_str()
+            .ok_or("criteria must be a string path relative to the server root")?;
+        let path = self.resolve(relative)?;
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("cannot read criteria {relative:?}: {error}"))?;
+        let document: Value = serde_json::from_str(&text)
+            .map_err(|error| format!("criteria {relative:?} is not valid JSON: {error}"))?;
+
+        let map = document
+            .as_object()
+            .ok_or_else(|| format!("criteria {relative:?} must be an object"))?;
+        let declared_fields = [
+            "schema_version",
+            "criteria",
+            "obligations",
+            "falsifiers",
+            "limitations",
+        ];
+        if let Some(unknown) = map
+            .keys()
+            .find(|key| !declared_fields.contains(&key.as_str()))
+        {
+            return Err(format!(
+                "undeclared field {unknown:?} on criteria {relative:?}; the declared fields are \
+                 {declared_fields:?}"
+            ));
+        }
+        match map.get("schema_version").and_then(Value::as_str) {
+            Some(version) if version == REPAIR_DECLARATIONS_SCHEMA_VERSION => {}
+            Some(other) => {
+                return Err(format!(
+                    "criteria {relative:?} declares schema_version {other:?}, expected \
+                     {REPAIR_DECLARATIONS_SCHEMA_VERSION:?}"
+                ))
+            }
+            None => {
+                return Err(format!(
+                    "criteria {relative:?} needs a string \"schema_version\" of \
+                     {REPAIR_DECLARATIONS_SCHEMA_VERSION:?}"
+                ))
+            }
+        }
+
+        let items = |field: &str, with_rationale: bool| -> Result<Vec<RepairDeclaredItem>, String> {
+            let Some(value) = map.get(field) else {
+                return Ok(Vec::new());
+            };
+            let entries = value
+                .as_array()
+                .ok_or_else(|| format!("{field:?} on criteria {relative:?} must be an array"))?;
+            entries
+                .iter()
+                .map(|entry| {
+                    let fields: &[&str] = if with_rationale {
+                        &["name", "statement", "predicate", "rationale"]
+                    } else {
+                        &["name", "statement", "predicate"]
+                    };
+                    let entry = entry
+                        .as_object()
+                        .ok_or_else(|| format!("every entry in {field:?} is an object"))?;
+                    if let Some(unknown) =
+                        entry.keys().find(|key| !fields.contains(&key.as_str()))
+                    {
+                        return Err(format!(
+                            "undeclared field {unknown:?} on an entry in {field:?}; the declared \
+                             fields are {fields:?}"
+                        ));
+                    }
+                    let text = |key: &str| -> Result<String, String> {
+                        entry
+                            .get(key)
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .ok_or_else(|| {
+                                format!("an entry in {field:?} needs a string {key:?}")
+                            })
+                    };
+                    let predicate = predicate_from_json(
+                        entry
+                            .get("predicate")
+                            .ok_or_else(|| {
+                                format!("an entry in {field:?} declares no \"predicate\"")
+                            })?,
+                    )
+                    .map_err(|error| {
+                        format!("an entry in {field:?} carries no predicate: {error}")
+                    })?;
+                    let item =
+                        RepairDeclaredItem::new(text("name")?, text("statement")?, predicate);
+                    Ok(if with_rationale {
+                        item.with_rationale(text("rationale")?)
+                    } else {
+                        item
+                    })
+                })
+                .collect()
+        };
+
+        let limitations = match map.get("limitations") {
+            None => Vec::new(),
+            Some(value) => value
+                .as_array()
+                .ok_or("\"limitations\" must be an array of strings")?
+                .iter()
+                .map(|entry| {
+                    entry
+                        .as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| "\"limitations\" carries a non-string entry".to_string())
+                })
+                .collect::<Result<Vec<String>, String>>()?,
+        };
+
+        Ok(RepairPlanOptions {
+            declared_criteria: items("criteria", true)?,
+            declared_obligations: items("obligations", false)?,
+            declared_falsifiers: items("falsifiers", false)?,
+            limitations,
+        })
+    }
+
+    /// Derive a repair plan for one declared issue and optionally write it.
+    ///
+    /// Writing follows the server's one side-effect convention (see `project_ingest`): with `out`
+    /// but without `confirm: true` the call previews the exact path it would create and writes
+    /// nothing. `preview.writes` and `written` are built from the same expression, so a caller
+    /// cannot approve one effect and receive another.
+    ///
+    /// `performed` carries three states for the reason `project_ingest` gives: `null` when no
+    /// `out` was named at all, `false` when one was named and the write is waiting on `confirm`,
+    /// `true` when the file is on disk. Collapsing "nobody asked for a write" into "a write was
+    /// declined" would report a refusal that never happened.
+    ///
+    /// Nothing here edits the scanned tree, produces a patch, builds, or runs a test. The one
+    /// write is the plan document.
+    fn repair_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let issue_id = arguments
+            .get("issue")
+            .and_then(Value::as_str)
+            .ok_or("issue is required (the id of an issue the issues file declares)")?
+            .to_string();
+        if arguments.get("issues").is_none() {
+            return Err(
+                "issues is required: a plan is for one declared issue, and a tree assembled \
+                 without its declarations carries no issue to plan for"
+                    .into(),
+            );
+        }
+        let declared = self.repair_declarations(arguments)?;
+        let (_scan, assembled) = self.project_scan_and_assemble(arguments)?;
+
+        let query_document = assembled.issue_queries.get(&issue_id).ok_or_else(|| {
+            let known: Vec<&str> = assembled
+                .issue_queries
+                .keys()
+                .map(String::as_str)
+                .collect();
+            format!(
+                "no issue {issue_id:?} is declared in the issues file; it declares {}",
+                if known.is_empty() {
+                    "no issues at all".to_string()
+                } else {
+                    known.join(", ")
+                }
+            )
+        })?;
+
+        let world = World::from_json(assembled.world.clone()).map_err(|e| e.to_string())?;
+        let pack = DomainPack::from_json(&assembled.pack).map_err(|e| e.to_string())?;
+        let query =
+            Query::from_json(query_document.clone()).map_err(|e| format!("issue query: {e}"))?;
+        let compiled = compile_with_oracle(&world, &query, pack.oracle())
+            .map_err(|e| format!("issue {issue_id:?} compile: {e}"))?;
+        let plan = plan_for_issue(&world, &pack, &issue_id, &compiled.certificate, &declared)
+            .map_err(|e| e.to_string())?;
+        let plan_document = plan.to_json().map_err(|e| e.to_string())?;
+
+        let summary = json!({
+            "ok": true,
+            "plan_id": plan.plan_id(),
+            "issue_id": plan.issue_id(),
+            "goal": plan.goal(),
+            "world_id": plan.evidence_binding().world_id,
+            "region_fact_ids": plan.evidence_binding().region_fact_ids,
+            "items": plan
+                .criteria()
+                .iter()
+                .map(|item| json!({ "kind": "criterion", "name": item.name, "origin": item.origin.as_str() }))
+                .chain(plan.obligations().iter().map(|item| {
+                    json!({ "kind": "obligation", "name": item.name, "origin": item.origin.as_str() })
+                }))
+                .chain(plan.falsifiers().iter().map(|item| {
+                    json!({ "kind": "falsifier", "name": item.name, "origin": item.origin.as_str() })
+                }))
+                .collect::<Vec<_>>(),
+            "plan": plan_document,
+            "limitations": [
+                "this tool plans and never repairs: no file in the scanned tree is edited, no patch is produced, nothing is built and no test is run",
+                "a derived criterion is a proxy for something the release-readiness pack could see, never for what the issue means; the plan's own limitations enumerate the rest",
+                "meeting every criterion in the plan is not proof the issue is resolved, and repair_verify never claims it is",
+            ],
+        });
+
+        let mut response = summary
+            .as_object()
+            .expect("the summary is an object")
+            .clone();
+        let Some(out_value) = arguments.get("out") else {
+            response.insert("performed".into(), Value::Null);
+            response.insert("written".into(), json!([]));
+            return Ok(Value::Object(response));
+        };
+
+        let out_relative = out_value
+            .as_str()
+            .ok_or("out must be a string path relative to the server root")?;
+        let out_path = self.resolve(out_relative)?;
+        let display_path = out_relative.replace('\\', "/");
+        let confirmed = arguments
+            .get("confirm")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !confirmed {
+            response.insert("performed".into(), Value::Bool(false));
+            response.insert("written".into(), json!([]));
+            response.insert(
+                "preview".into(),
+                json!({
+                    "effect": "would write the repair plan document",
+                    "writes": [display_path],
+                }),
+            );
+            response.insert(
+                "hint".into(),
+                json!("call again with confirm=true to perform this write"),
+            );
+            return Ok(Value::Object(response));
+        }
+
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        }
+        let bytes = bioprism_ids::to_canonical_bytes(&plan_document)
+            .map_err(|error| format!("cannot canonicalise the plan: {error}"))?;
+        std::fs::write(&out_path, bytes)
+            .map_err(|error| format!("cannot write {}: {error}", out_path.display()))?;
+        response.insert("performed".into(), Value::Bool(true));
+        response.insert("written".into(), json!([display_path]));
+        Ok(Value::Object(response))
+    }
+
+    /// Report which of a repair plan's declared criteria held in a freshly scanned tree.
+    ///
+    /// Three-valued and staleness-first, exactly as `bioprism_repair::verify` is. If the world
+    /// scanned here is not the world the plan was bound to, the response is the crate's `stale`
+    /// report — no outcome, no item statuses, nothing evaluated — because a verdict computed
+    /// against a different world is not a verdict about this plan. `stale` is a finding and not an
+    /// error: it arrives as a successful call carrying a report that says so, so a caller cannot
+    /// discard it the way it would discard a transport failure.
+    ///
+    /// Nothing is written, built, or run, and the response never states that the issue is fixed.
+    ///
+    /// # Not exposed here
+    ///
+    /// **A repaired tree cannot be given a verdict through this tool.** A project world id is
+    /// derived from the file listing, so any edit produces a different world and this tool reports
+    /// `stale` — correctly, and unhelpfully for the case the feature exists for.
+    /// `bioprism_repair::verify_successor` exists for it and takes a `Succession`: a named
+    /// person's assertion that the new world is the repaired successor of the planned one,
+    /// recorded verbatim and never verified. No argument here mints one, and the gap is stated
+    /// rather than worked around by verifying against the new world and calling the difference
+    /// immaterial.
+    fn repair_verify(&self, arguments: &Value) -> Result<Value, String> {
+        let plan_relative = arguments
+            .get("plan")
+            .and_then(Value::as_str)
+            .ok_or("plan is required (a path to a repair plan document, relative to the server root)")?;
+        let plan_path = self.resolve(plan_relative)?;
+        let text = std::fs::read_to_string(&plan_path)
+            .map_err(|error| format!("cannot read plan {plan_relative:?}: {error}"))?;
+        let document: Value = serde_json::from_str(&text)
+            .map_err(|error| format!("plan {plan_relative:?} is not valid JSON: {error}"))?;
+        let plan = RepairPlan::from_json(&document)
+            .map_err(|error| format!("plan {plan_relative:?}: {error}"))?;
+
+        let (_scan, assembled) = self.project_scan_and_assemble(arguments)?;
+        let world = World::from_json(assembled.world.clone()).map_err(|e| e.to_string())?;
+        let report = verify_repair(&plan, &world);
+
+        Ok(json!({
+            "ok": true,
+            "plan_id": report.plan_id(),
+            "issue_id": report.issue_id(),
+            "stale": matches!(report, AcceptanceReport::Stale { .. }),
+            "outcome": report.outcome().map(|outcome| outcome.as_str()),
+            "admissibility": report.admissibility().map(|value| value.as_str()),
+            "report": report.to_json(),
+            "limitations": [
+                "this report states which of the plan's declared criteria held in the tree scanned here; it does not state that the issue is resolved",
+                "a stale report evaluated nothing at all: outcome and admissibility are null, and the item list is absent rather than empty",
+                "criteria are evaluated against every fact in the assembled world rather than a recompiled evidence region, so no budget is applied; nothing is executed",
             ],
         }))
     }
@@ -36006,9 +36350,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "decision_context",
-            "domains": ["typed queries", "evidence selection", "omission accounting"],
-            "crates": ["bioprism-fiber", "bioprism-section", "bioprism-obligation", "bioprism-scope", "bioprism-graph", "bioprism-domain", "bioprism-project"],
-            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle", "obligation_gate_check", "domain_validate", "project_audit"],
+            "domains": ["typed queries", "evidence selection", "omission accounting", "repair planning", "three-valued acceptance"],
+            "crates": ["bioprism-fiber", "bioprism-section", "bioprism-obligation", "bioprism-scope", "bioprism-graph", "bioprism-domain", "bioprism-project", "bioprism-repair"],
+            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle", "obligation_gate_check", "domain_validate", "project_audit", "repair_plan", "repair_verify"],
             "cli_entrypoints": ["context explain", "context compile", "context verify", "context compare"],
             "status": "available"
         },
@@ -36297,8 +36641,9 @@ pub fn workspace_capabilities() -> Value {
 ///
 /// **This call needs more stack than a default thread has, and the shortfall aborts rather than
 /// unwinds.** The body is a single `vec![...]` literal, so every schema in the catalogue lives in
-/// one activation record and the frame grows with the tool count: measured on the 262-tool
-/// catalogue in an unoptimised build, 2 MiB overflows and 4 MiB does not. A stack overflow is not
+/// one activation record and the frame grows with the tool count: measured on a 262-tool
+/// catalogue in an unoptimised build, 2 MiB overflows and 4 MiB does not. The catalogue has
+/// only grown since, so treat that as a floor and not a current reading. A stack overflow is not
 /// a `Result` — it takes the process down — so a caller cannot detect this and recover.
 ///
 /// The server itself never calls this on a thread it did not size: `tools/list` goes through the
@@ -40322,6 +40667,37 @@ pub fn tool_definitions() -> Vec<Value> {
                     "decision_time": { "type": "string", "description": "Optional RFC 3339 timestamp for the scan event and generated queries. No clock is ever read; omitted means the fixed epoch 1970-01-01T00:00:00Z." }
                 },
                 "required": ["root"]
+            }
+        }),
+        json!({
+            "name": "repair_plan",
+            "description": "Derive a checkable repair plan for one declared issue from the evidence region compiled for it, and optionally write it as a bioprism-repair-plan/0.1 document. The plan is bound to the world it was planned from — world id, world digest, region fact ids and query digest — so repair_verify can report staleness instead of guessing. Items the generator inferred are marked derived and items the caller declared are marked declared; the two never merge, and a declared name colliding with a derived one is refused rather than absorbed. Nothing is edited, patched, built, or run: this plans and it checks. Meeting every criterion is not proof the issue is resolved, and the plan says so in its own limitations. With out the document is written as canonical bytes — without confirm=true the call previews the exact path and writes nothing; 'performed' is null when no out was named, false when one awaits confirm, and true when the file is on disk.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "root": { "type": "string", "description": "Project directory to scan, relative to the server root. Absolute paths, traversal, and symlink escapes are refused." },
+                    "issues": { "type": "string", "description": "Path to a strict JSON issues file (array of {id, title, body?, components?}), relative to the server root. Required: a plan is for one declared issue, and a tree assembled without its declarations carries no issue to plan for." },
+                    "issue": { "type": "string", "description": "The id of the issue to plan for. It must be declared in the issues file; an id that is not is refused with the ids that are." },
+                    "decision_time": { "type": "string", "description": "Optional RFC 3339 timestamp for the scan event and generated queries. No clock is ever read; omitted means the fixed epoch 1970-01-01T00:00:00Z." },
+                    "criteria": { "type": "string", "description": "Optional path to a bioprism-repair-declarations/0.1 document, relative to the server root, carrying the caller's own criteria (each needing name, statement, predicate and rationale), obligations and falsifiers (name, statement, predicate) plus extra limitations. Undeclared keys are refused; an absent list means the author declared none of that kind." },
+                    "out": { "type": "string", "description": "Optional path to write the plan document to, relative to the server root." },
+                    "confirm": { "type": "boolean", "description": "Must be true for out to actually write; otherwise the call previews the effect." }
+                },
+                "required": ["root", "issues", "issue"]
+            }
+        }),
+        json!({
+            "name": "repair_verify",
+            "description": "Re-scan a project tree and report which of a repair plan's declared criteria held. Three-valued: every criterion, obligation and falsifier is met, unmet, or not_evaluable, and not_evaluable is never folded into either of the others — it carries the obstruction naming the variable that stopped the check. Staleness comes first and nothing is evaluated behind it: if the tree scanned here is not the world the plan was bound to, the report is 'stale' with a null outcome and no item list, because a verdict computed against a different world is not a verdict about this plan. A repaired tree is by construction a different world, so it reports stale too; giving it a verdict needs a named person's succession declaration, which this tool does not mint. Obligations are reported on a separate admissibility axis and never move the outcome. This never states that the issue is resolved, only which declared criteria held. Nothing is written, built, or run.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "root": { "type": "string", "description": "Project directory to scan, relative to the server root. Absolute paths, traversal, and symlink escapes are refused." },
+                    "plan": { "type": "string", "description": "Path to a bioprism-repair-plan/0.1 document, relative to the server root. Its content-derived plan_id is rederived, so a body edited after the id was minted is refused." },
+                    "issues": { "type": "string", "description": "Optional path to the issues file the plan was planned from, relative to the server root. Assembling the same tree without its declarations produces a different world, which the plan reports as stale rather than as a verdict." },
+                    "decision_time": { "type": "string", "description": "Optional RFC 3339 timestamp for the scan event and generated queries. No clock is ever read; omitted means the fixed epoch 1970-01-01T00:00:00Z." }
+                },
+                "required": ["root", "plan"]
             }
         }),
     ];

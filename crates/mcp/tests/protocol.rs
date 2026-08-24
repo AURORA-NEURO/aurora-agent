@@ -213,7 +213,8 @@ fn call(server: &mut Server, name: &str, arguments: Value) -> Value {
 /// advertised tool's schema in one activation record, so a direct call from a default 2 MiB
 /// test thread aborts with `STATUS_STACK_OVERFLOW` while the same call through `tools/call`
 /// or `tools/list` is safe, because dispatch already runs on a 16 MiB thread. Measured on the
-/// 262-tool catalogue: 2 MiB overflows, 4 MiB does not.
+/// 262-tool catalogue: 2 MiB overflows, 4 MiB does not. The catalogue has only grown since
+/// that measurement, so the figure is a floor rather than a current reading.
 fn on_a_dispatch_sized_stack<T: Send>(body: impl FnOnce() -> T + Send) -> T {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
@@ -348,7 +349,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = on_a_dispatch_sized_stack(tool_definitions);
-    assert_eq!(tools.len(), 262);
+    assert_eq!(tools.len(), 264);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -8668,12 +8669,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(30));
-    assert_eq!(result["unique_catalog_tools"], json!(262));
-    assert_eq!(result["advertised_tool_count"], json!(262));
+    assert_eq!(result["unique_catalog_tools"], json!(264));
+    assert_eq!(result["advertised_tool_count"], json!(264));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(262));
-    assert_eq!(result["schema_quality"]["valid"], json!(262));
+    assert_eq!(result["schema_quality"]["checked"], json!(264));
+    assert_eq!(result["schema_quality"]["valid"], json!(264));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -10543,6 +10544,456 @@ fn a_region_built_from_an_unresolvable_declaration_is_distinguishable_from_one_d
     }
 
     let _ = std::fs::remove_dir_all(repo_root().join(issues_dir));
+}
+
+/// Writes a `bioprism-repair-declarations/0.1` document under the server root and returns the
+/// root-relative path `repair_plan` takes.
+fn write_repair_declarations(directory: &str, document: Value) -> String {
+    std::fs::create_dir_all(repo_root().join(directory)).unwrap();
+    let relative = format!("{directory}/declared.json");
+    std::fs::write(
+        repo_root().join(&relative),
+        serde_json::to_vec_pretty(&document).unwrap(),
+    )
+    .unwrap();
+    relative
+}
+
+/// Plans ISSUE-1 of the demo app into `out`, confirming the write, and returns the payload.
+fn plan_demo_issue_one(server: &mut Server, out: &str, extra: &[(&str, Value)]) -> Value {
+    let mut arguments = json!({
+        "root": DEMO_PROJECT,
+        "issues": DEMO_PROJECT_ISSUES,
+        "issue": "ISSUE-1",
+        "out": out,
+        "confirm": true,
+    });
+    for (key, value) in extra {
+        arguments[*key] = value.clone();
+    }
+    let payload = call(server, "repair_plan", arguments);
+    assert_ne!(
+        payload["__isError"],
+        json!(true),
+        "planning failed: {payload}"
+    );
+    payload
+}
+
+/// The plan crosses MCP bound to the world it was planned from, and the acceptance report that
+/// comes back for an unrepaired tree says so: `not_met`, with the release check that fired when
+/// the plan was made still firing. A tool that congratulated the tree here would be the exact lie
+/// this surface exists to refuse.
+#[test]
+fn repair_verify_reports_not_met_on_an_unrepaired_tree_and_never_that_the_issue_is_resolved() {
+    let directory = "target/mcp-repair-unchanged";
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+    let out = format!("{directory}/plan.json");
+
+    let mut server = server();
+    let planned = plan_demo_issue_one(&mut server, &out, &[]);
+    assert!(planned["plan_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("repair-ISSUE-1-"));
+
+    let payload = call(
+        &mut server,
+        "repair_verify",
+        json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "plan": out }),
+    );
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["stale"], json!(false));
+    assert_eq!(payload["outcome"], json!("not_met"));
+    assert_eq!(
+        payload["admissibility"],
+        json!("undeclared"),
+        "a plan declaring no prerequisite has declared none, which is not the same as one holding"
+    );
+
+    let items = payload["report"]["items"].as_array().unwrap();
+    let status_of = |name: &str| -> String {
+        items
+            .iter()
+            .find(|item| item["name"] == json!(name))
+            .unwrap_or_else(|| panic!("{name} is not on the report: {items:?}"))["status"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(status_of("check_cleared:unpinned_dependency"), "unmet");
+    assert_eq!(status_of("component_present:src"), "met");
+    assert_eq!(status_of("region_evidence_removed"), "unmet");
+    assert!(
+        payload["report"]["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line
+                .as_str()
+                .unwrap()
+                .contains("does not state that the issue is resolved")),
+        "the report must refuse the claim the tool could be mistaken for: {payload}"
+    );
+
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+}
+
+/// A plan is bound to the world it was planned from, and a world that is not that world gets no
+/// verdict at all — not a verdict with a flag beside it, because a reader offered both takes the
+/// verdict and skips the flag. So the claim is the absence: no outcome, no item list, nothing
+/// evaluated. The two worlds are made to differ by scanning a genuinely different tree, so a
+/// passing run cannot mean the comparison was vacuous.
+#[test]
+fn repair_verify_reports_staleness_against_a_different_world_without_evaluating_anything() {
+    let directory = "target/mcp-repair-stale";
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+    let out = format!("{directory}/plan.json");
+
+    let mut server = server();
+    let planned = plan_demo_issue_one(&mut server, &out, &[]);
+
+    let payload = call(
+        &mut server,
+        "repair_verify",
+        json!({ "root": "fixtures/projects/bare-script", "plan": out }),
+    );
+    assert_ne!(
+        payload["__isError"],
+        json!(true),
+        "staleness is a finding and arrives as a successful call, or a caller discards it with \
+         the transport errors: {payload}"
+    );
+    assert_eq!(payload["stale"], json!(true));
+    assert_eq!(payload["report"]["verdict"], json!("stale"));
+    assert_eq!(
+        payload["report"]["expected_world_id"], planned["world_id"],
+        "the report must name the world the plan was planned from"
+    );
+    assert_ne!(
+        payload["report"]["found_world_id"],
+        payload["report"]["expected_world_id"],
+        "if the two worlds were the same this test would prove nothing"
+    );
+    assert_eq!(
+        payload["outcome"],
+        Value::Null,
+        "a stale report has no verdict rather than a neutral one: {payload}"
+    );
+    assert_eq!(payload["admissibility"], Value::Null);
+    assert!(
+        payload["report"]["items"].is_null(),
+        "nothing was evaluated, so there is no item list to report: {payload}"
+    );
+    assert!(
+        payload["report"]["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line
+                .as_str()
+                .unwrap()
+                .contains("not a verdict about this plan")),
+        "the stale report must say why nothing was evaluated: {payload}"
+    );
+
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+}
+
+/// A preview whose file list does not match what confirming actually writes is worse than no
+/// preview, because the caller approves one effect and receives another. The claim under test is
+/// the equality itself, and the bytes: the confirmed write must be the plan document the preview
+/// already carried, not a second plan derived on a second pass.
+#[test]
+fn repair_plan_previews_exactly_the_path_confirming_writes_and_creates_none_of_it() {
+    let directory = "target/mcp-repair-preview";
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+    let out = format!("{directory}/plan.json");
+
+    let mut server = server();
+    let arguments = json!({
+        "root": DEMO_PROJECT,
+        "issues": DEMO_PROJECT_ISSUES,
+        "issue": "ISSUE-1",
+        "out": out,
+    });
+
+    let unasked = call(
+        &mut server,
+        "repair_plan",
+        json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-1" }),
+    );
+    assert_eq!(
+        unasked["performed"],
+        Value::Null,
+        "nobody asked for a write, which is not the same as a write being declined: {unasked}"
+    );
+
+    let preview = call(&mut server, "repair_plan", arguments.clone());
+    assert_eq!(preview["performed"], json!(false));
+    assert_eq!(
+        preview["written"],
+        json!([]),
+        "an unconfirmed call has written nothing, so it may claim nothing"
+    );
+    assert!(preview["preview"]["effect"]
+        .as_str()
+        .unwrap()
+        .contains("would write"));
+    assert!(
+        !repo_root().join(&out).exists(),
+        "the preview created {out}, so it was not a preview"
+    );
+    let previewed = preview["preview"]["writes"].as_array().unwrap().clone();
+    assert_eq!(previewed, vec![json!(out)]);
+
+    let mut confirmed_arguments = arguments;
+    confirmed_arguments["confirm"] = json!(true);
+    let performed = call(&mut server, "repair_plan", confirmed_arguments);
+    assert_eq!(performed["performed"], json!(true));
+    assert_eq!(
+        performed["written"],
+        Value::Array(previewed),
+        "confirming wrote a different set of files than the preview promised"
+    );
+    assert!(repo_root().join(&out).is_file());
+
+    let written: Value =
+        serde_json::from_slice(&std::fs::read(repo_root().join(&out)).unwrap()).unwrap();
+    assert_eq!(
+        written, preview["plan"],
+        "the document on disk must be the one the preview already showed the caller"
+    );
+    assert_eq!(written["plan_id"], performed["plan_id"]);
+
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+}
+
+/// Every path parameter of both repair tools is root-confined, on both separators, for traversal
+/// and for absolute paths alike — planning a repair must never become a way to read a criteria or
+/// plan document from, or write a plan into, an arbitrary directory. The refused write is checked
+/// against the filesystem, because a refusal that still created the file would be a refusal in
+/// name only.
+#[test]
+fn a_root_escaping_path_is_refused_by_both_repair_tools() {
+    let directory = "target/mcp-repair-confinement";
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+    let out = format!("{directory}/plan.json");
+    let mut server = server();
+    plan_demo_issue_one(&mut server, &out, &[]);
+
+    let escape_attempts = [
+        (
+            "repair_plan",
+            json!({ "root": "fixtures/../../etc", "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-1" }),
+        ),
+        (
+            "repair_plan",
+            json!({ "root": "C:\\Windows", "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-1" }),
+        ),
+        (
+            "repair_plan",
+            json!({ "root": DEMO_PROJECT, "issues": "..\\outside-issues.json", "issue": "ISSUE-1" }),
+        ),
+        (
+            "repair_plan",
+            json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-1", "criteria": "../outside-criteria.json" }),
+        ),
+        (
+            "repair_plan",
+            json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-1", "criteria": "/etc/criteria.json" }),
+        ),
+        (
+            "repair_plan",
+            json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-1", "out": "../mcp-outside-plan.json", "confirm": true }),
+        ),
+        (
+            "repair_plan",
+            json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-1", "out": "C:/mcp-outside-plan.json", "confirm": true }),
+        ),
+        (
+            "repair_verify",
+            json!({ "root": "..\\..\\etc", "plan": out }),
+        ),
+        (
+            "repair_verify",
+            json!({ "root": DEMO_PROJECT, "plan": "../outside-plan.json" }),
+        ),
+        (
+            "repair_verify",
+            json!({ "root": DEMO_PROJECT, "plan": "\\etc\\outside-plan.json" }),
+        ),
+    ];
+
+    for (tool, arguments) in escape_attempts {
+        let payload = call(&mut server, tool, arguments.clone());
+        assert_eq!(
+            payload["__isError"],
+            json!(true),
+            "{tool} accepted the escaping arguments {arguments}"
+        );
+        assert!(
+            payload["error"].as_str().unwrap().contains("refused"),
+            "{tool} refused {arguments} without saying so: {}",
+            payload["error"]
+        );
+    }
+
+    for outside in [
+        repo_root().join("..").join("mcp-outside-plan.json"),
+        PathBuf::from("C:/mcp-outside-plan.json"),
+    ] {
+        assert!(
+            !outside.exists(),
+            "the refused out {} was created anyway",
+            outside.display()
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+}
+
+/// A criterion the caller declared and a criterion the generator inferred carry different
+/// authority, so the wire must keep them apart — and a criterion whose variable the world does not
+/// carry must arrive as `not_evaluable` naming the obstruction, never as a failure. Both claims
+/// are checked over one plan, because it is the mixture that a tool folding the third value into
+/// the second would report as an ordinary `not_met`.
+#[test]
+fn repair_verify_reports_an_unevaluable_declared_criterion_as_neither_met_nor_unmet() {
+    let directory = "target/mcp-repair-declared";
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+    let out = format!("{directory}/plan.json");
+    let criteria = write_repair_declarations(
+        directory,
+        json!({
+            "schema_version": "bioprism-repair-declarations/0.1",
+            "criteria": [{
+                "name": "ghost_component_inventory_nonempty",
+                "statement": "A component the tree does not carry reports a non-empty inventory.",
+                "predicate": { "kind": "nonempty", "variable": "component_ghost_inventory" },
+                "rationale": "Declared to exercise a criterion no scan of this tree can evaluate."
+            }]
+        }),
+    );
+
+    let mut server = server();
+    let planned = plan_demo_issue_one(&mut server, &out, &[("criteria", json!(criteria))]);
+    let origin_of = |name: &str| -> String {
+        planned["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == json!(name))
+            .unwrap_or_else(|| panic!("{name} is not among the plan's items: {planned}"))["origin"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(
+        origin_of("ghost_component_inventory_nonempty"),
+        "declared",
+        "the caller's criterion must never borrow the authority of an inference"
+    );
+    assert_eq!(
+        origin_of("check_cleared:unpinned_dependency"),
+        "derived",
+        "and the generator's inference must never be reported as somebody's claim"
+    );
+
+    let payload = call(
+        &mut server,
+        "repair_verify",
+        json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "plan": out }),
+    );
+    let items = payload["report"]["items"].as_array().unwrap();
+    let blocked = items
+        .iter()
+        .find(|item| item["name"] == json!("ghost_component_inventory_nonempty"))
+        .expect("the declared criterion is reported");
+    assert_eq!(blocked["status"], json!("not_evaluable"));
+    assert_eq!(
+        blocked["obstruction"]["variable"],
+        json!("component_ghost_inventory"),
+        "the third status exists to name what stopped the check: {blocked}"
+    );
+    assert!(
+        items.iter().any(|item| item["status"] == json!("unmet")),
+        "a determinate failure must also be present, or this test does not exercise the ordering: \
+         {items:?}"
+    );
+    assert_eq!(
+        payload["outcome"],
+        json!("underdetermined"),
+        "not_met would presuppose the criteria were all checked, and one was not: {payload}"
+    );
+
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+}
+
+/// Three named refusals rather than one generic one, because the operator's next action differs.
+/// A `issue` naming something the declarations do not carry is a parameter to fix, and the refusal
+/// names the ids that are declared. An absent `issues` is a missing parameter, not an issue that
+/// does not exist. A declarations document with a misspelled key is a document to fix, and
+/// silently ignoring the key would produce a plan whose missing falsifier the author would then be
+/// blamed for.
+#[test]
+fn repair_plan_refuses_an_undeclared_issue_and_an_undeclared_criteria_key_by_name() {
+    let directory = "target/mcp-repair-refusals";
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
+    let mut server = server();
+
+    let unknown_issue = call(
+        &mut server,
+        "repair_plan",
+        json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-404" }),
+    );
+    assert_eq!(unknown_issue["__isError"], json!(true));
+    let message = unknown_issue["error"].as_str().unwrap();
+    assert!(
+        message.contains("ISSUE-404") && message.contains("ISSUE-1"),
+        "the refusal must name both what was asked for and what is actually declared: {message}"
+    );
+
+    let no_issues = call(
+        &mut server,
+        "repair_plan",
+        json!({ "root": DEMO_PROJECT, "issue": "ISSUE-1" }),
+    );
+    assert_eq!(no_issues["__isError"], json!(true));
+    assert!(
+        no_issues["error"]
+            .as_str()
+            .unwrap()
+            .contains("issues is required"),
+        "a tree assembled without its declarations carries no issue to plan for, and the refusal \
+         must point at the missing parameter: {}",
+        no_issues["error"]
+    );
+
+    let criteria = write_repair_declarations(
+        directory,
+        json!({
+            "schema_version": "bioprism-repair-declarations/0.1",
+            "falsifier": [{
+                "name": "typo_in_the_key",
+                "statement": "The author meant falsifiers and wrote falsifier.",
+                "predicate": { "kind": "missing", "variable": "component_src_inventory" }
+            }]
+        }),
+    );
+    let misspelled = call(
+        &mut server,
+        "repair_plan",
+        json!({ "root": DEMO_PROJECT, "issues": DEMO_PROJECT_ISSUES, "issue": "ISSUE-1", "criteria": criteria }),
+    );
+    assert_eq!(misspelled["__isError"], json!(true));
+    assert!(
+        misspelled["error"].as_str().unwrap().contains("falsifier"),
+        "the refusal must name the key the author has to fix: {}",
+        misspelled["error"]
+    );
+
+    let _ = std::fs::remove_dir_all(repo_root().join(directory));
 }
 
 #[test]
