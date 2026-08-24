@@ -256,6 +256,19 @@ advertised as *not* retryable when re-reading and re-sending the identical reque
 clears it. `bioprism-devx`'s exit-code audit found both against blueprint 40.36 and now reports
 neither; the registry it found them in is retained there as the audit's known-positive input.
 
+## Installing (Claude surfaces)
+
+- **Claude Desktop**: download `aurora-agent.mcpb` from the
+  [latest release](https://github.com/MurariAmbati/aurora-agent-releases/releases/latest)
+  and double-click it (or Settings → Extensions). Ships with the reference
+  fixtures; the "AURORA data root" setting can point at a full checkout.
+- **Claude Code**: this repo is a plugin marketplace —
+  `claude plugin marketplace add AURORA-NEURO/aurora-agent` then
+  `claude plugin install aurora-agent@aurora` (see [plugins/README.md](plugins/README.md)).
+- **MCP registry**: listed as `io.github.MurariAmbati/aurora-agent` on
+  [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/).
+- Privacy: local program, no network, no data collection — [PRIVACY.md](PRIVACY.md).
+
 ## Using it from an agent
 
 ```bash
