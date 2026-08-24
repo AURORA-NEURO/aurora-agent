@@ -41,7 +41,7 @@
 
     <h1>Install</h1>
 
-    <p class="lede">Four ways in, all local. The server makes no network requests and collects no data
+    <p class="lede">Five ways in, all local. The server makes no network requests and collects no data
     on any of them.</p>
 
     <h2>Claude Desktop (.mcpb bundle)</h2>
@@ -63,6 +63,17 @@
 
     <pre><code>claude plugin marketplace add AURORA-NEURO/aurora-agent
 claude plugin install aurora-agent@aurora</code></pre>
+
+    <h2>VS Code (extension)</h2>
+
+    <p>Sideload <code>aurora-agent-0.1.3.vsix</code> from the
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/releases/tag/v0.1.3">v0.1.3 release</a>:</p>
+
+    <pre><code>code --install-extension aurora-agent-0.1.3.vsix</code></pre>
+
+    <p>The extension registers the MCP server with VS Code (1.101+) so Copilot agent mode can call
+    the 259 tools, and adds workflow/autopilot/pipeline views. It can also be built from source in
+    <code>editors/vscode</code> with <code>npm install &amp;&amp; npm run package</code>.</p>
 
     <h2>MCP registry</h2>
 

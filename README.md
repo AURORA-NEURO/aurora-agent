@@ -283,6 +283,11 @@ neither; the registry it found them in is retained there as the audit's known-po
 - **Claude Code**: this repo is a plugin marketplace —
   `claude plugin marketplace add AURORA-NEURO/aurora-agent` then
   `claude plugin install aurora-agent@aurora` (see [plugins/README.md](plugins/README.md)).
+- **VS Code**: sideload `aurora-agent-0.1.3.vsix` from the
+  [v0.1.3 release](https://github.com/AURORA-NEURO/aurora-agent/releases/tag/v0.1.3)
+  (`code --install-extension aurora-agent-0.1.3.vsix`). The extension registers the MCP
+  server with VS Code (1.101+) so Copilot agent mode can call the 259 tools, and adds
+  workflow/autopilot/pipeline views (see [editors/vscode](editors/vscode/)).
 - **MCP registry**: listed as `io.github.MurariAmbati/aurora-agent` on
   [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/).
 - Privacy: local program, no network, no data collection — [PRIVACY.md](PRIVACY.md).
