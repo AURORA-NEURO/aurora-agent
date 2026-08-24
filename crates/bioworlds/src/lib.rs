@@ -27,16 +27,18 @@
 //! every protected variable in the world stays readable at that same cut. The structural property
 //! is asserted in `tests/non_protected_temporal_withholding.rs`.
 //!
-//! ## `underdetermined_abstention` — the input exists, the compiler path does not
+//! ## `underdetermined_abstention` — the input exists; the default compile still calls it valid
 //!
 //! That blocker names `bioprism-fiber`, which this crate cannot touch and does not depend on.
 //! What it *can* supply is a world that genuinely underdetermines: [`underdetermined`] leaves
 //! three mutually exclusive hypotheses live over an evidence set that is complete, fully readable
-//! at the cut, and records its absences explicitly rather than omitting them. On the v0.1 oracle
-//! that world's witness list is empty, so it compiles to `valid` — a *wrong* answer rather than a
-//! missing one, which is a sharper failure than the blocker currently describes.
-//! [`underdetermined::AbstentionStep`] enumerates the six things a compiler would still have to
-//! do.
+//! at the cut, and records its absences explicitly rather than omitting them. `bioprism-fiber`
+//! has since gained `compile_with_oracle`, through which an injected oracle — `bioprism-domain`'s
+//! rule oracles are the worked case — can return an abstaining verdict; but the default
+//! `compile()` still runs the split-integrity oracle, whose witness list is empty on this world,
+//! so the default path still compiles it to `valid` — a *wrong* answer rather than a missing one.
+//! [`underdetermined::AbstentionStep`] enumerates the six things a judge of *this* world would
+//! still have to do; no oracle yet interprets its hypothesis factors.
 //!
 //! # The line this crate does not cross
 //!
