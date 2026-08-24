@@ -308,6 +308,8 @@ test("provider-planned decision cycles settle planner and execution quality acro
     assert.equal(result.status, "completed", domain);
     assert.equal(result.planner_evaluation.reward, 0.83, domain);
     assert.equal(result.planner_settlement.status, "settled", domain);
+    assert.equal(result.planner_settlement.planner_context?.domain, domain, domain);
+    assert.equal(result.planner_settlement.planner_context_digest.length, 64, domain);
     assert.equal(result.settlement.episode.status, "settled", domain);
   }
   const state = agent.learner.snapshot();

@@ -467,6 +467,9 @@ export interface AutonomousPlanningQualitySettlement extends JsonObject {
   schema: typeof AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA;
   status: "settled" | "not_eligible";
   plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | AutonomousOrderedStepPlanRefinementResult | null;
+  /** Context actually credited; embedded planner context wins over legacy caller reconstruction. */
+  planner_context: BrainBanditContext | null;
+  planner_context_digest: Digest | null;
   evaluation: AutonomousEvaluatorRewardInput | null;
   next_state: BrainBanditState | null;
   model_quality: AutonomousLearningModelQualityProjection | null;
@@ -674,6 +677,36 @@ function boundedGeneration(value: unknown): number {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+type AutonomousPlannerRefinement = AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | AutonomousOrderedStepPlanRefinementResult;
+
+/**
+ * Recover and verify the planner identity embedded in a provider proposal. Planner feedback
+ * must be credited to the contextual arm that actually selected the provider, not to whatever
+ * context a later caller happens to reconstruct from legacy settlement options.
+ */
+async function embeddedPlannerContext(
+  plan: AutonomousPlannerRefinement,
+): Promise<{ context: BrainBanditContext; digest: string } | null> {
+  const rawPlan = plan as JsonObject;
+  const rawContext = rawPlan.planner_context;
+  const rawDigest = rawPlan.planner_context_digest;
+  if (rawContext === undefined && rawDigest === undefined) return null;
+  if (!isObject(rawContext) || typeof rawDigest !== "string" || !/^[0-9a-f]{64}$/.test(rawDigest)) throw new ArgumentError("planner context metadata is malformed");
+  const allowedKeys = new Set(["domain", "capability", "risk_class", "task_family"]);
+  if (Object.keys(rawContext).some((key) => !allowedKeys.has(key))) throw new ArgumentError("planner context metadata contains unsupported fields");
+  const domain = boundedIdentifier("planner context domain", rawContext.domain);
+  if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError("planner context domain is unsupported");
+  const capability = boundedIdentifier("planner context capability", rawContext.capability);
+  const riskClass = boundedIdentifier("planner context risk_class", rawContext.risk_class);
+  const taskFamily = rawContext.task_family === undefined || rawContext.task_family === null
+    ? null
+    : boundedIdentifier("planner context task_family", rawContext.task_family);
+  const context: BrainBanditContext = { domain, capability, risk_class: riskClass, task_family: taskFamily };
+  const expectedDigest = await digestCanonicalJsonText(JSON.stringify(context));
+  if (expectedDigest !== rawDigest) throw new ArgumentError("planner context digest does not match planner context");
+  return { context, digest: rawDigest };
 }
 
 const SETTLEMENT_RECEIPT_FORBIDDEN_KEYS = new Set([
@@ -2180,18 +2213,26 @@ export class AutonomousLearningController {
     },
   ): Promise<AutonomousPlanningQualitySettlement> {
     if (!isObject(plan) || plan.status !== "completed" || !isObject(plan.selected_model) || typeof plan.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(plan.outcome_digest)) {
-      return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: isObject(plan) ? plan : null, evaluation: null, next_state: null, model_quality: null, reason: "planning_proposal_not_completed", remote: false, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+      return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: isObject(plan) ? plan : null, planner_context: null, planner_context_digest: null, evaluation: null, next_state: null, model_quality: null, reason: "planning_proposal_not_completed", remote: false, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
     }
     if (!options || typeof options !== "object" || !AUTONOMOUS_DOMAIN_NAMES.includes(options.domain)) throw new ArgumentError("planning quality settlement requires a built-in domain");
     const evaluation = normalizeRewardInput(options.evaluator);
     const selected = plan.selected_model;
     const provider = selected.provider;
     const model = selected.model;
-    const capability = options.capability ?? "planning";
-    const riskClass = options.riskClass ?? "planning_review";
-    if (typeof capability !== "string" || !capability.trim() || typeof riskClass !== "string" || !riskClass.trim()) throw new ArgumentError("planning quality capability and riskClass must be non-empty");
-    const context: BrainBanditContext = { domain: options.domain, capability, risk_class: riskClass, task_family: options.taskFamily ?? null };
-    const contextDigest = await digestCanonicalJsonText(JSON.stringify(context));
+    const embeddedContext = await embeddedPlannerContext(plan);
+    let context: BrainBanditContext;
+    let contextDigest: string;
+    if (embeddedContext) {
+      context = embeddedContext.context;
+      contextDigest = embeddedContext.digest;
+    } else {
+      const capability = options.capability ?? "planning";
+      const riskClass = options.riskClass ?? "planning_review";
+      if (typeof capability !== "string" || !capability.trim() || typeof riskClass !== "string" || !riskClass.trim()) throw new ArgumentError("planning quality capability and riskClass must be non-empty");
+      context = { domain: options.domain, capability, risk_class: riskClass, task_family: options.taskFamily ?? null };
+      contextDigest = await digestCanonicalJsonText(JSON.stringify(context));
+    }
     const planningOutcomeDigest = await digestJson({ kind: "planning_quality", plan_outcome_digest: plan.outcome_digest, selection_digest: plan.selection_digest ?? null, planner_plan_digest: plan.planner_plan_digest ?? null });
     let nextState: BrainBanditState | null = null;
     const remote = options.remote === true;
@@ -2209,9 +2250,9 @@ export class AutonomousLearningController {
     const qualityBase = {
       provider,
       model,
-      domain: options.domain,
-      capability,
-      risk_class: riskClass,
+      domain: context.domain as AutonomousDomainName,
+      capability: context.capability,
+      risk_class: context.risk_class,
       evaluator_id: evaluation.evaluator_id,
       evaluator_version: evaluation.evaluator_version,
       reward: evaluation.reward,
@@ -2226,14 +2267,14 @@ export class AutonomousLearningController {
       modelQuality = { status: "not_configured", ...qualityBase };
     } else {
       try {
-        const receipt = await healthController.recordEvaluation({ provider, model, domain: options.domain, capability, riskClass, evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evidenceDigest: evaluation.evidence_digest ?? null, outcomeDigest: planningOutcomeDigest });
+        const receipt = await healthController.recordEvaluation({ provider, model, domain: context.domain as AutonomousDomainName, capability: context.capability, riskClass: context.risk_class, evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evidenceDigest: evaluation.evidence_digest ?? null, outcomeDigest: planningOutcomeDigest });
         modelQuality = { status: "recorded", ...qualityBase, health_event_digest: receipt.event_digest };
       } catch (error) {
         modelQuality = { status: "failed", ...qualityBase, error_class: error instanceof Error && error.constructor.name.trim() ? error.constructor.name : "ModelHealthError" };
       }
     }
-    if (!nextState && modelQuality.status === "not_configured") return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: plan, evaluation: null, next_state: null, model_quality: null, reason: "no_learning_or_health_sink", remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
-    return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "settled", plan_refinement: plan, evaluation, next_state: nextState, model_quality: modelQuality, reason: null, remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+    if (!nextState && modelQuality.status === "not_configured") return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: plan, planner_context: context, planner_context_digest: contextDigest, evaluation: null, next_state: null, model_quality: null, reason: "no_learning_or_health_sink", remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "settled", plan_refinement: plan, planner_context: context, planner_context_digest: contextDigest, evaluation, next_state: nextState, model_quality: modelQuality, reason: null, remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
   }
 
   /**

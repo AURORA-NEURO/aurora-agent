@@ -2939,7 +2939,12 @@ Provider planning has its own explicit settlement seam because a planner and an 
 may be different arms. TypeScript callers can pass a completed `planWithProvider()` proposal to
 `AutonomousLearningController.settlePlanningQuality(plan, { domain, evaluator })`. The method
 binds the evaluator packet to the proposal's planning outcome digest, updates the contextual
-bandit arm, and writes a separate model-quality health observation. Replaying the same proposal
+bandit arm, and writes a separate model-quality health observation. Every new proposal carries
+`planner_context` and `planner_context_digest`, the exact stable
+`{ domain, capability, risk_class, task_family }` identity used for planner selection. Settlement
+verifies that digest and credits the embedded context, so single-domain, cross-domain, workflow,
+portfolio, and mission wrappers cannot accidentally reconstruct a different contextual arm.
+Older proposals without these fields use the legacy caller-supplied context. Replaying the same proposal
 and evaluator packet returns the same bandit state and health receipt; a changed reward for the
 same planning digest is refused. A valid plan proposal still proves only plan structure—it does
 not authorize tools, effects, provider calls, or task correctness.

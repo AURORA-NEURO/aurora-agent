@@ -401,6 +401,9 @@ export interface AutonomousPlanRefinementResult extends JsonObject {
   planner_prompt_digest: string | null;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
+  /** Exact contextual identity used by the planner model-selection request. */
+  planner_context?: BrainBanditContext;
+  planner_context_digest?: string;
   /** Strict-mode provider-free admission for the planner call, when enabled. */
   domain_policy_admission?: JsonObject;
   /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
@@ -428,6 +431,9 @@ export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
   planner_prompt_digest: string | null;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
+  /** Exact contextual identity used by the cross-domain planner selection request. */
+  planner_context?: BrainBanditContext;
+  planner_context_digest?: string;
   /** Strict-mode provider-free admission for the cross-domain planner call, when enabled. */
   domain_policy_admission?: JsonObject;
   /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
@@ -462,6 +468,9 @@ export interface AutonomousOrderedStepPlanRefinementResult extends JsonObject {
   planner_prompt_digest: string | null;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
+  /** Exact contextual identity used by ordered-step planner selection. */
+  planner_context?: BrainBanditContext;
+  planner_context_digest?: string;
   /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
   cost_budget?: {
     max_cost_units: number;

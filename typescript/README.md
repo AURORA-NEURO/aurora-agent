@@ -704,6 +704,13 @@ child ids and carry the accepted digest through specialist fan-out and synthesis
 execution can share one `AutonomousCostBudget`, keeping the planner inside the caller's aggregate
 ceiling.
 
+Provider planning proposals also carry `planner_context` and `planner_context_digest`, the exact
+stable `{ domain, capability, risk_class, task_family }` identity used for contextual model
+selection. Planning-quality settlement verifies that digest and credits the embedded context;
+legacy proposals without the metadata use the caller-supplied settlement context. This keeps
+single-domain, cross-domain, workflow, portfolio, and mission wrappers from silently moving
+planner feedback to a different contextual bandit arm.
+
 `runAutonomousReplanCycle()` adds the bounded adaptive control loop for callers that want the
 evaluator to decide whether one answer deserves another attempt. Each completed attempt is sent
 to a caller-owned evaluator that returns reward/pass/failure metadata plus `replan_requested` and,

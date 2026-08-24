@@ -2746,6 +2746,8 @@ function planningResponseSchema(ids: readonly string[], focusField: "focus_stage
 interface PreparedProviderPlanning {
   prompt: AutonomousPromptResult;
   plan: AutonomousExecutionPlan;
+  learningContext: BrainBanditContext;
+  learningContextDigest: string;
 }
 
 function validatePlanningWorkflow(stages: readonly AutonomousWorkflowStage[]): string[] {
@@ -2797,7 +2799,7 @@ async function prepareProviderPlanning(
   // Provider planning is its own learner context. The execution blueprint's digest is keyed
   // by the execution capability, while this request is selected as a planning decision; using
   // the blueprint digest here makes learner-backed planning reject its own request identity.
-  const planningLearnerContext = {
+  const planningLearnerContext: BrainBanditContext = {
     domain: profile.domain,
     capability: "planning",
     risk_class: profile.risk_class,
@@ -2830,6 +2832,8 @@ async function prepareProviderPlanning(
       candidates: options.candidates ?? [],
       request,
     },
+    learningContext: planningLearnerContext,
+    learningContextDigest,
   };
 }
 
@@ -2837,7 +2841,10 @@ function planningModelProjection(selection: AutonomousSelectionDecision): { prov
   return selection.selected_model === null ? null : { ...selection.selected_model };
 }
 
-async function planningOutcomeDigest(execution: { selection: AutonomousSelectionDecision; response: ProviderResponse }): Promise<string> {
+async function planningOutcomeDigest(
+  execution: { selection: AutonomousSelectionDecision; response: ProviderResponse },
+  learningContextDigest: string | null = null,
+): Promise<string> {
   const responseDigest = await digestJson({
     provider: execution.response.provider,
     model: execution.response.model,
@@ -2847,7 +2854,7 @@ async function planningOutcomeDigest(execution: { selection: AutonomousSelection
     text: execution.response.text,
     structured: execution.response.structured,
   });
-  return digestJson({ selection: execution.selection, response_digest: responseDigest });
+  return digestJson({ selection: execution.selection, response_digest: responseDigest, learning_context_digest: learningContextDigest });
 }
 
 /** Project a malformed provider response into a digest-only planning refusal. */
@@ -2930,12 +2937,13 @@ async function prepareOrderedStepPlanning(
   // Only the stable four-field learner identity is hashed. Descriptive selection metadata
   // cannot be passed through this digest because the local, Rust, and Python learners all
   // normalize the same bounded BrainBanditContext shape before selecting or settling.
-  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify({
+  const learningContext: BrainBanditContext = {
     domain: selectionContext.domain,
     capability: selectionContext.capability,
     risk_class: selectionContext.risk_class,
     task_family: selectionContext.task_family ?? null,
-  }));
+  };
+  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(learningContext));
   const requiredCapabilities = [...new Set([...profile.required_model_capabilities, "structured_output"])]
   const plan: AutonomousExecutionPlan = {
     task: plannerTask,
@@ -2960,7 +2968,7 @@ async function prepareOrderedStepPlanning(
       ...(options.runId === undefined ? {} : { idempotencyKey: boundedIdentifier("ordered-step planning run id", options.runId) }),
     },
   };
-  return { prompt, plan };
+  return { prompt, plan, learningContext, learningContextDigest };
 }
 
 export interface AutonomousAcceptedCrossDomainPlan {
@@ -5519,6 +5527,8 @@ export class AutonomousAgent {
       planner_prompt_digest: prepared.prompt.prompt_digest,
       planner_plan_digest: null,
       outcome_digest: null,
+      planner_context: prepared.learningContext,
+      planner_context_digest: prepared.learningContextDigest,
       cost_budget: null,
       retention: "step_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_arguments_or_effects_authorized",
@@ -5549,7 +5559,7 @@ export class AutonomousAgent {
       selected_model: planningModelProjection(execution.selection),
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
-      outcome_digest: await planningOutcomeDigest(execution),
+      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest),
       cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
@@ -5620,6 +5630,8 @@ export class AutonomousAgent {
       planner_prompt_digest: prepared.prompt.prompt_digest,
       planner_plan_digest: null,
       outcome_digest: null,
+      planner_context: prepared.learningContext,
+      planner_context_digest: prepared.learningContextDigest,
       cost_budget: null,
       retention: "stage_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_or_effects_authorized",
@@ -5652,7 +5664,7 @@ export class AutonomousAgent {
       };
     }
     const selectionDigest = await digestJson(execution.selection);
-    const outcomeDigest = await planningOutcomeDigest(execution);
+    const outcomeDigest = await planningOutcomeDigest(execution, prepared.learningContextDigest);
     const plannerPlanDigest = await digestJson({ planner_output: execution.response.structured });
     const metadata = { ...base, selected_model: planningModelProjection(execution.selection), selection_digest: selectionDigest, planner_plan_digest: plannerPlanDigest, outcome_digest: outcomeDigest, cost_budget: budgetSnapshot() };
     const raw = execution.response.structured;
@@ -5716,6 +5728,8 @@ export class AutonomousAgent {
       planner_prompt_digest: prepared.prompt.prompt_digest,
       planner_plan_digest: null,
       outcome_digest: null,
+      planner_context: prepared.learningContext,
+      planner_context_digest: prepared.learningContextDigest,
       cost_budget: null,
       retention: "child_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_or_effects_authorized",
@@ -5753,7 +5767,7 @@ export class AutonomousAgent {
       selected_model: planningModelProjection(execution.selection),
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
-      outcome_digest: await planningOutcomeDigest(execution),
+      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest),
       cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
