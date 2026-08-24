@@ -79,6 +79,7 @@ members = [
     "crates/interweave",
     "crates/residue",
     "crates/domain",
+    "crates/project",
     "crates/brain",
     "crates/cli",
 ]
@@ -130,6 +131,7 @@ bioprism-factory = { path = "crates/factory" }
 bioprism-bioeval = { path = "crates/bioeval" }
 bioprism-ledger = { path = "crates/ledger" }
 bioprism-domain = { path = "crates/domain" }
+bioprism-project = { path = "crates/project" }
 bioprism-sdk = { path = "crates/sdk" }
 bioprism-governance = { path = "crates/governance" }
 bioprism-standards = { path = "crates/standards" }

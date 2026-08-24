@@ -245,6 +245,7 @@ dependencies = [
 name = "bioprism-cli"
 version = "0.1.0"
 dependencies = [
+ "bioprism-adapter",
  "bioprism-baseline",
  "bioprism-devplat",
  "bioprism-domain",
@@ -253,6 +254,7 @@ dependencies = [
  "bioprism-mcp",
  "bioprism-mutation",
  "bioprism-prism",
+ "bioprism-project",
  "bioprism-scope",
  "bioprism-section",
  "bioprism-store",
@@ -631,6 +633,7 @@ dependencies = [
  "bioprism-packs",
  "bioprism-policy",
  "bioprism-prism",
+ "bioprism-project",
  "bioprism-registry",
  "bioprism-routing",
  "bioprism-runtime",
@@ -818,6 +821,22 @@ dependencies = [
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-project"
+version = "0.1.0"
+dependencies = [
+ "bioprism-adapter",
+ "bioprism-domain",
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
+ "bioprism-world",
  "serde",
  "serde_json",
  "thiserror",
