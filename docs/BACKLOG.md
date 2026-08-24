@@ -1277,3 +1277,15 @@ provider/model observations can be snapshotted, restored atomically, and handed 
 conditional-write/HTTP adapter with stale-writer fencing. Its all-domain tests cover restart and
 tamper refusal while keeping request messages, response text, headers, credential handles, and
 model prompts outside historical transport evidence.
+
+The Python reviewed-evidence surface now also has a provider-backed LLM acquisition seam. The
+`AutonomousLLMEvidenceAdapter` binds a reviewed requirement to the existing `LLMRuntime`, supports
+static or context-selected models, structured response parsing, caller-owned prompt builders,
+credential handles or explicitly credentialless local providers, and metadata-only projections.
+`AutonomousLLMEvidenceAdapterRouter` requires an explicit per-domain mapping for cross-domain runs,
+and `AutonomousAgent.run_with_llm_evidence` / `run_resumable_llm_evidence` compose that mapping with
+source approval, evidence evaluation, provider approval, journaling, and restart checkpoints.
+The adapter rejects secret-shaped response fields and malformed provider output; no credential,
+prompt, or provider response is placed in durable evidence state. This closes the Python gap with
+the TypeScript LLM evidence adapter while leaving provider registration, credential onboarding,
+model selection policy, and external network authorization caller-owned.

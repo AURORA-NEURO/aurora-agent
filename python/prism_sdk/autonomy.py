@@ -14741,6 +14741,45 @@ class AutonomousAgent:
             run_options=run_options,
         )
 
+    def run_with_llm_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        adapter: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        projector: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run reviewed evidence acquisition through a provider-backed adapter or router.
+
+        ``AutonomousLLMEvidenceAdapter`` and ``AutonomousLLMEvidenceAdapterRouter`` both expose
+        ``acquire``.  A router also exposes ``project``; a single adapter uses its
+        ``project_value`` method.  The remaining keyword arguments are passed to
+        :meth:`run_with_reviewed_evidence`, so source approval, evidence acceptance, provider
+        approval, journaling, and model-routing policy stay visible at the call site.
+        """
+
+        if not callable(getattr(adapter, "acquire", None)):
+            raise ArgumentError("LLM evidence adapter must expose a callable acquire method")
+        selected_projector = projector
+        if selected_projector is None:
+            candidate = getattr(adapter, "project", None)
+            if callable(candidate):
+                selected_projector = candidate
+            else:
+                candidate = getattr(adapter, "project_value", None)
+                if callable(candidate):
+                    selected_projector = candidate
+        return self.run_with_reviewed_evidence(
+            task=task,
+            requests=requests,
+            acquirer=adapter,
+            credentials=credentials,
+            projector=selected_projector,
+            **kwargs,
+        )
+
     def run_resumable_evidence_backed(self, **kwargs: Any) -> Any:
         """Run or resume reviewed evidence-backed work through a caller checkpoint sink.
 
@@ -14752,6 +14791,36 @@ class AutonomousAgent:
         from .autonomous_evidence_backed_resumable import run_autonomous_evidence_backed_resumable
 
         return run_autonomous_evidence_backed_resumable(self, **kwargs)
+
+    def run_resumable_llm_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        adapter: Any,
+        projector: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run or resume provider-backed reviewed evidence with the same explicit adapter seam."""
+
+        if not callable(getattr(adapter, "acquire", None)):
+            raise ArgumentError("LLM evidence adapter must expose a callable acquire method")
+        selected_projector = projector
+        if selected_projector is None:
+            candidate = getattr(adapter, "project", None)
+            if callable(candidate):
+                selected_projector = candidate
+            else:
+                candidate = getattr(adapter, "project_value", None)
+                if callable(candidate):
+                    selected_projector = candidate
+        return self.run_resumable_evidence_backed(
+            task=task,
+            requests=requests,
+            acquirer=adapter,
+            projector=selected_projector,
+            **kwargs,
+        )
 
     def evidence_backed_controller(self, job_id: str, persistence: Any) -> Any:
         """Create a serialized, optionally CAS-fenced evidence-backed restart controller."""
