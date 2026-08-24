@@ -5125,6 +5125,33 @@ text and specialist/synthesis outputs remain caller-owned and transient. The rec
 separate outcome, evaluator, learning-state, and progress digests, allowing an evaluator or bandit
 controller to be reconciled after restart without treating provider success as task quality.
 
+#### Deterministic goal admission and worker claims
+
+The goal ledger is intentionally not itself a scheduler: it records objective state, while a
+worker needs a separate, replayable decision about which objectives to attempt next. The
+TypeScript `AutonomousGoalScheduler` and Python `AutonomousGoalScheduler` now provide that
+boundary through `scheduleAutonomousGoals(...)` / `schedule_autonomous_goals(...)`. The scheduler
+accepts only current goal projections plus bounded caller/evaluator signals: priority, urgency,
+deadline, estimated cost, and dependency goal IDs. It computes a deterministic score from priority,
+urgency, deadline pressure, aging fairness, and retry pressure, then ranks by score-per-cost with
+stable goal-ID ties.
+
+Admission is dependency-closed and fail-closed. A goal whose dependency is incomplete, unknown, or
+part of a cycle is deferred or marked ineligible; completed dependencies are satisfied, and
+selected prerequisites are ordered before their dependants. `max_selected`, `max_concurrent`,
+`max_cost`, optional failed-retry policy, paused-goal policy, per-domain quotas, and required-domain
+coverage are explicit inputs. The result contains only revisions, statuses, scores, reasons,
+dependencies, selected IDs, coverage, and a `schedule_digest`; task text, prompts, provider output,
+tool arguments, evidence bodies, and credentials never enter the schedule.
+
+Workers call `claimAutonomousGoals(...)` / `claim_autonomous_goals(...)` with the schedule and the
+caller-owned ledger. Every admitted row is re-read and checked against its expected revision and
+status before any transition. Ready and paused goals move directly to `running`; an explicitly
+allowed failed retry first reopens to `ready` and then claims `running`. A stale or tampered
+schedule is refused, and a successful claim returns only the schedule-bound claim digest. The
+canonical numeric projection is quantized so the same twelve-domain schedule has the same digest
+in both SDKs, making Python/TypeScript replay and worker handoff portable.
+
 The Python `AutonomousGoalLedger` now exposes the same portable restart contract as the other
 state boundaries. `snapshot()` exports the sorted current goal projection plus its complete
 hash-chained lifecycle, and `restore()` validates event order, created/transition lifecycle,

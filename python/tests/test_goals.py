@@ -15,10 +15,91 @@ from prism_sdk.goals import (
     TransactionalJsonAutonomousGoalSnapshotPersistence,
     goal_task_digest,
 )
+from prism_sdk.autonomous_goal_scheduler import (
+    AutonomousGoalSchedulingSignal,
+    AutonomousGoalScheduler,
+    claim_autonomous_goals,
+    schedule_autonomous_goals,
+    validate_goal_schedule,
+)
 
 
 def _digest(value: str) -> str:
     return goal_task_digest(value)
+
+
+def test_goal_scheduler_prioritizes_dependency_closed_work_across_every_domain(tmp_path: Path) -> None:
+    with AutonomousGoalLedger(str(tmp_path / "scheduler.sqlite3"), max_goals=len(AUTONOMOUS_DOMAINS) + 2) as ledger:
+        for domain in AUTONOMOUS_DOMAINS:
+            ledger.create(
+                goal_id=f"goal-{domain}",
+                task_digest=_digest(f"task-{domain}"),
+                domain=domain,
+                now_ns=0,
+            )
+        schedule = AutonomousGoalScheduler().plan(
+            ledger.list(limit=len(AUTONOMOUS_DOMAINS)),
+            {
+                "now_ns": 1_000,
+                "max_selected": len(AUTONOMOUS_DOMAINS),
+                "max_concurrent": len(AUTONOMOUS_DOMAINS),
+                "required_domains": list(AUTONOMOUS_DOMAINS),
+                "signals": [
+                    {"goal_id": "goal-coding", "priority": 0.2},
+                    {"goal_id": "goal-science", "priority": 1.0, "urgency": 1.0, "dependencies": ["goal-coding"]},
+                ],
+            },
+        )
+        assert schedule.selected_goal_ids.index("goal-coding") < schedule.selected_goal_ids.index("goal-science")
+        assert set(schedule.selected_goal_ids) == {f"goal-{domain}" for domain in AUTONOMOUS_DOMAINS}
+        assert schedule.missing_domains == ()
+        assert schedule.to_dict()["coverage"]["selected_domains"] == list(AUTONOMOUS_DOMAINS)
+        assert "task-coding" not in json.dumps(schedule.to_dict())
+        assert validate_goal_schedule(schedule.to_dict())["schedule_digest"] == schedule.schedule_digest
+        assert schedule.schedule_digest == "30451f0e55e23ad929f23415a2ffe0a9281e3c3632c51ac9420d00995c789654"
+
+
+def test_goal_scheduler_enforces_budgets_cycles_retries_and_stale_claims(tmp_path: Path) -> None:
+    with AutonomousGoalLedger(str(tmp_path / "scheduler-claim.sqlite3"), clock=lambda: 20, max_goals=8) as ledger:
+        ledger.create(goal_id="base", task_digest=_digest("base task"), domain="coding", now_ns=0)
+        ledger.create(goal_id="dependent", task_digest=_digest("dependent task"), domain="science", now_ns=0)
+        ledger.create(goal_id="cycle-a", task_digest=_digest("cycle a"), domain="data", now_ns=0)
+        ledger.create(goal_id="cycle-b", task_digest=_digest("cycle b"), domain="operations", now_ns=0)
+        failed = ledger.create(goal_id="retry", task_digest=_digest("retry task"), domain="evaluation", max_attempts=3, now_ns=0)
+        failed = ledger.transition(failed.goal_id, "running", expected_revision=failed.revision, now_ns=1)
+        ledger.transition(failed.goal_id, "failed", expected_revision=failed.revision, now_ns=2)
+        schedule = schedule_autonomous_goals(
+            ledger.list(limit=8),
+            {
+                "now_ns": 20,
+                "max_selected": 2,
+                "max_concurrent": 2,
+                "max_cost": 3,
+                "allow_failed_retry": True,
+                "signals": [
+                    AutonomousGoalSchedulingSignal("dependent", priority=1.0, urgency=1.0, dependencies=("base",), estimated_cost=2),
+                    {"goal_id": "cycle-a", "dependencies": ["cycle-b"]},
+                    {"goal_id": "cycle-b", "dependencies": ["cycle-a"]},
+                    {"goal_id": "retry", "priority": 0.1},
+                ],
+            },
+        )
+        rows = {row.goal_id: row for row in schedule.rows}
+        assert rows["cycle-a"].reason == "dependency_cycle"
+        assert rows["cycle-b"].reason == "dependency_cycle"
+        assert rows["dependent"].decision == "admit"
+        assert rows["dependent"].unmet_dependencies == ()
+        assert schedule.used_cost == 3
+        claim = claim_autonomous_goals(ledger, schedule, now_ns=30)
+        assert [item.goal_id for item in claim.claims] == ["base", "dependent"]
+        assert ledger.get("dependent").status == "running"
+        assert ledger.get("dependent").attempt == 1
+        with pytest.raises(AutonomousGoalError, match="stale"):
+            claim_autonomous_goals(ledger, schedule, now_ns=31)
+        tampered = schedule.to_dict()
+        tampered["selected_goal_ids"] = []
+        with pytest.raises(AutonomousGoalError, match="schedule_digest"):
+            validate_goal_schedule(tampered)
 
 
 class _CasTextStore:

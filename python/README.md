@@ -165,6 +165,12 @@ persisting task text; explicit evaluator rewards remain the only learning author
 `AutonomousGoalLedger` adds the restart-safe objective layer above that memory: bounded attempts,
 criterion/evidence digests, blockers, optimistic revisions, and a hash-chained lifecycle work for
 every built-in domain without retaining goal text or provider payloads.
+`AutonomousGoalScheduler` adds deterministic multi-goal admission above the ledger. It applies
+explicit priority/urgency/deadline signals, aging fairness, dependency closure, retry policy,
+concurrency/cost budgets, per-domain quotas, and required-domain coverage, then returns a
+digest-bound metadata-only schedule. `claim_autonomous_goals()` rechecks every expected revision
+before moving admitted goals to `running`; stale schedules and dependency cycles fail closed.
+The Python schedule digest is portable with the TypeScript scheduler for the same goal projection.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

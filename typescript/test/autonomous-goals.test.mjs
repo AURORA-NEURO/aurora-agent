@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   AutonomousGoalPersistenceCoordinator,
+  AutonomousGoalScheduler,
   AutonomousAgent,
   AutonomousLearningController,
   AutonomousOnlineLearner,
@@ -14,11 +15,75 @@ import {
   TransactionalJsonAutonomousGoalPersistence,
   WebStorageAutonomousGoalTextStore,
   builtinAutonomousDomainProfiles,
+  AUTONOMOUS_DOMAIN_NAMES,
+  claimAutonomousGoals,
   digestJsonSync,
   goalTaskDigest,
   openaiCompatibleProvider,
+  scheduleAutonomousGoals,
+  validateAutonomousGoalSchedule,
   validateAutonomousGoalSnapshot,
 } from "../dist/index.js";
+
+test("goal scheduler prioritizes dependency-closed work across every domain", () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: AUTONOMOUS_DOMAIN_NAMES.length, clock: () => 0 });
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) ledger.create({ goal_id: `goal-${domain}`, task_digest: goalTaskDigest(`task-${domain}`), domain, now_ns: 0 });
+  const schedule = new AutonomousGoalScheduler().plan(ledger.list({ limit: AUTONOMOUS_DOMAIN_NAMES.length }), {
+    now_ns: 1_000,
+    max_selected: AUTONOMOUS_DOMAIN_NAMES.length,
+    max_concurrent: AUTONOMOUS_DOMAIN_NAMES.length,
+    required_domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    signals: [
+      { goal_id: "goal-coding", priority: 0.2 },
+      { goal_id: "goal-science", priority: 1, urgency: 1, dependencies: ["goal-coding"] },
+    ],
+  });
+  assert.ok(schedule.selected_goal_ids.indexOf("goal-coding") < schedule.selected_goal_ids.indexOf("goal-science"));
+  assert.deepEqual(new Set(schedule.selected_goal_ids), new Set(AUTONOMOUS_DOMAIN_NAMES.map((domain) => `goal-${domain}`)));
+  assert.deepEqual(schedule.coverage.missing_domains, []);
+  assert.deepEqual(schedule.coverage.selected_domains, [...AUTONOMOUS_DOMAIN_NAMES]);
+  assert.equal(JSON.stringify(schedule).includes("task-coding"), false);
+  assert.equal(validateAutonomousGoalSchedule(schedule).schedule_digest, schedule.schedule_digest);
+  assert.equal(schedule.schedule_digest, "30451f0e55e23ad929f23415a2ffe0a9281e3c3632c51ac9420d00995c789654");
+});
+
+test("goal scheduler enforces cycles, budgets, retry policy, and stale claims", () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 8, clock: () => 20 });
+  ledger.create({ goal_id: "base", task_digest: goalTaskDigest("base task"), domain: "coding", now_ns: 0 });
+  ledger.create({ goal_id: "dependent", task_digest: goalTaskDigest("dependent task"), domain: "science", now_ns: 0 });
+  ledger.create({ goal_id: "cycle-a", task_digest: goalTaskDigest("cycle a"), domain: "data", now_ns: 0 });
+  ledger.create({ goal_id: "cycle-b", task_digest: goalTaskDigest("cycle b"), domain: "operations", now_ns: 0 });
+  const failed = ledger.create({ goal_id: "retry", task_digest: goalTaskDigest("retry task"), domain: "evaluation", max_attempts: 3, now_ns: 0 });
+  const running = ledger.transition(failed.goal_id, "running", { expected_revision: failed.revision, now_ns: 1 });
+  ledger.transition(running.goal_id, "failed", { expected_revision: running.revision, now_ns: 2 });
+  const schedule = scheduleAutonomousGoals(ledger.list({ limit: 8 }), {
+    now_ns: 20,
+    max_selected: 2,
+    max_concurrent: 2,
+    max_cost: 3,
+    allow_failed_retry: true,
+    signals: [
+      { goal_id: "dependent", priority: 1, urgency: 1, dependencies: ["base"], estimated_cost: 2 },
+      { goal_id: "cycle-a", dependencies: ["cycle-b"] },
+      { goal_id: "cycle-b", dependencies: ["cycle-a"] },
+      { goal_id: "retry", priority: 0.1 },
+    ],
+  });
+  const rows = new Map(schedule.rows.map((row) => [row.goal_id, row]));
+  assert.equal(rows.get("cycle-a").reason, "dependency_cycle");
+  assert.equal(rows.get("cycle-b").reason, "dependency_cycle");
+  assert.equal(rows.get("dependent").decision, "admit");
+  assert.deepEqual(rows.get("dependent").unmet_dependencies, []);
+  assert.equal(schedule.used_cost, 3);
+  const claim = claimAutonomousGoals(ledger, schedule, { now_ns: 30 });
+  assert.deepEqual(claim.claims.map((item) => item.goal_id), ["base", "dependent"]);
+  assert.equal(ledger.get("dependent").status, "running");
+  assert.equal(ledger.get("dependent").attempt, 1);
+  assert.throws(() => claimAutonomousGoals(ledger, schedule, { now_ns: 31 }), /stale/);
+  const tampered = structuredClone(schedule);
+  tampered.selected_goal_ids = [];
+  assert.throws(() => validateAutonomousGoalSchedule(tampered), /schedule_digest/);
+});
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {
   const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }));
