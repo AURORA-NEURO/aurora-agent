@@ -3536,6 +3536,15 @@ caller-owned child results. This gives TypeScript and Python the same operationa
 steps, digest-bound replay, caller-owned payload retention, and no claim that a checkpoint itself
 authorizes external effects.
 
+Durable TypeScript fan-out also preserves the learning boundary across restart. With
+`structuredDomainResponse` and a learning controller enabled, each completed specialist and
+synthesis records separate task-quality and structural-response episode IDs in the checkpoint and
+step result. `AutonomousLearningController.settleCrossDomainExecution()` accepts the ordinary
+reward packet plus a caller-owned result resolver, verifies each rehydrated result against its
+checkpoint digest, replays the reviewed domain response contract, and returns independent
+`response_settlements`. The executor never persists raw response content; tampered rehydration is
+rejected before response-quality credit is applied.
+
 The Python result envelope additionally exposes `AutonomousCrossDomainExecutionReceipt`, a
 stable value-only projection for every declared child across the twelve built-in domains. It
 records ordered child/domain/status mappings, completed and incomplete IDs, bounded progress,

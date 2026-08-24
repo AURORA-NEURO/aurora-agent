@@ -5,16 +5,39 @@ import {
   AutonomousAgent,
   AutonomousCrossDomainExecutor,
   AutonomousCrossDomainPersistenceCoordinator,
+  AutonomousLearningController,
+  AutonomousOnlineLearner,
   InMemoryAutonomousCrossDomainCheckpointStore,
   TransactionalJsonAutonomousCrossDomainSnapshotPersistence,
   CredentialStore,
   LLMRuntime,
+  buildAutonomousDomainResponseContract,
+  builtinAutonomousDomainProfiles,
   digestJson,
   openaiCompatibleProvider,
 } from "../dist/index.js";
 
 function jsonResponse(text) {
   return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: text }, finish_reason: "stop" }] }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+function structuredResponse(contract) {
+  return {
+    schema: "bioprism-typescript-autonomous-domain-response/0.1",
+    domain: contract.domain,
+    workflow_id: contract.workflow_id,
+    status: "complete",
+    answer: `Durable bounded answer for ${contract.domain}.`,
+    observations: ["The reviewed durable fixture was inspected."],
+    inferences: ["The result is limited to the supplied contract."],
+    uncertainty: ["External-world truth remains caller-owned."],
+    evidence_gaps: ["No live source was contacted in this test."],
+    next_actions: ["Review the declared evidence before action."],
+    stages: contract.stage_ids.map((stage_id) => ({ stage_id, status: "complete", evidence: [`evidence:${stage_id}`], findings: [`finding:${stage_id}`], uncertainty: [`uncertainty:${stage_id}`], open_questions: [] })),
+    domain_details: Object.fromEntries(contract.domain_fields.map((field) => [field, [`detail:${field}`]])),
+    retention: "transient_provider_response_only;validated_against_reviewed_domain_contract",
+    secret_material: "never_returned",
+  };
 }
 
 function model() {
@@ -381,4 +404,60 @@ test("durable cross-domain synthesis reconciliation is quarantined before child 
   assert.equal(completed.synthesis.response.text, "durable synthesis");
   assert.equal(runCalls, 4);
   assert.equal(calls(), 3);
+});
+
+test("durable cross-domain structured-response learning survives restart and settles independently", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const contracts = new Map();
+  for (const profile of profiles) contracts.set(profile.domain, await buildAutonomousDomainResponseContract(profile));
+  const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  llm.registerInMemoryProvider("durable-cross-structured", (request) => {
+    const domain = request.responseSchema?.properties?.domain?.const;
+    return { structured: structuredResponse(contracts.get(domain)) };
+  }, { structuredOutputMode: "json_schema" });
+  const candidate = { ...model(), provider: "durable-cross-structured", model: "durable-cross-structured-model" };
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(candidate);
+  const learning = new AutonomousLearningController(agent);
+  const store = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const executor = new AutonomousCrossDomainExecutor(agent, store, { learning });
+  const options = { candidates: [candidate], subtasks, structuredDomainResponse: true, approveProviderCall: true, maxSteps: 2, jobId: "durable-cross-structured-1" };
+
+  const first = await executor.start(task, options);
+  assert.equal(first.status, "paused");
+  assert.equal(first.completed_children, 2);
+  assert.equal(first.learning_episode_ids.length, 2);
+  assert.equal(first.response_learning_episode_ids.length, 2);
+  assert.deepEqual(first.checkpoint.learning_episode_ids, first.learning_episode_ids);
+  assert.deepEqual(first.checkpoint.response_learning_episode_ids, first.response_learning_episode_ids);
+  const children = new Map(first.step_results.map((step) => [step.item_id, step.run]));
+
+  const completed = await executor.resume("durable-cross-structured-1", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    resolveChildResult: (id) => children.get(id) ?? null,
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.learning_episode_ids.length, 3);
+  assert.equal(completed.response_learning_episode_ids.length, 3);
+  assert.equal(completed.checkpoint.learning_episode_ids.length, 3);
+  assert.equal(completed.checkpoint.response_learning_episode_ids.length, 3);
+  assert.equal(completed.synthesis.response.structured.domain, "cross_domain");
+
+  const rewards = Object.fromEntries(completed.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "durable-cross-task-reviewer", evaluator_version: "1", reward: 0.8, passed: true }]));
+  const settled = await learning.settleCrossDomainExecution(completed, rewards, {
+    trajectoryId: "durable-cross-structured-trajectory",
+    resolveResult: (id, phase) => phase === "child" ? children.get(id) ?? null : completed.synthesis,
+  });
+  assert.equal(settled.trajectory.settlements.length, 3);
+  assert.equal(settled.response_settlements.length, 3);
+  assert.ok(settled.response_settlements.every((row) => row.assessment.evaluator_id.endsWith("response-integrity")));
+
+  const tampered = structuredClone(completed);
+  tampered.synthesis.response.structured.answer = "tampered after durable provider execution";
+  await assert.rejects(
+    () => learning.settleCrossDomainExecution(tampered, rewards, { trajectoryId: "durable-cross-structured-trajectory", resolveResult: (id, phase) => phase === "child" ? children.get(id) ?? null : tampered.synthesis }),
+    /result digest does not match/,
+  );
 });

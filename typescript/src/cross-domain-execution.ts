@@ -50,6 +50,10 @@ export interface AutonomousCrossDomainCheckpoint {
   plan_refinement_digest: string | null;
   execution_contract_digest?: string | null;
   synthesis_result_digest: string | null;
+  /** Metadata-only ledger of task-quality episodes prepared for completed units. */
+  learning_episode_ids?: string[];
+  /** Metadata-only ledger of independent structured-response episodes. */
+  response_learning_episode_ids?: string[];
   generation: number;
   status: AutonomousCrossDomainCheckpointStatus;
   previous_checkpoint_digest: string | null;
@@ -127,6 +131,8 @@ export interface AutonomousCrossDomainStepResult {
   child_result_digests: Record<string, string>;
   plan_refinement_digest: string | null;
   learning_episode_id: string | null;
+  /** Independent structural-response episode; never task correctness or external-world truth. */
+  response_learning_episode_id: string | null;
 }
 
 export interface AutonomousCrossDomainExecutionResult {
@@ -145,6 +151,8 @@ export interface AutonomousCrossDomainExecutionResult {
   plan_refinement_digest: string | null;
   error: AutonomousCrossDomainErrorMetadata | null;
   learning_episode_ids: string[];
+  /** Independent structural-response episodes across all completed specialists and synthesis. */
+  response_learning_episode_ids: string[];
   recovery: "caller_rehydrates_task_credentials_and_completed_child_results";
   retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only";
 }
@@ -220,6 +228,14 @@ function childIds(value: unknown, label: string): string[] {
   return ids;
 }
 
+function episodeIds(value: unknown, label: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN + 1) throw new ArgumentError(`${label} exceeds its bounded episode count`);
+  const ids = value.map((item) => boundedId(item, `${label} episode id`, 256));
+  if (new Set(ids).size !== ids.length) throw new ArgumentError(`${label} must contain unique episode IDs`);
+  return ids;
+}
+
 function checkpointDescriptor(value: Omit<AutonomousCrossDomainCheckpoint, "checkpoint_digest">): Omit<AutonomousCrossDomainCheckpoint, "checkpoint_digest"> {
   return {
     ...value,
@@ -231,7 +247,7 @@ function checkpointDescriptor(value: Omit<AutonomousCrossDomainCheckpoint, "chec
 
 async function validateCheckpoint(value: unknown): Promise<AutonomousCrossDomainCheckpoint> {
   if (!isObject(value)) throw new ArgumentError("cross-domain checkpoint must be an object");
-  exactKeys(value, ["schema", "job_id", "task_digest", "route_digest", "base_plan_digest", "execution_child_ids", "completed_child_ids", "child_result_digests", "next_child_id", "plan_refinement_digest", "execution_contract_digest", "synthesis_result_digest", "generation", "status", "previous_checkpoint_digest", "checkpoint_digest", "retention", "secret_material"], "cross-domain checkpoint");
+  exactKeys(value, ["schema", "job_id", "task_digest", "route_digest", "base_plan_digest", "execution_child_ids", "completed_child_ids", "child_result_digests", "next_child_id", "plan_refinement_digest", "execution_contract_digest", "synthesis_result_digest", "learning_episode_ids", "response_learning_episode_ids", "generation", "status", "previous_checkpoint_digest", "checkpoint_digest", "retention", "secret_material"], "cross-domain checkpoint");
   if (value.schema !== AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA || value.retention !== "metadata_only;task_prompt_response_and_credentials_not_retained" || value.secret_material !== "never_returned") throw new ArgumentError("cross-domain checkpoint metadata markers are invalid");
   const jobId = boundedId(value.job_id, "cross-domain checkpoint job_id");
   const taskDigest = digest(value.task_digest, "cross-domain checkpoint task_digest")!;
@@ -254,6 +270,8 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousCrossDomain
   const planRefinementDigest = digest(value.plan_refinement_digest, "cross-domain checkpoint plan_refinement_digest", true);
   const executionContractDigest = value.execution_contract_digest === undefined ? null : digest(value.execution_contract_digest, "cross-domain checkpoint execution_contract_digest", true);
   const synthesisResultDigest = digest(value.synthesis_result_digest, "cross-domain checkpoint synthesis_result_digest", true);
+  const learningEpisodeIds = episodeIds(value.learning_episode_ids, "cross-domain checkpoint learning_episode_ids");
+  const responseLearningEpisodeIds = episodeIds(value.response_learning_episode_ids, "cross-domain checkpoint response_learning_episode_ids");
   if (synthesisResultDigest !== null && completed.length !== execution.length) throw new ArgumentError("cross-domain checkpoint cannot contain synthesis before all children");
   const generation = boundedInteger(value.generation, "cross-domain checkpoint generation", Number.MAX_SAFE_INTEGER, 1);
   const status = value.status;
@@ -279,6 +297,8 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousCrossDomain
     plan_refinement_digest: planRefinementDigest,
     execution_contract_digest: executionContractDigest,
     synthesis_result_digest: synthesisResultDigest,
+    ...(value.learning_episode_ids === undefined ? {} : { learning_episode_ids: learningEpisodeIds }),
+    ...(value.response_learning_episode_ids === undefined ? {} : { response_learning_episode_ids: responseLearningEpisodeIds }),
     generation,
     status,
     previous_checkpoint_digest: previous,
@@ -727,14 +747,14 @@ export class AutonomousCrossDomainExecutor {
     return migrated;
   }
 
-  private async makeCheckpoint(jobId: string, route: Pick<AutonomousRouteProposal, "route_digest">, blueprint: AutonomousCrossDomainBlueprint, executionOrder: readonly string[], completed: readonly string[], childResultDigests: Record<string, string>, status: AutonomousCrossDomainCheckpointStatus, previous: AutonomousCrossDomainCheckpoint | null, contractDigest: string | null, planRefinementDigest: string | null, synthesisResultDigest: string | null): Promise<AutonomousCrossDomainCheckpoint> {
+  private async makeCheckpoint(jobId: string, route: Pick<AutonomousRouteProposal, "route_digest">, blueprint: AutonomousCrossDomainBlueprint, executionOrder: readonly string[], completed: readonly string[], childResultDigests: Record<string, string>, status: AutonomousCrossDomainCheckpointStatus, previous: AutonomousCrossDomainCheckpoint | null, contractDigest: string | null, planRefinementDigest: string | null, synthesisResultDigest: string | null, learningEpisodeIds: readonly string[] = previous?.learning_episode_ids ?? [], responseLearningEpisodeIds: readonly string[] = previous?.response_learning_episode_ids ?? []): Promise<AutonomousCrossDomainCheckpoint> {
     const next = completed.length < executionOrder.length ? executionOrder[completed.length]! : null;
-    const descriptor = { schema: AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA, job_id: jobId, task_digest: blueprint.task_digest, route_digest: route.route_digest, base_plan_digest: blueprint.plan_digest, execution_child_ids: [...executionOrder], completed_child_ids: [...completed], child_result_digests: { ...childResultDigests }, next_child_id: next, plan_refinement_digest: planRefinementDigest, execution_contract_digest: contractDigest, synthesis_result_digest: synthesisResultDigest, generation: (previous?.generation ?? 0) + 1, status, previous_checkpoint_digest: previous?.checkpoint_digest ?? null, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA, job_id: jobId, task_digest: blueprint.task_digest, route_digest: route.route_digest, base_plan_digest: blueprint.plan_digest, execution_child_ids: [...executionOrder], completed_child_ids: [...completed], child_result_digests: { ...childResultDigests }, next_child_id: next, plan_refinement_digest: planRefinementDigest, execution_contract_digest: contractDigest, synthesis_result_digest: synthesisResultDigest, learning_episode_ids: [...learningEpisodeIds], response_learning_episode_ids: [...responseLearningEpisodeIds], generation: (previous?.generation ?? 0) + 1, status, previous_checkpoint_digest: previous?.checkpoint_digest ?? null, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
     return { ...descriptor, checkpoint_digest: await digestJson(descriptor) };
   }
 
   private async makeCheckpointFromExisting(checkpoint: AutonomousCrossDomainCheckpoint, status: AutonomousCrossDomainCheckpointStatus, contractDigest: string, planRefinementDigest: string | null, synthesisResultDigest: string | null): Promise<AutonomousCrossDomainCheckpoint> {
-    const descriptor = { schema: AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA, job_id: checkpoint.job_id, task_digest: checkpoint.task_digest, route_digest: checkpoint.route_digest, base_plan_digest: checkpoint.base_plan_digest, execution_child_ids: [...checkpoint.execution_child_ids], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, next_child_id: checkpoint.next_child_id, plan_refinement_digest: planRefinementDigest, execution_contract_digest: contractDigest, synthesis_result_digest: synthesisResultDigest, generation: checkpoint.generation + 1, status, previous_checkpoint_digest: checkpoint.checkpoint_digest, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA, job_id: checkpoint.job_id, task_digest: checkpoint.task_digest, route_digest: checkpoint.route_digest, base_plan_digest: checkpoint.base_plan_digest, execution_child_ids: [...checkpoint.execution_child_ids], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, next_child_id: checkpoint.next_child_id, plan_refinement_digest: planRefinementDigest, execution_contract_digest: contractDigest, synthesis_result_digest: synthesisResultDigest, learning_episode_ids: [...(checkpoint.learning_episode_ids ?? [])], response_learning_episode_ids: [...(checkpoint.response_learning_episode_ids ?? [])], generation: checkpoint.generation + 1, status, previous_checkpoint_digest: checkpoint.checkpoint_digest, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
     return { ...descriptor, checkpoint_digest: await digestJson(descriptor) };
   }
 
@@ -746,7 +766,7 @@ export class AutonomousCrossDomainExecutor {
 
   private routeReviewResult(route: AutonomousRouteProposal, semanticStatus: AutonomousCrossDomainSemanticRouteStatus | null = null): AutonomousCrossDomainExecutionResult {
     const status: AutonomousCrossDomainExecutionStatus = semanticStatus === "policy_blocked" ? "policy_blocked" : semanticStatus === "policy_review_required" ? "policy_review_required" : "route_review_required";
-    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status, job_id: null, route, semantic_route_status: semanticStatus, blueprint: null, checkpoint: null, events: [], step_results: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, plan_refinement_digest: null, error: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
+    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status, job_id: null, route, semantic_route_status: semanticStatus, blueprint: null, checkpoint: null, events: [], step_results: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, plan_refinement_digest: null, error: null, learning_episode_ids: [], response_learning_episode_ids: [], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
   }
 
   private async hydrateChildren(jobId: string, checkpoint: AutonomousCrossDomainCheckpoint, blueprint: AutonomousCrossDomainBlueprint, options: AutonomousCrossDomainExecuteOptions): Promise<Map<string, AutonomousRunResult>> {
@@ -778,9 +798,10 @@ export class AutonomousCrossDomainExecutor {
     const order = checkpoint.execution_child_ids;
     const maxSteps = boundedSteps(options.maxSteps, order.length);
     const stepResults: AutonomousCrossDomainStepResult[] = [];
-    const learningEpisodeIds: string[] = [];
+    const learningEpisodeIds: string[] = [...(checkpoint.learning_episode_ids ?? [])];
+    const responseLearningEpisodeIds: string[] = [...(checkpoint.response_learning_episode_ids ?? [])];
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? checkpoint.plan_refinement_digest ?? null;
-    const finish = (status: AutonomousCrossDomainExecutionStatus, error?: AutonomousCrossDomainErrorMetadata, synthesis: AutonomousRunResult | null = null): Promise<AutonomousCrossDomainExecutionResult> => this.result(status, route, blueprint, checkpoint, stepResults, learningEpisodeIds, error, synthesis, semanticStatus);
+    const finish = (status: AutonomousCrossDomainExecutionStatus, error?: AutonomousCrossDomainErrorMetadata, synthesis: AutonomousRunResult | null = null): Promise<AutonomousCrossDomainExecutionResult> => this.result(status, route, blueprint, checkpoint, stepResults, learningEpisodeIds, responseLearningEpisodeIds, error, synthesis, semanticStatus);
     if (checkpoint.status === "completed") return finish("completed");
     if (checkpoint.status === "reconciliation_required") {
       if (options.retryReconciliation !== true) {
@@ -811,7 +832,7 @@ export class AutonomousCrossDomainExecutor {
         ];
         let run: AutonomousRunResult;
         try {
-          run = await this.agent.run(childSpec.task, { domain: childSpec.domain, capability: childSpec.capability, candidates: options.candidates, credential: options.credential, credentialFor: options.credentialFor, context: childContext, hints: [], allowCrossDomain: false, maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, requireJson: options.requireJson, responseSchema: options.responseSchema, temperature: options.temperature, tools: options.tools, authorizeAndExecute: options.authorizeAndExecute, toolReadOnly: options.toolReadOnly, approveProviderCall: true, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary, costBudget, executionAttempt: checkpoint.generation, maxProviderFailovers: options.maxProviderFailovers, executionLifecycle: "observe_only", signal: options.signal, observer: options.observer });
+          run = await this.agent.run(childSpec.task, { domain: childSpec.domain, capability: childSpec.capability, candidates: options.candidates, credential: options.credential, credentialFor: options.credentialFor, context: childContext, hints: [], allowCrossDomain: false, maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, requireJson: options.requireJson, responseSchema: options.responseSchema, structuredDomainResponse: options.structuredDomainResponse, temperature: options.temperature, tools: options.tools, authorizeAndExecute: options.authorizeAndExecute, toolReadOnly: options.toolReadOnly, approveProviderCall: true, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary, costBudget, executionAttempt: checkpoint.generation, maxProviderFailovers: options.maxProviderFailovers, executionLifecycle: "observe_only", signal: options.signal, observer: options.observer });
         } catch (error) {
           const metadata = errorMetadata(error);
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
@@ -824,8 +845,14 @@ export class AutonomousCrossDomainExecutor {
         const outputBytes = new TextEncoder().encode(text).byteLength;
         const resultDigest = await digestJson(run);
         const learningEpisodeId = run.status === "completed" && learning ? (await learning.prepareRun(run, { episodeId: `cross:${checkpoint.job_id}:${childId}`, runId: `cross:${checkpoint.job_id}:${childId}`, stageId: childId, parentJobId: checkpoint.job_id, planRefinementDigest })).episode_id : null;
+        let responseLearningEpisodeId: string | null = null;
+        if (learningEpisodeId && run.response_evaluation) {
+          const responseEpisodeId = `response:${(await digestJson({ episode_id: learningEpisodeId })).slice(0, 64)}`;
+          responseLearningEpisodeId = (await learning!.prepareRun(run, { episodeId: responseEpisodeId, runId: responseEpisodeId, stageId: childId, parentJobId: checkpoint.job_id, planRefinementDigest })).episode_id;
+        }
         if (learningEpisodeId) learningEpisodeIds.push(learningEpisodeId);
-        stepResults.push({ phase: "child", item_id: childId, run, output_digest: outputDigest, output_bytes: outputBytes, execution_child_ids: [...order], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, plan_refinement_digest: planRefinementDigest, learning_episode_id: learningEpisodeId });
+        if (responseLearningEpisodeId) responseLearningEpisodeIds.push(responseLearningEpisodeId);
+        stepResults.push({ phase: "child", item_id: childId, run, output_digest: outputDigest, output_bytes: outputBytes, execution_child_ids: [...order], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, plan_refinement_digest: planRefinementDigest, learning_episode_id: learningEpisodeId, response_learning_episode_id: responseLearningEpisodeId });
         if (run.status === "approval_required") {
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, null);
           await this.store.save(checkpoint);
@@ -849,7 +876,7 @@ export class AutonomousCrossDomainExecutor {
         const completed = [...checkpoint.completed_child_ids, childId];
         const digests = { ...checkpoint.child_result_digests, [childId]: resultDigest };
         const nextStatus: AutonomousCrossDomainCheckpointStatus = completed.length === order.length ? "synthesis_pending" : "children_pending";
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, route, blueprint, order, completed, digests, nextStatus, checkpoint, contractDigest, planRefinementDigest, null);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, route, blueprint, order, completed, digests, nextStatus, checkpoint, contractDigest, planRefinementDigest, null, learningEpisodeIds, responseLearningEpisodeIds);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "child_completed", childId, "child", checkpoint);
         stepResults[step] = { ...stepResults[step]!, completed_child_ids: [...completed], child_result_digests: { ...digests } };
@@ -872,7 +899,7 @@ export class AutonomousCrossDomainExecutor {
       }
       let synthesis: AutonomousRunResult;
       try {
-        synthesis = await this.agent.run(synthesisMessage.content, { domain: "cross_domain", capability: "cross_domain_synthesis", candidates: options.candidates, credential: options.credential, credentialFor: options.credentialFor, context: synthesisContext, hints: [], allowCrossDomain: false, maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, requireJson: options.requireJson, responseSchema: options.responseSchema, temperature: options.temperature, tools: options.tools, authorizeAndExecute: options.authorizeAndExecute, toolReadOnly: options.toolReadOnly, approveProviderCall: true, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary, costBudget, executionAttempt: order.length + 1, maxProviderFailovers: options.maxProviderFailovers, executionLifecycle: "observe_only", signal: options.signal, observer: options.observer });
+        synthesis = await this.agent.run(synthesisMessage.content, { domain: "cross_domain", capability: "cross_domain_synthesis", candidates: options.candidates, credential: options.credential, credentialFor: options.credentialFor, context: synthesisContext, hints: [], allowCrossDomain: false, maxInputTokens: options.maxInputTokens, maxOutputTokens: options.maxOutputTokens, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, requireJson: options.requireJson, responseSchema: options.responseSchema, structuredDomainResponse: options.structuredDomainResponse, temperature: options.temperature, tools: options.tools, authorizeAndExecute: options.authorizeAndExecute, toolReadOnly: options.toolReadOnly, approveProviderCall: true, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary, costBudget, executionAttempt: order.length + 1, maxProviderFailovers: options.maxProviderFailovers, executionLifecycle: "observe_only", signal: options.signal, observer: options.observer });
       } catch (error) {
         checkpoint = await this.makeCheckpointFromExisting(checkpoint, "failed", contractDigest, planRefinementDigest, null);
         await this.store.save(checkpoint);
@@ -882,8 +909,14 @@ export class AutonomousCrossDomainExecutor {
       const synthesisText = responseText(synthesis);
       const synthesisOutputDigest = synthesisText ? await digestJson({ output: synthesisText }) : null;
       const synthesisEpisodeId = synthesis.status === "completed" && learning ? (await learning.prepareRun(synthesis, { episodeId: `cross:${checkpoint.job_id}:synthesis`, runId: `cross:${checkpoint.job_id}:synthesis`, stageId: "synthesis", parentJobId: checkpoint.job_id, planRefinementDigest })).episode_id : null;
+      let synthesisResponseLearningEpisodeId: string | null = null;
+      if (synthesisEpisodeId && synthesis.response_evaluation) {
+        const responseEpisodeId = `response:${(await digestJson({ episode_id: synthesisEpisodeId })).slice(0, 64)}`;
+        synthesisResponseLearningEpisodeId = (await learning!.prepareRun(synthesis, { episodeId: responseEpisodeId, runId: responseEpisodeId, stageId: "synthesis", parentJobId: checkpoint.job_id, planRefinementDigest })).episode_id;
+      }
       if (synthesisEpisodeId) learningEpisodeIds.push(synthesisEpisodeId);
-      stepResults.push({ phase: "synthesis", item_id: "synthesis", run: synthesis, output_digest: synthesisOutputDigest, output_bytes: new TextEncoder().encode(synthesisText).byteLength, execution_child_ids: [...order], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, plan_refinement_digest: planRefinementDigest, learning_episode_id: synthesisEpisodeId });
+      if (synthesisResponseLearningEpisodeId) responseLearningEpisodeIds.push(synthesisResponseLearningEpisodeId);
+      stepResults.push({ phase: "synthesis", item_id: "synthesis", run: synthesis, output_digest: synthesisOutputDigest, output_bytes: new TextEncoder().encode(synthesisText).byteLength, execution_child_ids: [...order], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, plan_refinement_digest: planRefinementDigest, learning_episode_id: synthesisEpisodeId, response_learning_episode_id: synthesisResponseLearningEpisodeId });
       if (synthesis.status === "approval_required") {
         checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, null);
         await this.store.save(checkpoint);
@@ -902,7 +935,7 @@ export class AutonomousCrossDomainExecutor {
         await this.appendEvent(checkpoint.job_id, "failed", "synthesis", "synthesis", checkpoint);
         return finish("failed");
       }
-      checkpoint = await this.makeCheckpoint(checkpoint.job_id, route, blueprint, order, checkpoint.completed_child_ids, checkpoint.child_result_digests, "completed", checkpoint, contractDigest, planRefinementDigest, await digestJson(synthesis));
+      checkpoint = await this.makeCheckpoint(checkpoint.job_id, route, blueprint, order, checkpoint.completed_child_ids, checkpoint.child_result_digests, "completed", checkpoint, contractDigest, planRefinementDigest, await digestJson(synthesis), learningEpisodeIds, responseLearningEpisodeIds);
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, "synthesis_completed", "synthesis", "synthesis", checkpoint);
       await this.appendEvent(checkpoint.job_id, "completed", null, "lifecycle", checkpoint);
@@ -917,7 +950,7 @@ export class AutonomousCrossDomainExecutor {
     return finish(status);
   }
 
-  private async result(status: AutonomousCrossDomainExecutionStatus, route: AutonomousRouteProposal, blueprint: AutonomousCrossDomainBlueprint, checkpoint: AutonomousCrossDomainCheckpoint, stepResults: AutonomousCrossDomainStepResult[], learningEpisodeIds: string[], error: AutonomousCrossDomainErrorMetadata | undefined = undefined, synthesis: AutonomousRunResult | null = null, semanticStatus: AutonomousCrossDomainSemanticRouteStatus | null = null): Promise<AutonomousCrossDomainExecutionResult> {
-    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, route, semantic_route_status: semanticStatus, blueprint, checkpoint, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS), step_results: stepResults, synthesis, completed_children: checkpoint.completed_child_ids.length, total_children: checkpoint.execution_child_ids.length, plan_refinement_digest: checkpoint.plan_refinement_digest, error: error ?? null, learning_episode_ids: [...learningEpisodeIds], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
+  private async result(status: AutonomousCrossDomainExecutionStatus, route: AutonomousRouteProposal, blueprint: AutonomousCrossDomainBlueprint, checkpoint: AutonomousCrossDomainCheckpoint, stepResults: AutonomousCrossDomainStepResult[], learningEpisodeIds: string[], responseLearningEpisodeIds: string[], error: AutonomousCrossDomainErrorMetadata | undefined = undefined, synthesis: AutonomousRunResult | null = null, semanticStatus: AutonomousCrossDomainSemanticRouteStatus | null = null): Promise<AutonomousCrossDomainExecutionResult> {
+    return { schema: AUTONOMOUS_CROSS_DOMAIN_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, route, semantic_route_status: semanticStatus, blueprint, checkpoint, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS), step_results: stepResults, synthesis, completed_children: checkpoint.completed_child_ids.length, total_children: checkpoint.execution_child_ids.length, plan_refinement_digest: checkpoint.plan_refinement_digest, error: error ?? null, learning_episode_ids: [...learningEpisodeIds], response_learning_episode_ids: [...responseLearningEpisodeIds], recovery: "caller_rehydrates_task_credentials_and_completed_child_results", retention: "provider_responses_local;checkpoint_metadata_and_outcome_digests_only" };
   }
 }

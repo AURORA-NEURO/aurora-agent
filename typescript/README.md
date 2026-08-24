@@ -1190,6 +1190,16 @@ integrity-checked snapshots and a caller-owned persistence adapter through
 `AutonomousCrossDomainPersistenceCoordinator`; production workers can implement the same store
 interface over their durable database or queue.
 
+When durable execution receives `structuredDomainResponse: true` and a learning controller, every
+completed specialist and synthesis receives two independently addressable episode identities. The
+checkpoint ledger carries both `learning_episode_ids` and `response_learning_episode_ids`, while
+each transient step result exposes its structural-response episode separately. After a restart,
+`settleCrossDomainExecution()` accepts the task-quality reward packet plus a caller-owned
+`resolveResult(itemId, phase, checkpoint)` callback for any child or synthesis response that is not
+in the current invocation. It verifies the checkpoint result digest, replays the reviewed response
+contract, then returns independent `response_settlements`; tampered rehydration fails before the
+provider-quality or response-quality learning state is credited.
+
 An uncertain child or synthesis dispatch is different from an ordinary pause: it creates a
 `reconciliation_required` checkpoint and a metadata-only `reconciliation_required` event. A
 normal `resume()` returns that quarantine without rehydrating completed child payloads or calling
@@ -1524,6 +1534,9 @@ digest-bound domain response contract before settling those episodes and returns
 `response_settlements`, independently from the delayed task-quality trajectory. This keeps
 cross-domain formatting/composition adaptation useful without treating a child or synthesis
 response as external-world truth; mutating a caller-owned response after execution fails replay.
+The restart-safe `AutonomousCrossDomainExecutor` uses the same split through
+`settleCrossDomainExecution()`: episode ledgers and result digests remain in the checkpoint, while
+raw completed responses must be rehydrated by the caller and are never persisted by the executor.
 
 For persistence, `InMemoryAutonomousLearningStateStore` is a bounded reference implementation that
 combines episode and trajectory rows. Its `snapshot()` is content-addressed and its `restore()`

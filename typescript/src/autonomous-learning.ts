@@ -13,6 +13,7 @@ import {
   type AutonomousRunResult,
 } from "./autonomous.js";
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
+import type { AutonomousCrossDomainCheckpoint, AutonomousCrossDomainExecutionResult } from "./cross-domain-execution.js";
 import type { AutonomousEpisodicMemoryStore } from "./autonomous-memory.js";
 import { replayAutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
 import type { AutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
@@ -506,6 +507,25 @@ export interface AutonomousCrossDomainLearningSettlement {
   /** Separate contract-quality updates for completed specialists and synthesis. */
   response_settlements: AutonomousLearningSettlement[];
   retention: typeof PRIVATE_RETENTION;
+}
+
+export interface AutonomousCrossDomainExecutionLearningSettlement {
+  schema: typeof AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA;
+  execution: AutonomousCrossDomainExecutionResult;
+  trajectory: AutonomousTrajectorySettlement;
+  /** Independent structural-response settlements rehydrated from caller-owned completed runs. */
+  response_settlements: AutonomousLearningSettlement[];
+  retention: typeof PRIVATE_RETENTION;
+}
+
+export interface AutonomousCrossDomainExecutionLearningOptions {
+  trajectoryId: string;
+  discount?: number;
+  remote?: boolean;
+  idempotencyKey?: string;
+  outbox?: AutonomousLearningOutboxSettlementOptions;
+  /** Rehydrate a completed child or synthesis result; raw responses remain caller-owned. */
+  resolveResult?: (itemId: string, phase: "child" | "synthesis", checkpoint: AutonomousCrossDomainCheckpoint) => AutonomousRunResult | null | Promise<AutonomousRunResult | null>;
 }
 
 /**
@@ -2397,6 +2417,70 @@ export class AutonomousLearningController {
       }));
     }
     return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, result, trajectory: settled, response_settlements: responseSettlements, retention: PRIVATE_RETENTION };
+  }
+
+  /** Build a trajectory from the metadata-only episode ledger emitted by the durable cross-domain executor. */
+  async prepareCrossDomainExecutionTrajectory(execution: AutonomousCrossDomainExecutionResult, options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {
+    const ids = [...new Set(execution.learning_episode_ids ?? [])];
+    if (!ids.length) throw new ArgumentError("durable cross-domain execution has no learning episodes");
+    const checkpointIds = execution.checkpoint?.learning_episode_ids;
+    if (checkpointIds && (checkpointIds.length !== ids.length || checkpointIds.some((id) => !ids.includes(id)))) {
+      throw new ArgumentError("durable cross-domain learning episode ledger does not match its checkpoint");
+    }
+    const pending: string[] = [];
+    for (const id of ids) if ((await this.episodes.load(id))?.status === "pending") pending.push(id);
+    if (pending.length) return this.prepareTrajectory(pending, options);
+    if (await this.trajectories.load(options.trajectoryId)) return this.prepareTrajectory(ids, options);
+    throw new ArgumentError("durable cross-domain execution has no pending learning episodes");
+  }
+
+  /**
+   * Settle a completed durable cross-domain execution after caller-owned child/synthesis
+   * rehydration. Structural-response evaluations are replayed against their reviewed contracts
+   * before any learning state is mutated and are settled independently from task-quality credit.
+   */
+  async settleCrossDomainExecution(execution: AutonomousCrossDomainExecutionResult, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: AutonomousCrossDomainExecutionLearningOptions): Promise<AutonomousCrossDomainExecutionLearningSettlement> {
+    if (execution.status !== "completed" || !execution.checkpoint) throw new ArgumentError("durable cross-domain settlement requires a completed execution checkpoint");
+    const trajectory = await this.prepareCrossDomainExecutionTrajectory(execution, options);
+    const responseIds = [...new Set(execution.response_learning_episode_ids ?? [])];
+    const checkpointResponseIds = execution.checkpoint.response_learning_episode_ids;
+    if (checkpointResponseIds && (checkpointResponseIds.length !== responseIds.length || checkpointResponseIds.some((id) => !responseIds.includes(id)))) {
+      throw new ArgumentError("durable cross-domain response episode ledger does not match its checkpoint");
+    }
+    const stepRuns = new Map(execution.step_results.map((step) => [step.item_id, step.run]));
+    if (execution.synthesis) stepRuns.set("synthesis", execution.synthesis);
+    const resolveRun = async (itemId: string, phase: "child" | "synthesis"): Promise<AutonomousRunResult> => {
+      const candidate = stepRuns.get(itemId) ?? await options.resolveResult?.(itemId, phase, execution.checkpoint!);
+      if (!candidate || candidate.status !== "completed") throw new ArgumentError(`durable cross-domain response episode for ${itemId} is missing a completed caller-owned run`);
+      const expectedDigest = phase === "synthesis" ? execution.checkpoint!.synthesis_result_digest : execution.checkpoint!.child_result_digests[itemId];
+      if (!expectedDigest || expectedDigest !== await digestJson(candidate)) throw new ArgumentError(`durable cross-domain ${phase} ${itemId} result digest does not match the checkpoint`);
+      return candidate;
+    };
+    const responsePlans: Array<{ episodeId: string; reward: AutonomousEvaluatorRewardInput }> = [];
+    for (const responseEpisodeId of responseIds) {
+      const episode = await this.episodes.load(responseEpisodeId);
+      if (!episode) throw new ArgumentError(`durable cross-domain response learning episode ${responseEpisodeId} disappeared during settlement`);
+      const stageId = episode.stage_id;
+      if (!stageId) throw new ArgumentError(`durable cross-domain response learning episode ${responseEpisodeId} is missing its execution stage`);
+      const phase = stageId === "synthesis" ? "synthesis" : "child";
+      const candidate = await resolveRun(stageId, phase);
+      const evaluation = candidate.response_evaluation as AutonomousDomainResponseEvaluation | null | undefined;
+      if (!evaluation) throw new ArgumentError(`durable cross-domain response learning episode ${responseEpisodeId} is missing its replayable response evaluation`);
+      if (!candidate.response?.structured || !candidate.blueprint?.response_contract) throw new ArgumentError(`durable cross-domain response episode ${responseEpisodeId} is missing its structured response contract`);
+      const replayed = replayAutonomousDomainResponseEvaluation(candidate.response.structured, candidate.blueprint.response_contract, evaluation);
+      if (replayed.domain !== candidate.blueprint.domain_profile.domain || replayed.domain !== episode.domain) throw new ArgumentError(`durable cross-domain response evaluation for ${responseEpisodeId} is bound to the wrong domain`);
+      responsePlans.push({ episodeId: responseEpisodeId, reward: replayed.reward_input });
+    }
+    const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey, outbox: options.outbox });
+    const responseSettlements: AutonomousLearningSettlement[] = [];
+    for (const plan of responsePlans) {
+      responseSettlements.push(await this.settleRun(plan.episodeId, plan.reward, {
+        remote: options.remote,
+        idempotencyKey: `durable-cross-domain-response:${plan.episodeId}`,
+        outbox: options.outbox,
+      }));
+    }
+    return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, execution, trajectory: settled, response_settlements: responseSettlements, retention: PRIVATE_RETENTION };
   }
 
   private async recordMemoryEvaluation(
