@@ -5213,6 +5213,16 @@ only schedule/claim/worker digests, status counts, domain coverage, and its own 
 the control loop useful as a service-worker heartbeat across all twelve domains without allowing a
 policy callback to inject task text, provider payloads, credentials, or execution authority.
 
+For explicit quality feedback, pass an `evaluator(cycle)` callback. It must return exactly one
+bounded packet per worker run: evaluator identity/version, a finite reward in `[-1, 1]`, pass/fail,
+and optional evidence/failure digests. The loop binds each packet to the worker's goal, attempt, and
+outcome digest, rejects duplicates or unsupported fields, then revision-fences the evaluator digest
+back onto the goal. Transport success, HTTP status, or executor completion is never converted into
+reward. If no learner is supplied, `AutonomousGoalBanditLearner` applies an explicit UCB-style,
+domain-scoped value update to future admission signals; a custom learner may return only bounded
+priority/urgency/dependency signals plus a learning-state digest. Feedback and learner state are
+retained as digests/counts only, with evaluator values and live results remaining process-local.
+
 ## Resumable learning jobs
 
 For work that must survive a worker restart, `BrainJobStore` adds a separate orchestration journal.

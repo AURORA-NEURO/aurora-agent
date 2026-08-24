@@ -24,7 +24,7 @@ from prism_sdk.autonomous_goal_scheduler import (
     validate_goal_schedule,
 )
 from prism_sdk.autonomous_goal_worker import AutonomousGoalWorker
-from prism_sdk.autonomous_goal_control_loop import AutonomousGoalControlLoop
+from prism_sdk.autonomous_goal_control_loop import AutonomousGoalBanditLearner, AutonomousGoalControlLoop
 from prism_sdk.autonomous_goal_worker_journal import (
     AutonomousGoalWorkerJournal,
     JsonAutonomousGoalWorkerJournalPersistence,
@@ -325,6 +325,76 @@ def test_goal_control_loop_continues_all_domains_and_retries_paused_work_with_fr
     ).run(schedule_options={"now_ns": 300, "max_selected": 1, "max_concurrent": 1}, max_cycles=2)
     assert failed.stop_reason == "no_admissible_work"
     assert failure_ledger.get("failed-loop").status == "failed"
+
+
+def test_goal_control_loop_settles_explicit_evaluator_credit_and_adapts_all_domains() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 400, max_goals=len(domains))
+    for domain in domains:
+        ledger.create(goal_id=f"eval-{domain}", task_digest=_digest(f"private evaluator task {domain}"), domain=domain, now_ns=0)
+    learner = AutonomousGoalBanditLearner(exploration=0.4)
+    evaluator_cycles: list[int] = []
+
+    def evaluate(cycle):
+        evaluator_cycles.append(cycle.cycle)
+        return [
+            {
+                "goal_id": run.goal_id,
+                "evaluator_id": "domain-quality-evaluator",
+                "evaluator_version": "2026.08",
+                "reward": 1.0 if run.domain == "coding" else 0.25,
+                "passed": True,
+                "evidence_digest": _digest(f"private evidence {run.goal_id}"),
+            }
+            for run in cycle.batch.runs
+        ]
+
+    loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            ledger,
+            resolver=lambda goal, _row: {"task": f"private evaluator task {goal.domain}"},
+            executor=lambda _request: {"status": "completed"},
+        ),
+        evaluator=evaluate,
+        learner=learner,
+        batch_id_prefix="explicit-evaluator-loop",
+    )
+    result = loop.run(
+        schedule_options={
+            "now_ns": 400,
+            "max_selected": len(domains),
+            "max_concurrent": len(domains),
+            "required_domains": list(domains),
+        },
+        max_cycles=2,
+    )
+
+    assert result.stop_reason == "all_terminal"
+    assert evaluator_cycles == [1]
+    assert result.evaluation_count == len(domains)
+    assert result.evaluation_digest is not None
+    assert result.learning_state_digest is not None
+    assert learner.snapshot()["generation"] == 1
+    assert all(record.evaluator_digest is not None for record in ledger.list(limit=len(domains)))
+    assert all(record.learning_state_digest == result.learning_state_digest for record in ledger.list(limit=len(domains)))
+    assert all(len(cycle.evaluations) == len(domains) for cycle in result.cycles)
+    public = json.dumps(result.to_dict(), sort_keys=True)
+    assert "private evaluator task" not in public
+    assert "private evidence" not in public
+    assert "domain-quality-evaluator" not in public
+    assert ledger.verify_integrity()["goals"] == len(domains)
+
+    tampered_reward = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            AutonomousGoalLedger(clock=lambda: 500),
+            resolver=lambda _goal, _row: {"task": "private invalid evaluator task"},
+            executor=lambda _request: {"status": "completed"},
+        ),
+        evaluator=lambda _cycle: [{"goal_id": "invalid-eval", "evaluator_id": "bad", "evaluator_version": "1", "reward": 2.0, "passed": True}],
+    )
+    tampered_reward.worker.ledger.create(goal_id="invalid-eval", task_digest=_digest("private invalid evaluator task"), domain="coding", now_ns=0)
+    with pytest.raises(AutonomousGoalError, match="reward"):
+        tampered_reward.run(schedule_options={"now_ns": 500, "max_selected": 1, "max_concurrent": 1})
 
 
 class _CasTextStore:

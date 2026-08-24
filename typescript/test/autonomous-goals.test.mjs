@@ -6,6 +6,7 @@ import {
   AutonomousGoalScheduler,
   AutonomousGoalWorker,
   AutonomousGoalControlLoop,
+  AutonomousGoalBanditLearner,
   AutonomousGoalWorkerJournal,
   AutonomousGoalWorkerJournalPersistenceCoordinator,
   AutonomousAgent,
@@ -264,6 +265,58 @@ test("goal control loop continues all domains and re-admits paused work with fre
   }).run({ schedule_options: { now_ns: 300, max_selected: 1, max_concurrent: 1 }, max_cycles: 2 });
   assert.equal(failed.stop_reason, "no_admissible_work");
   assert.equal(failureLedger.get("failed-loop").status, "failed");
+});
+
+test("goal control loop settles explicit evaluator credit and adapts every domain", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 400 });
+  for (const domain of domains) ledger.create({ goal_id: `eval-${domain}`, task_digest: goalTaskDigest(`private evaluator task ${domain}`), domain, now_ns: 0 });
+  const learner = new AutonomousGoalBanditLearner({ exploration: 0.4 });
+  const evaluatorCycles = [];
+  const result = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      resolver: (goal) => ({ task: `private evaluator task ${goal.domain}` }),
+      executor: async () => ({ status: "completed" }),
+    }),
+    evaluator: (cycle) => {
+      evaluatorCycles.push(cycle.cycle);
+      return cycle.batch.runs.map((run) => ({
+        goal_id: run.goal_id,
+        evaluator_id: "domain-quality-evaluator",
+        evaluator_version: "2026.08",
+        reward: run.domain === "coding" ? 1 : 0.25,
+        passed: true,
+        evidence_digest: goalTaskDigest(`private evidence ${run.goal_id}`),
+      }));
+    },
+    learner,
+    batch_id_prefix: "explicit-evaluator-loop",
+  }).run({
+    schedule_options: { now_ns: 400, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    max_cycles: 2,
+  });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.deepEqual(evaluatorCycles, [1]);
+  assert.equal(result.evaluation_count, domains.length);
+  assert.ok(result.evaluation_digest);
+  assert.ok(result.learning_state_digest);
+  assert.equal(learner.snapshot().generation, 1);
+  assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.evaluator_digest !== null)), new Set([true]));
+  assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.learning_state_digest)), new Set([result.learning_state_digest]));
+  assert.equal(result.cycles[0].evaluations.length, domains.length);
+  const publicResult = JSON.stringify(result.toJSON());
+  assert.equal(publicResult.includes("private evaluator task"), false);
+  assert.equal(publicResult.includes("private evidence"), false);
+  assert.equal(publicResult.includes("domain-quality-evaluator"), false);
+  assert.equal(ledger.verifyIntegrity().ok, true);
+
+  const invalidLedger = new InMemoryAutonomousGoalLedger({ clock: () => 500 });
+  invalidLedger.create({ goal_id: "invalid-eval", task_digest: goalTaskDigest("private invalid evaluator task"), domain: "coding", now_ns: 0 });
+  await assert.rejects(() => new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({ ledger: invalidLedger, resolver: () => ({ task: "private invalid evaluator task" }), executor: async () => ({ status: "completed" }) }),
+    evaluator: () => [{ goal_id: "invalid-eval", evaluator_id: "bad", evaluator_version: "1", reward: 2, passed: true }],
+  }).run({ schedule_options: { now_ns: 500, max_selected: 1, max_concurrent: 1 } }), /reward/);
 });
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {

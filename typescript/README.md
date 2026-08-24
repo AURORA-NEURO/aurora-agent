@@ -1037,6 +1037,14 @@ provider payloads. It stops explicitly with `all_terminal`, `no_admissible_work`
 `cycle_budget_exhausted`, or `run_budget_exhausted`. Paused goals can be re-admitted when the
 schedule policy permits them, while failed, blocked, or concurrently running goals remain visible
 as held work rather than being mislabeled as completed.
+Pass `evaluator(cycle)` to require one explicit reward packet per worker run. The loop validates the
+goal, attempt, outcome digest, evaluator identity/version, finite reward in `[-1, 1]`, and optional
+evidence/failure digests before revision-fenced settlement. It never derives reward from transport
+success or executor status. When no learner is supplied, `AutonomousGoalBanditLearner` applies a
+bounded UCB-style value update by domain and feeds validated priority/urgency signals into the next
+admission cycle; custom learners return only the same bounded signal projection and a learning-state
+digest. Public cycles expose counts and digests only, while evaluator values, evidence, tasks,
+prompts, credentials, and live executor results remain transient.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,

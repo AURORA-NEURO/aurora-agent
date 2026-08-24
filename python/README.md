@@ -193,6 +193,13 @@ reintroducing task payloads. Paused objectives can be re-admitted on a later cyc
 blocked, or concurrently running objectives produce an explicit `no_admissible_work` stop rather
 than being reported as success. The result contains cycle digests, domain/status counts, and live
 executor values only on the initiating process.
+Pass `evaluator(cycle)` to close the loop with explicit quality credit. The callback must return one
+metadata-only reward packet per run; rewards are finite values in `[-1, 1]`, bound to the goal's
+attempt and worker outcome digest, and never inferred from transport or executor status. With no
+custom learner, `AutonomousGoalBanditLearner` updates domain admission priorities using a bounded
+UCB-style value state. Custom learners can return only validated scheduling signals and a learning
+state digest. Goal records receive evaluator/learning digests through an optimistic revision fence;
+raw evidence, evaluator values, tasks, prompts, credentials, and live results stay transient.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.
