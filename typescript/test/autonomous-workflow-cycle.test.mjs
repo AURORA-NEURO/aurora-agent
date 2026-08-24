@@ -327,8 +327,8 @@ test("workflow cycle gives the evaluator a bounded replan path and settles stage
   assert.equal(cycle.evaluations[1].passed, true);
   assert.equal(cycle.settlements.length, 2);
   assert.equal(episodes.pending().length, 0);
-  assert.equal(agent.learner.snapshot().generation, 10);
-  assert.equal(outbox.rows().filter((command) => command.status === "applied").length, 2);
+  assert.equal(agent.learner.snapshot().generation, 20, "each of ten task stages now settles one independent composition episode");
+  assert.equal(outbox.rows().filter((command) => command.status === "applied").length, 12, "two trajectory settlements plus ten independent composition settlements");
   assert.match(cycle.attempts[1].job_id, /:attempt-2$/);
 });
 

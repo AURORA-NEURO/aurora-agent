@@ -4682,6 +4682,13 @@ replay recomputes the stage response digest so checkpoint tampering or evaluator
 rejected. The projection carries explicit `not_external_truth` authority and never retains stage
 response text, credentials, or provider envelopes.
 
+The TypeScript workflow executor exposes the same boundary through `response_evaluation` on each
+completed stage and `response_learning_episode_id` when an `AutonomousLearningController` is
+attached. `settleWorkflow()` returns independent `response_settlements` in addition to the normal
+delayed-credit trajectory. Rehydrated `stageOutputs` must reproduce the persisted composition
+evaluation before a dependent stage can run, preserving restart safety without treating structure
+quality as proof of task correctness.
+
 For work that genuinely spans domains, `prepare_cross_domain` and `run_cross_domain` provide a
 bounded fan-out/fan-in path. Child tasks are prepared with their own domain workflow contracts,
 run sequentially in declared order, and are synthesized by the `cross_domain` workflow only after

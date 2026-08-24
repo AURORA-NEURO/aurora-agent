@@ -18,6 +18,12 @@ import type {
 import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
 import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
 import { AutonomousCostBudget } from "./llm.js";
+import {
+  evaluateAutonomousWorkflowStageResponse,
+  replayAutonomousWorkflowStageResponseEvaluation,
+  validateAutonomousWorkflowStageResponseEvaluation,
+} from "./autonomous-workflow-response.js";
+import type { AutonomousWorkflowStageResponseEvaluation } from "./autonomous-workflow-response.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type {
   BrainJobApprovalResult,
@@ -70,6 +76,8 @@ export interface AutonomousWorkflowStageOutcome {
   retryable?: boolean | null;
   status_code?: number | null;
   learning_episode_id: string | null;
+  response_learning_episode_id?: string | null;
+  response_evaluation?: AutonomousWorkflowStageResponseEvaluation | null;
 }
 
 /** Metadata-only restart checkpoint. Task text, prompts, credentials, and provider responses are never persisted here. */
@@ -160,6 +168,8 @@ export interface AutonomousWorkflowStageResult {
   notes: string | null;
   next_actions: string[];
   validation_errors: string[];
+  response_learning_episode_id: string | null;
+  response_evaluation: AutonomousWorkflowStageResponseEvaluation | null;
 }
 
 /**
@@ -197,6 +207,7 @@ export interface AutonomousWorkflowExecutionResult {
   total_stage_count: number;
   plan_refinement_digest: string | null;
   learning_episode_ids: string[];
+  response_learning_episode_ids: string[];
   /** Value-only operational projection for UI progress, replay admission, and restart recovery. */
   execution_receipt?: AutonomousWorkflowExecutionReceipt;
   recovery: "caller_rehydrates_task_and_credentials";
@@ -636,13 +647,21 @@ async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWor
   if (!Array.isArray(value.stage_outcomes) || value.stage_outcomes.length > AUTONOMOUS_WORKFLOW_MAX_STAGES_PER_CALL) throw new ArgumentError("workflow stage_outcomes exceed their bound");
   const stageOutcomes: AutonomousWorkflowStageOutcome[] = value.stage_outcomes.map((candidate) => {
     if (!isObject(candidate)) throw new ArgumentError("workflow stage outcome must be an object");
-    exactKeys(candidate, ["stage_id", "status", "run_status", "selection_digest", "response_digest", "output_bytes", "error_class", "error_code", "retryable", "status_code", "learning_episode_id"], "workflow stage outcome");
+    exactKeys(candidate, ["stage_id", "status", "run_status", "selection_digest", "response_digest", "output_bytes", "error_class", "error_code", "retryable", "status_code", "learning_episode_id", "response_learning_episode_id", "response_evaluation"], "workflow stage outcome");
     const status = candidate.status;
     if (status !== "completed" && status !== "approval_required" && status !== "failed") throw new ArgumentError("workflow stage outcome status is invalid");
     const errorCode = candidate.error_code === undefined || candidate.error_code === null ? null : workflowLabel(candidate.error_code, "workflow error_code", 128) as ProviderErrorCode;
     if (candidate.retryable !== undefined && candidate.retryable !== null && typeof candidate.retryable !== "boolean") throw new ArgumentError("workflow retryable must be boolean or null");
     if (candidate.status_code !== undefined && candidate.status_code !== null) workflowBoundedInteger(candidate.status_code, "workflow status_code", 999, 100);
     const hasErrorCode = Object.prototype.hasOwnProperty.call(candidate, "error_code");
+    const responseLearningEpisodeId = candidate.response_learning_episode_id === undefined || candidate.response_learning_episode_id === null
+      ? null
+      : workflowLabel(candidate.response_learning_episode_id, "workflow response_learning_episode_id", 512);
+    let responseEvaluation: AutonomousWorkflowStageResponseEvaluation | null = null;
+    if (candidate.response_evaluation !== undefined && candidate.response_evaluation !== null) {
+      responseEvaluation = validateAutonomousWorkflowStageResponseEvaluation(candidate.response_evaluation);
+      if (responseEvaluation.stage_id !== candidate.stage_id || responseEvaluation.domain !== value.domain || responseEvaluation.workflow_id !== workflowId || responseEvaluation.workflow_digest !== workflowDigestValue) throw new ArgumentError("workflow stage response evaluation is not bound to its checkpoint");
+    }
     return {
       stage_id: workflowLabel(candidate.stage_id, "workflow stage_id", 256),
       status,
@@ -655,6 +674,8 @@ async function validateWorkflowCheckpoint(value: unknown): Promise<AutonomousWor
       ...(candidate.retryable === undefined ? {} : { retryable: candidate.retryable as boolean | null }),
       ...(candidate.status_code === undefined ? {} : { status_code: candidate.status_code as number | null }),
       learning_episode_id: candidate.learning_episode_id === null ? null : workflowLabel(candidate.learning_episode_id, "workflow learning_episode_id", 512),
+      ...(Object.prototype.hasOwnProperty.call(candidate, "response_learning_episode_id") ? { response_learning_episode_id: responseLearningEpisodeId } : {}),
+      ...(Object.prototype.hasOwnProperty.call(candidate, "response_evaluation") ? { response_evaluation: responseEvaluation } : {}),
     };
   });
   const generation = workflowBoundedInteger(value.generation, "workflow generation", Number.MAX_SAFE_INTEGER, 1);
@@ -1270,7 +1291,7 @@ export class AutonomousWorkflowExecutor {
 
   private async routeReviewResult(route: AutonomousRouteProposal | null = null, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null = null): Promise<AutonomousWorkflowExecutionResult> {
     const status: AutonomousWorkflowExecutionStatus = semanticStatus === "policy_blocked" ? "policy_blocked" : semanticStatus === "policy_review_required" ? "policy_review_required" : "route_review_required";
-    const base: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: null, blueprint: null, checkpoint: null, route, semantic_route_status: semanticStatus, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+    const base: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: null, blueprint: null, checkpoint: null, route, semantic_route_status: semanticStatus, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], response_learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
     return { ...base, execution_receipt: await autonomousWorkflowExecutionReceipt(base) };
   }
 
@@ -1351,6 +1372,16 @@ export class AutonomousWorkflowExecutor {
       try { structured = JSON.parse(raw); } catch { throw new ProviderRuntimeError(`rehydrated workflow stage output for ${stageId} is not valid JSON`); }
       const validation = validateWorkflowStageOutput(stage, structured);
       if (validation.errors.length > 0 || validation.declaredStatus !== "completed") throw new ProviderRuntimeError(`rehydrated workflow stage output for ${stageId} fails its stage contract`);
+      if (outcome.response_evaluation) {
+        replayAutonomousWorkflowStageResponseEvaluation({
+          stage_id: stageId,
+          status: validation.declaredStatus,
+          evidence: validation.evidence,
+          uncertainty: validation.uncertainty,
+          notes: validation.notes!,
+          next_actions: validation.nextActions,
+        }, outcome.response_evaluation);
+      }
       outputs.set(stageId, {
         stage_id: stageId,
         output_digest: outcome.response_digest,
@@ -1428,10 +1459,30 @@ export class AutonomousWorkflowExecutor {
       const outputBytes = new TextEncoder().encode(text).byteLength;
       const validation = validateWorkflowStageOutput(stage, run.response?.structured);
       let learningEpisodeId: string | null = null;
+      let responseLearningEpisodeId: string | null = null;
+      let responseEvaluation: AutonomousWorkflowStageResponseEvaluation | null = null;
+      if (run.status === "completed" && validation.errors.length === 0 && validation.declaredStatus === "completed") {
+        responseEvaluation = evaluateAutonomousWorkflowStageResponse({
+          stage_id: stage.id,
+          status: validation.declaredStatus,
+          evidence: validation.evidence,
+          uncertainty: validation.uncertainty,
+          notes: validation.notes!,
+          next_actions: validation.nextActions,
+        }, {
+          domain: blueprint.domain_profile.domain,
+          workflowId: blueprint.workflow.workflow_id,
+          workflowDigest: blueprint.workflow.workflow_digest,
+          stageId: stage.id,
+        });
+      }
       if (run.status === "completed" && validation.errors.length === 0 && validation.declaredStatus === "completed" && this.learning) {
         const episodeId = `workflow:${checkpoint.job_id}:${stage.id}:g${checkpoint.generation + 1}`;
         const episode = await this.learning.prepareRun(run, { episodeId, runId: episodeId, stageId: stage.id, parentJobId: checkpoint.job_id, planRefinementDigest });
         learningEpisodeId = episode.episode_id;
+        const responseEpisodeId = `${episodeId}:response`;
+        const responseEpisode = await this.learning.prepareRun(run, { episodeId: responseEpisodeId, runId: responseEpisodeId, stageId: stage.id, parentJobId: checkpoint.job_id, planRefinementDigest });
+        responseLearningEpisodeId = responseEpisode.episode_id;
       }
       stageResults.push({
         stage,
@@ -1439,6 +1490,8 @@ export class AutonomousWorkflowExecutor {
         output_digest: outputDigest,
         output_bytes: outputBytes,
         learning_episode_id: learningEpisodeId,
+        response_learning_episode_id: responseLearningEpisodeId,
+        response_evaluation: responseEvaluation,
         declared_status: validation.declaredStatus,
         evidence: validation.evidence,
         uncertainty: validation.uncertainty,
@@ -1472,7 +1525,7 @@ export class AutonomousWorkflowExecutor {
         return this.result(blockedWorkflowExecutionStatus(errorClass) ?? "failed", checkpoint, blueprint, stageResults, route, semanticStatus);
       }
       const completed = [...checkpoint.completed_stage_ids, stage.id];
-      const outcomes = [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "completed" as const, run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: learningEpisodeId }];
+      const outcomes = [...checkpoint.stage_outcomes, { stage_id: stage.id, status: "completed" as const, run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: learningEpisodeId, response_learning_episode_id: responseLearningEpisodeId, response_evaluation: responseEvaluation }];
       const nextStatus: AutonomousWorkflowCheckpointStatus = completed.length === stages.length ? "completed" : "running";
       checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, completed, outcomes, nextStatus, contractDigest, checkpoint, stageOrder, planRefinementDigest);
       await this.store.save(checkpoint);
@@ -1486,7 +1539,7 @@ export class AutonomousWorkflowExecutor {
   }
 
   private async result(status: AutonomousWorkflowExecutionStatus, checkpoint: AutonomousWorkflowCheckpoint, blueprint: AutonomousTaskBlueprint, stageResults: AutonomousWorkflowStageResult[], route: AutonomousRouteProposal, semanticStatus: AutonomousWorkflowSemanticRouteStatus | null): Promise<AutonomousWorkflowExecutionResult> {
-    const base: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, route, semantic_route_status: semanticStatus, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, plan_refinement_digest: checkpoint.plan_refinement_digest ?? null, learning_episode_ids: checkpoint.stage_outcomes.flatMap((outcome) => outcome.learning_episode_id ? [outcome.learning_episode_id] : []), recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+    const base: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status, job_id: checkpoint.job_id, blueprint, checkpoint, route, semantic_route_status: semanticStatus, events: await this.store.events(checkpoint.job_id, 0, AUTONOMOUS_WORKFLOW_MAX_EVENTS), stage_results: stageResults, completed_stage_count: checkpoint.completed_stage_ids.length, total_stage_count: blueprint.workflow.stages.length, plan_refinement_digest: checkpoint.plan_refinement_digest ?? null, learning_episode_ids: checkpoint.stage_outcomes.flatMap((outcome) => outcome.learning_episode_id ? [outcome.learning_episode_id] : []), response_learning_episode_ids: checkpoint.stage_outcomes.flatMap((outcome) => outcome.response_learning_episode_id ? [outcome.response_learning_episode_id] : []), recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
     return { ...base, execution_receipt: await autonomousWorkflowExecutionReceipt(base) };
   }
 }
@@ -1601,7 +1654,7 @@ export class AutonomousDurableJobController {
     const normalizedJobId = boundedJobId(jobId);
     let server = await this.status(normalizedJobId);
     if (server.job.state === "waiting_approval") {
-      const localBase: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, route: null, semantic_route_status: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
+      const localBase: AutonomousWorkflowExecutionResult = { schema: AUTONOMOUS_WORKFLOW_EXECUTION_SCHEMA, status: "approval_required", job_id: normalizedJobId, blueprint: null, checkpoint: null, route: null, semantic_route_status: null, events: [], stage_results: [], completed_stage_count: 0, total_stage_count: 0, plan_refinement_digest: null, learning_episode_ids: [], response_learning_episode_ids: [], recovery: "caller_rehydrates_task_and_credentials", retention: "provider_responses_local;checkpoint_metadata_only" };
       return { schema: AUTONOMOUS_DURABLE_JOB_SCHEMA, job: server.job, local: { ...localBase, execution_receipt: await autonomousWorkflowExecutionReceipt(localBase) }, server_job_posture: "control_plane_projection;completion_requires_external_worker_reconciliation", private_spec: "caller_owned;task_prompt_response_and_credentials_not_sent_to_control_plane" };
     }
     const lifecycle = this.lifecycleAvailable();

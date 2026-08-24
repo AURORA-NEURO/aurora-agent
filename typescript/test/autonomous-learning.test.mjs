@@ -738,6 +738,8 @@ test("workflow executor emits pending stage episodes and controller settles them
   }, { trajectoryId: "learning-workflow-trajectory", discount: 0.9 });
   assert.equal(settled.evaluation.status, "incomplete");
   assert.equal(settled.trajectory.settlements.length, 2);
+  assert.equal(settled.response_settlements.length, 2);
+  assert.ok(settled.response_settlements.every((row) => row.assessment.evaluator_id.endsWith("workflow-stage-integrity")));
   assert.ok(settled.trajectory.settlements.every((row) => row.assessment.passed));
   assert.equal(episodes.pending().length, 0);
 
@@ -748,7 +750,7 @@ test("workflow executor emits pending stage episodes and controller settles them
   });
   assert.equal(resumed.status, "paused");
   assert.equal(resumed.learning_episode_ids.length, 3);
-  assert.equal(episodes.pending().length, 1);
+  assert.equal(episodes.pending().length, 2, "a resumed stage has one task-quality and one composition episode");
   const resumedSettlement = await controller.settleWorkflow(resumed, {
     stages: resumed.stage_results.map((stage) => ({
       stage_id: stage.stage.id,
@@ -756,6 +758,7 @@ test("workflow executor emits pending stage episodes and controller settles them
     })),
   }, { trajectoryId: "learning-workflow-trajectory-2" });
   assert.equal(resumedSettlement.trajectory.settlements.length, 1);
+  assert.equal(resumedSettlement.response_settlements.length, 3, "response settlements include replay-safe historical stage projections");
   assert.equal(episodes.pending().length, 0);
 });
 

@@ -753,6 +753,9 @@ test("workflow executor runs every built-in single-domain workflow through the s
     assert.equal(result.completed_stage_count, profile.workflow.stages.length, profile.domain);
     assert.equal(result.stage_results.length, profile.workflow.stages.length, profile.domain);
     assert.ok(result.stage_results.every((stage) => stage.declared_status === "completed" && stage.validation_errors.length === 0), profile.domain);
+    assert.ok(result.stage_results.every((stage) => stage.response_evaluation?.domain === profile.domain && stage.response_evaluation?.stage_id === stage.stage.id), profile.domain);
+    assert.ok(result.checkpoint.stage_outcomes.filter((outcome) => outcome.status === "completed").every((outcome) => outcome.response_evaluation?.domain === profile.domain), profile.domain);
+    assert.equal(result.response_learning_episode_ids.length, 0, "learning is disabled for this execution");
     assert.equal(result.execution_receipt.next_action, "complete", profile.domain);
     assert.equal(result.execution_receipt.completed_stage_ids.length, profile.workflow.stages.length, profile.domain);
     assert.equal(result.execution_receipt.incomplete_stage_ids.length, 0, profile.domain);

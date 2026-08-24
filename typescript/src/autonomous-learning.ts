@@ -15,6 +15,7 @@ import {
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
 import type { AutonomousEpisodicMemoryStore } from "./autonomous-memory.js";
 import type { AutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
+import type { AutonomousWorkflowStageResponseEvaluation } from "./autonomous-workflow-response.js";
 import {
   assertAutonomousEvaluatorCalibrationReady,
   validateAutonomousEvaluatorCalibrationReport,
@@ -492,6 +493,8 @@ export interface AutonomousWorkflowLearningSettlement extends JsonObject {
   schema: typeof AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA;
   evaluation: AutonomousWorkflowEvaluation;
   trajectory: AutonomousTrajectorySettlement;
+  /** Independent value-only settlements for stage composition; never task-correctness credit. */
+  response_settlements: AutonomousLearningSettlement[];
   retention: typeof PRIVATE_RETENTION;
 }
 
@@ -2321,7 +2324,25 @@ export class AutonomousLearningController {
       };
     }
     const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey, outbox: options.outbox });
-    return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, evaluation, trajectory: settled, retention: PRIVATE_RETENTION };
+    const stageResults = new Map(execution.stage_results.map((result) => [result.stage.id, result]));
+    const checkpointOutcomes = new Map((execution.checkpoint?.stage_outcomes ?? []).map((outcome) => [outcome.stage_id, outcome]));
+    const responseIds = [...new Set(execution.response_learning_episode_ids ?? [])];
+    const responseSettlements: AutonomousLearningSettlement[] = [];
+    for (const responseEpisodeId of responseIds) {
+      const episode = await this.episodes.load(responseEpisodeId);
+      if (!episode) throw new ArgumentError(`workflow response learning episode ${responseEpisodeId} disappeared during settlement`);
+      const stageId = episode.stage_id;
+      const evaluationProjection: AutonomousWorkflowStageResponseEvaluation | null = stageId === null
+        ? null
+        : stageResults.get(stageId)?.response_evaluation ?? checkpointOutcomes.get(stageId)?.response_evaluation ?? null;
+      if (!evaluationProjection) throw new ArgumentError(`workflow response learning episode ${responseEpisodeId} is missing its stage response evaluation`);
+      responseSettlements.push(await this.settleRun(responseEpisodeId, evaluationProjection.reward_input, {
+        remote: options.remote,
+        idempotencyKey: `workflow-stage-response:${responseEpisodeId}`,
+        outbox: options.outbox,
+      }));
+    }
+    return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, evaluation, trajectory: settled, response_settlements: responseSettlements, retention: PRIVATE_RETENTION };
   }
 
   /** Build a trajectory from completed specialist and synthesis episodes emitted by runCrossDomain. */

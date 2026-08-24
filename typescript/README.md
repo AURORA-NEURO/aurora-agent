@@ -1257,6 +1257,16 @@ failure metadata. The built-in stage schema caps evidence and action arrays at 3
 entry at 4,096 bytes, and notes at 16,000 bytes. This makes workflow completion an evidence-bearing
 state transition rather than an inference from provider transport success.
 
+Each valid completed stage also receives `response_evaluation`, a deterministic, digest-bound
+composition score for stage identity, declared status, evidence, uncertainty, notes, next actions,
+and response binding. This is deliberately separate from the task-quality evaluator: it is marked
+`not_external_truth`, never stores provider text or credentials, and cannot substitute for explicit
+domain evidence. When `learning` is attached, the executor creates a separate
+`response_learning_episode_id` for this signal. `settleWorkflow()` returns the normal delayed-credit
+trajectory plus independent `response_settlements`, so formatting and contract adaptation cannot
+silently contaminate task-quality credit. Caller-owned `stageOutputs` are replayed against the
+persisted evaluation before dependent work is dispatched.
+
 Blocked-stage recovery is an explicit caller decision. Resuming a checkpoint with a blocked,
 proposed, or not-attempted terminal stage returns the same typed status without dispatching another
 provider call. Pass `retryBlocked: true` only after revising the caller-owned evidence, prompt
