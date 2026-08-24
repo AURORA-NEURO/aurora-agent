@@ -14,6 +14,7 @@ import {
 } from "./autonomous.js";
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
 import type { AutonomousEpisodicMemoryStore } from "./autonomous-memory.js";
+import { replayAutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
 import type { AutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
 import type { AutonomousWorkflowStageResponseEvaluation } from "./autonomous-workflow-response.js";
 import {
@@ -502,6 +503,8 @@ export interface AutonomousCrossDomainLearningSettlement {
   schema: typeof AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA;
   result: AutonomousCrossDomainRunResult;
   trajectory: AutonomousTrajectorySettlement;
+  /** Separate contract-quality updates for completed specialists and synthesis. */
+  response_settlements: AutonomousLearningSettlement[];
   retention: typeof PRIVATE_RETENTION;
 }
 
@@ -530,6 +533,8 @@ export interface AutonomousEvaluatedCrossDomainRunResult {
   rewards: Record<string, AutonomousEvaluatorRewardInput>;
   /** Value-only trajectory projection; the transient cross-domain result is available in `run`. */
   settlement: AutonomousTrajectorySettlement | null;
+  /** Independent structural-response settlements, separate from delayed task-quality credit. */
+  response_settlements: AutonomousLearningSettlement[];
   reason: "run_not_completed" | "learning_episodes_not_prepared" | null;
   retention: "run_caller_owned; rewards_and_settlement_value_only";
 }
@@ -2222,8 +2227,8 @@ export class AutonomousLearningController {
     const runOptions: Omit<AutonomousCrossDomainRunOptions, "learning" | "learningEpisodeId"> = options.run === undefined ? {} : { ...options.run };
     if (!options.evaluator && !this.runEvaluator) throw new ArgumentError("runCrossDomainLearning requires an evaluator callback or configured runEvaluator");
     const run = await this.agent.runCrossDomain(task, { ...runOptions, learning: this });
-    if (run.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, reason: "run_not_completed", retention: "run_caller_owned; rewards_and_settlement_value_only" };
-    if (!run.learning_episode_ids.length) return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, reason: "learning_episodes_not_prepared", retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    if (run.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, response_settlements: [], reason: "run_not_completed", retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    if (!run.learning_episode_ids.length) return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, response_settlements: [], reason: "learning_episodes_not_prepared", retention: "run_caller_owned; rewards_and_settlement_value_only" };
     const evaluate = options.evaluator ?? (this.runEvaluator ? (candidate: AutonomousRunResult) => this.runEvaluator!.evaluate(candidate) : undefined);
     if (!evaluate) throw new ArgumentError("cross-domain learning requires an evaluator callback or configured runEvaluator");
     const candidates = [...run.child_runs.map((child) => child.result), ...(run.synthesis ? [run.synthesis] : [])]
@@ -2240,7 +2245,7 @@ export class AutonomousLearningController {
       idempotencyKey: options.idempotencyKey,
       outbox: options.outbox,
     });
-    return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "settled", run, rewards, settlement: settlement.trajectory, reason: null, retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "settled", run, rewards, settlement: settlement.trajectory, response_settlements: settlement.response_settlements, reason: null, retention: "run_caller_owned; rewards_and_settlement_value_only" };
   }
 
   async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null; memoryEpisodeId?: string | null }): Promise<AutonomousLearningEpisode> {
@@ -2360,7 +2365,38 @@ export class AutonomousLearningController {
   async settleCrossDomain(result: AutonomousCrossDomainRunResult, rewards: Record<string, AutonomousEvaluatorRewardInput>, options: { trajectoryId: string; discount?: number; remote?: boolean; idempotencyKey?: string; outbox?: AutonomousLearningOutboxSettlementOptions }): Promise<AutonomousCrossDomainLearningSettlement> {
     const trajectory = await this.prepareCrossDomainTrajectory(result, options);
     const settled = await this.settleTrajectory(trajectory.trajectory_id, rewards, { remote: options.remote, idempotencyKey: options.idempotencyKey, outbox: options.outbox });
-    return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, result, trajectory: settled, retention: PRIVATE_RETENTION };
+    const responseEvaluations = new Map<string, AutonomousDomainResponseEvaluation>();
+    const replayResponseEvaluation = (candidate: AutonomousRunResult, itemId: string): AutonomousDomainResponseEvaluation | null => {
+      const evaluation = candidate.response_evaluation ?? null;
+      if (!evaluation) return null;
+      if (!candidate.response?.structured || !candidate.blueprint?.response_contract) throw new ArgumentError(`cross-domain response episode ${itemId} is missing its structured response contract`);
+      const replayed = replayAutonomousDomainResponseEvaluation(candidate.response.structured, candidate.blueprint.response_contract, evaluation);
+      if (replayed.domain !== candidate.blueprint.domain_profile.domain) throw new ArgumentError(`cross-domain response evaluation for ${itemId} is bound to the wrong domain`);
+      return replayed;
+    };
+    for (const child of result.child_runs) {
+      const evaluation = replayResponseEvaluation(child.result, child.id);
+      if (evaluation) responseEvaluations.set(child.id, evaluation);
+    }
+    if (result.synthesis) {
+      const evaluation = replayResponseEvaluation(result.synthesis, "synthesis");
+      if (evaluation) responseEvaluations.set("synthesis", evaluation);
+    }
+    const responseSettlements: AutonomousLearningSettlement[] = [];
+    for (const responseEpisodeId of [...new Set(result.response_learning_episode_ids ?? [])]) {
+      const episode = await this.episodes.load(responseEpisodeId);
+      if (!episode) throw new ArgumentError(`cross-domain response learning episode ${responseEpisodeId} disappeared during settlement`);
+      const stageId = episode.stage_id;
+      const evaluation = stageId === null ? null : responseEvaluations.get(stageId) ?? null;
+      if (!evaluation) throw new ArgumentError(`cross-domain response learning episode ${responseEpisodeId} is missing its replayable response evaluation`);
+      if (evaluation.domain !== episode.domain) throw new ArgumentError(`cross-domain response learning episode ${responseEpisodeId} is bound to the wrong domain`);
+      responseSettlements.push(await this.settleRun(responseEpisodeId, evaluation.reward_input, {
+        remote: options.remote,
+        idempotencyKey: `cross-domain-response:${responseEpisodeId}`,
+        outbox: options.outbox,
+      }));
+    }
+    return { schema: AUTONOMOUS_LEARNING_TRAJECTORY_SCHEMA, result, trajectory: settled, response_settlements: responseSettlements, retention: PRIVATE_RETENTION };
   }
 
   private async recordMemoryEvaluation(

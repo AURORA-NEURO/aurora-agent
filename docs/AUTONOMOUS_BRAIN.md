@@ -4516,8 +4516,9 @@ const evaluated = await learning.runLearning("Review this data pipeline", {
 
 `runCrossDomainLearning()` evaluates every completed specialist and synthesis result in the
 prepared episode order, then applies one bounded discounted trajectory settlement. Its returned
-`settlement` is intentionally only the value-only trajectory projection; the transient
-cross-domain result remains separately available as `run`. Replaying either helper through the
+`settlement` is the value-only trajectory projection, while `response_settlements` independently
+contains replay-bound structural-response updates when `structuredDomainResponse` was enabled;
+the transient cross-domain result remains separately available as `run`. Replaying either helper through the
 same episode/trajectory identity returns the prior receipt without another provider call or a
 second bandit credit. Evaluator disagreement, missing episode coverage, calibration holds, remote
 CAS conflicts, and outbox failures remain explicit typed failures. The evaluator sees transient

@@ -110,8 +110,9 @@ test("the same domain response contract propagates through specialist fan-out an
     const domain = request.responseSchema?.properties?.domain?.const;
     return { structured: responseFor(contracts.get(domain)) };
   }, { structuredOutputMode: "json_schema" });
-  const agent = new AutonomousAgent(llm);
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
   agent.registerModel(model);
+  const learning = new AutonomousLearningController(agent);
   const task = "Research a biomedical neuroscience experiment with patient EEG evidence.";
   const route = await agent.route(task, { allowCrossDomain: true });
   assert.equal(route.cross_domain, true);
@@ -120,11 +121,25 @@ test("the same domain response contract propagates through specialist fan-out an
     structuredDomainResponse: true,
     approveProviderCall: true,
     maxParallelChildren: 2,
+    learning,
   });
   assert.equal(result.status, "completed");
   assert.ok(result.child_runs.length >= 2);
   assert.ok(result.child_runs.every((child) => child.result.response.structured.domain === child.domain));
   assert.equal(result.synthesis.response.structured.domain, "cross_domain");
+  assert.equal(result.learning_episode_ids.length, result.child_runs.length + 1);
+  assert.equal(result.response_learning_episode_ids.length, result.child_runs.length + 1);
+  const rewards = Object.fromEntries(result.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "cross-domain-task-reviewer", evaluator_version: "1", reward: 0.8, passed: true }]));
+  const settled = await learning.settleCrossDomain(result, rewards, { trajectoryId: "structured-cross-domain-trajectory" });
+  assert.equal(settled.trajectory.settlements.length, result.learning_episode_ids.length);
+  assert.equal(settled.response_settlements.length, result.response_learning_episode_ids.length);
+  assert.ok(settled.response_settlements.every((row) => row.assessment.evaluator_id.endsWith("response-integrity")));
+  const tampered = structuredClone(result);
+  tampered.child_runs[0].result.response.structured.answer = "tampered after provider execution";
+  await assert.rejects(
+    () => learning.settleCrossDomain(tampered, rewards, { trajectoryId: "structured-cross-domain-trajectory" }),
+    /replay drifted/,
+  );
 });
 
 test("domain response validation rejects stage drift, unknown fields, and credential-shaped material", async () => {

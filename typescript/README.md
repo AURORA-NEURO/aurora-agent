@@ -1518,6 +1518,12 @@ episodes for each completed specialist and the synthesis run. The returned
 `learning_episode_ids` preserve declaration order, so `settleCrossDomain()` can require an exact
 reward packet covering every pending child/synthesis episode. Partial or approval-blocked fan-out
 returns only episodes for specialists that actually completed; no blocked child is silently rewarded.
+When `structuredDomainResponse: true` is also enabled, each completed specialist and synthesis
+response creates a separate `response_learning_episode_id`. `settleCrossDomain()` replays the
+digest-bound domain response contract before settling those episodes and returns them as
+`response_settlements`, independently from the delayed task-quality trajectory. This keeps
+cross-domain formatting/composition adaptation useful without treating a child or synthesis
+response as external-world truth; mutating a caller-owned response after execution fails replay.
 
 For persistence, `InMemoryAutonomousLearningStateStore` is a bounded reference implementation that
 combines episode and trajectory rows. Its `snapshot()` is content-addressed and its `restore()`
