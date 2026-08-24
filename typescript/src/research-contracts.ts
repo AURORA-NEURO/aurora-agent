@@ -16,6 +16,7 @@ export const PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01" as const;
 export const REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01" as const;
 export const QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01" as const;
 export const RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01" as const;
+export const REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -217,6 +218,31 @@ export function validateResearchContextReceipt(receipt: ResearchContextReceipt):
 
 export function researchContextReceiptDigest(receipt: ResearchContextReceipt): string {
   validateResearchContextReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface ReplayAuditReceipt {
+  payload: Record<string, unknown> & {
+    status: "equivalent" | "diverged" | "invalid";
+    baseline_digest: string;
+    candidate_digest: string;
+    reasons: readonly string[];
+  };
+  artifact: Record<string, unknown>;
+}
+
+export function validateReplayAuditReceipt(receipt: ReplayAuditReceipt): void {
+  if (receipt.payload.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (receipt.payload.feature_id !== REPLAY_AUDIT_FEATURE_ID) throw new Error("replay-audit feature mismatch");
+  if (receipt.payload.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!["equivalent", "diverged", "invalid"].includes(receipt.payload.status)) throw new Error("replay-audit status is unknown");
+  if (!receipt.payload.reasons.length) throw new Error("replay-audit reasons are required");
+  if (!/^[0-9a-f]{64}$/.test(receipt.payload.baseline_digest) || !/^[0-9a-f]{64}$/.test(receipt.payload.candidate_digest)) throw new Error("replay-audit source digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("replay-audit artifact digest is invalid");
+}
+
+export function replayAuditReceiptDigest(receipt: ReplayAuditReceipt): string {
+  validateReplayAuditReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -139,6 +139,24 @@ def test_research_context_receipt_preserves_closure_and_omission_state():
             "unresolved_obligations": 2,
             "section_digest": "a" * 64,
             "certificate_digest": "b" * 64,
+        },
+        artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_replay_audit_receipt_preserves_divergence_status():
+    receipt = ReplayAuditReceipt(
+        payload={
+            "schema_version": "aurora-research-contract/1.0",
+            "feature_id": REPLAY_AUDIT_FEATURE_ID,
+            "boundary": PRECLINICAL_BOUNDARY,
+            "status": "diverged",
+            "baseline_digest": "a" * 64,
+            "candidate_digest": "b" * 64,
+            "first_difference": "run.events",
+            "reasons": ["first observable replay divergence: run.events"],
         },
         artifact={"content_hash": "c" * 64},
     )

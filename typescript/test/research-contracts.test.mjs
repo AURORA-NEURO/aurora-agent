@@ -26,6 +26,9 @@ import {
   RESEARCH_CONTEXT_FEATURE_ID,
   researchContextReceiptDigest,
   validateResearchContextReceipt,
+  REPLAY_AUDIT_FEATURE_ID,
+  replayAuditReceiptDigest,
+  validateReplayAuditReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -182,4 +185,22 @@ test("research-context receipt preserves closure and omission state", () => {
   };
   assert.doesNotThrow(() => validateResearchContextReceipt(receipt));
   assert.equal(researchContextReceiptDigest(receipt), researchContextReceiptDigest(receipt));
+});
+
+test("replay-audit receipt preserves divergence status", () => {
+  const receipt = {
+    payload: {
+      schema_version: "aurora-research-contract/1.0",
+      feature_id: REPLAY_AUDIT_FEATURE_ID,
+      boundary: PRECLINICAL_BOUNDARY,
+      status: "diverged",
+      baseline_digest: "a".repeat(64),
+      candidate_digest: "b".repeat(64),
+      first_difference: "run.events",
+      reasons: ["first observable replay divergence: run.events"],
+    },
+    artifact: { content_hash: "c".repeat(64) },
+  };
+  assert.doesNotThrow(() => validateReplayAuditReceipt(receipt));
+  assert.equal(replayAuditReceiptDigest(receipt), replayAuditReceiptDigest(receipt));
 });

@@ -26,6 +26,8 @@ from .research_contracts import (
     QualityControlReceipt,
     RESEARCH_CONTEXT_FEATURE_ID,
     ResearchContextReceipt,
+    REPLAY_AUDIT_FEATURE_ID,
+    ReplayAuditReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

@@ -21,6 +21,7 @@ PROTOCOL_SIMULATION_FEATURE_ID = "AFA-lab-P10-F01"
 REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01"
 QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01"
 RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01"
+REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01"
 
 
 class ResearchContractError(ValueError):
@@ -319,6 +320,37 @@ class ResearchContextReceipt:
         digest = self.artifact.get("content_hash")
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ResearchContractError("research-context artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})
+
+
+@dataclass(frozen=True)
+class ReplayAuditReceipt:
+    """Transport validator for fail-closed semantic replay comparison."""
+
+    payload: Mapping[str, Any]
+    artifact: Mapping[str, Any]
+
+    def validate(self) -> None:
+        if self.payload.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.payload.get("feature_id") != REPLAY_AUDIT_FEATURE_ID:
+            raise ResearchContractError("replay-audit feature mismatch")
+        if self.payload.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        if self.payload.get("status") not in {"equivalent", "diverged", "invalid"}:
+            raise ResearchContractError("replay-audit status is unknown")
+        if not isinstance(self.payload.get("reasons"), list) or not self.payload["reasons"]:
+            raise ResearchContractError("replay-audit reasons are required")
+        for key in ("baseline_digest", "candidate_digest"):
+            digest = self.payload.get(key)
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError(f"{key} is not a canonical sha256")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("replay-audit artifact digest is invalid")
 
     def digest(self) -> str:
         self.validate()

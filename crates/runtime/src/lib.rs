@@ -66,6 +66,7 @@ pub mod host;
 pub mod orchestrator;
 pub mod provider;
 pub mod research_run;
+pub mod replay_audit;
 pub mod sandbox;
 pub mod seam;
 pub mod secret;
@@ -97,6 +98,10 @@ pub use research_run::{
     ResearchExecutionSession, ResearchReplayBundle, ResearchRuntimeError,
     FEATURE_CONTRACT_VERSION as RESEARCH_FEATURE_CONTRACT_VERSION,
     FEATURE_ID as RESEARCH_FEATURE_ID,
+};
+pub use replay_audit::{
+    audit_replay, replay_audit_manifest, ReplayAuditError, ReplayAuditRequest,
+    ReplayAuditReceipt, ReplayAuditStatus,
 };
 pub use sandbox::{Fault, FileChange, InProcessWorld};
 pub use seam::{Clock, ExternalActions, Network, Randomness, Sandbox};

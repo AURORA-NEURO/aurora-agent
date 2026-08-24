@@ -13,6 +13,8 @@ The quality-control schema carries modality thresholds and distinguishes blocked
 and unknown data states.
 The research-context schema carries Decision Section and certificate identities, protected-closure
 proof, sufficiency state, and unresolved-obligation counts.
+The replay-audit schema carries equivalent, diverged, or invalid status with baseline/candidate
+identities and the first observable difference.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.
