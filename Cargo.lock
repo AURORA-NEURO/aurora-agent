@@ -353,6 +353,7 @@ dependencies = [
 name = "bioprism-evalengine"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-section",
  "serde",
