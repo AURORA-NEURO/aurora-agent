@@ -70,6 +70,8 @@ MECHANISM_CONTROL_PLANE_FEATURE_ID = "AFA-adapter-P08-F31"
 MECHANISM_CONTROL_PLANE_CONTRACT_VERSION = "federated-mechanism-control-plane/1.0"
 MECHANISM_GATEWAY_FEATURE_ID = "AFA-fiber-P08-F24"
 MECHANISM_GATEWAY_CONTRACT_VERSION = "federated-mechanism-interoperability-gateway/1.0"
+EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-adapter-P01-F09"
+EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -1937,3 +1939,48 @@ class MechanismGatewayReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "federation_id": self.federation_id, "source_profile": self.source_profile, "target_profile": self.target_profile, "projected_candidate_ids": list(self.projected_candidate_ids), "interoperability_profile": self.interoperability_profile, "disposition": self.disposition, "projection_digest": self.projection_digest, "checks": list(self.checks), "omissions": list(self.omissions), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class EvidenceSurveillanceReceipt:
+    request_id: str
+    study_id: str
+    intent: str
+    selected_source_ids: tuple[str, ...]
+    disposition: str
+    qualified_set: Mapping[str, Any]
+    effect_receipts: tuple[Mapping[str, Any], ...]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = EVIDENCE_SURVEILLANCE_FEATURE_ID
+    contract_version: str = EVIDENCE_SURVEILLANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != EVIDENCE_SURVEILLANCE_FEATURE_ID or self.contract_version != EVIDENCE_SURVEILLANCE_CONTRACT_VERSION:
+            raise ResearchContractError("evidence surveillance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.study_id.strip() or not self.intent.strip() or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("evidence surveillance identity, checks, or effect receipts are incomplete")
+        if self.disposition not in {"passed", "blocked", "unknown"}:
+            raise ResearchContractError("evidence surveillance disposition is unknown")
+        if tuple(self.qualified_set.get("selected_source_ids", ())) != self.selected_source_ids or self.qualified_set.get("study_id") != self.study_id or self.qualified_set.get("intent") != self.intent:
+            raise ResearchContractError("qualified evidence set is not linked to its receipt")
+        if self.qualified_set.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION or self.qualified_set.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("qualified evidence set schema or boundary mismatch")
+        if self.qualified_set.get("ordering_rule") != "relevance_score descending, source_id ascending":
+            raise ResearchContractError("qualified evidence ordering rule is not canonical")
+        if len(set(self.selected_source_ids)) != len(self.selected_source_ids):
+            raise ResearchContractError("qualified evidence source identities are not unique")
+        if self.qualified_set.get("evidence_state") == "proven" and (self.omissions or self.uncertainty):
+            raise ResearchContractError("proven evidence cannot contain unresolved omissions")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("evidence surveillance artifact digest is invalid")
+        for effect in self.effect_receipts:
+            if effect.get("effect") != "read_local_data" or not isinstance(effect.get("authorized"), bool) or not isinstance(effect.get("reason"), str) or not re.fullmatch(r"[0-9a-f]{64}", str(effect.get("receipt_digest", ""))):
+                raise ResearchContractError("evidence surveillance effect receipt is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "study_id": self.study_id, "intent": self.intent, "selected_source_ids": list(self.selected_source_ids), "disposition": self.disposition, "qualified_set": dict(self.qualified_set), "effect_receipts": [dict(item) for item in self.effect_receipts], "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "artifact": dict(self.artifact), "boundary": self.boundary})

@@ -6,6 +6,7 @@ from prism_sdk.research_contracts import RESOURCE_CONTROL_PLANE_FEATURE_ID, RESO
 from prism_sdk.research_contracts import WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID, WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION, WeaveLangReleaseAssuranceReceipt
 from prism_sdk.research_contracts import MECHANISM_CONTROL_PLANE_FEATURE_ID, MECHANISM_CONTROL_PLANE_CONTRACT_VERSION, MechanismControlPlaneReceipt
 from prism_sdk.research_contracts import MECHANISM_GATEWAY_FEATURE_ID, MECHANISM_GATEWAY_CONTRACT_VERSION, MechanismGatewayReceipt
+from prism_sdk.research_contracts import EVIDENCE_SURVEILLANCE_FEATURE_ID, EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, EvidenceSurveillanceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -697,3 +698,36 @@ def test_mechanism_control_plane_keeps_missing_candidate_unknown():
 def test_mechanism_gateway_keeps_missing_projection_unknown():
     receipt = MechanismGatewayReceipt(request_id="request:gateway", federation_id="federation:mechanism", source_profile="mechanism-v1", target_profile="mechanism-v2", projected_candidate_ids=("candidate:a",), interoperability_profile="ro-crate+prov-o:1", disposition="unknown", projection_digest=None, checks=("incomplete candidate projection remains unknown rather than interoperable",), omissions=("projection receipt is absent",), artifact={"content_hash": "b" * 64})
     receipt.validate(); assert receipt.feature_id == MECHANISM_GATEWAY_FEATURE_ID; assert receipt.contract_version == MECHANISM_GATEWAY_CONTRACT_VERSION; assert receipt.digest() == receipt.digest()
+
+
+def test_evidence_surveillance_preserves_negative_sources_and_effect_receipts():
+    receipt = EvidenceSurveillanceReceipt(
+        request_id="request:surveillance",
+        study_id="study:organoid",
+        intent="monitor mechanism evidence",
+        selected_source_ids=("source:primary",),
+        disposition="unknown",
+        qualified_set={
+            "schema_version": "aurora-research-contract/1.0",
+            "set_id": "qualified-evidence:request:surveillance",
+            "study_id": "study:organoid",
+            "intent": "monitor mechanism evidence",
+            "selected_source_ids": ["source:primary"],
+            "selected_source_digests": ["a" * 64],
+            "evidence_state": "unknown",
+            "negative_source_ids": ["source:negative"],
+            "omissions": ["required evidence source unavailable: source:negative"],
+            "uncertainty": ["incomplete feed coverage remains unknown"],
+            "ordering_rule": "relevance_score descending, source_id ascending",
+            "boundary": PRECLINICAL_BOUNDARY,
+        },
+        effect_receipts=({"effect": "read_local_data", "authorized": True, "reason": "local evidence feed read is policy-authorized", "receipt_digest": "c" * 64},),
+        checks=("incomplete feed coverage remains unknown rather than promoted",),
+        omissions=("required evidence source unavailable: source:negative",),
+        uncertainty=("incomplete feed coverage remains unknown",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == EVIDENCE_SURVEILLANCE_FEATURE_ID
+    assert receipt.contract_version == EVIDENCE_SURVEILLANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()

@@ -16,6 +16,10 @@ use bioprism_adapter::{
     operate_mechanism_control_plane, MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
     MECHANISM_CONTROL_PLANE_FEATURE_ID,
 };
+use bioprism_adapter::{
+    run_evidence_surveillance, EvidenceFeedRequest, EvidenceSurveillanceReceipt,
+    EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
 use bioprism_atlashub::{
     synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
     FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
@@ -134,6 +138,7 @@ pub const RESOURCE_CONTROL_PLANE_TOOL: &str = "federated_resource_control_plane"
 pub const WEAVELANG_RELEASE_ASSURANCE_TOOL: &str = "weavelang_release_assurance";
 pub const MECHANISM_CONTROL_PLANE_TOOL: &str = "federated_mechanism_control_plane";
 pub const MECHANISM_GATEWAY_TOOL: &str = "federated_mechanism_gateway";
+pub const EVIDENCE_SURVEILLANCE_TOOL: &str = "evidence_surveillance_copilot";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -752,6 +757,26 @@ pub fn validate_mechanism_gateway_json(value: &Value) -> Result<MechanismGateway
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != MECHANISM_GATEWAY_FEATURE_ID {
         return Err("mechanism gateway feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_evidence_surveillance_json(value: &Value) -> Result<Value, String> {
+    let request: EvidenceFeedRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid evidence surveillance request: {error}"))?;
+    let receipt = run_evidence_surveillance(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize evidence surveillance receipt: {error}"))
+}
+
+pub fn validate_evidence_surveillance_json(
+    value: &Value,
+) -> Result<EvidenceSurveillanceReceipt, String> {
+    let receipt: EvidenceSurveillanceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid evidence surveillance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != EVIDENCE_SURVEILLANCE_FEATURE_ID {
+        return Err("evidence surveillance feature id mismatch".into());
     }
     Ok(receipt)
 }

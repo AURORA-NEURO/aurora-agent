@@ -64,6 +64,8 @@ export const MECHANISM_CONTROL_PLANE_FEATURE_ID = "AFA-adapter-P08-F31" as const
 export const MECHANISM_CONTROL_PLANE_CONTRACT_VERSION = "federated-mechanism-control-plane/1.0" as const;
 export const MECHANISM_GATEWAY_FEATURE_ID = "AFA-fiber-P08-F24" as const;
 export const MECHANISM_GATEWAY_CONTRACT_VERSION = "federated-mechanism-interoperability-gateway/1.0" as const;
+export const EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-adapter-P01-F09" as const;
+export const EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1131,6 +1133,38 @@ export function mechanismControlPlaneReceiptDigest(receipt: MechanismControlPlan
 export interface MechanismGatewayReceipt { schema_version: string; feature_id: string; contract_version: string; request_id: string; federation_id: string; source_profile: string; target_profile: string; projected_candidate_ids: string[]; interoperability_profile: string; disposition: "passed" | "blocked" | "unknown"; projection_digest: string | null; checks: string[]; omissions: string[]; artifact: Record<string, unknown>; boundary: string; }
 export function validateMechanismGatewayReceipt(receipt: MechanismGatewayReceipt): void { if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== MECHANISM_GATEWAY_FEATURE_ID || receipt.contract_version !== MECHANISM_GATEWAY_CONTRACT_VERSION) throw new Error("mechanism gateway schema, feature, or version mismatch"); if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.source_profile.trim() || !receipt.target_profile.trim() || !receipt.interoperability_profile.trim() || !receipt.projected_candidate_ids.length || !receipt.checks.length) throw new Error("mechanism gateway identity or checks are incomplete"); if (JSON.stringify([...new Set(receipt.projected_candidate_ids)].sort()) !== JSON.stringify(receipt.projected_candidate_ids)) throw new Error("mechanism gateway candidate ordering is invalid"); if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition)) throw new Error("mechanism gateway disposition is unknown"); if (receipt.projection_digest !== null && !/^[0-9a-f]{64}$/.test(receipt.projection_digest)) throw new Error("mechanism gateway projection digest is invalid"); if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("mechanism gateway receipt digest is invalid"); }
 export function mechanismGatewayReceiptDigest(receipt: MechanismGatewayReceipt): string { validateMechanismGatewayReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface EvidenceSurveillanceReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  study_id: string;
+  intent: string;
+  selected_source_ids: string[];
+  disposition: "passed" | "blocked" | "unknown";
+  qualified_set: Record<string, unknown>;
+  effect_receipts: readonly Record<string, unknown>[];
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateEvidenceSurveillanceReceipt(receipt: EvidenceSurveillanceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVIDENCE_SURVEILLANCE_FEATURE_ID || receipt.contract_version !== EVIDENCE_SURVEILLANCE_CONTRACT_VERSION) throw new Error("evidence surveillance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.study_id.trim() || !receipt.intent.trim() || !receipt.checks.length || !receipt.effect_receipts.length) throw new Error("evidence surveillance identity or checks are incomplete");
+  if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition)) throw new Error("evidence surveillance disposition is unknown");
+  if (JSON.stringify(receipt.qualified_set.selected_source_ids) !== JSON.stringify(receipt.selected_source_ids) || receipt.qualified_set.study_id !== receipt.study_id || receipt.qualified_set.intent !== receipt.intent) throw new Error("qualified evidence set is not linked to its receipt");
+  if (receipt.qualified_set.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.qualified_set.boundary !== PRECLINICAL_BOUNDARY || receipt.qualified_set.ordering_rule !== "relevance_score descending, source_id ascending") throw new Error("qualified evidence set schema, boundary, or ordering is invalid");
+  if (new Set(receipt.selected_source_ids).size !== receipt.selected_source_ids.length) throw new Error("qualified evidence source identities are not unique");
+  if (receipt.qualified_set.evidence_state === "proven" && (receipt.omissions.length || receipt.uncertainty.length)) throw new Error("proven evidence cannot contain unresolved omissions");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("evidence surveillance artifact digest is invalid");
+  for (const effect of receipt.effect_receipts) if (effect.effect !== "read_local_data" || typeof effect.authorized !== "boolean" || typeof effect.reason !== "string" || typeof effect.receipt_digest !== "string" || !/^[0-9a-f]{64}$/.test(effect.receipt_digest)) throw new Error("evidence surveillance effect receipt is invalid");
+}
+
+export function evidenceSurveillanceReceiptDigest(receipt: EvidenceSurveillanceReceipt): string { validateEvidenceSurveillanceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

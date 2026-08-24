@@ -82,6 +82,7 @@ pub mod adapter;
 pub mod conformance;
 pub mod csv;
 pub mod error;
+pub mod evidence_surveillance;
 pub mod fact;
 pub mod ingestion;
 pub mod inventory;
@@ -101,6 +102,12 @@ pub use adapter::{Adapter, AdapterManifest, ConformanceLevel};
 pub use conformance::{certify, Check, CheckOutcome, ConformanceReport, Status};
 pub use csv::Table;
 pub use error::{AdapterError, CsvError};
+pub use evidence_surveillance::{
+    run_evidence_surveillance, EffectReceipt, EvidenceFeedItem, EvidenceFeedRequest,
+    EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceReceipt,
+    QualifiedEvidenceSet, CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
 pub use fact::{FactDraft, ValueQualifiers};
 pub use ingestion::Ingestion;
 pub use inventory::{InventoryAdapter, InventoryProfile};
