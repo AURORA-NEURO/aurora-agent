@@ -906,6 +906,51 @@ interpretation, or domain truth has been independently validated.
 
 ### Bounded provider-neutral HTTP connector transport
 
+The Python SDK now exposes the reviewed all-domain evidence catalogue that composes a typed
+evidence requirement with caller-owned source routes. `create_builtin_autonomous_domain_evidence_source_catalogue()`
+loads one versioned profile for each of the twelve autonomous domains. Profiles declare source
+kinds, capabilities, operations, required metadata, freshness, authentication posture, pagination,
+normalizer identity, quorum defaults, and explicit limitations. They are digest-bound metadata and
+never discover a provider or retain a key.
+
+```python
+from prism_sdk import (
+    create_builtin_autonomous_domain_evidence_source_catalogue,
+    builtin_autonomous_domain_http_source_presets,
+    register_autonomous_domain_http_source_matrix,
+)
+
+catalogue = create_builtin_autonomous_domain_evidence_source_catalogue()
+presets = {preset.domain: preset for preset in builtin_autonomous_domain_http_source_presets()}
+matrix = register_autonomous_domain_http_source_matrix(
+    catalogue=catalogue,
+    entries=[
+        {
+            "preset": presets[domain].preset_id,
+            "source_id": f"caller-{domain}",
+            "acquirer": caller_owned_acquirer_for(domain),
+        }
+        for domain in presets
+    ],
+)
+```
+
+Matrix registration validates complete domain coverage, profile/preset digests, route identity,
+capability and operation subsets, required operation metadata, and the secret-shaped metadata
+boundary. It is metadata-only: every acquirer call count remains zero until a caller prepares a
+requirement, reviews the returned reconciliation plan, and passes `approve_source_dispatch=True`.
+`catalogue.prepare(...)` binds one exact profile and route set to the existing bounded reconciliation
+runtime; `catalogue.execute(...)` rechecks profile and route digests and requires the profile's
+normalizer callback. Prepared plans fail closed if a route disappears or a profile is replaced.
+
+For a policy-gated HTTP route, `create_autonomous_domain_http_source_acquirer()` wraps the existing
+bounded HTTP connector and keeps endpoint construction, short-lived header/credential resolution,
+response interpretation, pagination, and transport ownership with the caller. The wrapper returns
+only observed JSON to the transient reconciliation result; refusals and transient transport
+classes become typed acquisition failures. Use a provider-contract registry at route registration
+when the deployment has an adapter manifest: the route records the contract and adapter digests,
+and registration verifies that provider, domain, capability, operation, and manifest bindings agree.
+
 The connector registry remains provider-neutral, but applications that need a real external
 evidence call can now compose the same reviewed registration with a policy-gated HTTP executor.
 `create_autonomous_http_connector_executor()` exists in both SDKs. It takes a caller-owned endpoint
