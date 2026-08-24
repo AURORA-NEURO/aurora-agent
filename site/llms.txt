@@ -43,5 +43,7 @@ treatment, triage care, enroll participants, or claim medical-device functionali
   documentation.
 - [FAQ](https://aurora-neuro.github.io/aurora-agent/faq.html): Context Certificates, RAG
   comparison, privacy, platforms, license.
+- [Autopilot](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md):
+  grant-authorised autonomous mission driving — autonomous workflows, with receipts.
 - [Repository](https://github.com/AURORA-NEURO/aurora-agent) and
   [privacy policy](https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md).

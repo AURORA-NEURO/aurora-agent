@@ -194,6 +194,21 @@ cursor-addressable event pages/SSE snapshots, and signed webhook outbox lifecycl
 reports gRPC, TLS termination, distributed scheduling, and external delivery as absent rather than
 inferring them from an HTTP listener.
 
+## Autopilot (docs/AUTOPILOT.md)
+
+Autonomous workflows, with receipts. `bioprism autopilot` drives an instantiated workflow's
+mission autonomously under an explicit AutonomyGrant — the only source of authority; there is no
+default grant. The driver dispatches the mission in-process, classifies every failed step by its
+declared 40.36 retry class (terminal / retryable-after-change / retryable-as-is / unknown), and
+re-dispatches only what the grant authorises as a repair subset with rematerialised bindings;
+terminal and cancelled steps are never re-dispatched, and unknown is never retried without an
+explicit opt-in. Success is never inferred: full step coverage, a succeeded mission report, and
+(by default) a complete reconciliation with valid integrity. Every drive emits a digest-sealed
+report chaining the grant, mission, report, and reconciliation digests; `bioprism autopilot
+verify` recomputes it and detects a single tampered byte. `--dry-run` plans attempt 1 only — no
+dispatch, zero writes. Limitations: no scheduling or recurrence, no MCP tool exposure of the
+driver itself, no cross-process resume, no wall-clock deadlines.
+
 ---
 
 ## Architecture (docs/ARCHITECTURE.md)
@@ -296,6 +311,7 @@ A: Apache-2.0.
 - Architecture: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/ARCHITECTURE.md
 - Findings: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/FINDINGS.md
 - Capability dashboard: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/CAPABILITY_DASHBOARD.md
+- Autopilot: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md
 - HTTP API: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/HTTP_API.md
 - Python SDK: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/PYTHON_SDK.md
 - TypeScript SDK: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/TYPESCRIPT_SDK.md
