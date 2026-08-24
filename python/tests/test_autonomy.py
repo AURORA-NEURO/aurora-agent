@@ -3551,7 +3551,10 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
             assert result.status == "paused"
             assert result.stage_results[0].stage.id == blueprint.workflow.stages[0].id
             assert result.stage_results[0].declared_status == "completed"
+            assert result.stage_results[0].response_evaluation is not None
+            assert result.stage_results[0].response_evaluation["stage_id"] == blueprint.workflow.stages[0].id  # type: ignore[index]
             assert result.checkpoint.completed_stage_ids == (blueprint.workflow.stages[0].id,)
+            assert result.checkpoint.stages[0]["response_evaluation"] is not None
             assert result.execution_receipt.completed_stage_ids == (blueprint.workflow.stages[0].id,)
             assert result.execution_receipt.next_action == "continue_workflow"
             assert result.execution_receipt.progress == 1 / len(blueprint.workflow.stages)
@@ -3651,6 +3654,8 @@ def test_run_workflow_learning_updates_each_completed_stage_with_explicit_signal
         assert result.status == "paused"
         assert [item.stage_id for item in result.evaluations] == ["scope", "inspect"]
         assert all(item.decision.passed for item in result.evaluations)
+        assert all(item.structured_response is not None for item in result.evaluations)
+        assert all(item.recording["structured_response"] == item.structured_response for item in result.evaluations)
         assert result.replan_requested is False
         assert result.bandit_state["generation"] == 1  # type: ignore[index]
         assert all(item.evidence_digest for item in result.evaluations)
@@ -4004,6 +4009,8 @@ def test_run_workflow_trajectory_learning_assigns_terminal_credit_after_stages()
         assert result.trajectory_result is not None
         assert len(result.trajectory_result.credited_rewards) == 2
         assert [item.recording["trajectory_step"] for item in result.evaluations] == [0, 1]
+        assert all(item.structured_response is not None for item in result.evaluations)
+        assert all(item.recording["structured_response"] == item.structured_response for item in result.evaluations)
         assert "workflow-trajectory-secret" not in json.dumps(result.to_dict())
     finally:
         server.shutdown()

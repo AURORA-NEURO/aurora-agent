@@ -4636,7 +4636,7 @@ malformed structured evidence, or a stage declares `blocked`, `proposed`, or `no
 Completed-stage uncertainty is preserved as evidence for downstream stages; it is never silently
 converted into a clean-pass signal.
 `AutonomousWorkflowCheckpoint` contains only stage ids, statuses, evidence, uncertainty, bounded
-structured outputs, and digests—never the raw task, credentials, provider messages, or transport
+structured outputs, stage-response integrity evaluations, and digests—never the raw task, credentials, provider messages, or transport
 envelopes. Passing the checkpoint back verifies the task/workflow/run/accepted-plan identity and skips completed
 stages. A blocked or proposed stage is not retried implicitly; the caller must pass
 `retry_blocked=True` to make that decision explicit.
@@ -4670,6 +4670,17 @@ explicit caller decision point, and the ledger/memory paths retain only value-on
 digests. When more than one stage is requested in one call, the orchestrator checkpoints and
 evaluates each stage before scheduling its dependent successor, so the successor sees the latest
 bandit state rather than the state from the beginning of the workflow.
+
+Every semantically valid stage response also receives a separate, deterministic
+`workflow-stage-integrity` evaluation. It scores only the stage contract—identity, declared
+status, evidence, uncertainty, bounded notes, next actions, and digest binding—and never
+substitutes for the task-specific evaluator above. Online learning records that composition
+signal under a distinct evaluator and idempotency key; trajectory learning preserves delayed
+task-quality credit and then applies the independent stage-composition update. The checkpoint
+stores the value-only evaluation projection alongside the full provider-response digest, and
+replay recomputes the stage response digest so checkpoint tampering or evaluator drift is
+rejected. The projection carries explicit `not_external_truth` authority and never retains stage
+response text, credentials, or provider envelopes.
 
 For work that genuinely spans domains, `prepare_cross_domain` and `run_cross_domain` provide a
 bounded fan-out/fan-in path. Child tasks are prepared with their own domain workflow contracts,

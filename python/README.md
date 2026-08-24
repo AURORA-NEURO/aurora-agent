@@ -242,6 +242,16 @@ quality, source, or external-effect oracle. `evaluate_autonomous_domain_response
 detection; no provider call or credential is needed for those operations. Credential-shaped fields
 and values are refused before the response can cross into durable learning metadata.
 
+Workflow stages receive the same value-only treatment. A valid structured stage response is
+scored by `evaluate_autonomous_workflow_stage_response()` for contract integrity only—stage
+identity, status, evidence, uncertainty, bounded notes, next actions, and response-digest
+binding. `run_workflow_learning()` and `run_workflow_trajectory_learning()` record this signal
+under a separate evaluator and idempotency key, preserving the normal task-quality evaluator and
+delayed trajectory credit as independent learning channels. `AutonomousWorkflowCheckpoint`
+round-trips the digest-bound evaluation projection without retaining provider text or credentials;
+`replay_autonomous_workflow_stage_response_evaluation()` rejects response or evaluator drift.
+The stage evaluator is not a truth, quality, source, or external-effect oracle.
+
 The structural signal can be settled into the bandit explicitly after a process boundary. The
 settlement only adapts response composition; task correctness still requires the caller's normal
 domain evaluator:

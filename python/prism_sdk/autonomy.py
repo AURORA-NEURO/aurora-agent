@@ -72,6 +72,11 @@ from .autonomous_domain_response import (
     validate_autonomous_domain_response_evaluation,
     validate_autonomous_provider_domain_response,
 )
+from .autonomous_workflow_response import (
+    evaluate_autonomous_workflow_stage_response,
+    replay_autonomous_workflow_stage_response_evaluation,
+    validate_autonomous_workflow_stage_response_evaluation,
+)
 from .brain import (
     AutonomousBrain,
     BRAIN_CONTEXT_LEARNING_STATE_SCHEMA,
@@ -5408,6 +5413,19 @@ class AutonomousWorkflowCheckpoint:
                 raise BrainRunError("workflow checkpoint stage attempt must be a positive integer")
             response_digest = raw.get("response_digest")
             _workflow_digest(response_digest, "workflow checkpoint response_digest")
+            response_evaluation = raw.get("response_evaluation")
+            if response_evaluation is not None:
+                try:
+                    normalized_evaluation = validate_autonomous_workflow_stage_response_evaluation(response_evaluation)
+                    replay_autonomous_workflow_stage_response_evaluation(structured, normalized_evaluation)
+                except ArgumentError as error:
+                    raise BrainRunError("workflow checkpoint response_evaluation is invalid or drifted") from error
+                if (
+                    normalized_evaluation.workflow_id != self.workflow_id
+                    or normalized_evaluation.workflow_digest != self.workflow_digest
+                    or normalized_evaluation.stage_id != stage_id
+                ):
+                    raise BrainRunError("workflow checkpoint response_evaluation is not bound to its stage")
             evidence = raw.get("evidence", [])
             uncertainty = raw.get("uncertainty", [])
             stage_plan_digest = raw.get("stage_execution_plan_digest")
@@ -5437,6 +5455,9 @@ class AutonomousWorkflowCheckpoint:
                     "uncertainty": list(_sequence("workflow checkpoint uncertainty", uncertainty, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE)),
                     "attempt": attempt,
                     "response_digest": response_digest,
+                    "response_evaluation": None
+                    if response_evaluation is None
+                    else dict(normalized_evaluation.to_dict()),
                     "stage_execution_plan_digest": stage_plan_digest,
                     "stage_selected_tool_names": list(selected_tool_names),
                     "stage_capability_contract_digests": list(contract_digests),
@@ -5463,7 +5484,10 @@ class AutonomousWorkflowCheckpoint:
             "task_digest": self.task_digest,
             "workflow_id": self.workflow_id,
             "workflow_digest": self.workflow_digest,
-            "stages": [dict(stage) for stage in self.stages],
+            "stages": [
+                _safe_json("workflow checkpoint stage", stage, maximum=250_000)
+                for stage in self.stages
+            ],
         }
         if self.plan_refinement_digest is not None:
             payload["plan_refinement_digest"] = self.plan_refinement_digest
@@ -5477,7 +5501,10 @@ class AutonomousWorkflowCheckpoint:
             "workflow_id": self.workflow_id,
             "workflow_digest": self.workflow_digest,
             "plan_refinement_digest": self.plan_refinement_digest,
-            "stages": [dict(stage) for stage in self.stages],
+            "stages": [
+                _safe_json("workflow checkpoint stage", stage, maximum=250_000)
+                for stage in self.stages
+            ],
             "completed_stage_ids": list(self.completed_stage_ids),
             "checkpoint_digest": self.checkpoint_digest,
             "retention": "structured_stage_metadata_only; caller_owned",
@@ -5802,6 +5829,7 @@ class AutonomousWorkflowStageResult:
     attempt: int = 1
     response_digest: str | None = None
     stage_execution_plan: Mapping[str, Any] | None = None
+    response_evaluation: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.execution_status not in AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES:
@@ -5815,7 +5843,11 @@ class AutonomousWorkflowStageResult:
         if self.structured is not None:
             if not isinstance(self.structured, Mapping):
                 raise BrainRunError("workflow stage structured output must be an object")
-            _safe_json("workflow stage structured output", self.structured, maximum=250_000)
+            object.__setattr__(
+                self,
+                "structured",
+                _safe_json("workflow stage structured output", self.structured, maximum=250_000),
+            )
         if self.stage_execution_plan is not None:
             if not isinstance(self.stage_execution_plan, Mapping):
                 raise BrainRunError("workflow stage execution plan must be a mapping or None")
@@ -5835,6 +5867,22 @@ class AutonomousWorkflowStageResult:
             raise BrainRunError("workflow stage attempt must be a positive integer")
         if self.response_digest is not None:
             _workflow_digest(self.response_digest, "workflow stage response_digest")
+        if self.response_evaluation is not None:
+            try:
+                normalized_evaluation = validate_autonomous_workflow_stage_response_evaluation(self.response_evaluation)
+            except ArgumentError as error:
+                raise BrainRunError("workflow stage response_evaluation is invalid") from error
+            if self.structured is None:
+                raise BrainRunError("workflow stage response_evaluation requires structured stage output")
+            try:
+                replay_autonomous_workflow_stage_response_evaluation(self.structured, normalized_evaluation)
+            except ArgumentError as error:
+                raise BrainRunError("workflow stage response_evaluation is invalid or drifted") from error
+            object.__setattr__(self, "response_evaluation", _safe_json(
+                "workflow stage response_evaluation",
+                self.response_evaluation,
+                maximum=64_000,
+            ))
 
     def checkpoint_snapshot(self) -> dict[str, Any] | None:
         if self.structured is None or self.declared_status is None or self.response_digest is None:
@@ -5848,6 +5896,7 @@ class AutonomousWorkflowStageResult:
             "uncertainty": list(self.uncertainty),
             "attempt": self.attempt,
             "response_digest": self.response_digest,
+            "response_evaluation": None if self.response_evaluation is None else dict(self.response_evaluation),
             "stage_execution_plan_digest": None
             if self.stage_execution_plan is None
             else self.stage_execution_plan.get("stage_plan_digest"),
@@ -5873,6 +5922,9 @@ class AutonomousWorkflowStageResult:
             "stage_execution_plan": None
             if self.stage_execution_plan is None
             else dict(self.stage_execution_plan),
+            "response_evaluation": None
+            if self.response_evaluation is None
+            else dict(self.response_evaluation),
             "result": None if self.result is None else self.result.to_dict(),
             "retention": "provider_result_returned_to_caller; checkpoint_is_structured_only",
         }
@@ -6414,6 +6466,7 @@ class AutonomousWorkflowStageEvaluation:
     decision: BrainEvaluatorDecision
     recording: Mapping[str, Any]
     evidence_digest: str | None = None
+    structured_response: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _identifier("workflow stage evaluation stage_id", self.stage_id)
@@ -6426,6 +6479,12 @@ class AutonomousWorkflowStageEvaluation:
         _safe_json("workflow stage evaluation recording", self.recording, maximum=250_000)
         if self.evidence_digest is not None:
             _workflow_digest(self.evidence_digest, "workflow stage evaluation evidence_digest")
+        if self.structured_response is not None:
+            _safe_json(
+                "workflow stage evaluation structured_response",
+                self.structured_response,
+                maximum=64_000,
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -6434,6 +6493,9 @@ class AutonomousWorkflowStageEvaluation:
             "decision": self.decision.to_dict(),
             "recording": dict(self.recording),
             "evidence_digest": self.evidence_digest,
+            "structured_response": None
+            if self.structured_response is None
+            else dict(self.structured_response),
             "retention": "value_only_evaluator_and_bandit_metadata",
         }
 
@@ -7466,6 +7528,87 @@ def _record_structured_response_feedback(
             "status": structured_report.get("status"),
             "next_state": structured_report.get("next_state"),
             "learning_evidence": structured_report.get("learning_evidence"),
+        },
+    }
+
+
+def _record_workflow_stage_response_feedback(
+    brain: AutonomousBrain,
+    stage_result: AutonomousWorkflowStageResult,
+    *,
+    bandit_state: Mapping[str, Any],
+    ledger: BrainLearningLedger | None,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Record one stage-composition signal without merging it into task-quality credit."""
+
+    if stage_result.response_evaluation is None or stage_result.result is None:
+        return None
+    evaluation = validate_autonomous_workflow_stage_response_evaluation(stage_result.response_evaluation)
+    brain_result = stage_result.result if isinstance(stage_result.result, BrainRunResult) else stage_result.result.brain_run
+    decision = BrainEvaluatorDecision(
+        evaluator_id=evaluation.evaluator_id,
+        evaluator_version=evaluation.evaluator_version,
+        reward=evaluation.reward,
+        passed=evaluation.passed,
+        failed=evaluation.failed,
+        feedback_digest=evaluation.feedback_digest,
+        failure_class=evaluation.failure_class,
+        evidence_digest=None,
+        replan_requested=evaluation.replan_requested,
+        replan_instruction=evaluation.replan_instruction,
+    )
+    replay_key = _json_digest(
+        {
+            "run_id": brain_result.run_id,
+            "stage_id": evaluation.stage_id,
+            "evaluation_digest": evaluation.evaluation_digest,
+        }
+    )
+    report = brain.record_evaluator_outcome(
+        stage_result.result,
+        bandit_state=bandit_state,
+        evaluator_id=decision.evaluator_id,
+        evaluator_version=decision.evaluator_version,
+        reward=decision.reward,
+        passed=decision.passed,
+        failed=decision.failed,
+        feedback_digest=decision.feedback_digest,
+        failure_class=decision.failure_class,
+        evidence_digest=evaluation.response_digest,
+        ledger=ledger,
+        replay_metadata={
+            "schema": "bioprism-brain-workflow-stage-response-replay/0.1",
+            "run_id": brain_result.run_id,
+            "stage_id": evaluation.stage_id,
+            "response_digest": evaluation.response_digest,
+            "evaluation_digest": evaluation.evaluation_digest,
+            "evaluator_id": decision.evaluator_id,
+            "evaluator_version": decision.evaluator_version,
+            "decision_digest": _json_digest(decision.to_dict()),
+            "retention": "metadata_and_digests_only",
+        },
+        idempotency_key=(
+            "workflow-stage-response:"
+            + replay_key
+        ),
+    )
+    next_state = report.get("next_state")
+    state = dict(next_state) if isinstance(next_state, Mapping) else dict(bandit_state)
+    return state, {
+        "kind": "structured_response",
+        "decision": decision.to_dict(),
+        "response_evaluation": {
+            "schema": evaluation.schema,
+            "evaluation_digest": evaluation.evaluation_digest,
+            "response_digest": evaluation.response_digest,
+            "stage_id": evaluation.stage_id,
+            "signals": dict(evaluation.signals),
+            "evaluator_authority": evaluation.evaluator_authority,
+        },
+        "recording": {
+            "status": report.get("status"),
+            "next_state": report.get("next_state"),
+            "learning_evidence": report.get("learning_evidence"),
         },
     }
 
@@ -11256,6 +11399,15 @@ class AutonomousTaskOrchestrator:
             response_digest = None if response is None else content_digest(response.to_dict())
             if errors and execution_status == "completed":
                 execution_status = "provider_failed"
+            response_evaluation = None
+            if structured is not None and not errors:
+                response_evaluation = evaluate_autonomous_workflow_stage_response(
+                    structured,
+                    domain=blueprint.domain_pack.domain,
+                    workflow_id=blueprint.workflow.workflow_id,
+                    workflow_digest=blueprint.workflow.workflow_digest,
+                    stage_id=ready.id,
+                ).to_dict()
             stage_report = AutonomousWorkflowStageResult(
                 stage=ready,
                 execution_status=execution_status,
@@ -11268,6 +11420,7 @@ class AutonomousTaskOrchestrator:
                 response_digest=response_digest,
                 attempt=1,
                 stage_execution_plan=stage_execution_plan.to_dict(),
+                response_evaluation=response_evaluation,
             )
             _emit_trace_event(
                 trace_event_callback,
@@ -11526,6 +11679,15 @@ class AutonomousTaskOrchestrator:
                 next_state = report.get("next_state")
                 if isinstance(next_state, Mapping):
                     state = dict(next_state)
+                structured_feedback = _record_workflow_stage_response_feedback(
+                    self.brain,
+                    stage_result,
+                    bandit_state=state,
+                    ledger=continuation_kwargs.get("ledger"),
+                )
+                structured_record = None
+                if structured_feedback is not None:
+                    state, structured_record = structured_feedback
                 should_replan = should_replan or decision.replan_requested
                 evaluation = AutonomousWorkflowStageEvaluation(
                     stage_id=stage_result.stage.id,
@@ -11535,8 +11697,10 @@ class AutonomousTaskOrchestrator:
                         "status": report.get("status"),
                         "next_state": report.get("next_state"),
                         "learning_evidence": report.get("learning_evidence"),
+                        "structured_response": structured_record,
                     },
                     evidence_digest=decision.evidence_digest,
+                    structured_response=structured_record,
                 )
                 evaluations.append(evaluation)
                 if memory_store is not None:
@@ -11755,6 +11919,15 @@ class AutonomousTaskOrchestrator:
                 decision = trajectory_result.decisions[index]
                 should_replan = should_replan or decision.replan_requested
                 recording = trajectory_result.recordings[index]
+                structured_feedback = _record_workflow_stage_response_feedback(
+                    self.brain,
+                    stage_result,
+                    bandit_state=state,
+                    ledger=ledger,
+                )
+                structured_record = None
+                if structured_feedback is not None:
+                    state, structured_record = structured_feedback
                 evaluation = AutonomousWorkflowStageEvaluation(
                     stage_id=stage_result.stage.id,
                     stage_status=stage_result.declared_status or "completed",
@@ -11766,8 +11939,10 @@ class AutonomousTaskOrchestrator:
                         "trajectory_id": trajectory_result.trajectory.trajectory_id,
                         "trajectory_step": index,
                         "credited_reward": trajectory_result.credited_rewards[index],
+                        "structured_response": structured_record,
                     },
                     evidence_digest=decision.evidence_digest,
+                    structured_response=structured_record,
                 )
                 evaluations.append(evaluation)
                 if memory_store is not None:
