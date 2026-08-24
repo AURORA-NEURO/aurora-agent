@@ -1809,6 +1809,7 @@ impl Server {
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
+            "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24505,6 +24506,28 @@ impl Server {
         }))
     }
 
+    fn multimodal_replication_evaluate(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized MultimodalReplicationRequest")?;
+        let report = crate::research_contracts::evaluate_multimodal_replication_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_evalengine::MULTIMODAL_REPLICATION_FEATURE_ID,
+            "receipt": report,
+            "guarantees": [
+                "required modality schema, units, coordinates, QC, and preregistration gates are evaluated before aggregation",
+                "incompatible or incomplete studies remain visible as omissions and contradictions rather than being averaged away",
+                "raw imaging and omics bytes remain institution-local and only typed digests cross the contract"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied manifests and does not inspect raw modality bytes or establish biological truth",
+                "a replicated disposition is a comparability and evidence gate, not a clinical or treatment conclusion"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35919,7 +35942,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "multimodal_ingestion",
             "domains": ["modality harmonization", "unit alignment", "coordinate systems", "semantic loss", "local research objects"],
             "crates": ["bioprism-adapter", "bioprism-modalities", "bioprism-foundation"],
-            "mcp_tools": ["multimodal_harmonize"],
+            "mcp_tools": ["multimodal_harmonize", "multimodal_replication_evaluate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -38257,6 +38280,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-lab ProtocolMatrixRequest with protocol steps, factor levels, retries, budget, and compensation policy." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "multimodal_replication_evaluate",
+            "description": "Evaluate independent preclinical imaging and omics study manifests through comparability, QC, preregistration, disagreement, and negative-result gates. The report preserves every omitted study and exports typed digests only.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-evalengine MultimodalReplicationRequest with required modalities, study manifests, outcomes, and policy." }
                 },
                 "required": ["request"]
             }

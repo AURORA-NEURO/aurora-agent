@@ -42,6 +42,8 @@ from .research_contracts import (
     QualifiedAnalysisResult,
     PROTOCOL_MATRIX_FEATURE_ID,
     ProtocolMatrixReceipt,
+    MULTIMODAL_REPLICATION_FEATURE_ID,
+    MultimodalReplicationReport,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

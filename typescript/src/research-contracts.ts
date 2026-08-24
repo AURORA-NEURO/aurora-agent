@@ -24,6 +24,7 @@ export const INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01" as const;
 export const MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02" as const;
 export const ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01" as const;
 export const PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02" as const;
+export const MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -491,6 +492,36 @@ export function validateProtocolMatrixReceipt(receipt: ProtocolMatrixReceipt): v
 export function protocolMatrixReceiptDigest(receipt: ProtocolMatrixReceipt): string {
   validateProtocolMatrixReceipt(receipt);
   return digestJsonSync(receipt);
+}
+
+export interface MultimodalReplicationReport {
+  schema_version: string;
+  feature_id: string;
+  capability_id: string;
+  claim: string;
+  request_digest: string;
+  required_modalities: readonly string[];
+  summary: Record<string, unknown>;
+  studies: readonly Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateMultimodalReplicationReport(report: MultimodalReplicationReport): void {
+  if (report.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (report.feature_id !== MULTIMODAL_REPLICATION_FEATURE_ID || !report.capability_id.trim() || !report.claim.trim()) throw new Error("multimodal replication identity is incomplete");
+  if (report.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!report.required_modalities.length || !report.studies.length) throw new Error("multimodal replication evidence set is incomplete");
+  const disposition = report.summary.disposition;
+  if (typeof disposition !== "string" || !new Set(["replicated", "partially_replicated", "contradicted", "null_result", "insufficient_evidence"]).has(disposition)) throw new Error("multimodal replication disposition is unknown");
+  if (report.summary.total_observations !== report.studies.length || !Array.isArray(report.summary.reasons) || report.summary.reasons.length === 0) throw new Error("multimodal replication summary is inconsistent");
+  if (report.studies.some((study) => typeof study.study_id !== "string" || !study.study_id.trim() || !Array.isArray(study.reasons))) throw new Error("multimodal study comparability record is incomplete");
+  if (typeof report.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(report.artifact.content_hash)) throw new Error("multimodal replication artifact digest is invalid");
+}
+
+export function multimodalReplicationReportDigest(report: MultimodalReplicationReport): string {
+  validateMultimodalReplicationReport(report);
+  return digestJsonSync(report);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {

@@ -29,6 +29,7 @@ INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01"
 MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02"
 ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01"
 PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02"
+MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02"
 
 
 class ResearchContractError(ValueError):
@@ -264,6 +265,43 @@ class ReplicationReport:
         digest = self.artifact.get("content_hash")
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ResearchContractError("replication artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})
+
+
+@dataclass(frozen=True)
+class MultimodalReplicationReport:
+    """Transport validator for comparability-gated multimodal replication evidence."""
+
+    payload: Mapping[str, Any]
+    artifact: Mapping[str, Any]
+
+    def validate(self) -> None:
+        if self.payload.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.payload.get("feature_id") != MULTIMODAL_REPLICATION_FEATURE_ID:
+            raise ResearchContractError("multimodal replication feature mismatch")
+        if self.payload.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        if not str(self.payload.get("capability_id", "")).strip() or not str(self.payload.get("claim", "")).strip():
+            raise ResearchContractError("multimodal replication identity is incomplete")
+        required = self.payload.get("required_modalities")
+        studies = self.payload.get("studies")
+        summary = self.payload.get("summary")
+        if not isinstance(required, list) or not required or not isinstance(studies, list) or not studies or not isinstance(summary, Mapping):
+            raise ResearchContractError("multimodal replication evidence set is incomplete")
+        if summary.get("disposition") not in {"replicated", "partially_replicated", "contradicted", "null_result", "insufficient_evidence"}:
+            raise ResearchContractError("multimodal replication disposition is unknown")
+        if int(summary.get("total_observations", 0)) != len(studies) or not isinstance(summary.get("reasons"), list) or not summary["reasons"]:
+            raise ResearchContractError("multimodal replication summary is inconsistent")
+        for study in studies:
+            if not isinstance(study, Mapping) or not str(study.get("study_id", "")).strip() or not isinstance(study.get("reasons"), list):
+                raise ResearchContractError("multimodal study comparability record is incomplete")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("multimodal replication artifact digest is invalid")
 
     def digest(self) -> str:
         self.validate()

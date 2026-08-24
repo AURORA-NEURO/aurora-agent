@@ -8,9 +8,11 @@ use bioprism_adapter::{
     MULTIMODAL_HARMONIZATION_FEATURE_ID,
 };
 use bioprism_evalengine::{
-    compile_evaluation_card, qualify_analysis, AnalysisQualificationRequest, EvaluationCardReceipt,
-    EvaluationCardRequest, QualifiedAnalysisResult, ANALYSIS_QUALIFICATION_FEATURE_ID,
-    EVALUATION_OBSERVABILITY_FEATURE_ID,
+    compile_evaluation_card, evaluate_multimodal_replication, qualify_analysis,
+    AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
+    MultimodalReplicationReport, MultimodalReplicationRequest, QualifiedAnalysisResult,
+    ANALYSIS_QUALIFICATION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID,
+    MULTIMODAL_REPLICATION_FEATURE_ID,
 };
 use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
 use bioprism_lab::{
@@ -34,6 +36,7 @@ pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
 pub const MULTIMODAL_HARMONIZATION_TOOL: &str = "multimodal_harmonize";
 pub const ANALYSIS_QUALIFICATION_TOOL: &str = "analysis_qualify";
 pub const PROTOCOL_MATRIX_TOOL: &str = "protocol_matrix_simulate";
+pub const MULTIMODAL_REPLICATION_TOOL: &str = "multimodal_replication_evaluate";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -181,6 +184,26 @@ pub fn validate_protocol_matrix_receipt_json(
         return Err("protocol matrix feature id mismatch".into());
     }
     Ok(receipt)
+}
+
+pub fn evaluate_multimodal_replication_json(value: &Value) -> Result<Value, String> {
+    let request: MultimodalReplicationRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal replication request: {error}"))?;
+    let report = evaluate_multimodal_replication(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(report)
+        .map_err(|error| format!("cannot serialize multimodal replication report: {error}"))
+}
+
+pub fn validate_multimodal_replication_report_json(
+    value: &Value,
+) -> Result<MultimodalReplicationReport, String> {
+    let report: MultimodalReplicationReport = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal replication report: {error}"))?;
+    report.validate().map_err(|error| error.to_string())?;
+    if report.feature_id != MULTIMODAL_REPLICATION_FEATURE_ID {
+        return Err("multimodal replication feature id mismatch".into());
+    }
+    Ok(report)
 }
 
 #[cfg(test)]

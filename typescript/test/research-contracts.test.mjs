@@ -50,6 +50,9 @@ import {
   PROTOCOL_MATRIX_FEATURE_ID,
   protocolMatrixReceiptDigest,
   validateProtocolMatrixReceipt,
+  MULTIMODAL_REPLICATION_FEATURE_ID,
+  multimodalReplicationReportDigest,
+  validateMultimodalReplicationReport,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -379,4 +382,24 @@ test("protocol matrix receipt partitions statuses and preserves digest", () => {
   };
   assert.doesNotThrow(() => validateProtocolMatrixReceipt(receipt));
   assert.equal(protocolMatrixReceiptDigest(receipt), protocolMatrixReceiptDigest(receipt));
+});
+
+test("multimodal replication report preserves comparability omissions", () => {
+  const report = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: MULTIMODAL_REPLICATION_FEATURE_ID,
+    capability_id: "capability:multimodal-replication",
+    claim: "organoid mechanism reproduces across sites",
+    request_digest: "b".repeat(64),
+    required_modalities: ["image", "rna"],
+    summary: { disposition: "partially_replicated", total_observations: 2, reasons: ["one study omitted rna"] },
+    studies: [
+      { study_id: "study-a", site: "site-a", reasons: [], comparable: true },
+      { study_id: "study-b", site: "site-b", reasons: ["required modalities omitted: rna"], comparable: false },
+    ],
+    artifact: { content_hash: "a".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateMultimodalReplicationReport(report));
+  assert.equal(multimodalReplicationReportDigest(report), multimodalReplicationReportDigest(report));
 });

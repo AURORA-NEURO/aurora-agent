@@ -36,28 +36,29 @@
 //! that a disputed result should enter (07.01). Where those are load-bearing for an invariant here,
 //! the invariant is stated and the measurement is left to the caller.
 
-pub mod attribution;
 pub mod analysis_qualification;
+pub mod attribution;
 pub mod bridge;
 pub mod cluster;
 pub mod error;
 pub mod evaluation_observability;
 pub mod ladder;
+pub mod multimodal_replication;
 pub mod posterior;
 pub mod replication;
 pub mod research_release;
 pub mod score;
 
-pub use attribution::{
-    attribute, ArmSpec, Attribution, AttributionClaim, AttributionReport, ComponentEffect,
-    EffectDirection, MatchedFork, RefusalReason,
-};
 pub use analysis_qualification::{
     analysis_qualification_manifest, qualify_analysis, AnalysisCandidate,
     AnalysisQualificationError, AnalysisQualificationRequest, AnalysisQuestion,
     IdentificationStatus, QualificationVerdict, QualifiedAnalysisResult,
     FEATURE_CONTRACT_VERSION as ANALYSIS_QUALIFICATION_FEATURE_VERSION,
     FEATURE_ID as ANALYSIS_QUALIFICATION_FEATURE_ID,
+};
+pub use attribution::{
+    attribute, ArmSpec, Attribution, AttributionClaim, AttributionReport, ComponentEffect,
+    EffectDirection, MatchedFork, RefusalReason,
 };
 pub use bridge::{contribution_from_verdict, digest, Provenance};
 pub use cluster::{ClusteredEstimate, ClusteredSample, IccEstimate};
@@ -71,6 +72,14 @@ pub use evaluation_observability::{
 pub use ladder::{
     compose, Contribution, Detail, Disagreement, EvidenceRef, ScoreTier, ScoredResult,
     SuppressedRaise, UnknownPolicy,
+};
+pub use multimodal_replication::{
+    evaluate_multimodal_replication, multimodal_replication_manifest, ModalityReceipt,
+    MultimodalReplicationDisposition, MultimodalReplicationError, MultimodalReplicationObservation,
+    MultimodalReplicationPolicy, MultimodalReplicationReport, MultimodalReplicationRequest,
+    MultimodalReplicationSummary, StudyComparability,
+    FEATURE_ID as MULTIMODAL_REPLICATION_FEATURE_ID,
+    FEATURE_VERSION as MULTIMODAL_REPLICATION_FEATURE_VERSION,
 };
 pub use posterior::{
     unprovenanced, CapabilityEstimate, CapabilityPosterior, CoverageFloor, Dominance, GateScalar,

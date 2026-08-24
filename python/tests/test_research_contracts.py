@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID, MULTIMODAL_REPLICATION_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -303,3 +303,24 @@ def test_protocol_matrix_receipt_partitions_statuses_and_preserves_digest():
     receipt.validate()
     assert receipt.feature_id == PROTOCOL_MATRIX_FEATURE_ID
     assert receipt.digest() == receipt.digest()
+
+
+def test_multimodal_replication_receipt_preserves_comparability_omissions():
+    report = MultimodalReplicationReport(
+        payload={
+            "schema_version": "aurora-research-contract/1.0",
+            "feature_id": MULTIMODAL_REPLICATION_FEATURE_ID,
+            "capability_id": "capability:multimodal-replication",
+            "claim": "organoid mechanism reproduces across sites",
+            "required_modalities": ["image", "rna"],
+            "summary": {"disposition": "partially_replicated", "total_observations": 2, "reasons": ["one study omitted rna"]},
+            "studies": [
+                {"study_id": "study-a", "site": "site-a", "reasons": [], "comparable": True},
+                {"study_id": "study-b", "site": "site-b", "reasons": ["required modalities omitted: rna"], "comparable": False},
+            ],
+            "boundary": PRECLINICAL_BOUNDARY,
+        },
+        artifact={"content_hash": "a" * 64},
+    )
+    report.validate()
+    assert report.digest() == report.digest()

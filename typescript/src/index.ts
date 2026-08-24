@@ -157,6 +157,7 @@ export {
   harmonizedResearchObjectDigest,
   qualifiedAnalysisResultDigest,
   protocolMatrixReceiptDigest,
+  multimodalReplicationReportDigest,
   releaseReviewDigest,
   validateEvidenceReceipt,
   validatePolicyReceipt,
@@ -175,8 +176,9 @@ export {
   validateHarmonizedResearchObject,
   validateQualifiedAnalysisResult,
   validateProtocolMatrixReceipt,
+  validateMultimodalReplicationReport,
 } from "./research-contracts.js";
-export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt } from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,
