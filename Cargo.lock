@@ -267,6 +267,7 @@ dependencies = [
  "bioprism-mutation",
  "bioprism-prism",
  "bioprism-project",
+ "bioprism-repair",
  "bioprism-scope",
  "bioprism-section",
  "bioprism-store",
@@ -647,6 +648,7 @@ dependencies = [
  "bioprism-prism",
  "bioprism-project",
  "bioprism-registry",
+ "bioprism-repair",
  "bioprism-routing",
  "bioprism-runtime",
  "bioprism-safety",
@@ -864,6 +866,20 @@ dependencies = [
  "bioprism-section",
  "bioprism-worldgen",
  "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-repair"
+version = "0.1.0"
+dependencies = [
+ "bioprism-domain",
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-project",
+ "bioprism-section",
+ "bioprism-world",
  "serde_json",
  "thiserror",
 ]
