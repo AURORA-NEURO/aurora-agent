@@ -214,6 +214,13 @@ deployment may call `assertProviderProtocolConformance(report)` as a release or 
 live provider availability, quotas, model permissions, and user credential readiness remain separate
 runtime checks.
 
+The Python package provides the equivalent `run_provider_protocol_conformance()` and
+`assert_provider_protocol_conformance(report)` gate. It drives the same seven built-in provider
+families through `LLMRuntime`, but uses an ephemeral `127.0.0.1` loopback server because Python's
+HTTP runtime is intentionally exercised without an injectable fetch seam. The server is shut down
+after each provider, and the report declares `local_loopback_fixture_never_external`; no external
+network, caller key, prompt, request, response, or header is required or retained.
+
 ### Operator process boundary
 
 The Python package now ships a small process boundary for operators and local integrations. It is

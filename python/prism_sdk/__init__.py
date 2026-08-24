@@ -1292,6 +1292,19 @@ from .llm_runtime import (
     provider_image_base64_part,
     normalize_provider_content_parts,
 )
+from .provider_conformance import (
+    MAX_PROVIDER_CONFORMANCE_CHECKS,
+    MAX_PROVIDER_CONFORMANCE_PROVIDERS,
+    PROVIDER_CONFORMANCE_CHECK_NAMES,
+    PROVIDER_CONFORMANCE_PROVIDERS,
+    PROVIDER_PROTOCOL_CONFORMANCE_MODE,
+    PROVIDER_PROTOCOL_CONFORMANCE_SCHEMA,
+    ProviderConformanceCheck,
+    ProviderConformanceProviderResult,
+    ProviderProtocolConformanceReport,
+    assert_provider_protocol_conformance,
+    run_provider_protocol_conformance,
+)
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
 from .adapter_runtime import (
@@ -6633,4 +6646,15 @@ __all__ = [
     "provider_image_url_part",
     "provider_image_base64_part",
     "normalize_provider_content_parts",
+    "MAX_PROVIDER_CONFORMANCE_CHECKS",
+    "MAX_PROVIDER_CONFORMANCE_PROVIDERS",
+    "PROVIDER_CONFORMANCE_CHECK_NAMES",
+    "PROVIDER_CONFORMANCE_PROVIDERS",
+    "PROVIDER_PROTOCOL_CONFORMANCE_MODE",
+    "PROVIDER_PROTOCOL_CONFORMANCE_SCHEMA",
+    "ProviderConformanceCheck",
+    "ProviderConformanceProviderResult",
+    "ProviderProtocolConformanceReport",
+    "assert_provider_protocol_conformance",
+    "run_provider_protocol_conformance",
 ]

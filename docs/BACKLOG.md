@@ -64,6 +64,15 @@ request, response, or header is persisted. This validates protocol wiring in CI 
 live quota, model availability, provider uptime, or user credential readiness, which remain
 deployment/runtime checks.
 
+Python now has protocol-conformance parity through `run_provider_protocol_conformance()` and
+`assert_provider_protocol_conformance(report)`. The gate runs all seven built-in provider families
+through the real `LLMRuntime` using an ephemeral local loopback fixture, covering credential
+refusal, provider-specific request/header policy, response normalization, model discovery, and
+SSE streaming. Its 56 checks and per-provider call counts are metadata-only; the synthetic
+credential and all request/response material are discarded before the digest is emitted. This is
+still a local protocol gate, not live provider availability, quota, permission, or user-key
+verification.
+
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
 the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson
