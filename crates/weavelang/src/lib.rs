@@ -130,6 +130,7 @@ pub mod lower;
 pub mod parser;
 pub mod printer;
 pub mod reference;
+pub mod release_assurance;
 pub mod semantics;
 
 pub use compile::{compile, CompileError};
@@ -139,4 +140,10 @@ pub use ir::{WeaveEvent, WeaveIr, WEAVE_EVENT_VERSION, WEAVE_IR_VERSION};
 pub use lower::{lower_program, LowerError};
 pub use parser::{parse, ParseError};
 pub use printer::print;
+pub use release_assurance::{
+    assure_weavelang_release, ReleaseAssuranceDisposition, ReleaseAssuranceError,
+    WeaveLangReleaseAssuranceReceipt, WeaveLangReleaseAssuranceRequest,
+    CONTRACT_VERSION as WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
+};
 pub use semantics::{ExecutionMode, Invariant, LivenessReport, Machine, Trace};

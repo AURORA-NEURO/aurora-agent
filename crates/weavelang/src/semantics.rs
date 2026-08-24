@@ -390,7 +390,10 @@ impl Machine {
             schema: transition.payload_type.clone(),
             security_label: label.clone(),
             payload_ref,
-            idempotency_key: format!("{}:{}:{}", self.thread_id, transition.id, self.logical_clock),
+            idempotency_key: format!(
+                "{}:{}:{}",
+                self.thread_id, transition.id, self.logical_clock
+            ),
         };
 
         self.apply_ledger_effects(&transition, &event);
@@ -582,7 +585,10 @@ impl Machine {
             let Some(parent_id) = &grant.parent else {
                 continue;
             };
-            let Some(parent) = self.authority.iter().find(|candidate| &candidate.id == parent_id)
+            let Some(parent) = self
+                .authority
+                .iter()
+                .find(|candidate| &candidate.id == parent_id)
             else {
                 continue;
             };
@@ -602,9 +608,7 @@ impl Machine {
             if remaining > *issued {
                 violations.push(InvariantViolation {
                     invariant: Invariant::BudgetConservation,
-                    detail: format!(
-                        "{resource:?} shows {remaining} remaining of {issued} issued"
-                    ),
+                    detail: format!("{resource:?} shows {remaining} remaining of {issued} issued"),
                     at_event,
                 });
             }
@@ -721,9 +725,7 @@ impl Machine {
                 .state_graph
                 .nodes
                 .iter()
-                .filter(|node| {
-                    node.enabled_acts.is_empty() && !terminal.contains(node.id.as_str())
-                })
+                .filter(|node| node.enabled_acts.is_empty() && !terminal.contains(node.id.as_str()))
                 .map(|node| node.id.clone())
                 .collect(),
             unreachable_states: self

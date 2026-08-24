@@ -630,20 +630,26 @@ impl Parser<'_> {
             return Err(self.unexpected("a number"));
         }
         self.bump();
-        token.text.parse::<f64>().map_err(|_| ParseError::Malformed {
-            expected: "number",
-            text: token.text.clone(),
-            span: token.span,
-        })
+        token
+            .text
+            .parse::<f64>()
+            .map_err(|_| ParseError::Malformed {
+                expected: "number",
+                text: token.text.clone(),
+                span: token.span,
+            })
     }
 
     fn integer(&mut self) -> Result<u64, ParseError> {
         let token = self.expect(TokenKind::Integer)?;
-        token.text.parse::<u64>().map_err(|_| ParseError::Malformed {
-            expected: "integer",
-            text: token.text.clone(),
-            span: token.span,
-        })
+        token
+            .text
+            .parse::<u64>()
+            .map_err(|_| ParseError::Malformed {
+                expected: "integer",
+                text: token.text.clone(),
+                span: token.span,
+            })
     }
 
     fn policy_decl(&mut self) -> Result<PolicyDecl, ParseError> {
@@ -761,11 +767,14 @@ impl Parser<'_> {
         match token.kind {
             TokenKind::Integer => {
                 self.bump();
-                let value = token.text.parse::<i64>().map_err(|_| ParseError::Malformed {
-                    expected: "integer",
-                    text: token.text.clone(),
-                    span: token.span,
-                })?;
+                let value = token
+                    .text
+                    .parse::<i64>()
+                    .map_err(|_| ParseError::Malformed {
+                        expected: "integer",
+                        text: token.text.clone(),
+                        span: token.span,
+                    })?;
                 Ok(Literal::Integer(value))
             }
             TokenKind::Duration => {
@@ -1518,14 +1527,14 @@ impl Parser<'_> {
         self.bump();
         let mut arguments = Vec::new();
         while self.kind() != TokenKind::RParen {
-            let name = if self.kind() == TokenKind::Ident && self.peek_at(1).kind == TokenKind::Colon
-            {
-                let (name, _) = self.any_name()?;
-                self.bump();
-                Some(name)
-            } else {
-                None
-            };
+            let name =
+                if self.kind() == TokenKind::Ident && self.peek_at(1).kind == TokenKind::Colon {
+                    let (name, _) = self.any_name()?;
+                    self.bump();
+                    Some(name)
+                } else {
+                    None
+                };
             let value = self.expression()?;
             arguments.push(Argument {
                 span: value.span(),

@@ -107,7 +107,9 @@ pub enum LowerError {
         span: Span,
     },
 
-    #[error("branch `{branch}` at {span} leases `{resource}`, which policy `{policy}` never allocates")]
+    #[error(
+        "branch `{branch}` at {span} leases `{resource}`, which policy `{policy}` never allocates"
+    )]
     BudgetResourceNotAllocated {
         branch: String,
         resource: String,
@@ -311,7 +313,10 @@ pub fn lower_program(program: &Program, source: &str) -> Result<WeaveIr, LowerEr
         program_id: String::new(),
         package_lock: package_lock(program)?,
         roles: roles.values().map(|decl| lower_role(decl)).collect(),
-        interfaces: interfaces.iter().map(|decl| lower_interface(decl)).collect(),
+        interfaces: interfaces
+            .iter()
+            .map(|decl| lower_interface(decl))
+            .collect(),
         participants: lowering.participants(&weave.body),
         choreography,
         policies: policies_ir,
@@ -336,7 +341,8 @@ pub fn lower_program(program: &Program, source: &str) -> Result<WeaveIr, LowerEr
 fn budget_ceiling(policy: &PolicyDecl) -> Budget {
     let mut budget = Budget::new();
     for limit in &policy.budgets {
-        if let (Some(resource), Literal::Integer(value)) = (kernel_resource(&limit.resource), &limit.limit)
+        if let (Some(resource), Literal::Integer(value)) =
+            (kernel_resource(&limit.resource), &limit.limit)
         {
             budget = budget.with(resource, (*value).max(0) as u64);
         }
@@ -387,7 +393,12 @@ fn limit_text(limit: &Literal) -> String {
         Literal::Money {
             currency,
             minor_units,
-        } => format!("{}({}.{:02})", currency, minor_units / 100, minor_units % 100),
+        } => format!(
+            "{}({}.{:02})",
+            currency,
+            minor_units / 100,
+            minor_units % 100
+        ),
     }
 }
 
@@ -404,10 +415,13 @@ fn lower_role(decl: &RoleDecl) -> RoleIr {
                 compartments: clearance.compartments.clone(),
             })
             .unwrap_or_else(|| SecurityLabel::new("public")),
-        minimum_profile: decl.minimum_profile.as_ref().map(|profile| MinimumProfileIr {
-            reference: profile.reference.clone(),
-            threshold: profile.threshold,
-        }),
+        minimum_profile: decl
+            .minimum_profile
+            .as_ref()
+            .map(|profile| MinimumProfileIr {
+                reference: profile.reference.clone(),
+                threshold: profile.threshold,
+            }),
         substitution: SubstitutionPolicy::EffectSubset,
     }
 }
@@ -803,11 +817,16 @@ impl Lowering<'_> {
                     requires_human_approval: false,
                 });
             }
-            Stmt::Let { attributes, name, .. } => {
+            Stmt::Let {
+                attributes, name, ..
+            } => {
                 self.record_hooks(attributes, name);
             }
             other => {
-                debug_assert!(!advances(other), "an advancing statement reached lower_static");
+                debug_assert!(
+                    !advances(other),
+                    "an advancing statement reached lower_static"
+                );
             }
         }
         Ok(())
@@ -865,7 +884,8 @@ impl Lowering<'_> {
                 span,
             } => {
                 self.record_hooks(attributes, name);
-                let (participant, method) = ask_target(value).expect("advances() checked for an ask");
+                let (participant, method) =
+                    ask_target(value).expect("advances() checked for an ask");
                 let role = self.role_of(&participant, *span)?;
                 let mut effects = self.method_effects(&method);
                 if effects.is_empty() {
@@ -932,9 +952,8 @@ impl Lowering<'_> {
                 arms,
                 span,
             } => {
-                let decider = await_target(scrutinee).and_then(|path| {
-                    self.bindings.get(path.head()).cloned()
-                });
+                let decider = await_target(scrutinee)
+                    .and_then(|path| self.bindings.get(path.head()).cloned());
                 for arm in arms {
                     let arm_entry = self.new_state();
                     let kind = kernel_act(&arm.pattern.case).unwrap_or(ActKind::Ask);
@@ -961,12 +980,7 @@ impl Lowering<'_> {
             Stmt::Par { body, span } => {
                 self.lower_block(body, current, target, "par", *span)?;
             }
-            Stmt::Race {
-                branches, span, ..
-            }
-            | Stmt::Fork {
-                branches, span, ..
-            } => {
+            Stmt::Race { branches, span, .. } | Stmt::Fork { branches, span, .. } => {
                 if let Stmt::Fork { from, .. } = statement {
                     if !self.checkpoints.contains(from) {
                         return Err(LowerError::UnknownCheckpoint {
@@ -997,13 +1011,7 @@ impl Lowering<'_> {
                         },
                         requires_human_approval: false,
                     });
-                    self.lower_block(
-                        &branch.body,
-                        &branch_entry,
-                        target,
-                        "branch",
-                        branch.span,
-                    )?;
+                    self.lower_block(&branch.body, &branch_entry, target, "branch", branch.span)?;
                 }
             }
             Stmt::Commit(commit) => {
@@ -1118,14 +1126,7 @@ impl Lowering<'_> {
         Ok(())
     }
 
-    fn simple_act(
-        &mut self,
-        current: &str,
-        target: &str,
-        kind: ActKind,
-        label: &str,
-        _span: Span,
-    ) {
+    fn simple_act(&mut self, current: &str, target: &str, kind: ActKind, label: &str, _span: Span) {
         self.emit(TransitionIr {
             id: format!("{label}-{}", self.transitions.len()),
             from: current.to_string(),
@@ -1223,7 +1224,11 @@ impl Lowering<'_> {
                     outstanding_commitments: outgoing
                         .iter()
                         .filter(|transition| {
-                            transition.effects.ledger.iter().any(|entry| entry == "create_commitment")
+                            transition
+                                .effects
+                                .ledger
+                                .iter()
+                                .any(|entry| entry == "create_commitment")
                         })
                         .map(|transition| transition.id.clone())
                         .collect(),

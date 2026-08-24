@@ -406,7 +406,10 @@ fn lex_identifier(cursor: &mut Cursor<'_>, start: usize, line: u32, column: u32)
     while let Some(c) = cursor.peek() {
         let continues = c.is_ascii_alphanumeric()
             || c == '_'
-            || (c == '-' && cursor.peek_at(1).is_some_and(|next| next.is_ascii_alphanumeric()));
+            || (c == '-'
+                && cursor
+                    .peek_at(1)
+                    .is_some_and(|next| next.is_ascii_alphanumeric()));
         if !continues {
             break;
         }
@@ -541,7 +544,12 @@ fn lex_string(
                     other => {
                         return Err(LexError::UnknownEscape {
                             character: other,
-                            span: Span::new(escape_start, cursor.offset(), escape_line, escape_column),
+                            span: Span::new(
+                                escape_start,
+                                cursor.offset(),
+                                escape_line,
+                                escape_column,
+                            ),
                         })
                     }
                 });

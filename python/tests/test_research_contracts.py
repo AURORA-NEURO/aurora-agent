@@ -3,6 +3,7 @@ from prism_sdk.research_contracts import FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_I
 from prism_sdk.research_contracts import CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID, CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION, ContextCompilationAssuranceReceipt
 from prism_sdk.research_contracts import KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID, KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION, KnowledgeRepresentationAssuranceReceipt
 from prism_sdk.research_contracts import RESOURCE_CONTROL_PLANE_FEATURE_ID, RESOURCE_CONTROL_PLANE_CONTRACT_VERSION, ResourceControlPlaneReceipt
+from prism_sdk.research_contracts import WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID, WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION, WeaveLangReleaseAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -679,3 +680,8 @@ def test_knowledge_representation_keeps_missing_fact_unknown():
 def test_resource_control_plane_keeps_missing_qualification_unknown():
     receipt = ResourceControlPlaneReceipt(request_id="request:resources", federation_id="federation:resources", institution_ids=("site:a", "site:b"), qualified_resource_ids=("resource:a",), disposition="unknown", qualification_digest=None, checks=("incomplete qualification remains unknown rather than executable",), omissions=("qualification receipt is absent",), artifact={"content_hash": "b" * 64})
     receipt.validate(); assert receipt.feature_id == RESOURCE_CONTROL_PLANE_FEATURE_ID; assert receipt.contract_version == RESOURCE_CONTROL_PLANE_CONTRACT_VERSION; assert receipt.digest() == receipt.digest()
+
+
+def test_weavelang_release_keeps_incomplete_closure_unknown():
+    receipt = WeaveLangReleaseAssuranceReceipt(request_id="request:release", run_id="run:high-throughput", release_id="release:2026", disposition="unknown", artifact_digest=None, checks=("incomplete release closure remains unknown rather than published",), omissions=("evidence receipts are absent",), artifact={"content_hash": "b" * 64})
+    receipt.validate(); assert receipt.feature_id == WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID; assert receipt.contract_version == WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION; assert receipt.digest() == receipt.digest()

@@ -86,6 +86,10 @@ use bioprism_weave::{
     operate_resource_control_plane, ResourceControlPlaneReceipt, ResourceControlPlaneRequest,
     RESOURCE_CONTROL_PLANE_FEATURE_ID,
 };
+use bioprism_weavelang::{
+    assure_weavelang_release, WeaveLangReleaseAssuranceReceipt, WeaveLangReleaseAssuranceRequest,
+    WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
@@ -119,6 +123,7 @@ pub const CONTEXT_COMPILATION_ASSURANCE_TOOL: &str = "federated_context_compilat
 pub const KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL: &str =
     "federated_knowledge_representation_assurance";
 pub const RESOURCE_CONTROL_PLANE_TOOL: &str = "federated_resource_control_plane";
+pub const WEAVELANG_RELEASE_ASSURANCE_TOOL: &str = "weavelang_release_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -679,6 +684,26 @@ pub fn validate_resource_control_plane_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RESOURCE_CONTROL_PLANE_FEATURE_ID {
         return Err("resource control-plane feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_weavelang_release_json(value: &Value) -> Result<Value, String> {
+    let request: WeaveLangReleaseAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid WeaveLang release assurance request: {error}"))?;
+    let receipt = assure_weavelang_release(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize WeaveLang release assurance receipt: {error}"))
+}
+
+pub fn validate_weavelang_release_assurance_json(
+    value: &Value,
+) -> Result<WeaveLangReleaseAssuranceReceipt, String> {
+    let receipt: WeaveLangReleaseAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid WeaveLang release assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID {
+        return Err("WeaveLang release assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

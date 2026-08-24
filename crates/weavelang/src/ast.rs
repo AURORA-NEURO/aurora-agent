@@ -72,10 +72,16 @@ impl QualifiedName {
 pub enum Literal {
     Integer(i64),
     Float(f64),
-    Duration { millis: u64, text: String },
+    Duration {
+        millis: u64,
+        text: String,
+    },
     Text(String),
     /// `usd(5)` and friends: a currency tag with an amount in minor units.
-    Money { currency: String, minor_units: i64 },
+    Money {
+        currency: String,
+        minor_units: i64,
+    },
 }
 
 /// A type expression: `probability`, `list<assumption-ref>`, `Claim<P>`.
@@ -368,7 +374,10 @@ pub enum Stmt {
     /// `par { ... }` — concurrent, not parallel: 23.34 gives no scheduler, and neither does this
     /// crate. Lowering records the branches as unordered, and the evaluator interleaves them in a
     /// fixed order so that a trace is reproducible.
-    Par { body: Vec<Stmt>, span: Span },
+    Par {
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// `race first valid { branch fast-model { ... } }`
     Race {
         policy: String,
@@ -388,7 +397,10 @@ pub enum Stmt {
         span: Span,
     },
     /// `join using verified-best`
-    Join { using: String, span: Span },
+    Join {
+        using: String,
+        span: Span,
+    },
     /// `commit worker to lead when task.accepted { ... }`
     Commit(CommitStmt),
     /// `watch evidence where contradiction.blocking { ... }`
@@ -406,10 +418,19 @@ pub enum Stmt {
         condition: Expr,
         span: Span,
     },
-    Return { value: Expr, span: Span },
+    Return {
+        value: Expr,
+        span: Span,
+    },
     /// `execute p` and `resolve c` in 23.37's match arms.
-    Execute { value: Expr, span: Span },
-    Resolve { value: Expr, span: Span },
+    Execute {
+        value: Expr,
+        span: Span,
+    },
+    Resolve {
+        value: Expr,
+        span: Span,
+    },
     /// `publish finding into evidence` (23.02).
     Publish {
         value: Expr,
@@ -423,9 +444,15 @@ pub enum Stmt {
         span: Span,
     },
     /// `spawn role skeptic`
-    Spawn { role: String, span: Span },
+    Spawn {
+        role: String,
+        span: Span,
+    },
     /// `delegate patcher.produce-patch(x)` (23.02).
-    Delegate { value: Expr, span: Span },
+    Delegate {
+        value: Expr,
+        span: Span,
+    },
 }
 
 impl Stmt {
@@ -495,8 +522,14 @@ pub struct Include {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum WatchAction {
     /// `pause effects [publish, main.merge]`
-    PauseEffects { effects: Vec<Path>, span: Span },
-    SpawnRole { role: String, span: Span },
+    PauseEffects {
+        effects: Vec<Path>,
+        span: Span,
+    },
+    SpawnRole {
+        role: String,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -539,18 +572,29 @@ pub enum Expr {
         span: Span,
     },
     /// `ask lead.plan(issue)` — a request act, not a function call.
-    Ask { call: Box<Expr>, span: Span },
+    Ask {
+        call: Box<Expr>,
+        span: Span,
+    },
     /// `await reviewer.decision`
-    Await { target: Path, span: Span },
+    Await {
+        target: Path,
+        span: Span,
+    },
     /// `choose evidence by information-value`
     Choose {
         subject: String,
         by: Path,
         span: Span,
     },
-    Literal { value: Literal, span: Span },
+    Literal {
+        value: Literal,
+        span: Span,
+    },
     /// The `current` keyword in `checkpoint c = current`.
-    Current { span: Span },
+    Current {
+        span: Span,
+    },
     Binary {
         op: BinaryOp,
         left: Box<Expr>,
