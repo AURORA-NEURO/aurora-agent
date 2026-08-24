@@ -159,8 +159,8 @@ mod tests {
 
     #[test]
     fn a_csv_source_inventories_its_columns_not_its_cells() {
-        let source = Source::bytes("s", b"subject,age\nS1,40\nS2,41\n".to_vec())
-            .with_format("text/csv");
+        let source =
+            Source::bytes("s", b"subject,age\nS1,40\nS2,41\n".to_vec()).with_format("text/csv");
         let inventory = field_inventory(&source).unwrap();
         let locations = inventory.locations().unwrap();
         assert_eq!(locations.len(), 2);

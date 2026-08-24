@@ -339,10 +339,7 @@ fn check_loss_completeness(
     ))
 }
 
-fn check_declared_loss_kinds(
-    declared: &BTreeSet<LossKind>,
-    ingestion: &Ingestion,
-) -> CheckOutcome {
+fn check_declared_loss_kinds(declared: &BTreeSet<LossKind>, ingestion: &Ingestion) -> CheckOutcome {
     let emitted = ingestion.loss().kinds();
     let undeclared: Vec<LossKind> = emitted
         .into_iter()

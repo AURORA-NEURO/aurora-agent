@@ -204,7 +204,10 @@ impl AdapterError {
         }
     }
 
-    pub(crate) fn ambiguous_identity(location: SourceLocation, dimension: impl Into<String>) -> Self {
+    pub(crate) fn ambiguous_identity(
+        location: SourceLocation,
+        dimension: impl Into<String>,
+    ) -> Self {
         AdapterError::AmbiguousIdentity {
             location: Box::new(location),
             dimension: dimension.into(),

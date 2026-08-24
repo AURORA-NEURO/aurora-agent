@@ -4,6 +4,7 @@ from prism_sdk.research_contracts import CONTEXT_COMPILATION_ASSURANCE_FEATURE_I
 from prism_sdk.research_contracts import KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID, KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION, KnowledgeRepresentationAssuranceReceipt
 from prism_sdk.research_contracts import RESOURCE_CONTROL_PLANE_FEATURE_ID, RESOURCE_CONTROL_PLANE_CONTRACT_VERSION, ResourceControlPlaneReceipt
 from prism_sdk.research_contracts import WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID, WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION, WeaveLangReleaseAssuranceReceipt
+from prism_sdk.research_contracts import MECHANISM_CONTROL_PLANE_FEATURE_ID, MECHANISM_CONTROL_PLANE_CONTRACT_VERSION, MechanismControlPlaneReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -685,3 +686,8 @@ def test_resource_control_plane_keeps_missing_qualification_unknown():
 def test_weavelang_release_keeps_incomplete_closure_unknown():
     receipt = WeaveLangReleaseAssuranceReceipt(request_id="request:release", run_id="run:high-throughput", release_id="release:2026", disposition="unknown", artifact_digest=None, checks=("incomplete release closure remains unknown rather than published",), omissions=("evidence receipts are absent",), artifact={"content_hash": "b" * 64})
     receipt.validate(); assert receipt.feature_id == WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID; assert receipt.contract_version == WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION; assert receipt.digest() == receipt.digest()
+
+
+def test_mechanism_control_plane_keeps_missing_candidate_unknown():
+    receipt = MechanismControlPlaneReceipt(request_id="request:mechanism", federation_id="federation:mechanism", question_id="question:organoid", admitted_candidate_ids=("candidate:a",), disposition="unknown", evidence_receipt_digest=None, checks=("incomplete mechanism evidence remains unknown rather than admitted",), omissions=("required mechanism candidate unavailable: candidate:b",), artifact={"content_hash": "b" * 64})
+    receipt.validate(); assert receipt.feature_id == MECHANISM_CONTROL_PLANE_FEATURE_ID; assert receipt.contract_version == MECHANISM_CONTROL_PLANE_CONTRACT_VERSION; assert receipt.digest() == receipt.digest()

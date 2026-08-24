@@ -8,8 +8,8 @@
 //! replayed by downstream analysis and federation services.
 
 use bioprism_foundation::{
-    LossSeverity, ProvenanceLink, SemanticLoss, TypedResearchArtifact,
-    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    LossSeverity, ProvenanceLink, SemanticLoss, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -68,7 +68,8 @@ pub struct HarmonizedResearchObject {
 
 impl HarmonizedResearchObject {
     pub fn validate(&self) -> Result<(), HarmonizationError> {
-        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION || self.feature_id != FEATURE_ID {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION || self.feature_id != FEATURE_ID
+        {
             return Err(HarmonizationError::Contract(
                 "harmonization schema or feature mismatch".into(),
             ));
@@ -160,10 +161,9 @@ pub fn harmonize_multimodal(
         }
     }
     for required in &request.required_modalities {
-        if !modalities
-            .iter()
-            .any(|modality| &modality.modality_type == required || &modality.modality_id == required)
-        {
+        if !modalities.iter().any(|modality| {
+            &modality.modality_type == required || &modality.modality_id == required
+        }) {
             omitted_modalities.push(required.clone());
         }
     }
@@ -257,7 +257,8 @@ fn validate_request(request: &MultimodalHarmonizationRequest) -> Result<(), Harm
         });
     }
     let mut modality_ids = BTreeSet::new();
-    let mut modality_types = BTreeMap::<String, (&BTreeMap<String, String>, Option<&String>)>::new();
+    let mut modality_types =
+        BTreeMap::<String, (&BTreeMap<String, String>, Option<&String>)>::new();
     for modality in &request.modalities {
         if modality.modality_id.trim().is_empty()
             || modality.modality_type.trim().is_empty()
@@ -326,7 +327,10 @@ mod tests {
         MultimodalHarmonizationRequest {
             study_id: "study:organoid-1".into(),
             reference_schema: "aurora-multimodal/1".into(),
-            modalities: vec![manifest("rna", "transcriptomics", true), manifest("image", "imaging", true)],
+            modalities: vec![
+                manifest("rna", "transcriptomics", true),
+                manifest("image", "imaging", true),
+            ],
             required_modalities: vec!["transcriptomics".into(), "imaging".into()],
             raw_data_local: true,
         }
@@ -357,7 +361,9 @@ mod tests {
     fn units_conflict_is_rejected_before_artifact_creation() {
         let mut request = request();
         request.modalities[1].modality_type = "transcriptomics".into();
-        request.modalities[1].units.insert("intensity".into(), "counts".into());
+        request.modalities[1]
+            .units
+            .insert("intensity".into(), "counts".into());
         assert!(matches!(
             harmonize_multimodal(&request).unwrap_err(),
             HarmonizationError::Incompatibility(_)

@@ -186,9 +186,7 @@ fn split_records(
             match chars.peek().copied() {
                 None => {}
                 Some(next) if next == delimiter || next == '\n' || next == '\r' => {}
-                Some(found) => {
-                    return Err(CsvError::trailing_garbage(location(ordinal), found))
-                }
+                Some(found) => return Err(CsvError::trailing_garbage(location(ordinal), found)),
             }
             continue;
         }
@@ -349,7 +347,10 @@ mod tests {
     #[test]
     fn an_empty_column_name_is_an_error() {
         let error = Table::parse("s", b"a,,c\n1,2,3\n").unwrap_err();
-        assert!(matches!(error, CsvError::EmptyColumnName { position: 1, .. }));
+        assert!(matches!(
+            error,
+            CsvError::EmptyColumnName { position: 1, .. }
+        ));
     }
 
     #[test]

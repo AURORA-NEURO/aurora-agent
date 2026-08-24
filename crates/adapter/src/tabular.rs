@@ -189,7 +189,10 @@ pub enum ColumnRole {
     Provenance,
     /// The column is deliberately not carried. Still a loss, and still reported — the point of
     /// declaring it is to record the author's reason and severity, not to make it disappear.
-    Ignored { reason: String, severity: LossSeverity },
+    Ignored {
+        reason: String,
+        severity: LossSeverity,
+    },
 }
 
 /// The mapping policy for one table.
@@ -588,9 +591,10 @@ fn encode_cell(
                 other,
             )),
         },
-        Some(ValueType::Integer) => trimmed.parse::<i64>().map(Value::from).map_err(|_| {
-            AdapterError::type_mismatch(location.clone(), "integer", trimmed)
-        }),
+        Some(ValueType::Integer) => trimmed
+            .parse::<i64>()
+            .map(Value::from)
+            .map_err(|_| AdapterError::type_mismatch(location.clone(), "integer", trimmed)),
         Some(ValueType::Real) => {
             let parsed = trimmed.parse::<f64>().map_err(|_| {
                 AdapterError::type_mismatch(location.clone(), "real number", trimmed)
@@ -668,7 +672,11 @@ fn normalize_decimal(text: &str) -> Option<(bool, String, i32)> {
     }
     let trimmed = digits.trim_end_matches('0');
     let removed = i32::try_from(digits.len() - trimmed.len()).ok()?;
-    Some((negative, trimmed.to_string(), exponent.checked_add(removed)?))
+    Some((
+        negative,
+        trimmed.to_string(),
+        exponent.checked_add(removed)?,
+    ))
 }
 
 #[cfg(test)]

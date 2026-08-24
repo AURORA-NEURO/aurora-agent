@@ -150,15 +150,13 @@ impl FactDraft {
             .map_err(|error| AdapterError::identifier(self.origin.clone(), error))?;
         let provides = VariableName::parse(self.provides)
             .map_err(|error| AdapterError::identifier(self.origin.clone(), error))?;
-        let scope = serde_json::to_value(&self.scope)
-            .map_err(|error| AdapterError::malformed_fact(self.origin.clone(), error.to_string()))?;
+        let scope = serde_json::to_value(&self.scope).map_err(|error| {
+            AdapterError::malformed_fact(self.origin.clone(), error.to_string())
+        })?;
 
         let mut map = Map::new();
         map.insert("id".to_string(), Value::String(id.to_string()));
-        map.insert(
-            "provides".to_string(),
-            Value::String(provides.to_string()),
-        );
+        map.insert("provides".to_string(), Value::String(provides.to_string()));
         map.insert("value".to_string(), self.value);
         map.insert("scope".to_string(), scope);
         map.insert(
@@ -190,7 +188,11 @@ mod tests {
 
     #[test]
     fn a_built_draft_parses_as_a_fiber_world_fact() {
-        let document = draft().tag("clinical").provenance("demo#record=1").build().unwrap();
+        let document = draft()
+            .tag("clinical")
+            .provenance("demo#record=1")
+            .build()
+            .unwrap();
         let fact = Fact::from_json(&document).unwrap();
         assert_eq!(fact.id.as_str(), "fact.demo.r1.age");
         assert_eq!(fact.provides.as_str(), "age");

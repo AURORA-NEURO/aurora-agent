@@ -66,6 +66,8 @@ RESOURCE_CONTROL_PLANE_FEATURE_ID = "AFA-weave-P05-F32"
 RESOURCE_CONTROL_PLANE_CONTRACT_VERSION = "federated-resource-control-plane/1.0"
 WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID = "AFA-weavelang-P16-F27"
 WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION = "weavelang-release-assurance/1.0"
+MECHANISM_CONTROL_PLANE_FEATURE_ID = "AFA-adapter-P08-F31"
+MECHANISM_CONTROL_PLANE_CONTRACT_VERSION = "federated-mechanism-control-plane/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -1875,3 +1877,31 @@ class WeaveLangReleaseAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "run_id": self.run_id, "release_id": self.release_id, "disposition": self.disposition, "artifact_digest": self.artifact_digest, "checks": list(self.checks), "omissions": list(self.omissions), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class MechanismControlPlaneReceipt:
+    request_id: str
+    federation_id: str
+    question_id: str
+    admitted_candidate_ids: tuple[str, ...]
+    disposition: str
+    evidence_receipt_digest: str | None
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = MECHANISM_CONTROL_PLANE_FEATURE_ID
+    contract_version: str = MECHANISM_CONTROL_PLANE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != MECHANISM_CONTROL_PLANE_FEATURE_ID or self.contract_version != MECHANISM_CONTROL_PLANE_CONTRACT_VERSION: raise ResearchContractError("mechanism control-plane schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.federation_id.strip() or not self.question_id.strip() or not self.checks: raise ResearchContractError("mechanism control-plane identity or checks are incomplete")
+        if not self.admitted_candidate_ids or len(set(self.admitted_candidate_ids)) != len(self.admitted_candidate_ids): raise ResearchContractError("mechanism candidate identities are not unique")
+        if self.disposition not in {"passed", "blocked", "unknown"}: raise ResearchContractError("mechanism control-plane disposition is unknown")
+        if self.evidence_receipt_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.evidence_receipt_digest): raise ResearchContractError("mechanism evidence digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]): raise ResearchContractError("mechanism receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "federation_id": self.federation_id, "question_id": self.question_id, "admitted_candidate_ids": list(self.admitted_candidate_ids), "disposition": self.disposition, "evidence_receipt_digest": self.evidence_receipt_digest, "checks": list(self.checks), "omissions": list(self.omissions), "artifact": dict(self.artifact), "boundary": self.boundary})

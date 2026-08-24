@@ -87,12 +87,13 @@ pub mod ingestion;
 pub mod inventory;
 pub mod location;
 pub mod loss;
+pub mod mechanism_control_plane;
+pub mod multimodal_harmonization;
 pub mod probe;
 pub mod quality_control;
 pub mod quality_drift;
-pub mod research_ingest;
-pub mod multimodal_harmonization;
 pub mod registry;
+pub mod research_ingest;
 pub mod source;
 pub mod tabular;
 
@@ -105,6 +106,18 @@ pub use ingestion::Ingestion;
 pub use inventory::{InventoryAdapter, InventoryProfile};
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
+pub use mechanism_control_plane::{
+    operate_mechanism_control_plane, MechanismControlDisposition, MechanismControlError,
+    MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
+    CONTRACT_VERSION as MECHANISM_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_harmonization::{
+    harmonize_multimodal, HarmonizationDecision, HarmonizationError, HarmonizedResearchObject,
+    ModalityManifest, MultimodalHarmonizationRequest,
+    FEATURE_ID as MULTIMODAL_HARMONIZATION_FEATURE_ID,
+    FEATURE_VERSION as MULTIMODAL_HARMONIZATION_FEATURE_VERSION,
+};
 pub use probe::{field_inventory, Inventory};
 pub use quality_control::{
     evaluate_quality_control, manifest as quality_control_manifest, MetricDirection, MetricStatus,
@@ -112,24 +125,17 @@ pub use quality_control::{
     QualityDisposition, QualityMetric,
 };
 pub use quality_drift::{
-    evaluate_quality_drift, quality_drift_manifest, DriftMetric, DriftMetricResult,
-    DriftMetricStatus, DriftDisposition, QualityDriftError, QualityDriftPolicy,
+    evaluate_quality_drift, quality_drift_manifest, DriftDisposition, DriftMetric,
+    DriftMetricResult, DriftMetricStatus, QualityDriftError, QualityDriftPolicy,
     QualityDriftReceipt, QualityDriftRequest, QualityDriftSummary,
-    FEATURE_ID as QUALITY_DRIFT_FEATURE_ID,
-    FEATURE_VERSION as QUALITY_DRIFT_FEATURE_VERSION,
-};
-pub use research_ingest::{
-    certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
-};
-pub use multimodal_harmonization::{
-    harmonize_multimodal, HarmonizationDecision, HarmonizationError,
-    HarmonizedResearchObject, ModalityManifest, MultimodalHarmonizationRequest,
-    FEATURE_ID as MULTIMODAL_HARMONIZATION_FEATURE_ID,
-    FEATURE_VERSION as MULTIMODAL_HARMONIZATION_FEATURE_VERSION,
+    FEATURE_ID as QUALITY_DRIFT_FEATURE_ID, FEATURE_VERSION as QUALITY_DRIFT_FEATURE_VERSION,
 };
 pub use registry::{
     AdapterDescriptor, AdapterExecution, AdapterPlan, AdapterPlanCandidate, AdapterPlanRequest,
     AdapterRegistry, PlanStatus, RegistryError, SourceKind, ADAPTER_REGISTRY_SCHEMA_VERSION,
+};
+pub use research_ingest::{
+    certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
 };
 pub use source::{Locator, Source, SourceManifest, SourceProvenance};
 pub use tabular::{

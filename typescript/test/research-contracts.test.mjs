@@ -130,6 +130,10 @@ import {
   WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION,
   weaveLangReleaseAssuranceReceiptDigest,
   validateWeaveLangReleaseAssuranceReceipt,
+  MECHANISM_CONTROL_PLANE_FEATURE_ID,
+  MECHANISM_CONTROL_PLANE_CONTRACT_VERSION,
+  mechanismControlPlaneReceiptDigest,
+  validateMechanismControlPlaneReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -870,3 +874,5 @@ test("knowledge representation keeps missing fact unknown", () => {
 test("resource control plane keeps missing qualification unknown", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: RESOURCE_CONTROL_PLANE_FEATURE_ID, contract_version: RESOURCE_CONTROL_PLANE_CONTRACT_VERSION, request_id: "request:resources", federation_id: "federation:resources", institution_ids: ["site:a", "site:b"], qualified_resource_ids: ["resource:a"], disposition: "unknown", qualification_digest: null, checks: ["incomplete qualification remains unknown rather than executable"], omissions: ["qualification receipt is absent"], artifact: { content_hash: "b".repeat(64) }, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateResourceControlPlaneReceipt(receipt)); assert.equal(resourceControlPlaneReceiptDigest(receipt), resourceControlPlaneReceiptDigest(receipt)); });
 
 test("WeaveLang release keeps incomplete closure unknown", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID, contract_version: WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION, request_id: "request:release", run_id: "run:high-throughput", release_id: "release:2026", disposition: "unknown", artifact_digest: null, checks: ["incomplete release closure remains unknown rather than published"], omissions: ["evidence receipts are absent"], artifact: { content_hash: "b".repeat(64) }, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateWeaveLangReleaseAssuranceReceipt(receipt)); assert.equal(weaveLangReleaseAssuranceReceiptDigest(receipt), weaveLangReleaseAssuranceReceiptDigest(receipt)); });
+
+test("mechanism control plane keeps missing candidate unknown", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: MECHANISM_CONTROL_PLANE_FEATURE_ID, contract_version: MECHANISM_CONTROL_PLANE_CONTRACT_VERSION, request_id: "request:mechanism", federation_id: "federation:mechanism", question_id: "question:organoid", admitted_candidate_ids: ["candidate:a"], disposition: "unknown", evidence_receipt_digest: null, checks: ["incomplete mechanism evidence remains unknown rather than admitted"], omissions: ["required mechanism candidate unavailable: candidate:b"], artifact: { content_hash: "b".repeat(64) }, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateMechanismControlPlaneReceipt(receipt)); assert.equal(mechanismControlPlaneReceiptDigest(receipt), mechanismControlPlaneReceiptDigest(receipt)); });

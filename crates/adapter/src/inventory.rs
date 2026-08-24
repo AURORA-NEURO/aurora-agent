@@ -216,7 +216,10 @@ impl Adapter for InventoryAdapter {
                 .exact("artifact", &entry.relative);
 
             let draft = FactDraft::new(
-                format!("fact.artifact.{}.{}", self.profile.repository, entry.relative),
+                format!(
+                    "fact.artifact.{}.{}",
+                    self.profile.repository, entry.relative
+                ),
                 format!("artifact.{}", entry.relative),
                 Value::Object(value),
                 scope,

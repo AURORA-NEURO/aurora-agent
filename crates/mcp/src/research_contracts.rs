@@ -12,6 +12,10 @@ use bioprism_adapter::{
     MultimodalHarmonizationRequest, QualityDriftReceipt, QualityDriftRequest,
     MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
 };
+use bioprism_adapter::{
+    operate_mechanism_control_plane, MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
+    MECHANISM_CONTROL_PLANE_FEATURE_ID,
+};
 use bioprism_atlashub::{
     synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
     FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
@@ -124,6 +128,7 @@ pub const KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL: &str =
     "federated_knowledge_representation_assurance";
 pub const RESOURCE_CONTROL_PLANE_TOOL: &str = "federated_resource_control_plane";
 pub const WEAVELANG_RELEASE_ASSURANCE_TOOL: &str = "weavelang_release_assurance";
+pub const MECHANISM_CONTROL_PLANE_TOOL: &str = "federated_mechanism_control_plane";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -704,6 +709,26 @@ pub fn validate_weavelang_release_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID {
         return Err("WeaveLang release assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn operate_mechanism_control_plane_json(value: &Value) -> Result<Value, String> {
+    let request: MechanismControlPlaneRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid mechanism control-plane request: {error}"))?;
+    let receipt = operate_mechanism_control_plane(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize mechanism control-plane receipt: {error}"))
+}
+
+pub fn validate_mechanism_control_plane_json(
+    value: &Value,
+) -> Result<MechanismControlPlaneReceipt, String> {
+    let receipt: MechanismControlPlaneReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid mechanism control-plane receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != MECHANISM_CONTROL_PLANE_FEATURE_ID {
+        return Err("mechanism control-plane feature id mismatch".into());
     }
     Ok(receipt)
 }

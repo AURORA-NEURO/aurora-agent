@@ -46,8 +46,9 @@ impl Ingestion {
 
         for document in facts {
             let location = fact_location(&manifest.source_id, &document);
-            let fact = Fact::from_json(&document)
-                .map_err(|error| AdapterError::malformed_fact(location.clone(), error.to_string()))?;
+            let fact = Fact::from_json(&document).map_err(|error| {
+                AdapterError::malformed_fact(location.clone(), error.to_string())
+            })?;
             let id = fact.id.to_string();
             if let Some(first) = seen.get(&id) {
                 return Err(AdapterError::duplicate_fact_id(id, first.clone(), location));
@@ -60,7 +61,10 @@ impl Ingestion {
 
         Ok(Ingestion {
             manifest,
-            facts: validated.into_iter().map(|(_, document)| document).collect(),
+            facts: validated
+                .into_iter()
+                .map(|(_, document)| document)
+                .collect(),
             loss,
         })
     }
@@ -192,8 +196,12 @@ mod tests {
     #[test]
     fn facts_are_sorted_by_id_so_walk_order_cannot_change_the_digest() {
         let audit = LossAudit::new().finish();
-        let forward =
-            Ingestion::new(manifest(), vec![fact("fact.a"), fact("fact.b")], audit.clone()).unwrap();
+        let forward = Ingestion::new(
+            manifest(),
+            vec![fact("fact.a"), fact("fact.b")],
+            audit.clone(),
+        )
+        .unwrap();
         let backward =
             Ingestion::new(manifest(), vec![fact("fact.b"), fact("fact.a")], audit).unwrap();
         assert_eq!(forward.digest().unwrap(), backward.digest().unwrap());
@@ -227,7 +235,8 @@ mod tests {
     #[test]
     fn the_digest_covers_the_loss_report_not_only_the_facts() {
         let facts = vec![fact("fact.a")];
-        let lossless = Ingestion::new(manifest(), facts.clone(), LossAudit::new().finish()).unwrap();
+        let lossless =
+            Ingestion::new(manifest(), facts.clone(), LossAudit::new().finish()).unwrap();
         let unaudited = Ingestion::new(
             manifest(),
             facts,
