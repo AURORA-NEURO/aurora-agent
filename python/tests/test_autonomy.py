@@ -79,6 +79,18 @@ from prism_sdk import (
 from prism_sdk.errors import ArgumentError
 
 
+def _planner_context_digest(context: Mapping[str, object]) -> str:
+    stable = {
+        "domain": context["domain"],
+        "capability": context["capability"],
+        "risk_class": context["risk_class"],
+        "task_family": context.get("task_family"),
+    }
+    return hashlib.sha256(
+        json.dumps(stable, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 class _CasTextStore:
     def __init__(self) -> None:
         self.value: str | None = None
@@ -1794,6 +1806,13 @@ def test_provider_plan_refinement_is_dependency_closed_and_approval_gated():
             assert refined.priority_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
             assert refined.focus_stage_ids == ("inspect", "verify")
             assert refined.review_required is False
+            assert refined.planner_context == {
+                "domain": "coding",
+                "capability": "planning",
+                "risk_class": blueprint.profile.risk_class,
+                "task_family": blueprint.workflow.workflow_id,
+            }
+            assert refined.planner_context_digest == _planner_context_digest(refined.planner_context)
             assert refined.to_dict()["authorization"].startswith("plan_proposal_only")
             public = json.dumps(refined.to_dict())
             assert "plan-refinement-secret" not in public
@@ -1842,6 +1861,13 @@ def test_provider_cross_domain_plan_refinement_reorders_only_existing_children()
             assert refined.priority_child_ids == ("data-review", "engineering-review")
             assert refined.focus_child_ids == ("data-review",)
             assert refined.review_required is False
+            assert refined.planner_context == {
+                "domain": "cross_domain",
+                "capability": "planning",
+                "risk_class": blueprint.synthesis_blueprint.profile.risk_class,
+                "task_family": blueprint.synthesis_blueprint.workflow.workflow_id,
+            }
+            assert refined.planner_context_digest == _planner_context_digest(refined.planner_context)
             public = json.dumps(refined.to_dict())
             assert task not in public
             assert "cross-domain-plan-secret" not in public
@@ -2044,6 +2070,12 @@ def test_run_auto_provider_planning_contract_is_domain_neutral_across_all_builti
         assert hasattr(blueprint, "workflow")
         planned_domains.append(blueprint.spec.domain)  # type: ignore[union-attr]
         stage_ids = tuple(stage.id for stage in blueprint.workflow.stages)  # type: ignore[union-attr]
+        planner_context = {
+            "domain": blueprint.spec.domain,  # type: ignore[union-attr]
+            "capability": "planning",
+            "risk_class": blueprint.profile.risk_class,  # type: ignore[union-attr]
+            "task_family": blueprint.workflow.workflow_id,  # type: ignore[union-attr]
+        }
         return AutonomousPlanRefinementResult(
             status="completed",
             task_digest=blueprint.spec.task_digest,  # type: ignore[union-attr]
@@ -2053,6 +2085,8 @@ def test_run_auto_provider_planning_contract_is_domain_neutral_across_all_builti
             focus_stage_ids=stage_ids[:1],
             review_required=False,
             confidence=1.0,
+            planner_context=planner_context,
+            planner_context_digest=_planner_context_digest(planner_context),
         )
 
     def fake_workflow(**_kwargs: object) -> object:
@@ -2072,6 +2106,8 @@ def test_run_auto_provider_planning_contract_is_domain_neutral_across_all_builti
         assert result.route.primary_domain == domain
         assert isinstance(result.planning, AutonomousPlanRefinementResult)
         assert result.planning.workflow_digest
+        assert result.planning.planner_context["domain"] == domain
+        assert result.planning.planner_context_digest == _planner_context_digest(result.planning.planner_context)
     assert planned_domains == list(AUTONOMOUS_DOMAINS)
 
 
@@ -2581,6 +2617,61 @@ def test_agent_settles_provider_planning_quality_into_bandit_and_model_health(tm
     assert replay["model_quality"]["replayed"] is True
     assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 1
     assert "Original task" not in json.dumps(first["plan_refinement"])
+
+
+def test_agent_planning_quality_credits_embedded_context_and_rejects_context_tampering():
+    workspace = _Workspace()
+    agent = AutonomousAgent(workspace, LLMRuntime())
+    context = {
+        "domain": "coding",
+        "capability": "planning",
+        "risk_class": "read_only",
+        "task_family": "coding_workflow",
+    }
+    plan = AutonomousPlanRefinementResult(
+        status="completed",
+        task_digest="a" * 64,
+        base_plan_digest="b" * 64,
+        workflow_digest="c" * 64,
+        priority_stage_ids=("scope",),
+        focus_stage_ids=("scope",),
+        review_required=False,
+        confidence=0.9,
+        selected_model={"provider": "openai", "model": "test-model"},
+        selection_digest="d" * 64,
+        planner_prompt_digest="e" * 64,
+        planner_plan_digest="f" * 64,
+        outcome_digest="1" * 64,
+        planner_context=context,
+        planner_context_digest=_planner_context_digest(context),
+    )
+    settlement = agent.settle_planning_quality(
+        plan,
+        domain="data",
+        evaluator_id="planner-reviewer",
+        evaluator_version="1",
+        reward=0.8,
+        passed=True,
+        bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+    )
+    assert settlement["planner_context"] == context
+    assert settlement["planner_context_digest"] == plan.planner_context_digest
+    outcome_call = next(args for name, args in workspace.calls if name == "brain_outcome_record")
+    assert outcome_call["context"] == context
+    assert outcome_call["context_digest"] == plan.planner_context_digest
+
+    assert plan.planner_context is not None
+    plan.planner_context["capability"] = "tampered"
+    with pytest.raises(BrainRunError, match="planner_context_digest does not match"):
+        agent.settle_planning_quality(
+            plan,
+            domain="coding",
+            evaluator_id="planner-reviewer",
+            evaluator_version="1",
+            reward=0.8,
+            passed=True,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
 
 
 def test_agent_run_learning_is_the_explicit_facade_for_evaluator_backed_online_learning(tmp_path: Path):

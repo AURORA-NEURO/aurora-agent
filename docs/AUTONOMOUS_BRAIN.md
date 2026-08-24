@@ -2949,6 +2949,13 @@ and evaluator packet returns the same bandit state and health receipt; a changed
 same planning digest is refused. A valid plan proposal still proves only plan structure—it does
 not authorize tools, effects, provider calls, or task correctness.
 
+The Python `AutonomousPlanRefinementResult` and
+`AutonomousCrossDomainPlanRefinementResult` now carry the same two fields. Python settlement
+validates the embedded digest before calling `brain_outcome_record` or the provider-health ledger;
+the caller's `domain`, capability, risk, and task-family arguments are used only for legacy
+proposals that predate the binding. This keeps Python and TypeScript replays on the same
+fail-closed planner identity contract.
+
 The complete two-phase handoff is available through
 `AutonomousLearningController.evaluateAndSettlePlanAndRun(planAndRun, options)`. It requires an
 explicit planner evaluator, evaluates every completed specialist and synthesis result for a

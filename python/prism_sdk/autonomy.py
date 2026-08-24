@@ -878,6 +878,66 @@ def _route_digest(value: Any, name: str) -> str:
     return value
 
 
+def _normalize_planner_context(value: Any, name: str = "planner context") -> dict[str, Any]:
+    """Normalize the stable planner identity used by contextual model selection."""
+
+    if not isinstance(value, Mapping):
+        raise BrainRunError(f"{name} must be a mapping")
+    expected_keys = {"domain", "capability", "risk_class", "task_family"}
+    if set(value) != expected_keys:
+        raise BrainRunError(f"{name} must contain exactly domain, capability, risk_class, and task_family")
+    domain = _identifier(f"{name}.domain", value.get("domain"))
+    if domain not in AUTONOMOUS_DOMAINS:
+        raise BrainRunError(f"{name}.domain must be a built-in autonomous domain")
+    capability = _identifier(f"{name}.capability", value.get("capability"))
+    risk_class = _identifier(f"{name}.risk_class", value.get("risk_class"))
+    task_family_value = value.get("task_family")
+    task_family = None if task_family_value is None else _identifier(f"{name}.task_family", task_family_value)
+    return {
+        "domain": domain,
+        "capability": capability,
+        "risk_class": risk_class,
+        "task_family": task_family,
+    }
+
+
+def _planner_context_binding(
+    value: Any,
+    digest: Any,
+    name: str = "planner context",
+) -> tuple[dict[str, Any], str]:
+    """Validate a planner context and its digest as one inseparable identity."""
+
+    context = _normalize_planner_context(value, name)
+    context_digest = _route_digest(digest, f"{name}_digest")
+    expected_digest = _context_identity_digest(context)
+    if context_digest != expected_digest:
+        raise BrainRunError(f"{name}_digest does not match {name}")
+    return context, context_digest
+
+
+def _provider_planner_context(
+    selection_context: Mapping[str, Any],
+    *,
+    task_family: str,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Bind the exact stable context used by a provider-planning selector."""
+
+    if not isinstance(selection_context, Mapping):
+        raise BrainRunError("provider planner selection context must be a mapping")
+    planner_context = _normalize_planner_context(
+        {
+            "domain": selection_context.get("domain"),
+            "capability": selection_context.get("capability"),
+            "risk_class": selection_context.get("risk_class"),
+            "task_family": task_family,
+        },
+        "provider planner context",
+    )
+    bound_selection_context = {**dict(selection_context), "task_family": planner_context["task_family"]}
+    return planner_context, bound_selection_context, _context_identity_digest(planner_context)
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousRouteCandidate:
     """One metadata-only domain candidate produced by the provider-free task router."""
@@ -1168,6 +1228,9 @@ class AutonomousPlanRefinementResult:
     planner_prompt_digest: str | None = None
     planner_plan_digest: str | None = None
     outcome_digest: str | None = None
+    # Exact contextual identity used by the planner model-selection request.
+    planner_context: Mapping[str, Any] | None = None
+    planner_context_digest: str | None = None
     domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
 
     def __post_init__(self) -> None:
@@ -1210,6 +1273,16 @@ class AutonomousPlanRefinementResult:
         ):
             if value is not None:
                 _route_digest(value, f"plan refinement {name}")
+        if (self.planner_context is None) != (self.planner_context_digest is None):
+            raise BrainRunError("plan refinement planner_context and planner_context_digest must be supplied together")
+        if self.planner_context is not None and self.planner_context_digest is not None:
+            context, context_digest = _planner_context_binding(
+                self.planner_context,
+                self.planner_context_digest,
+                "plan refinement planner_context",
+            )
+            object.__setattr__(self, "planner_context", context)
+            object.__setattr__(self, "planner_context_digest", context_digest)
         if self.domain_policy_admission is not None and not isinstance(self.domain_policy_admission, AutonomousDomainPolicyAdmission):
             raise BrainRunError("plan refinement domain policy admission is malformed")
         object.__setattr__(self, "priority_stage_ids", priority)
@@ -1235,6 +1308,9 @@ class AutonomousPlanRefinementResult:
             "retention": "stage_ids_and_digests_only; planner_transcript_not_retained",
             "authorization": "plan_proposal_only; no_tools_or_effects_authorized",
         }
+        if self.planner_context is not None:
+            result["planner_context"] = dict(self.planner_context)
+            result["planner_context_digest"] = self.planner_context_digest
         if self.domain_policy_admission is not None:
             result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
         return result
@@ -4482,6 +4558,9 @@ class AutonomousCrossDomainPlanRefinementResult:
     planner_prompt_digest: str | None = None
     planner_plan_digest: str | None = None
     outcome_digest: str | None = None
+    # Exact contextual identity used by the cross-domain planner model-selection request.
+    planner_context: Mapping[str, Any] | None = None
+    planner_context_digest: str | None = None
     domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
 
     def __post_init__(self) -> None:
@@ -4531,6 +4610,16 @@ class AutonomousCrossDomainPlanRefinementResult:
         ):
             if value is not None:
                 _route_digest(value, f"cross-domain plan refinement {name}")
+        if (self.planner_context is None) != (self.planner_context_digest is None):
+            raise BrainRunError("cross-domain plan refinement planner_context and planner_context_digest must be supplied together")
+        if self.planner_context is not None and self.planner_context_digest is not None:
+            context, context_digest = _planner_context_binding(
+                self.planner_context,
+                self.planner_context_digest,
+                "cross-domain plan refinement planner_context",
+            )
+            object.__setattr__(self, "planner_context", context)
+            object.__setattr__(self, "planner_context_digest", context_digest)
         if self.domain_policy_admission is not None and not isinstance(self.domain_policy_admission, AutonomousDomainPolicyAdmission):
             raise BrainRunError("cross-domain plan refinement domain policy admission is malformed")
         object.__setattr__(self, "priority_child_ids", priority)
@@ -4555,6 +4644,9 @@ class AutonomousCrossDomainPlanRefinementResult:
             "retention": "child_ids_and_digests_only; planner_transcript_not_retained",
             "authorization": "plan_proposal_only; caller_acceptance_required",
         }
+        if self.planner_context is not None:
+            result["planner_context"] = dict(self.planner_context)
+            result["planner_context_digest"] = self.planner_context_digest
         if self.domain_policy_admission is not None:
             result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
         return result
@@ -8184,6 +8276,10 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=blueprint.required_capabilities,
         )
+        planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
+            planner_blueprint.selection_context,
+            task_family=blueprint.workflow.workflow_id,
+        )
         domain_policy_admission = _planning_domain_policy_admission(
             domain=blueprint.profile.domain,
             mode=domain_policy_mode,
@@ -8201,6 +8297,8 @@ class AutonomousTaskOrchestrator:
                 base_plan_digest=base_plan_digest,
                 workflow_digest=blueprint.workflow.workflow_digest,
                 planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
             )
         if domain_policy_mode == "strict" and approve_provider_call is not True:
@@ -8210,6 +8308,8 @@ class AutonomousTaskOrchestrator:
                 base_plan_digest=base_plan_digest,
                 workflow_digest=blueprint.workflow.workflow_digest,
                 planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
             )
         selection_request = self.brain.build_adaptive_model_selection(
@@ -8217,7 +8317,7 @@ class AutonomousTaskOrchestrator:
             model_candidates=model_candidates,
             credentials=credentials,
             bandit_state=bandit_state,
-            context=planner_blueprint.selection_context,
+            context=planner_selection_context,
             contextual_observations=contextual_observations,
             required_capabilities=blueprint.required_capabilities,
             input_tokens=input_tokens,
@@ -8239,7 +8339,7 @@ class AutonomousTaskOrchestrator:
             temperature=temperature,
             require_json=True,
             response_schema=response_schema,
-            context=planner_blueprint.selection_context,
+            context=planner_selection_context,
             contextual_observations=contextual_observations,
         )
         selection = run.selection
@@ -8266,7 +8366,12 @@ class AutonomousTaskOrchestrator:
             "selection_digest": selection.get("decision_digest"),
             "planner_prompt_digest": run.prompt.get("prompt_digest"),
             "planner_plan_digest": planner_plan_digest,
-            "outcome_digest": run.outcome_digest,
+            "outcome_digest": _json_digest({
+                "provider_outcome_digest": run.outcome_digest,
+                "learning_context_digest": planner_learning_context_digest,
+            }),
+            "planner_context": planner_learning_context,
+            "planner_context_digest": planner_learning_context_digest,
         }
         if domain_policy_admission is not None:
             metadata["domain_policy_admission"] = domain_policy_admission
@@ -8443,6 +8548,10 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=required_model_capabilities,
         )
+        planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
+            planner_blueprint.selection_context,
+            task_family=blueprint.synthesis_blueprint.workflow.workflow_id,
+        )
         domain_policy_admission = _planning_domain_policy_admission(
             domain="cross_domain",
             mode=domain_policy_mode,
@@ -8459,6 +8568,8 @@ class AutonomousTaskOrchestrator:
                 task_digest=blueprint.task_digest,
                 base_plan_digest=base_plan_digest,
                 planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
             )
         if domain_policy_mode == "strict" and approve_provider_call is not True:
@@ -8467,6 +8578,8 @@ class AutonomousTaskOrchestrator:
                 task_digest=blueprint.task_digest,
                 base_plan_digest=base_plan_digest,
                 planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
             )
         selection_request = self.brain.build_adaptive_model_selection(
@@ -8474,7 +8587,7 @@ class AutonomousTaskOrchestrator:
             model_candidates=model_candidates,
             credentials=credentials,
             bandit_state=bandit_state,
-            context=planner_blueprint.selection_context,
+            context=planner_selection_context,
             contextual_observations=contextual_observations,
             required_capabilities=required_model_capabilities,
             input_tokens=input_tokens,
@@ -8496,7 +8609,7 @@ class AutonomousTaskOrchestrator:
             temperature=temperature,
             require_json=True,
             response_schema=response_schema,
-            context=planner_blueprint.selection_context,
+            context=planner_selection_context,
             contextual_observations=contextual_observations,
         )
         selected_model = run.selection.get("selected_model")
@@ -8514,7 +8627,12 @@ class AutonomousTaskOrchestrator:
             "selection_digest": run.selection.get("decision_digest"),
             "planner_prompt_digest": run.prompt.get("prompt_digest"),
             "planner_plan_digest": planner_plan_digest,
-            "outcome_digest": run.outcome_digest,
+            "outcome_digest": _json_digest({
+                "provider_outcome_digest": run.outcome_digest,
+                "learning_context_digest": planner_learning_context_digest,
+            }),
+            "planner_context": planner_learning_context,
+            "planner_context_digest": planner_learning_context_digest,
         }
         if domain_policy_admission is not None:
             metadata["domain_policy_admission"] = domain_policy_admission
@@ -16745,6 +16863,8 @@ class AutonomousAgent:
                 "schema": AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA,
                 "status": "not_eligible",
                 "plan_refinement": plan.to_dict(),
+                "planner_context": None,
+                "planner_context_digest": None,
                 "evaluation": None,
                 "next_state": None,
                 "model_quality": None,
@@ -16754,11 +16874,6 @@ class AutonomousAgent:
             }
         if not isinstance(domain, str) or domain not in AUTONOMOUS_DOMAINS:
             raise BrainRunError("planning quality domain must be a built-in autonomous domain")
-        for name, value in (("capability", capability), ("risk_class", risk_class)):
-            if not isinstance(value, str) or not value.strip():
-                raise BrainRunError(f"planning quality {name} must be a non-empty string")
-        if task_family is not None and (not isinstance(task_family, str) or not task_family.strip()):
-            raise BrainRunError("planning quality task_family must be a non-empty string or None")
         if not isinstance(evaluator_id, str) or not evaluator_id.strip() or not isinstance(evaluator_version, str) or not evaluator_version.strip():
             raise BrainRunError("planning quality evaluator identity must be non-empty")
         if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not -1.0 <= float(reward) <= 1.0:
@@ -16795,8 +16910,25 @@ class AutonomousAgent:
         }
         if any(not isinstance(value, str) or len(value) != 64 for value in required_digests.values()):
             raise BrainRunError("completed planning quality result is missing a planning digest")
-        context = {"domain": domain, "capability": capability, "risk_class": risk_class, "task_family": task_family}
-        context_digest = _context_identity_digest(context)
+        if plan.planner_context is None and plan.planner_context_digest is None:
+            for name, value in (("capability", capability), ("risk_class", risk_class)):
+                if not isinstance(value, str) or not value.strip():
+                    raise BrainRunError(f"planning quality {name} must be a non-empty string")
+            if task_family is not None and (not isinstance(task_family, str) or not task_family.strip()):
+                raise BrainRunError("planning quality task_family must be a non-empty string or None")
+            context = {
+                "domain": domain,
+                "capability": capability,
+                "risk_class": risk_class,
+                "task_family": task_family,
+            }
+            context_digest = _context_identity_digest(context)
+        else:
+            context, context_digest = _planner_context_binding(
+                plan.planner_context,
+                plan.planner_context_digest,
+                "planning quality planner_context",
+            )
         planning_outcome_digest = _json_digest({
             "kind": "planning_quality",
             "plan_outcome_digest": plan.outcome_digest,
@@ -16889,6 +17021,8 @@ class AutonomousAgent:
             "schema": AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA,
             "status": "settled",
             "plan_refinement": plan.to_dict(),
+            "planner_context": dict(context),
+            "planner_context_digest": context_digest,
             "evaluation": decision.to_dict(),
             "next_state": dict(next_state),
             "model_quality": model_quality,

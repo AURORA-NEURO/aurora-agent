@@ -295,6 +295,11 @@ workflow/cross-domain learning, evaluator, and checkpoint options through the sa
 surface. `AutonomousProvisionedRun.to_dict()` is metadata-only; `.result` is deliberately not a
 durable payload.
 
+Provider planning results carry `planner_context` and `planner_context_digest`, the exact
+`{domain, capability, risk_class, task_family}` identity used for contextual model selection.
+`AutonomousAgent.settle_planning_quality()` verifies and credits that embedded identity; legacy
+planning results without the fields use the explicit settlement arguments for compatibility.
+
 `RemoteBrainJobWorker` is the Python high-level queue adapter when the durable job authority is
 remote (HTTP, MCP, or `DurableBrainControlPlaneAdapter`) rather than a local `BrainJobStore`.
 `submit()` sends only a bounded idempotency key, composite request/mode/policy digest, domain,
