@@ -35,6 +35,10 @@ use bioprism_lab::{
     InstrumentPreflightRequest, ProtocolMatrixReceipt, ProtocolMatrixRequest,
     DESIGN_FRONTIER_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID,
 };
+use bioprism_obligation::{
+    assess_release_harness, ReleaseHarnessReceipt, ReleaseHarnessRequest,
+    RELEASE_HARNESS_FEATURE_ID,
+};
 use bioprism_policy::{
     admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest, AUTONOMY_BATCH_FEATURE_ID,
 };
@@ -68,6 +72,7 @@ pub const WORKFLOW_BATCH_TOOL: &str = "workflow_batch_execute";
 pub const RESOURCE_WORKBENCH_TOOL: &str = "resource_workbench_discover";
 pub const RESOURCE_DISCOVERY_CONTRACT_TOOL: &str = "resource_discovery_contract_v2";
 pub const GOVERNANCE_RESEARCH_RELEASE_TOOL: &str = "governance_research_release_compile";
+pub const RELEASE_ASSURANCE_HARNESS_TOOL: &str = "release_assurance_harness";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -414,6 +419,24 @@ pub fn validate_governance_research_release_json(
         return Err("governance research-release feature id mismatch".into());
     }
     Ok(object)
+}
+
+pub fn assess_release_harness_json(value: &Value) -> Result<Value, String> {
+    let request: ReleaseHarnessRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid release assurance request: {error}"))?;
+    let receipt = assess_release_harness(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize release assurance receipt: {error}"))
+}
+
+pub fn validate_release_harness_json(value: &Value) -> Result<ReleaseHarnessReceipt, String> {
+    let receipt: ReleaseHarnessReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid release assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RELEASE_HARNESS_FEATURE_ID {
+        return Err("release assurance harness feature id mismatch".into());
+    }
+    Ok(receipt)
 }
 
 #[cfg(test)]

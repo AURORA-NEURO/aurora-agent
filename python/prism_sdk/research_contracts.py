@@ -41,6 +41,8 @@ RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID = "AFA-mcp-P05-F08"
 RESOURCE_DISCOVERY_CONTRACT_VERSION = "aurora-mcp-resource-discovery/2.0"
 GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID = "AFA-governance-P16-F08"
 GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION = "signed-research-object/2.0"
+RELEASE_HARNESS_FEATURE_ID = "AFA-obligation-P16-F27"
+RELEASE_HARNESS_CONTRACT_VERSION = "release-assurance-harness/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -764,6 +766,52 @@ class SignedResearchObjectReceipt:
             "migration_notes": list(self.migration_notes),
             "omissions": list(self.omissions),
             "raw_data_local": self.raw_data_local,
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class ReleaseHarnessReceipt:
+    """Transport validator for omission-aware signed-object admission checks."""
+
+    request_id: str
+    object_digest: str
+    disposition: str
+    checks: tuple[Mapping[str, Any], ...]
+    omissions: tuple[str, ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RELEASE_HARNESS_FEATURE_ID
+    contract_version: str = RELEASE_HARNESS_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RELEASE_HARNESS_FEATURE_ID or self.contract_version != RELEASE_HARNESS_CONTRACT_VERSION:
+            raise ResearchContractError("release harness schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or self.disposition not in {"passed", "blocked", "unknown"} or not self.checks or not self.reasons:
+            raise ResearchContractError("release harness identity, disposition, checks, or boundary is invalid")
+        if not isinstance(self.object_digest, str) or len(self.object_digest) != 64 or any(char not in "0123456789abcdef" for char in self.object_digest):
+            raise ResearchContractError("release harness object digest is invalid")
+        if any(not check.get("check_id") or check.get("disposition") not in {"passed", "blocked", "unknown"} or not check.get("reason") for check in self.checks):
+            raise ResearchContractError("release harness check is incomplete")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("release harness artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "object_digest": self.object_digest,
+            "disposition": self.disposition,
+            "checks": [dict(check) for check in self.checks],
+            "omissions": list(self.omissions),
+            "reasons": list(self.reasons),
             "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })

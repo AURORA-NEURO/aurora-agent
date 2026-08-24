@@ -40,6 +40,7 @@ pub mod gate;
 pub mod graph;
 pub mod invariants;
 pub mod ledger;
+pub mod release_harness;
 pub mod state;
 
 pub use budget::{
@@ -58,5 +59,10 @@ pub use invariants::{
 pub use ledger::{
     CertificateCheck, OmissionLedger, OmissionReason, OmittedCandidate, RelevanceIndex,
     RelevanceRecord, SufficiencyCertificate, SufficiencyInputs, SufficiencyStatus, UnmetObligation,
+};
+pub use release_harness::{
+    assess_release_harness, HarnessCheck, HarnessDisposition, ReleaseHarnessError,
+    ReleaseHarnessReceipt, ReleaseHarnessRequest,
+    CONTRACT_VERSION as RELEASE_HARNESS_CONTRACT_VERSION, FEATURE_ID as RELEASE_HARNESS_FEATURE_ID,
 };
 pub use state::{ObligationState, StateRecord};

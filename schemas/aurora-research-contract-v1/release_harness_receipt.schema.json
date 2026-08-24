@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/release-harness-receipt.json",
+  "title": "AURORA release assurance harness receipt",
+  "description": "Admission checks for signed research objects with explicit blocked and unknown replay states.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "contract_version", "request_id", "object_digest", "disposition", "checks", "omissions", "reasons", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-obligation-P16-F27" },
+    "contract_version": { "const": "release-assurance-harness/1.0" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "object_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "disposition": { "enum": ["passed", "blocked", "unknown"] },
+    "checks": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["check_id", "disposition", "reason"], "properties": { "check_id": { "type": "string", "minLength": 1 }, "disposition": { "enum": ["passed", "blocked", "unknown"] }, "reason": { "type": "string", "minLength": 1 } } } },
+    "omissions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

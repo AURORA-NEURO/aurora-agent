@@ -82,6 +82,10 @@ import {
   GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION,
   signedResearchObjectReceiptDigest,
   validateSignedResearchObjectReceipt,
+  RELEASE_HARNESS_FEATURE_ID,
+  RELEASE_HARNESS_CONTRACT_VERSION,
+  releaseHarnessReceiptDigest,
+  validateReleaseHarnessReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -611,4 +615,22 @@ test("signed research object receipt preserves locality and migration", () => {
   };
   assert.doesNotThrow(() => validateSignedResearchObjectReceipt(receipt));
   assert.equal(signedResearchObjectReceiptDigest(receipt), signedResearchObjectReceiptDigest(receipt));
+});
+
+test("release harness keeps unknown replay gate", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: RELEASE_HARNESS_FEATURE_ID,
+    contract_version: RELEASE_HARNESS_CONTRACT_VERSION,
+    request_id: "request:harness",
+    object_digest: "a".repeat(64),
+    disposition: "unknown",
+    checks: [{ check_id: "replay-identity", disposition: "unknown", reason: "replay identity is unmeasured" }],
+    omissions: ["replay identity is unmeasured"],
+    reasons: ["an unmeasured release assurance gate prevents a pass"],
+    artifact: { content_hash: "e".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateReleaseHarnessReceipt(receipt));
+  assert.equal(releaseHarnessReceiptDigest(receipt), releaseHarnessReceiptDigest(receipt));
 });

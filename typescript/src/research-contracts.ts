@@ -36,6 +36,8 @@ export const RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID = "AFA-mcp-P05-F08" as const
 export const RESOURCE_DISCOVERY_CONTRACT_VERSION = "aurora-mcp-resource-discovery/2.0" as const;
 export const GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID = "AFA-governance-P16-F08" as const;
 export const GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION = "signed-research-object/2.0" as const;
+export const RELEASE_HARNESS_FEATURE_ID = "AFA-obligation-P16-F27" as const;
+export const RELEASE_HARNESS_CONTRACT_VERSION = "release-assurance-harness/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -776,6 +778,33 @@ export function validateSignedResearchObjectReceipt(receipt: SignedResearchObjec
 
 export function signedResearchObjectReceiptDigest(receipt: SignedResearchObjectReceipt): string {
   validateSignedResearchObjectReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface ReleaseHarnessReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  object_digest: string;
+  disposition: "passed" | "blocked" | "unknown";
+  checks: readonly Record<string, unknown>[];
+  omissions: string[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateReleaseHarnessReceipt(receipt: ReleaseHarnessReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RELEASE_HARNESS_FEATURE_ID || receipt.contract_version !== RELEASE_HARNESS_CONTRACT_VERSION) throw new Error("release harness schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !new Set(["passed", "blocked", "unknown"]).has(receipt.disposition) || receipt.checks.length === 0 || receipt.reasons.length === 0) throw new Error("release harness identity, disposition, checks, or boundary is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.object_digest)) throw new Error("release harness object digest is invalid");
+  if (receipt.checks.some((check) => typeof check.check_id !== "string" || !check.check_id.trim() || !new Set(["passed", "blocked", "unknown"]).has(String(check.disposition)) || typeof check.reason !== "string" || !check.reason.trim())) throw new Error("release harness check is incomplete");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("release harness artifact digest is invalid");
+}
+
+export function releaseHarnessReceiptDigest(receipt: ReleaseHarnessReceipt): string {
+  validateReleaseHarnessReceipt(receipt);
   return digestJsonSync(receipt);
 }
 
