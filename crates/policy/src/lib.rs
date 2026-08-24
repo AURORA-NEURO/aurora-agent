@@ -58,27 +58,30 @@
 //! In 36.01's enforcement architecture this crate is the policy-intersection step, not the trusted
 //! kernel that surrounds it.
 
-pub mod consent;
 pub mod autonomy;
 pub mod autonomy_batch;
+pub mod consent;
 pub mod decision;
 pub mod error;
 pub mod flow;
 pub mod label;
 pub mod lattice;
+pub mod protocol_assurance;
 pub mod purpose;
 pub mod redaction;
 pub mod request;
 pub mod residency;
 pub mod trace;
 
-pub use consent::{Consent, ConsentStatus};
-pub use autonomy::{admit_autonomy, AutonomyAdmissionReceipt, AutonomyAdmissionRequest, AutonomyError};
+pub use autonomy::{
+    admit_autonomy, AutonomyAdmissionReceipt, AutonomyAdmissionRequest, AutonomyError,
+};
 pub use autonomy_batch::{
     admit_autonomy_batch, autonomy_batch_manifest, BatchActionDecision, BatchActionReceipt,
     BatchAdmissionAction, BatchAdmissionError, BatchAdmissionReceipt, BatchAdmissionRequest,
     FEATURE_ID as AUTONOMY_BATCH_FEATURE_ID, FEATURE_VERSION as AUTONOMY_BATCH_FEATURE_VERSION,
 };
+pub use consent::{Consent, ConsentStatus};
 pub use decision::{Admission, Decision, ExecutionMode, Obligation, Refusal};
 pub use error::PolicyError;
 pub use flow::{
@@ -87,6 +90,12 @@ pub use flow::{
 pub use label::{Classification, ExportPolicy, PolicyLabel, Retention};
 pub use lattice::{
     AdmittedFact, LabelResolution, PolicyLattice, PolicyRule, RefusedFact, Screening,
+};
+pub use protocol_assurance::{
+    assess_protocol_assurance, ProtocolAssuranceDisposition, ProtocolAssuranceError,
+    ProtocolAssuranceReceipt, ProtocolAssuranceRequest,
+    CONTRACT_VERSION as PROTOCOL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as PROTOCOL_ASSURANCE_FEATURE_ID,
 };
 pub use purpose::{Purpose, PurposeSet};
 pub use redaction::{

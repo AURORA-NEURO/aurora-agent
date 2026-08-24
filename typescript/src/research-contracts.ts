@@ -38,6 +38,8 @@ export const GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID = "AFA-governance-P16-F08" a
 export const GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION = "signed-research-object/2.0" as const;
 export const RELEASE_HARNESS_FEATURE_ID = "AFA-obligation-P16-F27" as const;
 export const RELEASE_HARNESS_CONTRACT_VERSION = "release-assurance-harness/1.0" as const;
+export const PROTOCOL_ASSURANCE_FEATURE_ID = "AFA-policy-P10-F27" as const;
+export const PROTOCOL_ASSURANCE_CONTRACT_VERSION = "protocol-assurance-harness/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -805,6 +807,37 @@ export function validateReleaseHarnessReceipt(receipt: ReleaseHarnessReceipt): v
 
 export function releaseHarnessReceiptDigest(receipt: ReleaseHarnessReceipt): string {
   validateReleaseHarnessReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface ProtocolAssuranceReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  protocol_id: string;
+  disposition: "passed" | "blocked" | "unknown";
+  total_cells: number;
+  passed_cells: number;
+  blocked_cells: number;
+  unknown_cells: number;
+  checks: string[];
+  omissions: string[];
+  simulation_digest: string;
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateProtocolAssuranceReceipt(receipt: ProtocolAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== PROTOCOL_ASSURANCE_FEATURE_ID || receipt.contract_version !== PROTOCOL_ASSURANCE_CONTRACT_VERSION) throw new Error("protocol assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.protocol_id.trim()) throw new Error("protocol assurance identity or boundary is invalid");
+  if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition) || receipt.checks.length === 0) throw new Error("protocol assurance disposition or checks is incomplete");
+  if (!Number.isInteger(receipt.total_cells) || receipt.total_cells <= 0 || [receipt.passed_cells, receipt.blocked_cells, receipt.unknown_cells].some((value) => !Number.isInteger(value) || value < 0) || receipt.total_cells !== receipt.passed_cells + receipt.blocked_cells + receipt.unknown_cells) throw new Error("protocol assurance cell counts do not partition");
+  if (!/^[0-9a-f]{64}$/.test(receipt.simulation_digest) || typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("protocol assurance digest is not a canonical sha256");
+}
+
+export function protocolAssuranceReceiptDigest(receipt: ProtocolAssuranceReceipt): string {
+  validateProtocolAssuranceReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

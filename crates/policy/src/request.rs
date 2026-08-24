@@ -84,10 +84,7 @@ impl Clearance {
 
     /// Compartments the label requires that this clearance does not hold.
     pub fn missing_compartments(&self, required: &BTreeSet<String>) -> Vec<String> {
-        required
-            .difference(&self.compartments)
-            .cloned()
-            .collect()
+        required.difference(&self.compartments).cloned().collect()
     }
 }
 
@@ -253,10 +250,11 @@ mod tests {
 
     #[test]
     fn holding_a_compartment_removes_it_from_the_missing_set() {
-        let clearance = Clearance::up_to(Classification::InstitutionalConfidential)
-            .cleared_for("pediatric");
-        let required: BTreeSet<String> =
-            ["pediatric".to_string(), "dual_use".to_string()].into_iter().collect();
+        let clearance =
+            Clearance::up_to(Classification::InstitutionalConfidential).cleared_for("pediatric");
+        let required: BTreeSet<String> = ["pediatric".to_string(), "dual_use".to_string()]
+            .into_iter()
+            .collect();
         assert_eq!(clearance.missing_compartments(&required), vec!["dual_use"]);
     }
 

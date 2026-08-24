@@ -86,6 +86,10 @@ import {
   RELEASE_HARNESS_CONTRACT_VERSION,
   releaseHarnessReceiptDigest,
   validateReleaseHarnessReceipt,
+  PROTOCOL_ASSURANCE_FEATURE_ID,
+  PROTOCOL_ASSURANCE_CONTRACT_VERSION,
+  protocolAssuranceReceiptDigest,
+  validateProtocolAssuranceReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -633,4 +637,26 @@ test("release harness keeps unknown replay gate", () => {
   };
   assert.doesNotThrow(() => validateReleaseHarnessReceipt(receipt));
   assert.equal(releaseHarnessReceiptDigest(receipt), releaseHarnessReceiptDigest(receipt));
+});
+
+test("protocol assurance keeps unknown simulation cells", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: PROTOCOL_ASSURANCE_FEATURE_ID,
+    contract_version: PROTOCOL_ASSURANCE_CONTRACT_VERSION,
+    request_id: "request:protocol",
+    protocol_id: "protocol:organoid",
+    disposition: "unknown",
+    total_cells: 2,
+    passed_cells: 1,
+    blocked_cells: 0,
+    unknown_cells: 1,
+    checks: ["unknown simulation cells prevent a pass"],
+    omissions: ["unknown simulation cells remain unmeasured"],
+    simulation_digest: "a".repeat(64),
+    artifact: { content_hash: "b".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateProtocolAssuranceReceipt(receipt));
+  assert.equal(protocolAssuranceReceiptDigest(receipt), protocolAssuranceReceiptDigest(receipt));
 });

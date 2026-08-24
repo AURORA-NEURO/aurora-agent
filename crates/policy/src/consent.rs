@@ -201,7 +201,10 @@ mod tests {
             .expect_err("a historical cut does not resurrect a withdrawn consent");
 
         assert!(matches!(refusal, Refusal::ConsentWithdrawn { .. }));
-        assert_eq!(consent.status(at("2026-01-01T00:00:00Z")), ConsentStatus::Withdrawn);
+        assert_eq!(
+            consent.status(at("2026-01-01T00:00:00Z")),
+            ConsentStatus::Withdrawn
+        );
     }
 
     #[test]

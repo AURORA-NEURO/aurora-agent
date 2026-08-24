@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, RESEARCH_RELEASE_BATCH_FEATURE_ID, FEDERATED_EVALUATION_FEATURE_ID, RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID, RESOURCE_DISCOVERY_CONTRACT_VERSION, GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID, GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION, RELEASE_HARNESS_FEATURE_ID, RELEASE_HARNESS_CONTRACT_VERSION, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID, MULTIMODAL_REPLICATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID, DESIGN_FRONTIER_FEATURE_ID, AUTONOMY_BATCH_FEATURE_ID, WORKFLOW_BATCH_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, RESEARCH_RELEASE_BATCH_FEATURE_ID, FEDERATED_EVALUATION_FEATURE_ID, RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID, RESOURCE_DISCOVERY_CONTRACT_VERSION, GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID, GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION, RELEASE_HARNESS_FEATURE_ID, RELEASE_HARNESS_CONTRACT_VERSION, PROTOCOL_ASSURANCE_FEATURE_ID, PROTOCOL_ASSURANCE_CONTRACT_VERSION, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID, MULTIMODAL_REPLICATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID, DESIGN_FRONTIER_FEATURE_ID, AUTONOMY_BATCH_FEATURE_ID, WORKFLOW_BATCH_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -501,4 +501,24 @@ def test_release_harness_keeps_unknown_replay_gate():
     receipt.validate()
     assert receipt.feature_id == RELEASE_HARNESS_FEATURE_ID
     assert receipt.contract_version == RELEASE_HARNESS_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_protocol_assurance_keeps_unknown_cells():
+    receipt = ProtocolAssuranceReceipt(
+        request_id="request:protocol",
+        protocol_id="protocol:organoid",
+        disposition="unknown",
+        total_cells=2,
+        passed_cells=1,
+        blocked_cells=0,
+        unknown_cells=1,
+        checks=("unknown simulation cells prevent a pass",),
+        omissions=("unknown simulation cells remain unmeasured",),
+        simulation_digest="a" * 64,
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == PROTOCOL_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == PROTOCOL_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -295,7 +295,11 @@ impl PolicyLabel {
     pub fn join(&self, other: &PolicyLabel) -> PolicyLabel {
         PolicyLabel {
             classification: self.classification.max(other.classification),
-            compartments: self.compartments.union(&other.compartments).cloned().collect(),
+            compartments: self
+                .compartments
+                .union(&other.compartments)
+                .cloned()
+                .collect(),
             purposes: self.purposes.intersect(&other.purposes),
             residency: self.residency.intersect(&other.residency),
             export: self.export.max(other.export),
@@ -420,7 +424,9 @@ mod tests {
         let right = us_training();
         let joined = left.join(&right);
 
-        let looser_candidate = joined.clone().with_classification(Classification::RestrictedDualUse);
+        let looser_candidate = joined
+            .clone()
+            .with_classification(Classification::RestrictedDualUse);
         assert!(left.flows_to(&looser_candidate));
         assert!(right.flows_to(&looser_candidate));
         assert!(
@@ -447,7 +453,10 @@ mod tests {
     fn public_is_the_identity_of_the_join_so_folding_inputs_starts_there() {
         let label = eu_research();
         assert_eq!(PolicyLabel::public().join(&label), label);
-        assert_eq!(PolicyLabel::join_all([] as [&PolicyLabel; 0]), PolicyLabel::public());
+        assert_eq!(
+            PolicyLabel::join_all([] as [&PolicyLabel; 0]),
+            PolicyLabel::public()
+        );
     }
 
     #[test]

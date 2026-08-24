@@ -207,8 +207,12 @@ export {
   RELEASE_HARNESS_CONTRACT_VERSION,
   releaseHarnessReceiptDigest,
   validateReleaseHarnessReceipt,
+  PROTOCOL_ASSURANCE_FEATURE_ID,
+  PROTOCOL_ASSURANCE_CONTRACT_VERSION,
+  protocolAssuranceReceiptDigest,
+  validateProtocolAssuranceReceipt,
 } from "./research-contracts.js";
-export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,

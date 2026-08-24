@@ -43,6 +43,8 @@ GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID = "AFA-governance-P16-F08"
 GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION = "signed-research-object/2.0"
 RELEASE_HARNESS_FEATURE_ID = "AFA-obligation-P16-F27"
 RELEASE_HARNESS_CONTRACT_VERSION = "release-assurance-harness/1.0"
+PROTOCOL_ASSURANCE_FEATURE_ID = "AFA-policy-P10-F27"
+PROTOCOL_ASSURANCE_CONTRACT_VERSION = "protocol-assurance-harness/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -812,6 +814,61 @@ class ReleaseHarnessReceipt:
             "checks": [dict(check) for check in self.checks],
             "omissions": list(self.omissions),
             "reasons": list(self.reasons),
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class ProtocolAssuranceReceipt:
+    """Transport validator for policy-gated protocol simulation admission."""
+
+    request_id: str
+    protocol_id: str
+    disposition: str
+    total_cells: int
+    passed_cells: int
+    blocked_cells: int
+    unknown_cells: int
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    simulation_digest: str
+    artifact: Mapping[str, Any]
+    feature_id: str = PROTOCOL_ASSURANCE_FEATURE_ID
+    contract_version: str = PROTOCOL_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != PROTOCOL_ASSURANCE_FEATURE_ID or self.contract_version != PROTOCOL_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("protocol assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.protocol_id.strip():
+            raise ResearchContractError("protocol assurance identity or boundary is invalid")
+        if self.disposition not in {"passed", "blocked", "unknown"} or not self.checks:
+            raise ResearchContractError("protocol assurance disposition or checks are incomplete")
+        counts = (self.total_cells, self.passed_cells, self.blocked_cells, self.unknown_cells)
+        if self.total_cells <= 0 or any(value < 0 for value in counts) or self.total_cells != self.passed_cells + self.blocked_cells + self.unknown_cells:
+            raise ResearchContractError("protocol assurance cell counts do not partition")
+        for digest in (self.simulation_digest, self.artifact.get("content_hash")):
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("protocol assurance digest is not a canonical sha256")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "protocol_id": self.protocol_id,
+            "disposition": self.disposition,
+            "total_cells": self.total_cells,
+            "passed_cells": self.passed_cells,
+            "blocked_cells": self.blocked_cells,
+            "unknown_cells": self.unknown_cells,
+            "checks": list(self.checks),
+            "omissions": list(self.omissions),
+            "simulation_digest": self.simulation_digest,
             "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })

@@ -42,6 +42,10 @@ use bioprism_obligation::{
 use bioprism_policy::{
     admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest, AUTONOMY_BATCH_FEATURE_ID,
 };
+use bioprism_policy::{
+    assess_protocol_assurance, ProtocolAssuranceReceipt, ProtocolAssuranceRequest,
+    PROTOCOL_ASSURANCE_FEATURE_ID,
+};
 use bioprism_runtime::{
     execute_workflow, execute_workflow_batch, WorkflowBatchReceipt, WorkflowBatchRequest,
     WorkflowExecutionReceipt, WorkflowExecutionRequest, WORKFLOW_BATCH_FEATURE_ID,
@@ -73,6 +77,7 @@ pub const RESOURCE_WORKBENCH_TOOL: &str = "resource_workbench_discover";
 pub const RESOURCE_DISCOVERY_CONTRACT_TOOL: &str = "resource_discovery_contract_v2";
 pub const GOVERNANCE_RESEARCH_RELEASE_TOOL: &str = "governance_research_release_compile";
 pub const RELEASE_ASSURANCE_HARNESS_TOOL: &str = "release_assurance_harness";
+pub const PROTOCOL_ASSURANCE_TOOL: &str = "protocol_assurance_harness";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -435,6 +440,24 @@ pub fn validate_release_harness_json(value: &Value) -> Result<ReleaseHarnessRece
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RELEASE_HARNESS_FEATURE_ID {
         return Err("release assurance harness feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assess_protocol_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: ProtocolAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid protocol assurance request: {error}"))?;
+    let receipt = assess_protocol_assurance(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize protocol assurance receipt: {error}"))
+}
+
+pub fn validate_protocol_assurance_json(value: &Value) -> Result<ProtocolAssuranceReceipt, String> {
+    let receipt: ProtocolAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid protocol assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != PROTOCOL_ASSURANCE_FEATURE_ID {
+        return Err("protocol assurance feature id mismatch".into());
     }
     Ok(receipt)
 }
