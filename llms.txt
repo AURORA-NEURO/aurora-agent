@@ -13,6 +13,7 @@ Key facts: on the shipped reference world (761 facts), FIBER compiles the query 
 - [Discriminating comparison](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/DISCRIMINATING_COMPARISON.md): The generated world where the three strategies separate
 - [Capability dashboard](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/CAPABILITY_DASHBOARD.md): Which domains are callable through each transport, and what surface is missing
 - [HTTP API](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/HTTP_API.md): The bounded local `bioprism-api` gateway routes and event delivery
+- [Autopilot](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md): Grant-authorised autonomous mission driving — 40.36 retry classification, repair subsets, digest-sealed reports
 - [Python SDK](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/PYTHON_SDK.md): Dependency-free MCP and HTTP clients
 - [TypeScript SDK](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/TYPESCRIPT_SDK.md): Dependency-free Fetch client for browser and Node
 - [ADR-001 language strategy](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/ADR-001-language-strategy.md): Why Rust plus a CPython reference, and the indexed-store measurements

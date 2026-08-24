@@ -132,6 +132,21 @@
       collection — <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">privacy policy</a>.</li>
     </ul>
 
+    <h2>Autonomous workflows, with receipts</h2>
+
+    <p><code>bioprism autopilot</code> drives an instantiated workflow's mission autonomously under an
+    explicit <strong>AutonomyGrant</strong> — the only source of authority; there is no default grant.
+    Every failed step is classified by its declared retry class, and only what the grant authorises is
+    re-dispatched as a repair subset; success is never inferred — it requires full step coverage, a
+    succeeded mission report, and (by default) a complete workflow reconciliation with valid integrity.
+    Every drive emits a digest-sealed report that <code>bioprism autopilot verify</code> recomputes,
+    detecting a single tampered byte.</p>
+
+    <p>What it deliberately does not do: no scheduling or recurrence, no MCP tool exposure of the
+    driver itself, no cross-process resume, no wall-clock deadlines. See
+    <a href="faq.html#autonomous-workflows">the FAQ entry</a> and
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md">docs/AUTOPILOT.md</a>.</p>
+
     <h2>Install</h2>
 
     <dl class="facts">

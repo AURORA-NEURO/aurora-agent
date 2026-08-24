@@ -130,6 +130,19 @@
     </div>
 
     <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md">AUTOPILOT.md</a></h2>
+      <p>Autopilot: grant-authorised autonomous mission driving. <code>bioprism autopilot</code>
+      drives an instantiated workflow's mission under an explicit AutonomyGrant — the only source of
+      authority, with no default grant — classifying every failed step by its declared 40.36 retry
+      class and re-dispatching only the grant-authorised repair subset with rematerialised bindings;
+      terminal and cancelled steps are never re-dispatched. Success requires full step coverage, a
+      succeeded mission report, and by default a complete reconciliation with valid integrity; every
+      drive emits a digest-sealed report that <code>autopilot verify</code> recomputes. States its
+      limits up front: no scheduling or recurrence, no MCP tool exposure of the driver itself, no
+      cross-process resume, no wall-clock deadlines.</p>
+    </div>
+
+    <div class="doc-entry">
       <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/SECURITY_PRIVACY_AUDIT.md">SECURITY_PRIVACY_AUDIT.md</a></h2>
       <p>The <code>security_privacy_audit</code> governance contract: a bounded, deterministic check
       that a declared system's data assets, flows, identities, threats, reviews, and controls form a

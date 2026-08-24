@@ -30,7 +30,8 @@
     { "@type": "Question", "name": "What platforms are supported?", "acceptedAnswer": { "@type": "Answer", "text": "The prebuilt Claude Desktop .mcpb bundle is Windows-only. On other platforms, build from source with cargo build --release --offline and register the bioprism-mcp binary with any MCP client." } },
     { "@type": "Question", "name": "What is the license?", "acceptedAnswer": { "@type": "Answer", "text": "Apache-2.0. The repository AURORA-NEURO/aurora-agent is public on GitHub." } },
     { "@type": "Question", "name": "Is this a medical device or clinical tool?", "acceptedAnswer": { "@type": "Answer", "text": "No. It is research and developer infrastructure: it does not diagnose an individual, recommend treatment, triage care, enroll participants, or claim medical-device functionality." } },
-    { "@type": "Question", "name": "How do I know the implementation is correct?", "acceptedAnswer": { "@type": "Answer", "text": "Byte-level parity is enforced by test across three implementations — the CPython reference, the eager Rust path, and the Rust indexed store — which agree on the certificate digest c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4 for the reference compilation." } }
+    { "@type": "Question", "name": "How do I know the implementation is correct?", "acceptedAnswer": { "@type": "Answer", "text": "Byte-level parity is enforced by test across three implementations — the CPython reference, the eager Rust path, and the Rust indexed store — which agree on the certificate digest c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4 for the reference compilation." } },
+    { "@type": "Question", "name": "Can AURORA Agent run workflows autonomously?", "acceptedAnswer": { "@type": "Answer", "text": "Yes — under an explicit grant. bioprism autopilot drives an instantiated workflow's mission autonomously under an AutonomyGrant, the only source of authority: there is no default grant. The driver dispatches the mission in-process, classifies every failed step by its declared retry class (terminal, retryable-after-change, retryable-as-is, or unknown), and re-dispatches only what the grant authorises as a repair subset with rematerialised bindings — terminal and cancelled steps are never re-dispatched, and unknown failures are never retried unless the grant explicitly opts in. Success is never inferred: it requires full step coverage, a succeeded mission report, and (by default) a complete workflow reconciliation with valid integrity. Every drive emits a digest-sealed autopilot report chaining the grant digest, every mission and report digest, and every reconciliation digest; bioprism autopilot verify recomputes it and detects a single tampered byte. It deliberately does no scheduling or recurrence, exposes no MCP tool for the driver itself, cannot resume across processes, and has no wall-clock deadlines." } }
   ]
 }
 </script>
@@ -165,6 +166,25 @@
       SDK, a dependency-free TypeScript SDK, and the <code>bioprism</code> CLI, whose
       <code>--json</code> envelopes and ten-exit-code retryability matrix are designed for scripted
       callers.</p>
+    </div>
+
+    <div class="faq-item" id="autonomous-workflows">
+      <h2>Can AURORA Agent run workflows autonomously?</h2>
+      <p>Yes — under an explicit grant. <code>bioprism autopilot</code> drives an instantiated
+      workflow's mission autonomously under an <strong>AutonomyGrant</strong>, the only source of
+      authority: there is no default grant. The driver dispatches the mission in-process, classifies
+      every failed step by its declared retry class (terminal, retryable-after-change,
+      retryable-as-is, or unknown), and re-dispatches only what the grant authorises as a repair
+      subset with rematerialised bindings — terminal and cancelled steps are never re-dispatched,
+      and unknown failures are never retried unless the grant explicitly opts in. Success is never
+      inferred: it requires full step coverage, a succeeded mission report, and (by default) a
+      complete workflow reconciliation with valid integrity. Every drive emits a digest-sealed
+      autopilot report chaining the grant digest, every mission and report digest, and every
+      reconciliation digest; <code>bioprism autopilot verify</code> recomputes it and detects a
+      single tampered byte. It deliberately does no scheduling or recurrence, exposes no MCP tool
+      for the driver itself, cannot resume across processes, and has no wall-clock deadlines. Full
+      reference:
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md">docs/AUTOPILOT.md</a>.</p>
     </div>
 
     <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
