@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, RESEARCH_RELEASE_BATCH_FEATURE_ID, FEDERATED_EVALUATION_FEATURE_ID, RESOURCE_WORKBENCH_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID, MULTIMODAL_REPLICATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID, DESIGN_FRONTIER_FEATURE_ID, AUTONOMY_BATCH_FEATURE_ID, WORKFLOW_BATCH_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, RESEARCH_RELEASE_BATCH_FEATURE_ID, FEDERATED_EVALUATION_FEATURE_ID, RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID, RESOURCE_DISCOVERY_CONTRACT_VERSION, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, ANALYSIS_QUALIFICATION_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID, MULTIMODAL_REPLICATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID, DESIGN_FRONTIER_FEATURE_ID, AUTONOMY_BATCH_FEATURE_ID, WORKFLOW_BATCH_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -448,4 +448,19 @@ def test_resource_workbench_receipt_preserves_protected_omission():
     )
     receipt.validate()
     assert receipt.feature_id == RESOURCE_WORKBENCH_FEATURE_ID
+    assert receipt.digest() == receipt.digest()
+
+
+def test_resource_discovery_contract_preserves_migration_notes():
+    receipt = ResourceDiscoveryContractReceipt(
+        request_id="request:resource-v2",
+        requested_by="admin:consortium",
+        compatibility_profile="qualified-resource-set/v1",
+        result={"feature_id": RESOURCE_WORKBENCH_FEATURE_ID, "boundary": PRECLINICAL_BOUNDARY},
+        migration_notes=("v1 semantic fields remain stable",),
+        artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID
+    assert receipt.contract_version == RESOURCE_DISCOVERY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -32,6 +32,8 @@ export const WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11" as const;
 export const RESEARCH_RELEASE_BATCH_FEATURE_ID = "AFA-services-P16-F03" as const;
 export const FEDERATED_EVALUATION_FEATURE_ID = "AFA-evalengine-P23-F02" as const;
 export const RESOURCE_WORKBENCH_FEATURE_ID = "AFA-fiber-P05-F20" as const;
+export const RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID = "AFA-mcp-P05-F08" as const;
+export const RESOURCE_DISCOVERY_CONTRACT_VERSION = "aurora-mcp-resource-discovery/2.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -714,6 +716,31 @@ export function validateQualifiedResourceSet(receipt: QualifiedResourceSet): voi
 
 export function qualifiedResourceSetDigest(receipt: QualifiedResourceSet): string {
   validateQualifiedResourceSet(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface ResourceDiscoveryContractReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  requested_by: string;
+  compatibility_profile: string;
+  result: Record<string, unknown>;
+  migration_notes: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateResourceDiscoveryContractReceipt(receipt: ResourceDiscoveryContractReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID || receipt.contract_version !== RESOURCE_DISCOVERY_CONTRACT_VERSION) throw new Error("resource discovery contract schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.requested_by.trim() || !receipt.compatibility_profile.trim() || new TextEncoder().encode(receipt.compatibility_profile).length > 256 || receipt.migration_notes.length === 0) throw new Error("resource discovery contract identity, compatibility, migration, or boundary is invalid");
+  if (receipt.result.feature_id !== RESOURCE_WORKBENCH_FEATURE_ID || receipt.result.boundary !== PRECLINICAL_BOUNDARY) throw new Error("resource discovery contract result is not the qualified-resource contract");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("resource discovery contract artifact digest is invalid");
+}
+
+export function resourceDiscoveryContractReceiptDigest(receipt: ResourceDiscoveryContractReceipt): string {
+  validateResourceDiscoveryContractReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

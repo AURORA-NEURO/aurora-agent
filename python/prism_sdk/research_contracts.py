@@ -37,6 +37,8 @@ WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11"
 RESEARCH_RELEASE_BATCH_FEATURE_ID = "AFA-services-P16-F03"
 FEDERATED_EVALUATION_FEATURE_ID = "AFA-evalengine-P23-F02"
 RESOURCE_WORKBENCH_FEATURE_ID = "AFA-fiber-P05-F20"
+RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID = "AFA-mcp-P05-F08"
+RESOURCE_DISCOVERY_CONTRACT_VERSION = "aurora-mcp-resource-discovery/2.0"
 
 
 class ResearchContractError(ValueError):
@@ -658,6 +660,48 @@ class QualifiedResourceSet:
             "resources": [dict(item) for item in self.resources],
             "omissions": [dict(item) for item in self.omissions],
             "reasons": list(self.reasons),
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class ResourceDiscoveryContractReceipt:
+    """Compatibility envelope for the MCP resource-discovery contract."""
+
+    request_id: str
+    requested_by: str
+    compatibility_profile: str
+    result: Mapping[str, Any]
+    migration_notes: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID
+    contract_version: str = RESOURCE_DISCOVERY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID or self.contract_version != RESOURCE_DISCOVERY_CONTRACT_VERSION:
+            raise ResearchContractError("resource discovery contract schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.requested_by.strip() or not self.compatibility_profile.strip() or len(self.compatibility_profile.encode("utf-8")) > 256 or not self.migration_notes:
+            raise ResearchContractError("resource discovery contract identity, compatibility, migration, or boundary is invalid")
+        if self.result.get("feature_id") != RESOURCE_WORKBENCH_FEATURE_ID or self.result.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("resource discovery contract result is not the qualified-resource contract")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("resource discovery contract artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "requested_by": self.requested_by,
+            "compatibility_profile": self.compatibility_profile,
+            "result": dict(self.result),
+            "migration_notes": list(self.migration_notes),
             "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })

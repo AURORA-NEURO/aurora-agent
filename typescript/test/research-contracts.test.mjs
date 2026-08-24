@@ -74,6 +74,10 @@ import {
   RESOURCE_WORKBENCH_FEATURE_ID,
   qualifiedResourceSetDigest,
   validateQualifiedResourceSet,
+  RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
+  RESOURCE_DISCOVERY_CONTRACT_VERSION,
+  resourceDiscoveryContractReceiptDigest,
+  validateResourceDiscoveryContractReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -562,4 +566,21 @@ test("resource workbench receipt preserves protected omission", () => {
   };
   assert.doesNotThrow(() => validateQualifiedResourceSet(receipt));
   assert.equal(qualifiedResourceSetDigest(receipt), qualifiedResourceSetDigest(receipt));
+});
+
+test("resource discovery contract receipt preserves migration notes", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
+    contract_version: RESOURCE_DISCOVERY_CONTRACT_VERSION,
+    request_id: "request:resource-v2",
+    requested_by: "admin:consortium",
+    compatibility_profile: "qualified-resource-set/v1",
+    result: { feature_id: RESOURCE_WORKBENCH_FEATURE_ID, boundary: PRECLINICAL_BOUNDARY },
+    migration_notes: ["v1 semantic fields remain stable"],
+    artifact: { content_hash: "d".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateResourceDiscoveryContractReceipt(receipt));
+  assert.equal(resourceDiscoveryContractReceiptDigest(receipt), resourceDiscoveryContractReceiptDigest(receipt));
 });

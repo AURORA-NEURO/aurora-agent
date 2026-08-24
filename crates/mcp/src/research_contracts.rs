@@ -3,6 +3,10 @@
 //! The MCP transport accepts JSON, but it does not own scientific semantics. These helpers perform
 //! the same schema/boundary/policy checks as the Rust service before a tool result is returned.
 
+use crate::resource_discovery_contract::{
+    compile_resource_discovery_contract_v2, ResourceDiscoveryContractRequest,
+    ResourceDiscoveryContractResponse, FEATURE_ID as RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
+};
 use bioprism_adapter::{
     evaluate_quality_drift, harmonize_multimodal, HarmonizedResearchObject,
     MultimodalHarmonizationRequest, QualityDriftReceipt, QualityDriftRequest,
@@ -58,6 +62,7 @@ pub const DESIGN_FRONTIER_TOOL: &str = "design_frontier_evaluate";
 pub const AUTONOMY_BATCH_TOOL: &str = "autonomy_batch_admit";
 pub const WORKFLOW_BATCH_TOOL: &str = "workflow_batch_execute";
 pub const RESOURCE_WORKBENCH_TOOL: &str = "resource_workbench_discover";
+pub const RESOURCE_DISCOVERY_CONTRACT_TOOL: &str = "resource_discovery_contract_v2";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -363,6 +368,27 @@ pub fn validate_qualified_resource_set_json(value: &Value) -> Result<QualifiedRe
         return Err("resource workbench feature id mismatch".into());
     }
     Ok(receipt)
+}
+
+pub fn resource_discovery_contract_v2_json(value: &Value) -> Result<Value, String> {
+    let request: ResourceDiscoveryContractRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid resource discovery contract request: {error}"))?;
+    let response =
+        compile_resource_discovery_contract_v2(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(response)
+        .map_err(|error| format!("cannot serialize resource discovery contract: {error}"))
+}
+
+pub fn validate_resource_discovery_contract_v2_json(
+    value: &Value,
+) -> Result<ResourceDiscoveryContractResponse, String> {
+    let response: ResourceDiscoveryContractResponse = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid resource discovery contract response: {error}"))?;
+    response.validate().map_err(|error| error.to_string())?;
+    if response.feature_id != RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID {
+        return Err("resource discovery contract feature id mismatch".into());
+    }
+    Ok(response)
 }
 
 #[cfg(test)]
