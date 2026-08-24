@@ -443,7 +443,7 @@ pub fn validate_autopilot_checkpoint(value: &Value) -> Result<Value, AutopilotEr
         to_canonical_string(value).map_err(|error| AutopilotError::Canonicalisation {
             reason: error.to_string(),
         })?;
-    if canonical.as_bytes().len() > AUTOPILOT_CHECKPOINT_MAX_BYTES {
+    if canonical.len() > AUTOPILOT_CHECKPOINT_MAX_BYTES {
         return Err(invalid("checkpoint exceeds its byte bound"));
     }
     let _ = (grant_digest, base_mission_id);
@@ -539,7 +539,7 @@ fn canonical_snapshot(snapshot: &Value, max_bytes: usize) -> Result<String, Auto
         to_canonical_string(&normalized).map_err(|error| AutopilotError::Canonicalisation {
             reason: error.to_string(),
         })?;
-    if canonical.as_bytes().len() > max_bytes {
+    if canonical.len() > max_bytes {
         return Err(invalid("checkpoint exceeds the configured byte bound"));
     }
     Ok(canonical)
@@ -553,7 +553,7 @@ fn read_json_snapshot<S: AutopilotCheckpointStore>(
     let Some(encoded) = encoded else {
         return Ok(None);
     };
-    if encoded.as_bytes().len() > max_bytes {
+    if encoded.len() > max_bytes {
         return Err(invalid("stored checkpoint exceeds its byte bound"));
     }
     let raw: Value = serde_json::from_str(&encoded)

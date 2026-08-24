@@ -1,0 +1,10 @@
+[workspace]
+
+[package]
+name = "demo-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+exact-widget = "=1.0.0"
+loose-gadget = "1.0"

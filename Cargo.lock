@@ -256,6 +256,7 @@ dependencies = [
 name = "bioprism-cli"
 version = "0.1.0"
 dependencies = [
+ "bioprism-adapter",
  "bioprism-autopilot",
  "bioprism-baseline",
  "bioprism-devplat",
@@ -265,6 +266,8 @@ dependencies = [
  "bioprism-mcp",
  "bioprism-mutation",
  "bioprism-prism",
+ "bioprism-project",
+ "bioprism-repair",
  "bioprism-scope",
  "bioprism-section",
  "bioprism-store",
@@ -643,7 +646,9 @@ dependencies = [
  "bioprism-packs",
  "bioprism-policy",
  "bioprism-prism",
+ "bioprism-project",
  "bioprism-registry",
+ "bioprism-repair",
  "bioprism-routing",
  "bioprism-runtime",
  "bioprism-safety",
@@ -836,6 +841,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-project"
+version = "0.1.0"
+dependencies = [
+ "bioprism-adapter",
+ "bioprism-domain",
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
+ "bioprism-world",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-registry"
 version = "0.1.0"
 dependencies = [
@@ -845,6 +866,20 @@ dependencies = [
  "bioprism-section",
  "bioprism-worldgen",
  "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-repair"
+version = "0.1.0"
+dependencies = [
+ "bioprism-domain",
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-project",
+ "bioprism-section",
+ "bioprism-world",
  "serde_json",
  "thiserror",
 ]

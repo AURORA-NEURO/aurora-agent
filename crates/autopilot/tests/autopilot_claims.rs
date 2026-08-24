@@ -5,15 +5,13 @@
 use bioprism_autopilot::{
     build_autopilot_report, classify_step_result, drive_instantiation, drive_mission,
     drive_mission_with_checkpoint, drive_mission_with_schedule, plan_next_action,
-    preview_first_action,
-    resume_mission_with_checkpoint, seal_autopilot_checkpoint, validate_autopilot_checkpoint,
-    verify_autopilot_report, AttemptKind, AttemptRecord, AutonomyGrant, AutopilotCheckpointStore,
-    AutopilotCheckpointPersistence, AutopilotError, DriveHistory, FinalDisposition, FinalStatus,
-    GrantError, JsonAutopilotCheckpointPersistence,
-    NextAction, RetryClass, StepClass, TransactionalAutopilotCheckpointPersistence,
-    TransactionalAutopilotCheckpointPersistenceCoordinator,
-    TransactionalAutopilotCheckpointStore, TransactionalJsonAutopilotCheckpointPersistence,
-    RetrySchedule, REQUIRED_LIMITATIONS,
+    preview_first_action, resume_mission_with_checkpoint, seal_autopilot_checkpoint,
+    validate_autopilot_checkpoint, verify_autopilot_report, AttemptKind, AttemptRecord,
+    AutonomyGrant, AutopilotCheckpointPersistence, AutopilotCheckpointStore, AutopilotError,
+    DriveHistory, FinalDisposition, FinalStatus, GrantError, JsonAutopilotCheckpointPersistence,
+    NextAction, RetryClass, RetrySchedule, StepClass,
+    TransactionalAutopilotCheckpointPersistenceCoordinator, TransactionalAutopilotCheckpointStore,
+    TransactionalJsonAutopilotCheckpointPersistence, REQUIRED_LIMITATIONS,
 };
 use bioprism_devplat::{
     plan_mission, MissionReport, MissionRequest, MissionStepResult, MISSION_SCHEMA_VERSION,
@@ -269,8 +267,7 @@ fn push_full(
     let mission = expect_full_dispatch(grant, history);
     let report = report_for(&mission, results, status_override);
     history.push(
-        AttemptRecord::delivered(AttemptKind::Full, mission, report, reconciliation, None)
-            .unwrap(),
+        AttemptRecord::delivered(AttemptKind::Full, mission, report, reconciliation, None).unwrap(),
     );
 }
 
@@ -339,8 +336,7 @@ mod grant {
 
     #[test]
     fn a_grant_naming_agent_mission_is_refused_as_recursive() {
-        let error =
-            grant_error(json!({ "allowed_tools": ["agent_mission"], "max_attempts": 3 }));
+        let error = grant_error(json!({ "allowed_tools": ["agent_mission"], "max_attempts": 3 }));
         assert!(error.contains("recursive"), "{error}");
     }
 
@@ -353,8 +349,7 @@ mod grant {
 
     #[test]
     fn a_grant_with_an_invalid_tool_name_is_refused() {
-        let error =
-            grant_error(json!({ "allowed_tools": ["not a tool"], "max_attempts": 3 }));
+        let error = grant_error(json!({ "allowed_tools": ["not a tool"], "max_attempts": 3 }));
         assert!(error.contains("bare tool name"), "{error}");
     }
 
@@ -382,7 +377,10 @@ mod grant {
             "max_attempts": 3,
             "retry": { "retry_terminal": true },
         }));
-        assert!(refused.is_err(), "an unknown retry field must not be ignored");
+        assert!(
+            refused.is_err(),
+            "an unknown retry field must not be ignored"
+        );
     }
 
     #[test]
@@ -445,9 +443,7 @@ mod grant {
         }));
         let message = refused.expect_err("false must be refused").to_string();
         assert!(message.contains("not supported"), "{message}");
-        assert!(
-            format!("{}", GrantError::UnsupportedStopOption).contains("only true is accepted")
-        );
+        assert!(format!("{}", GrantError::UnsupportedStopOption).contains("only true is accepted"));
     }
 
     #[test]
@@ -619,7 +615,13 @@ mod planner {
     fn a_confirmation_flag_without_side_effect_authority_is_a_policy_refusal() {
         let grant = default_grant(&["tool_a"]);
         let mission = mission_of(
-            vec![step("a", "tool_a", &[], json!({ "confirm": true }), json!([]))],
+            vec![step(
+                "a",
+                "tool_a",
+                &[],
+                json!({ "confirm": true }),
+                json!([]),
+            )],
             None,
         );
         let history = DriveHistory::new(mission).unwrap();
@@ -745,7 +747,10 @@ mod planner {
             None,
         );
         let accounting = expect_exhausted(&grant, &history);
-        assert_eq!(accounting["reason"], json!("unresolved_steps_not_retryable"));
+        assert_eq!(
+            accounting["reason"],
+            json!("unresolved_steps_not_retryable")
+        );
         let rows = accounting["unresolved_steps"].as_array().unwrap();
         let row_b = rows
             .iter()
@@ -878,7 +883,10 @@ mod planner {
             None,
         );
         let accounting = expect_exhausted(&grant, &history);
-        assert_eq!(accounting["reason"], json!("unresolved_steps_not_retryable"));
+        assert_eq!(
+            accounting["reason"],
+            json!("unresolved_steps_not_retryable")
+        );
         let rows = accounting["unresolved_steps"].as_array().unwrap();
         let row_b = rows
             .iter()
@@ -1013,7 +1021,10 @@ mod planner {
             None,
         );
         let accounting = expect_exhausted(&grant, &history);
-        assert_eq!(accounting["reason"], json!("unresolved_steps_not_retryable"));
+        assert_eq!(
+            accounting["reason"],
+            json!("unresolved_steps_not_retryable")
+        );
         let rows = accounting["unresolved_steps"].as_array().unwrap();
         let row_b = rows
             .iter()
@@ -1512,16 +1523,76 @@ mod drive {
                 |_delay| Err("worker shutdown".into()),
                 |_history| Ok(()),
             )
-            .expect_err("wait failure must not be swallowed");
-            error
+            .expect_err("wait failure must not be swallowed")
         };
         assert_eq!(calls, 1);
-        assert_eq!(error, AutopilotError::Scheduling { reason: "worker shutdown".into() });
+        assert_eq!(
+            error,
+            AutopilotError::Scheduling {
+                reason: "worker shutdown".into()
+            }
+        );
     }
 }
 
 mod persistence {
     use super::*;
+
+    /// The snapshot's retained *values*, without the structural vocabulary that names them.
+    ///
+    /// A leak scan over the serialised document greps its own field names and policy sentences.
+    /// Two of these assertions failed against a projection that was leaking nothing: `retention`
+    /// is the literal `metadata_only_autopilot;missions_arguments_provider_output_credentials_and_evidence_not_retained`,
+    /// which contains `arguments` inside the clause promising arguments are *not* retained; and
+    /// the field name `result_metadata_digest` contains `data`, which is one of the twelve
+    /// built-in domain names. The guard was tripping on the sentence that declares the guarantee
+    /// and on the key that carries the digest.
+    ///
+    /// Keys and the policy constants are compile-time strings that no mission, attempt or report
+    /// can influence, so the scan belongs on the values alone — which is also the stronger claim,
+    /// since leaked material would have to arrive as a value. `leak_scan_still_fires_on_planted_payload`
+    /// holds this honest: a scan that cannot fail is worth nothing.
+    fn retained_values(snapshot: &Value) -> String {
+        fn collect(value: &Value, into: &mut Vec<String>) {
+            match value {
+                Value::String(text) => into.push(text.clone()),
+                Value::Number(number) => into.push(number.to_string()),
+                Value::Bool(flag) => into.push(flag.to_string()),
+                Value::Array(items) => items.iter().for_each(|item| collect(item, into)),
+                Value::Object(entries) => entries.values().for_each(|entry| collect(entry, into)),
+                Value::Null => {}
+            }
+        }
+        let mut scanned = snapshot.clone();
+        if let Some(map) = scanned.as_object_mut() {
+            for declaration in ["schema", "retention", "secret_material"] {
+                map.remove(declaration);
+            }
+        }
+        let mut values = Vec::new();
+        collect(&scanned, &mut values);
+        values.join("\u{1f}")
+    }
+
+    #[test]
+    fn leak_scan_still_fires_on_planted_payload() {
+        let snapshot = json!({
+            "retention": bioprism_autopilot::AUTOPILOT_CHECKPOINT_RETENTION,
+            "secret_material": "never_returned",
+            "attempts": [{ "mission_digest": "aa" }],
+        });
+        assert!(
+            !retained_values(&snapshot).contains("private_task"),
+            "a clean snapshot must scan clean"
+        );
+
+        let mut planted = snapshot.clone();
+        planted["attempts"][0]["mission_digest"] = json!("private_task text");
+        assert!(
+            retained_values(&planted).contains("private_task"),
+            "the scan must catch payload planted where an attempt projection would carry it"
+        );
+    }
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -1550,7 +1621,12 @@ mod persistence {
                 .borrow()
                 .as_ref()
                 .and_then(|encoded| serde_json::from_str::<Value>(encoded).ok())
-                .and_then(|snapshot| snapshot.get("snapshot_digest").and_then(Value::as_str).map(str::to_owned));
+                .and_then(|snapshot| {
+                    snapshot
+                        .get("snapshot_digest")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                });
             if actual_snapshot_digest.as_deref() != expected_snapshot_digest {
                 return Ok(false);
             }
@@ -1584,7 +1660,11 @@ mod persistence {
             let mut dispatcher = |dispatched: &Value| -> Result<Value, String> {
                 let report = report_for(
                     dispatched,
-                    vec![ok_result("a", "tool_a", Some(&json!({ "provider_secret": "do not persist" })))],
+                    vec![ok_result(
+                        "a",
+                        "tool_a",
+                        Some(&json!({ "provider_secret": "do not persist" })),
+                    )],
                     None,
                 );
                 rehydrated_attempts.push(
@@ -1599,30 +1679,21 @@ mod persistence {
                 );
                 Ok(report)
             };
-            drive_mission_with_checkpoint(
-                &grant,
-                mission.clone(),
-                &mut dispatcher,
-                |history| {
-                    let snapshot = seal_autopilot_checkpoint(
-                        &grant,
-                        history,
-                        generation,
-                        predecessor.as_deref(),
-                    )?;
-                    predecessor = snapshot["snapshot_digest"].as_str().map(str::to_owned);
-                    generation += 1;
-                    snapshots.push(snapshot);
-                    Ok(())
-                },
-            )
+            drive_mission_with_checkpoint(&grant, mission.clone(), &mut dispatcher, |history| {
+                let snapshot =
+                    seal_autopilot_checkpoint(&grant, history, generation, predecessor.as_deref())?;
+                predecessor = snapshot["snapshot_digest"].as_str().map(str::to_owned);
+                generation += 1;
+                snapshots.push(snapshot);
+                Ok(())
+            })
             .unwrap()
         };
         assert_eq!(outcome.final_status, FinalStatus::Succeeded);
         assert_eq!(snapshots.len(), 1);
         let snapshot = snapshots.last().unwrap();
         validate_autopilot_checkpoint(snapshot).unwrap();
-        let encoded = snapshot.to_string();
+        let encoded = retained_values(snapshot);
         assert!(!encoded.contains("private_task"));
         assert!(!encoded.contains("provider_secret"));
         assert!(!encoded.contains("arguments"));
@@ -1653,7 +1724,13 @@ mod persistence {
             "require_reconciliation_complete": false,
         }));
         let mission = mission_of(
-            vec![step("a", "tool_a", &[], json!({ "private": true }), json!([]))],
+            vec![step(
+                "a",
+                "tool_a",
+                &[],
+                json!({ "private": true }),
+                json!([]),
+            )],
             None,
         );
         let attempt_mission = mission.clone();
@@ -1662,14 +1739,9 @@ mod persistence {
             vec![ok_result("a", "tool_a", Some(&json!({ "result": true })))],
             None,
         );
-        let attempt = AttemptRecord::delivered(
-            AttemptKind::Full,
-            attempt_mission,
-            report,
-            None,
-            None,
-        )
-        .unwrap();
+        let attempt =
+            AttemptRecord::delivered(AttemptKind::Full, attempt_mission, report, None, None)
+                .unwrap();
         let history = DriveHistory::from_attempts(mission, vec![attempt]).unwrap();
         let snapshot = seal_autopilot_checkpoint(&grant, &history, 1, None).unwrap();
         let shared = SharedStore::default();
@@ -1758,10 +1830,16 @@ mod persistence {
         let checkpoint = seal_autopilot_checkpoint(&grant, &history, 1, None).unwrap();
         validate_autopilot_checkpoint(&checkpoint).unwrap();
         assert_eq!(checkpoint["base_step_count"], json!(domains.len()));
-        assert_eq!(checkpoint["attempts"][0]["step_count"], json!(domains.len()));
-        let encoded = checkpoint.to_string();
+        assert_eq!(
+            checkpoint["attempts"][0]["step_count"],
+            json!(domains.len())
+        );
+        let encoded = retained_values(&checkpoint);
         for domain in domains {
-            assert!(!encoded.contains(domain), "raw domain material leaked: {domain}");
+            assert!(
+                !encoded.contains(domain),
+                "raw domain material leaked: {domain}"
+            );
         }
     }
 }

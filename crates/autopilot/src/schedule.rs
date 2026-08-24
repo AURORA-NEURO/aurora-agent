@@ -19,6 +19,7 @@ fn default_zero() -> u64 {
 /// behavior; a non-zero base requires a non-zero ceiling at least as large as the base.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct RetryScheduleDocument {
     /// Delay before the first repair dispatch, in caller-defined logical ticks.
     #[serde(default = "default_zero")]
@@ -28,14 +29,6 @@ pub struct RetryScheduleDocument {
     pub retry_max_delay: u64,
 }
 
-impl Default for RetryScheduleDocument {
-    fn default() -> Self {
-        Self {
-            retry_base_delay: 0,
-            retry_max_delay: 0,
-        }
-    }
-}
 
 /// Validated immutable retry timing policy carried by an [`AutonomyGrant`](crate::AutonomyGrant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,0 +1,20 @@
+[package]
+name = "bioprism-project"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Project modeling: compiles a software project tree into a FIBER world through the sealed adapter contract, with every scanning loss declared"
+
+[dependencies]
+bioprism-adapter = { workspace = true }
+bioprism-domain = { workspace = true }
+bioprism-fiber = { workspace = true }
+bioprism-ids = { workspace = true }
+bioprism-scope = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-world = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

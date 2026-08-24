@@ -1,0 +1,12 @@
+[
+  {
+    "id": "ISSUE-1",
+    "title": "Fix the gadget seam",
+    "body": "The seam string should name the gadget before the widget.",
+    "components": ["src/lib.rs"]
+  },
+  {
+    "id": "ISSUE-2",
+    "title": "Audit release readiness"
+  }
+]

@@ -23,7 +23,10 @@ mod exit;
 mod explain;
 mod io;
 
-use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
+use args::{
+    Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile,
+    ProjectIngestOptions, ProjectPlanOptions,
+};
 use bioprism_autopilot::{
     drive::instantiation_mission, drive_instantiation, preview_first_action,
     verify_autopilot_report, AutonomyGrant, AutonomyGrantDocument, FinalStatus, NextAction,
@@ -41,8 +44,15 @@ use bioprism_devplat::{
 use bioprism_domain::DomainPack;
 use bioprism_fiber::{compile, compile_with_oracle, DecisionOracle, Query};
 use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
+use bioprism_project::{
+    AssemblyOptions, AuditOptions, AuditReport, Issue, ProjectScan, ProjectWorld, ScanOptions,
+};
+use bioprism_repair::{
+    plan_for_issue, predicate_from_json, verify, AcceptanceReport, DeclaredItem, ItemStatus,
+    Outcome as RepairOutcome, PlanOptions, RepairPlan,
+};
 use bioprism_scope::DimensionRegistry;
-use bioprism_section::{CertificateProfile, ContextCertificate, OracleStatus};
+use bioprism_section::{CertificateProfile, ContextCertificate, LeakageWitness, OracleStatus};
 use bioprism_world::{validate, Severity};
 use exit::{CliError, CliResult, ExitCode};
 use serde_json::{json, Value};
@@ -142,6 +152,18 @@ impl Outcome {
         }
         self
     }
+
+    /// Reports a completed run under a code other than 0 or 1.
+    ///
+    /// [`Outcome::failing_if`] covers the two-valued case — the checked property held or it did
+    /// not — and every command before `project verify` had only that. Acceptance verification does
+    /// not: "a criterion could not be evaluated" and "the plan is bound to a different world" are
+    /// neither successes nor failed assertions, and folding either into exit 1 would tell a script
+    /// the criteria were adjudicated and came out against the tree. See [`verdict_code`].
+    fn under(mut self, code: ExitCode) -> Self {
+        self.code = code;
+        self
+    }
 }
 
 fn run(invocation: &Invocation) -> CliResult<Outcome> {
@@ -181,6 +203,19 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             query,
             markdown,
         } => context_compare(world, query, *markdown),
+        Command::ProjectIngest(options) => project_ingest(options),
+        Command::ProjectAudit {
+            root,
+            issues,
+            decision_time,
+        } => project_audit(root, issues.as_deref(), decision_time.as_deref()),
+        Command::ProjectPlan(options) => project_plan(options),
+        Command::ProjectVerify {
+            root,
+            plan,
+            issues,
+            decision_time,
+        } => project_verify(root, plan, issues.as_deref(), decision_time.as_deref()),
         Command::EvidenceBundleVerify { bundle } => evidence_bundle_verify(bundle),
         Command::EvidenceBundleImport {
             bundle,
@@ -2646,6 +2681,851 @@ Next: bioprism context explain --world {} --query {}
         .any(|r| r.name == "fiber" && !r.admissible());
 
     Ok(Outcome::ok(comparison.to_json(), human).failing_if(fiber_inadmissible))
+}
+
+/// The `project` scope label for a scanned tree: the root's last path segment.
+///
+/// A display name, never an identity claim — the world id is derived from the file listing's
+/// content, so the same tree reached by two different paths still assembles to the same world.
+/// Derived the way the MCP server's project tools derive it, so a world assembled through either
+/// surface binds the same value into its scopes.
+fn project_label(root: &Path) -> String {
+    root.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .next_back()
+        .unwrap_or("project")
+        .to_string()
+}
+
+/// Reads the declared issues before anything walks the tree.
+///
+/// Read first because a malformed issues file is the operator's to edit: scanning first would
+/// spend the whole walk to arrive at the same refusal, and the diagnostic would name the file
+/// only after work nobody can use.
+fn project_issues(path: Option<&Path>) -> CliResult<Vec<Issue>> {
+    match path {
+        None => Ok(Vec::new()),
+        Some(path) => Issue::load(path)
+            .map_err(|error| CliError::from_project(error).about(path.display().to_string())),
+    }
+}
+
+/// Scans a project root and assembles its world, dimension document, pack and queries.
+///
+/// Nothing here is written or executed: the scan is static, and the assembled world already
+/// passed `bioprism_world::World::from_json` inside the crate before it is returned.
+fn project_assemble(
+    root: &Path,
+    issues: Vec<Issue>,
+    decision_time: Option<&str>,
+) -> CliResult<(ProjectScan, ProjectWorld)> {
+    let (scan, _ingestion) = ProjectScan::scan(root, &ScanOptions::new(project_label(root)))
+        .map_err(|error| CliError::from_project(error).about(root.display().to_string()))?;
+    let assembled = ProjectWorld::assemble(
+        &scan,
+        &AssemblyOptions {
+            decision_time: decision_time.unwrap_or_default().to_string(),
+            issues,
+            ..AssemblyOptions::default()
+        },
+    )
+    .map_err(CliError::from_project)?;
+    Ok((scan, assembled))
+}
+
+/// Writes the generated queries as one bundle document or as a directory of documents.
+///
+/// The single-file form is a *container* — `release` plus `issues` keyed by issue id — and each
+/// member of it is a `fiber-query/0.2` document. Keeping only the release query to make the one
+/// file fit would silently drop every issue region the caller asked to have generated, so the
+/// flag chooses where the queries go and never which of them survive.
+fn write_queries(
+    path: &Path,
+    assembled: &ProjectWorld,
+    dry_run: bool,
+) -> CliResult<Vec<io::WrittenArtifact>> {
+    if path.extension().and_then(std::ffi::OsStr::to_str) == Some("json") {
+        let bundle = json!({
+            "release": assembled.release_query,
+            "issues": assembled.issue_queries,
+        });
+        return Ok(vec![io::write_artifact(path, &bundle, dry_run)?]);
+    }
+
+    let mut written = vec![io::write_artifact(
+        &path.join("release.json"),
+        &assembled.release_query,
+        dry_run,
+    )?];
+    for (issue_id, query) in &assembled.issue_queries {
+        written.push(io::write_artifact(
+            &path.join(format!("issue-{issue_id}.json")),
+            query,
+            dry_run,
+        )?);
+    }
+    Ok(written)
+}
+
+/// Renders the scan's loss report: total entries and the count of each declared kind.
+///
+/// Printed on both project commands, because a project model is a lossy reading of a tree and a
+/// count of what the scan could not interpret is the only thing standing between "we read the
+/// project" and "we read the part of the project this scanner understands". Zero entries is a
+/// measured zero here — every skip is declared — so it is reported as a count like any other.
+fn render_losses(counts: &BTreeMap<String, u64>) -> String {
+    let total: u64 = counts.values().sum();
+    let detail = counts
+        .iter()
+        .map(|(kind, count)| format!("{kind} {count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if detail.is_empty() {
+        format!("  scan loss {total} entries\n")
+    } else {
+        format!("  scan loss {total} entries: {detail}\n")
+    }
+}
+
+fn project_ingest(options: &ProjectIngestOptions) -> CliResult<Outcome> {
+    let issues = project_issues(options.issues.as_deref())?;
+    let (scan, assembled) =
+        project_assemble(&options.root, issues, options.decision_time.as_deref())?;
+
+    let mut written = vec![
+        io::write_artifact(&options.world_out, &assembled.world, options.dry_run)?,
+        io::write_artifact(&options.pack_out, &assembled.pack, options.dry_run)?,
+        io::write_artifact(
+            &options.dimensions_out,
+            &assembled.dimensions,
+            options.dry_run,
+        )?,
+    ];
+    if let Some(path) = &options.queries_out {
+        written.extend(write_queries(path, &assembled, options.dry_run)?);
+    }
+
+    let facts = assembled.world["facts"].as_array().map_or(0, Vec::len);
+    let factors = assembled.world["factors"].as_array().map_or(0, Vec::len);
+    let components = assembled.world["facts"].as_array().map_or(0, |facts| {
+        facts
+            .iter()
+            .filter(|fact| {
+                fact["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("fact.component."))
+            })
+            .count()
+    });
+    let losses = scan.loss_kind_counts();
+
+    let document = json!({
+        "ok": true,
+        "world_id": assembled.world_id,
+        "facts": facts,
+        "factors": factors,
+        "components": components,
+        "issue_queries": assembled.issue_queries.keys().collect::<Vec<_>>(),
+        "losses_by_kind": losses,
+        "dry_run": options.dry_run,
+        "artifacts": written
+            .iter()
+            .map(|a| json!({
+                "path": a.path.display().to_string(),
+                "bytes": a.bytes,
+                "written": a.written,
+            }))
+            .collect::<Vec<_>>(),
+        "limitations": [
+            "the scan is static: tests are counted never run, markers are case-sensitive \
+             substring proxies, and requirement strings are never resolved against a registry",
+            "every skipped or unread byte is declared in losses_by_kind; what the scan could \
+             not interpret is reported as absent, never as zero",
+        ],
+    });
+
+    let mut human = format!(
+        "scanned {} into {}\n  {} facts, {} factors, {} components, {} issue queries\n",
+        options.root.display(),
+        assembled.world_id,
+        facts,
+        factors,
+        components,
+        assembled.issue_queries.len(),
+    );
+    human.push_str(&render_losses(&losses));
+    for artifact in &written {
+        human.push_str(&format!(
+            "  {} {} ({} bytes)\n",
+            if artifact.written {
+                "wrote"
+            } else {
+                "would write"
+            },
+            artifact.path.display(),
+            artifact.bytes
+        ));
+    }
+    human.push_str(&format!(
+        "\nNext: bioprism world validate --world {} --dimensions {}\n",
+        options.world_out.display(),
+        options.dimensions_out.display()
+    ));
+
+    Ok(Outcome::ok(document, human))
+}
+
+/// One issue's compiled evidence region, and the declarations that defined it.
+///
+/// `declared` and `unresolved` travel with the region because an issue's relevance here is its
+/// declared components and nothing else: a region that looks deliberately small is a different
+/// thing from a region built from a component name that resolved to nothing, and a reader who
+/// cannot tell them apart will read the second as the first.
+struct IssueRegion {
+    query_id: String,
+    selected_facts: Vec<String>,
+    declared: Vec<String>,
+    unresolved: Vec<String>,
+}
+
+/// Compiles each declared issue's query against the assembled world.
+///
+/// This re-scans and re-assembles the tree. [`bioprism_project::audit`] returns the verdict and
+/// its witnesses but not the world it judged, and the issue queries only exist inside that
+/// assembly, so the alternative would be to re-implement the audit pipeline here and let the
+/// CLI's verdict drift from the crate's. Paying for a second deterministic walk is the cheaper
+/// mistake, and the world ids are compared afterwards so a tree that moved between the two
+/// walks is reported rather than papered over.
+fn project_issue_regions(
+    root: &Path,
+    issues: &[Issue],
+    decision_time: Option<&str>,
+    report: &AuditReport,
+) -> CliResult<BTreeMap<String, IssueRegion>> {
+    let mut regions = BTreeMap::new();
+    if issues.is_empty() {
+        return Ok(regions);
+    }
+
+    let (_scan, assembled) = project_assemble(root, issues.to_vec(), decision_time)?;
+    if assembled.world_id != report.world_id {
+        return Err(CliError::new(
+            ExitCode::Stale,
+            format!(
+                "the tree changed while it was being audited: the verdict is about world {} and \
+                 the issue regions would be about world {}; re-run to audit one tree",
+                report.world_id, assembled.world_id
+            ),
+        )
+        .about(root.display().to_string()));
+    }
+
+    let world = bioprism_world::World::from_json(assembled.world.clone())
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let pack = DomainPack::from_json(&assembled.pack)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+
+    let declarations: BTreeMap<&str, &Issue> = issues
+        .iter()
+        .map(|issue| (issue.id.as_str(), issue))
+        .collect();
+
+    for (issue_id, document) in &assembled.issue_queries {
+        let query = Query::from_json(document.clone())
+            .map_err(|error| CliError::internal(format!("issue {issue_id:?} query: {error}")))?;
+        let compiled =
+            compile_with_oracle(&world, &query, pack.oracle()).map_err(CliError::from_compile)?;
+        let unresolved = world
+            .facts
+            .iter()
+            .find(|fact| fact.id.as_str() == format!("fact.issue.{issue_id}"))
+            .and_then(|fact| fact.value.get("unresolved_components"))
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        regions.insert(
+            issue_id.clone(),
+            IssueRegion {
+                query_id: document["query_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                selected_facts: compiled.certificate.selected_facts.clone(),
+                declared: declarations
+                    .get(issue_id.as_str())
+                    .map(|issue| issue.components.clone())
+                    .unwrap_or_default(),
+                unresolved,
+            },
+        );
+    }
+
+    Ok(regions)
+}
+
+/// Renders one oracle witness: the check that fired, the sentence declaring its mechanism, and
+/// the variable bindings it read.
+///
+/// The bindings are printed because a witness is a checkable object rather than a score — a
+/// reader must be able to re-run the check by hand against the values it saw.
+fn render_witness(witness: &LeakageWitness) -> String {
+    match witness {
+        LeakageWitness::DomainCheck {
+            check,
+            observed,
+            detail,
+        } => {
+            let mut text = format!("  witness {check}\n    {detail}\n");
+            for (variable, value) in observed {
+                text.push_str(&format!("    observed {variable} = {value}\n"));
+            }
+            text
+        }
+        other => format!("  witness {}\n", other.kind()),
+    }
+}
+
+/// Scans, assembles and judges a project under the emitted pack's rule oracle.
+///
+/// An invalid verdict exits 1 through [`Outcome::failing_if`], which is where `context compile`
+/// routes the same verdict: the command ran correctly and the property it checked does not hold.
+/// There is no `--fail-on-invalid` switch to gate it — compiling is useful whatever the oracle
+/// concludes, which is why that flag exists there, whereas a project audit *is* the verdict and a
+/// caller who did not want to hear it would not have run the command.
+fn project_audit(
+    root: &Path,
+    issues_path: Option<&Path>,
+    decision_time: Option<&str>,
+) -> CliResult<Outcome> {
+    let issues = project_issues(issues_path)?;
+    let report = bioprism_project::audit(
+        root,
+        &AuditOptions {
+            scan: Some(ScanOptions::new(project_label(root))),
+            assembly: AssemblyOptions {
+                decision_time: decision_time.unwrap_or_default().to_string(),
+                issues: issues.clone(),
+                ..AssemblyOptions::default()
+            },
+        },
+    )
+    .map_err(|error| CliError::from_project(error).about(root.display().to_string()))?;
+
+    let regions = project_issue_regions(root, &issues, decision_time, &report)?;
+    let invalid = report.status == OracleStatus::Invalid;
+    let witnesses = serde_json::to_value(&report.witnesses)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let loss_total: u64 = report.loss_kind_counts.values().sum();
+
+    let document = json!({
+        "ok": true,
+        "world_id": report.world_id,
+        "verdict": {
+            "status": report.status.as_str(),
+            "oracle_kind": report.oracle_kind,
+            "witnesses": witnesses,
+        },
+        "facts": report.fact_count,
+        "selected_facts": report.selected_fact_count,
+        "loss": {
+            "total": loss_total,
+            "by_kind": report.loss_kind_counts,
+        },
+        "issues": regions
+            .iter()
+            .map(|(issue_id, region)| (issue_id.clone(), json!({
+                "query_id": region.query_id,
+                "declared_components": region.declared,
+                "unresolved_components": region.unresolved,
+                "region": region.selected_facts,
+                "region_facts": region.selected_facts.len(),
+            })))
+            .collect::<serde_json::Map<String, Value>>(),
+        "limitations": [
+            "every check is a static-scan proxy and says so in its own witness detail; nothing \
+             is executed, resolved or fetched",
+            "an issue's region comes from the components it declares, resolved syntactically; \
+             there is no semantic relevance search, and an unresolvable declaration is reported \
+             rather than guessed at",
+        ],
+    });
+
+    let mut human = format!(
+        "project world {} judged {} by {}\n  {} facts in the world, {} selected for the release \
+         query\n",
+        report.world_id,
+        report.status.as_str(),
+        report.oracle_kind,
+        report.fact_count,
+        report.selected_fact_count,
+    );
+    for witness in &report.witnesses {
+        human.push_str(&render_witness(witness));
+    }
+    human.push_str(&render_losses(&report.loss_kind_counts));
+    for (issue_id, region) in &regions {
+        human.push_str(&format!(
+            "  issue {issue_id} — {} facts in its declared region ({})\n",
+            region.selected_facts.len(),
+            if region.declared.is_empty() {
+                "no components declared".to_string()
+            } else {
+                format!("declared {}", region.declared.join(", "))
+            }
+        ));
+        for fact_id in &region.selected_facts {
+            human.push_str(&format!("      {fact_id}\n"));
+        }
+        if !region.unresolved.is_empty() {
+            human.push_str(&format!(
+                "      unresolved declarations: {}\n",
+                region.unresolved.join(", ")
+            ));
+        }
+    }
+    human.push_str(&format!(
+        "\nNext: bioprism project ingest --root {} --world-out world.json --pack-out pack.json \
+         --dimensions-out dimensions.json\n",
+        root.display()
+    ));
+
+    Ok(Outcome::ok(document, human).failing_if(invalid))
+}
+
+/// The schema of the document `project plan --criteria` reads.
+const DECLARATIONS_SCHEMA_VERSION: &str = "bioprism-repair-declarations/0.1";
+
+/// Reads a caller's declared criteria, obligations and falsifiers.
+///
+/// A separate document rather than a pile of flags, because a criterion is a name, a sentence and
+/// a predicate, and three of those on a command line would be positional in all but syntax.
+///
+/// Strict in the same way `bioprism_repair::RepairPlan::from_json` is strict: an undeclared key is
+/// refused rather than ignored, so a misspelled `falsifier` does not silently become a plan with
+/// no falsifier that the admissibility gate then blames on the author. An *absent* list, by
+/// contrast, is accepted and means the author declared none of that kind — which is what
+/// `Admissibility::Undeclared` already reports for obligations, and what the generated plan's own
+/// limitations already state.
+///
+/// A declared criterion must carry a `rationale`; an obligation and a falsifier need none. That
+/// asymmetry is the plan document's, not this reader's invention: `AcceptanceCriterion` is the one
+/// item type with a rationale field, and a criterion is the item a plan marks as
+/// `Origin::Declared` precisely to say somebody is accountable for it. An accountable claim with
+/// no stated reason is the shape of a criterion added to make a verification pass.
+fn read_declarations(path: &Path) -> CliResult<PlanOptions> {
+    let document = io::read_json(path)?;
+    let blame = |message: String| CliError::invalid(message).about(path.display().to_string());
+
+    let map = document.as_object().ok_or_else(|| {
+        blame(format!("a {DECLARATIONS_SCHEMA_VERSION} document is an object"))
+    })?;
+    let declared = [
+        "schema_version",
+        "criteria",
+        "obligations",
+        "falsifiers",
+        "limitations",
+    ];
+    if let Some(unknown) = map.keys().find(|key| !declared.contains(&key.as_str())) {
+        return Err(blame(format!(
+            "undeclared field {unknown:?} on the declarations document; the declared fields are \
+             {declared:?}"
+        )));
+    }
+    match map.get("schema_version").and_then(Value::as_str) {
+        Some(version) if version == DECLARATIONS_SCHEMA_VERSION => {}
+        Some(other) => {
+            return Err(blame(format!(
+                "declarations document declares schema_version {other:?}, expected \
+                 {DECLARATIONS_SCHEMA_VERSION:?}"
+            )))
+        }
+        None => {
+            return Err(blame(format!(
+                "declarations document needs a string \"schema_version\" of \
+                 {DECLARATIONS_SCHEMA_VERSION:?}"
+            )))
+        }
+    }
+
+    let items = |field: &str, with_rationale: bool| -> CliResult<Vec<DeclaredItem>> {
+        let entries = match map.get(field) {
+            None => return Ok(Vec::new()),
+            Some(value) => value
+                .as_array()
+                .ok_or_else(|| blame(format!("{field:?} must be an array")))?,
+        };
+        entries
+            .iter()
+            .map(|entry| {
+                let fields: &[&str] = if with_rationale {
+                    &["name", "statement", "predicate", "rationale"]
+                } else {
+                    &["name", "statement", "predicate"]
+                };
+                let entry = entry.as_object().ok_or_else(|| {
+                    blame(format!("every entry in {field:?} is an object"))
+                })?;
+                if let Some(unknown) = entry.keys().find(|key| !fields.contains(&key.as_str())) {
+                    return Err(blame(format!(
+                        "undeclared field {unknown:?} on an entry in {field:?}; the declared \
+                         fields are {fields:?}"
+                    )));
+                }
+                let text = |key: &str| -> CliResult<String> {
+                    entry
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            blame(format!("an entry in {field:?} needs a string {key:?}"))
+                        })
+                };
+                let predicate = predicate_from_json(entry.get("predicate").ok_or_else(|| {
+                    blame(format!("an entry in {field:?} declares no \"predicate\""))
+                })?)
+                .map_err(|error| {
+                    blame(format!("an entry in {field:?} carries no predicate: {error}"))
+                })?;
+                let item = DeclaredItem::new(text("name")?, text("statement")?, predicate);
+                Ok(if with_rationale {
+                    item.with_rationale(text("rationale")?)
+                } else {
+                    item
+                })
+            })
+            .collect()
+    };
+
+    let limitations = match map.get("limitations") {
+        None => Vec::new(),
+        Some(value) => value
+            .as_array()
+            .ok_or_else(|| blame("\"limitations\" must be an array of strings".to_string()))?
+            .iter()
+            .map(|entry| {
+                entry
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| blame("\"limitations\" carries a non-string entry".to_string()))
+            })
+            .collect::<CliResult<Vec<String>>>()?,
+    };
+
+    Ok(PlanOptions {
+        declared_criteria: items("criteria", true)?,
+        declared_obligations: items("obligations", false)?,
+        declared_falsifiers: items("falsifiers", false)?,
+        limitations,
+    })
+}
+
+/// One `kind origin name` column block, so a reader can scan the origins down a single column.
+///
+/// The origin is on every line because a derived criterion is a proxy for something the release
+/// pack could see and a declared one is a claim someone is accountable for. Printing them in one
+/// undifferentiated list would let the tool's inferences borrow the author's authority.
+fn render_plan_items(plan: &RepairPlan) -> String {
+    let mut text = String::new();
+    for criterion in plan.criteria() {
+        text.push_str(&format!(
+            "    criterion  {:<8}  {}\n",
+            criterion.origin.as_str(),
+            criterion.name
+        ));
+    }
+    for obligation in plan.obligations() {
+        text.push_str(&format!(
+            "    obligation {:<8}  {}\n",
+            obligation.origin.as_str(),
+            obligation.name
+        ));
+    }
+    for falsifier in plan.falsifiers() {
+        text.push_str(&format!(
+            "    falsifier  {:<8}  {}\n",
+            falsifier.origin.as_str(),
+            falsifier.name
+        ));
+    }
+    text
+}
+
+/// `1 falsifier` / `2 falsifiers`.
+///
+/// A count line is the first thing a reader checks a plan against, and "1 criteria" is the kind of
+/// wrong that makes a reader wonder what else was assembled without being read.
+fn counted(n: usize, singular: &str, plural: &str) -> String {
+    format!("{n} {}", if n == 1 { singular } else { plural })
+}
+
+fn render_limitations(limitations: &[String]) -> String {
+    let mut text = String::from("  limitations:\n");
+    for line in limitations {
+        text.push_str(&format!("    - {line}\n"));
+    }
+    text
+}
+
+/// Derives a repair plan for one declared issue and writes it.
+///
+/// Nothing here edits a file in the scanned tree, applies a patch, builds, or runs a test. The one
+/// write is the plan document itself, and `--dry-run` suppresses it exactly as it does on
+/// `project ingest`.
+fn project_plan(options: &ProjectPlanOptions) -> CliResult<Outcome> {
+    let declared = match &options.criteria {
+        None => PlanOptions::default(),
+        Some(path) => read_declarations(path)?,
+    };
+    let issues = project_issues(Some(&options.issues))?;
+    let (_scan, assembled) =
+        project_assemble(&options.root, issues, options.decision_time.as_deref())?;
+
+    let query_document = assembled.issue_queries.get(&options.issue).ok_or_else(|| {
+        let declared_ids: Vec<&str> = assembled
+            .issue_queries
+            .keys()
+            .map(String::as_str)
+            .collect();
+        CliError::invalid(format!(
+            "no issue {:?} is declared in {}; it declares {}",
+            options.issue,
+            options.issues.display(),
+            if declared_ids.is_empty() {
+                "no issues at all".to_string()
+            } else {
+                declared_ids.join(", ")
+            }
+        ))
+        .about(options.issues.display().to_string())
+    })?;
+
+    let world = bioprism_world::World::from_json(assembled.world.clone())
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let pack = DomainPack::from_json(&assembled.pack)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let query = Query::from_json(query_document.clone()).map_err(|error| {
+        CliError::internal(format!("issue {:?} query: {error}", options.issue))
+    })?;
+    let compiled =
+        compile_with_oracle(&world, &query, pack.oracle()).map_err(CliError::from_compile)?;
+
+    let plan = plan_for_issue(
+        &world,
+        &pack,
+        &options.issue,
+        &compiled.certificate,
+        &declared,
+    )
+    .map_err(CliError::from_repair)?;
+    let plan_document = plan.to_json().map_err(CliError::from_repair)?;
+    let written = io::write_artifact(&options.out, &plan_document, options.dry_run)?;
+
+    let document = json!({
+        "ok": true,
+        "plan_id": plan.plan_id(),
+        "issue_id": plan.issue_id(),
+        "world_id": plan.evidence_binding().world_id,
+        // `region_fact_ids`, not `region_facts`: PROJECT_MODELING records that on this surface
+        // `region_facts` is the *count* beside the `region` list, and `project audit` emits it that
+        // way three hundred lines up. One name meaning a number in one `project` document and a
+        // list of ids in the next is the kind of drift a caller only finds by indexing into it. The
+        // name here is the plan document's own field name, which is also what `repair_plan` returns.
+        "region_fact_ids": plan.evidence_binding().region_fact_ids,
+        "region_facts": plan.evidence_binding().region_fact_ids.len(),
+        "criteria": plan.criteria().len(),
+        "obligations": plan.obligations().len(),
+        "falsifiers": plan.falsifiers().len(),
+        "plan": plan_document,
+        "dry_run": options.dry_run,
+        "artifacts": [json!({
+            "path": written.path.display().to_string(),
+            "bytes": written.bytes,
+            "written": written.written,
+        })],
+        "limitations": [
+            "this command plans and never repairs: no file is edited, no patch is produced, \
+             nothing is built and no test is run",
+            "a derived criterion is a proxy for something the release pack could see, never for \
+             what the issue means; the plan's own limitations enumerate the rest",
+        ],
+    });
+
+    let mut human = format!(
+        "planned {} for issue {} in world {}\n  goal: {}\n  {}, {}, {} over an evidence region \
+         of {}\n",
+        plan.plan_id(),
+        plan.issue_id(),
+        plan.evidence_binding().world_id,
+        plan.goal(),
+        counted(plan.criteria().len(), "criterion", "criteria"),
+        counted(plan.obligations().len(), "obligation", "obligations"),
+        counted(plan.falsifiers().len(), "falsifier", "falsifiers"),
+        counted(
+            plan.evidence_binding().region_fact_ids.len(),
+            "fact",
+            "facts"
+        ),
+    );
+    human.push_str(&render_plan_items(&plan));
+    human.push_str(&render_limitations(plan.limitations()));
+    human.push_str(&format!(
+        "  {} {} ({} bytes)\n",
+        if written.written {
+            "wrote"
+        } else {
+            "would write"
+        },
+        written.path.display(),
+        written.bytes
+    ));
+    human.push_str(&format!(
+        "\nNext: bioprism project verify --root {} --plan {} --issues {}\n",
+        options.root.display(),
+        options.out.display(),
+        options.issues.display(),
+    ));
+
+    Ok(Outcome::ok(document, human))
+}
+
+/// The exit code one acceptance report lands on.
+///
+/// Four states, four codes, and the two that would be cheapest to collapse are the two that must
+/// not be:
+///
+/// * **Stale is not a failed verification.** Nothing was evaluated, so exit 1 — "the checked
+///   property does not hold" — would report a verdict the run never reached. Exit 9 is the one
+///   failure in the registry whose remedy touches nothing in the request: re-read the tree, or
+///   re-plan against it, and re-send.
+/// * **Underdetermined is not `not_met`.** Exit 1 invites the reader to conclude that clearing
+///   the listed failures is the whole remaining distance to a pass, and when a criterion never ran
+///   that conclusion is false. Exit 8 already means "ran correctly; the evidence does not decide",
+///   which is exactly what the report says.
+///
+/// `falsified` and `not_met` share exit 1 with `project audit`'s invalid verdict, because both are
+/// determinate adverse verdicts about a run that completed. Admissibility is deliberately absent
+/// from this function: an obligation asks whether the change was admissible *to make*, checked
+/// here only retrospectively, and letting a weaker check move the process status would contaminate
+/// it exactly as it would contaminate the outcome.
+fn verdict_code(report: &AcceptanceReport) -> ExitCode {
+    match report.outcome() {
+        None => ExitCode::Stale,
+        Some(RepairOutcome::Met) => ExitCode::Ok,
+        Some(RepairOutcome::Underdetermined) => ExitCode::Indeterminate,
+        Some(RepairOutcome::NotMet) | Some(RepairOutcome::Falsified) => ExitCode::AssertionFailed,
+    }
+}
+
+/// Re-scans the tree and reports which of a plan's declared criteria held.
+///
+/// # Not implemented here
+///
+/// **A repaired tree cannot be given a verdict on this surface.** A project world id is derived
+/// from the file listing, so any edit produces a different world and this command reports `stale`
+/// — correctly, and unhelpfully for the case the feature exists for.
+/// `bioprism_repair::verify_successor` exists for it and takes a `Succession`: a named person's
+/// assertion that the new world is the repaired successor of the planned one, recorded verbatim
+/// and never verified. No flag here mints one. That is a gap in this command, not in the crate,
+/// and it is stated rather than worked around by verifying against the new world and calling the
+/// difference immaterial.
+fn project_verify(
+    root: &Path,
+    plan_path: &Path,
+    issues_path: Option<&Path>,
+    decision_time: Option<&str>,
+) -> CliResult<Outcome> {
+    let plan = RepairPlan::from_json(&io::read_json(plan_path)?)
+        .map_err(|error| CliError::from_repair(error).about(plan_path.display().to_string()))?;
+    let issues = project_issues(issues_path)?;
+    let (_scan, assembled) = project_assemble(root, issues, decision_time)?;
+    let world = bioprism_world::World::from_json(assembled.world.clone())
+        .map_err(|error| CliError::internal(error.to_string()))?;
+
+    let report = verify(&plan, &world);
+    let code = verdict_code(&report);
+
+    let document = json!({
+        "ok": true,
+        "exit_code": code.as_i32(),
+        "report": report.to_json(),
+    });
+
+    let mut human = match &report {
+        AcceptanceReport::Stale {
+            plan_id,
+            issue_id,
+            expected_world_id,
+            found_world_id,
+            expected_world_sha256,
+            found_world_sha256,
+            ..
+        } => format!(
+            "{plan_id} for issue {issue_id}: STALE — nothing was evaluated\n  planned against \
+             world {expected_world_id} ({expected_world_sha256})\n  offered world \
+             {found_world_id} ({found_world_sha256})\n"
+        ),
+        AcceptanceReport::Evaluated {
+            plan_id,
+            issue_id,
+            goal,
+            world_id,
+            outcome,
+            admissibility,
+            missing_region_facts,
+            ..
+        } => {
+            let mut text = format!(
+                "{plan_id} for issue {issue_id}: {} (admissibility {})\n  goal: {goal}\n  world \
+                 {world_id}\n",
+                outcome.as_str(),
+                admissibility.as_str(),
+            );
+            if !missing_region_facts.is_empty() {
+                text.push_str(&format!(
+                    "  the plan binds {} that the verified world no longer carries: {}\n",
+                    counted(
+                        missing_region_facts.len(),
+                        "region fact",
+                        "region facts"
+                    ),
+                    missing_region_facts.join(", ")
+                ));
+            }
+            text
+        }
+    };
+    for item in report.items() {
+        human.push_str(&format!(
+            "  {:<10} {:<8}  {:<13}  {}\n      {}\n",
+            item.kind.as_str(),
+            item.origin.as_str(),
+            item.status.as_str(),
+            item.name,
+            item.statement
+        ));
+        if let ItemStatus::NotEvaluable(obstruction) = &item.status {
+            human.push_str(&format!(
+                "      blocked: {} {}\n",
+                obstruction.variable, obstruction.reason
+            ));
+        }
+    }
+    human.push_str(&render_limitations(report.limitations()));
+    human.push_str(&format!(
+        "\nNext: bioprism project audit --root {}\n",
+        root.display()
+    ));
+
+    Ok(Outcome::ok(document, human).under(code))
 }
 
 fn prism_fork(

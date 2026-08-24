@@ -93,6 +93,37 @@ COMMANDS
                     Apply the standard metamorphic suite, validate every postcondition against
                     the oracle, deduplicate by content, and report effective diversity.
 
+  project ingest    --root <dir> [--issues <path>] [--decision-time <rfc3339>]
+                    --world-out <path> --pack-out <path> --dimensions-out <path>
+                    [--queries-out <dir or .json path>] [--dry-run]
+                    Scan a software project tree into a fiber-world/0.1 document, its
+                    bioprism-scope-dimensions/0.1 classification, the release-readiness pack
+                    and the generated fiber-query/0.2 documents. Static scan only: nothing is
+                    executed or resolved, and every skipped byte ships as declared loss.
+                    --queries-out ending in .json writes one document carrying the release query
+                    and every issue query; otherwise a directory of release.json plus
+                    issue-<id>.json.
+  project audit     --root <dir> [--issues <path>] [--decision-time <rfc3339>]
+                    Scan, assemble and judge the project under the release-readiness pack's
+                    rule oracle. Exit 1 when the verdict is invalid. With --issues, also
+                    compiles and prints each issue's declared evidence region.
+  project plan      --root <dir> --issues <path> --issue <id> [--decision-time <rfc3339>]
+                    [--criteria <path>] --out <path> [--dry-run]
+                    Derive a repair plan for one declared issue from its compiled evidence
+                    region and write it as a bioprism-repair-plan/0.1 document. --criteria loads
+                    a bioprism-repair-declarations/0.1 file whose criteria, obligations and
+                    falsifiers are recorded as declared by their author; the generator's own
+                    items are recorded as derived and the two never merge. Nothing is edited,
+                    built or run: the plan is a declaration of what would count as evidence.
+  project verify    --root <dir> --plan <path> [--issues <path>] [--decision-time <rfc3339>]
+                    Re-scan the tree and report which of the plan's declared criteria held,
+                    each with its own three-valued status and the obstruction that stopped it.
+                    Never reports that the issue is fixed. Exit 1 when the outcome is not_met
+                    or falsified, 8 when a criterion or falsifier could not be evaluated, and 9
+                    when the plan is bound to a different world — a stale plan evaluates
+                    nothing, so it is not a failed verification. Obligations are reported on
+                    their own admissibility axis and never move the exit code.
+
   evidence verify   --bundle <path>
                     Verify a portable mission evidence bundle's schema, retention claims and
                     content digests. Exit 1 when the bundle is well-formed but unverifiable.
@@ -272,6 +303,19 @@ pub enum Command {
         world: PathBuf,
         out_dir: Option<PathBuf>,
     },
+    ProjectIngest(ProjectIngestOptions),
+    ProjectAudit {
+        root: PathBuf,
+        issues: Option<PathBuf>,
+        decision_time: Option<String>,
+    },
+    ProjectPlan(ProjectPlanOptions),
+    ProjectVerify {
+        root: PathBuf,
+        plan: PathBuf,
+        issues: Option<PathBuf>,
+        decision_time: Option<String>,
+    },
     EvidenceBundleVerify {
         bundle: PathBuf,
     },
@@ -450,6 +494,41 @@ pub enum Family {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct ProjectIngestOptions {
+    pub root: PathBuf,
+    pub issues: Option<PathBuf>,
+    /// Already validated as RFC 3339 by the parser; kept as the caller's exact string so the
+    /// emitted world carries their bytes, not a re-rendering.
+    pub decision_time: Option<String>,
+    pub world_out: PathBuf,
+    pub pack_out: PathBuf,
+    pub dimensions_out: PathBuf,
+    pub queries_out: Option<PathBuf>,
+    pub dry_run: bool,
+}
+
+/// `project plan`'s parsed invocation.
+///
+/// `issues` is required here although `project ingest` and `project audit` both take it
+/// optionally. Those two commands have something to say about a tree with no declared issues; a
+/// plan is *for* one issue, so an invocation naming none has no subject, and defaulting to an
+/// empty issue list would turn that into "issue not found in the world" — a diagnostic pointing
+/// at the tree rather than at the missing flag.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ProjectPlanOptions {
+    pub root: PathBuf,
+    pub issues: PathBuf,
+    pub issue: String,
+    /// Already validated as RFC 3339 by the parser; kept as the caller's exact string.
+    pub decision_time: Option<String>,
+    /// A `bioprism-repair-declarations/0.1` document, or nothing: a plan with no declared items
+    /// carries only what the generator could derive, and says so in its own limitations.
+    pub criteria: Option<PathBuf>,
+    pub out: PathBuf,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct CompileOptions {
     pub world: PathBuf,
     pub query: PathBuf,
@@ -582,6 +661,38 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         },
         ("prism", "minimize") => Command::PrismMinimize {
             world: options.take_path("--world")?,
+        },
+        ("project", "ingest") => Command::ProjectIngest(ProjectIngestOptions {
+            root: options.take_path("--root")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
+            world_out: options.take_path("--world-out")?,
+            pack_out: options.take_path("--pack-out")?,
+            dimensions_out: options.take_path("--dimensions-out")?,
+            queries_out: options.take_optional_path("--queries-out"),
+            dry_run: options.take_switch("--dry-run"),
+        }),
+        ("project", "audit") => Command::ProjectAudit {
+            root: options.take_path("--root")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
+        },
+        ("project", "plan") => Command::ProjectPlan(ProjectPlanOptions {
+            root: options.take_path("--root")?,
+            issues: options.take_path("--issues")?,
+            issue: options
+                .take_optional("--issue")
+                .ok_or_else(|| usage("--issue is required and takes a declared issue id"))?,
+            decision_time: take_decision_time(&mut options)?,
+            criteria: options.take_optional_path("--criteria"),
+            out: options.take_path("--out")?,
+            dry_run: options.take_switch("--dry-run"),
+        }),
+        ("project", "verify") => Command::ProjectVerify {
+            root: options.take_path("--root")?,
+            plan: options.take_path("--plan")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
         },
         // `--domain` is refused here rather than silently accepted-and-ignored. The comparison
         // harness (`bioprism_baseline::compare`) judges every strategy's selection against the
@@ -847,6 +958,24 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
     Ok(Parsed::Run(Invocation { json, command }))
 }
 
+/// Takes `--decision-time`, refusing anything the workspace's own RFC 3339 parser refuses.
+///
+/// Validated here rather than deep inside assembly, because there the malformed string would
+/// surface as the emitted world failing the reference validator — which reads as a bug in this
+/// binary, when in fact the flag value is the thing that needs editing. The caller's exact
+/// string is kept: the parse is a gate, not a normalisation.
+fn take_decision_time(options: &mut Options) -> CliResult<Option<String>> {
+    match options.take_optional("--decision-time") {
+        None => Ok(None),
+        Some(text) => {
+            bioprism_scope::Timestamp::parse(&text).map_err(|error| {
+                usage(format!("--decision-time must be RFC 3339: {error}"))
+            })?;
+            Ok(Some(text))
+        }
+    }
+}
+
 fn extract_flag(tokens: &mut Vec<String>, flag: &str) -> bool {
     let present = tokens.iter().any(|t| t == flag);
     tokens.retain(|t| t != flag);
@@ -957,6 +1086,225 @@ mod tests {
         );
         assert!(text.contains("world validate    --world <path> [--dimensions <path>]"));
         assert!(text.contains("world sweep       [--distractors <n,n,...>] [--seed <n>] [--markdown]"));
+    }
+
+    #[test]
+    fn help_documents_both_project_commands_and_every_flag_they_parse() {
+        let text = super::help();
+        assert!(text.contains("project ingest    --root <dir>"));
+        assert!(text.contains("project audit     --root <dir>"));
+        for flag in [
+            "--issues",
+            "--decision-time",
+            "--world-out",
+            "--pack-out",
+            "--dimensions-out",
+            "--queries-out",
+        ] {
+            assert!(
+                text.contains(flag),
+                "a flag the project parser accepts must be documented: {flag}"
+            );
+        }
+        assert!(
+            text.contains("Exit 1 when the verdict is invalid"),
+            "the audit's exit contract is the reason to run it and must be stated"
+        );
+    }
+
+    #[test]
+    fn project_ingest_parses_every_declared_output_path_and_the_dry_run_switch() {
+        let parsed = parse(
+            [
+                "project",
+                "ingest",
+                "--root",
+                "tree",
+                "--issues",
+                "issues.json",
+                "--decision-time",
+                "2024-01-01T00:00:00Z",
+                "--world-out",
+                "world.json",
+                "--pack-out",
+                "pack.json",
+                "--dimensions-out",
+                "dimensions.json",
+                "--queries-out",
+                "queries",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project ingest");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ProjectIngest(super::ProjectIngestOptions {
+                    root: PathBuf::from("tree"),
+                    issues: Some(PathBuf::from("issues.json")),
+                    decision_time: Some("2024-01-01T00:00:00Z".into()),
+                    world_out: PathBuf::from("world.json"),
+                    pack_out: PathBuf::from("pack.json"),
+                    dimensions_out: PathBuf::from("dimensions.json"),
+                    queries_out: Some(PathBuf::from("queries")),
+                    dry_run: true,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_the_repair_commands_and_the_exit_code_a_stale_plan_reports() {
+        let text = super::help();
+        assert!(text.contains("project plan      --root <dir>"));
+        assert!(text.contains("project verify    --root <dir>"));
+        for flag in ["--issue ", "--criteria", "--out ", "--plan "] {
+            assert!(
+                text.contains(flag),
+                "a flag the repair parser accepts must be documented: {flag:?}"
+            );
+        }
+        assert!(
+            text.contains("Exit 1 when the outcome is not_met")
+                && text.contains("a stale plan evaluates"),
+            "the three verdict-bearing exit codes are what a caller branches on and must be \
+             stated, staleness included:\n{text}"
+        );
+        assert!(
+            text.contains("Never reports that the issue is fixed"),
+            "the help must state the refusal the whole command exists for:\n{text}"
+        );
+    }
+
+    #[test]
+    fn project_plan_requires_the_issue_it_plans_for_rather_than_defaulting_to_none() {
+        let error = parse(
+            [
+                "project", "plan", "--root", "tree", "--issues", "issues.json", "--out", "plan.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("a plan with no subject must be refused");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(
+            error.message.contains("--issue is required"),
+            "the message must name the flag the operator has to add: {}",
+            error.message
+        );
+
+        let without_issues = parse(
+            [
+                "project", "plan", "--root", "tree", "--issue", "ISSUE-1", "--out", "plan.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("planning against a tree with no declared issues must be refused");
+        assert!(
+            without_issues.message.contains("--issues"),
+            "an absent issues file must point at the flag, not at the tree: {}",
+            without_issues.message
+        );
+    }
+
+    #[test]
+    fn project_plan_parses_its_declaration_file_output_path_and_dry_run_switch() {
+        let parsed = parse(
+            [
+                "project",
+                "plan",
+                "--root",
+                "tree",
+                "--issues",
+                "issues.json",
+                "--issue",
+                "ISSUE-1",
+                "--decision-time",
+                "2024-01-01T00:00:00Z",
+                "--criteria",
+                "declared.json",
+                "--out",
+                "plan.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project plan");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ProjectPlan(super::ProjectPlanOptions {
+                    root: PathBuf::from("tree"),
+                    issues: PathBuf::from("issues.json"),
+                    issue: "ISSUE-1".into(),
+                    decision_time: Some("2024-01-01T00:00:00Z".into()),
+                    criteria: Some(PathBuf::from("declared.json")),
+                    out: PathBuf::from("plan.json"),
+                    dry_run: true,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn project_verify_parses_the_plan_it_checks_and_the_tree_it_checks_it_against() {
+        let parsed = parse(
+            [
+                "--json",
+                "project",
+                "verify",
+                "--root",
+                "tree",
+                "--plan",
+                "plan.json",
+                "--issues",
+                "issues.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project verify");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::ProjectVerify {
+                    root: PathBuf::from("tree"),
+                    plan: PathBuf::from("plan.json"),
+                    issues: Some(PathBuf::from("issues.json")),
+                    decision_time: None,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_decision_time_that_is_not_rfc_3339_is_refused_at_the_flag_rather_than_inside_assembly() {
+        let error = parse(
+            [
+                "project",
+                "audit",
+                "--root",
+                "tree",
+                "--decision-time",
+                "yesterday",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("a malformed decision time must be a usage error");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(
+            error.message.contains("--decision-time must be RFC 3339"),
+            "the message must name the flag the operator has to edit: {}",
+            error.message
+        );
     }
 
     #[test]

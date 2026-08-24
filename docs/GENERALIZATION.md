@@ -7,6 +7,10 @@ legal privilege review, software supply-chain release review) compile end to end
 `crates/domain/tests/end_to_end.rs`; every statement below is checked there or in
 `crates/domain/tests/{pack_documents,rule_language}.rs`.
 
+Project modeling is the worked large-scale example of a domain pack: `bioprism-project` scans an
+entire software project into a fiber-world under the sealed adapter contract and judges it with
+the `project-release-readiness` pack — see [PROJECT_MODELING](PROJECT_MODELING.md).
+
 ## Where the biology actually lived
 
 The pipeline itself is domain-neutral. Facts, typed factors, scopes, protected closure, slicing,

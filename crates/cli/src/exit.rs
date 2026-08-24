@@ -36,11 +36,14 @@
 //! asked. [`ExitCode::retryability`] returns `None` for both rather than inventing a third state
 //! that consumers would have to special-case anyway.
 
+use bioprism_adapter::AdapterError;
 use bioprism_autopilot::{AutopilotError, GrantError};
 use bioprism_baseline::CompareError;
 use bioprism_fiber::{FiberError, PolicyViolation};
 use bioprism_mutation::MutationError;
 use bioprism_prism::MinimizeError;
+use bioprism_project::ProjectError;
+use bioprism_repair::RepairError;
 use bioprism_store::StoreError;
 use std::fmt;
 
@@ -342,6 +345,92 @@ impl CliError {
         CliError::new(code, error.to_string())
     }
 
+    /// Routes a project scan, assembly or audit failure to the code carrying its 40.36 class.
+    ///
+    /// The split follows who has to move. A root that cannot be read is a dependency failure
+    /// (`io`, retryable as-is once the path exists). A malformed issues file, a source the
+    /// adapter refuses, and a tree whose component directories collide on one slug are all
+    /// conversations about the operator's input (`invalid_input`): re-sending the identical
+    /// command cannot succeed until the input is edited. An emitted fact the sealed ingestion
+    /// rejects, or an assembled world, pack or query that fails its own strict parser, is this
+    /// binary's fault — the emitter and the parser ship together, so the operator supplied
+    /// nothing that could be edited — and lands on [`CliError::internal`], exactly as
+    /// `world sweep` routes a generated world its own loader rejects.
+    ///
+    /// The fiber case defers to [`CliError::from_compile`] rather than naming a code, so the
+    /// paths that surface the same [`FiberError`] cannot drift apart. Written against the error
+    /// types rather than at the call site so a new variant on either enum fails to compile
+    /// until somebody decides which code it belongs under.
+    pub fn from_project(error: ProjectError) -> Self {
+        let message = error.to_string();
+        match error {
+            ProjectError::Adapter(adapter) => {
+                let code = match &adapter {
+                    AdapterError::Io { .. } => ExitCode::Io,
+                    AdapterError::UnsupportedSource { .. }
+                    | AdapterError::UnsupportedFormat { .. }
+                    | AdapterError::Csv(_)
+                    | AdapterError::AmbiguousIdentity { .. }
+                    | AdapterError::SchemaDrift { .. }
+                    | AdapterError::ValueTypeMismatch { .. }
+                    | AdapterError::Identifier { .. } => ExitCode::InvalidInput,
+                    AdapterError::MalformedFact { .. }
+                    | AdapterError::DuplicateFactId { .. }
+                    | AdapterError::Canonical { .. } => return CliError::internal(message),
+                };
+                CliError::new(code, message)
+            }
+            ProjectError::Issues(_) | ProjectError::Assembly(_) => CliError::invalid(message),
+            ProjectError::Io { .. } => CliError::new(ExitCode::Io, message),
+            ProjectError::World(_) | ProjectError::Domain(_) => CliError::internal(message),
+            ProjectError::Fiber(source) => {
+                CliError::new(CliError::from_compile(source).code, message)
+            }
+        }
+    }
+
+    /// Routes a repair-planning failure to the code carrying its 40.36 class.
+    ///
+    /// The split follows who has to move, and for this crate that is almost always the *author*:
+    /// a plan with no falsifier, a declaration file whose two items share a name, a plan body
+    /// edited after its content-derived id was minted, and an `--issue` naming an issue the tree
+    /// does not declare are all documents or flags an operator edits, so they are exit 3. Nothing
+    /// here is exit 4: `bioprism-repair` reports a failed check as an [`ItemStatus`] on the report
+    /// rather than as an error, so a `RepairError` never means "no result satisfies the contract",
+    /// it means "this document is not a plan".
+    ///
+    /// Three variants are this binary's fault instead. `MalformedIssueFact`, `RegionFactUnknown`
+    /// and `RegionWorldMismatch` can only fire when the world and the certificate handed to the
+    /// generator disagree, and both come from a single assembly performed here — the operator
+    /// supplied nothing that could be edited to clear them. `Canonical` is the same case one layer
+    /// down: JSON cannot carry a value that fails to canonicalise, so anything that does was made
+    /// unrepresentable here.
+    ///
+    /// Written against the error type rather than at the call site so a new variant fails to
+    /// compile until somebody decides which code it belongs under.
+    ///
+    /// [`ItemStatus`]: bioprism_repair::ItemStatus
+    pub fn from_repair(error: RepairError) -> Self {
+        let message = error.to_string();
+        match error {
+            RepairError::Document(_)
+            | RepairError::Predicate(_)
+            | RepairError::NoFalsifier { .. }
+            | RepairError::NoCriterion { .. }
+            | RepairError::DuplicateItemName { .. }
+            | RepairError::MissingMandatoryLimitation
+            | RepairError::EmptyField { .. }
+            | RepairError::RegionFactIds(_)
+            | RepairError::PlanIdMismatch { .. }
+            | RepairError::UnknownIssue { .. }
+            | RepairError::UnrepresentablePredicate(_) => CliError::invalid(message),
+            RepairError::Canonical(_)
+            | RepairError::MalformedIssueFact(_)
+            | RepairError::RegionFactUnknown { .. }
+            | RepairError::RegionWorldMismatch { .. } => CliError::internal(message),
+        }
+    }
+
     /// Routes a comparison failure to the code carrying its 40.36 class.
     ///
     /// [`CompareError`] has one variant and it is the oracle declining to judge the full-context
@@ -583,6 +672,47 @@ mod tests {
             ExitCode::InvalidInput,
             "a grant naming agent_mission is a defect in the authority document, not a refusal \
              a further grant could clear"
+        );
+    }
+
+    #[test]
+    fn a_plan_defect_is_the_authors_to_edit_and_never_reports_a_contract_the_tool_could_not_meet() {
+        for defect in [
+            RepairError::NoFalsifier {
+                issue: "ISSUE-1".into(),
+            },
+            RepairError::DuplicateItemName {
+                name: "check_cleared:unpinned_dependency".into(),
+            },
+            RepairError::MissingMandatoryLimitation,
+            RepairError::PlanIdMismatch {
+                declared: "repair-ISSUE-1-000000000000".into(),
+                derived: "repair-ISSUE-1-111111111111".into(),
+            },
+            RepairError::UnknownIssue {
+                issue_id: "ISSUE-9".into(),
+                variable: "issue_ISSUE-9_record".into(),
+            },
+        ] {
+            let error = CliError::from_repair(defect);
+            assert_eq!(
+                error.code,
+                ExitCode::InvalidInput,
+                "the operator edits a document or a flag to clear this, so it is not a compile \
+                 failure: {}",
+                error.message
+            );
+            assert_eq!(error.code.retryability(), Some(Retryability::Terminal));
+        }
+
+        let ours = CliError::from_repair(RepairError::MalformedIssueFact(
+            "\"issue_ISSUE-1_record\" carries no array \"components\"".into(),
+        ));
+        assert_eq!(
+            ours.code,
+            ExitCode::Io,
+            "a world this binary assembled and then could not read is this binary's fault; there \
+             is nothing for the operator to edit"
         );
     }
 

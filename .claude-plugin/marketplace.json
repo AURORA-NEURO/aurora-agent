@@ -11,7 +11,7 @@
     {
       "name": "aurora-agent",
       "source": "./plugins/aurora-agent",
-      "description": "THE plugin: bioprism MCP server (259 tools), FIBER compile/explain/compare/validate/verify commands, mission preflight, ops-auditor subagent, and setup/workflow/SDK skills. Requires a built aurora-agent checkout.",
+      "description": "THE plugin: bioprism MCP server (264 tools), FIBER compile/explain/compare/validate/verify commands, mission preflight, ops-auditor subagent, and setup/workflow/SDK skills. Requires a built aurora-agent checkout.",
       "version": "0.1.0",
       "license": "Apache-2.0",
       "keywords": ["mcp", "fiber", "decision-context", "missions", "operations"],
