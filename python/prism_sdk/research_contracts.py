@@ -23,6 +23,7 @@ QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01"
 RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01"
 REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01"
 WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10"
+EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01"
 
 
 class ResearchContractError(ValueError):
@@ -426,6 +427,64 @@ class WorkflowExecutionReceipt:
                 "remaining_budget": dict(self.remaining_budget),
                 "artifact": dict(self.artifact),
                 "reasons": list(self.reasons),
+                "boundary": self.boundary,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class EvaluationCardReceipt:
+    """Transport validator for cost-normalized, uncertainty-bearing EvaluationCards."""
+
+    card: Mapping[str, Any]
+    card_digest: str
+    observations_digest: str
+    baseline_counts: Mapping[str, int]
+    omissions: tuple[str, ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = EVALUATION_OBSERVABILITY_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != EVALUATION_OBSERVABILITY_FEATURE_ID:
+            raise ResearchContractError("evaluation-observability feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        if not self.card.get("capability_id") or self.card.get("benchmark_world") is None:
+            raise ResearchContractError("evaluation card identity is incomplete")
+        if self.card.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("evaluation card schema mismatch")
+        if self.card.get("release_verdict") not in {"pass", "conditional", "blocked", "not_evaluated"}:
+            raise ResearchContractError("evaluation card release verdict is unknown")
+        if not self.card.get("baselines") or not self.card.get("metrics") or not self.card.get("uncertainty"):
+            raise ResearchContractError("evaluation card evidence fields are incomplete")
+        if not self.reasons or not self.baseline_counts:
+            raise ResearchContractError("evaluation receipt needs baseline counts and reasons")
+        if self.card.get("release_verdict") == "pass" and self.omissions:
+            raise ResearchContractError("a passing evaluation card cannot hide baseline omissions")
+        for digest in (self.card_digest, self.observations_digest, self.artifact.get("content_hash")):
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("evaluation receipt digest is not a canonical sha256")
+        if any(not isinstance(value, int) or value < 0 for value in self.baseline_counts.values()):
+            raise ResearchContractError("evaluation baseline count is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest(
+            {
+                "schema_version": self.schema_version,
+                "feature_id": self.feature_id,
+                "card": dict(self.card),
+                "card_digest": self.card_digest,
+                "observations_digest": self.observations_digest,
+                "baseline_counts": dict(self.baseline_counts),
+                "omissions": list(self.omissions),
+                "reasons": list(self.reasons),
+                "artifact": dict(self.artifact),
                 "boundary": self.boundary,
             }
         )

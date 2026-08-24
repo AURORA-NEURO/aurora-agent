@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -179,4 +179,29 @@ def test_workflow_execution_receipt_preserves_order_and_dry_run_state():
     )
     receipt.validate()
     assert receipt.feature_id == WORKFLOW_EXECUTION_FEATURE_ID
+    assert receipt.digest() == receipt.digest()
+
+
+def test_evaluation_card_receipt_keeps_baseline_omissions_explicit():
+    receipt = EvaluationCardReceipt(
+        card={
+            "schema_version": "aurora-research-contract/1.0",
+            "capability_id": "capability:demo",
+            "benchmark_world": "synthetic-v1",
+            "baselines": ["fixed"],
+            "metrics": [{"name": "auditable_discovery_rate", "value": "0.4", "uncertainty": "95%"}],
+            "uncertainty": [{"kind": "sampling", "statement": "small sample"}],
+            "limitations": ["synthetic only"],
+            "release_verdict": "blocked",
+            "boundary": PRECLINICAL_BOUNDARY,
+        },
+        card_digest="a" * 64,
+        observations_digest="b" * 64,
+        baseline_counts={"fixed": 0},
+        omissions=("baseline fixed is under-sampled",),
+        reasons=("baseline coverage is incomplete",),
+        artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == EVALUATION_OBSERVABILITY_FEATURE_ID
     assert receipt.digest() == receipt.digest()

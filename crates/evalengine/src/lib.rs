@@ -40,19 +40,26 @@ pub mod attribution;
 pub mod bridge;
 pub mod cluster;
 pub mod error;
+pub mod evaluation_observability;
 pub mod ladder;
 pub mod posterior;
-pub mod research_release;
 pub mod replication;
+pub mod research_release;
 pub mod score;
 
-pub use bridge::{contribution_from_verdict, digest, Provenance};
 pub use attribution::{
     attribute, ArmSpec, Attribution, AttributionClaim, AttributionReport, ComponentEffect,
     EffectDirection, MatchedFork, RefusalReason,
 };
+pub use bridge::{contribution_from_verdict, digest, Provenance};
 pub use cluster::{ClusteredEstimate, ClusteredSample, IccEstimate};
 pub use error::EvalError;
+pub use evaluation_observability::{
+    compile_evaluation_card, evaluation_observability_manifest, CapabilityRunObservation,
+    EvaluationCardReceipt, EvaluationCardRequest, EvaluationObservabilityError,
+    FEATURE_CONTRACT_VERSION as EVALUATION_OBSERVABILITY_FEATURE_VERSION,
+    FEATURE_ID as EVALUATION_OBSERVABILITY_FEATURE_ID,
+};
 pub use ladder::{
     compose, Contribution, Detail, Disagreement, EvidenceRef, ScoreTier, ScoredResult,
     SuppressedRaise, UnknownPolicy,
@@ -61,13 +68,13 @@ pub use posterior::{
     unprovenanced, CapabilityEstimate, CapabilityPosterior, CoverageFloor, Dominance, GateScalar,
     Observation, ReleaseGate,
 };
-pub use research_release::{
-    review_release, AdversarialCheck, ReleaseReview, ReleaseReviewPolicy, ReplicationEvidence,
-};
 pub use replication::{
     evaluate_replication, manifest as replication_manifest, ReplicationDisposition,
     ReplicationError, ReplicationObservation, ReplicationOutcome, ReplicationPolicy,
     ReplicationReport, ReplicationRequest, ReplicationSummary,
+};
+pub use research_release::{
+    review_release, AdversarialCheck, ReleaseReview, ReleaseReviewPolicy, ReplicationEvidence,
 };
 pub use score::{
     credit_for, Conclusion, Constraint, Credit, CreditBasis, CreditPolicy, Justification, Outcome,

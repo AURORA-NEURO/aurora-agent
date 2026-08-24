@@ -17,6 +17,8 @@ The replay-audit schema carries equivalent, diverged, or invalid status with bas
 identities and the first observable difference.
 The workflow-execution schema carries deterministic node order, dry-run or succeeded status,
 execution identity, budget remainder, and the content-addressed artifact digest.
+The evaluation-card schema carries cost-normalized metrics, Wilson uncertainty, baseline counts,
+explicit omissions, and a measurement-only release verdict.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.

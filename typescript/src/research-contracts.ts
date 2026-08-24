@@ -18,6 +18,7 @@ export const QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01" as const;
 export const RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01" as const;
 export const REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01" as const;
 export const WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10" as const;
+export const EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -279,6 +280,45 @@ export function validateWorkflowExecutionReceipt(receipt: WorkflowExecutionRecei
 
 export function workflowExecutionReceiptDigest(receipt: WorkflowExecutionReceipt): string {
   validateWorkflowExecutionReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface EvaluationCardReceipt {
+  schema_version: string;
+  feature_id: string;
+  card: Record<string, unknown> & {
+    schema_version: string;
+    capability_id: string;
+    benchmark_world: string;
+    baselines: readonly string[];
+    metrics: readonly Record<string, unknown>[];
+    uncertainty: readonly Record<string, unknown>[];
+    release_verdict: "pass" | "conditional" | "blocked" | "not_evaluated";
+  };
+  card_digest: string;
+  observations_digest: string;
+  baseline_counts: Record<string, number>;
+  omissions: readonly string[];
+  reasons: readonly string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateEvaluationCardReceipt(receipt: EvaluationCardReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (receipt.feature_id !== EVALUATION_OBSERVABILITY_FEATURE_ID) throw new Error("evaluation-observability feature mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (receipt.card.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || !receipt.card.capability_id.trim() || !receipt.card.benchmark_world.trim()) throw new Error("evaluation card identity is incomplete");
+  if (!receipt.card.baselines.length || !receipt.card.metrics.length || !receipt.card.uncertainty.length) throw new Error("evaluation card evidence fields are incomplete");
+  if (!receipt.reasons.length || !Object.keys(receipt.baseline_counts).length) throw new Error("evaluation receipt needs baseline counts and reasons");
+  if (receipt.card.release_verdict === "pass" && receipt.omissions.length) throw new Error("a passing evaluation card cannot hide baseline omissions");
+  if (Object.values(receipt.baseline_counts).some((count) => !Number.isInteger(count) || count < 0)) throw new Error("evaluation baseline count is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.card_digest) || !/^[0-9a-f]{64}$/.test(receipt.observations_digest)) throw new Error("evaluation receipt source digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("evaluation receipt artifact digest is invalid");
+}
+
+export function evaluationCardReceiptDigest(receipt: EvaluationCardReceipt): string {
+  validateEvaluationCardReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

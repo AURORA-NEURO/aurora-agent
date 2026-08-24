@@ -30,6 +30,8 @@ from .research_contracts import (
     ReplayAuditReceipt,
     WORKFLOW_EXECUTION_FEATURE_ID,
     WorkflowExecutionReceipt,
+    EVALUATION_OBSERVABILITY_FEATURE_ID,
+    EvaluationCardReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

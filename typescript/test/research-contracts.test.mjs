@@ -32,6 +32,9 @@ import {
   WORKFLOW_EXECUTION_FEATURE_ID,
   workflowExecutionReceiptDigest,
   validateWorkflowExecutionReceipt,
+  EVALUATION_OBSERVABILITY_FEATURE_ID,
+  evaluationCardReceiptDigest,
+  validateEvaluationCardReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -226,4 +229,31 @@ test("workflow-execution receipt preserves deterministic dry-run order", () => {
   };
   assert.doesNotThrow(() => validateWorkflowExecutionReceipt(receipt));
   assert.equal(workflowExecutionReceiptDigest(receipt), workflowExecutionReceiptDigest(receipt));
+});
+
+test("evaluation-card receipt keeps baseline omissions explicit", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: EVALUATION_OBSERVABILITY_FEATURE_ID,
+    card: {
+      schema_version: "aurora-research-contract/1.0",
+      capability_id: "capability:demo",
+      benchmark_world: "synthetic-v1",
+      baselines: ["fixed"],
+      metrics: [{ name: "auditable_discovery_rate", value: "0.4", uncertainty: "95%" }],
+      uncertainty: [{ kind: "sampling", statement: "small sample" }],
+      limitations: ["synthetic only"],
+      release_verdict: "blocked",
+      boundary: PRECLINICAL_BOUNDARY,
+    },
+    card_digest: "a".repeat(64),
+    observations_digest: "b".repeat(64),
+    baseline_counts: { fixed: 0 },
+    omissions: ["baseline fixed is under-sampled"],
+    reasons: ["baseline coverage is incomplete"],
+    artifact: { content_hash: "c".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateEvaluationCardReceipt(receipt));
+  assert.equal(evaluationCardReceiptDigest(receipt), evaluationCardReceiptDigest(receipt));
 });
