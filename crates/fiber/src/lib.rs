@@ -52,6 +52,7 @@ pub mod policy;
 pub mod qir;
 pub mod research_context;
 pub mod resource_workbench;
+pub mod retrieval_assurance;
 pub mod slice;
 pub mod temporal;
 
@@ -79,6 +80,12 @@ pub use resource_workbench::{
     ResourceAvailability, ResourceCandidate, ResourceDiscoveryDisposition, ResourceNeed,
     ResourceOmission, ResourceWorkbenchError, FEATURE_ID as RESOURCE_WORKBENCH_FEATURE_ID,
     FEATURE_VERSION as RESOURCE_WORKBENCH_FEATURE_VERSION,
+};
+pub use retrieval_assurance::{
+    assure_federated_retrieval, FederatedRetrievalAssuranceReceipt,
+    FederatedRetrievalAssuranceRequest, RetrievalAssuranceDisposition, RetrievalAssuranceError,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
 };
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};

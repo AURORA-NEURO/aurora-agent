@@ -21,8 +21,9 @@ use bioprism_evalengine::{
     MULTIMODAL_REPLICATION_FEATURE_ID,
 };
 use bioprism_fiber::{
-    discover_resources, QualifiedResourceSet, ResourceCandidate, ResourceNeed,
-    RESOURCE_WORKBENCH_FEATURE_ID,
+    assure_federated_retrieval, discover_resources, FederatedRetrievalAssuranceReceipt,
+    FederatedRetrievalAssuranceRequest, QualifiedResourceSet, ResourceCandidate, ResourceNeed,
+    FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID, RESOURCE_WORKBENCH_FEATURE_ID,
 };
 use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
 use bioprism_governance::{
@@ -96,6 +97,7 @@ pub const FEDERATED_MULTIMODAL_ASSURANCE_TOOL: &str = "federated_multimodal_assu
 pub const FEDERATED_KNOWLEDGE_GATEWAY_TOOL: &str = "federated_knowledge_gateway";
 pub const FEDERATED_LENS_ASSURANCE_TOOL: &str = "federated_lens_assurance";
 pub const SEMANTIC_PARITY_TOOL: &str = "lab_semantic_parity";
+pub const FEDERATED_RETRIEVAL_ASSURANCE_TOOL: &str = "federated_retrieval_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -555,6 +557,26 @@ pub fn validate_semantic_parity_json(value: &Value) -> Result<LabSemanticParityR
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != SEMANTIC_PARITY_FEATURE_ID {
         return Err("lab semantic parity feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_federated_retrieval_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedRetrievalAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated retrieval assurance request: {error}"))?;
+    let receipt = assure_federated_retrieval(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federated retrieval assurance receipt: {error}"))
+}
+
+pub fn validate_federated_retrieval_assurance_json(
+    value: &Value,
+) -> Result<FederatedRetrievalAssuranceReceipt, String> {
+    let receipt: FederatedRetrievalAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated retrieval assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID {
+        return Err("federated retrieval assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

@@ -39,9 +39,7 @@ fn object<'a>(values: &'a BTreeMap<String, Value>, key: &str) -> Option<&'a Map<
 ///
 /// The reverse index is built in the document order of `subject_aliases` so that the `subjects`
 /// list in the witness matches the reference byte for byte, then iterated in sorted alias order.
-fn identity_witnesses(
-    values: &BTreeMap<String, Value>,
-) -> Result<Vec<LeakageWitness>, FiberError> {
+fn identity_witnesses(values: &BTreeMap<String, Value>) -> Result<Vec<LeakageWitness>, FiberError> {
     let Some(aliases) = object(values, "subject_aliases") else {
         return Ok(Vec::new());
     };
@@ -49,7 +47,9 @@ fn identity_witnesses(
 
     let mut reverse: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (subject, names) in aliases {
-        let Some(names) = names.as_array() else { continue };
+        let Some(names) = names.as_array() else {
+            continue;
+        };
         for name in names {
             let Some(name) = name.as_str() else { continue };
             reverse
@@ -102,7 +102,9 @@ fn site_witnesses(values: &BTreeMap<String, Value>) -> Vec<LeakageWitness> {
 
     let mut by_split: BTreeMap<String, BTreeSet<Option<&str>>> = BTreeMap::new();
     for (subject, assigned) in split {
-        let Some(assigned) = assigned.as_str() else { continue };
+        let Some(assigned) = assigned.as_str() else {
+            continue;
+        };
         by_split
             .entry(assigned.to_string())
             .or_default()
@@ -137,9 +139,7 @@ fn site_witnesses(values: &BTreeMap<String, Value>) -> Vec<LeakageWitness> {
 /// zero-offset `...Z` form used throughout the packs this agrees with instant ordering; for
 /// mixed offsets or differing precision it does not, which is recorded as a known limitation on
 /// every certificate rather than silently corrected here.
-fn temporal_witnesses(
-    values: &BTreeMap<String, Value>,
-) -> Result<Vec<LeakageWitness>, FiberError> {
+fn temporal_witnesses(values: &BTreeMap<String, Value>) -> Result<Vec<LeakageWitness>, FiberError> {
     let Some(cut) = values.get("training_decision_time") else {
         return Ok(Vec::new());
     };
