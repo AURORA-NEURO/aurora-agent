@@ -128,11 +128,14 @@ export {
   PRECLINICAL_BOUNDARY,
   RESEARCH_CONTRACT_SCHEMA_VERSION,
   RESEARCH_FEATURE_ID,
+  RELEASE_REVIEW_FEATURE_ID,
   researchArtifactDigest,
+  releaseReviewDigest,
   validateEvidenceReceipt,
   validatePolicyReceipt,
+  validateReleaseReview,
 } from "./research-contracts.js";
-export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt } from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview } from "./research-contracts.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,

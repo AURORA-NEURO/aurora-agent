@@ -5,6 +5,9 @@ import {
   validateEvidenceReceipt,
   validatePolicyReceipt,
   researchArtifactDigest,
+  RELEASE_REVIEW_FEATURE_ID,
+  releaseReviewDigest,
+  validateReleaseReview,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -36,4 +39,35 @@ test("unresolved policy cannot allow", () => {
 
 test("artifact digest is key-order stable", () => {
   assert.equal(researchArtifactDigest({ b: 2, a: 1 }), researchArtifactDigest({ a: 1, b: 2 }));
+});
+
+test("a passing release review requires provenance", () => {
+  assert.throws(() => validateReleaseReview({
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: RELEASE_REVIEW_FEATURE_ID,
+    capability_id: "capability:demo",
+    card_digest: "a".repeat(64),
+    verdict: "pass",
+    reasons: ["all gates passed"],
+    replications: [],
+    checks: [],
+    provenance_complete: false,
+    boundary: PRECLINICAL_BOUNDARY,
+  }));
+});
+
+test("release review digest is deterministic", () => {
+  const review = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: RELEASE_REVIEW_FEATURE_ID,
+    capability_id: "capability:demo",
+    card_digest: "a".repeat(64),
+    verdict: "blocked",
+    reasons: ["replication floor unmet"],
+    replications: [],
+    checks: [],
+    provenance_complete: false,
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.equal(releaseReviewDigest(review), releaseReviewDigest(review));
 });

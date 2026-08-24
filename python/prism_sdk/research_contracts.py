@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 RESEARCH_CONTRACT_SCHEMA_VERSION = "aurora-research-contract/1.0"
 PRECLINICAL_BOUNDARY = "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
 RESEARCH_FEATURE_ID = "AFA-bioir-P02-F01"
+RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01"
 
 
 class ResearchContractError(ValueError):
@@ -73,3 +74,45 @@ class EvidenceReceipt:
         if self.conclusion_state == "proven" and any(item.get("could_change_decision") != "no_known_impact" for item in self.omissions):
             raise ResearchContractError("protected omission blocks proven conclusion")
 
+
+@dataclass(frozen=True)
+class ReleaseReview:
+    """Transport-level mirror of the Rust fail-closed production review."""
+
+    capability_id: str
+    card_digest: str
+    verdict: str
+    reasons: tuple[str, ...]
+    replications: tuple[Mapping[str, Any], ...] = ()
+    checks: tuple[Mapping[str, Any], ...] = ()
+    provenance_complete: bool = False
+    feature_id: str = RELEASE_REVIEW_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.boundary != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research contract schema or boundary mismatch")
+        if self.feature_id != RELEASE_REVIEW_FEATURE_ID or not self.capability_id.strip():
+            raise ResearchContractError("release review feature or capability is missing")
+        if len(self.card_digest) != 64 or any(char not in "0123456789abcdef" for char in self.card_digest):
+            raise ResearchContractError("release review card digest is not a canonical sha256")
+        if self.verdict not in {"pass", "conditional", "blocked", "not_evaluated"} or not self.reasons:
+            raise ResearchContractError("release review verdict and reasons are required")
+        if self.verdict == "pass" and not self.provenance_complete:
+            raise ResearchContractError("a passing release review requires complete provenance")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "capability_id": self.capability_id,
+            "card_digest": self.card_digest,
+            "verdict": self.verdict,
+            "reasons": list(self.reasons),
+            "replications": list(self.replications),
+            "checks": list(self.checks),
+            "provenance_complete": self.provenance_complete,
+            "boundary": self.boundary,
+        })
