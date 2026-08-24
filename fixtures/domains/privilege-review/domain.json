@@ -1,0 +1,32 @@
+{
+  "schema_version": "bioprism-domain/0.1",
+  "name": "privilege-review",
+  "description": "Attorney-client privilege review of one document family: decides whether privilege holds, was waived by disclosure, or cannot be determined from the collected record.",
+  "goal": "Decide whether the document family retains attorney-client privilege.",
+  "protected_tags": ["identity", "protected"],
+  "scope_dimensions": {
+    "schema_version": "bioprism-scope-dimensions/0.1",
+    "dimensions": {
+      "matter": "specimen",
+      "custodian": "identity",
+      "review_batch": "identity",
+      "collection_date": "time"
+    }
+  },
+  "oracle": {
+    "kind": "rule/privilege-review-v1",
+    "require": ["counsel_communications", "third_party_disclosures"],
+    "checks": [
+      {
+        "name": "waiver_by_disclosure",
+        "description": "a communication in the family was disclosed to a third party, waiving privilege",
+        "when": { "kind": "nonempty", "variable": "third_party_disclosures" }
+      },
+      {
+        "name": "non_legal_purpose",
+        "description": "the dominant purpose of the communications was not legal advice",
+        "when": { "kind": "equals", "variable": "dominant_purpose_legal", "value": false }
+      }
+    ]
+  }
+}

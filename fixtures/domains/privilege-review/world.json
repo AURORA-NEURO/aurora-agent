@@ -1,0 +1,144 @@
+{
+  "schema_version": "fiber-world/0.1",
+  "world_id": "pr-demo-001",
+  "description": "One document family from matter M-2024-117. The disclosure log exists but its collection event completes only after the decision time, so the decisive third_party_disclosures fact is withheld at the cut - deliberately.",
+  "facts": [
+    {
+      "id": "fact.counsel_communications",
+      "provides": "counsel_communications",
+      "value": [
+        "DOC-0042",
+        "DOC-0043",
+        "DOC-0044"
+      ],
+      "scope": {
+        "matter": "M-2024-117",
+        "custodian": "gc-office"
+      },
+      "tags": [
+        "identity",
+        "protected"
+      ],
+      "provenance": [
+        "collections/family_0042.json"
+      ]
+    },
+    {
+      "id": "fact.dominant_purpose",
+      "provides": "dominant_purpose_legal",
+      "value": true,
+      "scope": {
+        "matter": "M-2024-117",
+        "custodian": "gc-office"
+      },
+      "tags": [
+        "protected"
+      ],
+      "provenance": [
+        "review/purpose_call.json"
+      ]
+    },
+    {
+      "id": "fact.third_party_disclosures",
+      "provides": "third_party_disclosures",
+      "value": [
+        "DOC-0043 disclosed to outside-auditor@example.com"
+      ],
+      "scope": {
+        "matter": "M-2024-117",
+        "collection_date": "2025-06-15"
+      },
+      "tags": [],
+      "provenance": [
+        "collections/disclosure_log_pending.json"
+      ]
+    },
+    {
+      "id": "fact.colour.page_count",
+      "provides": "family_page_count",
+      "value": 41,
+      "scope": {
+        "matter": "M-2024-117"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "provenance": [
+        "stats/pages.json"
+      ]
+    },
+    {
+      "id": "fact.colour.custodian_count",
+      "provides": "family_custodian_count",
+      "value": 2,
+      "scope": {
+        "matter": "M-2024-117"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "provenance": [
+        "stats/custodians.json"
+      ]
+    },
+    {
+      "id": "fact.colour.review_batch",
+      "provides": "family_review_batch",
+      "value": "batch-7",
+      "scope": {
+        "matter": "M-2024-117",
+        "review_batch": "batch-7"
+      },
+      "tags": [
+        "exploratory"
+      ],
+      "provenance": [
+        "stats/batches.json"
+      ]
+    }
+  ],
+  "factors": [
+    {
+      "id": "factor.privilege_review",
+      "inputs": [
+        "counsel_communications",
+        "third_party_disclosures",
+        "dominant_purpose_legal"
+      ],
+      "outputs": [
+        "privilege_status"
+      ],
+      "kind": "deterministic_rule",
+      "cost": 1.0,
+      "scope": {
+        "matter": "M-2024-117"
+      },
+      "tags": [
+        "protected"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": "event.collection_complete",
+      "event_time": "2025-02-01T00:00:00Z",
+      "availability_time": "2025-02-01T00:00:00Z",
+      "causal_parents": [],
+      "produces": [
+        "counsel_communications",
+        "dominant_purpose_legal"
+      ]
+    },
+    {
+      "id": "event.disclosure_log_collection",
+      "event_time": "2025-06-01T00:00:00Z",
+      "availability_time": "2025-06-15T00:00:00Z",
+      "causal_parents": [
+        "event.collection_complete"
+      ],
+      "produces": [
+        "third_party_disclosures"
+      ]
+    }
+  ]
+}

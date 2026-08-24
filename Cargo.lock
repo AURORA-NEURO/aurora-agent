@@ -338,6 +338,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-domain"
+version = "0.1.0"
+dependencies = [
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
+ "bioprism-world",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-epistemic"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,11 @@
+{
+  "schema_version": "fiber-query/0.2",
+  "query_id": "audit-wash-trade-v1",
+  "goal": "Decide whether the matched order flow in the review window shows wash trading.",
+  "targets": ["wash_trade_status"],
+  "protected_tags": ["identity", "time", "protected"],
+  "decision_time": "2025-03-15T00:00:00Z",
+  "budgets": {
+    "max_facts": 16
+  }
+}

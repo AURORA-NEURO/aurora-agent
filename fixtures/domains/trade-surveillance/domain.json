@@ -1,0 +1,37 @@
+{
+  "schema_version": "bioprism-domain/0.1",
+  "name": "trade-surveillance",
+  "description": "Wash-trade review of one matched order-flow window: decides whether the window shows self-dealing, late reporting, or excessive cancellation.",
+  "goal": "Decide whether the matched order flow in the review window shows wash trading.",
+  "protected_tags": ["identity", "time", "protected"],
+  "scope_dimensions": {
+    "schema_version": "bioprism-scope-dimensions/0.1",
+    "dimensions": {
+      "account": "identity",
+      "venue": "region",
+      "session": "time",
+      "rulebook": "ontology"
+    }
+  },
+  "oracle": {
+    "kind": "rule/trade-surveillance-v1",
+    "require": ["self_match_conflicts", "reporting_window_closed"],
+    "checks": [
+      {
+        "name": "self_cross",
+        "description": "a buy and a sell in the window resolve to the same beneficial account",
+        "when": { "kind": "nonempty", "variable": "self_match_conflicts" }
+      },
+      {
+        "name": "late_reporting",
+        "description": "the review window closed before every matched trade was reported",
+        "when": { "kind": "equals", "variable": "reporting_window_closed", "value": false }
+      },
+      {
+        "name": "cancel_ratio_excessive",
+        "description": "cancellations exceed the venue threshold for the session",
+        "when": { "kind": "number_at_least", "variable": "cancel_ratio", "minimum": 0.95 }
+      }
+    ]
+  }
+}

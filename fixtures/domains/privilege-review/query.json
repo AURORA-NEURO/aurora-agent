@@ -1,0 +1,11 @@
+{
+  "schema_version": "fiber-query/0.2",
+  "query_id": "audit-privilege-family-0042-v1",
+  "goal": "Decide whether the document family retains attorney-client privilege.",
+  "targets": ["privilege_status"],
+  "protected_tags": ["identity", "protected"],
+  "decision_time": "2025-03-01T00:00:00Z",
+  "budgets": {
+    "max_facts": 16
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "schema_version": "fiber-world/0.1",
+  "world_id": "sc-demo-001",
+  "description": "Release candidate 2025.05: every artifact signed, provenance complete, SBOM generated inside the freeze window.",
+  "facts": [
+    {
+      "id": "fact.unsigned_artifacts",
+      "provides": "unsigned_artifacts",
+      "value": [],
+      "scope": { "registry": "prod-eu", "build_window": "2025-05" },
+      "tags": ["identity", "protected"],
+      "provenance": ["attestations/signatures.json"]
+    },
+    {
+      "id": "fact.build_provenance_gaps",
+      "provides": "build_provenance_gaps",
+      "value": [],
+      "scope": { "pipeline": "release-2025.05", "build_window": "2025-05" },
+      "tags": ["protected"],
+      "provenance": ["attestations/provenance.json"]
+    },
+    {
+      "id": "fact.sbom_generated_at",
+      "provides": "sbom_generated_at",
+      "value": "2025-05-20T08:00:00Z",
+      "scope": { "pipeline": "release-2025.05", "build_window": "2025-05" },
+      "tags": ["time", "protected"],
+      "provenance": ["sbom/manifest.json"]
+    },
+    {
+      "id": "fact.colour.dependency_count",
+      "provides": "release_dependency_count",
+      "value": 214,
+      "scope": { "pipeline": "release-2025.05" },
+      "tags": ["exploratory"],
+      "provenance": ["stats/dependencies.json"]
+    },
+    {
+      "id": "fact.colour.binary_size",
+      "provides": "release_binary_size_mb",
+      "value": 38.2,
+      "scope": { "pipeline": "release-2025.05" },
+      "tags": ["exploratory"],
+      "provenance": ["stats/size.json"]
+    },
+    {
+      "id": "fact.colour.build_minutes",
+      "provides": "release_build_minutes",
+      "value": 17,
+      "scope": { "pipeline": "release-2025.05" },
+      "tags": ["exploratory"],
+      "provenance": ["stats/build_time.json"]
+    }
+  ],
+  "factors": [
+    {
+      "id": "factor.release_integrity_review",
+      "inputs": [
+        "unsigned_artifacts",
+        "build_provenance_gaps",
+        "sbom_generated_at"
+      ],
+      "outputs": ["release_integrity_status"],
+      "kind": "deterministic_rule",
+      "cost": 1.0,
+      "scope": { "pipeline": "release-2025.05" },
+      "tags": ["protected"]
+    }
+  ],
+  "events": [
+    {
+      "id": "event.freeze",
+      "event_time": "2025-05-19T00:00:00Z",
+      "availability_time": "2025-05-20T09:00:00Z",
+      "causal_parents": [],
+      "produces": [
+        "unsigned_artifacts",
+        "build_provenance_gaps",
+        "sbom_generated_at"
+      ]
+    }
+  ]
+}

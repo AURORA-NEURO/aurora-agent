@@ -1,0 +1,134 @@
+{
+  "schema_version": "fiber-world/0.1",
+  "world_id": "ts-demo-001",
+  "description": "One trading session on venue X-ALPHA with a precomputed self-match conflict and six exploratory market-colour facts.",
+  "facts": [
+    {
+      "id": "fact.review_window",
+      "provides": "review_window",
+      "value": "2025-03-14T09:30:00Z/2025-03-14T16:00:00Z",
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["time", "protected"],
+      "provenance": ["feeds/session_window.json"]
+    },
+    {
+      "id": "fact.self_match_conflicts",
+      "provides": "self_match_conflicts",
+      "value": [
+        { "account": "ACC-9", "buy_order": "ORD-1201", "sell_order": "ORD-1288" }
+      ],
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["identity", "protected"],
+      "provenance": ["surveillance/self_match_scan.csv"]
+    },
+    {
+      "id": "fact.reporting_window_closed",
+      "provides": "reporting_window_closed",
+      "value": true,
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["time", "protected"],
+      "provenance": ["compliance/reporting_log.json"]
+    },
+    {
+      "id": "fact.cancel_ratio",
+      "provides": "cancel_ratio",
+      "value": 0.41,
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["protected"],
+      "provenance": ["surveillance/cancel_ratio.csv"]
+    },
+    {
+      "id": "fact.colour.volume_profile",
+      "provides": "market_colour_volume",
+      "value": "u-shaped",
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["exploratory"],
+      "provenance": ["colour/volume.json"]
+    },
+    {
+      "id": "fact.colour.spread",
+      "provides": "market_colour_spread",
+      "value": 0.012,
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["exploratory"],
+      "provenance": ["colour/spread.json"]
+    },
+    {
+      "id": "fact.colour.news_sentiment",
+      "provides": "market_colour_sentiment",
+      "value": "neutral",
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["exploratory"],
+      "provenance": ["colour/news.json"]
+    },
+    {
+      "id": "fact.colour.peer_flow",
+      "provides": "market_colour_peer_flow",
+      "value": "inbound",
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["exploratory"],
+      "provenance": ["colour/peer_flow.json"]
+    },
+    {
+      "id": "fact.colour.index_beta",
+      "provides": "market_colour_index_beta",
+      "value": 1.07,
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["exploratory"],
+      "provenance": ["colour/index_beta.json"]
+    },
+    {
+      "id": "fact.colour.open_interest",
+      "provides": "market_colour_open_interest",
+      "value": 55210,
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["exploratory"],
+      "provenance": ["colour/open_interest.json"]
+    }
+  ],
+  "factors": [
+    {
+      "id": "factor.wash_trade_review",
+      "inputs": [
+        "review_window",
+        "self_match_conflicts",
+        "reporting_window_closed",
+        "cancel_ratio"
+      ],
+      "outputs": ["wash_trade_status"],
+      "kind": "deterministic_rule",
+      "cost": 1.0,
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["protected"]
+    },
+    {
+      "id": "factor.colour_summary",
+      "inputs": [
+        "market_colour_volume",
+        "market_colour_spread",
+        "market_colour_sentiment",
+        "market_colour_peer_flow",
+        "market_colour_index_beta",
+        "market_colour_open_interest"
+      ],
+      "outputs": ["market_colour_summary"],
+      "kind": "aggregation",
+      "cost": 1.0,
+      "scope": { "venue": "X-ALPHA", "session": "2025-03-14" },
+      "tags": ["exploratory"]
+    }
+  ],
+  "events": [
+    {
+      "id": "event.session_close",
+      "event_time": "2025-03-14T16:00:00Z",
+      "availability_time": "2025-03-14T16:05:00Z",
+      "causal_parents": [],
+      "produces": [
+        "self_match_conflicts",
+        "reporting_window_closed",
+        "cancel_ratio"
+      ]
+    }
+  ]
+}
