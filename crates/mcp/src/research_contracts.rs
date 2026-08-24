@@ -9,7 +9,9 @@ use bioprism_runtime::{
     WORKFLOW_EXECUTION_FEATURE_ID,
 };
 use bioprism_evalengine::{
-    compile_evaluation_card, EvaluationCardReceipt, EvaluationCardRequest,
+    compile_evaluation_card, qualify_analysis,
+    AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
+    QualifiedAnalysisResult, ANALYSIS_QUALIFICATION_FEATURE_ID,
     EVALUATION_OBSERVABILITY_FEATURE_ID,
 };
 use bioprism_lab::{
@@ -30,6 +32,7 @@ pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
 pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
 pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
 pub const MULTIMODAL_HARMONIZATION_TOOL: &str = "multimodal_harmonize";
+pub const ANALYSIS_QUALIFICATION_TOOL: &str = "analysis_qualify";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -137,6 +140,26 @@ pub fn validate_harmonized_research_object_json(
         return Err("multimodal harmonization feature id mismatch".into());
     }
     Ok(object)
+}
+
+pub fn qualify_analysis_json(value: &Value) -> Result<Value, String> {
+    let request: AnalysisQualificationRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid analysis qualification request: {error}"))?;
+    let result = qualify_analysis(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(result)
+        .map_err(|error| format!("cannot serialize qualified analysis result: {error}"))
+}
+
+pub fn validate_qualified_analysis_result_json(
+    value: &Value,
+) -> Result<QualifiedAnalysisResult, String> {
+    let result: QualifiedAnalysisResult = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid qualified analysis result: {error}"))?;
+    result.validate().map_err(|error| error.to_string())?;
+    if result.feature_id != ANALYSIS_QUALIFICATION_FEATURE_ID {
+        return Err("analysis qualification feature id mismatch".into());
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

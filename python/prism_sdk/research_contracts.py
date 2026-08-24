@@ -27,6 +27,7 @@ EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01"
 RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02"
 INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01"
 MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02"
+ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01"
 
 
 class ResearchContractError(ValueError):
@@ -659,6 +660,65 @@ class HarmonizedResearchObject:
                 "alignment": {key: list(value) for key, value in self.alignment.items()},
                 "omitted_modalities": list(self.omitted_modalities),
                 "semantic_loss": list(self.semantic_loss),
+                "reasons": list(self.reasons),
+                "artifact": dict(self.artifact),
+                "raw_data_local": self.raw_data_local,
+                "boundary": self.boundary,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class QualifiedAnalysisResult:
+    """Transport validator for omission-aware declared-analysis qualification."""
+
+    question_id: str
+    estimand: str
+    verdict: str
+    selected_candidate: str | None
+    candidate_order: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    omissions: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    raw_data_local: bool
+    feature_id: str = ANALYSIS_QUALIFICATION_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != ANALYSIS_QUALIFICATION_FEATURE_ID:
+            raise ResearchContractError("analysis qualification feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local:
+            raise ResearchContractError("qualified analysis must retain raw data locally")
+        if not self.question_id.strip() or not self.estimand.strip():
+            raise ResearchContractError("qualified analysis identity is incomplete")
+        if self.verdict not in {"qualified", "conditional", "blocked"}:
+            raise ResearchContractError("qualified analysis verdict is unknown")
+        if not self.candidate_order or not self.reasons or not self.uncertainty:
+            raise ResearchContractError("qualified analysis evidence is incomplete")
+        if self.verdict == "qualified" and self.selected_candidate is None:
+            raise ResearchContractError("qualified analysis needs a selected candidate")
+        if not isinstance(self.artifact.get("content_hash"), str) or len(self.artifact["content_hash"]) != 64:
+            raise ResearchContractError("qualified analysis artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest(
+            {
+                "schema_version": self.schema_version,
+                "feature_id": self.feature_id,
+                "question_id": self.question_id,
+                "estimand": self.estimand,
+                "verdict": self.verdict,
+                "selected_candidate": self.selected_candidate,
+                "candidate_order": list(self.candidate_order),
+                "uncertainty": list(self.uncertainty),
+                "omissions": list(self.omissions),
+                "negative_evidence": list(self.negative_evidence),
                 "reasons": list(self.reasons),
                 "artifact": dict(self.artifact),
                 "raw_data_local": self.raw_data_local,

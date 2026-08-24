@@ -38,6 +38,8 @@ from .research_contracts import (
     InstrumentPreflightReceipt,
     MULTIMODAL_HARMONIZATION_FEATURE_ID,
     HarmonizedResearchObject,
+    ANALYSIS_QUALIFICATION_FEATURE_ID,
+    QualifiedAnalysisResult,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

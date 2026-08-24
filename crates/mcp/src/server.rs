@@ -1807,6 +1807,7 @@ impl Server {
             "research_release_validate" => self.research_release_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
+            "analysis_qualify" => self.analysis_qualify(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24459,6 +24460,28 @@ impl Server {
         }))
     }
 
+    fn analysis_qualify(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized AnalysisQualificationRequest")?;
+        let result = crate::research_contracts::qualify_analysis_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_evalengine::ANALYSIS_QUALIFICATION_FEATURE_ID,
+            "receipt": result,
+            "guarantees": [
+                "candidate ordering is deterministic by declared score and candidate id",
+                "estimand, assumptions, uncertainty, artifact coverage, and identification status are retained",
+                "protected omissions and unidentified candidates cannot produce an unconditional qualification"
+            ],
+            "limitations": [
+                "the route qualifies caller-declared candidates and does not fit a model or inspect raw data",
+                "a qualified analysis result is not a biological, clinical, or treatment conclusion"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35680,7 +35703,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -38189,6 +38212,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-adapter MultimodalHarmonizationRequest." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "analysis_qualify",
+            "description": "Qualify declared statistical and causal analysis candidates against typed estimands, assumptions, uncertainty, artifact coverage, identification status, negative evidence, and protected omissions without fitting models or asserting biological truth.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-evalengine AnalysisQualificationRequest." }
                 },
                 "required": ["request"]
             }

@@ -44,6 +44,9 @@ import {
   MULTIMODAL_HARMONIZATION_FEATURE_ID,
   harmonizedResearchObjectDigest,
   validateHarmonizedResearchObject,
+  ANALYSIS_QUALIFICATION_FEATURE_ID,
+  qualifiedAnalysisResultDigest,
+  validateQualifiedAnalysisResult,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -332,4 +335,25 @@ test("harmonized research object preserves local multimodal limits", () => {
   };
   assert.doesNotThrow(() => validateHarmonizedResearchObject(object));
   assert.equal(harmonizedResearchObjectDigest(object), harmonizedResearchObjectDigest(object));
+});
+
+test("qualified analysis result preserves omission-aware qualification", () => {
+  const result = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: ANALYSIS_QUALIFICATION_FEATURE_ID,
+    question_id: "question:effect",
+    estimand: "average treatment effect in organoid model",
+    verdict: "conditional",
+    selected_candidate: "candidate-a",
+    candidate_order: ["candidate-a"],
+    uncertainty: ["candidate-a: interval is bounded"],
+    omissions: ["missing independent site"],
+    negative_evidence: ["candidate-a: null replication pending"],
+    reasons: ["protected omissions prevent unconditional qualification"],
+    artifact: { content_hash: "e".repeat(64) },
+    raw_data_local: true,
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateQualifiedAnalysisResult(result));
+  assert.equal(qualifiedAnalysisResultDigest(result), qualifiedAnalysisResultDigest(result));
 });

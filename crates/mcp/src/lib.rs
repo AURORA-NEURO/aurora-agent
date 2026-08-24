@@ -18,8 +18,10 @@ pub use research_contracts::{
     validate_workflow_execution_receipt_json, EVALUATION_OBSERVABILITY_TOOL,
     instrument_preflight_json, validate_instrument_preflight_receipt_json,
     harmonize_multimodal_json, validate_harmonized_research_object_json,
-    INSTRUMENT_PREFLIGHT_TOOL, MULTIMODAL_HARMONIZATION_TOOL, RESEARCH_COMPILE_TOOL,
-    RESEARCH_CONTRACT_SCHEMA_VERSION, RESEARCH_RELEASE_VALIDATE_TOOL, WORKFLOW_EXECUTION_TOOL,
+    qualify_analysis_json, validate_qualified_analysis_result_json,
+    ANALYSIS_QUALIFICATION_TOOL, INSTRUMENT_PREFLIGHT_TOOL, MULTIMODAL_HARMONIZATION_TOOL,
+    RESEARCH_COMPILE_TOOL, RESEARCH_CONTRACT_SCHEMA_VERSION, RESEARCH_RELEASE_VALIDATE_TOOL,
+    WORKFLOW_EXECUTION_TOOL,
 };
 pub use server::{
     resource_definitions, tool_definitions, workspace_capabilities, Lifecycle, Server,

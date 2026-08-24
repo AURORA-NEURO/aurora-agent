@@ -37,6 +37,7 @@
 //! the invariant is stated and the measurement is left to the caller.
 
 pub mod attribution;
+pub mod analysis_qualification;
 pub mod bridge;
 pub mod cluster;
 pub mod error;
@@ -50,6 +51,13 @@ pub mod score;
 pub use attribution::{
     attribute, ArmSpec, Attribution, AttributionClaim, AttributionReport, ComponentEffect,
     EffectDirection, MatchedFork, RefusalReason,
+};
+pub use analysis_qualification::{
+    analysis_qualification_manifest, qualify_analysis, AnalysisCandidate,
+    AnalysisQualificationError, AnalysisQualificationRequest, AnalysisQuestion,
+    IdentificationStatus, QualificationVerdict, QualifiedAnalysisResult,
+    FEATURE_CONTRACT_VERSION as ANALYSIS_QUALIFICATION_FEATURE_VERSION,
+    FEATURE_ID as ANALYSIS_QUALIFICATION_FEATURE_ID,
 };
 pub use bridge::{contribution_from_verdict, digest, Provenance};
 pub use cluster::{ClusteredEstimate, ClusteredSample, IccEstimate};

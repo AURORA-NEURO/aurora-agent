@@ -22,6 +22,7 @@ export const EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01" as c
 export const RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02" as const;
 export const INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01" as const;
 export const MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02" as const;
+export const ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -427,6 +428,37 @@ export function validateHarmonizedResearchObject(object: HarmonizedResearchObjec
 export function harmonizedResearchObjectDigest(object: HarmonizedResearchObject): string {
   validateHarmonizedResearchObject(object);
   return digestJsonSync(object);
+}
+
+export interface QualifiedAnalysisResult {
+  schema_version: string;
+  feature_id: string;
+  question_id: string;
+  estimand: string;
+  verdict: "qualified" | "conditional" | "blocked";
+  selected_candidate: string | null;
+  candidate_order: readonly string[];
+  uncertainty: readonly string[];
+  omissions: readonly string[];
+  negative_evidence: readonly string[];
+  reasons: readonly string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateQualifiedAnalysisResult(result: QualifiedAnalysisResult): void {
+  if (result.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (result.feature_id !== ANALYSIS_QUALIFICATION_FEATURE_ID || !result.question_id.trim() || !result.estimand.trim()) throw new Error("qualified analysis identity is incomplete");
+  if (result.boundary !== PRECLINICAL_BOUNDARY || !result.raw_data_local) throw new Error("qualified analysis must retain raw data locally");
+  if (!result.candidate_order.length || !result.reasons.length || !result.uncertainty.length) throw new Error("qualified analysis evidence is incomplete");
+  if (result.verdict === "qualified" && result.selected_candidate === null) throw new Error("qualified analysis needs a selected candidate");
+  if (typeof result.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(result.artifact.content_hash)) throw new Error("qualified analysis artifact digest is invalid");
+}
+
+export function qualifiedAnalysisResultDigest(result: QualifiedAnalysisResult): string {
+  validateQualifiedAnalysisResult(result);
+  return digestJsonSync(result);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {

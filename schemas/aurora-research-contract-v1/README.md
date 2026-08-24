@@ -25,6 +25,8 @@ The instrument-preflight schema carries interlock, approval, budget, evidence, a
 decisions without claiming that hardware executed.
 The harmonized-research-object schema carries deterministic modality alignment, unit and coordinate
 compatibility, QC limitations, omissions, and local raw-data retention.
+The qualified-analysis-result schema carries candidate selection, estimand, uncertainty, negative
+evidence, identification limitations, and protected omissions.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.

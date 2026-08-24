@@ -141,6 +141,7 @@ export {
   RESEARCH_RELEASE_FEATURE_ID,
   INSTRUMENT_PREFLIGHT_FEATURE_ID,
   MULTIMODAL_HARMONIZATION_FEATURE_ID,
+  ANALYSIS_QUALIFICATION_FEATURE_ID,
   researchArtifactDigest,
   researchIngestionBundleDigest,
   experimentDesignPlanDigest,
@@ -154,6 +155,7 @@ export {
   researchReleaseReceiptDigest,
   instrumentPreflightReceiptDigest,
   harmonizedResearchObjectDigest,
+  qualifiedAnalysisResultDigest,
   releaseReviewDigest,
   validateEvidenceReceipt,
   validatePolicyReceipt,
@@ -170,8 +172,9 @@ export {
   validateResearchReleaseReceipt,
   validateInstrumentPreflightReceipt,
   validateHarmonizedResearchObject,
+  validateQualifiedAnalysisResult,
 } from "./research-contracts.js";
-export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject } from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult } from "./research-contracts.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,
