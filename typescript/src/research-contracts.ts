@@ -27,6 +27,7 @@ export const PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02" as const;
 export const MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02" as const;
 export const QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02" as const;
 export const DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02" as const;
+export const AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -574,6 +575,32 @@ export function validateDesignFrontierReceipt(receipt: DesignFrontierReceipt): v
 
 export function designFrontierReceiptDigest(receipt: DesignFrontierReceipt): string {
   validateDesignFrontierReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface BatchAdmissionReceipt {
+  schema_version: string;
+  feature_id: string;
+  actor: string;
+  total_actions: number;
+  allowed_actions: number;
+  approval_actions: number;
+  denied_actions: number;
+  actions: readonly Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateBatchAdmissionReceipt(receipt: BatchAdmissionReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== AUTONOMY_BATCH_FEATURE_ID) throw new Error("autonomy batch schema or feature mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.actor.trim() || receipt.total_actions <= 0 || receipt.total_actions !== receipt.actions.length) throw new Error("autonomy batch identity or boundary is invalid");
+  if ([receipt.allowed_actions, receipt.approval_actions, receipt.denied_actions].some((value) => !Number.isInteger(value) || value < 0) || receipt.allowed_actions + receipt.approval_actions + receipt.denied_actions !== receipt.total_actions) throw new Error("autonomy batch counts are inconsistent");
+  if (receipt.actions.some((action) => typeof action.action_id !== "string" || !action.action_id.trim() || !new Set(["allowed", "approval_required", "denied"]).has(String(action.decision)) || !Array.isArray(action.reasons) || action.reasons.length === 0)) throw new Error("autonomy batch action record is incomplete");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("autonomy batch artifact digest is invalid");
+}
+
+export function batchAdmissionReceiptDigest(receipt: BatchAdmissionReceipt): string {
+  validateBatchAdmissionReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

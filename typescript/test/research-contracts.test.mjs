@@ -59,6 +59,9 @@ import {
   DESIGN_FRONTIER_FEATURE_ID,
   designFrontierReceiptDigest,
   validateDesignFrontierReceipt,
+  AUTONOMY_BATCH_FEATURE_ID,
+  batchAdmissionReceiptDigest,
+  validateBatchAdmissionReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -446,4 +449,25 @@ test("design frontier receipt retains blocked scenario", () => {
   };
   assert.doesNotThrow(() => validateDesignFrontierReceipt(receipt));
   assert.equal(designFrontierReceiptDigest(receipt), designFrontierReceiptDigest(receipt));
+});
+
+test("autonomy batch receipt retains denied action", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: AUTONOMY_BATCH_FEATURE_ID,
+    actor: "agent:batch",
+    total_actions: 3,
+    allowed_actions: 1,
+    approval_actions: 1,
+    denied_actions: 1,
+    actions: [
+      { action_id: "a", decision: "allowed", reasons: ["grant admits action"] },
+      { action_id: "b", decision: "approval_required", reasons: ["signed preflight required"] },
+      { action_id: "c", decision: "denied", reasons: ["unknown evidence"] },
+    ],
+    artifact: { content_hash: "d".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateBatchAdmissionReceipt(receipt));
+  assert.equal(batchAdmissionReceiptDigest(receipt), batchAdmissionReceiptDigest(receipt));
 });

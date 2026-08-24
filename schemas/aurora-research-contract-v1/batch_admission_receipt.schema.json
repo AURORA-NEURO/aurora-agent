@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/batch-admission-receipt.json",
+  "title": "AURORA batch autonomy admission receipt",
+  "description": "One-grant multi-action admission with explicit allowed, approval-required, and denied action decisions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "actor", "total_actions", "allowed_actions", "approval_actions", "denied_actions", "actions", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-policy-P19-F02" },
+    "actor": { "type": "string", "minLength": 1 },
+    "total_actions": { "type": "integer", "minimum": 1 },
+    "allowed_actions": { "type": "integer", "minimum": 0 },
+    "approval_actions": { "type": "integer", "minimum": 0 },
+    "denied_actions": { "type": "integer", "minimum": 0 },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["action_id", "requested_action", "requested_tier", "decision", "reasons", "evaluated_artifacts"],
+        "properties": {
+          "action_id": { "type": "string", "minLength": 1 },
+          "requested_action": { "type": "string", "minLength": 1 },
+          "requested_tier": { "enum": ["a0", "a1", "a2", "a3", "a4"] },
+          "decision": { "enum": ["allowed", "approval_required", "denied"] },
+          "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "evaluated_artifacts": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+        }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

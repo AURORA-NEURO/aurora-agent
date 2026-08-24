@@ -1812,6 +1812,7 @@ impl Server {
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
             "quality_drift_evaluate" => self.quality_drift_evaluate(&arguments),
             "design_frontier_evaluate" => self.design_frontier_evaluate(&arguments),
+            "autonomy_batch_admit" => self.autonomy_batch_admit(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24574,6 +24575,28 @@ impl Server {
         }))
     }
 
+    fn autonomy_batch_admit(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized BatchAdmissionRequest")?;
+        let receipt = crate::research_contracts::admit_autonomy_batch_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_policy::AUTONOMY_BATCH_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "every action is evaluated against the same validated grant and sorted by action id",
+                "allowed, approval-required, and denied actions are all retained in one immutable receipt",
+                "unknown or contradictory evidence cannot become autonomous permission"
+            ],
+            "limitations": [
+                "the route admits policy actions and performs no runtime, instrument, network, or data effect",
+                "approval-required actions still require the institution-local authority and signed preflight gates"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35891,7 +35914,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "safety_privacy_and_policy",
             "domains": ["consent", "privacy", "information flow", "threat modeling", "sandbox posture"],
             "crates": ["bioprism-policy", "bioprism-safety", "bioprism-bioethics", "bioprism-governance"],
-            "mcp_tools": ["policy_screen", "safety_posture", "security_redteam_simulate", "safety_release_gate", "medical_boundary_check", "bioethics_action_review", "bioethics_human_subject_screen", "bioethics_dual_use_review", "bioethics_validation_check", "bioethics_representation_audit"],
+            "mcp_tools": ["policy_screen", "autonomy_batch_admit", "safety_posture", "security_redteam_simulate", "safety_release_gate", "medical_boundary_check", "bioethics_action_review", "bioethics_human_subject_screen", "bioethics_dual_use_review", "bioethics_validation_check", "bioethics_representation_audit"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -38359,6 +38382,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-lab DesignFrontierRequest containing a base ExperimentDesignRequest and scenario assumptions." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "autonomy_batch_admit",
+            "description": "Evaluate a deterministic batch of typed autonomy actions against one grant, preserving allowed, approval-required, and denied decisions without performing any effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-policy BatchAdmissionRequest with one AutonomyGrant and action contracts." }
                 },
                 "required": ["request"]
             }

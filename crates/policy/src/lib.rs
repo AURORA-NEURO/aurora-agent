@@ -60,6 +60,7 @@
 
 pub mod consent;
 pub mod autonomy;
+pub mod autonomy_batch;
 pub mod decision;
 pub mod error;
 pub mod flow;
@@ -73,6 +74,11 @@ pub mod trace;
 
 pub use consent::{Consent, ConsentStatus};
 pub use autonomy::{admit_autonomy, AutonomyAdmissionReceipt, AutonomyAdmissionRequest, AutonomyError};
+pub use autonomy_batch::{
+    admit_autonomy_batch, autonomy_batch_manifest, BatchActionDecision, BatchActionReceipt,
+    BatchAdmissionAction, BatchAdmissionError, BatchAdmissionReceipt, BatchAdmissionRequest,
+    FEATURE_ID as AUTONOMY_BATCH_FEATURE_ID, FEATURE_VERSION as AUTONOMY_BATCH_FEATURE_VERSION,
+};
 pub use decision::{Admission, Decision, ExecutionMode, Obligation, Refusal};
 pub use error::PolicyError;
 pub use flow::{

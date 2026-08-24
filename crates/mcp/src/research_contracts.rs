@@ -16,6 +16,10 @@ use bioprism_evalengine::{
     MULTIMODAL_REPLICATION_FEATURE_ID,
 };
 use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
+use bioprism_policy::{
+    admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest,
+    AUTONOMY_BATCH_FEATURE_ID,
+};
 use bioprism_lab::{
     evaluate_design_frontier, instrument_preflight,
     DesignFrontierReceipt, DesignFrontierRequest, simulate_protocol_matrix,
@@ -42,6 +46,7 @@ pub const PROTOCOL_MATRIX_TOOL: &str = "protocol_matrix_simulate";
 pub const MULTIMODAL_REPLICATION_TOOL: &str = "multimodal_replication_evaluate";
 pub const QUALITY_DRIFT_TOOL: &str = "quality_drift_evaluate";
 pub const DESIGN_FRONTIER_TOOL: &str = "design_frontier_evaluate";
+pub const AUTONOMY_BATCH_TOOL: &str = "autonomy_batch_admit";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -243,6 +248,24 @@ pub fn validate_design_frontier_receipt_json(value: &Value) -> Result<DesignFron
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != DESIGN_FRONTIER_FEATURE_ID {
         return Err("design frontier feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn admit_autonomy_batch_json(value: &Value) -> Result<Value, String> {
+    let request: BatchAdmissionRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid autonomy batch request: {error}"))?;
+    let receipt = admit_autonomy_batch(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize autonomy batch receipt: {error}"))
+}
+
+pub fn validate_autonomy_batch_receipt_json(value: &Value) -> Result<BatchAdmissionReceipt, String> {
+    let receipt: BatchAdmissionReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid autonomy batch receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != AUTONOMY_BATCH_FEATURE_ID {
+        return Err("autonomy batch feature id mismatch".into());
     }
     Ok(receipt)
 }

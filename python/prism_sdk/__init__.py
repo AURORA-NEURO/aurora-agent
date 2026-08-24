@@ -48,6 +48,8 @@ from .research_contracts import (
     QualityDriftReceipt,
     DESIGN_FRONTIER_FEATURE_ID,
     DesignFrontierReceipt,
+    AUTONOMY_BATCH_FEATURE_ID,
+    BatchAdmissionReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

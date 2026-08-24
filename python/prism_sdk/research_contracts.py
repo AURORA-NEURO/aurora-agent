@@ -32,6 +32,7 @@ PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02"
 MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02"
 QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02"
 DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02"
+AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02"
 
 
 class ResearchContractError(ValueError):
@@ -423,6 +424,50 @@ class DesignFrontierReceipt:
             "feasible_scenarios": self.feasible_scenarios,
             "blocked_scenarios": self.blocked_scenarios,
             "scenarios": [dict(scenario) for scenario in self.scenarios],
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class BatchAdmissionReceipt:
+    """Transport validator for one-grant multi-action autonomy admission."""
+
+    actor: str
+    total_actions: int
+    allowed_actions: int
+    approval_actions: int
+    denied_actions: int
+    actions: tuple[Mapping[str, Any], ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = AUTONOMY_BATCH_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != AUTONOMY_BATCH_FEATURE_ID:
+            raise ResearchContractError("autonomy batch schema or feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.actor.strip() or self.total_actions <= 0 or self.total_actions != len(self.actions):
+            raise ResearchContractError("autonomy batch identity or boundary is invalid")
+        if self.allowed_actions < 0 or self.approval_actions < 0 or self.denied_actions < 0 or self.allowed_actions + self.approval_actions + self.denied_actions != self.total_actions:
+            raise ResearchContractError("autonomy batch counts are inconsistent")
+        if any(not action.get("action_id") or action.get("decision") not in {"allowed", "approval_required", "denied"} or not action.get("reasons") for action in self.actions):
+            raise ResearchContractError("autonomy batch action record is incomplete")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("autonomy batch artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "actor": self.actor,
+            "total_actions": self.total_actions,
+            "allowed_actions": self.allowed_actions,
+            "approval_actions": self.approval_actions,
+            "denied_actions": self.denied_actions,
+            "actions": [dict(action) for action in self.actions],
             "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })
