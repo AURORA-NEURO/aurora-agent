@@ -1052,6 +1052,27 @@ goal. Single-domain and `cross_domain` goals then use the same routing, prompt, 
 provider, evaluator, and online-learning paths as direct runs. The callbacks and all live values
 remain outside goal, worker, control-loop, and evaluator projections.
 
+Long-running loops can add `run_id`, `checkpoint`, and `resume_snapshot` to make the outer
+decision process restart-safe:
+
+```typescript
+const coordinator = new AutonomousGoalControlLoopPersistenceCoordinator(
+  new TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence(store),
+);
+await loop.run({ run_id: "research-mission-001", checkpoint: (snapshot) => coordinator.flush(snapshot), max_cycles: 128 });
+
+// In a new process, restore before creating fresh task/model/credential callbacks.
+const snapshot = await coordinator.restore();
+await freshLoop.run({ run_id: "research-mission-001", resume_snapshot: snapshot, checkpoint: (next) => coordinator.flush(next), max_cycles: 128 });
+```
+The sealed checkpoint contains contiguous cycle metadata, aggregate counts, evaluator digests,
+learned scheduling signals, and value-only bandit arms. It excludes task text, prompts,
+parameters, credentials, callbacks, provider output, and evaluator evidence. Restore continues at
+the next cycle and rehydrates the built-in bandit without replaying prior worker batches. Canonical
+JSON persistence, digest chaining, strict bounds, and optional `write_if_unchanged` fencing reject
+tampering, stale writers, identity drift, and non-contiguous recovery before another provider or
+executor call is admitted.
+
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,
 latency, quality, and circuit projections per provider/model arm, and exposes a deterministic

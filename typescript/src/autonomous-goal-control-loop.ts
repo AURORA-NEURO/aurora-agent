@@ -4,6 +4,11 @@ import type { AutonomousGoalRecord, InMemoryAutonomousGoalLedger } from "./auton
 import type { AutonomousGoalSchedulingSignal } from "./autonomous-goal-scheduler.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
+import {
+  sealAutonomousGoalControlLoopSnapshot,
+  validateAutonomousGoalControlLoopSnapshot,
+  type AutonomousGoalControlLoopCheckpoint,
+} from "./autonomous-goal-control-persistence.js";
 
 /** Bounded autonomous continuation over scheduler/worker cycles. */
 export const AUTONOMOUS_GOAL_CONTROL_LOOP_SCHEMA = "bioprism-autonomous-goal-control-loop/0.1" as const;
@@ -88,6 +93,8 @@ export interface AutonomousGoalControlLoopJSON extends JsonObject {
   evaluation_count?: number;
   evaluation_digest?: string;
   learning_state_digest?: string;
+  restored_cycle_count?: number;
+  cycle_history_digest?: string | null;
   retention: typeof AUTONOMOUS_GOAL_CONTROL_LOOP_RETENTION;
   secret_material: "never_returned";
   loop_digest: string;
@@ -201,17 +208,19 @@ type BanditArm = { pulls: number; failures: number; reward_sum: number };
 export class AutonomousGoalBanditLearner {
   private generationValue = 0;
   private readonly arms = new Map<string, BanditArm>();
-  readonly exploration: number;
+  exploration: number;
 
   constructor(options: { state?: JsonObject; exploration?: number } = {}) {
     this.exploration = finite("bandit exploration", options.exploration ?? 0.35, 0, 2);
     if (options.state !== undefined) this.restore(options.state);
   }
 
-  private restore(state: JsonObject): void {
+  restore(state: JsonObject): void {
     if (state.schema !== AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA) fail("bandit state schema is invalid");
+    this.exploration = finite("bandit state exploration", state.exploration ?? this.exploration, 0, 2);
     this.generationValue = integer("bandit generation", state.generation, 0, 2_147_483_647);
     if (!Array.isArray(state.arms) || state.arms.length > 128) fail("bandit arms are outside their bounds");
+    this.arms.clear();
     for (const raw of state.arms) {
       if (!isObject(raw)) fail("bandit arm is malformed");
       const domain = identifier("bandit arm domain", raw.domain, 128);
@@ -332,6 +341,8 @@ export class AutonomousGoalControlLoopResult {
     readonly evaluation_count = 0,
     readonly evaluation_digest: string | null = null,
     readonly learning_state_digest: string | null = null,
+    readonly restored_cycle_count = 0,
+    readonly cycle_history_digest: string | null = null,
   ) {}
 
   get live_results(): unknown[] {
@@ -353,6 +364,7 @@ export class AutonomousGoalControlLoopResult {
       loop_digest: this.loop_digest,
       ...(this.evaluation_digest === null ? {} : { evaluation_count: this.evaluation_count, evaluation_digest: this.evaluation_digest }),
       ...(this.learning_state_digest === null ? {} : { learning_state_digest: this.learning_state_digest }),
+      ...(this.restored_cycle_count === 0 ? {} : { restored_cycle_count: this.restored_cycle_count, cycle_history_digest: this.cycle_history_digest }),
     } satisfies AutonomousGoalControlLoopJSON;
     return clone(body);
   }
@@ -380,13 +392,20 @@ export class AutonomousGoalControlLoop {
     options_factory?: AutonomousGoalControlLoopOptionsFactory;
     max_cycles?: number;
     max_total_runs?: number;
+    run_id?: string;
+    resume_snapshot?: AutonomousGoalControlLoopCheckpoint | null;
+    checkpoint?: (snapshot: AutonomousGoalControlLoopCheckpoint) => unknown | Promise<unknown>;
   } = {}): Promise<AutonomousGoalControlLoopResult> {
     if (options.schedule_options !== undefined && !isObject(options.schedule_options)) fail("schedule_options must be an object");
     if (options.options_factory !== undefined && typeof options.options_factory !== "function") fail("options_factory must be callable or undefined");
+    if (options.run_id !== undefined && typeof options.run_id !== "string") fail("run_id must be a string or undefined");
+    if (options.resume_snapshot !== undefined && options.resume_snapshot !== null && !isObject(options.resume_snapshot)) fail("resume_snapshot must be an object or null");
+    if (options.checkpoint !== undefined && typeof options.checkpoint !== "function") fail("checkpoint must be callable or undefined");
     const maxCycles = integer("max_cycles", options.max_cycles ?? AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES, 1, AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES);
     const maxTotalRuns = integer("max_total_runs", options.max_total_runs ?? AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS, 1, AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS);
     const baseOptions = options.schedule_options ? { ...options.schedule_options } : {};
     const cycles: AutonomousGoalControlLoopCycle[] = [];
+    const history: JsonObject[] = [];
     let previous: AutonomousGoalControlLoopCycleJSON | null = null;
     let totalSelected = 0;
     let totalClaimed = 0;
@@ -394,11 +413,78 @@ export class AutonomousGoalControlLoop {
     const statusCounts: Record<string, number> = {};
     const domainCounts: Record<string, number> = {};
     const evaluationDigests: string[] = [];
+    let evaluationCount = 0;
     let learningStateDigest: string | null = null;
-    let learnedSignals: readonly AutonomousGoalSchedulingSignal[] = [];
+    let learnedSignals: readonly AutonomousGoalSchedulingSignal[] | null = null;
     let stopReason: AutonomousGoalControlLoopStopReason = "cycle_budget_exhausted";
+    let previousCheckpoint: AutonomousGoalControlLoopCheckpoint | null = null;
+    let restoredCycleCount = 0;
 
-    for (let cycleNumber = 1; cycleNumber <= maxCycles; cycleNumber += 1) {
+    const hasResumeSnapshot = options.resume_snapshot !== undefined && options.resume_snapshot !== null;
+    if (hasResumeSnapshot) {
+      const restored = validateAutonomousGoalControlLoopSnapshot(options.resume_snapshot as AutonomousGoalControlLoopCheckpoint);
+      restoredCycleCount = restored.completed_cycles;
+      history.push(...restored.cycle_summaries.map((item) => clone(item)));
+      previous = restored.previous_cycle === null ? null : clone(restored.previous_cycle) as AutonomousGoalControlLoopCycleJSON;
+      totalSelected = restored.total_selected;
+      totalClaimed = restored.total_claimed;
+      totalRuns = restored.total_runs;
+      Object.assign(statusCounts, restored.status_counts);
+      Object.assign(domainCounts, restored.domain_counts);
+      evaluationCount = restored.evaluation_count;
+      evaluationDigests.push(...restored.evaluation_digests);
+      learningStateDigest = restored.learning_state_digest;
+      learnedSignals = restored.learned_signals.map((item, index) => normalizeLearningSignal(item, index));
+      previousCheckpoint = restored;
+      if (options.run_id !== undefined && options.run_id !== restored.run_id) fail("run_id does not match the resume snapshot");
+      if (restored.learner_state !== null) {
+        if (!(this.learner instanceof AutonomousGoalBanditLearner)) fail("resume snapshot contains built-in learner state but this loop has no compatible bandit");
+        this.learner.restore(restored.learner_state);
+      }
+    }
+    const checkpointRunId = options.checkpoint !== undefined || hasResumeSnapshot
+      ? identifier("run_id", options.run_id ?? previousCheckpoint?.run_id ?? this.batch_id_prefix)
+      : (options.run_id ?? this.batch_id_prefix);
+    const startCycle = previousCheckpoint?.next_cycle ?? 1;
+    const emitCheckpoint = async (currentStopReason: AutonomousGoalControlLoopStopReason): Promise<void> => {
+      if (options.checkpoint === undefined) return;
+      const learnerState = this.learner instanceof AutonomousGoalBanditLearner ? this.learner.snapshot() : null;
+      const descriptor: JsonObject = {
+        schema: "bioprism-autonomous-goal-control-checkpoint/0.1",
+        run_id: checkpointRunId,
+        next_cycle: history.length + 1,
+        cycle_summaries: history,
+        previous_cycle: previous,
+        completed_cycles: history.length,
+        total_selected: totalSelected,
+        total_claimed: totalClaimed,
+        total_runs: totalRuns,
+        status_counts: Object.fromEntries(Object.entries(statusCounts).sort(([left], [right]) => left.localeCompare(right))),
+        domain_counts: Object.fromEntries(Object.entries(domainCounts).sort(([left], [right]) => left.localeCompare(right))),
+        evaluation_count: evaluationCount,
+        evaluation_digests: [...evaluationDigests],
+        learning_state_digest: learningStateDigest,
+        learned_signals: learnedSignals === null ? [] : learnedSignals.map((signal) => ({
+          goal_id: signal.goal_id,
+          priority: signal.priority ?? 0.5,
+          urgency: signal.urgency ?? 0,
+          deadline_ns: signal.deadline_ns ?? null,
+          estimated_cost: signal.estimated_cost ?? 1,
+          dependencies: [...(signal.dependencies ?? [])],
+        })),
+        learner_state: learnerState,
+        stop_reason: currentStopReason,
+        generation: previousCheckpoint === null ? 1 : previousCheckpoint.generation + 1,
+        previous_snapshot_digest: previousCheckpoint?.snapshot_digest ?? null,
+        retention: "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
+        secret_material: "never_returned",
+      };
+      const snapshot = sealAutonomousGoalControlLoopSnapshot(descriptor);
+      await options.checkpoint(snapshot);
+      previousCheckpoint = snapshot;
+    };
+
+    for (let cycleNumber = startCycle; cycleNumber <= maxCycles; cycleNumber += 1) {
       const remainingRuns = maxTotalRuns - totalRuns;
       if (remainingRuns <= 0) {
         stopReason = "run_budget_exhausted";
@@ -413,12 +499,12 @@ export class AutonomousGoalControlLoop {
         secret_material: "never_returned",
       };
       const scheduleOptions = { ...baseOptions };
+      if (learnedSignals !== null) scheduleOptions.signals = learnedSignals;
       if (options.options_factory) {
         const supplied = await options.options_factory(context);
         if (!isObject(supplied)) fail("options_factory must return an object");
         Object.assign(scheduleOptions, supplied);
       }
-      if (learnedSignals.length > 0) scheduleOptions.signals = learnedSignals;
       const requestedSelected = integer("schedule_options.max_selected", scheduleOptions.max_selected ?? 1, 1, 128);
       const effectiveSelected = Math.min(requestedSelected, remainingRuns);
       scheduleOptions.max_selected = effectiveSelected;
@@ -446,6 +532,7 @@ export class AutonomousGoalControlLoop {
           evaluations.push(evaluation);
         }
         evaluationDigests.push(digestJsonSync(evaluations));
+        evaluationCount += evaluations.length;
         const goalsForLearning = this.worker.ledger.list({ limit: 512 });
         if (this.learner !== null) {
           const update = this.learner instanceof AutonomousGoalBanditLearner
@@ -474,10 +561,12 @@ export class AutonomousGoalControlLoop {
       }
       const cycle = new AutonomousGoalControlLoopCycle(cycleNumber, batch, evaluations, learningStateDigest, nextSignals);
       cycles.push(cycle);
-      previous = cycle.toJSON();
-      totalSelected += previous.selected;
-      totalClaimed += previous.claimed;
-      totalRuns += previous.runs;
+      const publicCycle = cycle.toJSON();
+      previous = publicCycle;
+      history.push(publicCycle);
+      totalSelected += publicCycle.selected;
+      totalClaimed += publicCycle.claimed;
+      totalRuns += publicCycle.runs;
       for (const run of batch.runs) {
         statusCounts[run.goal_status] = (statusCounts[run.goal_status] ?? 0) + 1;
         domainCounts[run.domain] = (domainCounts[run.domain] ?? 0) + 1;
@@ -485,27 +574,29 @@ export class AutonomousGoalControlLoop {
       const includePaused = scheduleOptions.include_paused ?? true;
       const allowFailedRetry = scheduleOptions.allow_failed_retry ?? false;
       if (typeof includePaused !== "boolean" || typeof allowFailedRetry !== "boolean") fail("schedule retry and pause policies must be boolean");
+      let shouldBreak = false;
       if (batch.schedule.selected_goal_ids.length === 0) {
         stopReason = allTerminal(this.worker.ledger) ? "all_terminal" : "no_admissible_work";
-        break;
-      }
-      if (batch.runs.length === 0) {
+        shouldBreak = true;
+      } else if (batch.runs.length === 0) {
         stopReason = "no_admissible_work";
-        break;
-      }
-      if (!hasEligibleWork(this.worker.ledger, includePaused, allowFailedRetry)) {
+        shouldBreak = true;
+      } else if (!hasEligibleWork(this.worker.ledger, includePaused, allowFailedRetry)) {
         stopReason = allTerminal(this.worker.ledger) ? "all_terminal" : "no_admissible_work";
-        break;
+        shouldBreak = true;
       }
+      await emitCheckpoint(stopReason);
+      if (shouldBreak) break;
     }
 
     const summaries = cycles.map((cycle) => cycle.toJSON());
     const normalizedStatusCounts = Object.fromEntries(Object.entries(statusCounts).sort(([left], [right]) => left.localeCompare(right)));
     const normalizedDomainCounts = Object.fromEntries(Object.entries(domainCounts).sort(([left], [right]) => left.localeCompare(right)));
     const evaluationDigest = evaluationDigests.length > 0 ? digestJsonSync(evaluationDigests) : null;
+    const cycleHistoryDigest = restoredCycleCount > 0 ? digestJsonSync(history) : null;
     const loopDigest = digestJsonSync({
       schema: AUTONOMOUS_GOAL_CONTROL_LOOP_SCHEMA,
-      cycles: summaries,
+      cycles: restoredCycleCount > 0 ? history : summaries,
       stop_reason: stopReason,
       total_selected: totalSelected,
       total_claimed: totalClaimed,
@@ -514,13 +605,10 @@ export class AutonomousGoalControlLoop {
       domain_counts: normalizedDomainCounts,
       ...(evaluationDigest === null ? {} : { evaluation_digest: evaluationDigest }),
       ...(learningStateDigest === null ? {} : { learning_state_digest: learningStateDigest }),
+      ...(restoredCycleCount === 0 ? {} : { restored_cycle_count: restoredCycleCount, cycle_history_digest: cycleHistoryDigest }),
       retention: AUTONOMOUS_GOAL_CONTROL_LOOP_RETENTION,
       secret_material: "never_returned",
     });
-    return new AutonomousGoalControlLoopResult(cycles, stopReason, totalSelected, totalClaimed, totalRuns, normalizedStatusCounts, normalizedDomainCounts, loopDigest, evaluationsCount(cycles), evaluationDigest, learningStateDigest);
+    return new AutonomousGoalControlLoopResult(cycles, stopReason, totalSelected, totalClaimed, totalRuns, normalizedStatusCounts, normalizedDomainCounts, loopDigest, evaluationCount, evaluationDigest, learningStateDigest, restoredCycleCount, cycleHistoryDigest);
   }
-}
-
-function evaluationsCount(cycles: readonly AutonomousGoalControlLoopCycle[]): number {
-  return cycles.reduce((total, cycle) => total + cycle.evaluations.length, 0);
 }

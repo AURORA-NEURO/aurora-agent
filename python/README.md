@@ -206,6 +206,30 @@ factory supplies transient model candidates, opaque credential handles, approval
 memory, tools, and policy at execution time. All twelve domains, including `cross_domain`, use
 the same direct routing, prompt, provider, evaluator, and learning boundaries; no resolver or
 provider value is copied into goal or loop metadata.
+For long-running loops, pass a stable `run_id` and a `checkpoint(snapshot)` callback. The sealed
+checkpoint records contiguous cycle summaries, aggregate counters, evaluator digests, learned
+signals, and the built-in bandit's value-only arm state; it never records task text, prompts,
+parameters, credentials, callbacks, provider output, or evaluator evidence. The
+`JsonAutonomousGoalControlLoopSnapshotPersistence` adapter canonicalizes that projection, while
+`TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence` adds stale-writer fencing through
+`write_if_unchanged`. `AutonomousGoalControlLoopPersistenceCoordinator.flush` is directly usable
+as the callback:
+
+```python
+coordinator = AutonomousGoalControlLoopPersistenceCoordinator(
+    TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence(store),
+)
+loop.run(run_id="research-mission-001", checkpoint=coordinator.flush, max_cycles=128, max_total_runs=8192)
+
+# In a new process, restore the digest-bound image before supplying fresh transient callbacks.
+snapshot = coordinator.restore()
+fresh_loop.run(run_id="research-mission-001", resume_snapshot=snapshot, checkpoint=coordinator.flush, max_cycles=128, max_total_runs=8192)
+```
+Resume continues at the next cycle and restores the built-in bandit generation without replaying
+the completed worker batch. The caller still rehydrates task text, model candidates, opaque
+credentials, tools, memory, and approval policy after each new claim. Checkpoint generations are
+content-addressed and linked to their predecessor; a tampered image, non-contiguous cycle, changed
+run identity, or compare-and-swap conflict fails closed before execution.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

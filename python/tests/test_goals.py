@@ -25,6 +25,12 @@ from prism_sdk.autonomous_goal_scheduler import (
 )
 from prism_sdk.autonomous_goal_worker import AutonomousGoalWorker
 from prism_sdk.autonomous_goal_control_loop import AutonomousGoalBanditLearner, AutonomousGoalControlLoop
+from prism_sdk.autonomous_goal_control_persistence import (
+    AutonomousGoalControlLoopPersistenceCoordinator,
+    TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
+    seal_autonomous_goal_control_loop_snapshot,
+    validate_autonomous_goal_control_loop_snapshot,
+)
 from prism_sdk.autonomous_goal_agent import AutonomousGoalAgentRuntime
 from prism_sdk.autonomous_goal_worker_journal import (
     AutonomousGoalWorkerJournal,
@@ -396,6 +402,144 @@ def test_goal_control_loop_settles_explicit_evaluator_credit_and_adapts_all_doma
     tampered_reward.worker.ledger.create(goal_id="invalid-eval", task_digest=_digest("private invalid evaluator task"), domain="coding", now_ns=0)
     with pytest.raises(AutonomousGoalError, match="reward"):
         tampered_reward.run(schedule_options={"now_ns": 500, "max_selected": 1, "max_concurrent": 1})
+
+
+def test_goal_control_loop_checkpoints_restart_bandit_and_fences_tampering_across_all_domains() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 550, max_goals=len(domains))
+    for domain in domains:
+        ledger.create(goal_id=f"checkpoint-{domain}", task_digest=_digest(f"private checkpoint task {domain}"), domain=domain, now_ns=0)
+    phase = {"paused": True}
+    snapshots: list[dict[str, object]] = []
+
+    def evaluate(cycle):
+        return [
+            {
+                "goal_id": run.goal_id,
+                "evaluator_id": "checkpoint-evaluator",
+                "evaluator_version": "1",
+                "reward": 0.75,
+                "passed": not phase["paused"],
+            }
+            for run in cycle.batch.runs
+        ]
+
+    first = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            ledger,
+            resolver=lambda goal, _row: {"task": f"private checkpoint task {goal.domain}"},
+            executor=lambda _request: {"status": "paused" if phase["paused"] else "completed"},
+        ),
+        evaluator=evaluate,
+        batch_id_prefix="checkpoint-all-domains",
+    ).run(
+        run_id="checkpoint-all-domains",
+        schedule_options={"now_ns": 550, "max_selected": len(domains), "max_concurrent": len(domains), "required_domains": list(domains)},
+        max_cycles=1,
+        checkpoint=snapshots.append,
+    )
+    assert first.stop_reason == "cycle_budget_exhausted"
+    assert first.cycles[0].cycle == 1
+    assert snapshots[0]["completed_cycles"] == 1
+    assert snapshots[0]["learner_state"]["generation"] == 1
+    encoded = json.dumps(snapshots[0], sort_keys=True)
+    assert "private checkpoint task" not in encoded
+    assert "checkpoint-evaluator" not in encoded
+    assert "paused" in encoded
+
+    phase["paused"] = False
+    resumed = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            ledger,
+            resolver=lambda goal, _row: {"task": f"private checkpoint task {goal.domain}"},
+            executor=lambda _request: {"status": "completed"},
+        ),
+        evaluator=evaluate,
+        batch_id_prefix="checkpoint-all-domains",
+    ).run(
+        run_id="checkpoint-all-domains",
+        resume_snapshot=snapshots[-1],
+        schedule_options={"now_ns": 551, "max_selected": len(domains), "max_concurrent": len(domains), "required_domains": list(domains)},
+        max_cycles=3,
+        checkpoint=snapshots.append,
+    )
+    assert resumed.stop_reason == "all_terminal"
+    assert resumed.restored_cycle_count == 1
+    assert resumed.cycles[0].cycle == 2
+    assert resumed.evaluation_count == len(domains) * 2
+    assert snapshots[-1]["generation"] == 2
+    assert snapshots[-1]["previous_snapshot_digest"] == snapshots[0]["snapshot_digest"]
+    assert snapshots[-1]["learner_state"]["generation"] == 2
+    assert all(record.status == "completed" for record in ledger.list(limit=len(domains)))
+
+    class Store:
+        value: str | None = None
+
+        def read(self) -> str | None:
+            return self.value
+
+        def write(self, value: str) -> None:
+            self.value = value
+
+        def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+            actual = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+            if actual != expected_snapshot_digest:
+                return False
+            self.value = value
+            return True
+
+    store = Store()
+    persistence = TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence(store)
+    coordinator = AutonomousGoalControlLoopPersistenceCoordinator(persistence)
+    coordinator.flush(snapshots[0])
+    restored = coordinator.restore()
+    assert restored is not None
+    assert restored["snapshot_digest"] == snapshots[0]["snapshot_digest"]
+    tampered = dict(restored)
+    tampered["total_runs"] = int(tampered["total_runs"]) + 1
+    with pytest.raises(AutonomousGoalError, match="digest mismatch|aggregate counts"):
+        validate_autonomous_goal_control_loop_snapshot(tampered)
+
+    stale = AutonomousGoalControlLoopPersistenceCoordinator(persistence)
+    assert stale.restore()["snapshot_digest"] == restored["snapshot_digest"]
+    next_descriptor = dict(restored)
+    next_descriptor.pop("snapshot_digest")
+    next_descriptor["generation"] = 2
+    next_descriptor["previous_snapshot_digest"] = restored["snapshot_digest"]
+    next_descriptor["stop_reason"] = "cycle_budget_exhausted"
+    next_snapshot = seal_autonomous_goal_control_loop_snapshot(next_descriptor)
+    coordinator.flush(next_snapshot)
+    with pytest.raises(AutonomousGoalError, match="compare-and-swap"):
+        stale.flush(next_snapshot)
+
+
+def test_goal_control_checkpoint_digest_matches_typescript_reference() -> None:
+    snapshot = seal_autonomous_goal_control_loop_snapshot(
+        {
+            "schema": "bioprism-autonomous-goal-control-checkpoint/0.1",
+            "run_id": "parity-fixture",
+            "next_cycle": 1,
+            "cycle_summaries": [],
+            "previous_cycle": None,
+            "completed_cycles": 0,
+            "total_selected": 0,
+            "total_claimed": 0,
+            "total_runs": 0,
+            "status_counts": {},
+            "domain_counts": {},
+            "evaluation_count": 0,
+            "evaluation_digests": [],
+            "learning_state_digest": None,
+            "learned_signals": [],
+            "learner_state": None,
+            "stop_reason": "cycle_budget_exhausted",
+            "generation": 1,
+            "previous_snapshot_digest": None,
+            "retention": "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
+            "secret_material": "never_returned",
+        }
+    )
+    assert snapshot["snapshot_digest"] == "6781485690bc2aa87d5c4992de3017de959f236084f37f0d285cb1cd897ec5fb"
 
 
 def test_goal_agent_runtime_bridges_model_facade_across_every_domain_without_retaining_runtime_values() -> None:

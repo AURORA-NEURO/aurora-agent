@@ -7,6 +7,10 @@ import {
   AutonomousGoalWorker,
   AutonomousGoalControlLoop,
   AutonomousGoalBanditLearner,
+  AutonomousGoalControlLoopPersistenceCoordinator,
+  TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
+  sealAutonomousGoalControlLoopSnapshot,
+  validateAutonomousGoalControlLoopSnapshot,
   AutonomousGoalAgentRuntime,
   AutonomousGoalWorkerJournal,
   AutonomousGoalWorkerJournalPersistenceCoordinator,
@@ -318,6 +322,124 @@ test("goal control loop settles explicit evaluator credit and adapts every domai
     worker: new AutonomousGoalWorker({ ledger: invalidLedger, resolver: () => ({ task: "private invalid evaluator task" }), executor: async () => ({ status: "completed" }) }),
     evaluator: () => [{ goal_id: "invalid-eval", evaluator_id: "bad", evaluator_version: "1", reward: 2, passed: true }],
   }).run({ schedule_options: { now_ns: 500, max_selected: 1, max_concurrent: 1 } }), /reward/);
+});
+
+test("goal control checkpoints restart bandit state and fence tampering across every domain", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 550 });
+  for (const domain of domains) ledger.create({ goal_id: `checkpoint-${domain}`, task_digest: goalTaskDigest(`private checkpoint task ${domain}`), domain, now_ns: 0 });
+  let paused = true;
+  const snapshots = [];
+  const evaluate = (cycle) => cycle.batch.runs.map((run) => ({
+    goal_id: run.goal_id,
+    evaluator_id: "checkpoint-evaluator",
+    evaluator_version: "1",
+    reward: 0.75,
+    passed: !paused,
+  }));
+
+  const first = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      resolver: (goal) => ({ task: `private checkpoint task ${goal.domain}` }),
+      executor: async () => ({ status: paused ? "paused" : "completed" }),
+    }),
+    evaluator: evaluate,
+    batch_id_prefix: "checkpoint-all-domains",
+  }).run({
+    run_id: "checkpoint-all-domains",
+    schedule_options: { now_ns: 550, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    max_cycles: 1,
+    checkpoint: (snapshot) => { snapshots.push(snapshot); },
+  });
+  assert.equal(first.stop_reason, "cycle_budget_exhausted");
+  assert.equal(first.cycles[0].cycle, 1);
+  assert.equal(snapshots[0].completed_cycles, 1);
+  assert.equal(snapshots[0].learner_state.generation, 1);
+  assert.equal(JSON.stringify(snapshots[0]).includes("private checkpoint task"), false);
+  assert.equal(JSON.stringify(snapshots[0]).includes("checkpoint-evaluator"), false);
+
+  paused = false;
+  const resumed = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      resolver: (goal) => ({ task: `private checkpoint task ${goal.domain}` }),
+      executor: async () => ({ status: "completed" }),
+    }),
+    evaluator: evaluate,
+    batch_id_prefix: "checkpoint-all-domains",
+  }).run({
+    run_id: "checkpoint-all-domains",
+    resume_snapshot: snapshots.at(-1),
+    schedule_options: { now_ns: 551, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    max_cycles: 3,
+    checkpoint: (snapshot) => { snapshots.push(snapshot); },
+  });
+  assert.equal(resumed.stop_reason, "all_terminal");
+  assert.equal(resumed.restored_cycle_count, 1);
+  assert.equal(resumed.cycles[0].cycle, 2);
+  assert.equal(resumed.evaluation_count, domains.length * 2);
+  assert.equal(snapshots.at(-1).generation, 2);
+  assert.equal(snapshots.at(-1).previous_snapshot_digest, snapshots[0].snapshot_digest);
+  assert.equal(snapshots.at(-1).learner_state.generation, 2);
+  assert.ok(ledger.list({ limit: domains.length }).every((goal) => goal.status === "completed"));
+
+  let encoded = null;
+  const persistence = new TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence({
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    write_if_unchanged: (expected, value) => {
+      const actual = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (actual !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  });
+  const coordinator = new AutonomousGoalControlLoopPersistenceCoordinator(persistence);
+  await coordinator.flush(snapshots[0]);
+  const restored = await coordinator.restore();
+  assert.equal(restored.snapshot_digest, snapshots[0].snapshot_digest);
+  const tampered = structuredClone(restored);
+  tampered.total_runs += 1;
+  assert.throws(() => validateAutonomousGoalControlLoopSnapshot(tampered), /digest mismatch|aggregate counts/);
+
+  const stale = new AutonomousGoalControlLoopPersistenceCoordinator(persistence);
+  assert.equal((await stale.restore()).snapshot_digest, restored.snapshot_digest);
+  const nextDescriptor = structuredClone(restored);
+  delete nextDescriptor.snapshot_digest;
+  nextDescriptor.generation = 2;
+  nextDescriptor.previous_snapshot_digest = restored.snapshot_digest;
+  nextDescriptor.stop_reason = "cycle_budget_exhausted";
+  const nextSnapshot = sealAutonomousGoalControlLoopSnapshot(nextDescriptor);
+  await coordinator.flush(nextSnapshot);
+  await assert.rejects(() => stale.flush(nextSnapshot), /compare-and-swap/);
+});
+
+test("goal control checkpoint digest matches the Python reference", () => {
+  const snapshot = sealAutonomousGoalControlLoopSnapshot({
+    schema: "bioprism-autonomous-goal-control-checkpoint/0.1",
+    run_id: "parity-fixture",
+    next_cycle: 1,
+    cycle_summaries: [],
+    previous_cycle: null,
+    completed_cycles: 0,
+    total_selected: 0,
+    total_claimed: 0,
+    total_runs: 0,
+    status_counts: {},
+    domain_counts: {},
+    evaluation_count: 0,
+    evaluation_digests: [],
+    learning_state_digest: null,
+    learned_signals: [],
+    learner_state: null,
+    stop_reason: "cycle_budget_exhausted",
+    generation: 1,
+    previous_snapshot_digest: null,
+    retention: "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
+    secret_material: "never_returned",
+  });
+  assert.equal(snapshot.snapshot_digest, "6781485690bc2aa87d5c4992de3017de959f236084f37f0d285cb1cd897ec5fb");
 });
 
 test("goal agent runtime bridges the real facade across every domain without retaining runtime values", async () => {

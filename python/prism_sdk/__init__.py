@@ -163,8 +163,25 @@ from .autonomous_goal_control_loop import (
     AutonomousGoalEvaluation,
     ControlLoopStopReason,
     GoalLoopEvaluator,
+    GoalLoopCheckpoint,
     GoalLoopLearner,
     GoalLoopOptionsFactory,
+)
+from .autonomous_goal_control_persistence import (
+    AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA,
+    AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION,
+    AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES,
+    AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_RUNS,
+    AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_EVALUATIONS,
+    AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SIGNALS,
+    AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SNAPSHOT_BYTES,
+    AutonomousGoalControlLoopPersistenceCoordinator,
+    AutonomousGoalControlLoopSnapshotTextStore,
+    TransactionalAutonomousGoalControlLoopSnapshotTextStore,
+    JsonAutonomousGoalControlLoopSnapshotPersistence,
+    TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
+    seal_autonomous_goal_control_loop_snapshot,
+    validate_autonomous_goal_control_loop_snapshot,
 )
 from .autonomous_goal_agent import (
     GOAL_AGENT_RUNTIME_RETENTION,

@@ -17,6 +17,10 @@ from typing import Any, Literal
 from .authoring import content_digest
 from .autonomous_goal_scheduler import AutonomousGoalSchedulingSignal
 from .autonomous_goal_worker import AutonomousGoalWorker, AutonomousGoalWorkerBatch
+from .autonomous_goal_control_persistence import (
+    seal_autonomous_goal_control_loop_snapshot,
+    validate_autonomous_goal_control_loop_snapshot,
+)
 from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
 
 
@@ -39,6 +43,7 @@ ControlLoopStopReason = Literal[
 GoalLoopOptionsFactory = Callable[["AutonomousGoalControlLoopContext"], Mapping[str, Any]]
 GoalLoopEvaluator = Callable[["AutonomousGoalControlLoopCycle"], Sequence[Any]]
 GoalLoopLearner = Callable[[Sequence[Mapping[str, Any]], Sequence[Mapping[str, Any]]], Mapping[str, Any]]
+GoalLoopCheckpoint = Callable[[Mapping[str, Any]], Any]
 
 
 def _fail(message: str) -> None:
@@ -178,10 +183,15 @@ class AutonomousGoalBanditLearner:
     def _restore(self, state: Mapping[str, Any]) -> None:
         if not isinstance(state, Mapping) or state.get("schema") != GOAL_CONTROL_BANDIT_SCHEMA:
             _fail("bandit state schema is invalid")
+        exploration = state.get("exploration", self.exploration)
+        if isinstance(exploration, bool) or not isinstance(exploration, (int, float)) or not math.isfinite(float(exploration)) or not 0.0 <= float(exploration) <= 2.0:
+            _fail("bandit state exploration is outside its bounds")
+        self.exploration = float(exploration)
         self.generation = _integer(state.get("generation"), name="bandit generation", minimum=0, maximum=2**31 - 1)
         raw_arms = state.get("arms")
         if not isinstance(raw_arms, Sequence) or isinstance(raw_arms, (str, bytes, bytearray)) or len(raw_arms) > 128:
             _fail("bandit arms are outside their bounds")
+        self.arms.clear()
         for raw in raw_arms:
             if not isinstance(raw, Mapping):
                 _fail("bandit arm is malformed")
@@ -196,6 +206,11 @@ class AutonomousGoalBanditLearner:
             if isinstance(reward_sum, bool) or not isinstance(reward_sum, (int, float)) or not math.isfinite(float(reward_sum)) or not -pulls <= float(reward_sum) <= pulls:
                 _fail("bandit arm reward_sum is outside its bounds")
             self.arms[domain] = {"pulls": pulls, "failures": failures, "reward_sum": float(reward_sum)}
+
+    def restore(self, state: Mapping[str, Any]) -> None:
+        """Replace value-only state after a process restart."""
+
+        self._restore(state)
 
     def snapshot(self) -> dict[str, Any]:
         body = {
@@ -324,6 +339,8 @@ class AutonomousGoalControlLoopResult:
     evaluation_count: int = 0
     evaluation_digest: str | None = None
     learning_state_digest: str | None = None
+    restored_cycle_count: int = 0
+    cycle_history_digest: str | None = None
 
     @property
     def live_results(self) -> tuple[Any, ...]:
@@ -347,6 +364,9 @@ class AutonomousGoalControlLoopResult:
             body["evaluation_digest"] = self.evaluation_digest
         if self.learning_state_digest is not None:
             body["learning_state_digest"] = self.learning_state_digest
+        if self.restored_cycle_count:
+            body["restored_cycle_count"] = self.restored_cycle_count
+            body["cycle_history_digest"] = self.cycle_history_digest
         return {**body, "loop_digest": self.loop_digest}
 
 
@@ -405,15 +425,25 @@ class AutonomousGoalControlLoop:
         options_factory: GoalLoopOptionsFactory | None = None,
         max_cycles: int = MAX_GOAL_CONTROL_LOOP_CYCLES,
         max_total_runs: int = MAX_GOAL_CONTROL_LOOP_RUNS,
+        run_id: str | None = None,
+        resume_snapshot: Mapping[str, Any] | None = None,
+        checkpoint: GoalLoopCheckpoint | None = None,
     ) -> AutonomousGoalControlLoopResult:
         if schedule_options is not None and not isinstance(schedule_options, Mapping):
             _fail("schedule_options must be a mapping or None")
         if options_factory is not None and not callable(options_factory):
             _fail("options_factory must be callable or None")
+        if run_id is not None and not isinstance(run_id, str):
+            _fail("run_id must be a string or None")
+        if resume_snapshot is not None and not isinstance(resume_snapshot, Mapping):
+            _fail("resume_snapshot must be a mapping or None")
+        if checkpoint is not None and not callable(checkpoint):
+            _fail("checkpoint must be callable or None")
         max_cycles = _integer(max_cycles, name="max_cycles", minimum=1, maximum=MAX_GOAL_CONTROL_LOOP_CYCLES)
         max_total_runs = _integer(max_total_runs, name="max_total_runs", minimum=1, maximum=MAX_GOAL_CONTROL_LOOP_RUNS)
         base_options = {} if schedule_options is None else dict(schedule_options)
         cycles: list[AutonomousGoalControlLoopCycle] = []
+        history: list[dict[str, Any]] = []
         previous: dict[str, Any] | None = None
         total_selected = 0
         total_claimed = 0
@@ -423,9 +453,71 @@ class AutonomousGoalControlLoop:
         stop_reason: ControlLoopStopReason = "cycle_budget_exhausted"
         learned_signals: list[Mapping[str, Any]] | None = None
         evaluation_digests: list[str] = []
+        evaluation_count = 0
         learning_state_digest: str | None = None
+        previous_checkpoint: dict[str, Any] | None = None
+        restored_cycle_count = 0
 
-        for cycle_number in range(1, max_cycles + 1):
+        if resume_snapshot is not None:
+            restored = validate_autonomous_goal_control_loop_snapshot(resume_snapshot)
+            restored_cycle_count = int(restored["completed_cycles"])
+            history = [dict(item) for item in restored["cycle_summaries"]]
+            previous = None if restored["previous_cycle"] is None else dict(restored["previous_cycle"])
+            total_selected = int(restored["total_selected"])
+            total_claimed = int(restored["total_claimed"])
+            total_runs = int(restored["total_runs"])
+            status_counts = {str(key): int(value) for key, value in restored["status_counts"].items()}
+            domain_counts = {str(key): int(value) for key, value in restored["domain_counts"].items()}
+            evaluation_count = int(restored["evaluation_count"])
+            evaluation_digests = [str(value) for value in restored["evaluation_digests"]]
+            learning_state_digest = restored["learning_state_digest"]
+            learned_signals = [dict(signal) for signal in restored["learned_signals"]]
+            previous_checkpoint = dict(restored)
+            if run_id is not None and run_id != restored["run_id"]:
+                _fail("run_id does not match the resume snapshot")
+            run_id = str(restored["run_id"])
+            learner_state = restored["learner_state"]
+            if learner_state is not None:
+                if not isinstance(self.learner, AutonomousGoalBanditLearner):
+                    _fail("resume snapshot contains built-in learner state but this loop has no compatible bandit")
+                self.learner.restore(learner_state)
+
+        checkpoint_run_id = _identifier(run_id or self.batch_id_prefix, name="run_id") if (checkpoint is not None or resume_snapshot is not None) else (run_id or self.batch_id_prefix)
+        start_cycle = 1 if resume_snapshot is None else int(previous_checkpoint["next_cycle"])
+
+        def emit_checkpoint(current_stop_reason: ControlLoopStopReason) -> None:
+            nonlocal previous_checkpoint
+            if checkpoint is None:
+                return
+            learner_state: Mapping[str, Any] | None = self.learner.snapshot() if isinstance(self.learner, AutonomousGoalBanditLearner) else None
+            descriptor = {
+                "schema": "bioprism-autonomous-goal-control-checkpoint/0.1",
+                "run_id": checkpoint_run_id,
+                "next_cycle": len(history) + 1,
+                "cycle_summaries": history,
+                "previous_cycle": previous,
+                "completed_cycles": len(history),
+                "total_selected": total_selected,
+                "total_claimed": total_claimed,
+                "total_runs": total_runs,
+                "status_counts": dict(sorted(status_counts.items())),
+                "domain_counts": dict(sorted(domain_counts.items())),
+                "evaluation_count": evaluation_count,
+                "evaluation_digests": evaluation_digests,
+                "learning_state_digest": learning_state_digest,
+                "learned_signals": [] if learned_signals is None else [dict(signal) for signal in learned_signals],
+                "learner_state": learner_state,
+                "stop_reason": current_stop_reason,
+                "generation": 1 if previous_checkpoint is None else int(previous_checkpoint["generation"]) + 1,
+                "previous_snapshot_digest": None if previous_checkpoint is None else previous_checkpoint["snapshot_digest"],
+                "retention": "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
+                "secret_material": "never_returned",
+            }
+            snapshot = seal_autonomous_goal_control_loop_snapshot(descriptor)
+            checkpoint(snapshot)
+            previous_checkpoint = snapshot
+
+        for cycle_number in range(start_cycle, max_cycles + 1):
             remaining_runs = max_total_runs - total_runs
             if remaining_runs <= 0:
                 stop_reason = "run_budget_exhausted"
@@ -496,6 +588,7 @@ class AutonomousGoalControlLoop:
                     _fail("evaluator returned duplicate goal evaluations")
                 evaluations = tuple(normalized)
                 evaluation_digests.append(content_digest([item.to_dict() for item in evaluations]))
+                evaluation_count += len(evaluations)
                 goals_for_learning = [record.to_dict() for record in self.worker.ledger.list(limit=512)]
                 if self.learner is not None:
                     if isinstance(self.learner, AutonomousGoalBanditLearner):
@@ -531,6 +624,7 @@ class AutonomousGoalControlLoop:
             total_selected += public["selected"]
             total_claimed += public["claimed"]
             total_runs += public["runs"]
+            history.append(public)
             for run in batch.runs:
                 status_counts[run.goal_status] = status_counts.get(run.goal_status, 0) + 1
                 domain_counts[run.domain] = domain_counts.get(run.domain, 0) + 1
@@ -538,25 +632,33 @@ class AutonomousGoalControlLoop:
             allow_failed_retry = options.get("allow_failed_retry", False)
             if not isinstance(include_paused, bool) or not isinstance(allow_failed_retry, bool):
                 _fail("schedule retry and pause policies must be boolean")
+            should_break = False
             if not batch.schedule.selected_goal_ids:
                 stop_reason = "all_terminal" if _all_terminal(self.worker.ledger) else "no_admissible_work"
-                break
-            if not batch.runs:
+                should_break = True
+            elif not batch.runs:
                 stop_reason = "no_admissible_work"
-                break
-            if not _has_eligible_work(self.worker.ledger, include_paused=include_paused, allow_failed_retry=allow_failed_retry):
+                should_break = True
+            elif not _has_eligible_work(self.worker.ledger, include_paused=include_paused, allow_failed_retry=allow_failed_retry):
                 stop_reason = "all_terminal" if _all_terminal(self.worker.ledger) else "no_admissible_work"
+                should_break = True
+            emit_checkpoint(stop_reason)
+            if should_break:
                 break
         else:
             stop_reason = "cycle_budget_exhausted"
 
         summary = [cycle.to_dict() for cycle in cycles]
         evaluation_digest = content_digest(evaluation_digests) if evaluation_digests else None
-        digest_body = {"schema": GOAL_CONTROL_LOOP_SCHEMA, "cycles": summary, "stop_reason": stop_reason, "total_selected": total_selected, "total_claimed": total_claimed, "total_runs": total_runs, "status_counts": dict(sorted(status_counts.items())), "domain_counts": dict(sorted(domain_counts.items())), "retention": GOAL_CONTROL_LOOP_RETENTION, "secret_material": "never_returned"}
+        cycle_history_digest = content_digest(history) if restored_cycle_count else None
+        digest_body = {"schema": GOAL_CONTROL_LOOP_SCHEMA, "cycles": history if restored_cycle_count else summary, "stop_reason": stop_reason, "total_selected": total_selected, "total_claimed": total_claimed, "total_runs": total_runs, "status_counts": dict(sorted(status_counts.items())), "domain_counts": dict(sorted(domain_counts.items())), "retention": GOAL_CONTROL_LOOP_RETENTION, "secret_material": "never_returned"}
         if evaluation_digest is not None:
             digest_body["evaluation_digest"] = evaluation_digest
         if learning_state_digest is not None:
             digest_body["learning_state_digest"] = learning_state_digest
+        if restored_cycle_count:
+            digest_body["restored_cycle_count"] = restored_cycle_count
+            digest_body["cycle_history_digest"] = cycle_history_digest
         digest = content_digest(digest_body)
         return AutonomousGoalControlLoopResult(
             cycles=tuple(cycles),
@@ -567,9 +669,11 @@ class AutonomousGoalControlLoop:
             status_counts=dict(status_counts),
             domain_counts=dict(domain_counts),
             loop_digest=digest,
-            evaluation_count=sum(len(cycle.evaluations) for cycle in cycles),
+            evaluation_count=evaluation_count,
             evaluation_digest=evaluation_digest,
             learning_state_digest=learning_state_digest,
+            restored_cycle_count=restored_cycle_count,
+            cycle_history_digest=cycle_history_digest,
         )
 
 
@@ -593,4 +697,5 @@ __all__ = [
     "GoalLoopOptionsFactory",
     "GoalLoopEvaluator",
     "GoalLoopLearner",
+    "GoalLoopCheckpoint",
 ]

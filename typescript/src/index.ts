@@ -2602,6 +2602,27 @@ export type {
   AutonomousGoalEvaluation,
 } from "./autonomous-goal-control-loop.js";
 export {
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_SCHEMA,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_RETENTION,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_CYCLES,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_RUNS,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_EVALUATIONS,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SIGNALS,
+  AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SNAPSHOT_BYTES,
+  AutonomousGoalControlLoopPersistenceCoordinator,
+  JsonAutonomousGoalControlLoopSnapshotPersistence,
+  TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
+  sealAutonomousGoalControlLoopSnapshot,
+  validateAutonomousGoalControlLoopSnapshot,
+} from "./autonomous-goal-control-persistence.js";
+export type {
+  AutonomousGoalControlLoopCheckpoint,
+  AutonomousGoalControlLoopSnapshotTextStore,
+  TransactionalAutonomousGoalControlLoopSnapshotTextStore,
+  AutonomousGoalControlLoopSnapshotPersistence,
+  TransactionalAutonomousGoalControlLoopSnapshotPersistence,
+} from "./autonomous-goal-control-persistence.js";
+export {
   AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION,
   AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA,
   AutonomousGoalAgentRuntime,

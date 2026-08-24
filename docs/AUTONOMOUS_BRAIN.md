@@ -5223,6 +5223,26 @@ domain-scoped value update to future admission signals; a custom learner may ret
 priority/urgency/dependency signals plus a learning-state digest. Feedback and learner state are
 retained as digests/counts only, with evaluator values and live results remaining process-local.
 
+The outer loop now has its own crash/restart boundary rather than relying on the worker journal
+alone. Supply a stable `run_id` and a checkpoint callback (or use
+`AutonomousGoalControlLoopPersistenceCoordinator` with the canonical JSON adapter) to persist a
+sealed image after every completed cycle. The image binds the next cycle number, the complete
+bounded cycle-summary history, aggregate selected/claimed/run counters, evaluator digest history,
+learned scheduling signals, stop reason, and the value-only `AutonomousGoalBanditLearner` arm
+snapshot. It is content-addressed with `snapshot_digest`, linked to its predecessor through
+`previous_snapshot_digest`, and fenced by generation plus optional compare-and-swap storage.
+
+On restart, call `restore()` and pass the result as `resume_snapshot` to a freshly constructed
+loop. The loop resumes at the next cycle, restores the built-in bandit's generation/arms, carries
+forward the run and cycle budgets, and exposes the restored history only as digest/count metadata
+on the result. It does not replay completed worker batches. The caller must still recreate the
+task resolver, model candidates, prompt policy, opaque credential handles, tools, memory, approval
+callbacks, and evaluator implementation; those process-local values are obtained only after the
+new worker claim. Strict validation rejects tampered digests, identity drift, missing/extra fields,
+non-contiguous cycles, invalid bandit arms, oversized signals, and stale writers before execution.
+Python and TypeScript use the same schema, retention posture, canonical JSON, and generation chain
+so a checkpoint can be handed across runtimes without copying private execution state.
+
 `AutonomousGoalAgentRuntime` is the production composition bridge for long-horizon work. It binds
 the goal worker to the real `AutonomousTaskOrchestrator`: an application-owned task resolver
 rehydrates text after admission, and an execution-options factory can supply model candidates,
