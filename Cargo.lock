@@ -309,6 +309,7 @@ dependencies = [
  "bioprism-cookbook",
  "bioprism-devx",
  "bioprism-epistemic",
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-interweave",
  "serde",
@@ -744,6 +745,7 @@ dependencies = [
 name = "bioprism-ops"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-infra",
  "bioprism-safety",
@@ -1035,6 +1037,7 @@ dependencies = [
 name = "bioprism-weave"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-section",
  "serde",
@@ -1046,6 +1049,7 @@ dependencies = [
 name = "bioprism-weavelang"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-weave",
  "serde",

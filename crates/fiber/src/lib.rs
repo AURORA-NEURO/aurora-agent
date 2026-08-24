@@ -46,6 +46,7 @@ pub mod closure;
 pub mod compile;
 pub mod error;
 pub mod influence;
+pub mod mechanism_gateway;
 pub mod oracle;
 pub mod plan;
 pub mod policy;
@@ -62,6 +63,12 @@ pub use compile::{
 };
 pub use error::FiberError;
 pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
+pub use mechanism_gateway::{
+    admit_mechanism_gateway, MechanismGatewayDisposition, MechanismGatewayError,
+    MechanismGatewayReceipt, MechanismGatewayRequest,
+    CONTRACT_VERSION as MECHANISM_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_GATEWAY_FEATURE_ID,
+};
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
 pub use qir::{

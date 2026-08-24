@@ -68,6 +68,8 @@ WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID = "AFA-weavelang-P16-F27"
 WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION = "weavelang-release-assurance/1.0"
 MECHANISM_CONTROL_PLANE_FEATURE_ID = "AFA-adapter-P08-F31"
 MECHANISM_CONTROL_PLANE_CONTRACT_VERSION = "federated-mechanism-control-plane/1.0"
+MECHANISM_GATEWAY_FEATURE_ID = "AFA-fiber-P08-F24"
+MECHANISM_GATEWAY_CONTRACT_VERSION = "federated-mechanism-interoperability-gateway/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -1905,3 +1907,33 @@ class MechanismControlPlaneReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "federation_id": self.federation_id, "question_id": self.question_id, "admitted_candidate_ids": list(self.admitted_candidate_ids), "disposition": self.disposition, "evidence_receipt_digest": self.evidence_receipt_digest, "checks": list(self.checks), "omissions": list(self.omissions), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class MechanismGatewayReceipt:
+    request_id: str
+    federation_id: str
+    source_profile: str
+    target_profile: str
+    projected_candidate_ids: tuple[str, ...]
+    interoperability_profile: str
+    disposition: str
+    projection_digest: str | None
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = MECHANISM_GATEWAY_FEATURE_ID
+    contract_version: str = MECHANISM_GATEWAY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != MECHANISM_GATEWAY_FEATURE_ID or self.contract_version != MECHANISM_GATEWAY_CONTRACT_VERSION: raise ResearchContractError("mechanism gateway schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.federation_id.strip() or not self.source_profile.strip() or not self.target_profile.strip() or not self.interoperability_profile.strip() or not self.checks: raise ResearchContractError("mechanism gateway identity or checks are incomplete")
+        if not self.projected_candidate_ids or len(set(self.projected_candidate_ids)) != len(self.projected_candidate_ids): raise ResearchContractError("mechanism gateway candidate identities are not unique")
+        if self.disposition not in {"passed", "blocked", "unknown"}: raise ResearchContractError("mechanism gateway disposition is unknown")
+        if self.projection_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.projection_digest): raise ResearchContractError("mechanism gateway projection digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]): raise ResearchContractError("mechanism gateway receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "federation_id": self.federation_id, "source_profile": self.source_profile, "target_profile": self.target_profile, "projected_candidate_ids": list(self.projected_candidate_ids), "interoperability_profile": self.interoperability_profile, "disposition": self.disposition, "projection_digest": self.projection_digest, "checks": list(self.checks), "omissions": list(self.omissions), "artifact": dict(self.artifact), "boundary": self.boundary})

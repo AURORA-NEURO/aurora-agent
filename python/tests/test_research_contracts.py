@@ -5,6 +5,7 @@ from prism_sdk.research_contracts import KNOWLEDGE_REPRESENTATION_ASSURANCE_FEAT
 from prism_sdk.research_contracts import RESOURCE_CONTROL_PLANE_FEATURE_ID, RESOURCE_CONTROL_PLANE_CONTRACT_VERSION, ResourceControlPlaneReceipt
 from prism_sdk.research_contracts import WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID, WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION, WeaveLangReleaseAssuranceReceipt
 from prism_sdk.research_contracts import MECHANISM_CONTROL_PLANE_FEATURE_ID, MECHANISM_CONTROL_PLANE_CONTRACT_VERSION, MechanismControlPlaneReceipt
+from prism_sdk.research_contracts import MECHANISM_GATEWAY_FEATURE_ID, MECHANISM_GATEWAY_CONTRACT_VERSION, MechanismGatewayReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -691,3 +692,8 @@ def test_weavelang_release_keeps_incomplete_closure_unknown():
 def test_mechanism_control_plane_keeps_missing_candidate_unknown():
     receipt = MechanismControlPlaneReceipt(request_id="request:mechanism", federation_id="federation:mechanism", question_id="question:organoid", admitted_candidate_ids=("candidate:a",), disposition="unknown", evidence_receipt_digest=None, checks=("incomplete mechanism evidence remains unknown rather than admitted",), omissions=("required mechanism candidate unavailable: candidate:b",), artifact={"content_hash": "b" * 64})
     receipt.validate(); assert receipt.feature_id == MECHANISM_CONTROL_PLANE_FEATURE_ID; assert receipt.contract_version == MECHANISM_CONTROL_PLANE_CONTRACT_VERSION; assert receipt.digest() == receipt.digest()
+
+
+def test_mechanism_gateway_keeps_missing_projection_unknown():
+    receipt = MechanismGatewayReceipt(request_id="request:gateway", federation_id="federation:mechanism", source_profile="mechanism-v1", target_profile="mechanism-v2", projected_candidate_ids=("candidate:a",), interoperability_profile="ro-crate+prov-o:1", disposition="unknown", projection_digest=None, checks=("incomplete candidate projection remains unknown rather than interoperable",), omissions=("projection receipt is absent",), artifact={"content_hash": "b" * 64})
+    receipt.validate(); assert receipt.feature_id == MECHANISM_GATEWAY_FEATURE_ID; assert receipt.contract_version == MECHANISM_GATEWAY_CONTRACT_VERSION; assert receipt.digest() == receipt.digest()
