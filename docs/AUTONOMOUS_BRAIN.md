@@ -8437,6 +8437,39 @@ policy, and catalogue drift, and returns only bounded mismatch codes and a verif
 Cycles and failed items remain explicit blockers; `allow_partial` never turns a failed item into a
 successful portfolio-level claim.
 
+After review, the same plan can be dispatched through the caller-approved workflow boundary with
+`agent.execute_workflow_portfolio()`. The executor replays the digest-bound plan before the first
+provider call, runs ready items in deterministic dependency waves, limits concurrency, propagates
+failure/approval boundaries to dependents, and writes a checkpoint after each wave. Credentials,
+model candidates, and effect approval remain caller inputs; the executor never discovers or
+manufactures them. Successful checkpoints contain only item/request/task/result digests and
+control metadata. Raw `AutonomousWorkflowRun` values stay transient and must be restored through a
+caller-owned rehydration callback before a dependent item is dispatched:
+
+```python
+checkpoints = []
+execution = agent.execute_workflow_portfolio(
+    portfolio,
+    requests,
+    credentials=credential_session,
+    model_candidates=approved_candidates,
+    job_id="review-batch-2026-08-24",
+    max_parallelism=4,
+    stop_on_error=True,
+    checkpoint_sink=checkpoints.append,
+)
+if execution.status == "completed":
+    print(execution.checkpoint.to_dict())
+```
+
+On restart, pass the last checkpoint plus `rehydrate_result(context)`. The callback receives a
+metadata-only `AutonomousWorkflowPortfolioRehydrationContext` with the expected result digest; it
+must return the caller-retained run whose status and canonical projection reproduce that digest.
+Tampered checkpoints, request drift, plan drift, failed rehydration, and missing rehydration are
+rejected before new work is dispatched. `execution.to_dict()` intentionally excludes task text,
+prompts, credentials, provider output, tool arguments, and raw runs, while the returned execution
+object keeps raw runs only for the caller's transient handoff.
+
 When the application already knows the capability, use focused dispatch to narrow provider-visible
 tools and bind the evidence contract into the developer prompt:
 

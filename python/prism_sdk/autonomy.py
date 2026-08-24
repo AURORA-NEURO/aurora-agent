@@ -17005,6 +17005,45 @@ class AutonomousAgent:
             allow_partial=allow_partial,
         ).to_dict()
 
+    def execute_workflow_portfolio(
+        self,
+        plan: Mapping[str, Any] | Any,
+        requests: Sequence[Any],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        job_id: str,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        checkpoint: Mapping[str, Any] | Any | None = None,
+        checkpoint_sink: Any | None = None,
+        rehydrate_result: Any | None = None,
+        workflow_options_factory: Any | None = None,
+    ) -> Any:
+        """Execute a previously reviewed workflow portfolio in dependency waves.
+
+        The portfolio runner performs a provider-free replay before dispatch, then delegates each
+        ready item to this agent's ordinary credential/model-aware workflow runner.  Checkpoints
+        contain only digests and status metadata; callers retain and rehydrate successful raw runs.
+        """
+
+        from .autonomous_workflow_portfolio import execute_autonomous_workflow_portfolio
+
+        return execute_autonomous_workflow_portfolio(
+            self,
+            plan,
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            job_id=job_id,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+            checkpoint=checkpoint,
+            checkpoint_sink=checkpoint_sink,
+            rehydrate_result=rehydrate_result,
+            workflow_options_factory=workflow_options_factory,
+        )
+
     def prepare_auto_with_provider(
         self,
         *,

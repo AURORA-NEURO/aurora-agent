@@ -78,9 +78,12 @@ composes explicit requests across all twelve reviewed domains, preserves depende
 cycle/partial/required-domain coverage, and projects each task's workflow, evidence, model-capability,
 and route identities without retaining task text or making provider/tool calls. The matching
 `verify_workflow_portfolio` replay catches task, dependency, workflow, evidence, policy, and
-catalogue drift after restart. This is the planning/review boundary; the existing caller-approved
-workflow runner remains the execution authority, and durable portfolio queues/checkpoints are still
-deployment work.
+catalogue drift after restart. Python now also exposes a bounded executor that replays the plan
+before dispatch, schedules ready items in deterministic dependency waves, propagates failed and
+approval states to dependents, and persists a metadata-only checkpoint after each wave. Restart
+requires a caller-owned rehydration callback that proves each successful result digest before
+dependent work resumes. Durable multi-host queues, lease ownership, and external authorization
+are still deployment work.
 
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and

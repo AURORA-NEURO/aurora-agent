@@ -1320,8 +1320,13 @@ from .autonomous_workflow_portfolio import (
     AutonomousWorkflowPortfolioItemRequest,
     AutonomousWorkflowPortfolioPlan,
     AutonomousWorkflowPortfolioVerification,
+    AutonomousWorkflowPortfolioRehydrationContext,
+    AutonomousWorkflowPortfolioExecutionCheckpoint,
+    AutonomousWorkflowPortfolioExecutionItem,
+    AutonomousWorkflowPortfolioExecutionResult,
     plan_autonomous_workflow_portfolio,
     verify_autonomous_workflow_portfolio,
+    execute_autonomous_workflow_portfolio,
 )
 from .anndata import AnnDataAdapter, AnnDataAuditResult, AnnDataFinding, audit_anndata
 from .alignment import AlignmentAdapter, AlignmentAuditResult, AlignmentFinding, audit_alignments
@@ -6689,6 +6694,11 @@ __all__ = [
     "AutonomousWorkflowPortfolioItemRequest",
     "AutonomousWorkflowPortfolioPlan",
     "AutonomousWorkflowPortfolioVerification",
+    "AutonomousWorkflowPortfolioRehydrationContext",
+    "AutonomousWorkflowPortfolioExecutionCheckpoint",
+    "AutonomousWorkflowPortfolioExecutionItem",
+    "AutonomousWorkflowPortfolioExecutionResult",
     "plan_autonomous_workflow_portfolio",
     "verify_autonomous_workflow_portfolio",
+    "execute_autonomous_workflow_portfolio",
 ]
