@@ -56,6 +56,8 @@ export const CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID = "AFA-devplat-P03-F28" as
 export const CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION = "federated-context-compilation-assurance/1.0" as const;
 export const KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID = "AFA-ops-P04-F28" as const;
 export const KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION = "federated-knowledge-representation-assurance/1.0" as const;
+export const RESOURCE_CONTROL_PLANE_FEATURE_ID = "AFA-weave-P05-F32" as const;
+export const RESOURCE_CONTROL_PLANE_CONTRACT_VERSION = "federated-resource-control-plane/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1107,6 +1109,10 @@ export function knowledgeRepresentationAssuranceReceiptDigest(receipt: Knowledge
   validateKnowledgeRepresentationAssuranceReceipt(receipt);
   return digestJsonSync(receipt);
 }
+
+export interface ResourceControlPlaneReceipt { schema_version: string; feature_id: string; contract_version: string; request_id: string; federation_id: string; institution_ids: string[]; qualified_resource_ids: string[]; disposition: "passed" | "blocked" | "unknown"; qualification_digest: string | null; checks: string[]; omissions: string[]; artifact: Record<string, unknown>; boundary: string; }
+export function validateResourceControlPlaneReceipt(receipt: ResourceControlPlaneReceipt): void { if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RESOURCE_CONTROL_PLANE_FEATURE_ID || receipt.contract_version !== RESOURCE_CONTROL_PLANE_CONTRACT_VERSION) throw new Error("resource control-plane schema, feature, or version mismatch"); if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.federation_id.trim() || receipt.institution_ids.length < 2 || JSON.stringify([...new Set(receipt.institution_ids)].sort()) !== JSON.stringify(receipt.institution_ids)) throw new Error("resource control-plane identity is invalid"); if (!receipt.qualified_resource_ids.length || !new Set(["passed", "blocked", "unknown"]).has(receipt.disposition) || !receipt.checks.length) throw new Error("resource control-plane qualification is incomplete"); if (receipt.qualification_digest !== null && !/^[0-9a-f]{64}$/.test(receipt.qualification_digest)) throw new Error("resource control-plane digest is invalid"); if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("resource control-plane artifact digest is invalid"); }
+export function resourceControlPlaneReceiptDigest(receipt: ResourceControlPlaneReceipt): string { validateResourceControlPlaneReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

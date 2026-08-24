@@ -62,6 +62,8 @@ CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID = "AFA-devplat-P03-F28"
 CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION = "federated-context-compilation-assurance/1.0"
 KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID = "AFA-ops-P04-F28"
 KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION = "federated-knowledge-representation-assurance/1.0"
+RESOURCE_CONTROL_PLANE_FEATURE_ID = "AFA-weave-P05-F32"
+RESOURCE_CONTROL_PLANE_CONTRACT_VERSION = "federated-resource-control-plane/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -1817,3 +1819,31 @@ class KnowledgeRepresentationAssuranceReceipt:
             "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })
+
+
+@dataclass(frozen=True)
+class ResourceControlPlaneReceipt:
+    request_id: str
+    federation_id: str
+    institution_ids: tuple[str, ...]
+    qualified_resource_ids: tuple[str, ...]
+    disposition: str
+    qualification_digest: str | None
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RESOURCE_CONTROL_PLANE_FEATURE_ID
+    contract_version: str = RESOURCE_CONTROL_PLANE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RESOURCE_CONTROL_PLANE_FEATURE_ID or self.contract_version != RESOURCE_CONTROL_PLANE_CONTRACT_VERSION: raise ResearchContractError("resource control-plane schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.federation_id.strip() or len(self.institution_ids) < 2: raise ResearchContractError("resource control-plane identity or boundary is invalid")
+        if len(set(self.institution_ids)) != len(self.institution_ids) or list(self.institution_ids) != sorted(self.institution_ids): raise ResearchContractError("resource control-plane institution ordering is invalid")
+        if not self.qualified_resource_ids or len(set(self.qualified_resource_ids)) != len(self.qualified_resource_ids) or self.disposition not in {"passed", "blocked", "unknown"} or not self.checks: raise ResearchContractError("resource control-plane qualification or checks are incomplete")
+        if self.qualification_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.qualification_digest): raise ResearchContractError("resource control-plane digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]): raise ResearchContractError("resource control-plane artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "federation_id": self.federation_id, "institution_ids": list(self.institution_ids), "qualified_resource_ids": list(self.qualified_resource_ids), "disposition": self.disposition, "qualification_digest": self.qualification_digest, "checks": list(self.checks), "omissions": list(self.omissions), "artifact": dict(self.artifact), "boundary": self.boundary})

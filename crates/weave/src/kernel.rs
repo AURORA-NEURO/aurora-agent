@@ -116,7 +116,8 @@ impl Kernel {
 
     pub fn admit(&mut self, participant: Participant, budget: Budget) {
         self.budgets.insert(participant.name.clone(), budget);
-        self.participants.insert(participant.name.clone(), participant);
+        self.participants
+            .insert(participant.name.clone(), participant);
     }
 
     pub fn participant(&self, name: &str) -> Option<&Participant> {

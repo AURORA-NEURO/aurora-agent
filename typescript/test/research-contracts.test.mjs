@@ -122,6 +122,10 @@ import {
   KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
   knowledgeRepresentationAssuranceReceiptDigest,
   validateKnowledgeRepresentationAssuranceReceipt,
+  RESOURCE_CONTROL_PLANE_FEATURE_ID,
+  RESOURCE_CONTROL_PLANE_CONTRACT_VERSION,
+  resourceControlPlaneReceiptDigest,
+  validateResourceControlPlaneReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -858,3 +862,5 @@ test("knowledge representation keeps missing fact unknown", () => {
   assert.doesNotThrow(() => validateKnowledgeRepresentationAssuranceReceipt(receipt));
   assert.equal(knowledgeRepresentationAssuranceReceiptDigest(receipt), knowledgeRepresentationAssuranceReceiptDigest(receipt));
 });
+
+test("resource control plane keeps missing qualification unknown", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: RESOURCE_CONTROL_PLANE_FEATURE_ID, contract_version: RESOURCE_CONTROL_PLANE_CONTRACT_VERSION, request_id: "request:resources", federation_id: "federation:resources", institution_ids: ["site:a", "site:b"], qualified_resource_ids: ["resource:a"], disposition: "unknown", qualification_digest: null, checks: ["incomplete qualification remains unknown rather than executable"], omissions: ["qualification receipt is absent"], artifact: { content_hash: "b".repeat(64) }, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateResourceControlPlaneReceipt(receipt)); assert.equal(resourceControlPlaneReceiptDigest(receipt), resourceControlPlaneReceiptDigest(receipt)); });

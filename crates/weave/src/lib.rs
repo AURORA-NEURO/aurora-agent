@@ -21,6 +21,7 @@ pub mod capsule;
 pub mod continuation;
 pub mod kernel;
 pub mod ledger;
+pub mod resource_control_plane;
 
 pub use act::{Act, ActKind};
 pub use authority::{AuthorityError, AuthorityTable, Capability, Grant};
@@ -31,4 +32,10 @@ pub use kernel::{Kernel, KernelError, Participant};
 pub use ledger::{
     commitments, epistemic_state, ChainStatus, Commitment, CommitmentState, EpistemicEntry, Ledger,
     LedgerEvent,
+};
+pub use resource_control_plane::{
+    operate_resource_control_plane, ResourceControlDisposition, ResourceControlError,
+    ResourceControlPlaneReceipt, ResourceControlPlaneRequest,
+    CONTRACT_VERSION as RESOURCE_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as RESOURCE_CONTROL_PLANE_FEATURE_ID,
 };

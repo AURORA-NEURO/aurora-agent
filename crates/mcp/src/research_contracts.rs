@@ -82,6 +82,10 @@ use bioprism_store::{
     admit_federated_knowledge, FederatedKnowledgeGatewayReceipt, FederatedKnowledgeGatewayRequest,
     FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID,
 };
+use bioprism_weave::{
+    operate_resource_control_plane, ResourceControlPlaneReceipt, ResourceControlPlaneRequest,
+    RESOURCE_CONTROL_PLANE_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
@@ -114,6 +118,7 @@ pub const FEDERATED_CONTINUAL_RETRIEVAL_TOOL: &str = "federated_continual_retrie
 pub const CONTEXT_COMPILATION_ASSURANCE_TOOL: &str = "federated_context_compilation_assurance";
 pub const KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL: &str =
     "federated_knowledge_representation_assurance";
+pub const RESOURCE_CONTROL_PLANE_TOOL: &str = "federated_resource_control_plane";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -654,6 +659,26 @@ pub fn validate_knowledge_representation_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID {
         return Err("knowledge representation assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn operate_resource_control_plane_json(value: &Value) -> Result<Value, String> {
+    let request: ResourceControlPlaneRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid resource control-plane request: {error}"))?;
+    let receipt = operate_resource_control_plane(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize resource control-plane receipt: {error}"))
+}
+
+pub fn validate_resource_control_plane_json(
+    value: &Value,
+) -> Result<ResourceControlPlaneReceipt, String> {
+    let receipt: ResourceControlPlaneReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid resource control-plane receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RESOURCE_CONTROL_PLANE_FEATURE_ID {
+        return Err("resource control-plane feature id mismatch".into());
     }
     Ok(receipt)
 }

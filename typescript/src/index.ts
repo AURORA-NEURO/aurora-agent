@@ -243,8 +243,12 @@ export {
   KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
   knowledgeRepresentationAssuranceReceiptDigest,
   validateKnowledgeRepresentationAssuranceReceipt,
+  RESOURCE_CONTROL_PLANE_FEATURE_ID,
+  RESOURCE_CONTROL_PLANE_CONTRACT_VERSION,
+  resourceControlPlaneReceiptDigest,
+  validateResourceControlPlaneReceipt,
 } from "./research-contracts.js";
-export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, FederatedMultimodalAssuranceReceipt, FederatedKnowledgeGatewayReceipt, FederatedLensAssuranceReceipt, LabSemanticParityReceipt, FederatedRetrievalAssuranceReceipt, FederatedContinualRetrievalReceipt, RetrievalSourceUpdate, ContextCompilationAssuranceReceipt, KnowledgeRepresentationAssuranceReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, FederatedMultimodalAssuranceReceipt, FederatedKnowledgeGatewayReceipt, FederatedLensAssuranceReceipt, LabSemanticParityReceipt, FederatedRetrievalAssuranceReceipt, FederatedContinualRetrievalReceipt, RetrievalSourceUpdate, ContextCompilationAssuranceReceipt, KnowledgeRepresentationAssuranceReceipt, ResourceControlPlaneReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,
