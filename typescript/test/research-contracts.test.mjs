@@ -90,6 +90,10 @@ import {
   PROTOCOL_ASSURANCE_CONTRACT_VERSION,
   protocolAssuranceReceiptDigest,
   validateProtocolAssuranceReceipt,
+  FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
+  FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION,
+  federatedMultimodalAssuranceReceiptDigest,
+  validateFederatedMultimodalAssuranceReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -659,4 +663,25 @@ test("protocol assurance keeps unknown simulation cells", () => {
   };
   assert.doesNotThrow(() => validateProtocolAssuranceReceipt(receipt));
   assert.equal(protocolAssuranceReceiptDigest(receipt), protocolAssuranceReceiptDigest(receipt));
+});
+
+test("federated multimodal assurance keeps locality and unknown state", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
+    contract_version: FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION,
+    request_id: "request:federated",
+    federation_id: "federation:preclinical",
+    benchmark_id: "benchmark:multimodal",
+    institution_ids: ["site:a", "site:b"],
+    disposition: "unknown",
+    harmonized_digest: "a".repeat(64),
+    checks: ["partial harmonization remains unknown rather than comparable"],
+    omissions: ["modality semantic loss remains bounded and must be reported"],
+    artifact: { content_hash: "b".repeat(64) },
+    raw_data_local: true,
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateFederatedMultimodalAssuranceReceipt(receipt));
+  assert.equal(federatedMultimodalAssuranceReceiptDigest(receipt), federatedMultimodalAssuranceReceiptDigest(receipt));
 });

@@ -847,8 +847,11 @@ dependencies = [
 name = "bioprism-routing"
 version = "0.1.0"
 dependencies = [
+ "bioprism-adapter",
  "bioprism-baseline",
  "bioprism-fiber",
+ "bioprism-foundation",
+ "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",

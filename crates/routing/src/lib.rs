@@ -77,6 +77,7 @@ pub mod calibration;
 pub mod comparator;
 pub mod error;
 pub mod evidence;
+pub mod federated_multimodal_assurance;
 pub mod fingerprint;
 pub mod lab;
 pub mod policy;
@@ -91,6 +92,12 @@ pub use calibration::{CalibrationBin, CalibrationCurve};
 pub use comparator::Comparator;
 pub use error::RoutingError;
 pub use evidence::{utility, EvidenceLedger, Observation, INADMISSIBLE_UTILITY};
+pub use federated_multimodal_assurance::{
+    assure_federated_multimodal, FederatedAssuranceDisposition, FederatedAssuranceError,
+    FederatedMultimodalAssuranceReceipt, FederatedMultimodalAssuranceRequest,
+    CONTRACT_VERSION as FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
+};
 pub use fingerprint::{AttachmentRegime, ChainRegime, Fingerprint, Regime, TagRegime};
 pub use lab::{observe, Holdout, LabSettings, Task};
 pub use policy::{

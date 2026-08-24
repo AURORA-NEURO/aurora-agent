@@ -46,6 +46,10 @@ use bioprism_policy::{
     assess_protocol_assurance, ProtocolAssuranceReceipt, ProtocolAssuranceRequest,
     PROTOCOL_ASSURANCE_FEATURE_ID,
 };
+use bioprism_routing::{
+    assure_federated_multimodal, FederatedMultimodalAssuranceReceipt,
+    FederatedMultimodalAssuranceRequest, FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
+};
 use bioprism_runtime::{
     execute_workflow, execute_workflow_batch, WorkflowBatchReceipt, WorkflowBatchRequest,
     WorkflowExecutionReceipt, WorkflowExecutionRequest, WORKFLOW_BATCH_FEATURE_ID,
@@ -78,6 +82,7 @@ pub const RESOURCE_DISCOVERY_CONTRACT_TOOL: &str = "resource_discovery_contract_
 pub const GOVERNANCE_RESEARCH_RELEASE_TOOL: &str = "governance_research_release_compile";
 pub const RELEASE_ASSURANCE_HARNESS_TOOL: &str = "release_assurance_harness";
 pub const PROTOCOL_ASSURANCE_TOOL: &str = "protocol_assurance_harness";
+pub const FEDERATED_MULTIMODAL_ASSURANCE_TOOL: &str = "federated_multimodal_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -458,6 +463,27 @@ pub fn validate_protocol_assurance_json(value: &Value) -> Result<ProtocolAssuran
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != PROTOCOL_ASSURANCE_FEATURE_ID {
         return Err("protocol assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_federated_multimodal_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedMultimodalAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated multimodal assurance request: {error}"))?;
+    let receipt = assure_federated_multimodal(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated multimodal assurance receipt: {error}")
+    })
+}
+
+pub fn validate_federated_multimodal_assurance_json(
+    value: &Value,
+) -> Result<FederatedMultimodalAssuranceReceipt, String> {
+    let receipt: FederatedMultimodalAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated multimodal assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID {
+        return Err("federated multimodal assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

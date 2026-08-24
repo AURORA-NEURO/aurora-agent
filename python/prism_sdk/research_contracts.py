@@ -45,6 +45,8 @@ RELEASE_HARNESS_FEATURE_ID = "AFA-obligation-P16-F27"
 RELEASE_HARNESS_CONTRACT_VERSION = "release-assurance-harness/1.0"
 PROTOCOL_ASSURANCE_FEATURE_ID = "AFA-policy-P10-F27"
 PROTOCOL_ASSURANCE_CONTRACT_VERSION = "protocol-assurance-harness/1.0"
+FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID = "AFA-routing-P06-F28"
+FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION = "federated-multimodal-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -870,6 +872,58 @@ class ProtocolAssuranceReceipt:
             "omissions": list(self.omissions),
             "simulation_digest": self.simulation_digest,
             "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class FederatedMultimodalAssuranceReceipt:
+    """Transport validator for locality-preserving federated multimodal admission."""
+
+    request_id: str
+    federation_id: str
+    benchmark_id: str
+    institution_ids: tuple[str, ...]
+    disposition: str
+    harmonized_digest: str
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    raw_data_local: bool = True
+    feature_id: str = FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID
+    contract_version: str = FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID or self.contract_version != FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("federated multimodal assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.federation_id.strip() or not self.benchmark_id.strip():
+            raise ResearchContractError("federated multimodal assurance identity or locality is invalid")
+        if len(self.institution_ids) < 2 or any(not institution.strip() for institution in self.institution_ids) or len(set(self.institution_ids)) != len(self.institution_ids):
+            raise ResearchContractError("federated multimodal institution set is incomplete")
+        if self.disposition not in {"passed", "blocked", "unknown"} or not self.checks:
+            raise ResearchContractError("federated multimodal disposition or checks are incomplete")
+        for digest in (self.harmonized_digest, self.artifact.get("content_hash")):
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("federated multimodal digest is not a canonical sha256")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "benchmark_id": self.benchmark_id,
+            "institution_ids": list(self.institution_ids),
+            "disposition": self.disposition,
+            "harmonized_digest": self.harmonized_digest,
+            "checks": list(self.checks),
+            "omissions": list(self.omissions),
+            "artifact": dict(self.artifact),
+            "raw_data_local": self.raw_data_local,
             "boundary": self.boundary,
         })
 
