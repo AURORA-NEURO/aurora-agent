@@ -9,8 +9,8 @@
 //! headline verdict says `Pass`.
 
 use bioprism_foundation::{
-    EvaluationCard, ReleaseVerdict, ResearchContractError, RESEARCH_CONTRACT_SCHEMA_VERSION,
-    PRECLINICAL_BOUNDARY,
+    EvaluationCard, ReleaseVerdict, ResearchContractError, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -91,7 +91,9 @@ impl ReleaseReview {
             });
         }
         if self.feature_id != FEATURE_ID {
-            return Err(ResearchContractError::MissingField { field: "feature_id" });
+            return Err(ResearchContractError::MissingField {
+                field: "feature_id",
+            });
         }
         if self.boundary != PRECLINICAL_BOUNDARY {
             return Err(ResearchContractError::BoundaryMismatch {
@@ -116,12 +118,11 @@ pub fn review_release(
     policy: &ReleaseReviewPolicy,
 ) -> Result<ReleaseReview, ResearchContractError> {
     card.validate()?;
-    let card_value = serde_json::to_value(card).map_err(|error| {
-        ResearchContractError::Serialization {
+    let card_value =
+        serde_json::to_value(card).map_err(|error| ResearchContractError::Serialization {
             item: "evaluation_card".into(),
             message: error.to_string(),
-        }
-    })?;
+        })?;
     let card_digest = ContentHash::of_value(&card_value).map_err(|error| {
         ResearchContractError::Serialization {
             item: "evaluation_card".into(),
@@ -135,14 +136,16 @@ pub fn review_release(
         blocked = true;
         reasons.push(format!(
             "baseline floor unmet: {} < {}",
-            card.baselines.len(), policy.minimum_baselines
+            card.baselines.len(),
+            policy.minimum_baselines
         ));
     }
     if card.metrics.len() < policy.minimum_metrics {
         blocked = true;
         reasons.push(format!(
             "metric floor unmet: {} < {}",
-            card.metrics.len(), policy.minimum_metrics
+            card.metrics.len(),
+            policy.minimum_metrics
         ));
     }
     let distinct_sites = replications
@@ -153,7 +156,8 @@ pub fn review_release(
         blocked = true;
         reasons.push(format!(
             "independent replication floor unmet: {} < {}",
-            distinct_sites.len(), policy.minimum_replication_sites
+            distinct_sites.len(),
+            policy.minimum_replication_sites
         ));
     }
     if replications
@@ -277,7 +281,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(review.verdict, ReleaseVerdict::Blocked);
-        assert!(review.reasons.iter().any(|reason| reason.contains("replication")));
+        assert!(review
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("replication")));
     }
 
     #[test]

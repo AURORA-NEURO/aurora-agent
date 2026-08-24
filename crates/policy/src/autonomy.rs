@@ -10,9 +10,9 @@ use bioprism_foundation::{
     AutonomyGrant, AutonomyTier, Effect, EvidenceState, PolicyDecision, PolicyReceipt,
     ResearchContractError, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
+use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use bioprism_ids::ContentHash;
 
 pub const FEATURE_ID: &str = "AFA-policy-P19-F01";
 pub const FEATURE_VERSION: &str = "0.1.0";
@@ -71,7 +71,9 @@ impl AutonomyAdmissionReceipt {
         if self.feature_id != FEATURE_ID || self.actor.trim().is_empty() {
             return Err(ResearchContractError::MissingField { field: "actor" });
         }
-        if self.boundary != PRECLINICAL_BOUNDARY || self.policy_receipt.boundary != PRECLINICAL_BOUNDARY {
+        if self.boundary != PRECLINICAL_BOUNDARY
+            || self.policy_receipt.boundary != PRECLINICAL_BOUNDARY
+        {
             return Err(ResearchContractError::BoundaryMismatch {
                 capability: self.actor.clone(),
             });
@@ -81,18 +83,18 @@ impl AutonomyAdmissionReceipt {
 
     pub fn digest(&self) -> Result<ContentHash, AutonomyError> {
         self.validate()?;
-        let value = serde_json::to_value(self).map_err(|error| AutonomyError::Contract(
-            ResearchContractError::Serialization {
+        let value = serde_json::to_value(self).map_err(|error| {
+            AutonomyError::Contract(ResearchContractError::Serialization {
                 item: "autonomy_admission_receipt".into(),
                 message: error.to_string(),
-            },
-        ))?;
-        ContentHash::of_value(&value).map_err(|error| AutonomyError::Contract(
-            ResearchContractError::Serialization {
+            })
+        })?;
+        ContentHash::of_value(&value).map_err(|error| {
+            AutonomyError::Contract(ResearchContractError::Serialization {
                 item: "autonomy_admission_receipt".into(),
                 message: error.to_string(),
-            },
-        ))
+            })
+        })
     }
 }
 
@@ -118,7 +120,10 @@ pub fn admit_autonomy(
             granted: request.grant.autonomy_tier,
         });
     }
-    if matches!(request.evidence_state, EvidenceState::Unknown | EvidenceState::Contradicted) {
+    if matches!(
+        request.evidence_state,
+        EvidenceState::Unknown | EvidenceState::Contradicted
+    ) {
         return Err(AutonomyError::EvidenceNotAdmissible {
             state: request.evidence_state,
         });
@@ -150,15 +155,20 @@ pub fn admit_autonomy(
             }
         }
     }
-    if matches!(request.effect, Effect::InstrumentExecution | Effect::ConsumeMaterial)
-        && request.signed_preflight.is_none()
+    if matches!(
+        request.effect,
+        Effect::InstrumentExecution | Effect::ConsumeMaterial
+    ) && request.signed_preflight.is_none()
     {
         decision = PolicyDecision::ApprovalRequired;
         reasons.push("physical effects require signed preflight".into());
     }
     let receipt = PolicyReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
-        receipt_id: format!("autonomy:{}:{}", request.grant.actor, request.requested_action),
+        receipt_id: format!(
+            "autonomy:{}:{}",
+            request.grant.actor, request.requested_action
+        ),
         decision,
         reasons: reasons.clone(),
         evaluated_artifacts: artifacts.clone(),
@@ -256,7 +266,10 @@ mod tests {
             replay_identity: None,
             independent_safety_review: None,
         });
-        assert!(matches!(result, Err(AutonomyError::EvidenceNotAdmissible { .. })));
+        assert!(matches!(
+            result,
+            Err(AutonomyError::EvidenceNotAdmissible { .. })
+        ));
     }
 
     #[test]
@@ -271,6 +284,9 @@ mod tests {
             replay_identity: None,
             independent_safety_review: None,
         };
-        assert_eq!(admit_autonomy(&request).unwrap().digest().unwrap(), admit_autonomy(&request).unwrap().digest().unwrap());
+        assert_eq!(
+            admit_autonomy(&request).unwrap().digest().unwrap(),
+            admit_autonomy(&request).unwrap().digest().unwrap()
+        );
     }
 }
