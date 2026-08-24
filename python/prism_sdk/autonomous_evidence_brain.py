@@ -138,11 +138,23 @@ def _execution_metadata(agent: Any, execution: Any) -> tuple[str | None, str | N
 
 
 @dataclass(frozen=True, slots=True)
+class AutonomousEvidenceBackedPreflight:
+    """Transient, caller-owned state immediately before the provider boundary."""
+
+    task_digest: str
+    execution_plan_digest: str
+    evidence_plan: AutonomousEvidencePlan
+    evidence: AutonomousEvidenceRuntimeResult
+    prompt_context: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class AutonomousEvidenceBackedRunResult:
     """Transient execution envelope with a strict metadata-only projection."""
 
     status: str
     task_digest: str
+    execution_plan_digest: str
     evidence_plan: AutonomousEvidencePlan
     evidence: AutonomousEvidenceRuntimeResult | None
     prompt_context: Mapping[str, Any]
@@ -157,6 +169,7 @@ class AutonomousEvidenceBackedRunResult:
             "schema": AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
             "status": self.status,
             "task_digest": self.task_digest,
+            "execution_plan_digest": self.execution_plan_digest,
             "evidence_plan_digest": self.evidence_plan.plan_digest,
             "evidence_result_digest": None if self.evidence is None else self.evidence.result_digest,
             "execution_status": self.execution_status,
@@ -173,6 +186,7 @@ def _build_result(
     *,
     status: str,
     task_digest: str,
+    execution_plan_digest: str,
     evidence_plan: AutonomousEvidencePlan,
     evidence: AutonomousEvidenceRuntimeResult | None,
     prompt_context: Mapping[str, Any],
@@ -196,6 +210,7 @@ def _build_result(
     return AutonomousEvidenceBackedRunResult(
         status=status,
         task_digest=task_digest,
+        execution_plan_digest=execution_plan_digest,
         evidence_plan=evidence_plan,
         evidence=evidence,
         prompt_context=dict(prompt_context),
@@ -228,6 +243,8 @@ def run_autonomous_evidence_backed(
     approve_source_dispatch: bool = False,
     allow_incomplete_evidence: bool = False,
     approve_provider_call: bool = False,
+    provider_run_override: Any | None = None,
+    before_provider_run: Callable[[AutonomousEvidenceBackedPreflight], None] | None = None,
     prompt_builder: Callable[[AutonomousEvidenceRuntimeResult], Mapping[str, Any]] | None = None,
     run_mode: str = "auto",
     run_options: Mapping[str, Any] | None = None,
@@ -276,11 +293,21 @@ def run_autonomous_evidence_backed(
         completed_stages=completed_stages,
     )
     task_digest = content_digest({"task": task_text})
+    execution_plan_digest = content_digest(
+        {
+            "schema": AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
+            "task_digest": task_digest,
+            "evidence_plan_digest": plan.plan_digest,
+            "domains": list(selected_domains),
+            "run_mode": run_mode,
+        }
+    )
     empty_context: dict[str, Any] = {}
     if not approve_source_dispatch:
         return _build_result(
             status="evidence_review_required",
             task_digest=task_digest,
+            execution_plan_digest=execution_plan_digest,
             evidence_plan=plan,
             evidence=None,
             prompt_context=empty_context,
@@ -306,6 +333,7 @@ def run_autonomous_evidence_backed(
         return _build_result(
             status=_result_status(evidence.status),
             task_digest=task_digest,
+            execution_plan_digest=execution_plan_digest,
             evidence_plan=plan,
             evidence=evidence,
             prompt_context=empty_context,
@@ -350,37 +378,54 @@ def run_autonomous_evidence_backed(
     merged_context.update(prompt_context)
     options["context"] = merged_context
 
-    if run_mode == "domain":
-        execution = agent.run(
-            task=task_text,
-            domain=selected_domains[0],
-            credentials=credentials,
-            model_candidates=model_candidates,
-            **options,
-        )
-    elif run_mode == "cross_domain":
-        subtasks = tuple(
-            {
-                "id": f"evidence-{domain}",
-                "domain": domain,
-                "task": task_text,
-            }
-            for domain in selected_domains
-        )
-        execution = agent.run_cross_domain(
-            task=task_text,
-            subtasks=subtasks,
-            credentials=credentials,
-            model_candidates=model_candidates,
-            **options,
-        )
+    if provider_run_override is not None:
+        if approve_provider_call is not True:
+            raise ArgumentError("evidence-backed provider_run_override requires provider approval")
+        execution = provider_run_override
     else:
-        execution = agent.run_auto(
-            task=task_text,
-            credentials=credentials,
-            model_candidates=model_candidates,
-            **options,
-        )
+        if before_provider_run is not None:
+            if not callable(before_provider_run):
+                raise ArgumentError("evidence-backed before_provider_run must be callable or None")
+            before_provider_run(
+                AutonomousEvidenceBackedPreflight(
+                    task_digest=task_digest,
+                    execution_plan_digest=execution_plan_digest,
+                    evidence_plan=plan,
+                    evidence=evidence,
+                    prompt_context=dict(prompt_context),
+                )
+            )
+        if run_mode == "domain":
+            execution = agent.run(
+                task=task_text,
+                domain=selected_domains[0],
+                credentials=credentials,
+                model_candidates=model_candidates,
+                **options,
+            )
+        elif run_mode == "cross_domain":
+            subtasks = tuple(
+                {
+                    "id": f"evidence-{domain}",
+                    "domain": domain,
+                    "task": task_text,
+                }
+                for domain in selected_domains
+            )
+            execution = agent.run_cross_domain(
+                task=task_text,
+                subtasks=subtasks,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                **options,
+            )
+        else:
+            execution = agent.run_auto(
+                task=task_text,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                **options,
+            )
     execution_status, route_digest, execution_digest = _execution_metadata(agent, execution)
     final_status = (
         "completed"
@@ -394,6 +439,7 @@ def run_autonomous_evidence_backed(
     return _build_result(
         status=final_status,
         task_digest=task_digest,
+        execution_plan_digest=execution_plan_digest,
         evidence_plan=plan,
         evidence=evidence,
         prompt_context=prompt_context,
@@ -408,6 +454,7 @@ __all__ = [
     "AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA",
     "AUTONOMOUS_EVIDENCE_BACKED_RUN_STATUSES",
     "MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_BYTES",
+    "AutonomousEvidenceBackedPreflight",
     "AutonomousEvidenceBackedRunResult",
     "run_autonomous_evidence_backed",
 ]

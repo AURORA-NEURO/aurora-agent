@@ -246,6 +246,18 @@ values become `reconciliation_required` rather than silently reacquiring a sourc
 tests cover refusal, replay, redaction, and provider-backed execution across all twelve domain
 plans, bringing the Python and TypeScript source-to-brain contracts into parity.
 
+Python evidence-backed execution now also has the restart boundary that previously existed only
+in the TypeScript façade. `run_resumable_evidence_backed(...)` and
+`AutonomousEvidenceBackedController` persist a digest-bound checkpoint immediately before the
+provider boundary, retain only plan/request/policy/result digests, and require the caller-owned
+evidence journal for replay. `InMemoryAutonomousEvidenceBackedCheckpointStore`, canonical JSON
+persistence, and transactional compare-and-swap persistence are available for local, browser,
+and service adapters. A restored provider result must pass the exact checkpoint digest through
+`rehydrate_provider_run`; otherwise the run remains `provider_reconciliation_required` until the
+caller explicitly opts into `resume_provider=True`. All twelve domain plans are exercised
+credentiallessly, including source replay, provider-pending recovery, tamper rejection, and the
+no-duplicate-dispatch invariant.
+
 The evidence-backed brain operation now has a restart-safe controller and checkpoint boundary.
 `runAutonomousEvidenceBackedResumable()` and `AutonomousEvidenceBackedController` bind the task,
 request set, run policy, evidence plan, prompt projection, and provider result to a bounded

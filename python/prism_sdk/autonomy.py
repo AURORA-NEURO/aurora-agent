@@ -14698,6 +14698,8 @@ class AutonomousAgent:
         approve_source_dispatch: bool = False,
         allow_incomplete_evidence: bool = False,
         approve_provider_call: bool = False,
+        provider_run_override: Any | None = None,
+        before_provider_run: Callable[[Any], None] | None = None,
         prompt_builder: Callable[[AutonomousEvidenceRuntimeResult], Mapping[str, Any]] | None = None,
         run_mode: str = "auto",
         run_options: Mapping[str, Any] | None = None,
@@ -14732,10 +14734,31 @@ class AutonomousAgent:
             approve_source_dispatch=approve_source_dispatch,
             allow_incomplete_evidence=allow_incomplete_evidence,
             approve_provider_call=approve_provider_call,
+            provider_run_override=provider_run_override,
+            before_provider_run=before_provider_run,
             prompt_builder=prompt_builder,
             run_mode=run_mode,
             run_options=run_options,
         )
+
+    def run_resumable_evidence_backed(self, **kwargs: Any) -> Any:
+        """Run or resume reviewed evidence-backed work through a caller checkpoint sink.
+
+        The resumable boundary never replays a provider result implicitly.  Callers must provide
+        a caller-owned evidence journal and either rehydrate an observed provider result or pass
+        an explicit provider-resume decision.
+        """
+
+        from .autonomous_evidence_backed_resumable import run_autonomous_evidence_backed_resumable
+
+        return run_autonomous_evidence_backed_resumable(self, **kwargs)
+
+    def evidence_backed_controller(self, job_id: str, persistence: Any) -> Any:
+        """Create a serialized, optionally CAS-fenced evidence-backed restart controller."""
+
+        from .autonomous_evidence_backed_resumable import AutonomousEvidenceBackedController
+
+        return AutonomousEvidenceBackedController(self, job_id, persistence)
 
     def workflows(self) -> list[dict[str, Any]]:
         """Return the deterministic workflow contracts available to automatic intake."""
