@@ -80,6 +80,7 @@ members = [
     "crates/residue",
     "crates/domain",
     "crates/brain",
+    "crates/autopilot",
     "crates/cli",
 ]
 
@@ -176,6 +177,7 @@ bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }
 bioprism-evalengine = { path = "crates/evalengine" }
 bioprism-brain = { path = "crates/brain" }
+bioprism-autopilot = { path = "crates/autopilot" }
 
 [profile.release]
 lto = "thin"
