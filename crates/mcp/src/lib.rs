@@ -19,10 +19,12 @@ pub use research_contracts::{
     validate_autonomy_batch_receipt_json, validate_design_frontier_receipt_json, validate_quality_drift_receipt_json, validate_workflow_batch_receipt_json,
     validate_policy_receipt_json, validate_protocol_matrix_receipt_json,
     validate_qualified_analysis_result_json, validate_research_release_batch_receipt_json, validate_research_release_receipt_json,
-    validate_workflow_execution_receipt_json, ANALYSIS_QUALIFICATION_TOOL,
+    validate_workflow_execution_receipt_json, discover_resources_json,
+    validate_qualified_resource_set_json, ANALYSIS_QUALIFICATION_TOOL,
     EVALUATION_OBSERVABILITY_TOOL, FEDERATED_EVALUATION_TOOL, INSTRUMENT_PREFLIGHT_TOOL, MULTIMODAL_HARMONIZATION_TOOL,
     AUTONOMY_BATCH_TOOL, DESIGN_FRONTIER_TOOL, MULTIMODAL_REPLICATION_TOOL, PROTOCOL_MATRIX_TOOL, QUALITY_DRIFT_TOOL, RESEARCH_COMPILE_TOOL, WORKFLOW_BATCH_TOOL,
-    RESEARCH_CONTRACT_SCHEMA_VERSION, RESEARCH_RELEASE_BATCH_VALIDATE_TOOL, RESEARCH_RELEASE_VALIDATE_TOOL, WORKFLOW_EXECUTION_TOOL,
+    RESEARCH_CONTRACT_SCHEMA_VERSION, RESEARCH_RELEASE_BATCH_VALIDATE_TOOL, RESEARCH_RELEASE_VALIDATE_TOOL,
+    RESOURCE_WORKBENCH_TOOL, WORKFLOW_EXECUTION_TOOL,
 };
 pub use rpc::{Request, Response};
 pub use server::{

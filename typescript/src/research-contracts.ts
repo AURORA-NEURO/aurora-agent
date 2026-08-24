@@ -31,6 +31,7 @@ export const AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02" as const;
 export const WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11" as const;
 export const RESEARCH_RELEASE_BATCH_FEATURE_ID = "AFA-services-P16-F03" as const;
 export const FEDERATED_EVALUATION_FEATURE_ID = "AFA-evalengine-P23-F02" as const;
+export const RESOURCE_WORKBENCH_FEATURE_ID = "AFA-fiber-P05-F20" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -683,6 +684,36 @@ export function validateFederatedEvaluationReceipt(receipt: FederatedEvaluationR
 
 export function federatedEvaluationReceiptDigest(receipt: FederatedEvaluationReceipt): string {
   validateFederatedEvaluationReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface QualifiedResourceSet {
+  schema_version: string;
+  feature_id: string;
+  need_id: string;
+  requester: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  considered_candidates: number;
+  qualified_count: number;
+  resources: readonly Record<string, unknown>[];
+  omissions: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateQualifiedResourceSet(receipt: QualifiedResourceSet): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RESOURCE_WORKBENCH_FEATURE_ID) throw new Error("resource workbench schema or feature mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.need_id.trim() || !receipt.requester.trim()) throw new Error("resource workbench identity or boundary is invalid");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("resource discovery disposition is unknown");
+  if (!Number.isInteger(receipt.considered_candidates) || receipt.considered_candidates <= 0 || !Number.isInteger(receipt.qualified_count) || receipt.qualified_count < 0 || receipt.qualified_count !== receipt.resources.length || receipt.reasons.length === 0) throw new Error("resource discovery counts or reasons are incomplete");
+  if (receipt.resources.some((resource) => typeof resource.resource_id !== "string" || !resource.resource_id.trim() || typeof resource.origin !== "string" || !resource.origin.trim() || !Number.isInteger(resource.rank) || Number(resource.rank) <= 0 || !Array.isArray(resource.reasons) || resource.reasons.length === 0)) throw new Error("qualified resource entry is incomplete");
+  if (receipt.omissions.some((omission) => typeof omission.resource_id !== "string" || !omission.resource_id.trim() || typeof omission.reason !== "string" || !omission.reason.trim())) throw new Error("resource omission entry is incomplete");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("resource workbench artifact digest is invalid");
+}
+
+export function qualifiedResourceSetDigest(receipt: QualifiedResourceSet): string {
+  validateQualifiedResourceSet(receipt);
   return digestJsonSync(receipt);
 }
 

@@ -1805,6 +1805,7 @@ impl Server {
             "evaluation_trajectory_check" => self.evaluation_trajectory_check(&arguments),
             "evaluation_observability_card" => self.evaluation_observability_card(&arguments),
             "federated_evaluation_consensus" => self.federated_evaluation_consensus(&arguments),
+            "resource_workbench_discover" => self.resource_workbench_discover(&arguments),
             "research_release_validate" => self.research_release_validate(&arguments),
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
@@ -24421,6 +24422,28 @@ impl Server {
         }))
     }
 
+    fn resource_workbench_discover(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must contain need and candidates")?;
+        let receipt = crate::research_contracts::discover_resources_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_fiber::RESOURCE_WORKBENCH_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "candidate ranking is deterministic by trust score and resource identity",
+                "availability, locality, federation, origin, capability, and result-limit omissions remain explicit",
+                "raw research data stays institution-local and the route performs no connector or network effect"
+            ],
+            "limitations": [
+                "the route qualifies caller-supplied registry manifests and does not fetch or inspect raw resources",
+                "trust and capability declarations are evidence inputs, not a biological validity or clinical decision"
+            ]
+        }))
+    }
+
     fn research_release_validate(&self, arguments: &Value) -> Result<Value, String> {
         let receipt = arguments
             .get("receipt")
@@ -24449,9 +24472,11 @@ impl Server {
         let receipt = arguments
             .get("receipt")
             .ok_or("receipt is required and must be a serialized ResearchReleaseBatchReceipt")?;
-        let validated = crate::research_contracts::validate_research_release_batch_receipt_json(receipt)?;
-        let serialized = serde_json::to_value(&validated)
-            .map_err(|error| format!("cannot serialize validated research release batch: {error}"))?;
+        let validated =
+            crate::research_contracts::validate_research_release_batch_receipt_json(receipt)?;
+        let serialized = serde_json::to_value(&validated).map_err(|error| {
+            format!("cannot serialize validated research release batch: {error}")
+        })?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -35889,7 +35914,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -38376,6 +38401,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-evalengine FederatedEvaluationRequest with capability, benchmark world, minimum sites, and site cards." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "resource_workbench_discover",
+            "description": "Qualify typed local and permitted federated research resources against capability, origin, availability, trust, and locality constraints. The receipt ranks deterministically and preserves every omission without fetching raw data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Object containing serialized ResourceNeed under need and an array of ResourceCandidate records under candidates." }
                 },
                 "required": ["request"]
             }

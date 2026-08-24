@@ -51,6 +51,7 @@ pub mod plan;
 pub mod policy;
 pub mod qir;
 pub mod research_context;
+pub mod resource_workbench;
 pub mod slice;
 pub mod temporal;
 
@@ -72,6 +73,12 @@ pub use qir::{
 pub use research_context::{
     compile_research_context, research_context_manifest, ResearchContextError,
     ResearchContextReceipt, ResearchContextRequest,
+};
+pub use resource_workbench::{
+    discover_resources, resource_workbench_manifest, QualifiedResource, QualifiedResourceSet,
+    ResourceAvailability, ResourceCandidate, ResourceDiscoveryDisposition, ResourceNeed,
+    ResourceOmission, ResourceWorkbenchError, FEATURE_ID as RESOURCE_WORKBENCH_FEATURE_ID,
+    FEATURE_VERSION as RESOURCE_WORKBENCH_FEATURE_VERSION,
 };
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};

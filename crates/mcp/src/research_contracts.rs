@@ -9,24 +9,26 @@ use bioprism_adapter::{
     MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
 };
 use bioprism_evalengine::{
-    compile_evaluation_card, evaluate_federated_evaluation, evaluate_multimodal_replication, qualify_analysis,
-    AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
-    FederatedEvaluationReceipt, FederatedEvaluationRequest,
-    MultimodalReplicationReport, MultimodalReplicationRequest, QualifiedAnalysisResult,
-    ANALYSIS_QUALIFICATION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID,
-    FEDERATED_EVALUATION_FEATURE_ID, MULTIMODAL_REPLICATION_FEATURE_ID,
+    compile_evaluation_card, evaluate_federated_evaluation, evaluate_multimodal_replication,
+    qualify_analysis, AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
+    FederatedEvaluationReceipt, FederatedEvaluationRequest, MultimodalReplicationReport,
+    MultimodalReplicationRequest, QualifiedAnalysisResult, ANALYSIS_QUALIFICATION_FEATURE_ID,
+    EVALUATION_OBSERVABILITY_FEATURE_ID, FEDERATED_EVALUATION_FEATURE_ID,
+    MULTIMODAL_REPLICATION_FEATURE_ID,
+};
+use bioprism_fiber::{
+    discover_resources, QualifiedResourceSet, ResourceCandidate, ResourceNeed,
+    RESOURCE_WORKBENCH_FEATURE_ID,
 };
 use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
-use bioprism_policy::{
-    admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest,
-    AUTONOMY_BATCH_FEATURE_ID,
-};
 use bioprism_lab::{
-    evaluate_design_frontier, instrument_preflight,
-    DesignFrontierReceipt, DesignFrontierRequest, simulate_protocol_matrix,
-    InstrumentPreflightReceipt, InstrumentPreflightRequest, ProtocolMatrixReceipt,
-    ProtocolMatrixRequest, DESIGN_FRONTIER_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID,
-    PROTOCOL_MATRIX_FEATURE_ID,
+    evaluate_design_frontier, instrument_preflight, simulate_protocol_matrix,
+    DesignFrontierReceipt, DesignFrontierRequest, InstrumentPreflightReceipt,
+    InstrumentPreflightRequest, ProtocolMatrixReceipt, ProtocolMatrixRequest,
+    DESIGN_FRONTIER_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID,
+};
+use bioprism_policy::{
+    admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest, AUTONOMY_BATCH_FEATURE_ID,
 };
 use bioprism_runtime::{
     execute_workflow, execute_workflow_batch, WorkflowBatchReceipt, WorkflowBatchRequest,
@@ -55,6 +57,7 @@ pub const QUALITY_DRIFT_TOOL: &str = "quality_drift_evaluate";
 pub const DESIGN_FRONTIER_TOOL: &str = "design_frontier_evaluate";
 pub const AUTONOMY_BATCH_TOOL: &str = "autonomy_batch_admit";
 pub const WORKFLOW_BATCH_TOOL: &str = "workflow_batch_execute";
+pub const RESOURCE_WORKBENCH_TOOL: &str = "resource_workbench_discover";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -282,7 +285,9 @@ pub fn evaluate_design_frontier_json(value: &Value) -> Result<Value, String> {
         .map_err(|error| format!("cannot serialize design frontier receipt: {error}"))
 }
 
-pub fn validate_design_frontier_receipt_json(value: &Value) -> Result<DesignFrontierReceipt, String> {
+pub fn validate_design_frontier_receipt_json(
+    value: &Value,
+) -> Result<DesignFrontierReceipt, String> {
     let receipt: DesignFrontierReceipt = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid design frontier receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
@@ -300,7 +305,9 @@ pub fn admit_autonomy_batch_json(value: &Value) -> Result<Value, String> {
         .map_err(|error| format!("cannot serialize autonomy batch receipt: {error}"))
 }
 
-pub fn validate_autonomy_batch_receipt_json(value: &Value) -> Result<BatchAdmissionReceipt, String> {
+pub fn validate_autonomy_batch_receipt_json(
+    value: &Value,
+) -> Result<BatchAdmissionReceipt, String> {
     let receipt: BatchAdmissionReceipt = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid autonomy batch receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
@@ -324,6 +331,36 @@ pub fn validate_workflow_batch_receipt_json(value: &Value) -> Result<WorkflowBat
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != WORKFLOW_BATCH_FEATURE_ID {
         return Err("workflow batch feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn discover_resources_json(value: &Value) -> Result<Value, String> {
+    let need: ResourceNeed = serde_json::from_value(
+        value
+            .get("need")
+            .cloned()
+            .ok_or("need is required and must be a serialized ResourceNeed")?,
+    )
+    .map_err(|error| format!("invalid resource need: {error}"))?;
+    let candidates: Vec<ResourceCandidate> = serde_json::from_value(
+        value
+            .get("candidates")
+            .cloned()
+            .ok_or("candidates is required and must be an array of ResourceCandidate")?,
+    )
+    .map_err(|error| format!("invalid resource candidates: {error}"))?;
+    let receipt = discover_resources(&need, &candidates).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize qualified resource set: {error}"))
+}
+
+pub fn validate_qualified_resource_set_json(value: &Value) -> Result<QualifiedResourceSet, String> {
+    let receipt: QualifiedResourceSet = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid qualified resource set: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RESOURCE_WORKBENCH_FEATURE_ID {
+        return Err("resource workbench feature id mismatch".into());
     }
     Ok(receipt)
 }

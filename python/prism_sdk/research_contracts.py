@@ -36,6 +36,7 @@ AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02"
 WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11"
 RESEARCH_RELEASE_BATCH_FEATURE_ID = "AFA-services-P16-F03"
 FEDERATED_EVALUATION_FEATURE_ID = "AFA-evalengine-P23-F02"
+RESOURCE_WORKBENCH_FEATURE_ID = "AFA-fiber-P05-F20"
 
 
 class ResearchContractError(ValueError):
@@ -605,6 +606,58 @@ class FederatedEvaluationReceipt:
             "blocked_sites": self.blocked_sites,
             "disposition": self.disposition,
             "entries": [dict(entry) for entry in self.entries],
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class QualifiedResourceSet:
+    """Transport validator for deterministic, omission-aware resource discovery."""
+
+    need_id: str
+    requester: str
+    disposition: str
+    considered_candidates: int
+    qualified_count: int
+    resources: tuple[Mapping[str, Any], ...]
+    omissions: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RESOURCE_WORKBENCH_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RESOURCE_WORKBENCH_FEATURE_ID:
+            raise ResearchContractError("resource workbench schema or feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.need_id.strip() or not self.requester.strip():
+            raise ResearchContractError("resource workbench identity or boundary is invalid")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("resource discovery disposition is unknown")
+        if self.considered_candidates <= 0 or self.qualified_count < 0 or self.qualified_count != len(self.resources) or not self.reasons:
+            raise ResearchContractError("resource discovery counts or reasons are incomplete")
+        if any(not item.get("resource_id") or not item.get("origin") or not item.get("rank") or not item.get("reasons") for item in self.resources):
+            raise ResearchContractError("qualified resource entry is incomplete")
+        if any(not item.get("resource_id") or not item.get("reason") for item in self.omissions):
+            raise ResearchContractError("resource omission entry is incomplete")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("resource workbench artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "need_id": self.need_id,
+            "requester": self.requester,
+            "disposition": self.disposition,
+            "considered_candidates": self.considered_candidates,
+            "qualified_count": self.qualified_count,
+            "resources": [dict(item) for item in self.resources],
+            "omissions": [dict(item) for item in self.omissions],
+            "reasons": list(self.reasons),
             "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })

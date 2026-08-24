@@ -71,6 +71,9 @@ import {
   FEDERATED_EVALUATION_FEATURE_ID,
   federatedEvaluationReceiptDigest,
   validateFederatedEvaluationReceipt,
+  RESOURCE_WORKBENCH_FEATURE_ID,
+  qualifiedResourceSetDigest,
+  validateQualifiedResourceSet,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -540,4 +543,23 @@ test("federated evaluation receipt preserves contradiction", () => {
   };
   assert.doesNotThrow(() => validateFederatedEvaluationReceipt(receipt));
   assert.equal(federatedEvaluationReceiptDigest(receipt), federatedEvaluationReceiptDigest(receipt));
+});
+
+test("resource workbench receipt preserves protected omission", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: RESOURCE_WORKBENCH_FEATURE_ID,
+    need_id: "need:organoid",
+    requester: "researcher:alice",
+    disposition: "blocked",
+    considered_candidates: 1,
+    qualified_count: 0,
+    resources: [],
+    omissions: [{ resource_id: "resource:protected", reason: "raw research data is not institution-local" }],
+    reasons: ["no candidate satisfied the typed resource need; omissions remain explicit"],
+    artifact: { content_hash: "c".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateQualifiedResourceSet(receipt));
+  assert.equal(qualifiedResourceSetDigest(receipt), qualifiedResourceSetDigest(receipt));
 });
