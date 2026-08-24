@@ -9,3 +9,5 @@
 
 /.eval-snapshot
 /.eval-work
+mcpb/stage/
+mcpb/dist/
