@@ -47,6 +47,8 @@ PROTOCOL_ASSURANCE_FEATURE_ID = "AFA-policy-P10-F27"
 PROTOCOL_ASSURANCE_CONTRACT_VERSION = "protocol-assurance-harness/1.0"
 FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID = "AFA-routing-P06-F28"
 FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION = "federated-multimodal-assurance/1.0"
+FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-store-P04-F24"
+FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "federated-knowledge-gateway/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -920,6 +922,60 @@ class FederatedMultimodalAssuranceReceipt:
             "institution_ids": list(self.institution_ids),
             "disposition": self.disposition,
             "harmonized_digest": self.harmonized_digest,
+            "checks": list(self.checks),
+            "omissions": list(self.omissions),
+            "artifact": dict(self.artifact),
+            "raw_data_local": self.raw_data_local,
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class FederatedKnowledgeGatewayReceipt:
+    """Transport validator for manifest-only federated knowledge-store admission."""
+
+    request_id: str
+    federation_id: str
+    interoperability_profile: str
+    institution_ids: tuple[str, ...]
+    disposition: str
+    manifest_digest: str
+    permitted_tags: tuple[str, ...]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    raw_data_local: bool = True
+    feature_id: str = FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID
+    contract_version: str = FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID or self.contract_version != FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION:
+            raise ResearchContractError("federated knowledge gateway schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.federation_id.strip() or not self.interoperability_profile.strip():
+            raise ResearchContractError("federated knowledge gateway identity or locality is invalid")
+        if len(self.institution_ids) < 2 or any(not institution.strip() for institution in self.institution_ids) or len(set(self.institution_ids)) != len(self.institution_ids):
+            raise ResearchContractError("federated knowledge institution set is incomplete")
+        if self.disposition not in {"passed", "blocked", "unknown"} or not self.checks:
+            raise ResearchContractError("federated knowledge disposition or checks are incomplete")
+        for digest in (self.manifest_digest, self.artifact.get("content_hash")):
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("federated knowledge digest is not a canonical sha256")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "interoperability_profile": self.interoperability_profile,
+            "institution_ids": list(self.institution_ids),
+            "disposition": self.disposition,
+            "manifest_digest": self.manifest_digest,
+            "permitted_tags": list(self.permitted_tags),
             "checks": list(self.checks),
             "omissions": list(self.omissions),
             "artifact": dict(self.artifact),

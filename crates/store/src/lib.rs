@@ -12,10 +12,17 @@
 
 pub mod build;
 pub mod error;
+pub mod federated_gateway;
 pub mod lazy;
 pub mod sorted_index;
 
 pub use build::{build, StoreManifest, STORE_SCHEMA_VERSION};
 pub use error::StoreError;
+pub use federated_gateway::{
+    admit_federated_knowledge, FederatedKnowledgeGatewayReceipt, FederatedKnowledgeGatewayRequest,
+    GatewayDisposition, GatewayError,
+    CONTRACT_VERSION as FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID,
+};
 pub use lazy::LazyWorld;
 pub use sorted_index::{SortedIndex, SortedIndexWriter};

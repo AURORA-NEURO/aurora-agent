@@ -94,6 +94,10 @@ import {
   FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION,
   federatedMultimodalAssuranceReceiptDigest,
   validateFederatedMultimodalAssuranceReceipt,
+  FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID,
+  FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION,
+  federatedKnowledgeGatewayReceiptDigest,
+  validateFederatedKnowledgeGatewayReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -684,4 +688,26 @@ test("federated multimodal assurance keeps locality and unknown state", () => {
   };
   assert.doesNotThrow(() => validateFederatedMultimodalAssuranceReceipt(receipt));
   assert.equal(federatedMultimodalAssuranceReceiptDigest(receipt), federatedMultimodalAssuranceReceiptDigest(receipt));
+});
+
+test("federated knowledge gateway keeps manifest projection unknown", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID,
+    contract_version: FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION,
+    request_id: "request:gateway",
+    federation_id: "federation:preclinical",
+    interoperability_profile: "ro-crate+prov-o:1",
+    institution_ids: ["site:a", "site:b"],
+    disposition: "unknown",
+    manifest_digest: "a".repeat(64),
+    permitted_tags: [],
+    checks: ["missing tag projection remains unknown rather than an unrestricted export"],
+    omissions: ["no permitted tag projection was supplied for federation"],
+    artifact: { content_hash: "b".repeat(64) },
+    raw_data_local: true,
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateFederatedKnowledgeGatewayReceipt(receipt));
+  assert.equal(federatedKnowledgeGatewayReceiptDigest(receipt), federatedKnowledgeGatewayReceiptDigest(receipt));
 });

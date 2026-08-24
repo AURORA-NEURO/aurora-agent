@@ -59,6 +59,10 @@ use bioprism_services::{
     ResearchReleaseBatchReceipt, ResearchReleaseReceipt, RESEARCH_RELEASE_BATCH_FEATURE_ID,
     RESEARCH_RELEASE_FEATURE_ID,
 };
+use bioprism_store::{
+    admit_federated_knowledge, FederatedKnowledgeGatewayReceipt, FederatedKnowledgeGatewayRequest,
+    FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
@@ -83,6 +87,7 @@ pub const GOVERNANCE_RESEARCH_RELEASE_TOOL: &str = "governance_research_release_
 pub const RELEASE_ASSURANCE_HARNESS_TOOL: &str = "release_assurance_harness";
 pub const PROTOCOL_ASSURANCE_TOOL: &str = "protocol_assurance_harness";
 pub const FEDERATED_MULTIMODAL_ASSURANCE_TOOL: &str = "federated_multimodal_assurance";
+pub const FEDERATED_KNOWLEDGE_GATEWAY_TOOL: &str = "federated_knowledge_gateway";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -484,6 +489,26 @@ pub fn validate_federated_multimodal_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID {
         return Err("federated multimodal assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn admit_federated_knowledge_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedKnowledgeGatewayRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated knowledge gateway request: {error}"))?;
+    let receipt = admit_federated_knowledge(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federated knowledge gateway receipt: {error}"))
+}
+
+pub fn validate_federated_knowledge_gateway_json(
+    value: &Value,
+) -> Result<FederatedKnowledgeGatewayReceipt, String> {
+    let receipt: FederatedKnowledgeGatewayReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated knowledge gateway receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID {
+        return Err("federated knowledge gateway feature id mismatch".into());
     }
     Ok(receipt)
 }

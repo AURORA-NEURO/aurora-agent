@@ -42,6 +42,8 @@ export const PROTOCOL_ASSURANCE_FEATURE_ID = "AFA-policy-P10-F27" as const;
 export const PROTOCOL_ASSURANCE_CONTRACT_VERSION = "protocol-assurance-harness/1.0" as const;
 export const FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID = "AFA-routing-P06-F28" as const;
 export const FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION = "federated-multimodal-assurance/1.0" as const;
+export const FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-store-P04-F24" as const;
+export const FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "federated-knowledge-gateway/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -870,6 +872,37 @@ export function validateFederatedMultimodalAssuranceReceipt(receipt: FederatedMu
 
 export function federatedMultimodalAssuranceReceiptDigest(receipt: FederatedMultimodalAssuranceReceipt): string {
   validateFederatedMultimodalAssuranceReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface FederatedKnowledgeGatewayReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  federation_id: string;
+  interoperability_profile: string;
+  institution_ids: string[];
+  disposition: "passed" | "blocked" | "unknown";
+  manifest_digest: string;
+  permitted_tags: string[];
+  checks: string[];
+  omissions: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateFederatedKnowledgeGatewayReceipt(receipt: FederatedKnowledgeGatewayReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID || receipt.contract_version !== FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION) throw new Error("federated knowledge gateway schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.interoperability_profile.trim()) throw new Error("federated knowledge gateway identity or locality is invalid");
+  if (receipt.institution_ids.length < 2 || receipt.institution_ids.some((institution) => !institution.trim()) || new Set(receipt.institution_ids).size !== receipt.institution_ids.length) throw new Error("federated knowledge institution set is incomplete");
+  if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition) || receipt.checks.length === 0) throw new Error("federated knowledge disposition or checks is incomplete");
+  if (!/^[0-9a-f]{64}$/.test(receipt.manifest_digest) || typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("federated knowledge digest is not a canonical sha256");
+}
+
+export function federatedKnowledgeGatewayReceiptDigest(receipt: FederatedKnowledgeGatewayReceipt): string {
+  validateFederatedKnowledgeGatewayReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

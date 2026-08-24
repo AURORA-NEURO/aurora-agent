@@ -18,7 +18,10 @@ pub enum StoreError {
     CorruptIndex(String),
 
     #[error("unsupported store schema: expected {expected:?}, got {actual:?}")]
-    UnsupportedSchema { expected: &'static str, actual: String },
+    UnsupportedSchema {
+        expected: &'static str,
+        actual: String,
+    },
 
     #[error("world is not a JSON object with facts, factors and events")]
     MalformedWorld,

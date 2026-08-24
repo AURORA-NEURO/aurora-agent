@@ -973,6 +973,7 @@ name = "bioprism-store"
 version = "0.1.0"
 dependencies = [
  "bioprism-fiber",
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-section",

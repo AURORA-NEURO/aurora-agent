@@ -138,7 +138,11 @@ impl SortedIndex {
         Ok(None)
     }
 
-    fn read_record(&self, file: &mut File, position: usize) -> Result<(String, String), StoreError> {
+    fn read_record(
+        &self,
+        file: &mut File,
+        position: usize,
+    ) -> Result<(String, String), StoreError> {
         let start = self.offsets[position];
         let end = self
             .offsets
@@ -151,7 +155,8 @@ impl SortedIndex {
         let mut buffer = vec![0u8; length];
         file.read_exact(&mut buffer)?;
 
-        let line = String::from_utf8(buffer).map_err(|_| StoreError::CorruptIndex("utf8".into()))?;
+        let line =
+            String::from_utf8(buffer).map_err(|_| StoreError::CorruptIndex("utf8".into()))?;
         let line = line.trim_end_matches('\n');
         let (key, value) = line
             .split_once('\t')
