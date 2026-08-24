@@ -896,6 +896,10 @@ export interface AutonomousRunResult {
   learning_episode_id?: string | null;
   learning_episode_status?: "prepared" | "not_eligible" | "failed";
   learning_error_class?: string | null;
+  /** Independent pending episode for the reviewed structured-response contract signal. */
+  response_learning_episode_id?: string | null;
+  response_learning_episode_status?: "prepared" | "not_eligible" | "failed";
+  response_learning_error_class?: string | null;
   /** Strict-mode provider-free admission; absent for ordinary audit-mode runs. */
   domain_policy_admission?: AutonomousDomainPolicyAdmission | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
@@ -2742,6 +2746,8 @@ function planningResponseSchema(ids: readonly string[], focusField: "focus_stage
 interface PreparedProviderPlanning {
   prompt: AutonomousPromptResult;
   plan: AutonomousExecutionPlan;
+  learningContext: BrainBanditContext;
+  learningContextDigest: string;
 }
 
 function validatePlanningWorkflow(stages: readonly AutonomousWorkflowStage[]): string[] {
@@ -2790,6 +2796,16 @@ async function prepareProviderPlanning(
   });
   const responseSchema = planningResponseSchema(ids, focusField);
   const requiredCapabilities = [...new Set([...blueprint.required_capabilities, "structured_output"])];
+  // Provider planning is its own learner context. The execution blueprint's digest is keyed
+  // by the execution capability, while this request is selected as a planning decision; using
+  // the blueprint digest here makes learner-backed planning reject its own request identity.
+  const planningLearnerContext: BrainBanditContext = {
+    domain: profile.domain,
+    capability: "planning",
+    risk_class: profile.risk_class,
+    task_family: profile.workflow.workflow_id,
+  };
+  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(planningLearnerContext));
   const request: ProviderRequest = {
     model: "selection-delegated",
     messages: prompt.messages.map(({ role, content }) => ({ role, content })),
@@ -2807,7 +2823,7 @@ async function prepareProviderPlanning(
       capability: "planning",
       riskClass: profile.risk_class,
       taskFamily: profile.workflow.workflow_id,
-      learningContextDigest: blueprint.learning_context_digest,
+      learningContextDigest,
       requiredCapabilities,
       maxCostPerMillionTokens: options.maxCostPerMillionTokens,
       maxLatencyMs: options.maxLatencyMs,
@@ -2816,6 +2832,8 @@ async function prepareProviderPlanning(
       candidates: options.candidates ?? [],
       request,
     },
+    learningContext: planningLearnerContext,
+    learningContextDigest,
   };
 }
 
@@ -2823,7 +2841,10 @@ function planningModelProjection(selection: AutonomousSelectionDecision): { prov
   return selection.selected_model === null ? null : { ...selection.selected_model };
 }
 
-async function planningOutcomeDigest(execution: { selection: AutonomousSelectionDecision; response: ProviderResponse }): Promise<string> {
+async function planningOutcomeDigest(
+  execution: { selection: AutonomousSelectionDecision; response: ProviderResponse },
+  learningContextDigest: string | null = null,
+): Promise<string> {
   const responseDigest = await digestJson({
     provider: execution.response.provider,
     model: execution.response.model,
@@ -2833,7 +2854,7 @@ async function planningOutcomeDigest(execution: { selection: AutonomousSelection
     text: execution.response.text,
     structured: execution.response.structured,
   });
-  return digestJson({ selection: execution.selection, response_digest: responseDigest });
+  return digestJson({ selection: execution.selection, response_digest: responseDigest, learning_context_digest: learningContextDigest });
 }
 
 /** Project a malformed provider response into a digest-only planning refusal. */
@@ -2913,7 +2934,16 @@ async function prepareOrderedStepPlanning(
     risk_class: profile.risk_class,
     task_family: "ordered_step_plan",
   };
-  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(selectionContext));
+  // Only the stable four-field learner identity is hashed. Descriptive selection metadata
+  // cannot be passed through this digest because the local, Rust, and Python learners all
+  // normalize the same bounded BrainBanditContext shape before selecting or settling.
+  const learningContext: BrainBanditContext = {
+    domain: selectionContext.domain,
+    capability: selectionContext.capability,
+    risk_class: selectionContext.risk_class,
+    task_family: selectionContext.task_family ?? null,
+  };
+  const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(learningContext));
   const requiredCapabilities = [...new Set([...profile.required_model_capabilities, "structured_output"])]
   const plan: AutonomousExecutionPlan = {
     task: plannerTask,
@@ -2938,7 +2968,7 @@ async function prepareOrderedStepPlanning(
       ...(options.runId === undefined ? {} : { idempotencyKey: boundedIdentifier("ordered-step planning run id", options.runId) }),
     },
   };
-  return { prompt, plan };
+  return { prompt, plan, learningContext, learningContextDigest };
 }
 
 export interface AutonomousAcceptedCrossDomainPlan {
@@ -4198,7 +4228,37 @@ export class AutonomousAgent {
     this.capabilityLearningSettlementStore = options.capabilityLearningSettlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
     this.connectorRegistry = options.connectorRegistry ?? options.connectorRuntime?.registry;
     this.connectorRuntime = options.connectorRuntime;
-    const baseSelector = options.selector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.learner ? (request: AutonomousSelectionRequest) => options.learner!.select(request) : options.apiClient ? contextualSelector(options.apiClient) : this.modelHealthBridge ? this.modelHealthBridge.selector() : undefined);
+    const remoteHealthSelector = this.modelHealthBridge?.selector();
+    const learnedSelector: AutonomousModelSelector | undefined = options.learner === undefined
+      ? undefined
+      : async (request: AutonomousSelectionRequest): Promise<AutonomousSelectionDecision> => {
+        let learnedRequest = request;
+        if (this.modelHealthController) {
+          // Persisted health is a safety/availability prior, not a replacement for evaluator
+          // learning. Merge it before the learner scores arms so circuits and observed quality
+          // remain gates while contextual bandit rewards still adapt the chosen model.
+          const persistentHealth = await this.modelHealthController.store.selectorHealth();
+          learnedRequest = { ...request, model_health: { ...request.model_health, ...persistentHealth } };
+        } else if (remoteHealthSelector) {
+          // The remote bridge exposes only a value-only ranking. Preserve its eligibility gate
+          // locally, then let the local learner choose among the remotely admissible candidates.
+          // This keeps remote circuits authoritative without replaying or importing raw health.
+          const healthDecision = await remoteHealthSelector(request);
+          const remotelyEligible = new Set(
+            healthDecision.ranking
+              .filter((row) => row.eligible)
+              .map((row) => `${row.provider}/${row.model}`),
+          );
+          if (healthDecision.selected_model) remotelyEligible.add(`${healthDecision.selected_model.provider}/${healthDecision.selected_model.model}`);
+          if (remotelyEligible.size === 0) return healthDecision;
+          learnedRequest = {
+            ...request,
+            candidates: request.candidates.filter((candidate) => remotelyEligible.has(`${candidate.provider}/${candidate.model}`)),
+          };
+        }
+        return options.learner!.select(learnedRequest);
+      };
+    const baseSelector = options.selector ?? (learnedSelector ?? (this.modelHealthController ? this.modelHealthController.selector() : options.apiClient ? contextualSelector(options.apiClient) : remoteHealthSelector));
     const selector = options.learner !== undefined && this.selectionPromotion !== undefined
       ? async (request: AutonomousSelectionRequest): Promise<AutonomousSelectionDecision> => {
         if (!this.selectionPromotion!.isAdmitted()) {
@@ -5467,6 +5527,8 @@ export class AutonomousAgent {
       planner_prompt_digest: prepared.prompt.prompt_digest,
       planner_plan_digest: null,
       outcome_digest: null,
+      planner_context: prepared.learningContext,
+      planner_context_digest: prepared.learningContextDigest,
       cost_budget: null,
       retention: "step_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_arguments_or_effects_authorized",
@@ -5497,7 +5559,7 @@ export class AutonomousAgent {
       selected_model: planningModelProjection(execution.selection),
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
-      outcome_digest: await planningOutcomeDigest(execution),
+      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest),
       cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
@@ -5568,6 +5630,8 @@ export class AutonomousAgent {
       planner_prompt_digest: prepared.prompt.prompt_digest,
       planner_plan_digest: null,
       outcome_digest: null,
+      planner_context: prepared.learningContext,
+      planner_context_digest: prepared.learningContextDigest,
       cost_budget: null,
       retention: "stage_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_or_effects_authorized",
@@ -5600,7 +5664,7 @@ export class AutonomousAgent {
       };
     }
     const selectionDigest = await digestJson(execution.selection);
-    const outcomeDigest = await planningOutcomeDigest(execution);
+    const outcomeDigest = await planningOutcomeDigest(execution, prepared.learningContextDigest);
     const plannerPlanDigest = await digestJson({ planner_output: execution.response.structured });
     const metadata = { ...base, selected_model: planningModelProjection(execution.selection), selection_digest: selectionDigest, planner_plan_digest: plannerPlanDigest, outcome_digest: outcomeDigest, cost_budget: budgetSnapshot() };
     const raw = execution.response.structured;
@@ -5664,6 +5728,8 @@ export class AutonomousAgent {
       planner_prompt_digest: prepared.prompt.prompt_digest,
       planner_plan_digest: null,
       outcome_digest: null,
+      planner_context: prepared.learningContext,
+      planner_context_digest: prepared.learningContextDigest,
       cost_budget: null,
       retention: "child_ids_and_digests_only; planner_transcript_not_retained",
       authorization: "plan_proposal_only; no_tools_or_effects_authorized",
@@ -5701,7 +5767,7 @@ export class AutonomousAgent {
       selected_model: planningModelProjection(execution.selection),
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
-      outcome_digest: await planningOutcomeDigest(execution),
+      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest),
       cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
@@ -6682,10 +6748,10 @@ export class AutonomousAgent {
     result: AutonomousRunResult,
     route: AutonomousRouteProposal,
     options: Pick<AutonomousRunOptions, "learning" | "learningEpisodeId" | "memoryRunId"> & { memoryEpisodeId?: string | null },
-  ): Promise<Pick<AutonomousRunResult, "learning_episode_id" | "learning_episode_status" | "learning_error_class">> {
+  ): Promise<Pick<AutonomousRunResult, "learning_episode_id" | "learning_episode_status" | "learning_error_class" | "response_learning_episode_id" | "response_learning_episode_status" | "response_learning_error_class">> {
     if (!options.learning) return {};
     if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) {
-      return { learning_episode_id: null, learning_episode_status: "not_eligible", learning_error_class: null };
+      return { learning_episode_id: null, learning_episode_status: "not_eligible", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
     }
     try {
       const derivedId = options.learningEpisodeId
@@ -6694,11 +6760,18 @@ export class AutonomousAgent {
           : `learning:${route.task_digest.slice(0, 24)}:${++autonomousLearningEpisodeSequence}`);
       const episodeId = memoryIdentity("learning episode id", derivedId);
       const episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId, memoryEpisodeId: options.memoryEpisodeId ?? null });
-      return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null };
+      if (!result.response_evaluation) return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
+      try {
+        const responseEpisodeId = memoryIdentity("response learning episode id", `response:${digestJsonSync({ episode_id: episode.episode_id }).slice(0, 64)}`);
+        const responseEpisode = await options.learning.prepareRun(result, { episodeId: responseEpisodeId, runId: responseEpisodeId, memoryEpisodeId: null });
+        return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: responseEpisode.episode_id, response_learning_episode_status: "prepared", response_learning_error_class: null };
+      } catch (error) {
+        return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "failed", response_learning_error_class: memoryErrorClass(error) };
+      }
     } catch (error) {
       // A requested learning adapter must be observable as failed, but it must not turn a valid
       // provider result into a fabricated provider failure or cause a provider replay.
-      return { learning_episode_id: null, learning_episode_status: "failed", learning_error_class: memoryErrorClass(error) };
+      return { learning_episode_id: null, learning_episode_status: "failed", learning_error_class: memoryErrorClass(error), response_learning_episode_id: null, response_learning_episode_status: result.response_evaluation ? "failed" : "not_eligible", response_learning_error_class: result.response_evaluation ? memoryErrorClass(error) : null };
     }
   }
 

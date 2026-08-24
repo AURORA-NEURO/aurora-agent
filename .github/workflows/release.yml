@@ -1,0 +1,125 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: create the release for this tag if it does not exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag \
+              --title "AURORA Agent $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    # A 79-crate workspace builds from cold cache; leave generous headroom.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      # The repository pins net.offline=true in .cargo/config.toml; CI overrides it.
+      - name: build the MCP server and CLI
+        run: cargo build --release --locked --config net.offline=false --target ${{ matrix.target }} -p bioprism-mcp -p bioprism-cli
+      - name: package archive
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="aurora-agent-${version}-${{ matrix.target }}"
+          mkdir "$name"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "target/${{ matrix.target }}/release/bioprism-mcp.exe" "target/${{ matrix.target }}/release/bioprism.exe" "$name/"
+          else
+            cp "target/${{ matrix.target }}/release/bioprism-mcp" "target/${{ matrix.target }}/release/bioprism" "$name/"
+          fi
+          cp README.md LICENSE PRIVACY.md "$name/"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            archive="${name}.zip"
+            7z a "$archive" "$name" >/dev/null
+          else
+            archive="${name}.tar.gz"
+            tar -czf "$archive" "$name"
+          fi
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Windows'
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Windows'
+        with:
+          python-version: '3.12'
+      - name: pack the Claude Desktop extension (.mcpb)
+        if: runner.os == 'Windows'
+        env:
+          MCPB_VERSION: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          cp "target/${{ matrix.target }}/release/bioprism-mcp.exe" target/release/
+          python mcpb/build_mcpb.py
+      - name: upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" "${{ steps.package.outputs.archive }}" --clobber
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            gh release upload "$GITHUB_REF_NAME" mcpb/dist/aurora-agent.mcpb --clobber
+          fi
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: generate SHA256SUMS over every uploaded asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir assets
+          cd assets
+          gh release download "$GITHUB_REF_NAME" --pattern '*'
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS --clobber

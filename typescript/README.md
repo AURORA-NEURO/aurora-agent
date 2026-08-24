@@ -642,16 +642,20 @@ const result = await agent.run("Review this change and return a verifiable hando
 const answer = result.response?.structured; // transient, validated domain response
 const contract = result.blueprint?.response_contract; // safe digest-bound metadata
 const compositionReward = result.response_evaluation?.reward_input; // value-only format/composition signal
-await learning.settleStructuredResponse(result); // explicit bandit settlement; never task truth
+await learning.settleStructuredResponse(result); // independent response-bandit settlement; never task truth
 ```
 
 When a learning controller is supplied on the run, `response_evaluation` is a deterministic,
 replayable value-only assessment of answer presence, stage reporting, domain-field coverage,
 uncertainty/evidence-gap disclosure, and next-action coverage. It intentionally excludes the raw
-response from the evaluation projection. `AutonomousLearningController.settleStructuredResponse`
-can settle that signal through the normal idempotent learning/outbox boundary; this adapts response
+response from the evaluation projection. The run prepares `learning_episode_id` for task quality
+and a distinct `response_learning_episode_id` for contract quality; settling the latter never
+settles or overwrites the former. `AutonomousLearningController.settleStructuredResponse` can
+settle that signal through the normal idempotent learning/outbox boundary; this adapts response
 composition and model selection without treating formatting or self-reported findings as task
-correctness, source truth, or proof of an external effect.
+correctness, source truth, or proof of an external effect. `evaluateAndSettleRun()` and
+`runLearning()` settle both streams when both are prepared and return the response receipt
+separately.
 
 The composed execution wrappers preserve these options instead of rebuilding a weaker request:
 decision-cycle attempts and replans forward the cost, latency, quality, JSON, and schema policy;
@@ -700,6 +704,13 @@ child ids and carry the accepted digest through specialist fan-out and synthesis
 execution can share one `AutonomousCostBudget`, keeping the planner inside the caller's aggregate
 ceiling.
 
+Provider planning proposals also carry `planner_context` and `planner_context_digest`, the exact
+stable `{ domain, capability, risk_class, task_family }` identity used for contextual model
+selection. Planning-quality settlement verifies that digest and credits the embedded context;
+legacy proposals without the metadata use the caller-supplied settlement context. This keeps
+single-domain, cross-domain, workflow, portfolio, and mission wrappers from silently moving
+planner feedback to a different contextual bandit arm.
+
 `runAutonomousReplanCycle()` adds the bounded adaptive control loop for callers that want the
 evaluator to decide whether one answer deserves another attempt. Each completed attempt is sent
 to a caller-owned evaluator that returns reward/pass/failure metadata plus `replan_requested` and,
@@ -734,7 +745,10 @@ learning digests, bounded IDs, statuses, and a generation-linked state digest. I
 task or mode contracts, stale generations, unsupported fields, credential-shaped metadata, raw
 payload keys, oversized snapshots, and digest tampering. The same options work on
 `runAutonomousCrossDomainReplanCycle()`; its state also records the exact specialist/synthesis
-episode and trajectory identities.
+episode and trajectory identities. When `structuredDomainResponse: true` is enabled, it records a
+second response-quality episode ledger for each completed specialist and synthesis result; those
+episodes are replay-validated and settled independently on every bounded attempt, and the ledger
+survives terminal restart replay without retaining provider responses.
 
 When `providerPlanning` is enabled on a replan cycle, a plan-review pause is represented as an
 `execution_pending` attempt with a `plan_refinement_digest`; this keeps the outer ledger resumable
@@ -1000,6 +1014,29 @@ only evaluator, learning-settlement, and progress digests. Supply a stable `cycl
 caller-owned cycle `stateStore` for restart rehydration. Provider responses, task text, evaluator
 instructions, credentials, and evidence remain transient, and provider approval is still
 required.
+For the lower-level worker boundary, `AutonomousGoalWorker` accepts an
+`AutonomousGoalWorkerJournal` and a bounded `batch_id`:
+
+```typescript
+const journal = new AutonomousGoalWorkerJournal();
+const worker = new AutonomousGoalWorker({ ledger, resolver, executor, journal });
+await worker.run({ batch_id: "goal-batch-42", schedule_options: { max_selected: 8 } });
+```
+
+The journal hash-chains `prepared`, `claimed`, `dispatch_started`, `settled`, `failed`, and
+`reconciled` metadata without retaining tasks, prompts, parameters, credentials, or results. After
+restart, call `journal.restore(snapshot)` before `journal.recover(ledger)`: pre-dispatch claims are
+paused for safe retry, while post-dispatch claims are blocked for explicit reconciliation so an
+uncertain provider effect is never replayed. Use `JsonAutonomousGoalWorkerJournalPersistence`
+and `AutonomousGoalWorkerJournalPersistenceCoordinator` for canonical caller-owned storage and
+optional compare-and-swap fencing.
+`AutonomousGoalControlLoop` continues worker passes with bounded `max_cycles` and
+`max_total_runs`; its optional `options_factory(context)` receives only prior cycle metadata and
+ledger counts, allowing fresh priority/urgency/retry/domain signals without exposing task text or
+provider payloads. It stops explicitly with `all_terminal`, `no_admissible_work`,
+`cycle_budget_exhausted`, or `run_budget_exhausted`. Paused goals can be re-admitted when the
+schedule policy permits them, while failed, blocked, or concurrently running goals remain visible
+as held work rather than being mislabeled as completed.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,
@@ -1011,7 +1048,10 @@ prompts or responses to a provider. `AutonomousOfflineReplayEngine` re-evaluates
 numeric signal cases for all twelve domains, compares expected reward/pass/digest witnesses, and
 never invokes a provider or turns a replay mismatch into authorization.
 For the high-level facade, pass `modelHealthStore` in `AutonomousAgent` options; it automatically
-uses the persisted selector and records invocation observations for single- and cross-domain runs.
+records invocation observations for single- and cross-domain runs. When `learner` is supplied as
+well, persisted health is merged into the learner's selection request: circuits, credential and
+availability gates remain authoritative, while contextual evaluator rewards still adapt the chosen
+model. Health therefore constrains the bandit rather than silently replacing it.
 
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
@@ -1538,6 +1578,10 @@ digest-bound domain response contract before settling those episodes and returns
 `response_settlements`, independently from the delayed task-quality trajectory. This keeps
 cross-domain formatting/composition adaptation useful without treating a child or synthesis
 response as external-world truth; mutating a caller-owned response after execution fails replay.
+The evaluator-guided `runAutonomousCrossDomainReplanCycle()` applies the same split per attempt:
+its `response_learning_episode_ids` and flattened `response_settlements` remain separate from
+task-quality rewards, while its metadata-only replan state persists the response ledger alongside
+ordinary episode IDs and trajectory/settlement digests.
 The restart-safe `AutonomousCrossDomainExecutor` uses the same split through
 `settleCrossDomainExecution()`: episode ledgers and result digests remain in the checkpoint, while
 raw completed responses must be rehydrated by the caller and are never persisted by the executor.

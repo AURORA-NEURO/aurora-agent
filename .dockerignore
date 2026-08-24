@@ -1,0 +1,15 @@
+# Keep: crates/, Cargo.toml, Cargo.lock, .cargo/ (build); fixtures/, schemas/
+# (staged into /data); README.md, LICENSE, PRIVACY.md.
+.git
+target
+site
+docs
+typescript
+python
+npm
+plugins
+tools
+reference
+mcpb
+**/node_modules
+*.mcpb

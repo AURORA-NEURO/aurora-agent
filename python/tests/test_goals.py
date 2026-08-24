@@ -15,10 +15,316 @@ from prism_sdk.goals import (
     TransactionalJsonAutonomousGoalSnapshotPersistence,
     goal_task_digest,
 )
+from prism_sdk.autonomous_goal_scheduler import (
+    AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS,
+    AutonomousGoalSchedulingSignal,
+    AutonomousGoalScheduler,
+    claim_autonomous_goals,
+    schedule_autonomous_goals,
+    validate_goal_schedule,
+)
+from prism_sdk.autonomous_goal_worker import AutonomousGoalWorker
+from prism_sdk.autonomous_goal_control_loop import AutonomousGoalControlLoop
+from prism_sdk.autonomous_goal_worker_journal import (
+    AutonomousGoalWorkerJournal,
+    JsonAutonomousGoalWorkerJournalPersistence,
+    AutonomousGoalWorkerJournalPersistenceCoordinator,
+)
 
 
 def _digest(value: str) -> str:
     return goal_task_digest(value)
+
+
+def test_goal_scheduler_prioritizes_dependency_closed_work_across_every_domain(tmp_path: Path) -> None:
+    with AutonomousGoalLedger(str(tmp_path / "scheduler.sqlite3"), max_goals=len(AUTONOMOUS_DOMAINS) + 2) as ledger:
+        for domain in AUTONOMOUS_DOMAINS:
+            ledger.create(
+                goal_id=f"goal-{domain}",
+                task_digest=_digest(f"task-{domain}"),
+                domain=domain,
+                now_ns=0,
+            )
+        schedule = AutonomousGoalScheduler().plan(
+            ledger.list(limit=len(AUTONOMOUS_DOMAINS)),
+            {
+                "now_ns": 1_000,
+                "max_selected": len(AUTONOMOUS_DOMAINS),
+                "max_concurrent": len(AUTONOMOUS_DOMAINS),
+                "required_domains": list(AUTONOMOUS_DOMAINS),
+                "signals": [
+                    {"goal_id": "goal-coding", "priority": 0.2},
+                    {"goal_id": "goal-science", "priority": 1.0, "urgency": 1.0, "dependencies": ["goal-coding"]},
+                ],
+            },
+        )
+        assert schedule.selected_goal_ids.index("goal-coding") < schedule.selected_goal_ids.index("goal-science")
+        assert set(schedule.selected_goal_ids) == {f"goal-{domain}" for domain in AUTONOMOUS_DOMAINS}
+        assert schedule.missing_domains == ()
+        assert schedule.to_dict()["coverage"]["selected_domains"] == list(AUTONOMOUS_DOMAINS)
+        assert "task-coding" not in json.dumps(schedule.to_dict())
+        assert validate_goal_schedule(schedule.to_dict())["schedule_digest"] == schedule.schedule_digest
+        assert schedule.schedule_digest == "30451f0e55e23ad929f23415a2ffe0a9281e3c3632c51ac9420d00995c789654"
+
+
+def test_goal_scheduler_enforces_budgets_cycles_retries_and_stale_claims(tmp_path: Path) -> None:
+    with AutonomousGoalLedger(str(tmp_path / "scheduler-claim.sqlite3"), clock=lambda: 20, max_goals=8) as ledger:
+        ledger.create(goal_id="base", task_digest=_digest("base task"), domain="coding", now_ns=0)
+        ledger.create(goal_id="dependent", task_digest=_digest("dependent task"), domain="science", now_ns=0)
+        ledger.create(goal_id="cycle-a", task_digest=_digest("cycle a"), domain="data", now_ns=0)
+        ledger.create(goal_id="cycle-b", task_digest=_digest("cycle b"), domain="operations", now_ns=0)
+        failed = ledger.create(goal_id="retry", task_digest=_digest("retry task"), domain="evaluation", max_attempts=3, now_ns=0)
+        failed = ledger.transition(failed.goal_id, "running", expected_revision=failed.revision, now_ns=1)
+        ledger.transition(failed.goal_id, "failed", expected_revision=failed.revision, now_ns=2)
+        schedule = schedule_autonomous_goals(
+            ledger.list(limit=8),
+            {
+                "now_ns": 20,
+                "max_selected": 2,
+                "max_concurrent": 2,
+                "max_cost": 3,
+                "allow_failed_retry": True,
+                "signals": [
+                    AutonomousGoalSchedulingSignal("dependent", priority=1.0, urgency=1.0, dependencies=("base",), estimated_cost=2),
+                    {"goal_id": "cycle-a", "dependencies": ["cycle-b"]},
+                    {"goal_id": "cycle-b", "dependencies": ["cycle-a"]},
+                    {"goal_id": "retry", "priority": 0.1},
+                ],
+            },
+        )
+        rows = {row.goal_id: row for row in schedule.rows}
+        assert rows["cycle-a"].reason == "dependency_cycle"
+        assert rows["cycle-b"].reason == "dependency_cycle"
+        assert rows["dependent"].decision == "admit"
+        assert rows["dependent"].unmet_dependencies == ()
+        assert schedule.used_cost == 3
+        claim = claim_autonomous_goals(ledger, schedule, now_ns=30)
+        assert [item.goal_id for item in claim.claims] == ["base", "dependent"]
+        assert ledger.get("dependent").status == "running"
+        assert ledger.get("dependent").attempt == 1
+        with pytest.raises(AutonomousGoalError, match="stale"):
+            claim_autonomous_goals(ledger, schedule, now_ns=31)
+        tampered = schedule.to_dict()
+        tampered["selected_goal_ids"] = []
+        with pytest.raises(AutonomousGoalError, match="schedule_digest"):
+            validate_goal_schedule(tampered)
+
+
+def test_goal_scheduler_admits_cross_domain_objectives() -> None:
+    with AutonomousGoalLedger(clock=lambda: 100, max_goals=2) as ledger:
+        ledger.create(goal_id="cross", task_digest=_digest("cross task"), domain="cross_domain", now_ns=0)
+        schedule = schedule_autonomous_goals(
+            ledger.list(limit=2),
+            {"now_ns": 100, "max_selected": 1, "max_concurrent": 1, "required_domains": ["cross_domain"]},
+        )
+        assert schedule.selected_goal_ids == ("cross",)
+        assert schedule.selected_domains == ("cross_domain",)
+        assert schedule.missing_domains == ()
+        assert "cross_domain" in AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS
+
+
+def test_goal_worker_rehydrates_and_settles_every_domain_without_persisting_task_values() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains))
+    for domain in domains:
+        ledger.create(goal_id=f"worker-{domain}", task_digest=_digest(f"private task {domain}"), domain=domain, now_ns=0)
+    observed_tasks: list[str] = []
+
+    def resolve(goal, _row):
+        return {"task": f"private task for {goal.domain}", "parameters": {"private": True}}
+
+    def execute(request):
+        observed_tasks.append(request.task)
+        return {"status": "completed", "settlement_metadata": {"progress_digest": _digest(f"progress {request.goal.domain}")}}
+
+    batch = AutonomousGoalWorker(ledger, resolver=resolve, executor=execute).run(
+        schedule_options={
+            "now_ns": 100,
+            "max_selected": len(domains),
+            "max_concurrent": len(domains),
+            "required_domains": list(domains),
+        }
+    )
+    assert len(observed_tasks) == len(domains)
+    assert len(batch.runs) == len(domains)
+    assert all(run.goal_status == "completed" for run in batch.runs)
+    assert all(record.status == "completed" for record in ledger.list(limit=len(domains)))
+    public = json.dumps(batch.to_dict())
+    assert "private task for" not in public
+    assert '"private"' not in public
+    assert batch.to_dict()["counts"]["completed"] == len(domains)
+    assert ledger.verify_integrity()["ok"] is True
+
+
+def test_goal_worker_single_attempt_digest_matches_typescript_reference() -> None:
+    ledger = AutonomousGoalLedger(clock=lambda: 100)
+    ledger.create(goal_id="parity", task_digest=_digest("private"), domain="coding", now_ns=0)
+    batch = AutonomousGoalWorker(
+        ledger,
+        resolver=lambda _goal, _row: {"task": "private"},
+        executor=lambda _request: {"status": "completed"},
+    ).run(schedule_options={"now_ns": 100, "max_selected": 1, "max_concurrent": 1})
+    assert batch.worker_digest == "ce6809a88e6a2c0c44748f9c3ec9e57b13915d8472f29da35ed8e1c1fc8baad2"
+
+
+def test_goal_worker_converts_executor_failure_into_redacted_retry_state() -> None:
+    ledger = AutonomousGoalLedger(clock=lambda: 100)
+    ledger.create(goal_id="failure", task_digest=_digest("private failure"), domain="operations", now_ns=0)
+
+    def execute(_request):
+        raise RuntimeError("private provider response must not cross the ledger boundary")
+
+    batch = AutonomousGoalWorker(
+        ledger,
+        resolver=lambda _goal, _row: {"task": "private failure"},
+        executor=execute,
+    ).run(schedule_options={"now_ns": 100, "max_selected": 1, "max_concurrent": 1})
+    run = batch.runs[0]
+    assert run.execution_status == "failed"
+    assert run.goal_status == "failed"
+    assert run.error_class == "RuntimeError"
+    assert run.error_digest is not None
+    assert "private provider response" not in json.dumps(batch.to_dict())
+    assert ledger.get("failure").status == "failed"
+    assert ledger.get("failure").next_action_digest == _digest("goal-retry")
+
+
+def test_goal_worker_journal_reconciles_pre_and_post_dispatch_restarts_without_replay() -> None:
+    ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=2)
+    ledger.create(goal_id="pre", task_digest=_digest("pre task"), domain="coding", now_ns=0)
+    ledger.create(goal_id="post", task_digest=_digest("post task"), domain="cross_domain", now_ns=0)
+    schedule = schedule_autonomous_goals(
+        ledger.list(limit=2),
+        {"now_ns": 100, "max_selected": 2, "max_concurrent": 2, "required_domains": ["coding", "cross_domain"]},
+    )
+    claims = claim_autonomous_goals(ledger, schedule, now_ns=100)
+    journal = AutonomousGoalWorkerJournal(clock=lambda: 101)
+    for claim in claims.claims:
+        current = ledger.get(claim.goal_id)
+        journal.record(
+            batch_id="restart-batch",
+            goal_id=claim.goal_id,
+            phase="claimed",
+            attempt=current.attempt,
+            revision=current.revision,
+            schedule_digest=schedule.schedule_digest,
+            claim_digest=claims.claim_digest,
+        )
+    post = ledger.get("post")
+    journal.record(
+        batch_id="restart-batch",
+        goal_id="post",
+        phase="dispatch_started",
+        attempt=post.attempt,
+        revision=post.revision,
+        schedule_digest=schedule.schedule_digest,
+        claim_digest=claims.claim_digest,
+    )
+    recovery = journal.recover(ledger, now_ns=200)
+    assert {row["goal_id"] for row in recovery["recovered"]} == {"pre", "post"}
+    assert ledger.get("pre").status == "paused"
+    assert ledger.get("pre").next_action_digest == _digest("goal-retry")
+    assert ledger.get("post").status == "blocked"
+    assert ledger.get("post").next_action_digest == _digest("goal-reconciliation-review")
+    assert journal.active() == ()
+    snapshot = journal.snapshot()
+    restored = AutonomousGoalWorkerJournal(clock=lambda: 300)
+    assert restored.restore(snapshot)["head_digest"] == snapshot["head_digest"]
+    tampered = json.loads(json.dumps(snapshot))
+    tampered["events"][0]["event_digest"] = "0" * 64
+    with pytest.raises(AutonomousGoalError, match="digest"):
+        restored.restore(tampered)
+
+    class _Store:
+        def __init__(self):
+            self.value = None
+
+        def read(self):
+            return self.value
+
+        def write(self, value):
+            self.value = value
+
+    store = _Store()
+    coordinator = AutonomousGoalWorkerJournalPersistenceCoordinator(
+        journal,
+        JsonAutonomousGoalWorkerJournalPersistence(store),
+    )
+    flushed = coordinator.flush()
+    assert coordinator.restore()["snapshot_digest"] == flushed["snapshot_digest"]
+
+
+def test_goal_control_loop_continues_all_domains_and_retries_paused_work_with_fresh_signals() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains) + 1)
+    for domain in domains:
+        ledger.create(goal_id=f"loop-{domain}", task_digest=_digest(f"private loop task {domain}"), domain=domain, now_ns=0)
+    journal = AutonomousGoalWorkerJournal(clock=lambda: 101)
+    seen_cycles: list[int] = []
+    worker = AutonomousGoalWorker(
+        ledger,
+        journal=journal,
+        resolver=lambda goal, _row: {"task": f"private loop task {goal.domain}"},
+        executor=lambda request: {"status": "completed"},
+    )
+    loop = AutonomousGoalControlLoop(worker, batch_id_prefix="all-domain-loop")
+
+    def signals(context):
+        seen_cycles.append(context.cycle)
+        return {"signals": [{"goal_id": "loop-coding", "priority": 1.0, "urgency": 1.0}]}
+
+    result = loop.run(
+        schedule_options={
+            "now_ns": 100,
+            "max_selected": len(domains),
+            "max_concurrent": len(domains),
+            "required_domains": list(domains),
+        },
+        options_factory=signals,
+        max_cycles=4,
+    )
+    assert result.stop_reason == "all_terminal"
+    assert len(result.cycles) == 1
+    assert result.total_runs == len(domains)
+    assert result.domain_counts == {domain: 1 for domain in domains}
+    assert seen_cycles == [1]
+    assert journal.active() == ()
+    public = json.dumps(result.to_dict())
+    assert "private loop task" not in public
+    assert all(record.status == "completed" for record in ledger.list(limit=len(domains)))
+
+    retry_ledger = AutonomousGoalLedger(clock=lambda: 200)
+    retry_ledger.create(goal_id="paused-loop", task_digest=_digest("private paused loop"), domain="evaluation", now_ns=0)
+    calls = {"count": 0}
+
+    def execute_once_then_complete(_request):
+        calls["count"] += 1
+        return {"status": "paused" if calls["count"] == 1 else "completed"}
+
+    retry_loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            retry_ledger,
+            resolver=lambda _goal, _row: {"task": "private paused loop"},
+            executor=execute_once_then_complete,
+        )
+    )
+    resumed = retry_loop.run(schedule_options={"now_ns": 200, "max_selected": 1, "max_concurrent": 1, "include_paused": True}, max_cycles=3)
+    assert resumed.stop_reason == "all_terminal"
+    assert len(resumed.cycles) == 2
+    assert calls["count"] == 2
+    assert retry_ledger.get("paused-loop").status == "completed"
+
+    failure_ledger = AutonomousGoalLedger(clock=lambda: 300)
+    failure_ledger.create(goal_id="failed-loop", task_digest=_digest("private failed loop"), domain="operations", max_attempts=2, now_ns=0)
+    failed = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            failure_ledger,
+            resolver=lambda _goal, _row: {"task": "private failed loop"},
+            executor=lambda _request: (_ for _ in ()).throw(RuntimeError("private failure")),
+        )
+    ).run(schedule_options={"now_ns": 300, "max_selected": 1, "max_concurrent": 1}, max_cycles=2)
+    assert failed.stop_reason == "no_admissible_work"
+    assert failure_ledger.get("failed-loop").status == "failed"
 
 
 class _CasTextStore:

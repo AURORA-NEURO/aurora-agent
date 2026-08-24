@@ -3,6 +3,11 @@ import { test } from "node:test";
 
 import {
   AutonomousGoalPersistenceCoordinator,
+  AutonomousGoalScheduler,
+  AutonomousGoalWorker,
+  AutonomousGoalControlLoop,
+  AutonomousGoalWorkerJournal,
+  AutonomousGoalWorkerJournalPersistenceCoordinator,
   AutonomousAgent,
   AutonomousLearningController,
   AutonomousOnlineLearner,
@@ -10,15 +15,256 @@ import {
   InMemoryAutonomousCycleReplanStateStore,
   InMemoryAutonomousGoalLedger,
   JsonAutonomousGoalPersistence,
+  JsonAutonomousGoalWorkerJournalPersistence,
   LLMRuntime,
   TransactionalJsonAutonomousGoalPersistence,
   WebStorageAutonomousGoalTextStore,
   builtinAutonomousDomainProfiles,
+  AUTONOMOUS_DOMAIN_NAMES,
+  claimAutonomousGoals,
   digestJsonSync,
   goalTaskDigest,
   openaiCompatibleProvider,
+  scheduleAutonomousGoals,
+  validateAutonomousGoalSchedule,
   validateAutonomousGoalSnapshot,
 } from "../dist/index.js";
+
+test("goal scheduler prioritizes dependency-closed work across every domain", () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: AUTONOMOUS_DOMAIN_NAMES.length, clock: () => 0 });
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) ledger.create({ goal_id: `goal-${domain}`, task_digest: goalTaskDigest(`task-${domain}`), domain, now_ns: 0 });
+  const schedule = new AutonomousGoalScheduler().plan(ledger.list({ limit: AUTONOMOUS_DOMAIN_NAMES.length }), {
+    now_ns: 1_000,
+    max_selected: AUTONOMOUS_DOMAIN_NAMES.length,
+    max_concurrent: AUTONOMOUS_DOMAIN_NAMES.length,
+    required_domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    signals: [
+      { goal_id: "goal-coding", priority: 0.2 },
+      { goal_id: "goal-science", priority: 1, urgency: 1, dependencies: ["goal-coding"] },
+    ],
+  });
+  assert.ok(schedule.selected_goal_ids.indexOf("goal-coding") < schedule.selected_goal_ids.indexOf("goal-science"));
+  assert.deepEqual(new Set(schedule.selected_goal_ids), new Set(AUTONOMOUS_DOMAIN_NAMES.map((domain) => `goal-${domain}`)));
+  assert.deepEqual(schedule.coverage.missing_domains, []);
+  assert.deepEqual(schedule.coverage.selected_domains, [...AUTONOMOUS_DOMAIN_NAMES]);
+  assert.equal(JSON.stringify(schedule).includes("task-coding"), false);
+  assert.equal(validateAutonomousGoalSchedule(schedule).schedule_digest, schedule.schedule_digest);
+  assert.equal(schedule.schedule_digest, "30451f0e55e23ad929f23415a2ffe0a9281e3c3632c51ac9420d00995c789654");
+});
+
+test("goal scheduler enforces cycles, budgets, retry policy, and stale claims", () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 8, clock: () => 20 });
+  ledger.create({ goal_id: "base", task_digest: goalTaskDigest("base task"), domain: "coding", now_ns: 0 });
+  ledger.create({ goal_id: "dependent", task_digest: goalTaskDigest("dependent task"), domain: "science", now_ns: 0 });
+  ledger.create({ goal_id: "cycle-a", task_digest: goalTaskDigest("cycle a"), domain: "data", now_ns: 0 });
+  ledger.create({ goal_id: "cycle-b", task_digest: goalTaskDigest("cycle b"), domain: "operations", now_ns: 0 });
+  const failed = ledger.create({ goal_id: "retry", task_digest: goalTaskDigest("retry task"), domain: "evaluation", max_attempts: 3, now_ns: 0 });
+  const running = ledger.transition(failed.goal_id, "running", { expected_revision: failed.revision, now_ns: 1 });
+  ledger.transition(running.goal_id, "failed", { expected_revision: running.revision, now_ns: 2 });
+  const schedule = scheduleAutonomousGoals(ledger.list({ limit: 8 }), {
+    now_ns: 20,
+    max_selected: 2,
+    max_concurrent: 2,
+    max_cost: 3,
+    allow_failed_retry: true,
+    signals: [
+      { goal_id: "dependent", priority: 1, urgency: 1, dependencies: ["base"], estimated_cost: 2 },
+      { goal_id: "cycle-a", dependencies: ["cycle-b"] },
+      { goal_id: "cycle-b", dependencies: ["cycle-a"] },
+      { goal_id: "retry", priority: 0.1 },
+    ],
+  });
+  const rows = new Map(schedule.rows.map((row) => [row.goal_id, row]));
+  assert.equal(rows.get("cycle-a").reason, "dependency_cycle");
+  assert.equal(rows.get("cycle-b").reason, "dependency_cycle");
+  assert.equal(rows.get("dependent").decision, "admit");
+  assert.deepEqual(rows.get("dependent").unmet_dependencies, []);
+  assert.equal(schedule.used_cost, 3);
+  const claim = claimAutonomousGoals(ledger, schedule, { now_ns: 30 });
+  assert.deepEqual(claim.claims.map((item) => item.goal_id), ["base", "dependent"]);
+  assert.equal(ledger.get("dependent").status, "running");
+  assert.equal(ledger.get("dependent").attempt, 1);
+  assert.throws(() => claimAutonomousGoals(ledger, schedule, { now_ns: 31 }), /stale/);
+  const tampered = structuredClone(schedule);
+  tampered.selected_goal_ids = [];
+  assert.throws(() => validateAutonomousGoalSchedule(tampered), /schedule_digest/);
+});
+
+test("goal scheduler admits cross-domain objectives", () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 2, clock: () => 100 });
+  ledger.create({ goal_id: "cross", task_digest: goalTaskDigest("cross task"), domain: "cross_domain", now_ns: 0 });
+  const schedule = scheduleAutonomousGoals(ledger.list({ limit: 2 }), {
+    now_ns: 100,
+    max_selected: 1,
+    max_concurrent: 1,
+    required_domains: ["cross_domain"],
+  });
+  assert.deepEqual(schedule.selected_goal_ids, ["cross"]);
+  assert.deepEqual(schedule.coverage.selected_domains, ["cross_domain"]);
+  assert.deepEqual(schedule.coverage.missing_domains, []);
+});
+
+test("goal worker rehydrates and settles every domain without persisting task values", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 100 });
+  for (const domain of domains) ledger.create({ goal_id: `worker-${domain}`, task_digest: goalTaskDigest(`private task ${domain}`), domain, now_ns: 0 });
+  const observedTasks = [];
+  const worker = new AutonomousGoalWorker({
+    ledger,
+    resolver: (goal) => ({ task: `private task for ${goal.domain}`, parameters: { private: true } }),
+    executor: async (request) => {
+      observedTasks.push(request.task);
+      return { status: "completed", settlement_metadata: { progress_digest: goalTaskDigest(`progress ${request.goal.domain}`) } };
+    },
+  });
+  const batch = await worker.run({ schedule_options: { now_ns: 100, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains } });
+  assert.equal(observedTasks.length, domains.length);
+  assert.equal(batch.runs.length, domains.length);
+  assert.ok(batch.runs.every((run) => run.goal_status === "completed"));
+  assert.ok(ledger.list({ limit: domains.length }).every((goal) => goal.status === "completed"));
+  const publicValue = JSON.stringify(batch.toJSON());
+  assert.equal(publicValue.includes("private task for"), false);
+  assert.equal(publicValue.includes('"private"'), false);
+  assert.equal(batch.toJSON().counts.completed, domains.length);
+  assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
+test("goal worker single-attempt digest matches the Python reference", async () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
+  ledger.create({ goal_id: "parity", task_digest: goalTaskDigest("private"), domain: "coding", now_ns: 0 });
+  const batch = await new AutonomousGoalWorker({
+    ledger,
+    resolver: () => ({ task: "private" }),
+    executor: async () => ({ status: "completed" }),
+  }).run({ schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } });
+  assert.equal(batch.worker_digest, "ce6809a88e6a2c0c44748f9c3ec9e57b13915d8472f29da35ed8e1c1fc8baad2");
+});
+
+test("goal worker converts executor failure into redacted retry state", async () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
+  ledger.create({ goal_id: "failure", task_digest: goalTaskDigest("private failure"), domain: "operations", now_ns: 0 });
+  const batch = await new AutonomousGoalWorker({
+    ledger,
+    resolver: () => ({ task: "private failure" }),
+    executor: async () => { throw new Error("private provider response must not cross the ledger boundary"); },
+  }).run({ schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } });
+  const run = batch.runs[0];
+  assert.equal(run.execution_status, "failed");
+  assert.equal(run.goal_status, "failed");
+  assert.equal(run.error_class, "Error");
+  assert.ok(run.error_digest);
+  assert.equal(JSON.stringify(batch.toJSON()).includes("private provider response"), false);
+  assert.equal(ledger.get("failure").status, "failed");
+  assert.equal(ledger.get("failure").next_action_digest, goalTaskDigest("goal-retry"));
+});
+
+test("goal worker journals the dispatch boundary and reconciles restart uncertainty", async () => {
+  const workerLedger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
+  workerLedger.create({ goal_id: "journal-worker", task_digest: goalTaskDigest("private journal task"), domain: "coding", now_ns: 0 });
+  const journal = new AutonomousGoalWorkerJournal({ clock: () => 123 });
+  const worker = new AutonomousGoalWorker({
+    ledger: workerLedger,
+    journal,
+    resolver: () => ({ task: "private journal task", parameters: { secret: true } }),
+    executor: async () => ({ status: "completed" }),
+  });
+  await worker.run({ batch_id: "batch-success", schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } });
+  assert.deepEqual(journal.events({ goal_id: "journal-worker" }).map((event) => event.phase), ["prepared", "claimed", "dispatch_started", "settled"]);
+  assert.equal(JSON.stringify(journal.snapshot()).includes("private journal task"), false);
+
+  const recoveryLedger = new InMemoryAutonomousGoalLedger({ clock: () => 200 });
+  recoveryLedger.create({ goal_id: "pre-dispatch", task_digest: goalTaskDigest("pre task"), domain: "coding", now_ns: 0 });
+  recoveryLedger.create({ goal_id: "post-dispatch", task_digest: goalTaskDigest("post task"), domain: "operations", now_ns: 0 });
+  recoveryLedger.transition("pre-dispatch", "running", { expected_revision: 0, now_ns: 1 });
+  recoveryLedger.transition("post-dispatch", "running", { expected_revision: 0, now_ns: 1 });
+  const recoveredJournal = new AutonomousGoalWorkerJournal({ clock: () => 201 });
+  const scheduleDigest = goalTaskDigest("schedule");
+  const claimDigest = goalTaskDigest("claim");
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "pre-dispatch", phase: "claimed", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "post-dispatch", phase: "claimed", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "post-dispatch", phase: "dispatch_started", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
+  const recovery = recoveredJournal.recover(recoveryLedger, { now_ns: 202 });
+  assert.deepEqual(recovery.recovered.map((item) => item.goal_status), ["paused", "blocked"]);
+  assert.equal(recoveryLedger.get("pre-dispatch").next_action_digest, goalTaskDigest("goal-retry"));
+  assert.equal(recoveryLedger.get("post-dispatch").next_action_digest, goalTaskDigest("goal-reconciliation-review"));
+  assert.deepEqual(recoveredJournal.active(), []);
+
+  const snapshot = recoveredJournal.snapshot();
+  const restored = new AutonomousGoalWorkerJournal();
+  restored.restore(snapshot);
+  assert.equal(restored.head_digest, snapshot.head_digest);
+  const tampered = structuredClone(snapshot);
+  tampered.events[0].goal_id = "tampered";
+  assert.throws(() => restored.restore(tampered), /digest does not match/);
+
+  let encoded = null;
+  const persistence = new JsonAutonomousGoalWorkerJournalPersistence({ read: () => encoded, write: (value) => { encoded = value; } });
+  const coordinator = new AutonomousGoalWorkerJournalPersistenceCoordinator(restored, persistence);
+  await coordinator.flush();
+  const roundTripped = new AutonomousGoalWorkerJournal();
+  await new AutonomousGoalWorkerJournalPersistenceCoordinator(roundTripped, persistence).restore();
+  assert.equal(roundTripped.head_digest, restored.head_digest);
+  assert.equal(JSON.stringify(encoded).includes("private journal task"), false);
+});
+
+test("goal control loop continues all domains and re-admits paused work with fresh signals", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length + 1, clock: () => 100 });
+  for (const domain of domains) ledger.create({ goal_id: `loop-${domain}`, task_digest: goalTaskDigest(`private loop task ${domain}`), domain, now_ns: 0 });
+  const journal = new AutonomousGoalWorkerJournal({ clock: () => 101 });
+  const seenCycles = [];
+  const loop = new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      journal,
+      resolver: (goal) => ({ task: `private loop task ${goal.domain}` }),
+      executor: async () => ({ status: "completed" }),
+    }),
+    batch_id_prefix: "all-domain-loop",
+  });
+  const result = await loop.run({
+    schedule_options: { now_ns: 100, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    options_factory: (context) => {
+      seenCycles.push(context.cycle);
+      return { signals: [{ goal_id: "loop-coding", priority: 1, urgency: 1 }] };
+    },
+    max_cycles: 4,
+  });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.equal(result.cycles.length, 1);
+  assert.equal(result.total_runs, domains.length);
+  assert.deepEqual(result.domain_counts, Object.fromEntries(domains.map((domain) => [domain, 1])));
+  assert.deepEqual(seenCycles, [1]);
+  assert.deepEqual(journal.active(), []);
+  assert.equal(JSON.stringify(result.toJSON()).includes("private loop task"), false);
+
+  const retryLedger = new InMemoryAutonomousGoalLedger({ clock: () => 200 });
+  retryLedger.create({ goal_id: "paused-loop", task_digest: goalTaskDigest("private paused loop"), domain: "evaluation", now_ns: 0 });
+  let calls = 0;
+  const resumed = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger: retryLedger,
+      resolver: () => ({ task: "private paused loop" }),
+      executor: async () => ({ status: ++calls === 1 ? "paused" : "completed" }),
+    }),
+  }).run({ schedule_options: { now_ns: 200, max_selected: 1, max_concurrent: 1, include_paused: true }, max_cycles: 3 });
+  assert.equal(resumed.stop_reason, "all_terminal");
+  assert.equal(resumed.cycles.length, 2);
+  assert.equal(calls, 2);
+  assert.equal(retryLedger.get("paused-loop").status, "completed");
+
+  const failureLedger = new InMemoryAutonomousGoalLedger({ clock: () => 300 });
+  failureLedger.create({ goal_id: "failed-loop", task_digest: goalTaskDigest("private failed loop"), domain: "operations", max_attempts: 2, now_ns: 0 });
+  const failed = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger: failureLedger,
+      resolver: () => ({ task: "private failed loop" }),
+      executor: async () => { throw new Error("private failure"); },
+    }),
+  }).run({ schedule_options: { now_ns: 300, max_selected: 1, max_concurrent: 1 }, max_cycles: 2 });
+  assert.equal(failed.stop_reason, "no_admissible_work");
+  assert.equal(failureLedger.get("failed-loop").status, "failed");
+});
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {
   const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }));

@@ -408,6 +408,8 @@ test("provider-planned cross-domain learning settles planner, specialists, and s
   assert.equal(settled.planner_settlement?.status, "settled");
   assert.equal(settled.execution_settlement?.trajectory.status, "settled");
   assert.equal(Object.keys(settled.rewards).length, planned.result.learning_episode_ids.length);
+  assert.deepEqual(settled.planner_settlement?.planner_context, planned.plan_refinement.planner_context);
+  assert.equal(settled.planner_settlement?.planner_context_digest, planned.plan_refinement.planner_context_digest);
   assert.equal(health.health({ model: "cross-planner" })[0]?.quality_observations, planned.result.learning_episode_ids.length + 1);
 });
 

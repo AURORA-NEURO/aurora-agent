@@ -467,6 +467,9 @@ export interface AutonomousPlanningQualitySettlement extends JsonObject {
   schema: typeof AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA;
   status: "settled" | "not_eligible";
   plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | AutonomousOrderedStepPlanRefinementResult | null;
+  /** Context actually credited; embedded planner context wins over legacy caller reconstruction. */
+  planner_context: BrainBanditContext | null;
+  planner_context_digest: Digest | null;
   evaluation: AutonomousEvaluatorRewardInput | null;
   next_state: BrainBanditState | null;
   model_quality: AutonomousLearningModelQualityProjection | null;
@@ -538,6 +541,8 @@ export interface AutonomousEvaluatedRunResult {
   run: AutonomousRunResult;
   evaluation: AutonomousEvaluatorRewardInput | null;
   settlement: AutonomousLearningSettlement | null;
+  /** Independent structured-response contract settlement, when the run opted into that signal. */
+  response_settlement: AutonomousLearningSettlement | null;
   reason: "run_not_completed" | "learning_episode_not_prepared" | null;
   retention: "run_caller_owned; evaluation_and_settlement_value_only";
 }
@@ -575,6 +580,8 @@ export interface AutonomousEvaluatedPlanAndRunResult {
   execution_evaluation: AutonomousEvaluatorRewardInput | null;
   /** Single-domain settlement or the value-only cross-domain trajectory settlement. */
   execution_settlement: AutonomousLearningSettlement | AutonomousTrajectorySettlement | null;
+  /** Independent structured-response settlements; never merged into task-quality credit. */
+  response_settlements: AutonomousLearningSettlement[];
   rewards: Record<string, AutonomousEvaluatorRewardInput>;
   reason: "plan_not_completed" | "execution_not_completed" | "learning_episode_not_prepared" | "trajectory_id_required" | "planner_evaluator_not_provided" | "planner_sink_not_configured" | null;
   retention: "plan_and_run_caller_owned; planner_and_execution_settlements_value_only";
@@ -670,6 +677,36 @@ function boundedGeneration(value: unknown): number {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+type AutonomousPlannerRefinement = AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | AutonomousOrderedStepPlanRefinementResult;
+
+/**
+ * Recover and verify the planner identity embedded in a provider proposal. Planner feedback
+ * must be credited to the contextual arm that actually selected the provider, not to whatever
+ * context a later caller happens to reconstruct from legacy settlement options.
+ */
+async function embeddedPlannerContext(
+  plan: AutonomousPlannerRefinement,
+): Promise<{ context: BrainBanditContext; digest: string } | null> {
+  const rawPlan = plan as JsonObject;
+  const rawContext = rawPlan.planner_context;
+  const rawDigest = rawPlan.planner_context_digest;
+  if (rawContext === undefined && rawDigest === undefined) return null;
+  if (!isObject(rawContext) || typeof rawDigest !== "string" || !/^[0-9a-f]{64}$/.test(rawDigest)) throw new ArgumentError("planner context metadata is malformed");
+  const allowedKeys = new Set(["domain", "capability", "risk_class", "task_family"]);
+  if (Object.keys(rawContext).some((key) => !allowedKeys.has(key))) throw new ArgumentError("planner context metadata contains unsupported fields");
+  const domain = boundedIdentifier("planner context domain", rawContext.domain);
+  if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError("planner context domain is unsupported");
+  const capability = boundedIdentifier("planner context capability", rawContext.capability);
+  const riskClass = boundedIdentifier("planner context risk_class", rawContext.risk_class);
+  const taskFamily = rawContext.task_family === undefined || rawContext.task_family === null
+    ? null
+    : boundedIdentifier("planner context task_family", rawContext.task_family);
+  const context: BrainBanditContext = { domain, capability, risk_class: riskClass, task_family: taskFamily };
+  const expectedDigest = await digestCanonicalJsonText(JSON.stringify(context));
+  if (expectedDigest !== rawDigest) throw new ArgumentError("planner context digest does not match planner context");
+  return { context, digest: rawDigest };
 }
 
 const SETTLEMENT_RECEIPT_FORBIDDEN_KEYS = new Set([
@@ -2017,8 +2054,8 @@ export class AutonomousLearningController {
       outbox?: AutonomousLearningOutboxSettlementOptions;
     } = {},
   ): Promise<AutonomousEvaluatedRunResult> {
-    if (result.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, reason: "run_not_completed", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
-    if (!result.learning_episode_id) return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, reason: "learning_episode_not_prepared", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+    if (result.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, response_settlement: null, reason: "run_not_completed", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+    if (!result.learning_episode_id) return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "not_eligible", run: result, evaluation: null, settlement: null, response_settlement: null, reason: "learning_episode_not_prepared", retention: "run_caller_owned; evaluation_and_settlement_value_only" };
     const evaluation = await this.evaluateRun(result, options.evaluator);
     const settlement = await this.settleRun(result.learning_episode_id, evaluation, {
       creditedReward: options.creditedReward,
@@ -2027,7 +2064,14 @@ export class AutonomousLearningController {
       memoryStore: options.memoryStore,
       outbox: options.outbox,
     });
-    return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "settled", run: result, evaluation, settlement, reason: null, retention: "run_caller_owned; evaluation_and_settlement_value_only" };
+    const responseSettlement = result.response_learning_episode_id
+      ? await this.settleStructuredResponse(result, {
+        remote: options.remote,
+        idempotencyKey: options.idempotencyKey ? `response:${options.idempotencyKey}` : undefined,
+        outbox: options.outbox,
+      })
+      : null;
+    return { schema: AUTONOMOUS_EVALUATED_RUN_SCHEMA, status: "settled", run: result, evaluation, settlement, response_settlement: responseSettlement, reason: null, retention: "run_caller_owned; evaluation_and_settlement_value_only" };
   }
 
   /**
@@ -2054,6 +2098,7 @@ export class AutonomousLearningController {
       planner_settlement: null,
       execution_evaluation: null,
       execution_settlement: null,
+      response_settlements: [],
       rewards: {},
       reason,
       retention,
@@ -2072,6 +2117,7 @@ export class AutonomousLearningController {
     const isCrossDomain = "child_runs" in execution;
     let executionEvaluation: AutonomousEvaluatorRewardInput | null = null;
     let executionSettlement: AutonomousLearningSettlement | AutonomousTrajectorySettlement | null = null;
+    let responseSettlements: AutonomousLearningSettlement[] = [];
     const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
 
     if (isCrossDomain) {
@@ -2083,13 +2129,15 @@ export class AutonomousLearningController {
       const candidates = [...crossDomain.child_runs.map((child) => child.result), ...(crossDomain.synthesis ? [crossDomain.synthesis] : [])].filter((candidate) => candidate.status === "completed");
       if (candidates.length !== crossDomain.learning_episode_ids.length) throw new ArgumentError("plan-and-run learning episode order does not match completed specialist and synthesis results");
       for (const [index, candidate] of candidates.entries()) rewards[crossDomain.learning_episode_ids[index]!] = normalizeRewardInput(await evaluate(candidate));
-      executionSettlement = (await this.settleCrossDomain(crossDomain, rewards, {
+      const crossSettlement = await this.settleCrossDomain(crossDomain, rewards, {
         trajectoryId: options.trajectoryId,
         discount: options.discount,
         remote: options.remote,
         idempotencyKey: options.idempotencyKey ?? `plan-and-run:${options.trajectoryId}`,
         outbox: options.outbox,
-      })).trajectory;
+      });
+      executionSettlement = crossSettlement.trajectory;
+      responseSettlements = crossSettlement.response_settlements;
     } else {
       const single = execution as AutonomousRunResult;
       if (!single.learning_episode_id) return { ...empty("not_eligible", "learning_episode_not_prepared"), planner_evaluation: plannerEvaluation };
@@ -2101,6 +2149,13 @@ export class AutonomousLearningController {
         memoryStore: options.memoryStore,
         outbox: options.outbox,
       });
+      if (single.response_learning_episode_id) {
+        responseSettlements = [await this.settleStructuredResponse(single, {
+          remote: options.remote,
+          idempotencyKey: options.idempotencyKey ? `response:${options.idempotencyKey}` : `plan-and-run:response:${single.response_learning_episode_id}`,
+          outbox: options.outbox,
+        })];
+      }
     }
 
     const plannerSettlement = await this.settlePlanningQuality(plan, {
@@ -2119,6 +2174,7 @@ export class AutonomousLearningController {
       planner_settlement: plannerSettlement,
       execution_evaluation: executionEvaluation,
       execution_settlement: executionSettlement,
+      response_settlements: responseSettlements,
       rewards,
       reason: "planner_sink_not_configured",
       retention,
@@ -2131,6 +2187,7 @@ export class AutonomousLearningController {
       planner_settlement: plannerSettlement,
       execution_evaluation: executionEvaluation,
       execution_settlement: executionSettlement,
+      response_settlements: responseSettlements,
       rewards,
       reason: null,
       retention,
@@ -2156,18 +2213,26 @@ export class AutonomousLearningController {
     },
   ): Promise<AutonomousPlanningQualitySettlement> {
     if (!isObject(plan) || plan.status !== "completed" || !isObject(plan.selected_model) || typeof plan.outcome_digest !== "string" || !/^[0-9a-f]{64}$/.test(plan.outcome_digest)) {
-      return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: isObject(plan) ? plan : null, evaluation: null, next_state: null, model_quality: null, reason: "planning_proposal_not_completed", remote: false, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+      return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: isObject(plan) ? plan : null, planner_context: null, planner_context_digest: null, evaluation: null, next_state: null, model_quality: null, reason: "planning_proposal_not_completed", remote: false, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
     }
     if (!options || typeof options !== "object" || !AUTONOMOUS_DOMAIN_NAMES.includes(options.domain)) throw new ArgumentError("planning quality settlement requires a built-in domain");
     const evaluation = normalizeRewardInput(options.evaluator);
     const selected = plan.selected_model;
     const provider = selected.provider;
     const model = selected.model;
-    const capability = options.capability ?? "planning";
-    const riskClass = options.riskClass ?? "planning_review";
-    if (typeof capability !== "string" || !capability.trim() || typeof riskClass !== "string" || !riskClass.trim()) throw new ArgumentError("planning quality capability and riskClass must be non-empty");
-    const context: BrainBanditContext = { domain: options.domain, capability, risk_class: riskClass, task_family: options.taskFamily ?? null };
-    const contextDigest = await digestCanonicalJsonText(JSON.stringify(context));
+    const embeddedContext = await embeddedPlannerContext(plan);
+    let context: BrainBanditContext;
+    let contextDigest: string;
+    if (embeddedContext) {
+      context = embeddedContext.context;
+      contextDigest = embeddedContext.digest;
+    } else {
+      const capability = options.capability ?? "planning";
+      const riskClass = options.riskClass ?? "planning_review";
+      if (typeof capability !== "string" || !capability.trim() || typeof riskClass !== "string" || !riskClass.trim()) throw new ArgumentError("planning quality capability and riskClass must be non-empty");
+      context = { domain: options.domain, capability, risk_class: riskClass, task_family: options.taskFamily ?? null };
+      contextDigest = await digestCanonicalJsonText(JSON.stringify(context));
+    }
     const planningOutcomeDigest = await digestJson({ kind: "planning_quality", plan_outcome_digest: plan.outcome_digest, selection_digest: plan.selection_digest ?? null, planner_plan_digest: plan.planner_plan_digest ?? null });
     let nextState: BrainBanditState | null = null;
     const remote = options.remote === true;
@@ -2185,9 +2250,9 @@ export class AutonomousLearningController {
     const qualityBase = {
       provider,
       model,
-      domain: options.domain,
-      capability,
-      risk_class: riskClass,
+      domain: context.domain as AutonomousDomainName,
+      capability: context.capability,
+      risk_class: context.risk_class,
       evaluator_id: evaluation.evaluator_id,
       evaluator_version: evaluation.evaluator_version,
       reward: evaluation.reward,
@@ -2202,14 +2267,14 @@ export class AutonomousLearningController {
       modelQuality = { status: "not_configured", ...qualityBase };
     } else {
       try {
-        const receipt = await healthController.recordEvaluation({ provider, model, domain: options.domain, capability, riskClass, evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evidenceDigest: evaluation.evidence_digest ?? null, outcomeDigest: planningOutcomeDigest });
+        const receipt = await healthController.recordEvaluation({ provider, model, domain: context.domain as AutonomousDomainName, capability: context.capability, riskClass: context.risk_class, evaluatorId: evaluation.evaluator_id, evaluatorVersion: evaluation.evaluator_version, reward: evaluation.reward, passed: evaluation.passed, evidenceDigest: evaluation.evidence_digest ?? null, outcomeDigest: planningOutcomeDigest });
         modelQuality = { status: "recorded", ...qualityBase, health_event_digest: receipt.event_digest };
       } catch (error) {
         modelQuality = { status: "failed", ...qualityBase, error_class: error instanceof Error && error.constructor.name.trim() ? error.constructor.name : "ModelHealthError" };
       }
     }
-    if (!nextState && modelQuality.status === "not_configured") return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: plan, evaluation: null, next_state: null, model_quality: null, reason: "no_learning_or_health_sink", remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
-    return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "settled", plan_refinement: plan, evaluation, next_state: nextState, model_quality: modelQuality, reason: null, remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+    if (!nextState && modelQuality.status === "not_configured") return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "not_eligible", plan_refinement: plan, planner_context: context, planner_context_digest: contextDigest, evaluation: null, next_state: null, model_quality: null, reason: "no_learning_or_health_sink", remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA, status: "settled", plan_refinement: plan, planner_context: context, planner_context_digest: contextDigest, evaluation, next_state: nextState, model_quality: modelQuality, reason: null, remote, retention: PRIVATE_RETENTION, secret_material: "never_returned" };
   }
 
   /**
@@ -2814,8 +2879,8 @@ export class AutonomousLearningController {
   ): Promise<AutonomousLearningSettlement> {
     const evaluation = result.response_evaluation as AutonomousDomainResponseEvaluation | null | undefined;
     if (!evaluation) throw new ArgumentError("structured-response settlement requires a completed structured domain response evaluation");
-    if (!result.learning_episode_id) throw new ArgumentError("structured-response settlement requires a pending learning episode on the run result");
-    return this.settleRun(result.learning_episode_id, evaluation.reward_input, options);
+    if (!result.response_learning_episode_id) throw new ArgumentError("structured-response settlement requires an independent response learning episode on the run result");
+    return this.settleRun(result.response_learning_episode_id, evaluation.reward_input, options);
   }
 
   async prepareTrajectory(episodeIds: readonly string[], options: { trajectoryId: string; discount?: number }): Promise<AutonomousLearningTrajectory> {

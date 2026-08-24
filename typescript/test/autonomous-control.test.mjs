@@ -2,17 +2,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousBrainControlPlaneBridge,
   AutonomousModelHealthController,
   AutonomousModelHealthPersistenceCoordinator,
   AutonomousModelCataloguePersistenceCoordinator,
+  AutonomousOnlineLearner,
   AutonomousOfflineReplayEngine,
   InMemoryAutonomousModelHealthStore,
   TransactionalJsonAutonomousModelHealthSnapshotPersistence,
   validateAutonomousModelHealthSnapshot,
   LLMRuntime,
   builtinAutonomousDomainEvaluatorProfiles,
+  digestCanonicalJsonTextSync,
   autonomousReplayEvidenceDigest,
   digestJson,
   openaiCompatibleProvider,
@@ -220,6 +223,56 @@ test("AutonomousAgent wires a persisted health store into selection and invocati
   assert.equal(result.status, "completed");
   assert.equal((await store.health({ model: "health-model" }))[0].attempts, 1);
   assert.equal(JSON.stringify(await store.snapshot()).includes("bounded answer"), false);
+});
+
+test("online learner adapts through persisted health gates across every built-in domain", async () => {
+  const llm = new LLMRuntime();
+  for (const provider of ["adaptive-alpha", "adaptive-beta"]) {
+    llm.registerInMemoryProvider(provider, () => ({ output_text: "bounded adaptive result" }));
+  }
+  const store = new InMemoryAutonomousModelHealthStore();
+  const learner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0.5, seed: 7 } });
+  const agent = new AutonomousAgent(llm, { learner, modelHealthStore: store });
+  const capabilities = ["reasoning", "structured_output", "code", "web", "data", "science", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation"];
+  for (const provider of ["adaptive-alpha", "adaptive-beta"]) {
+    agent.registerModel({
+      provider,
+      model: "adaptive-model",
+      capabilities,
+      context_window_tokens: 64_000,
+      max_output_tokens: 8_000,
+      quality: 0.8,
+      latency_ms: 20,
+      cost_per_million_tokens: 1,
+      reliability: 0.9,
+      requires_credential: false,
+    });
+  }
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const task = `Execute a bounded adaptive task for ${domain}.`;
+    const envelope = await agent.blueprint(task, { domain });
+    const blueprint = envelope.blueprint;
+    const context = {
+      domain: blueprint.domain_profile.domain,
+      capability: blueprint.selection_context.capability,
+      risk_class: blueprint.domain_profile.risk_class,
+      task_family: blueprint.selection_context.task_family ?? null,
+    };
+    const contextDigest = digestCanonicalJsonTextSync(JSON.stringify(context));
+    await agent.recordEvaluatorReward("adaptive-beta/adaptive-model", 0.95, {
+      contextDigest,
+      context,
+      outcomeDigest: digestCanonicalJsonTextSync(JSON.stringify({ domain, seed: "adaptive-beta" })),
+    });
+    const result = await agent.run(task, { domain, approveProviderCall: true });
+    assert.equal(result.status, "completed", domain);
+    assert.deepEqual(result.selection.selected_model, { provider: "adaptive-beta", model: "adaptive-model" }, domain);
+  }
+  assert.equal(learner.snapshot().generation, AUTONOMOUS_DOMAIN_NAMES.length);
+  const healthRows = await store.health({ model: "adaptive-model" });
+  assert.equal(healthRows.length, 1);
+  assert.equal(healthRows[0].provider, "adaptive-beta");
+  assert.equal(healthRows[0].attempts, AUTONOMOUS_DOMAIN_NAMES.length);
 });
 
 test("offline replay evaluates all twelve domains and detects expected-evidence drift", async () => {

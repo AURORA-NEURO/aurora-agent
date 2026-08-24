@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a change or addition to AURORA Agent (bioprism)
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Proposals are judged against the ground rules in AGENTS.md: honest labelling,
+        invariants in the type system, and no claim without a measurement. A feature
+        that would blur the distinction between zero influence and unknown influence,
+        or between declared and enforced, will not be accepted.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and what currently prevents it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: >-
+        What you would change, and on which surface (CLI, MCP server, HTTP gateway,
+        a specific crate).
+    validations:
+      required: true
+  - type: textarea
+    id: measurement
+    attributes:
+      label: How it would be measured
+      description: >-
+        What test or measurement would demonstrate the change works — and what result
+        would show it does not. Negative results ship here.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

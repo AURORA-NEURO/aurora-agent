@@ -58,6 +58,8 @@ export interface AutonomousCycleReplanState extends JsonObject {
   attempts: AutonomousCycleReplanAttemptState[];
   evaluations: JsonObject[];
   learning_episode_ids: string[];
+  /** Optional for legacy snapshots; new cross-domain replan states persist this independent ledger. */
+  response_learning_episode_ids?: string[];
   settlement_digests: string[];
   trajectory_ids: string[];
   context_digests: string[];
@@ -187,7 +189,7 @@ function assertNoCredentialShape(value: unknown, path: string): void {
   } catch {
     throw new AutonomousCyclePersistenceError(`${path} must be JSON serializable`);
   }
-  if (typeof serialized === "string" && /(?:api[_-]?key|authorization|bearer|password|private[_-]?key|access[_-]?token|refresh[_-]?token|credential|gsk_|sk-[A-Za-z0-9])/i.test(serialized)) throw new AutonomousCyclePersistenceError(`${path} contains credential-shaped material`);
+  if (typeof serialized === "string" && /(?:api[_-]?key|authorization|bearer|password|private[_-]?key|access[_-]?token|refresh[_-]?token|credential|\bgsk_|\bsk-proj-|\bsk-[A-Za-z0-9]{16,})/i.test(serialized)) throw new AutonomousCyclePersistenceError(`${path} contains credential-shaped material`);
 }
 
 function stateDescriptor(state: AutonomousCycleReplanState): JsonObject {
@@ -232,7 +234,7 @@ function validateAttempt(value: unknown, index: number): AutonomousCycleReplanAt
 export async function validateAutonomousCycleReplanState(value: unknown): Promise<AutonomousCycleReplanState> {
   if (!isObject(value)) throw new AutonomousCyclePersistenceError("autonomous cycle state must be an object");
   const state = value as unknown as AutonomousCycleReplanState;
-  assertKnownKeys("autonomous cycle state", state, ["schema", "cycle_id", "task_digest", "mode", "max_replans", "attempt", "phase", "route_digest", "plan_refinement_digest", "outcome_digest", "evaluation_digest", "replan_instruction_digest", "terminal_status", "attempts", "evaluations", "learning_episode_ids", "settlement_digests", "trajectory_ids", "context_digests", "generation", "previous_state_digest", "state_digest", "retention", "secret_material"]);
+  assertKnownKeys("autonomous cycle state", state, ["schema", "cycle_id", "task_digest", "mode", "max_replans", "attempt", "phase", "route_digest", "plan_refinement_digest", "outcome_digest", "evaluation_digest", "replan_instruction_digest", "terminal_status", "attempts", "evaluations", "learning_episode_ids", "response_learning_episode_ids", "settlement_digests", "trajectory_ids", "context_digests", "generation", "previous_state_digest", "state_digest", "retention", "secret_material"]);
   if (state.schema !== AUTONOMOUS_CYCLE_REPLAN_STATE_SCHEMA || state.retention !== "metadata_only_hash_chained_no_private_payloads" || state.secret_material !== "never_returned") throw new AutonomousCyclePersistenceError("autonomous cycle state retention markers are invalid");
   boundedIdentifier("autonomous cycle state cycle_id", state.cycle_id);
   boundedDigest("autonomous cycle state task_digest", state.task_digest);
@@ -282,6 +284,7 @@ export async function validateAutonomousCycleReplanState(value: unknown): Promis
     return [...value] as string[];
   };
   const learningEpisodeIds = validateIds("autonomous cycle learning_episode_ids", state.learning_episode_ids, AUTONOMOUS_CYCLE_REPLAN_MAX_ATTEMPTS * 256);
+  const responseLearningEpisodeIds = state.response_learning_episode_ids === undefined ? undefined : validateIds("autonomous cycle response_learning_episode_ids", state.response_learning_episode_ids, AUTONOMOUS_CYCLE_REPLAN_MAX_ATTEMPTS * 256);
   const settlementDigests = validateIds("autonomous cycle settlement_digests", state.settlement_digests, AUTONOMOUS_CYCLE_REPLAN_MAX_ATTEMPTS);
   for (const digest of settlementDigests) boundedDigest("autonomous cycle settlement_digest", digest);
   const trajectoryIds = validateIds("autonomous cycle trajectory_ids", state.trajectory_ids, AUTONOMOUS_CYCLE_REPLAN_MAX_ATTEMPTS);
@@ -299,7 +302,7 @@ export async function validateAutonomousCycleReplanState(value: unknown): Promis
   assertNoCredentialShape(state, "autonomous cycle state");
   if (jsonBytes(state) > 8_000_000) throw new AutonomousCyclePersistenceError("autonomous cycle state exceeds its metadata budget");
   if (await digestJson(stateDescriptor(state)) !== state.state_digest) throw new AutonomousCyclePersistenceError("autonomous cycle state digest does not match its metadata");
-  return clone({ ...state, attempts, learning_episode_ids: learningEpisodeIds, settlement_digests: settlementDigests, trajectory_ids: trajectoryIds, context_digests: contextDigests });
+  return clone({ ...state, attempts, learning_episode_ids: learningEpisodeIds, ...(responseLearningEpisodeIds === undefined ? {} : { response_learning_episode_ids: responseLearningEpisodeIds }), settlement_digests: settlementDigests, trajectory_ids: trajectoryIds, context_digests: contextDigests });
 }
 
 /** Seal a state descriptor with its content digest before saving it. */

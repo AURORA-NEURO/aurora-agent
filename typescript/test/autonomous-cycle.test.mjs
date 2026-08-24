@@ -308,6 +308,8 @@ test("provider-planned decision cycles settle planner and execution quality acro
     assert.equal(result.status, "completed", domain);
     assert.equal(result.planner_evaluation.reward, 0.83, domain);
     assert.equal(result.planner_settlement.status, "settled", domain);
+    assert.equal(result.planner_settlement.planner_context?.domain, domain, domain);
+    assert.equal(result.planner_settlement.planner_context_digest.length, 64, domain);
     assert.equal(result.settlement.episode.status, "settled", domain);
   }
   const state = agent.learner.snapshot();
@@ -1346,6 +1348,64 @@ test("cross-domain decision cycles preserve structured-response learning alongsi
   assert.equal(result.settlement.trajectory.settlements.length, 3);
   assert.equal(result.response_settlements.length, 3);
   assert.ok(result.response_settlements.every((row) => row.assessment.evaluator_id.endsWith("response-integrity")));
+});
+
+test("cross-domain replanning persists and settles structured-response credit independently", async () => {
+  const contracts = new Map();
+  for (const profile of await builtinAutonomousDomainProfiles()) contracts.set(profile.domain, await buildAutonomousDomainResponseContract(profile));
+  let providerCalls = 0;
+  const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  llm.registerInMemoryProvider("replan-structured", (request) => {
+    providerCalls += 1;
+    const domain = request.responseSchema?.properties?.domain?.const;
+    return { structured: structuredCycleResponse(contracts.get(domain)) };
+  }, { structuredOutputMode: "json_schema" });
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  const structuredCandidate = { ...candidate(), provider: "replan-structured", model: "replan-structured-model" };
+  agent.registerModel(structuredCandidate);
+  const learning = new AutonomousLearningController(agent);
+  const stateStore = new InMemoryAutonomousCycleReplanStateStore();
+  const task = "Research a biomedical neuroscience study with patient EEG evidence.";
+  const route = await agent.route(task, { allowCrossDomain: true });
+  const options = {
+    routeOverride: route,
+    candidates: [structuredCandidate],
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+    ],
+    structuredDomainResponse: true,
+    approveProviderCall: true,
+    maxReplans: 0,
+    cycleId: "structured-cross-replan-persistence",
+    stateStore,
+    learning: { controller: learning, episodePrefix: "structured-cross-replan", trajectoryIdPrefix: "structured-cross-replan-trajectory" },
+    evaluate: (run) => ({
+      evaluator_id: "replan-task-reviewer",
+      evaluator_version: "1",
+      reward: 0.84,
+      passed: true,
+      replan_requested: false,
+      rewards: Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "replan-task-reviewer", evaluator_version: "1", reward: 0.84, passed: true }])),
+    }),
+  };
+  const first = await runAutonomousCrossDomainReplanCycle(agent, task, options);
+  assert.equal(first.status, "completed");
+  assert.equal(first.learning_episode_ids.length, 3);
+  assert.equal(first.response_learning_episode_ids.length, 3);
+  assert.equal(first.final.run.response_learning_episode_ids.length, 3);
+  assert.equal(first.settlements.length, 1);
+  assert.equal(first.settlements[0].trajectory.settlements.length, 3);
+  assert.equal(first.response_settlements.length, 3);
+  assert.ok(first.response_settlements.every((row) => row.assessment.evaluator_id.endsWith("response-integrity")));
+  const persisted = await stateStore.load("structured-cross-replan-persistence");
+  assert.deepEqual(persisted.response_learning_episode_ids, first.response_learning_episode_ids);
+  const callsAfterFirst = providerCalls;
+  const replay = await runAutonomousCrossDomainReplanCycle(agent, task, options);
+  assert.equal(replay.status, "completed");
+  assert.equal(replay.final, null);
+  assert.deepEqual(replay.response_learning_episode_ids, first.response_learning_episode_ids);
+  assert.equal(providerCalls, callsAfterFirst);
 });
 
 test("cross-domain decision cycle settles partial specialist trajectories without inventing synthesis", async () => {

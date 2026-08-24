@@ -165,6 +165,34 @@ persisting task text; explicit evaluator rewards remain the only learning author
 `AutonomousGoalLedger` adds the restart-safe objective layer above that memory: bounded attempts,
 criterion/evidence digests, blockers, optimistic revisions, and a hash-chained lifecycle work for
 every built-in domain without retaining goal text or provider payloads.
+`AutonomousGoalScheduler` adds deterministic multi-goal admission above the ledger. It applies
+explicit priority/urgency/deadline signals, aging fairness, dependency closure, retry policy,
+concurrency/cost budgets, per-domain quotas, and required-domain coverage, then returns a
+digest-bound metadata-only schedule. `claim_autonomous_goals()` rechecks every expected revision
+before moving admitted goals to `running`; stale schedules and dependency cycles fail closed.
+The Python schedule digest is portable with the TypeScript scheduler for the same goal projection.
+`AutonomousGoalWorker` closes the execution loop: it preflights caller-owned task rehydration,
+claims the admitted rows, invokes a caller-owned executor, and settles result status, criterion
+updates, evaluator digests, and retry-safe failure state. Rehydrated task text and executor output
+remain transient; `AutonomousGoalWorkerBatch.to_dict()` contains only the schedule, claim, outcome
+digests, bounded error classes, and aggregate counts. The worker supports all twelve catalogue
+domains, including `cross_domain`, and its single-attempt digest is portable with TypeScript.
+For process-loss recovery at the executor boundary, pass an `AutonomousGoalWorkerJournal` and a
+stable `batch_id`. Its bounded hash chain records only prepared/claimed/dispatch/settlement
+metadata. `recover()` pauses a claim that died before dispatch so it can be retried, but blocks a
+claim that reached dispatch with `goal-reconciliation-review`; it never replays an uncertain
+provider effect. `JsonAutonomousGoalWorkerJournalPersistence` and
+`AutonomousGoalWorkerJournalPersistenceCoordinator` provide canonical caller-owned snapshot
+storage with optional compare-and-swap fencing. Journal snapshots exclude task text, prompts,
+parameters, credentials, and executor results just like the goal ledger.
+`AutonomousGoalControlLoop` continues those bounded worker passes until every goal is terminal,
+no safe work is admissible, or an explicit cycle/run budget is exhausted. Its optional
+`options_factory(context)` receives only prior cycle metadata and ledger counts, so a caller can
+refresh priorities, urgency, dependencies, retry policy, and required-domain coverage without
+reintroducing task payloads. Paused objectives can be re-admitted on a later cycle, while failed,
+blocked, or concurrently running objectives produce an explicit `no_admissible_work` stop rather
+than being reported as success. The result contains cycle digests, domain/status counts, and live
+executor values only on the initiating process.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.
@@ -294,6 +322,11 @@ task. Inventory failure is raised instead of silently executing against a stale 
 workflow/cross-domain learning, evaluator, and checkpoint options through the same `run_auto`
 surface. `AutonomousProvisionedRun.to_dict()` is metadata-only; `.result` is deliberately not a
 durable payload.
+
+Provider planning results carry `planner_context` and `planner_context_digest`, the exact
+`{domain, capability, risk_class, task_family}` identity used for contextual model selection.
+`AutonomousAgent.settle_planning_quality()` verifies and credits that embedded identity; legacy
+planning results without the fields use the explicit settlement arguments for compatibility.
 
 `RemoteBrainJobWorker` is the Python high-level queue adapter when the durable job authority is
 remote (HTTP, MCP, or `DurableBrainControlPlaneAdapter`) rather than a local `BrainJobStore`.

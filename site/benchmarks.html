@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURORA Agent benchmarks — the deliberate negative, and where FIBER separates</title>
+<meta name="description" content="The headline benchmark is a deliberate negative: a 5-hop graph walk, BM25, and FIBER tie on the reference world; FIBER separates only on a generated world.">
+<link rel="canonical" href="https://aurora-neuro.github.io/aurora-agent/benchmarks.html">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AURORA Agent benchmarks">
+<meta property="og:description" content="The headline result is a deliberate negative: three methods tie on the reference world. That honesty is the methodology.">
+<meta property="og:url" content="https://aurora-neuro.github.io/aurora-agent/benchmarks.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="AURORA Agent benchmarks">
+<meta name="twitter:description" content="The headline result is a deliberate negative: three methods tie on the reference world. That honesty is the methodology.">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="10" fill="var(--accent)"/><path d="M32 14 L50 50 L42 50 L32 28 L22 50 L14 50 Z" fill="var(--bg)"/><rect x="27" y="41" width="10" height="5" rx="1.5" fill="var(--bg)"/></svg>
+      AURORA Agent
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="./">Overview</a>
+      <a href="install.html">Install</a>
+      <a href="benchmarks.html" aria-current="page">Benchmarks</a>
+      <a href="explore.html">Explorer</a>
+      <a href="docs.html">Docs</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <h1>The measurement story</h1>
+
+    <p class="lede">The headline benchmark is a <strong>deliberate negative</strong>: on the world the
+    distribution ships, FIBER has no measurable advantage over a correctly tuned graph walk or a
+    lexical retriever. Publishing that tie, rather than hiding it, is the product thesis.</p>
+
+    <h2>1. The reference world: a three-way tie</h2>
+
+    <p>The reference world (<code>radiogenomic-integrity-demo-v1</code>) contains 761 facts, 750 of
+    them exploratory distractors attached to a single hub. FIBER compiles the query down to
+    <strong>11 facts (1.45% of the world)</strong>, and the deterministic oracle returns the correct
+    verdict — <em>invalid</em>, with all four leakage witnesses (identity, preprocessing, site,
+    temporal).</p>
+
+    <p>Under equal tuning, so do two baselines. A 5-hop walk of the incidence graph and a BM25
+    retriever at k=11 select <strong>exactly the same eleven facts</strong> — not the same count, the
+    identical set. On this world the cheapest admissible strategy is the graph walk, not the
+    compiler.</p>
+
+    <div class="table-scroll">
+    <table>
+      <tr><th>Strategy</th><th class="num">Facts</th><th class="num">% of world</th><th>Sound?</th><th class="num">Closure</th><th>Admissible</th></tr>
+      <tr><td>full-context</td><td class="num">761</td><td class="num">100.00%</td><td class="yes">yes</td><td class="num">100%</td><td class="yes">yes</td></tr>
+      <tr><td>graph-4-hop</td><td class="num">0</td><td class="num">0.00%</td><td class="no">no</td><td class="num">0%</td><td class="no">no</td></tr>
+      <tr class="hl"><td>graph-5-hop</td><td class="num">11</td><td class="num">1.45%</td><td class="yes">yes</td><td class="num">100%</td><td class="yes">yes</td></tr>
+      <tr><td>graph-7-hop</td><td class="num">761</td><td class="num">100.00%</td><td class="yes">yes</td><td class="num">100%</td><td class="yes">yes</td></tr>
+      <tr class="hl"><td>lexical-top-11 (BM25)</td><td class="num">11</td><td class="num">1.45%</td><td class="yes">yes</td><td class="num">100%</td><td class="yes">yes</td></tr>
+      <tr class="hl"><td>fiber</td><td class="num">11</td><td class="num">1.45%</td><td class="yes">yes</td><td class="num">100%</td><td class="yes">yes</td></tr>
+    </table>
+    </div>
+
+    <p><em>Sound</em> means the strategy's selection, fed to the same deterministic oracle, reproduces
+    the full-context verdict with the same four witnesses. <em>Closure</em> is the fraction of the
+    query's protected facts retained. <em>Admissible</em> is both.</p>
+
+    <h2>2. Why publish a tie</h2>
+
+    <p>Without competent comparators, “FIBER compiles a smaller context” is unfalsifiable. The
+    workspace therefore ships an equal-engineering baseline panel
+    (<code>bioprism-baseline</code>: full-context, k-hop incidence, connected component, lexical
+    top-k, query-graph) and reports whatever the panel says. The distribution's own earlier
+    comparison script measured the graph baseline only at depth 7 and unbounded — the two settings
+    where it returns everything — and reported a 69× advantage that vanishes under equal tuning.
+    The project treats that as a strawman and corrects it, per its own blueprint requirements for
+    matched, equal-engineering comparisons.</p>
+
+    <p>The tie is information: it says the reference world cannot tell these methods apart, which is
+    a property of the benchmark, not of the methods.</p>
+
+    <h2>3. A world that discriminates</h2>
+
+    <p><code>bioprism-worldgen</code> makes the world's structure a parameter and builds one that can
+    separate the methods: distractors attached near the target instead of at a hub leaf, decisive
+    facts behind a relay chain, and distractor tags camouflaged to tokenise into the protected
+    vocabulary.</p>
+
+    <div class="table-scroll">
+    <table>
+      <tr><th>Strategy</th><th class="num">Facts</th><th>Sound?</th><th class="num">Closure</th><th>Admissible</th></tr>
+      <tr><td>full-context</td><td class="num">762</td><td class="yes">yes</td><td class="num">100%</td><td class="yes">yes</td></tr>
+      <tr><td>graph-5-hop</td><td class="num">750</td><td class="no">no</td><td class="num">0%</td><td class="no">no</td></tr>
+      <tr><td>graph-7-hop</td><td class="num">750</td><td class="no">no</td><td class="num">0%</td><td class="no">no</td></tr>
+      <tr><td>graph-11-hop</td><td class="num">761</td><td class="yes">yes</td><td class="num">100%</td><td class="yes">yes</td></tr>
+      <tr><td>lexical-top-11 (BM25)</td><td class="num">11</td><td class="yes">yes</td><td class="num">91%</td><td class="no">no</td></tr>
+      <tr class="hl"><td>fiber</td><td class="num">11</td><td class="yes">yes</td><td class="num">100%</td><td class="yes">yes</td></tr>
+    </table>
+    </div>
+
+    <p>Three distinct failure modes appear:</p>
+
+    <ul>
+      <li><strong>The graph walk has no usable depth.</strong> Depths 5–10 pull in 98% of the world
+      and still miss every decisive witness; depth 11 is the first sound setting, and by then it has
+      taken essentially everything.</li>
+      <li><strong>BM25 is right by luck.</strong> It reaches the correct verdict from a 91% protected
+      closure — it dropped a protected fact that happened not to matter, and raising k to 50 never
+      recovers it. This is why the harness ranks on <em>admissibility</em> rather than verdict alone:
+      ranking on verdict would have crowned a strategy that violated the mandatory closure and got
+      away with it.</li>
+      <li><strong>FIBER is the cheapest admissible strategy</strong> — right verdict and full
+      closure at 11 facts. Full-context and graph-11-hop are also admissible, at 762 and 761 facts
+      respectively.</li>
+    </ul>
+
+    <div class="callout">
+      <p><strong>What this does and does not establish.</strong> The discriminating world was built to
+      expose exactly these failure modes, just as the reference world was built to expose hub
+      expansion. Both are single points; the full structural sweep is not done, and an embedding
+      retriever and a directed dependency walk are still missing from the panel. This does not show
+      FIBER wins generally — the docs say so explicitly.</p>
+    </div>
+
+    <h2>4. Three-implementation parity</h2>
+
+    <p>Certificates hash canonical bytes, so a certificate produced by one implementation must be
+    replayable by another. Three implementations — the CPython reference runtime, the eager Rust
+    path, and the Rust indexed store — agree byte-for-byte on the reference compilation:</p>
+
+    <pre><code>certificate_sha256  c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4</code></pre>
+
+    <p>The numbers on this page come from the comparison harness documented in
+    <code>docs/DISCRIMINATING_COMPARISON.md</code> and <code>docs/FINDINGS.md</code>; the
+    reference-world certificate digest is pinned by the parity tests. Full reports:
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/FINDINGS.md">FINDINGS.md</a>,
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/BASELINE_COMPARISON.md">BASELINE_COMPARISON.md</a>,
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/DISCRIMINATING_COMPARISON.md">DISCRIMINATING_COMPARISON.md</a>.</p>
+
+    <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
+    recommend treatment, triage care, enroll participants, or claim medical-device functionality.</div>
+
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>AURORA Agent — Apache-2.0 ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">Source</a> ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">Privacy</a> ·
+      MCP registry: <code>io.github.MurariAmbati/aurora-agent</code></p>
+    <p>Research and developer infrastructure: it does not diagnose an individual, recommend treatment,
+    triage care, enroll participants, or claim medical-device functionality.</p>
+  </div>
+</footer>
+
+</body>
+</html>

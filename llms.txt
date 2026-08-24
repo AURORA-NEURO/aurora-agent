@@ -1,0 +1,32 @@
+# AURORA Agent
+
+> AURORA Agent (engine crates prefixed `bioprism-`) is a Rust workspace of 79 crates implementing the FIBER decision-context compiler: a typed decision query is compiled into the smallest decision-sufficient evidence region, delivered as a Decision Section plus a Context Certificate stating exactly what was omitted and whether the omission could have changed the decision. It ships 259 MCP tools via a stdio server, a CLI, and a local HTTP gateway. Fully local: no network access, no data collection. Apache-2.0. Research and developer infrastructure: it does not diagnose an individual, recommend treatment, triage care, enroll participants, or claim medical-device functionality.
+
+Key facts: on the shipped reference world (761 facts), FIBER compiles the query to 11 facts (1.45%) and the deterministic oracle returns the correct verdict with all four leakage witnesses — but a 5-hop graph walk and BM25 at k=11 select the identical eleven facts. FIBER only separates from those baselines on a generated discriminating world. This deliberate negative headline is the product thesis. Cross-language parity digest c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4 is agreed by three implementations (CPython reference, eager Rust, indexed store).
+
+## Docs
+
+- [README](https://github.com/AURORA-NEURO/aurora-agent/blob/main/README.md): Product overview, measurements, quickstart, exit-code matrix, install instructions
+- [Architecture](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/ARCHITECTURE.md): Crate layers, boundary rationale, cross-crate invariants and where each is tested
+- [Findings](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/FINDINGS.md): Measured baseline comparisons, including the reference-world draw and the discriminating world
+- [Baseline comparison](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/BASELINE_COMPARISON.md): Full equal-engineering panel on the reference world
+- [Discriminating comparison](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/DISCRIMINATING_COMPARISON.md): The generated world where the three strategies separate
+- [Capability dashboard](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/CAPABILITY_DASHBOARD.md): Which domains are callable through each transport, and what surface is missing
+- [HTTP API](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/HTTP_API.md): The bounded local `bioprism-api` gateway routes and event delivery
+- [Python SDK](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/PYTHON_SDK.md): Dependency-free MCP and HTTP clients
+- [TypeScript SDK](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/TYPESCRIPT_SDK.md): Dependency-free Fetch client for browser and Node
+- [ADR-001 language strategy](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/ADR-001-language-strategy.md): Why Rust plus a CPython reference, and the indexed-store measurements
+- [Coverage](https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/COVERAGE.md): How much of the blueprint the workspace covers, and what has nothing standing in for it
+- [Privacy policy](https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md): Local program, no network requests, no telemetry, no data collection
+
+## Install
+
+- [MCP registry listing](https://registry.modelcontextprotocol.io/): io.github.MurariAmbati/aurora-agent v0.1.1 (metadata listing — install via the .mcpb, the plugin marketplace, or a source build)
+- [Claude Desktop .mcpb release](https://github.com/AURORA-NEURO/aurora-agent/releases): v0.1.1, Windows-only prebuilt, sha256 e987c396a01eb2ae812efa8226f6892fc3f70cb441102217476990816458f025
+- [Claude Code plugin](https://github.com/AURORA-NEURO/aurora-agent/blob/main/plugins/README.md): `claude plugin marketplace add AURORA-NEURO/aurora-agent` then `claude plugin install aurora-agent@aurora`
+
+## Optional
+
+- [llms-full.txt](https://aurora-neuro.github.io/aurora-agent/llms-full.txt): Expanded corpus with the full product description, benchmark story, install instructions, and doc excerpts
+- [Canonical site](https://aurora-neuro.github.io/aurora-agent/): Project site
+- [Repository](https://github.com/AURORA-NEURO/aurora-agent): Source, fixtures, issues

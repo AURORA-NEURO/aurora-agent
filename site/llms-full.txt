@@ -1,0 +1,304 @@
+# AURORA Agent — full corpus for LLM consumption
+
+Canonical site: https://aurora-neuro.github.io/aurora-agent/
+Repository: https://github.com/AURORA-NEURO/aurora-agent (public, Apache-2.0)
+Engine crates are prefixed `bioprism-`; binaries are `bioprism`, `bioprism-mcp`, `bioprism-api`.
+
+Research and developer infrastructure: it does not diagnose an individual, recommend treatment,
+triage care, enroll participants, or claim medical-device functionality.
+
+---
+
+## What it is
+
+AURORA Agent is a Rust workspace of 79 crates implementing the FIBER decision-context compiler.
+The central idea, from README.md: context assembly is a compiler pass — instead of retrieval plus
+summarisation plus vibes-based compaction, a typed decision query is compiled into the smallest
+decision-sufficient evidence region, delivered as a Decision Section, and accompanied by a Context
+Certificate that states exactly what was omitted and whether the omission could have changed the
+decision.
+
+The README's motto: "Compile the smallest decision-sufficient evidence region. Never traverse the
+whole knowledge structure by default."
+
+Surfaces:
+
+- 259 MCP tools via the `bioprism-mcp` stdio server (JSON-RPC 2.0 over newline-delimited stdio,
+  full MCP lifecycle).
+- A CLI (`bioprism`), with `--json` envelopes and a 10-exit-code retryability matrix: every failure
+  code carries exactly one retry decision, so a caller holding nothing but the process status can
+  decide whether to re-send.
+- A local HTTP gateway (`bioprism-api`) for deployments that need a network boundary.
+
+Privacy: fully local. No network access, no external services, no telemetry, no data collection.
+Policy: https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md
+
+---
+
+## The headline benchmark is a deliberate negative
+
+This is the product thesis, stated plainly and never spun.
+
+Reference-world measurement (from README.md and docs/FINDINGS.md): the reference world ships 761
+facts, 750 of them exploratory distractors that all consume the same protected `cohort_id` hub.
+FIBER compiles the query down to 11 facts — 1.45% of the world — and the deterministic oracle
+still returns the correct verdict with all four leakage witnesses.
+
+It is not alone in doing so. Under equal tuning, a 5-hop incidence walk and a BM25 retriever at
+k=11 select exactly the same eleven facts — not the same count, the identical set. On the shipped
+reference world, FIBER has no measurable advantage over a correctly tuned graph walk or a lexical
+retriever. docs/FINDINGS.md notes that the distribution's own `compare_baselines.py` measured the
+graph baseline only at depth 7 and unbounded — the two settings where it returns everything — and
+reported a 69x advantage that vanishes under equal tuning; the workspace corrects that strawman.
+
+FIBER only wins on the generated discriminating world. `crates/worldgen` makes world structure a
+parameter and builds a world that can tell the methods apart: distractors attached near the target
+instead of at a hub leaf, decisive facts behind a relay chain, and distractor tags camouflaged to
+tokenise into the protected vocabulary. On that world (docs/DISCRIMINATING_COMPARISON.md, summarised
+in docs/FINDINGS.md):
+
+| Strategy               | Facts | Sound? | Closure | Admissible |
+|------------------------|------:|:------:|--------:|:----------:|
+| full-context           |   762 |  yes   |    100% |    yes     |
+| graph-5-hop            |   750 |  no    |      0% |    no      |
+| graph-7-hop            |   750 |  no    |      0% |    no      |
+| lexical-top-11 (BM25)  |    11 |  yes   |     91% |    no      |
+| fiber                  |    11 |  yes   |    100% |    yes     |
+
+Three distinct failure modes appear. The graph walk has no usable depth: depths 5-10 pull in 98%
+of the world and still miss every decisive witness. BM25 reaches the right verdict from a 91%
+protected closure — right by luck, having dropped a protected fact that happened not to matter, and
+raising k to 50 never recovers it. FIBER is the cheapest admissible strategy — right verdict and
+full closure at 11 facts. That last failure mode is why the harness ranks on admissibility rather than
+verdict alone — ranking on verdict would have crowned the strategy that violated the mandatory
+closure and got away with it.
+
+docs/FINDINGS.md is explicit about the limits: this does not establish that FIBER wins generally.
+The discriminating world was built to expose exactly these failure modes, just as the reference
+world was built to expose hub expansion. Both are single points; the full structural sweep is not
+done, and an embedding retriever and a directed dependency walk are still missing from the panel.
+
+---
+
+## Cross-language parity
+
+Certificate hashes are taken over canonical bytes, so implementations must agree exactly or a
+certificate produced by one cannot be replayed by another. The reference parity digest
+
+    c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4
+
+is agreed by three implementations: the CPython reference runtime, the Rust eager path, and the
+Rust indexed store. Per README.md, getting there required matching CPython in two places a naive
+port gets wrong: `repr` float formatting (CPython switches to exponential at a different threshold
+than Rust and zero-pads the exponent) and JSON object iteration order, which the reference relies
+on when building leakage witnesses.
+
+---
+
+## Installing
+
+- MCP registry: listed as `io.github.MurariAmbati/aurora-agent` v0.1.1 on
+  registry.modelcontextprotocol.io.
+- Claude Desktop: download `aurora-agent.mcpb` (v0.1.1, Windows-only prebuilt) from
+  https://github.com/AURORA-NEURO/aurora-agent/releases and double-click it (or Settings ->
+  Extensions). sha256 e987c396a01eb2ae812efa8226f6892fc3f70cb441102217476990816458f025. It ships
+  with the reference fixtures; the "AURORA data root" setting can point at a full checkout.
+- Claude Code: the repository is a plugin marketplace —
+  `claude plugin marketplace add AURORA-NEURO/aurora-agent` then
+  `claude plugin install aurora-agent@aurora`.
+- From source: `cargo build --release --offline`, then run `./target/release/bioprism-mcp --root .`
+  for the MCP server or use the `bioprism` CLI directly.
+
+## Quickstart (CLI, from README.md)
+
+    cargo build --release --offline
+    ./target/release/bioprism context explain \
+      --world fixtures/fiber-v0.1/radiogenomic_world.json \
+      --query fixtures/fiber-v0.1/leakage_query.json
+
+That prints a database-style explain plan: which passes ran and what each retained, the backend,
+selection ratios, omissions grouped by influence class, the oracle verdict with its witnesses, and
+which passes did not run and why.
+
+    ./target/release/bioprism --json context compile \
+      --world fixtures/fiber-v0.1/radiogenomic_world.json \
+      --query fixtures/fiber-v0.1/leakage_query.json --certificate-out cert.json
+    ./target/release/bioprism context verify --certificate cert.json
+
+Scale: compiling from a JSON document parses the whole world on every query. `bioprism world
+index --world big-world.json --store big-world.bpw` indexes it once; `--world` then accepts the
+store directory anywhere it accepted a document, and the certificate is identical. Per README.md,
+on a one-million-fact world this takes query time from 26.5 s to 41.6 ms, and compile cost becomes
+roughly logarithmic in corpus size rather than linear (reasoning in docs/ADR-001-language-strategy.md).
+
+## Exit codes (README.md)
+
+Ten codes; every failure code carries exactly one retry decision. `bioprism --help` prints the
+table; `--json` puts the same decision in the envelope as `error.retryability`.
+
+| code | name             | retry decision         |
+|-----:|------------------|------------------------|
+|    0 | ok               | — (verdict, not failure) |
+|    1 | assertion_failed | — (verdict, not failure) |
+|    2 | usage            | terminal               |
+|    3 | invalid_input    | terminal               |
+|    4 | compile_failed   | retryable_after_change |
+|    5 | io               | retryable_as_is        |
+|    6 | conflict         | terminal               |
+|    7 | policy_denied    | retryable_after_change |
+|    8 | indeterminate    | retryable_after_change |
+|    9 | stale            | retryable_as_is        |
+
+---
+
+## Using it from an agent (README.md)
+
+`bioprism-mcp --root .` speaks JSON-RPC 2.0 over newline-delimited stdio and follows the MCP
+lifecycle. `fiber_compile` returns the L0 decision contract — goal, verdict, what was omitted,
+whether the sufficiency claim holds — plus a versioned, content-addressed refinement handle, and
+not the evidence. An agent passes that handle to `fiber_refine` only when the contract is
+insufficient to act; the server recompiles and verifies the certificate digest before disclosing
+the requested layer. On the reference world L0 is ~204 estimated tokens against ~1,900 for the
+full section.
+
+The invariant that makes that safe: omissions are reported at every layer, so an agent that stops
+at L0 still knows what it does not have. Layering hides volume, never the fact of an omission.
+Paths are confined to `--root`; absolute paths, `..`, and symlink escapes are refused. Shipped
+JSON schemas and the capability catalog are available through read-only MCP resources.
+
+Beyond FIBER compilation, the tool surface spans world validation and generation, equal-engineering
+baseline comparison (`context_compare`), metamorphic mutation families, benchmark-pack registry and
+release gates, evaluation and oracle combination, oncology-domain boundary checks, policy and
+safety screening, epistemic value-of-information planning, capability discovery/routing/dashboard,
+and mission preflight and execution with digest-bound plans. Domain tools consistently preserve
+refusals, omissions, and non-claims rather than collapsing them into scores; a completed local
+call is never promoted into a readiness, scientific, or clinical verdict.
+
+The repository also ships a dependency-free Python client (`python/`, docs/PYTHON_SDK.md) with
+synchronous and asyncio MCP sessions plus an HTTP client, and a dependency-free TypeScript Fetch
+client (`typescript/`, docs/TYPESCRIPT_SDK.md) for browser and Node consumers.
+
+## HTTP gateway (docs/HTTP_API.md)
+
+`bioprism-api` is the network-facing integration layer over the Rust MCP server, available as a
+library and a binary:
+
+    cargo run -p bioprism-api -- --root . --bind 127.0.0.1:8787 --token <at-least-16-visible-bytes>
+
+The gateway is intentionally bounded and one-request-per-connection: headers default to 32 KiB,
+bodies to 2 MiB, event retention to 4,096 entries, and every route reports an `X-Request-Id`.
+Bearer authentication protects every route except `/healthz`, `/readyz`, and the OpenAPI document.
+It exposes the exact MCP tool catalogue through REST and JSON-RPC, capability routing and
+dashboard routes, bounded mission jobs with typed status polling and cooperative cancellation,
+cursor-addressable event pages/SSE snapshots, and signed webhook outbox lifecycle. It deliberately
+reports gRPC, TLS termination, distributed scheduling, and external delivery as absent rather than
+inferring them from an HTTP listener.
+
+---
+
+## Architecture (docs/ARCHITECTURE.md)
+
+Layers, top to bottom: agent surface (cli, mcp) -> evaluation (prism, baseline, mutation,
+registry) -> composition (weave) -> compilation (fiber, section) -> world and storage (world,
+store, worldgen, adapter, bioir, onco, oracle) -> foundation (ids, scope).
+
+Why the boundaries fall where they do:
+
+- `ids` depends on nothing. Certificates hash canonical bytes and cross-language byte parity is
+  hard, so there is one canonical implementation at the root of the graph.
+- `section` depends on neither `world` nor `fiber`. A consumer — an MCP client, a CI gate, an
+  auditor — must be able to read and verify a compiled context without linking the engine that
+  produced it.
+- `fiber` is generic over `WorldSource`: the same query compiled against an in-memory world and
+  against an indexed store must produce byte-identical certificates, asserted in
+  `crates/store/tests/store_parity.rs`.
+- `weave`'s kernel is small on purpose: a trusted computing base that enforces identity, protocol
+  legality, authority, budgets and causal ordering, and explicitly does not decide what is true.
+- `baseline` exists to make the central claim falsifiable. Without competent comparators, "FIBER
+  compiles a smaller context" is unfalsifiable. With them it came out a draw on the reference world.
+
+Cross-crate invariants each pinned by a test include: canonical bytes match CPython exactly;
+eager and indexed backends agree byte for byte; protected closure is computed before any relevance
+step; zero influence is distinguishable from unknown influence; a budget smaller than the closure
+fails rather than truncating; omissions are reported at every disclosure layer; a nondeterministic
+judgement cannot overturn a deterministic one; a mutation cannot validate its own postcondition;
+an adapter must declare what it could not preserve; a pack cannot be promoted past its evidence.
+
+What is not there: no network layer in the kernel, no multi-tenancy, no hosted execution —
+local-first only. Heavy biological formats (DICOM, BIDS/NIfTI, AnnData/Zarr, VCF) belong in a
+Python layer per ADR-001; the Rust side owns the adapter contract, not the parsers.
+
+## Capability dashboard (docs/CAPABILITY_DASHBOARD.md)
+
+`capability_dashboard` is the operator-facing projection between the workspace catalogue,
+authoritative MCP schemas, and the SDK/CLI surface declarations. It answers a practical question
+before an agent builds a mission: which domains are actually callable through this transport,
+which are only declared, and what surface is missing. Every group row is classified independently
+as `callable`, `partial`, or `declared_only`, with separate counts for crates, MCP memberships,
+CLI entrypoints, and Python artifacts. Gaps are labels, not a blended quality score.
+`capability_dashboard_ready` does not grant permission, prove scientific validity, execute a tool,
+or establish deployment readiness. Non-executing HTTP planning endpoints
+(`/v1/capabilities/route`, `/route/review`, `/route/plan`, `/route/plan/verify`) compose route
+review with authoritative mission preflight; `dispatch` remains `not_started`.
+
+---
+
+## FAQ
+
+Q: What problem does AURORA Agent solve?
+A: Deciding what context an agent actually needs. Instead of retrieving and summarising, FIBER
+compiles a typed decision query into the smallest decision-sufficient evidence region and issues a
+Context Certificate stating exactly what was omitted and whether the omission could have changed
+the decision.
+
+Q: Is FIBER better than retrieval baselines?
+A: On the shipped reference world, no — that is the headline result, reported deliberately. A
+5-hop graph walk, BM25 at k=11, and FIBER select the identical eleven facts there. FIBER separates
+from both only on the generated discriminating world, where it is the cheapest admissible strategy
+(right verdict and 100% protected closure at 11 facts). Neither single world establishes a general
+win; the full structural sweep is not done.
+
+Q: What does "admissible" mean in the benchmarks?
+A: Sound (the strategy's selection, fed to the same deterministic oracle, reproduces the
+full-context verdict with the same leakage witnesses) and complete closure (all of the query's
+protected facts retained). The harness ranks on admissibility rather than verdict alone, because
+a strategy can reach the right verdict from an incomplete protected basis by luck.
+
+Q: How do I install it?
+A: Claude Desktop: the `aurora-agent.mcpb` (Windows-only prebuilt) from the GitHub releases page.
+Claude Code: `claude plugin marketplace add AURORA-NEURO/aurora-agent` then
+`claude plugin install aurora-agent@aurora`. MCP registry: `io.github.MurariAmbati/aurora-agent`
+v0.1.1. From source: `cargo build --release --offline`.
+
+Q: Does it phone home?
+A: No. It is a local program: no network requests, no external services, no telemetry, no
+analytics, no crash reporting, no account. The optional `bioprism-api` gateway binds to an address
+you choose (loopback by default) and serves only callers presenting your bearer token.
+
+Q: Can I use it for clinical decisions?
+A: No. Research and developer infrastructure: it does not diagnose an individual, recommend
+treatment, triage care, enroll participants, or claim medical-device functionality. The
+`medical_boundary_check` tool admits research use cases and structurally refuses clinical outputs.
+
+Q: How is correctness enforced across languages?
+A: Byte-level parity with the CPython reference runtime is enforced by test across three
+implementations (CPython, Rust eager path, Rust indexed store); the shared certificate digest is
+c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4.
+
+Q: What license?
+A: Apache-2.0.
+
+---
+
+## Pointers
+
+- README: https://github.com/AURORA-NEURO/aurora-agent/blob/main/README.md
+- Architecture: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/ARCHITECTURE.md
+- Findings: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/FINDINGS.md
+- Capability dashboard: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/CAPABILITY_DASHBOARD.md
+- HTTP API: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/HTTP_API.md
+- Python SDK: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/PYTHON_SDK.md
+- TypeScript SDK: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/TYPESCRIPT_SDK.md
+- Privacy: https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md
+- Releases: https://github.com/AURORA-NEURO/aurora-agent/releases
+- Canonical site: https://aurora-neuro.github.io/aurora-agent/

@@ -1,0 +1,47 @@
+# AURORA Agent
+
+> A local Model Context Protocol (MCP) server built on FIBER, a decision context compiler.
+> A typed decision query is compiled into the smallest decision-sufficient evidence region,
+> delivered as a Decision Section plus a Context Certificate stating exactly what was omitted
+> and whether the omission could have changed the decision. Rust workspace, 79 crates
+> (engine crates prefixed bioprism-), 259 MCP tools, Apache-2.0, fully local: no network
+> access, no data collection.
+
+Key measured facts:
+- Reference world: 761 facts; FIBER compiles the query to 11 facts (1.45%) and the
+  deterministic oracle returns the correct verdict with all four leakage witnesses.
+- The headline benchmark is a deliberate negative: on the reference world a 5-hop graph walk,
+  BM25 at k=11, and FIBER select the identical eleven facts. FIBER separates from the
+  baselines only on a generated discriminating world. Publishing the tie is the methodology.
+- Three implementations (CPython reference, eager Rust, Rust indexed store) agree on the
+  certificate digest c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4.
+
+Install:
+- Claude Desktop: aurora-agent.mcpb (v0.1.1, Windows-only prebuilt) from
+  https://github.com/AURORA-NEURO/aurora-agent/releases
+- Claude Code: claude plugin marketplace add AURORA-NEURO/aurora-agent;
+  claude plugin install aurora-agent@aurora
+- MCP registry: io.github.MurariAmbati/aurora-agent v0.1.1 on registry.modelcontextprotocol.io
+  (metadata listing — install via the .mcpb, the plugin marketplace, or a source build)
+- Any MCP client: cargo build --release --offline, then run bioprism-mcp over stdio.
+
+Boundary: Research and developer infrastructure: it does not diagnose an individual, recommend
+treatment, triage care, enroll participants, or claim medical-device functionality.
+
+## Pages
+
+- [Overview](https://aurora-neuro.github.io/aurora-agent/): what the compiler does, the
+  measurement, install paths.
+- [Install](https://aurora-neuro.github.io/aurora-agent/install.html): per-surface install
+  instructions.
+- [Benchmarks](https://aurora-neuro.github.io/aurora-agent/benchmarks.html): the deliberate
+  negative and the discriminating world.
+- [Explorer](https://aurora-neuro.github.io/aurora-agent/explore.html): one real compile of the
+  reference world, embedded verbatim — the typed query, the 11-of-761 selection, the Context
+  Certificate, and the verify result.
+- [Docs map](https://aurora-neuro.github.io/aurora-agent/docs.html): curated repository
+  documentation.
+- [FAQ](https://aurora-neuro.github.io/aurora-agent/faq.html): Context Certificates, RAG
+  comparison, privacy, platforms, license.
+- [Repository](https://github.com/AURORA-NEURO/aurora-agent) and
+  [privacy policy](https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md).

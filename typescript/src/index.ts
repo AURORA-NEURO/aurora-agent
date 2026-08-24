@@ -2516,6 +2516,84 @@ export type {
   AutonomousGoalStatus,
 } from "./autonomous-goals.js";
 export {
+  AUTONOMOUS_GOAL_CLAIM_SCHEMA,
+  AUTONOMOUS_GOAL_SCHEDULE_MAX_DEPENDENCIES,
+  AUTONOMOUS_GOAL_SCHEDULE_MAX_GOALS,
+  AUTONOMOUS_GOAL_SCHEDULE_MAX_SELECTED,
+  AUTONOMOUS_GOAL_SCHEDULE_MAX_SIGNALS,
+  AUTONOMOUS_GOAL_SCHEDULE_MAX_SNAPSHOT_BYTES,
+  AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS,
+  AUTONOMOUS_GOAL_SCHEDULE_RETENTION,
+  AUTONOMOUS_GOAL_SCHEDULE_SCHEMA,
+  AutonomousGoalScheduler,
+  claimAutonomousGoals,
+  scheduleAutonomousGoals,
+  validateAutonomousGoalSchedule,
+} from "./autonomous-goal-scheduler.js";
+export type {
+  AutonomousGoalClaim,
+  AutonomousGoalClaimResult,
+  AutonomousGoalSchedule,
+  AutonomousGoalScheduleCoverage,
+  AutonomousGoalScheduleDecision,
+  AutonomousGoalScheduleRow,
+  AutonomousGoalSchedulingDomain,
+  AutonomousGoalSchedulingOptions,
+  AutonomousGoalSchedulingSignal,
+} from "./autonomous-goal-scheduler.js";
+export {
+  AUTONOMOUS_GOAL_WORKER_MAX_RUNS,
+  AUTONOMOUS_GOAL_WORKER_MAX_TASK_BYTES,
+  AUTONOMOUS_GOAL_WORKER_RETENTION,
+  AUTONOMOUS_GOAL_WORKER_SCHEMA,
+  AutonomousGoalWorker,
+  AutonomousGoalWorkerBatch,
+} from "./autonomous-goal-worker.js";
+export type {
+  AutonomousGoalExecutionRequest,
+  AutonomousGoalExecutor,
+  AutonomousGoalResolver,
+  AutonomousGoalWorkerBatchJSON,
+  AutonomousGoalWorkerOutcome,
+  AutonomousGoalWorkerResolution,
+  AutonomousGoalWorkerRun,
+  AutonomousGoalWorkerRunStatus,
+} from "./autonomous-goal-worker.js";
+export {
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_EVENT_SCHEMA,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_MAX_EVENTS,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_MAX_SNAPSHOT_BYTES,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_RETENTION,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_SCHEMA,
+  AUTONOMOUS_GOAL_WORKER_JOURNAL_SNAPSHOT_SCHEMA,
+  AutonomousGoalWorkerJournal,
+  AutonomousGoalWorkerJournalPersistenceCoordinator,
+  JsonAutonomousGoalWorkerJournalPersistence,
+} from "./autonomous-goal-worker-journal.js";
+export type {
+  AutonomousGoalWorkerEvent,
+  AutonomousGoalWorkerJournalPhase,
+  AutonomousGoalWorkerJournalSnapshot,
+  AutonomousGoalWorkerJournalTextStore,
+} from "./autonomous-goal-worker-journal.js";
+export {
+  AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_BATCH_PREFIX_BYTES,
+  AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES,
+  AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS,
+  AUTONOMOUS_GOAL_CONTROL_LOOP_RETENTION,
+  AUTONOMOUS_GOAL_CONTROL_LOOP_SCHEMA,
+  AutonomousGoalControlLoop,
+  AutonomousGoalControlLoopCycle,
+  AutonomousGoalControlLoopResult,
+} from "./autonomous-goal-control-loop.js";
+export type {
+  AutonomousGoalControlLoopContext,
+  AutonomousGoalControlLoopCycleJSON,
+  AutonomousGoalControlLoopJSON,
+  AutonomousGoalControlLoopOptionsFactory,
+  AutonomousGoalControlLoopStopReason,
+} from "./autonomous-goal-control-loop.js";
+export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,
   AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS,
   AUTONOMOUS_MODEL_HEALTH_MAX_QUERY_LIMIT,

@@ -2939,10 +2939,22 @@ Provider planning has its own explicit settlement seam because a planner and an 
 may be different arms. TypeScript callers can pass a completed `planWithProvider()` proposal to
 `AutonomousLearningController.settlePlanningQuality(plan, { domain, evaluator })`. The method
 binds the evaluator packet to the proposal's planning outcome digest, updates the contextual
-bandit arm, and writes a separate model-quality health observation. Replaying the same proposal
+bandit arm, and writes a separate model-quality health observation. Every new proposal carries
+`planner_context` and `planner_context_digest`, the exact stable
+`{ domain, capability, risk_class, task_family }` identity used for planner selection. Settlement
+verifies that digest and credits the embedded context, so single-domain, cross-domain, workflow,
+portfolio, and mission wrappers cannot accidentally reconstruct a different contextual arm.
+Older proposals without these fields use the legacy caller-supplied context. Replaying the same proposal
 and evaluator packet returns the same bandit state and health receipt; a changed reward for the
 same planning digest is refused. A valid plan proposal still proves only plan structure—it does
 not authorize tools, effects, provider calls, or task correctness.
+
+The Python `AutonomousPlanRefinementResult` and
+`AutonomousCrossDomainPlanRefinementResult` now carry the same two fields. Python settlement
+validates the embedded digest before calling `brain_outcome_record` or the provider-health ledger;
+the caller's `domain`, capability, risk, and task-family arguments are used only for legacy
+proposals that predate the binding. This keeps Python and TypeScript replays on the same
+fail-closed planner identity contract.
 
 The complete two-phase handoff is available through
 `AutonomousLearningController.evaluateAndSettlePlanAndRun(planAndRun, options)`. It requires an
@@ -4312,7 +4324,9 @@ orchestration boundary. Enabling `structuredDomainResponse` forwards the reviewe
 every specialist and synthesis invocation; the result exposes separate
 `response_learning_episode_ids` and `response_settlements` beside the ordinary delayed-credit
 trajectory. Contract-quality feedback remains replay-bound and is never treated as task truth or
-external-effect evidence.
+external-effect evidence. The evaluator-guided cross-domain replan loop creates the same
+independent response-quality ledger for every completed attempt, carries it through each bounded
+settlement, and exposes the flattened receipts without merging them into task-quality credit.
 
 The replan façade accepts a stable caller-owned `cycleId` and an
 `AutonomousCycleReplanStateStore`. The metadata-only state machine is:
@@ -4337,9 +4351,10 @@ replan_handoff      terminal
 
 Every state is content-addressed and generation-linked to its predecessor. The state table keeps
 only the task digest, mode, attempt/status rows, route/plan/selection/outcome/evaluation digests,
-learning episode and trajectory IDs, settlement digests, context digests, and bounded terminal
-status. It explicitly rejects task text, prompts, provider messages, tool arguments, evaluator
-instructions, credentials, raw evaluator evidence, and raw learning payloads. Snapshot restore
+ordinary and structured-response learning episode IDs, trajectory IDs, settlement digests, context
+digests, and bounded terminal status. It explicitly rejects task text, prompts, provider messages,
+tool arguments, evaluator instructions, credentials, raw evaluator evidence, and raw learning
+payloads. Snapshot restore
 validates field allow-lists, capacities, metadata depth, secret-shaped strings, every state digest,
 and the aggregate snapshot digest before replacing in-memory rows.
 
@@ -4491,7 +4506,12 @@ identity used by the controller. The result exposes `learning_episode_status` an
 `controller.settleRun()`; no reward is inferred from transport success, approval, or provider
 self-report. An approval pause or incomplete result is `not_eligible`, while adapter failure is
 explicitly `failed` without replaying or relabeling the valid provider outcome. The cross-domain
-path retains its existing specialist/synthesis trajectory and delayed-credit semantics.
+path retains its existing specialist/synthesis trajectory and delayed-credit semantics. When
+`structuredDomainResponse` is enabled with learning, a direct run prepares a second
+`response_learning_episode_id`; it is deliberately separate from the task-quality episode and
+`settleStructuredResponse()` can only settle that response episode. The high-level
+`evaluateAndSettleRun()` and `runLearning()` helpers settle both streams independently and return
+`response_settlement` beside the ordinary task settlement.
 
 When the agent owns an episodic `memoryStore`, the learning controller adopts that store by
 default, or callers can pass an explicit `memoryStore` to the controller. A completed direct run
@@ -5105,6 +5125,61 @@ text and specialist/synthesis outputs remain caller-owned and transient. The rec
 separate outcome, evaluator, learning-state, and progress digests, allowing an evaluator or bandit
 controller to be reconciled after restart without treating provider success as task quality.
 
+#### Deterministic goal admission and worker claims
+
+The goal ledger is intentionally not itself a scheduler: it records objective state, while a
+worker needs a separate, replayable decision about which objectives to attempt next. The
+TypeScript `AutonomousGoalScheduler` and Python `AutonomousGoalScheduler` now provide that
+boundary through `scheduleAutonomousGoals(...)` / `schedule_autonomous_goals(...)`. The scheduler
+accepts only current goal projections plus bounded caller/evaluator signals: priority, urgency,
+deadline, estimated cost, and dependency goal IDs. It computes a deterministic score from priority,
+urgency, deadline pressure, aging fairness, and retry pressure, then ranks by score-per-cost with
+stable goal-ID ties.
+
+Admission is dependency-closed and fail-closed. A goal whose dependency is incomplete, unknown, or
+part of a cycle is deferred or marked ineligible; completed dependencies are satisfied, and
+selected prerequisites are ordered before their dependants. `max_selected`, `max_concurrent`,
+`max_cost`, optional failed-retry policy, paused-goal policy, per-domain quotas, and required-domain
+coverage are explicit inputs. The result contains only revisions, statuses, scores, reasons,
+dependencies, selected IDs, coverage, and a `schedule_digest`; task text, prompts, provider output,
+tool arguments, evidence bodies, and credentials never enter the schedule.
+
+Workers call `claimAutonomousGoals(...)` / `claim_autonomous_goals(...)` with the schedule and the
+caller-owned ledger. Every admitted row is re-read and checked against its expected revision and
+status before any transition. Ready and paused goals move directly to `running`; an explicitly
+allowed failed retry first reopens to `ready` and then claims `running`. A stale or tampered
+schedule is refused, and a successful claim returns only the schedule-bound claim digest. The
+canonical numeric projection is quantized so the same twelve-domain schedule has the same digest
+in both SDKs, making Python/TypeScript replay and worker handoff portable.
+
+The Python and TypeScript `AutonomousGoalWorker` implementations provide the execution bridge
+after admission. A worker first resolves every selected goal through a caller-owned rehydration
+callback before claiming anything; this prevents a protected task lookup failure from leaving a
+batch leased. It then claims the schedule, passes each transient task and caller-owned parameter
+mapping to an executor, and settles the bounded result status back into the goal ledger. Executor
+results may add criterion updates and digest-only evaluator, learning-state, or progress metadata.
+Exceptions become durable `failed` attempts with a redacted error class and retry marker, while a
+provider/evaluator status maps to `completed`, `paused`, `blocked`, or `failed` through the existing
+goal policy. The live task, parameters, and executor result exist only on the initiating process;
+`to_dict()` and the worker digest exclude them. The Python and TypeScript workers produce the same
+single-attempt digest, so a worker can hand off a schedule or claim across the two SDKs without
+leaking the protected execution context.
+
+For process-loss recovery at this exact boundary, both SDKs expose
+`AutonomousGoalWorkerJournal`. It appends a bounded SHA-256 chain of `prepared`, `claimed`,
+`dispatch_started`, `settled`, `failed`, and `reconciled` metadata, and the worker accepts a caller-
+supplied `batch_id` to bind those events to one execution pass. The journal never stores the
+rehydrated task, prompt, parameters, credentials, provider/model payload, or executor result. A
+restart must restore the journal snapshot before resuming: a goal whose last event is `claimed`
+is moved to `paused` with a retry action because dispatch is known not to have started, while a
+goal whose last event is `dispatch_started` is moved to `blocked` with
+`goal-reconciliation-review` because the external outcome is uncertain and the provider is never
+silently replayed. `JsonAutonomousGoalWorkerJournalPersistence` validates canonical JSON, and
+`AutonomousGoalWorkerJournalPersistenceCoordinator` adds caller-owned restore/flush and optional
+compare-and-swap fencing. This journal complements, rather than replaces, the goal ledger: the
+ledger remains the authoritative objective state, while the journal explains whether an interrupted
+running claim crossed the irreversible execution boundary.
+
 The Python `AutonomousGoalLedger` now exposes the same portable restart contract as the other
 state boundaries. `snapshot()` exports the sorted current goal projection plus its complete
 hash-chained lifecycle, and `restore()` validates event order, created/transition lifecycle,
@@ -5125,6 +5200,18 @@ workers. `AutonomousGoalPersistenceCoordinator` serializes local operations, rem
 snapshot digest, and rejects stale flushes instead of silently overwriting a newer goal state. These
 adapters persist lifecycle/evaluator/learning digests only: they do not persist prompts, provider
 responses, tool arguments, evidence bodies, credentials, or approval authority.
+
+`AutonomousGoalControlLoop` is the bounded autonomous continuation above one worker batch. It can
+run up to 128 scheduler/worker cycles and 8,192 total runs, invoke a caller-owned metadata-only
+`options_factory` for fresh priority, urgency, dependency, retry, and required-domain signals, and
+return an explicit `all_terminal`, `no_admissible_work`, `cycle_budget_exhausted`, or
+`run_budget_exhausted` stop reason. Paused goals can be re-admitted on a later cycle when the
+schedule policy allows them; failed goals remain held unless failed retry is explicitly enabled;
+blocked or concurrently running goals never masquerade as terminal completion. Every cycle gets a
+distinct bounded batch identity when worker journaling is enabled, while the loop projection retains
+only schedule/claim/worker digests, status counts, domain coverage, and its own digest. This makes
+the control loop useful as a service-worker heartbeat across all twelve domains without allowing a
+policy callback to inject task text, provider payloads, credentials, or execution authority.
 
 ## Resumable learning jobs
 
@@ -6440,8 +6527,11 @@ The worker deliberately does not duplicate model-health observers. Construct the
 `AutonomousAgent` with the caller-owned `InMemoryAutonomousModelHealthStore` or durable store, for
 example `new AutonomousAgent(runtime, { modelHealthStore: healthStore })`. The agent then records
 bounded invocation outcomes at the provider boundary and folds persisted health into subsequent
-model selection. This keeps direct, cycle, adaptive, and all-domain worker jobs on the same health
-and bandit-selection path without retaining prompts, responses, credentials, or evaluator values.
+model selection. When the agent also has an `AutonomousOnlineLearner`, the health projection is
+merged into the learner request rather than replacing it: provider readiness, circuits, and
+availability remain hard gates while explicit evaluator rewards adapt the eligible model arm.
+This keeps direct, cycle, adaptive, and all-domain worker jobs on the same health-and-bandit path
+without retaining prompts, responses, credentials, or evaluator values.
 The worker is still a single-process scheduler adapter: multi-host transactions, provider-side
 idempotency, and secret manager/session ownership remain deployment responsibilities.
 

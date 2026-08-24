@@ -295,6 +295,13 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
   assert.equal(planned.focus_stage_ids.length, 1);
   assert.equal(planned.planner_prompt_digest.length, 64);
   assert.equal(planned.selection_digest.length, 64);
+  assert.deepEqual(planned.planner_context, {
+    domain: "coding",
+    capability: "planning",
+    risk_class: blueprint.blueprint.domain_profile.risk_class,
+    task_family: blueprint.blueprint.workflow.workflow_id,
+  });
+  assert.equal(planned.planner_context_digest, learningContextDigest(planned.planner_context));
   assert.equal(planned.cost_budget.max_cost_units, 1);
   assert.ok(planned.cost_budget.consumed_cost_units > 0);
   assert.equal(calls[0].response_format.type, "json_schema");
@@ -305,6 +312,7 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
   assert.equal(cross.status, "completed");
   assert.deepEqual(cross.priority_child_ids, crossBlueprint.cross_domain_blueprint.child_ids);
   assert.equal(cross.planner_prompt_digest.length, 64);
+  assert.equal(cross.planner_context_digest, learningContextDigest(cross.planner_context));
   assert.equal(cross.cost_budget.max_cost_units, 1);
   assert.ok(cross.cost_budget.consumed_cost_units > planned.cost_budget.consumed_cost_units, "planning and cross-domain planning share one aggregate budget");
   assert.doesNotMatch(JSON.stringify(cross), /Write Python code/);
@@ -441,6 +449,8 @@ test("provider planning quality settles the planner arm separately and replays w
   const first = await controller.settlePlanningQuality(plan, { domain: "coding", evaluator: input });
   assert.equal(first.status, "settled");
   assert.equal(first.model_quality?.status, "recorded");
+  assert.deepEqual(first.planner_context, plan.planner_context);
+  assert.equal(first.planner_context_digest, plan.planner_context_digest);
   assert.equal(agent.learner.snapshot().generation, 1);
   assert.equal(health.health({ model: "planner" })[0]?.quality_observations, 1);
   const before = agent.learner.snapshot();
@@ -448,6 +458,42 @@ test("provider planning quality settles the planner arm separately and replays w
   assert.deepEqual(agent.learner.snapshot(), before);
   assert.equal(replay.model_quality?.health_event_digest, first.model_quality?.health_event_digest);
   assert.equal(health.health({ model: "planner" })[0]?.quality_observations, 1);
+  const tampered = structuredClone(plan);
+  tampered.planner_context.capability = "tampered-context";
+  await assert.rejects(
+    () => controller.settlePlanningQuality(tampered, { domain: "coding", evaluator: input }),
+    /planner context digest does not match planner context/,
+  );
+});
+
+test("ordered-step provider planning preserves learner context identity without a health override", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("ordered-learner", (request) => {
+    const planningMessage = request.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+    const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+    const ids = contract.step_catalogue.map((step) => step.id);
+    return { structured: { priority_order: ids, focus_step_ids: ids.slice(0, 1), review_required: false, confidence: 0.91, abstain: false } };
+  }, { structuredOutputMode: "json_schema" });
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(candidate("ordered-learner", "ordered-planner", ["reasoning", "code", "structured_output", "planning"]));
+  const plan = await agent.planOrderedStepsWithProvider({
+    task: "Order the reviewed coding steps.",
+    domain: "coding",
+    steps: [
+      { id: "inspect", domain: "coding", capability: "code", objective: "Inspect the repository." },
+      { id: "verify", domain: "coding", capability: "code", objective: "Verify the resulting change.", depends_on: ["inspect"] },
+    ],
+  }, { approveProviderCall: true });
+  assert.equal(plan.status, "completed");
+  assert.equal(plan.planner_context_digest, learningContextDigest(plan.planner_context));
+  const settlement = await new AutonomousLearningController(agent).settlePlanningQuality(plan, {
+    domain: "coding",
+    evaluator: { evaluator_id: "ordered-planner-reviewer", evaluator_version: "1", reward: 0.82, passed: true },
+  });
+  assert.equal(settlement.status, "settled");
+  assert.deepEqual(settlement.planner_context, plan.planner_context);
+  assert.equal(settlement.planner_context_digest, plan.planner_context_digest);
+  assert.equal(agent.learner.snapshot().generation, 1);
 });
 
 test("planAndRun applies the same accepted planning contract to cross-domain fan-out and synthesis", async () => {

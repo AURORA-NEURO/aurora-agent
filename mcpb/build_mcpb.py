@@ -11,6 +11,8 @@ Requires: target/release/bioprism-mcp.exe (cargo build --release --offline
 """
 
 from pathlib import Path
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -37,7 +39,11 @@ def main() -> int:
     if STAGE.exists():
         shutil.rmtree(STAGE)
     (STAGE / "server").mkdir(parents=True)
-    shutil.copy2(REPO / "mcpb" / "manifest.json", STAGE / "manifest.json")
+    manifest = json.loads((REPO / "mcpb" / "manifest.json").read_text(encoding="utf-8"))
+    version = os.environ.get("MCPB_VERSION")
+    if version:
+        manifest["version"] = version.removeprefix("v")
+    (STAGE / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     shutil.copy2(EXE, STAGE / "server" / "bioprism-mcp.exe")
     for rel in ROOT_CONTENT:
         src = REPO / rel
