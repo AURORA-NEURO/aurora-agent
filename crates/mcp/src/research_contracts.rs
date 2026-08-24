@@ -16,6 +16,10 @@ use bioprism_atlashub::{
     synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
     FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
 };
+use bioprism_devplat::{
+    assure_context_compilation, ContextCompilationAssuranceReceipt,
+    ContextCompilationAssuranceRequest, CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
 use bioprism_evalengine::{
     compile_evaluation_card, evaluate_federated_evaluation, evaluate_multimodal_replication,
     qualify_analysis, AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
@@ -103,6 +107,7 @@ pub const FEDERATED_LENS_ASSURANCE_TOOL: &str = "federated_lens_assurance";
 pub const SEMANTIC_PARITY_TOOL: &str = "lab_semantic_parity";
 pub const FEDERATED_RETRIEVAL_ASSURANCE_TOOL: &str = "federated_retrieval_assurance";
 pub const FEDERATED_CONTINUAL_RETRIEVAL_TOOL: &str = "federated_continual_retrieval_copilot";
+pub const CONTEXT_COMPILATION_ASSURANCE_TOOL: &str = "federated_context_compilation_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -602,6 +607,26 @@ pub fn validate_federated_continual_retrieval_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID {
         return Err("federated continual retrieval feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_context_compilation_json(value: &Value) -> Result<Value, String> {
+    let request: ContextCompilationAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid context compilation assurance request: {error}"))?;
+    let receipt = assure_context_compilation(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize context compilation assurance receipt: {error}"))
+}
+
+pub fn validate_context_compilation_assurance_json(
+    value: &Value,
+) -> Result<ContextCompilationAssuranceReceipt, String> {
+    let receipt: ContextCompilationAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid context compilation assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID {
+        return Err("context compilation assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

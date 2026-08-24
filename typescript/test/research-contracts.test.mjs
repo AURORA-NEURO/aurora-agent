@@ -114,6 +114,10 @@ import {
   FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
   federatedContinualRetrievalReceiptDigest,
   validateFederatedContinualRetrievalReceipt,
+  CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+  CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  contextCompilationAssuranceReceiptDigest,
+  validateContextCompilationAssuranceReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -809,4 +813,24 @@ test("federated continual retrieval keeps unanchored refresh unknown", () => {
   };
   assert.doesNotThrow(() => validateFederatedContinualRetrievalReceipt(receipt));
   assert.equal(federatedContinualRetrievalReceiptDigest(receipt), federatedContinualRetrievalReceiptDigest(receipt));
+});
+
+test("context compilation keeps missing context unknown", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+    contract_version: CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    request_id: "request:context",
+    federation_id: "federation:context",
+    query_id: "query:mechanism",
+    resolved_context_ids: ["context:a"],
+    disposition: "unknown",
+    evidence_receipt_digest: null,
+    checks: ["incomplete context remains unknown rather than certified"],
+    omissions: ["required context unavailable: context:b"],
+    artifact: { content_hash: "b".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateContextCompilationAssuranceReceipt(receipt));
+  assert.equal(contextCompilationAssuranceReceiptDigest(receipt), contextCompilationAssuranceReceiptDigest(receipt));
 });

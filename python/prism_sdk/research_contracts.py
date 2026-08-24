@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+import re
 from typing import Any, Mapping, Sequence
 
 RESEARCH_CONTRACT_SCHEMA_VERSION = "aurora-research-contract/1.0"
@@ -57,6 +58,8 @@ FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID = "AFA-fiber-P02-F28"
 FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION = "federated-retrieval-assurance/1.0"
 FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID = "AFA-atlashub-P02-F12"
 FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION = "federated-continual-retrieval-copilot/1.0"
+CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID = "AFA-devplat-P03-F28"
+CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION = "federated-context-compilation-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -1706,3 +1709,56 @@ class FederatedContinualRetrievalReceipt:
                 "boundary": self.boundary,
             }
         )
+
+
+@dataclass(frozen=True)
+class ContextCompilationAssuranceReceipt:
+    """Transport validator for omission-aware federated context certification."""
+
+    request_id: str
+    federation_id: str
+    query_id: str
+    resolved_context_ids: tuple[str, ...]
+    disposition: str
+    evidence_receipt_digest: str | None
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID
+    contract_version: str = CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID or self.contract_version != CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("context compilation assurance feature or contract mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.federation_id.strip() or not self.query_id.strip():
+            raise ResearchContractError("context compilation assurance identity or boundary is invalid")
+        if not self.resolved_context_ids or len(set(self.resolved_context_ids)) != len(self.resolved_context_ids):
+            raise ResearchContractError("context compilation resolved identities are not unique")
+        if self.disposition not in {"passed", "blocked", "unknown"} or not self.checks:
+            raise ResearchContractError("context compilation disposition and checks are required")
+        if self.evidence_receipt_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.evidence_receipt_digest):
+            raise ResearchContractError("context compilation evidence digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("context compilation artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "query_id": self.query_id,
+            "resolved_context_ids": list(self.resolved_context_ids),
+            "disposition": self.disposition,
+            "evidence_receipt_digest": self.evidence_receipt_digest,
+            "checks": list(self.checks),
+            "omissions": list(self.omissions),
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })

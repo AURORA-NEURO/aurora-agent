@@ -52,6 +52,8 @@ export const FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID = "AFA-fiber-P02-F28" as c
 export const FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION = "federated-retrieval-assurance/1.0" as const;
 export const FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID = "AFA-atlashub-P02-F12" as const;
 export const FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION = "federated-continual-retrieval-copilot/1.0" as const;
+export const CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID = "AFA-devplat-P03-F28" as const;
+export const CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION = "federated-context-compilation-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1041,6 +1043,36 @@ export function validateFederatedContinualRetrievalReceipt(receipt: FederatedCon
 
 export function federatedContinualRetrievalReceiptDigest(receipt: FederatedContinualRetrievalReceipt): string {
   validateFederatedContinualRetrievalReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface ContextCompilationAssuranceReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  federation_id: string;
+  query_id: string;
+  resolved_context_ids: string[];
+  disposition: "passed" | "blocked" | "unknown";
+  evidence_receipt_digest: string | null;
+  checks: string[];
+  omissions: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateContextCompilationAssuranceReceipt(receipt: ContextCompilationAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID || receipt.contract_version !== CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION) throw new Error("context compilation assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.query_id.trim() || receipt.checks.length === 0) throw new Error("context compilation assurance identity, boundary, or checks are incomplete");
+  if (!receipt.resolved_context_ids.length || JSON.stringify([...new Set(receipt.resolved_context_ids)].sort()) !== JSON.stringify(receipt.resolved_context_ids)) throw new Error("context compilation resolved identities are invalid");
+  if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition)) throw new Error("context compilation disposition is unknown");
+  if (receipt.evidence_receipt_digest !== null && !/^[0-9a-f]{64}$/.test(receipt.evidence_receipt_digest)) throw new Error("context compilation evidence digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("context compilation artifact digest is invalid");
+}
+
+export function contextCompilationAssuranceReceiptDigest(receipt: ContextCompilationAssuranceReceipt): string {
+  validateContextCompilationAssuranceReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

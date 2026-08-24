@@ -214,6 +214,7 @@ pub mod ci_provider_evidence_registry;
 pub mod citations;
 pub mod claim;
 pub mod classify;
+pub mod context_compilation_assurance;
 pub mod cross_domain_audit;
 pub mod delivery_receipt;
 pub mod domain_acquisition;
@@ -319,6 +320,12 @@ pub use citations::{audit as audit_citations, scan as scan_citations, CitationAu
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};
 pub use classify::{
     classification, implemented_module_ids, not_implemented, verdict_counts, ModuleVerdict, Verdict,
+};
+pub use context_compilation_assurance::{
+    assure_context_compilation, ContextAssuranceDisposition, ContextAssuranceError,
+    ContextCompilationAssuranceReceipt, ContextCompilationAssuranceRequest,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
 };
 pub use cross_domain_audit::{
     build_cross_domain_audit, CROSS_DOMAIN_AUDIT_SCHEMA_VERSION, CROSS_DOMAIN_AUDIT_WORKFLOW,
