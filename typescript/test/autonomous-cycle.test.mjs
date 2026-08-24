@@ -8,6 +8,8 @@ import {
   AutonomousLearningController,
   InMemoryAutonomousLearningFeedbackOutboxStore,
   AutonomousOnlineLearner,
+  buildAutonomousDomainResponseContract,
+  builtinAutonomousDomainProfiles,
   InMemoryAutonomousModelHealthStore,
   AutonomousCostBudget,
   CredentialStore,
@@ -50,6 +52,25 @@ function providerPlanningCycleAgent(agentOptions = {}) {
 
 function jsonResponse(payload) {
   return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+function structuredCycleResponse(contract) {
+  return {
+    schema: "bioprism-typescript-autonomous-domain-response/0.1",
+    domain: contract.domain,
+    workflow_id: contract.workflow_id,
+    status: "complete",
+    answer: `Cycle answer for ${contract.domain}.`,
+    observations: ["The reviewed cycle fixture was inspected."],
+    inferences: ["The result remains bounded by the reviewed contract."],
+    uncertainty: ["External-world truth remains caller-owned."],
+    evidence_gaps: ["No live source was contacted in this test."],
+    next_actions: ["Review the declared evidence before action."],
+    stages: contract.stage_ids.map((stage_id) => ({ stage_id, status: "complete", evidence: [`evidence:${stage_id}`], findings: [`finding:${stage_id}`], uncertainty: [`uncertainty:${stage_id}`], open_questions: [] })),
+    domain_details: Object.fromEntries(contract.domain_fields.map((field) => [field, [`detail:${field}`]])),
+    retention: "transient_provider_response_only;validated_against_reviewed_domain_contract",
+    secret_material: "never_returned",
+  };
 }
 
 const capabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"];
@@ -1289,6 +1310,42 @@ test("cross-domain decision cycle applies semantic routing before fan-out and pr
   const executionGate = await runAutonomousCrossDomainDecisionCycle(gatedExecution.agent, "biomedical neuroscience", { approveProviderCall: false, synthesize: false, subtasks: [{ id: "bio", domain: "biomedical", task: "bio" }, { id: "neuro", domain: "neuroscience", task: "neuro" }] });
   assert.equal(executionGate.status, "approval_required");
   assert.equal(gatedExecution.calls(), 0);
+});
+
+test("cross-domain decision cycles preserve structured-response learning alongside task credit", async () => {
+  const contracts = new Map();
+  for (const profile of await builtinAutonomousDomainProfiles()) contracts.set(profile.domain, await buildAutonomousDomainResponseContract(profile));
+  const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  llm.registerInMemoryProvider("cycle-structured", (request) => {
+    const domain = request.responseSchema?.properties?.domain?.const;
+    return { structured: structuredCycleResponse(contracts.get(domain)) };
+  }, { structuredOutputMode: "json_schema" });
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  const structuredCandidate = { ...candidate(), provider: "cycle-structured", model: "cycle-structured-model" };
+  agent.registerModel(structuredCandidate);
+  const learning = new AutonomousLearningController(agent);
+  const task = "Research a biomedical neuroscience study with patient EEG evidence.";
+  const result = await runAutonomousCrossDomainDecisionCycle(agent, task, {
+    routeOverride: await agent.route(task, { allowCrossDomain: true }),
+    candidates: [structuredCandidate],
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review biomedical evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review neuroscience evidence." },
+    ],
+    structuredDomainResponse: true,
+    approveProviderCall: true,
+    learning: {
+      controller: learning,
+      trajectoryId: "structured-cycle-trajectory",
+      evaluate: (run) => Object.fromEntries(run.learning_episode_ids.map((episodeId) => [episodeId, { evaluator_id: "cycle-task-reviewer", evaluator_version: "1", reward: 0.8, passed: true }])),
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.learning_episode_ids.length, 3);
+  assert.equal(result.response_learning_episode_ids.length, 3);
+  assert.equal(result.settlement.trajectory.settlements.length, 3);
+  assert.equal(result.response_settlements.length, 3);
+  assert.ok(result.response_settlements.every((row) => row.assessment.evaluator_id.endsWith("response-integrity")));
 });
 
 test("cross-domain decision cycle settles partial specialist trajectories without inventing synthesis", async () => {

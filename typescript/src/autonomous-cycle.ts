@@ -764,8 +764,10 @@ function rehydratedCrossDomainCycle(route: AutonomousRouteProposal, run: Autonom
     run,
     plan_refinement: null,
     learning_episode_ids: [...run.learning_episode_ids],
+    response_learning_episode_ids: [...(run.response_learning_episode_ids ?? [])],
     evaluation: null,
     settlement: null,
+    response_settlements: [],
     planner_evaluation: null,
     planner_settlement: null,
     memory: null,
@@ -795,6 +797,7 @@ function runOptions(options: AutonomousDecisionCycleOptions, route: AutonomousRo
     costBudget,
     requireJson: options.requireJson,
     responseSchema: options.responseSchema,
+    structuredDomainResponse: options.structuredDomainResponse,
     temperature: options.temperature,
     tools: options.tools,
     authorizeAndExecute: options.authorizeAndExecute,
@@ -1645,8 +1648,10 @@ export interface AutonomousCrossDomainDecisionCycleResult {
   run: AutonomousCrossDomainRunResult | null;
   plan_refinement: AutonomousCrossDomainPlanRefinementResult | null;
   learning_episode_ids: string[];
+  response_learning_episode_ids: string[];
   evaluation: Record<string, BrainEvaluatorAssessment> | null;
   settlement: AutonomousCrossDomainLearningSettlement | null;
+  response_settlements: AutonomousLearningSettlement[];
   planner_evaluation: AutonomousEvaluatorRewardInput | null;
   planner_settlement: AutonomousPlanningQualitySettlement | null;
   memory: AutonomousDecisionCycleMemoryProjection | null;
@@ -1671,8 +1676,10 @@ function crossReviewResult(
     run: null,
     plan_refinement: planRefinement,
     learning_episode_ids: [],
+    response_learning_episode_ids: [],
     evaluation: null,
     settlement: null,
+    response_settlements: [],
     planner_evaluation: null,
     planner_settlement: null,
     memory: null,
@@ -1701,6 +1708,7 @@ function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, rou
     costBudget,
     requireJson: options.requireJson,
     responseSchema: options.responseSchema,
+    structuredDomainResponse: options.structuredDomainResponse,
     temperature: options.temperature,
     tools: options.tools,
     authorizeAndExecute: options.authorizeAndExecute,
@@ -1982,8 +1990,10 @@ export async function runAutonomousCrossDomainDecisionCycle(
       run,
       plan_refinement: planRefinement,
       learning_episode_ids: [...run.learning_episode_ids],
+      response_learning_episode_ids: [...(run.response_learning_episode_ids ?? [])],
       evaluation: settlement ? projectedEvaluations(settlement) : null,
       settlement,
+      response_settlements: settlement?.response_settlements ?? [],
       planner_evaluation: plannerEvaluation,
       planner_settlement: plannerSettlement,
       memory: memoryProjection,

@@ -4307,6 +4307,13 @@ true` is the convenience form for accepting a fresh proposal in the same call. P
 execution approvals remain separate, and one `AutonomousCostBudget` can charge both phases against
 one aggregate ceiling.
 
+Cross-domain decision cycles preserve the structured-response learning split at this higher
+orchestration boundary. Enabling `structuredDomainResponse` forwards the reviewed contract into
+every specialist and synthesis invocation; the result exposes separate
+`response_learning_episode_ids` and `response_settlements` beside the ordinary delayed-credit
+trajectory. Contract-quality feedback remains replay-bound and is never treated as task truth or
+external-effect evidence.
+
 The replan façade accepts a stable caller-owned `cycleId` and an
 `AutonomousCycleReplanStateStore`. The metadata-only state machine is:
 
