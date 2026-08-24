@@ -1748,6 +1748,14 @@ ledger stores credentials, prompts, provider responses, raw source values, or lo
 provenance/admission contract, not an authenticity oracle: callers remain responsible for provider
 registration, credential onboarding, network authorization, and the truth of a source declaration.
 
+Python failover now composes `AutonomousEvidenceRetryPolicy` inside each reviewed candidate route.
+The retry wrapper replays only the exact route, accepts only classified transient failures, caps
+exponential backoff, and emits metadata-only attempt observations. Candidate failover is a separate
+budget: it advances only when the classification is permitted by the same policy. When the optional
+`AutonomousLLMEvidenceSourceBoundary` is configured, contract and provenance admission run inside
+each retry attempt for every domain, so no raw response can bypass source freshness, authority,
+digest, or citation requirements. Refusals and malformed/credential failures remain non-retryable.
+
 For a deeper contract-level startup check, the TypeScript SDK also exposes
 `auditAutonomousDomainContracts()` and the same method through `AutonomousBrainFacade.domainAudit()`:
 

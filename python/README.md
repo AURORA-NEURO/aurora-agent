@@ -277,6 +277,14 @@ restart recovery without retaining raw source values or locators. The contract/s
 all twelve domains, failover, refusal, secret-shaped output rejection, canonical round trips, and
 stale-writer protection.
 
+`AutonomousEvidenceRetryPolicy` separates bounded same-route retry from candidate failover. The
+retry wrapper classifies only typed transient failures, applies capped exponential backoff, and
+emits attempt number, status, failure class, delay, and latency as value-free telemetry. The
+failover acquirer now applies that policy to every selected candidate and can compose the source
+boundary inside each retry route, so a successful source receipt is admitted only after the exact
+provider contract and source policy pass. Credential, argument, source-admission, and malformed
+response failures do not get retried or silently promoted to another provider.
+
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

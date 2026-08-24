@@ -30,6 +30,7 @@ from .autonomous_evidence_adapter_orchestration import (
 )
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 from .errors import ArgumentError
+from .autonomous_evidence_retry import AutonomousEvidenceRetryPolicy
 
 
 AUTONOMOUS_LLM_EVIDENCE_READINESS_SCHEMA = "bioprism-python-autonomous-llm-evidence-readiness/0.1"
@@ -434,12 +435,32 @@ class AutonomousLLMEvidenceReadinessReport:
         raw_failover = value.get("failover_policy")
         if not isinstance(raw_failover, Mapping):
             raise ArgumentError("LLM evidence readiness failover policy must be a mapping")
-        failover_allowed = {"schema", "max_failovers", "execution", "retention", "secret_material"}
+        failover_allowed = {"schema", "max_failovers", "retry_policy", "execution", "retention", "secret_material"}
         if set(raw_failover) != failover_allowed or raw_failover.get("schema") != AUTONOMOUS_LLM_EVIDENCE_FAILOVER_POLICY_SCHEMA:
             raise ArgumentError("LLM evidence readiness failover policy is malformed")
         if raw_failover.get("execution") != "caller_controlled_reviewed_candidate_failover;no_fuzzy_selection" or raw_failover.get("retention") != "metadata_only_candidate_identity_and_failure_class" or raw_failover.get("secret_material") != "never_returned":
             raise ArgumentError("LLM evidence readiness failover policy retention is invalid")
-        failover_policy = AutonomousLLMEvidenceFailoverPolicy(max_failovers=raw_failover.get("max_failovers"))
+        raw_retry = raw_failover.get("retry_policy")
+        retry_allowed = {
+            "schema", "max_attempts", "base_delay_ms", "max_delay_ms", "retryable_failure_classes",
+            "execution", "retention", "secret_material",
+        }
+        if not isinstance(raw_retry, Mapping) or set(raw_retry) != retry_allowed:
+            raise ArgumentError("LLM evidence readiness retry policy is malformed")
+        if raw_retry.get("schema") != "bioprism-python-autonomous-evidence-retry-policy/0.1" or raw_retry.get("execution") != "caller_controlled_bounded_retry;no_authorization" or raw_retry.get("retention") != "metadata_only_policy;no_errors_or_values" or raw_retry.get("secret_material") != "never_returned":
+            raise ArgumentError("LLM evidence readiness retry policy retention is invalid")
+        retry_policy = AutonomousEvidenceRetryPolicy(
+            max_attempts=raw_retry.get("max_attempts"),
+            base_delay_ms=raw_retry.get("base_delay_ms"),
+            max_delay_ms=raw_retry.get("max_delay_ms"),
+            retryable_failure_classes=tuple(raw_retry.get("retryable_failure_classes", ())),
+        )
+        if canonical_json(raw_retry) != canonical_json(retry_policy.to_dict()):
+            raise ArgumentError("LLM evidence readiness retry policy is not canonical")
+        failover_policy = AutonomousLLMEvidenceFailoverPolicy(
+            max_failovers=raw_failover.get("max_failovers"),
+            retry_policy=retry_policy,
+        )
         if canonical_json(raw_failover) != canonical_json(failover_policy.to_dict()):
             raise ArgumentError("LLM evidence readiness failover policy is not canonical")
         report = cls(

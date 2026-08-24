@@ -1332,3 +1332,12 @@ tests for contract coverage, failover, refusal, secret-shaped values, tamper res
 restart recovery. This remains an admission and provenance boundary—not provider authentication,
 source authenticity, or truth validation—and retains no credentials, prompts, responses, source
 values, or locators.
+
+The Python failover path now closes the retry-versus-failover distinction. A typed
+`AutonomousEvidenceRetryPolicy` classifies bounded transient failures, retries one exact reviewed
+route with capped exponential backoff, and emits attempt number, status, failure class, delay, and
+latency without persisting error text or values. `AutonomousLLMEvidenceSourceBoundary` composes the
+provider contract and metadata-only source admission inside every candidate route, including each
+retry, while the separate failover budget advances only for classifications permitted by the retry
+policy. Readiness serialization now round-trips the nested retry policy, and all-domain tests cover
+recovery, source receipts, refusal boundaries, no-raw projections, and retry telemetry.

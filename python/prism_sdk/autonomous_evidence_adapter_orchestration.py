@@ -17,7 +17,7 @@ registry or a stale selection plan fails closed before a provider call.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import threading
 import time
@@ -30,6 +30,13 @@ from .autonomous_evidence_llm_adapter import (
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 from .errors import ArgumentError
 from .llm_runtime import CredentialError, ProviderError
+from .autonomous_evidence_retry import (
+    AutonomousEvidenceRetryAttempt,
+    AutonomousEvidenceRetryClassification,
+    AutonomousEvidenceRetryPolicy,
+    classify_autonomous_evidence_acquisition_error,
+    create_autonomous_evidence_retrying_acquirer,
+)
 
 
 AUTONOMOUS_LLM_EVIDENCE_ADAPTER_REGISTRY_SCHEMA = "bioprism-python-autonomous-llm-evidence-adapter-registry/0.1"
@@ -1082,14 +1089,18 @@ class AutonomousLLMEvidenceAdapterHealthPersistenceCoordinator:
 @dataclass(frozen=True, slots=True)
 class AutonomousLLMEvidenceFailoverPolicy:
     max_failovers: int = 0
+    retry_policy: AutonomousEvidenceRetryPolicy = field(default_factory=AutonomousEvidenceRetryPolicy)
 
     def __post_init__(self) -> None:
         _integer("LLM evidence failover max_failovers", self.max_failovers, 0, MAX_AUTONOMOUS_LLM_EVIDENCE_FAILOVERS)
+        if not isinstance(self.retry_policy, AutonomousEvidenceRetryPolicy):
+            raise ArgumentError("LLM evidence failover retry_policy is malformed")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": AUTONOMOUS_LLM_EVIDENCE_FAILOVER_POLICY_SCHEMA,
             "max_failovers": self.max_failovers,
+            "retry_policy": self.retry_policy.to_dict(),
             "execution": "caller_controlled_reviewed_candidate_failover;no_fuzzy_selection",
             "retention": "metadata_only_candidate_identity_and_failure_class",
             "secret_material": "never_returned",
@@ -1150,6 +1161,37 @@ def _failure_class(error: BaseException) -> tuple[str, bool]:
     return "adapter_error", False
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousLLMEvidenceSourceBoundary:
+    """Typed source-admission options applied independently to every failover candidate."""
+
+    policy: Any
+    describe_source: Callable[[Mapping[str, Any]], Mapping[str, Any]]
+    ledger: Any | None = None
+    source_kind: str | None = None
+
+    def __post_init__(self) -> None:
+        from .autonomous_evidence_source import AutonomousEvidenceSourceLedger, AutonomousEvidenceSourcePolicy
+        if not isinstance(self.policy, AutonomousEvidenceSourcePolicy):
+            raise ArgumentError("LLM evidence source boundary policy is malformed")
+        if self.ledger is not None and not isinstance(self.ledger, AutonomousEvidenceSourceLedger):
+            raise ArgumentError("LLM evidence source boundary ledger is malformed")
+        if not callable(self.describe_source):
+            raise ArgumentError("LLM evidence source boundary descriptor is malformed")
+        if self.source_kind is not None:
+            _identifier("LLM evidence source boundary source_kind", self.source_kind)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_kind": self.source_kind,
+            "policy_digest": self.policy.policy_digest,
+            "ledger_enabled": self.ledger is not None,
+            "execution": "candidate_scoped_source_admission;raw_value_transient",
+            "retention": "metadata_only_source_policy_and_receipts",
+            "secret_material": "never_returned",
+        }
+
+
 def _context_key(context: Mapping[str, Any]) -> str:
     request = context.get("request")
     requirement = context.get("requirement")
@@ -1177,6 +1219,11 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
         health_store: InMemoryAutonomousLLMEvidenceAdapterHealthStore | None = None,
         observe_failover: Callable[[AutonomousLLMEvidenceFailoverEvent], Any] | None = None,
         provider_contracts: Any | None = None,
+        source_boundary: AutonomousLLMEvidenceSourceBoundary | Mapping[str, Any] | None = None,
+        classify: Callable[[BaseException], AutonomousEvidenceRetryClassification | Mapping[str, Any]] | None = None,
+        observe_attempt: Callable[[AutonomousEvidenceRetryAttempt], Any] | None = None,
+        clock: Callable[[], float] | None = None,
+        sleep: Callable[[int], Any] | None = None,
     ) -> None:
         if not isinstance(registry, AutonomousLLMEvidenceAdapterRegistry):
             raise ArgumentError("LLM evidence failover requires a typed registry")
@@ -1193,12 +1240,40 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
             if not isinstance(provider_contracts, AutonomousEvidenceProviderContractRegistry):
                 raise ArgumentError("LLM evidence failover provider_contracts is malformed")
             provider_contracts.verify()
+        typed_source_boundary = source_boundary
+        if isinstance(source_boundary, Mapping):
+            allowed_source_boundary = {"policy", "describe_source", "ledger", "source_kind"}
+            if set(source_boundary) != allowed_source_boundary:
+                raise ArgumentError("LLM evidence source boundary contains unsupported fields")
+            typed_source_boundary = AutonomousLLMEvidenceSourceBoundary(
+                policy=source_boundary.get("policy"),
+                describe_source=source_boundary.get("describe_source"),
+                ledger=source_boundary.get("ledger"),
+                source_kind=source_boundary.get("source_kind"),
+            )
+        if typed_source_boundary is not None and not isinstance(typed_source_boundary, AutonomousLLMEvidenceSourceBoundary):
+            raise ArgumentError("LLM evidence source boundary is malformed")
+        if typed_source_boundary is not None and provider_contracts is None:
+            raise ArgumentError("LLM evidence source boundary requires provider_contracts")
+        if classify is not None and not callable(classify):
+            raise ArgumentError("LLM evidence failover classifier is malformed")
+        if observe_attempt is not None and not callable(observe_attempt):
+            raise ArgumentError("LLM evidence retry observer is malformed")
+        if clock is not None and not callable(clock):
+            raise ArgumentError("LLM evidence retry clock is malformed")
+        if sleep is not None and not callable(sleep):
+            raise ArgumentError("LLM evidence retry sleep is malformed")
         self.registry = registry
         self.plan = typed_plan
         self.policy = policy or AutonomousLLMEvidenceFailoverPolicy()
         self.health_store = health_store
         self.observe_failover = observe_failover
         self.provider_contracts = provider_contracts
+        self.source_boundary = typed_source_boundary
+        self.classify = classify
+        self.observe_attempt = observe_attempt
+        self.clock = clock
+        self.sleep = sleep
         self._selected: dict[str, str] = {}
         self._lock = threading.RLock()
 
@@ -1230,9 +1305,37 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
             started = time.monotonic()
             try:
                 if self.provider_contracts is None:
-                    value = adapter.acquire(context)
+                    candidate_acquirer = adapter
                 else:
-                    value = self.provider_contracts.create_acquirer_for_adapter(adapter_id, domain).acquire(context)
+                    candidate_acquirer = self.provider_contracts.create_acquirer_for_adapter(adapter_id, domain)
+                if self.source_boundary is not None:
+                    from .autonomous_evidence_source import create_autonomous_evidence_source_guard
+                    contract = self.provider_contracts.contract_for_adapter(adapter_id, domain)
+                    source_kind = self.source_boundary.source_kind
+                    if source_kind is None:
+                        if len(contract.source_kinds) != 1:
+                            raise ArgumentError(f"LLM evidence source-bound failover requires source_kind for {contract.contract_id}")
+                        source_kind = contract.source_kinds[0]
+                    candidate_acquirer = create_autonomous_evidence_source_guard(
+                        candidate_acquirer,
+                        contract=contract,
+                        contract_registry=self.provider_contracts,
+                        adapter_id=adapter_id,
+                        domain=domain,
+                        source_kind=source_kind,
+                        policy=self.source_boundary.policy,
+                        ledger=self.source_boundary.ledger,
+                        describe_source=self.source_boundary.describe_source,
+                    )
+                resilient = create_autonomous_evidence_retrying_acquirer(
+                    candidate_acquirer,
+                    policy=self.policy.retry_policy,
+                    classify=self.classify,
+                    observe=self.observe_attempt,
+                    clock=self.clock,
+                    sleep=self.sleep,
+                )
+                value = resilient.acquire(context)
                 if self.health_store is not None:
                     self.health_store.record_acquisition(
                         adapter_id=adapter_id,
@@ -1260,9 +1363,19 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
                 return value
             except Exception as error:
                 last_error = error
-                failure_class, retryable = _failure_class(error)
+                classified_value = self.classify(error) if self.classify is not None else classify_autonomous_evidence_acquisition_error(error)
+                if isinstance(classified_value, AutonomousEvidenceRetryClassification):
+                    classification = classified_value
+                elif isinstance(classified_value, Mapping):
+                    classification = AutonomousEvidenceRetryClassification(
+                        failure_class=classified_value.get("failure_class", classified_value.get("failureClass")),
+                        retryable=classified_value.get("retryable"),
+                    )
+                else:
+                    raise ArgumentError("LLM evidence failover classifier returned malformed metadata") from error
+                failure_class, retryable = classification.failure_class, classification.retryable
                 remaining = max(0, len(candidates) - candidate_index - 1)
-                can_failover = retryable and candidate_index < self.policy.max_failovers and remaining > 0
+                can_failover = self.policy.retry_policy.permits(classification) and candidate_index < self.policy.max_failovers and remaining > 0
                 if self.health_store is not None:
                     self.health_store.record_acquisition(
                         adapter_id=adapter_id,
@@ -1350,6 +1463,8 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
             "provider_contract_registry_digest": None if self.provider_contracts is None else self.provider_contracts.registry_digest,
             "provider_contracts_enabled": self.provider_contracts is not None,
             "max_failovers": self.policy.max_failovers,
+            "retry_policy": self.policy.retry_policy.to_dict(),
+            "source_boundary": None if self.source_boundary is None else self.source_boundary.to_dict(),
             "domains": list(self.plan.domains),
             "health_recording": self.health_store is not None,
             "execution": "caller_controlled_reviewed_candidate_failover;no_fuzzy_selection",
@@ -1366,6 +1481,11 @@ def create_autonomous_llm_evidence_adapter_failover_acquirer(
     health_store: InMemoryAutonomousLLMEvidenceAdapterHealthStore | None = None,
     observe_failover: Callable[[AutonomousLLMEvidenceFailoverEvent], Any] | None = None,
     provider_contracts: Any | None = None,
+    source_boundary: AutonomousLLMEvidenceSourceBoundary | Mapping[str, Any] | None = None,
+    classify: Callable[[BaseException], AutonomousEvidenceRetryClassification | Mapping[str, Any]] | None = None,
+    observe_attempt: Callable[[AutonomousEvidenceRetryAttempt], Any] | None = None,
+    clock: Callable[[], float] | None = None,
+    sleep: Callable[[int], Any] | None = None,
 ) -> AutonomousLLMEvidenceAdapterFailoverAcquirer:
     return AutonomousLLMEvidenceAdapterFailoverAcquirer(
         registry,
@@ -1374,6 +1494,11 @@ def create_autonomous_llm_evidence_adapter_failover_acquirer(
         health_store=health_store,
         observe_failover=observe_failover,
         provider_contracts=provider_contracts,
+        source_boundary=source_boundary,
+        classify=classify,
+        observe_attempt=observe_attempt,
+        clock=clock,
+        sleep=sleep,
     )
 
 
@@ -1409,6 +1534,7 @@ __all__ = [
     "AutonomousLLMEvidenceAdapterHealthPersistenceCoordinator",
     "AutonomousLLMEvidenceFailoverPolicy",
     "AutonomousLLMEvidenceFailoverEvent",
+    "AutonomousLLMEvidenceSourceBoundary",
     "AutonomousLLMEvidenceAdapterFailoverAcquirer",
     "create_autonomous_llm_evidence_adapter_failover_acquirer",
 ]

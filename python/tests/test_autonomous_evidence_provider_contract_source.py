@@ -14,16 +14,21 @@ from prism_sdk import (
     AutonomousEvidenceSourceLedger,
     AutonomousEvidenceSourceLedgerPersistenceCoordinator,
     AutonomousEvidenceSourcePolicy,
+    AutonomousEvidenceRetryAttempt,
+    AutonomousEvidenceRetryPolicy,
+    AutonomousEvidenceAcquisitionError,
     AutonomousLLMEvidenceAdapter,
     AutonomousLLMEvidenceAdapterRegistry,
     AutonomousLLMEvidenceAdapterSelector,
     AutonomousLLMEvidenceFailoverPolicy,
+    AutonomousLLMEvidenceSourceBoundary,
     JsonAutonomousEvidenceSourceLedgerPersistence,
     LLMRuntime,
     ProviderError,
     TransactionalJsonAutonomousEvidenceSourceLedgerPersistence,
     content_digest,
     create_autonomous_evidence_source_acquirer,
+    create_autonomous_evidence_retrying_acquirer,
     create_autonomous_llm_evidence_adapter,
     create_autonomous_llm_evidence_adapter_failover_acquirer,
 )
@@ -348,3 +353,80 @@ def test_source_ledger_json_and_compare_and_swap_persistence_round_trip() -> Non
     tx_ledger = AutonomousEvidenceSourceLedger(persistence=transactional)
     tx_ledger.append(ledger.records()[0].receipt)
     assert len(transactional.records()) == 1
+
+
+def test_retry_policy_replays_one_route_with_bounded_backoff_and_metadata_only_attempts() -> None:
+    calls = 0
+    delays: list[int] = []
+    observations: list[AutonomousEvidenceRetryAttempt] = []
+
+    class FlakyAcquirer:
+        def acquire(self, _context: dict[str, object]) -> dict[str, str]:
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                raise AutonomousEvidenceAcquisitionError("timeout", True)
+            return {"answer": "ok"}
+
+    wrapped = create_autonomous_evidence_retrying_acquirer(
+        FlakyAcquirer(),
+        policy=AutonomousEvidenceRetryPolicy(max_attempts=3, base_delay_ms=7, max_delay_ms=20),
+        observe=observations.append,
+        sleep=delays.append,
+        clock=lambda: 1000.0,
+    )
+    assert wrapped.acquire({"requirement": {"domain": "science"}, "request": {}}) == {"answer": "ok"}
+    assert calls == 3
+    assert delays == [7, 14]
+    assert [attempt.status for attempt in observations] == ["retrying", "retrying", "succeeded"]
+    assert all(attempt.failure_class in {"timeout", None} for attempt in observations)
+    assert "answer" not in json.dumps([attempt.to_dict() for attempt in observations])
+
+
+def test_failover_applies_source_admission_and_retries_every_domain_candidate() -> None:
+    runtime = LLMRuntime()
+    attempts_by_domain: dict[str, int] = {}
+
+    def handler(request: object) -> dict[str, object]:
+        domain = request.model.removeprefix("fixture-")  # type: ignore[attr-defined]
+        attempts_by_domain[domain] = attempts_by_domain.get(domain, 0) + 1
+        if attempts_by_domain[domain] == 1:
+            raise ProviderError("transient fixture failure", retryable=True)
+        return {"text": json.dumps({"answer": f"recovered-{domain}"})}
+
+    runtime.register_in_memory_provider("contract-fixture", handler)
+    _adapter_registry, contracts = _contracts(runtime)
+    selection = AutonomousLLMEvidenceAdapterSelector(contracts.adapter_registry).select_for_domains(AUTONOMOUS_DOMAINS, capability="llm_evidence")
+    ledger = AutonomousEvidenceSourceLedger()
+    retry_attempts: list[AutonomousEvidenceRetryAttempt] = []
+    policy = AutonomousLLMEvidenceFailoverPolicy(
+        max_failovers=0,
+        retry_policy=AutonomousEvidenceRetryPolicy(max_attempts=2, base_delay_ms=0, max_delay_ms=0),
+    )
+    source_boundary = AutonomousLLMEvidenceSourceBoundary(
+        policy=AutonomousEvidenceSourcePolicy(clock=lambda: 1000.0),
+        ledger=ledger,
+        describe_source=_describe_source,
+    )
+    failover = create_autonomous_llm_evidence_adapter_failover_acquirer(
+        contracts.adapter_registry,
+        selection,
+        policy=policy,
+        provider_contracts=contracts,
+        source_boundary=source_boundary,
+        observe_attempt=retry_attempts.append,
+        sleep=lambda _delay: None,
+    )
+    for domain in AUTONOMOUS_DOMAINS:
+        plan, requirement = _plan(domain)
+        value = failover.acquire({"plan_digest": plan.plan_digest, "requirement": requirement, "request": _request(requirement)})
+        assert value == {"answer": f"recovered-{domain}"}
+
+    assert len(attempts_by_domain) == len(AUTONOMOUS_DOMAINS)
+    assert all(attempts == 2 for attempts in attempts_by_domain.values())
+    assert len(ledger.records()) == len(AUTONOMOUS_DOMAINS)
+    assert len(retry_attempts) == len(AUTONOMOUS_DOMAINS) * 2
+    assert sum(attempt.status == "retrying" for attempt in retry_attempts) == len(AUTONOMOUS_DOMAINS)
+    projection = json.dumps(failover.to_dict())
+    assert "recovered-" not in projection
+    assert "source_boundary" in projection
