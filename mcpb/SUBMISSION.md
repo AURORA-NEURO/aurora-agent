@@ -89,10 +89,11 @@ state, the `.mcpb` already works for anyone you hand it to.
 
 | Surface | State |
 |---|---|
-| Official MCP registry | ✅ live — `io.github.MurariAmbati/aurora-agent` v0.1.1 |
-| GitHub release (this repo) | ✅ v0.1.1 with the `.mcpb` asset |
+| Official MCP registry | ✅ live — `io.github.MurariAmbati/aurora-agent` v0.1.3, pointing at this repo's release asset |
+| GitHub release (this repo) | ✅ v0.1.3 — 4-platform binaries, stamped `.mcpb`, SHA256SUMS, `.vsix` |
 | Mirror release repo | ✅ MurariAmbati/aurora-agent-releases v0.1.0 + v0.1.1 |
 | Claude Code plugin marketplace | ✅ in-repo (`claude plugin marketplace add AURORA-NEURO/aurora-agent`) |
+| VS Code extension | ✅ .vsix on the v0.1.3 release (sideload); Marketplace / Open VSX pending publisher accounts (owner-gated) |
 | Desktop Extensions directory | ⏳ form answers in `DIRECTORY_SUBMISSION.md`; owner submits (Google sign-in) |
 | npm (`aurora-agent-mcp` launcher) | ⏳ package authored in `npm/`; publish needs a granular token with 2FA bypass |
 | punkpeye/awesome-mcp-servers | ⏳ PR #12745 open |
