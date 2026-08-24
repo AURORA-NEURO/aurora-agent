@@ -20,6 +20,7 @@ export const REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01" as const;
 export const WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10" as const;
 export const EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01" as const;
 export const RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02" as const;
+export const INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -363,6 +364,37 @@ export function validateResearchReleaseReceipt(receipt: ResearchReleaseReceipt):
 
 export function researchReleaseReceiptDigest(receipt: ResearchReleaseReceipt): string {
   validateResearchReleaseReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface InstrumentPreflightReceipt {
+  schema_version: string;
+  feature_id: string;
+  run_id: string;
+  study_id: string;
+  decision: "ready" | "blocked" | "requires_approval" | "emergency_stop";
+  ordered_actions: readonly string[];
+  action_digests: Record<string, string>;
+  remaining_budget: Record<string, number>;
+  omissions: readonly string[];
+  reasons: readonly string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateInstrumentPreflightReceipt(receipt: InstrumentPreflightReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (receipt.feature_id !== INSTRUMENT_PREFLIGHT_FEATURE_ID || !receipt.run_id.trim() || !receipt.study_id.trim()) throw new Error("instrument-preflight identity is missing");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!receipt.ordered_actions.length || !Object.keys(receipt.action_digests).length || !receipt.reasons.length) throw new Error("instrument preflight evidence is incomplete");
+  if (new Set(receipt.ordered_actions).size !== receipt.ordered_actions.length || receipt.ordered_actions.some((action) => !(action in receipt.action_digests))) throw new Error("instrument action ordering or digest coverage is invalid");
+  if (Object.values(receipt.action_digests).some((digest) => !/^[0-9a-f]{64}$/.test(digest))) throw new Error("instrument action digest is invalid");
+  if (Object.values(receipt.remaining_budget).some((amount) => !Number.isFinite(amount) || amount < 0)) throw new Error("instrument remaining budget is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("instrument preflight artifact digest is invalid");
+}
+
+export function instrumentPreflightReceiptDigest(receipt: InstrumentPreflightReceipt): string {
+  validateInstrumentPreflightReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

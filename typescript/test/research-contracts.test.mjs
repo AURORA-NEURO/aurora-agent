@@ -38,6 +38,9 @@ import {
   RESEARCH_RELEASE_FEATURE_ID,
   researchReleaseReceiptDigest,
   validateResearchReleaseReceipt,
+  INSTRUMENT_PREFLIGHT_FEATURE_ID,
+  instrumentPreflightReceiptDigest,
+  validateInstrumentPreflightReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -287,4 +290,23 @@ test("research-release receipt preserves localization and provenance", () => {
   };
   assert.doesNotThrow(() => validateResearchReleaseReceipt(receipt));
   assert.equal(researchReleaseReceiptDigest(receipt), researchReleaseReceiptDigest(receipt));
+});
+
+test("instrument preflight receipt preserves no-hardware boundary", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: INSTRUMENT_PREFLIGHT_FEATURE_ID,
+    run_id: "run:instrument-1",
+    study_id: "study:organoid-1",
+    decision: "ready",
+    ordered_actions: ["action-1"],
+    action_digests: { "action-1": "a".repeat(64) },
+    remaining_budget: { minutes: 2 },
+    omissions: [],
+    reasons: ["checks passed; no hardware effect performed"],
+    artifact: { content_hash: "b".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateInstrumentPreflightReceipt(receipt));
+  assert.equal(instrumentPreflightReceiptDigest(receipt), instrumentPreflightReceiptDigest(receipt));
 });

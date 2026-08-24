@@ -25,6 +25,7 @@ REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01"
 WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10"
 EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01"
 RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02"
+INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01"
 
 
 class ResearchContractError(ValueError):
@@ -545,6 +546,64 @@ class ResearchReleaseReceipt:
                 "release_digest": self.release_digest,
                 "omissions": list(self.omissions),
                 "reasons": list(self.reasons),
+                "boundary": self.boundary,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class InstrumentPreflightReceipt:
+    """Transport validator for approval-gated, no-hardware instrument preflight."""
+
+    run_id: str
+    study_id: str
+    decision: str
+    ordered_actions: tuple[str, ...]
+    action_digests: Mapping[str, str]
+    remaining_budget: Mapping[str, float]
+    omissions: tuple[str, ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = INSTRUMENT_PREFLIGHT_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != INSTRUMENT_PREFLIGHT_FEATURE_ID:
+            raise ResearchContractError("instrument-preflight feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.run_id.strip() or not self.study_id.strip():
+            raise ResearchContractError("instrument preflight identity or boundary is invalid")
+        if self.decision not in {"ready", "blocked", "requires_approval", "emergency_stop"}:
+            raise ResearchContractError("instrument preflight decision is unknown")
+        if not self.ordered_actions or not self.action_digests or not self.reasons:
+            raise ResearchContractError("instrument preflight evidence is incomplete")
+        if len(set(self.ordered_actions)) != len(self.ordered_actions) or any(action not in self.action_digests for action in self.ordered_actions):
+            raise ResearchContractError("instrument action ordering or digest coverage is invalid")
+        for digest in self.action_digests.values():
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("instrument action digest is not a canonical sha256")
+        if any(not isinstance(value, (int, float)) or not float(value) == float(value) or value < 0 for value in self.remaining_budget.values()):
+            raise ResearchContractError("instrument remaining budget is invalid")
+        if self.artifact.get("content_hash") is None or not isinstance(self.artifact.get("content_hash"), str) or len(self.artifact["content_hash"]) != 64:
+            raise ResearchContractError("instrument preflight artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest(
+            {
+                "schema_version": self.schema_version,
+                "feature_id": self.feature_id,
+                "run_id": self.run_id,
+                "study_id": self.study_id,
+                "decision": self.decision,
+                "ordered_actions": list(self.ordered_actions),
+                "action_digests": dict(self.action_digests),
+                "remaining_budget": dict(self.remaining_budget),
+                "omissions": list(self.omissions),
+                "reasons": list(self.reasons),
+                "artifact": dict(self.artifact),
                 "boundary": self.boundary,
             }
         )

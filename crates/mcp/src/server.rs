@@ -1805,6 +1805,7 @@ impl Server {
             "evaluation_trajectory_check" => self.evaluation_trajectory_check(&arguments),
             "evaluation_observability_card" => self.evaluation_observability_card(&arguments),
             "research_release_validate" => self.research_release_validate(&arguments),
+            "instrument_preflight" => self.instrument_preflight(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24412,6 +24413,28 @@ impl Server {
         }))
     }
 
+    fn instrument_preflight(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized InstrumentPreflightRequest")?;
+        let receipt = crate::research_contracts::instrument_preflight_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_lab::INSTRUMENT_PREFLIGHT_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "actions are sorted and content-addressed before any physical effect",
+                "missing interlocks, missing evidence, budget overflow, emergency stop, and non-allow policy fail closed",
+                "the route performs no instrument, network, filesystem, or material effect"
+            ],
+            "limitations": [
+                "a ready receipt is a signed-preflight input, not evidence that hardware executed",
+                "actual instrument execution requires a separate institution-local A3 gateway and human authorization"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35815,6 +35838,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "laboratory_integration",
+            "domains": ["instrument preflight", "interlocks", "physical-effect authorization", "protocol evidence"],
+            "crates": ["bioprism-lab", "bioprism-runtime", "bioprism-policy"],
+            "mcp_tools": ["instrument_preflight"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "runtime_execution_and_replay",
             "domains": ["effect authorization", "sandbox posture", "hash-chained replay", "checkpoint verification"],
             "crates": ["bioprism-runtime", "bioprism-trace", "bioprism-store"],
@@ -38106,6 +38137,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "receipt": { "type": "object", "description": "Serialized bioprism-services ResearchReleaseReceipt produced by an authorized local signer." }
                 },
                 "required": ["receipt"]
+            }
+        }),
+        json!({
+            "name": "instrument_preflight",
+            "description": "Run deterministic A3 instrument preflight over a typed action plan. It checks policy, approvals, evidence for non-reversible actions, interlocks, emergency stop, and budgets without reaching hardware.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-lab InstrumentPreflightRequest." }
+                },
+                "required": ["request"]
             }
         }),
         json!({

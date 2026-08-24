@@ -21,6 +21,8 @@ The evaluation-card schema carries cost-normalized metrics, Wilson uncertainty, 
 explicit omissions, and a measurement-only release verdict.
 The research-release schema carries signed content-addressed publication metadata, provenance,
 policy-bound localization, and explicit omissions while keeping raw data local.
+The instrument-preflight schema carries interlock, approval, budget, evidence, and emergency-stop
+decisions without claiming that hardware executed.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.

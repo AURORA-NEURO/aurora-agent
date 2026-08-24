@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/instrument-preflight-receipt.json",
+  "title": "AURORA instrument preflight receipt",
+  "description": "Approval-gated, interlock-aware preclinical instrument plan validation with an explicit no-hardware-effect guarantee.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "run_id", "study_id", "decision", "ordered_actions", "action_digests", "remaining_budget", "omissions", "reasons", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-lab-P11-F01" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "study_id": { "type": "string", "minLength": 1 },
+    "decision": { "enum": ["ready", "blocked", "requires_approval", "emergency_stop"] },
+    "ordered_actions": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "action_digests": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+    "remaining_budget": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0 } },
+    "omissions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

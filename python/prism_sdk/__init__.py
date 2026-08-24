@@ -34,6 +34,8 @@ from .research_contracts import (
     EvaluationCardReceipt,
     RESEARCH_RELEASE_FEATURE_ID,
     ResearchReleaseReceipt,
+    INSTRUMENT_PREFLIGHT_FEATURE_ID,
+    InstrumentPreflightReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

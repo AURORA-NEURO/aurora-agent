@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -230,4 +230,21 @@ def test_research_release_receipt_preserves_localization_and_provenance():
     )
     receipt.validate()
     assert receipt.feature_id == RESEARCH_RELEASE_FEATURE_ID
+    assert receipt.digest() == receipt.digest()
+
+
+def test_instrument_preflight_receipt_preserves_no_hardware_boundary():
+    receipt = InstrumentPreflightReceipt(
+        run_id="run:instrument-1",
+        study_id="study:organoid-1",
+        decision="ready",
+        ordered_actions=("action-1",),
+        action_digests={"action-1": "a" * 64},
+        remaining_budget={"minutes": 2.0},
+        omissions=(),
+        reasons=("checks passed; no hardware effect performed",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == INSTRUMENT_PREFLIGHT_FEATURE_ID
     assert receipt.digest() == receipt.digest()

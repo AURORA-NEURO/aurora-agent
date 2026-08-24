@@ -12,6 +12,10 @@ use bioprism_evalengine::{
     compile_evaluation_card, EvaluationCardReceipt, EvaluationCardRequest,
     EVALUATION_OBSERVABILITY_FEATURE_ID,
 };
+use bioprism_lab::{
+    instrument_preflight, InstrumentPreflightReceipt, InstrumentPreflightRequest,
+    INSTRUMENT_PREFLIGHT_FEATURE_ID,
+};
 use bioprism_services::{ResearchReleaseReceipt, RESEARCH_RELEASE_FEATURE_ID};
 use serde_json::Value;
 
@@ -20,6 +24,7 @@ pub const RESEARCH_COMPILE_TOOL: &str = "aurora_research_compile_evidence";
 pub const WORKFLOW_EXECUTION_TOOL: &str = "runtime_workflow_execute";
 pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
 pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
+pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -85,6 +90,26 @@ pub fn validate_research_release_receipt_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RESEARCH_RELEASE_FEATURE_ID {
         return Err("research-release feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn instrument_preflight_json(value: &Value) -> Result<Value, String> {
+    let request: InstrumentPreflightRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid instrument preflight request: {error}"))?;
+    let receipt = instrument_preflight(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize instrument preflight receipt: {error}"))
+}
+
+pub fn validate_instrument_preflight_receipt_json(
+    value: &Value,
+) -> Result<InstrumentPreflightReceipt, String> {
+    let receipt: InstrumentPreflightReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid instrument preflight receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != INSTRUMENT_PREFLIGHT_FEATURE_ID {
+        return Err("instrument preflight feature id mismatch".into());
     }
     Ok(receipt)
 }

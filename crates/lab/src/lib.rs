@@ -137,6 +137,7 @@ pub mod holdout;
 pub mod hypothesis;
 pub mod pareto;
 pub mod protocol_simulation;
+pub mod instrument_preflight;
 pub mod report;
 pub mod risk;
 pub mod rollback;
@@ -156,6 +157,12 @@ pub use protocol_simulation::{
     simulate_protocol, ProtocolOperation, ProtocolScenario, ProtocolSimulationError,
     ProtocolSimulationPayload, ProtocolSimulationReport, ProtocolSimulationRequest, ProtocolStep,
     ScenarioResult, ScenarioStatus,
+};
+pub use instrument_preflight::{
+    instrument_preflight, instrument_preflight_manifest, InstrumentAction,
+    InstrumentPreflightError, InstrumentPreflightReceipt, InstrumentPreflightRequest,
+    PreflightDecision, FEATURE_CONTRACT_VERSION as INSTRUMENT_PREFLIGHT_FEATURE_VERSION,
+    FEATURE_ID as INSTRUMENT_PREFLIGHT_FEATURE_ID,
 };
 pub use error::{
     EvolutionError, HoldoutError, LabError, ParetoError, RollbackError, SeparationError, SpaceError,
