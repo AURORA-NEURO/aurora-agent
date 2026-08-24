@@ -583,7 +583,9 @@ impl DegradationPlan {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "saturation", rename_all = "snake_case")]
 pub enum Saturation {
-    Within { headroom_calls_per_epoch: f64 },
+    Within {
+        headroom_calls_per_epoch: f64,
+    },
     /// Carries the plan. There is no saturated state without one.
     Saturated {
         excess_calls_per_epoch: f64,
@@ -633,7 +635,11 @@ mod tests {
     #[test]
     fn a_headline_number_cannot_travel_without_what_qualifies_it() {
         let projection = model()
-            .project(&compile_workload(assumed("cost_per_step", 2.0, "work-units/step")))
+            .project(&compile_workload(assumed(
+                "cost_per_step",
+                2.0,
+                "work-units/step",
+            )))
             .expect("projects");
         let headline = projection.sustainable_calls_per_epoch();
         assert!(!headline.is_fully_measured());
@@ -647,30 +653,41 @@ mod tests {
     #[test]
     fn a_projection_over_measured_inputs_says_so_and_one_over_a_guess_does_not() {
         let all_measured = model()
-            .project(&compile_workload(measured("cost_per_step", 2.0, "work-units/step")))
+            .project(&compile_workload(measured(
+                "cost_per_step",
+                2.0,
+                "work-units/step",
+            )))
             .unwrap();
         assert!(all_measured.is_fully_measured());
         assert!(all_measured.utilisation().to_string().contains("measured"));
 
         let one_guess = model()
-            .project(&compile_workload(assumed("cost_per_step", 2.0, "work-units/step")))
+            .project(&compile_workload(assumed(
+                "cost_per_step",
+                2.0,
+                "work-units/step",
+            )))
             .unwrap();
         assert!(!one_guess.is_fully_measured());
     }
 
     #[test]
     fn an_operation_with_no_traversal_bound_has_no_capacity_rather_than_a_large_one() {
-        let workload = Workload::new("graph_query", measured("calls_per_epoch", 10.0, "calls/epoch"))
-            .unwrap()
-            .with(
-                Operation::new(
-                    "transitive_closure",
-                    Bound::Unbounded,
-                    ArtifactHandling::Streamed,
-                    measured("cost_per_step", 1.0, "work-units/step"),
-                )
-                .unwrap(),
-            );
+        let workload = Workload::new(
+            "graph_query",
+            measured("calls_per_epoch", 10.0, "calls/epoch"),
+        )
+        .unwrap()
+        .with(
+            Operation::new(
+                "transitive_closure",
+                Bound::Unbounded,
+                ArtifactHandling::Streamed,
+                measured("cost_per_step", 1.0, "work-units/step"),
+            )
+            .unwrap(),
+        );
         let error = model().project(&workload).unwrap_err();
         match error {
             OpsError::UnboundedWorkload { operation, .. } => {
@@ -744,7 +761,11 @@ mod tests {
     #[test]
     fn saturation_always_carries_the_plan_that_says_what_is_given_up() {
         let projection = model()
-            .project(&compile_workload(measured("cost_per_step", 2.0, "work-units/step")))
+            .project(&compile_workload(measured(
+                "cost_per_step",
+                2.0,
+                "work-units/step",
+            )))
             .unwrap();
         let plan = DegradationPlan::declare(
             "shed",
@@ -780,7 +801,11 @@ mod tests {
     #[test]
     fn utilisation_and_headroom_are_read_off_the_same_stated_quantities() {
         let projection = model()
-            .project(&compile_workload(measured("cost_per_step", 2.0, "work-units/step")))
+            .project(&compile_workload(measured(
+                "cost_per_step",
+                2.0,
+                "work-units/step",
+            )))
             .unwrap();
         assert!((projection.work_per_call().value() - 1000.0).abs() < 1e-9);
         assert!((projection.sustainable_calls_per_epoch().value() - 1000.0).abs() < 1e-9);
@@ -790,7 +815,11 @@ mod tests {
     #[test]
     fn every_assumption_the_projection_rests_on_travels_with_it() {
         let projection = model()
-            .project(&compile_workload(assumed("cost_per_step", 2.0, "work-units/step")))
+            .project(&compile_workload(assumed(
+                "cost_per_step",
+                2.0,
+                "work-units/step",
+            )))
             .unwrap();
         let names: Vec<&str> = projection
             .assumptions()

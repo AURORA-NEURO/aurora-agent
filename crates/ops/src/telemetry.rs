@@ -516,23 +516,20 @@ impl RedactionPolicy {
     ///
     /// Deny by default: a field whose class has no declared treatment is a failure, not an
     /// emission.
-    pub fn project(
-        &self,
-        event: &DomainEvent,
-        trace: TraceId,
-    ) -> Result<Projected, OpsError> {
+    pub fn project(&self, event: &DomainEvent, trace: TraceId) -> Result<Projected, OpsError> {
         let mut attributes = Map::new();
         let mut dropped = Vec::new();
         let mut coarsened = Vec::new();
 
         for (name, field) in &event.fields {
-            let treatment = self.treatments.get(&field.class).ok_or_else(|| {
-                OpsError::RedactionMiss {
-                    field: name.clone(),
-                    class: field.class.as_str().to_string(),
-                    policy: self.version.clone(),
-                }
-            })?;
+            let treatment =
+                self.treatments
+                    .get(&field.class)
+                    .ok_or_else(|| OpsError::RedactionMiss {
+                        field: name.clone(),
+                        class: field.class.as_str().to_string(),
+                        policy: self.version.clone(),
+                    })?;
             match treatment {
                 Treatment::Emit => {
                     attributes.insert(name.clone(), field.value.clone());
@@ -765,7 +762,12 @@ mod tests {
     #[test]
     fn an_asserted_denominator_does_not_support_a_coverage_metric() {
         let observations = Observations::new()
-            .record(Sample::observed(signal("spans_emitted"), 98.0, "counter", 1))
+            .record(Sample::observed(
+                signal("spans_emitted"),
+                98.0,
+                "counter",
+                1,
+            ))
             .record(Sample::asserted(
                 signal("operations_total"),
                 100.0,
@@ -780,7 +782,12 @@ mod tests {
     #[test]
     fn a_metric_value_carries_the_observations_that_support_it() {
         let observations = Observations::new()
-            .record(Sample::observed(signal("spans_emitted"), 98.0, "counter", 1))
+            .record(Sample::observed(
+                signal("spans_emitted"),
+                98.0,
+                "counter",
+                1,
+            ))
             .record(Sample::observed(
                 signal("operations_total"),
                 100.0,
@@ -797,7 +804,12 @@ mod tests {
     fn a_ratio_over_a_zero_denominator_is_indeterminate_rather_than_zero_or_one() {
         let observations = Observations::new()
             .record(Sample::observed(signal("spans_emitted"), 0.0, "counter", 1))
-            .record(Sample::observed(signal("operations_total"), 0.0, "counter", 1));
+            .record(Sample::observed(
+                signal("operations_total"),
+                0.0,
+                "counter",
+                1,
+            ));
         let error = coverage().evaluate(&observations).unwrap_err();
         assert!(matches!(error, OpsError::IndeterminateMetric { .. }));
     }
@@ -823,7 +835,12 @@ mod tests {
     #[test]
     fn an_ops_metric_enters_the_safety_audit_log_asserted_because_its_observation_set_is_closed() {
         let observations = Observations::new()
-            .record(Sample::observed(signal("spans_emitted"), 98.0, "counter", 1))
+            .record(Sample::observed(
+                signal("spans_emitted"),
+                98.0,
+                "counter",
+                1,
+            ))
             .record(Sample::observed(
                 signal("operations_total"),
                 100.0,
@@ -941,17 +958,12 @@ mod tests {
         );
         assert_eq!(batch.correlated(&trace).len(), 2);
         assert_eq!(batch.by_event("evt-1").unwrap().event_id(), "evt-1");
-        assert_ne!(
-            batch.records()[0].event_id(),
-            batch.records()[1].event_id()
-        );
+        assert_ne!(batch.records()[0].event_id(), batch.records()[1].event_id());
     }
 
     #[test]
     fn a_record_correlated_with_an_event_it_does_not_project_is_a_typed_mismatch() {
-        let projected = policy()
-            .project(&event(), TraceId::new("trace-a"))
-            .unwrap();
+        let projected = policy().project(&event(), TraceId::new("trace-a")).unwrap();
         assert!(projected.record.check_projects(&event()).is_ok());
         let error = projected
             .record

@@ -60,6 +60,8 @@ FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID = "AFA-atlashub-P02-F12"
 FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION = "federated-continual-retrieval-copilot/1.0"
 CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID = "AFA-devplat-P03-F28"
 CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION = "federated-context-compilation-assurance/1.0"
+KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID = "AFA-ops-P04-F28"
+KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION = "federated-knowledge-representation-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -1755,6 +1757,59 @@ class ContextCompilationAssuranceReceipt:
             "federation_id": self.federation_id,
             "query_id": self.query_id,
             "resolved_context_ids": list(self.resolved_context_ids),
+            "disposition": self.disposition,
+            "evidence_receipt_digest": self.evidence_receipt_digest,
+            "checks": list(self.checks),
+            "omissions": list(self.omissions),
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class KnowledgeRepresentationAssuranceReceipt:
+    """Transport validator for omission-aware federated knowledge projections."""
+
+    request_id: str
+    federation_id: str
+    query_id: str
+    resolved_fact_ids: tuple[str, ...]
+    disposition: str
+    evidence_receipt_digest: str | None
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID
+    contract_version: str = KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID or self.contract_version != KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("knowledge representation assurance feature or contract mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.federation_id.strip() or not self.query_id.strip():
+            raise ResearchContractError("knowledge representation assurance identity or boundary is invalid")
+        if not self.resolved_fact_ids or len(set(self.resolved_fact_ids)) != len(self.resolved_fact_ids):
+            raise ResearchContractError("knowledge representation fact identities are not unique")
+        if self.disposition not in {"passed", "blocked", "unknown"} or not self.checks:
+            raise ResearchContractError("knowledge representation disposition and checks are required")
+        if self.evidence_receipt_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.evidence_receipt_digest):
+            raise ResearchContractError("knowledge representation evidence digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("knowledge representation artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "query_id": self.query_id,
+            "resolved_fact_ids": list(self.resolved_fact_ids),
             "disposition": self.disposition,
             "evidence_receipt_digest": self.evidence_receipt_digest,
             "checks": list(self.checks),

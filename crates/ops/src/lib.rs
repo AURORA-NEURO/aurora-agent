@@ -294,6 +294,7 @@ pub mod config;
 pub mod error;
 pub mod flags;
 pub mod hardening;
+pub mod knowledge_representation_assurance;
 pub mod telemetry;
 
 pub use alpha::{AlphaSummary, Basis, Criterion, Finding, Verdict};
@@ -315,10 +316,16 @@ pub use hardening::{
     audit_credentials, coverage, AmbientFinding, ControlCoverage, ControlOwner, CredentialAudit,
     Effect, EffectDeclaration,
 };
+pub use knowledge_representation_assurance::{
+    assure_knowledge_representation, KnowledgeAssuranceDisposition, KnowledgeAssuranceError,
+    KnowledgeRepresentationAssuranceReceipt, KnowledgeRepresentationAssuranceRequest,
+    CONTRACT_VERSION as KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+};
 pub use telemetry::{
     audit_statement, Derivation, DomainEvent, ExportBatch, Field, LabelBudget, MetricDefinition,
-    MetricValue, Observations, Projected, RedactionPolicy, Sample, Sampling, SemanticLoss, SignalId,
-    TelemetryRecord, TraceId, Treatment,
+    MetricValue, Observations, Projected, RedactionPolicy, Sample, Sampling, SemanticLoss,
+    SignalId, TelemetryRecord, TraceId, Treatment,
 };
 
 /// The share of §40's 45 modules that is template rather than content.

@@ -118,6 +118,10 @@ import {
   CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
   contextCompilationAssuranceReceiptDigest,
   validateContextCompilationAssuranceReceipt,
+  KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+  KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
+  knowledgeRepresentationAssuranceReceiptDigest,
+  validateKnowledgeRepresentationAssuranceReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -833,4 +837,24 @@ test("context compilation keeps missing context unknown", () => {
   };
   assert.doesNotThrow(() => validateContextCompilationAssuranceReceipt(receipt));
   assert.equal(contextCompilationAssuranceReceiptDigest(receipt), contextCompilationAssuranceReceiptDigest(receipt));
+});
+
+test("knowledge representation keeps missing fact unknown", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+    contract_version: KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
+    request_id: "request:knowledge",
+    federation_id: "federation:knowledge",
+    query_id: "query:mechanism",
+    resolved_fact_ids: ["fact:a"],
+    disposition: "unknown",
+    evidence_receipt_digest: null,
+    checks: ["incomplete representation remains unknown rather than asserted"],
+    omissions: ["required fact unavailable: fact:b"],
+    artifact: { content_hash: "b".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateKnowledgeRepresentationAssuranceReceipt(receipt));
+  assert.equal(knowledgeRepresentationAssuranceReceiptDigest(receipt), knowledgeRepresentationAssuranceReceiptDigest(receipt));
 });

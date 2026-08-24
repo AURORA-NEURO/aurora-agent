@@ -54,6 +54,10 @@ use bioprism_obligation::{
     assess_release_harness, ReleaseHarnessReceipt, ReleaseHarnessRequest,
     RELEASE_HARNESS_FEATURE_ID,
 };
+use bioprism_ops::{
+    assure_knowledge_representation, KnowledgeRepresentationAssuranceReceipt,
+    KnowledgeRepresentationAssuranceRequest, KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+};
 use bioprism_policy::{
     admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest, AUTONOMY_BATCH_FEATURE_ID,
 };
@@ -108,6 +112,8 @@ pub const SEMANTIC_PARITY_TOOL: &str = "lab_semantic_parity";
 pub const FEDERATED_RETRIEVAL_ASSURANCE_TOOL: &str = "federated_retrieval_assurance";
 pub const FEDERATED_CONTINUAL_RETRIEVAL_TOOL: &str = "federated_continual_retrieval_copilot";
 pub const CONTEXT_COMPILATION_ASSURANCE_TOOL: &str = "federated_context_compilation_assurance";
+pub const KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL: &str =
+    "federated_knowledge_representation_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -627,6 +633,27 @@ pub fn validate_context_compilation_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID {
         return Err("context compilation assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_knowledge_representation_json(value: &Value) -> Result<Value, String> {
+    let request: KnowledgeRepresentationAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid knowledge representation assurance request: {error}"))?;
+    let receipt = assure_knowledge_representation(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize knowledge representation assurance receipt: {error}")
+    })
+}
+
+pub fn validate_knowledge_representation_assurance_json(
+    value: &Value,
+) -> Result<KnowledgeRepresentationAssuranceReceipt, String> {
+    let receipt: KnowledgeRepresentationAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid knowledge representation assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID {
+        return Err("knowledge representation assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

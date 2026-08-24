@@ -54,6 +54,8 @@ export const FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID = "AFA-atlashub-P02-F12" a
 export const FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION = "federated-continual-retrieval-copilot/1.0" as const;
 export const CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID = "AFA-devplat-P03-F28" as const;
 export const CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION = "federated-context-compilation-assurance/1.0" as const;
+export const KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID = "AFA-ops-P04-F28" as const;
+export const KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION = "federated-knowledge-representation-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1073,6 +1075,36 @@ export function validateContextCompilationAssuranceReceipt(receipt: ContextCompi
 
 export function contextCompilationAssuranceReceiptDigest(receipt: ContextCompilationAssuranceReceipt): string {
   validateContextCompilationAssuranceReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface KnowledgeRepresentationAssuranceReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  federation_id: string;
+  query_id: string;
+  resolved_fact_ids: string[];
+  disposition: "passed" | "blocked" | "unknown";
+  evidence_receipt_digest: string | null;
+  checks: string[];
+  omissions: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateKnowledgeRepresentationAssuranceReceipt(receipt: KnowledgeRepresentationAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID || receipt.contract_version !== KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION) throw new Error("knowledge representation assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.query_id.trim() || receipt.checks.length === 0) throw new Error("knowledge representation assurance identity, boundary, or checks are incomplete");
+  if (!receipt.resolved_fact_ids.length || JSON.stringify([...new Set(receipt.resolved_fact_ids)].sort()) !== JSON.stringify(receipt.resolved_fact_ids)) throw new Error("knowledge representation fact identities are invalid");
+  if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition)) throw new Error("knowledge representation disposition is unknown");
+  if (receipt.evidence_receipt_digest !== null && !/^[0-9a-f]{64}$/.test(receipt.evidence_receipt_digest)) throw new Error("knowledge representation evidence digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("knowledge representation artifact digest is invalid");
+}
+
+export function knowledgeRepresentationAssuranceReceiptDigest(receipt: KnowledgeRepresentationAssuranceReceipt): string {
+  validateKnowledgeRepresentationAssuranceReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

@@ -143,9 +143,7 @@ pub enum OpsError {
 
     /// An author labelled a flag change compatible when the change moves emitted artifacts. The
     /// same shape as `bioprism_governance::DigestBreach`, in the currency of feature flags.
-    #[error(
-        "change to flag {flag:?} was declared {declared} and is {derived}: {reason}"
-    )]
+    #[error("change to flag {flag:?} was declared {declared} and is {derived}: {reason}")]
     FlagChangeMisclassified {
         flag: String,
         declared: String,
@@ -432,6 +430,9 @@ mod tests {
     fn a_name_with_interior_whitespace_is_rejected_rather_than_normalised() {
         assert!(well_formed_name("flag", "graph compiled").is_err());
         assert!(well_formed_name("flag", " trimmed").is_err());
-        assert_eq!(well_formed_name("flag", "graph.compiled").unwrap(), "graph.compiled");
+        assert_eq!(
+            well_formed_name("flag", "graph.compiled").unwrap(),
+            "graph.compiled"
+        );
     }
 }
