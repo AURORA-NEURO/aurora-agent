@@ -100,6 +100,10 @@ import type {
   AutonomousEvidenceExecutionResumableRun,
 } from "./autonomous-evidence-execution-resumable.js";
 import type {
+  AutonomousDomainEvidenceBrainRunOptions,
+  AutonomousDomainEvidenceBrainRunResult,
+} from "./autonomous-domain-evidence-brain.js";
+import type {
   AutonomousEpisodicMemoryStore,
   AutonomousMemoryEpisode,
   AutonomousMemoryQuery,
@@ -5601,6 +5605,20 @@ export class AutonomousAgent {
       run = await this.run(taskText, { ...runOptions, context });
     }
     return finish(run.status, evidence, projectedContext, run);
+  }
+
+  /**
+   * Run the catalogue-backed evidence brain lifecycle. The source catalogue owns route and
+   * normalizer identity; this facade owns prompt assembly, model selection, provider invocation,
+   * memory, and optional online-learning feedback. Source approval and provider approval remain
+   * independent, and the default prompt contains metadata-only evidence projections.
+   */
+  async runWithDomainEvidenceCatalogue(
+    task: string,
+    options: AutonomousDomainEvidenceBrainRunOptions,
+  ): Promise<AutonomousDomainEvidenceBrainRunResult> {
+    const { runAutonomousDomainEvidenceBacked } = await import("./autonomous-domain-evidence-brain.js");
+    return runAutonomousDomainEvidenceBacked(this, task, options);
   }
 
   async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number } = {}): Promise<AutonomousAutoBlueprint> {

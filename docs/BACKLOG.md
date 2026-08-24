@@ -363,6 +363,15 @@ plans fail closed when the registry changes. Claim projections retain only opera
 shape/count/byte metadata, transient value and shape digests, and explicit limitations; unsafe
 normalizer output and same-spec callback replacement are rejected before quorum.
 
+The catalogue is now a first-class brain input through TypeScript
+`AutonomousAgent.runWithDomainEvidenceCatalogue()`. It composes all selected workflow evidence
+requirements into digest-bound catalogue reconciliations, applies bounded parallel source
+dispatch, uses the built-in normalizer registry, and feeds a metadata-only evidence context into
+the ordinary routing/prompt/model/provider path. Source approval, evidence settlement, provider
+approval, and optional learning remain independent. A caller-owned prompt builder may explicitly
+bridge transient values, while the result projection remains digest-only and rejects catalogue,
+route, profile, or normalizer drift before dispatch.
+
 The TypeScript SDK now also exposes `registerAutonomousDomainHttpEvidenceSource`, which composes
 the bounded HTTP transport with a typed domain source profile and catalogue route. It binds optional
 adapter manifests, source/provider identities, endpoint/request/header resolvers, and explicit

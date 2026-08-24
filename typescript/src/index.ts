@@ -1060,6 +1060,26 @@ export {
   domainEvidenceRequestIdentity,
 } from "./autonomous-domain-evidence-catalogue.js";
 export {
+  AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_RUN_SCHEMA,
+  AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_CONTEXT_SCHEMA,
+  MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_REQUIREMENTS,
+  MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_PARALLEL_REQUIREMENTS,
+  MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_CONTEXT_BYTES,
+  MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_RESULT_BYTES,
+  runAutonomousDomainEvidenceBacked,
+} from "./autonomous-domain-evidence-brain.js";
+export type {
+  AutonomousDomainEvidenceBrainStatus,
+  AutonomousDomainEvidenceBrainPreparation,
+  AutonomousDomainEvidenceBrainPromptProjection,
+  AutonomousDomainEvidenceBrainPromptBuilder,
+  AutonomousDomainEvidenceBrainPreflight,
+  AutonomousDomainEvidenceBrainPreflightHook,
+  AutonomousDomainEvidenceBrainRunOptions,
+  AutonomousDomainEvidenceBrainRunProjection,
+  AutonomousDomainEvidenceBrainRunResult,
+} from "./autonomous-domain-evidence-brain.js";
+export {
   AUTONOMOUS_DOMAIN_HTTP_SOURCE_SCHEMA,
   MAX_AUTONOMOUS_DOMAIN_HTTP_SOURCE_METADATA_BYTES,
   registerAutonomousDomainHttpEvidenceSource,

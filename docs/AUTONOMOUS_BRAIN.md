@@ -967,6 +967,37 @@ a normalizer after preparation causes execution to stop before source dispatch. 
 register a custom normalizer for a custom profile, but the callback remains process-local and its
 output must stay within the SDK's JSON, depth, byte, and credential-shaped-field bounds.
 
+The TypeScript catalogue can now be composed directly into the autonomous brain through
+`AutonomousAgent.runWithDomainEvidenceCatalogue()`. The method compiles the selected domain
+workflows into one evidence plan, prepares one digest-bound catalogue reconciliation per required
+output, executes those reconciliations with bounded parallelism, and then passes the resulting
+metadata into the ordinary route, prompt, model-selection, provider, memory, and optional learning
+path. Source dispatch approval and provider approval remain separate. The default prompt contains
+only source/result digests, normalized-claim metadata, evaluator posture, and limitations; a
+caller-owned `promptBuilder` receives transient values when an application explicitly needs to
+format them into the provider prompt. The returned result keeps typed reconciliation objects
+available transiently while `toJSON()` excludes values, prompt text, and provider output:
+
+```ts
+const result = await agent.runWithDomainEvidenceCatalogue(task, {
+  catalogue,
+  domains: ["science", "data"],
+  execute: { approveSourceDispatch: true },
+  promptBuilder: ({ values }) => buildCallerOwnedEvidencePrompt(values),
+  run: {
+    candidates: callerOwnedModels,
+    approveProviderCall: true,
+    learning: callerOwnedLearningController,
+  },
+});
+```
+
+Every route and normalizer identity is rechecked before source dispatch. A disagreement,
+insufficient quorum, or failed source blocks the provider by default; `allowIncompleteEvidence`
+is an explicit opt-in and does not convert the evidence into a truth or evaluator verdict. The
+bridge is provider-neutral and remains keyless: applications supply their own route acquirers,
+credential sessions, prompt formatting, evaluator authority, and persistence/replay adapters.
+
 The connector registry remains provider-neutral, but applications that need a real external
 evidence call can now compose the same reviewed registration with a policy-gated HTTP executor.
 `create_autonomous_http_connector_executor()` exists in both SDKs. It takes a caller-owned endpoint
