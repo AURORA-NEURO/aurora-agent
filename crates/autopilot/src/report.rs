@@ -22,10 +22,10 @@ pub const AUTOPILOT_REPORT_SCHEMA_VERSION: &str = "bioprism-autopilot/report/0.1
 
 /// The limitations every report must carry. Verification refuses a report missing any of them.
 pub const REQUIRED_LIMITATIONS: [&str; 4] = [
-    "no scheduling or recurrence: the drive runs to a stop state in one call and nothing wakes up later",
+    "no recurrence: the drive runs one mission to a stop state and never repeats a completed mission",
     "no MCP tool exposure: the autopilot is not an MCP tool and registers nothing with the server",
     "metadata-only cross-process resume: checkpoints retain digests and bounded status metadata, while callers must rehydrate private mission and report material",
-    "wall-clock deadlines are unsupported: retryable-as-is failures are re-dispatched immediately or not at all, with no waiting or backoff",
+    "wall-clock ownership and deadlines remain caller-owned: a grant may authorize logical-tick retry backoff, but the wait seam and deadline policy live outside the kernel",
 ];
 
 const ADDITIONAL_LIMITATIONS: [&str; 4] = [

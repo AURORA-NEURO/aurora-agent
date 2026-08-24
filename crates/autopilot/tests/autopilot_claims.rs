@@ -4,7 +4,8 @@
 
 use bioprism_autopilot::{
     build_autopilot_report, classify_step_result, drive_instantiation, drive_mission,
-    drive_mission_with_checkpoint, plan_next_action, preview_first_action,
+    drive_mission_with_checkpoint, drive_mission_with_schedule, plan_next_action,
+    preview_first_action,
     resume_mission_with_checkpoint, seal_autopilot_checkpoint, validate_autopilot_checkpoint,
     verify_autopilot_report, AttemptKind, AttemptRecord, AutonomyGrant, AutopilotCheckpointStore,
     AutopilotCheckpointPersistence, AutopilotError, DriveHistory, FinalDisposition, FinalStatus,
@@ -12,7 +13,7 @@ use bioprism_autopilot::{
     NextAction, RetryClass, StepClass, TransactionalAutopilotCheckpointPersistence,
     TransactionalAutopilotCheckpointPersistenceCoordinator,
     TransactionalAutopilotCheckpointStore, TransactionalJsonAutopilotCheckpointPersistence,
-    REQUIRED_LIMITATIONS,
+    RetrySchedule, REQUIRED_LIMITATIONS,
 };
 use bioprism_devplat::{
     plan_mission, MissionReport, MissionRequest, MissionStepResult, MISSION_SCHEMA_VERSION,
@@ -392,6 +393,47 @@ mod grant {
         assert!(!grant.retry().unknown());
         assert!(!grant.allow_side_effects());
         assert!(grant.require_reconciliation_complete());
+        assert_eq!(grant.schedule().retry_base_delay(), 0);
+        assert_eq!(grant.schedule().retry_max_delay(), 0);
+    }
+
+    #[test]
+    fn a_retry_schedule_is_explicit_bounded_and_exponentially_capped() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a"],
+            "max_attempts": 4,
+            "schedule": { "retry_base_delay": 2, "retry_max_delay": 5 },
+        }));
+        assert_eq!(grant.schedule().delay_for_retry(0), 0);
+        assert_eq!(grant.schedule().delay_for_retry(1), 2);
+        assert_eq!(grant.schedule().delay_for_retry(2), 4);
+        assert_eq!(grant.schedule().delay_for_retry(3), 5);
+        assert_eq!(grant.schedule().delay_for_retry(usize::MAX), 5);
+        let round_trip: RetrySchedule = serde_json::from_value::<AutonomyGrant>(json!({
+            "allowed_tools": ["tool_a"],
+            "max_attempts": 4,
+            "schedule": { "retry_base_delay": 2, "retry_max_delay": 5 },
+        }))
+        .unwrap()
+        .schedule()
+        .to_owned();
+        assert_eq!(round_trip, *grant.schedule());
+    }
+
+    #[test]
+    fn an_invalid_retry_schedule_is_refused_before_dispatch_authority_exists() {
+        for schedule in [
+            json!({ "retry_base_delay": 5, "retry_max_delay": 4 }),
+            json!({ "retry_base_delay": 0, "retry_max_delay": 1 }),
+            json!({ "retry_base_delay": 31_536_001, "retry_max_delay": 31_536_001 }),
+        ] {
+            let error = grant_error(json!({
+                "allowed_tools": ["tool_a"],
+                "max_attempts": 3,
+                "schedule": schedule,
+            }));
+            assert!(error.contains("retry schedule is invalid"), "{error}");
+        }
     }
 
     #[test]
@@ -1388,6 +1430,93 @@ mod drive {
             outcome.report["first_terminal_refusal"]["step_id"],
             json!("b")
         );
+    }
+
+    #[test]
+    fn the_drive_waits_only_before_authorized_repairs_and_caps_backoff() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a", "tool_b", "tool_c"],
+            "max_attempts": 4,
+            "require_reconciliation_complete": false,
+            "schedule": { "retry_base_delay": 3, "retry_max_delay": 5 },
+        }));
+        let mut waits = Vec::new();
+        let mut calls = 0;
+        let outcome = {
+            let mut dispatcher = |mission: &Value| -> Result<Value, String> {
+                calls += 1;
+                if calls == 1 {
+                    Ok(report_for(
+                        mission,
+                        vec![
+                            ok_result("a", "tool_a", Some(&json!({ "value": 7 }))),
+                            refused_tool("b", "tool_b", &declared_as_is_text()),
+                            blocked_result("c", "tool_c"),
+                        ],
+                        None,
+                    ))
+                } else {
+                    Ok(report_for(
+                        mission,
+                        vec![
+                            ok_result("b", "tool_b", Some(&json!({ "done": true }))),
+                            ok_result("c", "tool_c", Some(&json!({ "done": true }))),
+                        ],
+                        None,
+                    ))
+                }
+            };
+            drive_mission_with_schedule(
+                &grant,
+                three_step_mission(),
+                &mut dispatcher,
+                |delay| {
+                    waits.push(delay);
+                    Ok(())
+                },
+                |_history| Ok(()),
+            )
+            .unwrap()
+        };
+        assert_eq!(outcome.final_status, FinalStatus::Succeeded);
+        assert_eq!(calls, 2);
+        assert_eq!(waits, vec![3]);
+    }
+
+    #[test]
+    fn a_wait_failure_stops_before_the_repair_dispatch() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a", "tool_b", "tool_c"],
+            "max_attempts": 4,
+            "require_reconciliation_complete": false,
+            "schedule": { "retry_base_delay": 7, "retry_max_delay": 7 },
+        }));
+        let mut calls = 0;
+        let error = {
+            let mut dispatcher = |mission: &Value| -> Result<Value, String> {
+                calls += 1;
+                Ok(report_for(
+                    mission,
+                    vec![
+                        ok_result("a", "tool_a", Some(&json!({ "value": 7 }))),
+                        refused_tool("b", "tool_b", &declared_as_is_text()),
+                        blocked_result("c", "tool_c"),
+                    ],
+                    None,
+                ))
+            };
+            drive_mission_with_schedule(
+                &grant,
+                three_step_mission(),
+                &mut dispatcher,
+                |_delay| Err("worker shutdown".into()),
+                |_history| Ok(()),
+            )
+            .expect_err("wait failure must not be swallowed");
+            error
+        };
+        assert_eq!(calls, 1);
+        assert_eq!(error, AutopilotError::Scheduling { reason: "worker shutdown".into() });
     }
 }
 

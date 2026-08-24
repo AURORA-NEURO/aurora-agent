@@ -18,6 +18,7 @@
 //! field is an authority document the author misread.
 
 use crate::error::GrantError;
+use crate::schedule::{RetrySchedule, RetryScheduleDocument};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +77,11 @@ pub struct AutonomyGrantDocument {
     pub max_attempts: usize,
     #[serde(default)]
     pub retry: RetryPolicyDocument,
+    /// Deterministic caller-clock delay before authorized repair dispatches. Zero preserves
+    /// immediate retry behavior; the schedule never grants a retry class the `retry` policy did
+    /// not already authorize.
+    #[serde(default)]
+    pub schedule: RetryScheduleDocument,
     /// Require a reconciliation record with `complete` completion and valid integrity before the
     /// drive may report success. On by default: a mission report alone shows the executor's own
     /// accounting, while reconciliation checks it against the instantiated workflow contract.
@@ -118,6 +124,7 @@ pub struct AutonomyGrant {
     allow_side_effects: bool,
     max_attempts: usize,
     retry: RetryPolicy,
+    schedule: RetrySchedule,
     require_reconciliation_complete: bool,
 }
 
@@ -162,6 +169,7 @@ impl TryFrom<AutonomyGrantDocument> for AutonomyGrant {
         if !document.stop_on_first_success {
             return Err(GrantError::UnsupportedStopOption);
         }
+        let schedule = RetrySchedule::try_from(document.schedule)?;
         Ok(AutonomyGrant {
             allowed_tools: document.allowed_tools,
             allow_side_effects: document.allow_side_effects,
@@ -171,6 +179,7 @@ impl TryFrom<AutonomyGrantDocument> for AutonomyGrant {
                 retry_retryable_after_change: document.retry.retry_retryable_after_change,
                 retry_unknown: document.retry.retry_unknown,
             },
+            schedule,
             require_reconciliation_complete: document.require_reconciliation_complete,
         })
     }
@@ -187,6 +196,7 @@ impl From<AutonomyGrant> for AutonomyGrantDocument {
                 retry_retryable_after_change: grant.retry.retry_retryable_after_change,
                 retry_unknown: grant.retry.retry_unknown,
             },
+            schedule: grant.schedule.into(),
             require_reconciliation_complete: grant.require_reconciliation_complete,
             stop_on_first_success: true,
         }
@@ -208,6 +218,10 @@ impl AutonomyGrant {
 
     pub fn retry(&self) -> &RetryPolicy {
         &self.retry
+    }
+
+    pub fn schedule(&self) -> &RetrySchedule {
+        &self.schedule
     }
 
     pub fn require_reconciliation_complete(&self) -> bool {

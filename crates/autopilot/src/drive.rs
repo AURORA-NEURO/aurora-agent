@@ -30,6 +30,7 @@ use crate::history::{AttemptKind, AttemptRecord, DriveHistory};
 use crate::persistence::restore_drive_history;
 use crate::planner::{never_dispatched_rows, plan_next_action, NextAction};
 use crate::report::{build_autopilot_report, FinalDisposition, FinalStatus};
+use crate::schedule::AutopilotWait;
 use bioprism_devplat::reconcile_domain_workflow;
 use serde_json::{json, Value};
 
@@ -163,11 +164,16 @@ fn reconciliation_unavailable_accounting(grant: &AutonomyGrant, history: &DriveH
     })
 }
 
-fn drive_loop<D: MissionDispatch, C: FnMut(&DriveHistory) -> Result<(), AutopilotError>>(
+fn drive_loop<
+    D: MissionDispatch,
+    W: AutopilotWait,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+>(
     grant: &AutonomyGrant,
     mut history: DriveHistory,
     instantiation: Option<&Value>,
     dispatcher: &mut D,
+    waiter: &mut W,
     checkpoint: &mut C,
 ) -> Result<DriveOutcome, AutopilotError> {
     let disposition = loop {
@@ -190,6 +196,12 @@ fn drive_loop<D: MissionDispatch, C: FnMut(&DriveHistory) -> Result<(), Autopilo
                 checkpoint(&history)?;
             }
             NextAction::DispatchRepair { mission, .. } => {
+                let delay = grant.schedule().delay_for_retry(history.dispatches_used());
+                if delay > 0 {
+                    waiter
+                        .wait_for(delay)
+                        .map_err(|reason| AutopilotError::Scheduling { reason })?;
+                }
                 dispatch_once(
                     AttemptKind::Repair,
                     mission,
@@ -225,6 +237,10 @@ fn no_checkpoint(_: &DriveHistory) -> Result<(), AutopilotError> {
     Ok(())
 }
 
+fn no_wait(_: u64) -> Result<(), String> {
+    Ok(())
+}
+
 fn dispatch_once<D: MissionDispatch>(
     kind: AttemptKind,
     mission: Value,
@@ -251,7 +267,7 @@ pub fn drive_mission<D: MissionDispatch>(
     base_mission: Value,
     dispatcher: &mut D,
 ) -> Result<DriveOutcome, AutopilotError> {
-    drive_mission_with_checkpoint(grant, base_mission, dispatcher, no_checkpoint)
+    drive_mission_with_schedule(grant, base_mission, dispatcher, no_wait, no_checkpoint)
 }
 
 /// Drive a bare mission while giving the caller a durable-history hook after every delivered or
@@ -267,8 +283,33 @@ where
     D: MissionDispatch,
     C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
 {
+    drive_mission_with_schedule(grant, base_mission, dispatcher, no_wait, checkpoint)
+}
+
+/// Drive a bare mission while applying the grant's deterministic repair backoff. The caller owns
+/// the wait implementation (sleep, queue handoff, or virtual clock) and receives a checkpoint
+/// after every appended attempt.
+pub fn drive_mission_with_schedule<D, W, C>(
+    grant: &AutonomyGrant,
+    base_mission: Value,
+    dispatcher: &mut D,
+    mut waiter: W,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    W: AutopilotWait,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
     let history = DriveHistory::new(base_mission)?;
-    drive_loop(grant, history, None, dispatcher, &mut checkpoint)
+    drive_loop(
+        grant,
+        history,
+        None,
+        dispatcher,
+        &mut waiter,
+        &mut checkpoint,
+    )
 }
 
 /// Resume a bare mission from a validated metadata-only checkpoint. The original mission and
@@ -286,8 +327,41 @@ where
     D: MissionDispatch,
     C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
 {
+    resume_mission_with_schedule(
+        grant,
+        checkpoint_snapshot,
+        base_mission,
+        attempts,
+        dispatcher,
+        no_wait,
+        checkpoint,
+    )
+}
+
+/// Resume a bare mission while applying the grant's repair backoff schedule.
+pub fn resume_mission_with_schedule<D, W, C>(
+    grant: &AutonomyGrant,
+    checkpoint_snapshot: &Value,
+    base_mission: Value,
+    attempts: Vec<AttemptRecord>,
+    dispatcher: &mut D,
+    mut waiter: W,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    W: AutopilotWait,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
     let history = restore_drive_history(grant, checkpoint_snapshot, base_mission, attempts)?;
-    drive_loop(grant, history, None, dispatcher, &mut checkpoint)
+    drive_loop(
+        grant,
+        history,
+        None,
+        dispatcher,
+        &mut waiter,
+        &mut checkpoint,
+    )
 }
 
 /// Drive the mission carried by a workflow instantiation artifact.
@@ -300,7 +374,7 @@ pub fn drive_instantiation<D: MissionDispatch>(
     instantiation: &Value,
     dispatcher: &mut D,
 ) -> Result<DriveOutcome, AutopilotError> {
-    drive_instantiation_with_checkpoint(grant, instantiation, dispatcher, no_checkpoint)
+    drive_instantiation_with_schedule(grant, instantiation, dispatcher, no_wait, no_checkpoint)
 }
 
 /// Drive an accepted instantiation while checkpointing after each dispatch.
@@ -314,6 +388,22 @@ where
     D: MissionDispatch,
     C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
 {
+    drive_instantiation_with_schedule(grant, instantiation, dispatcher, no_wait, checkpoint)
+}
+
+/// Drive an accepted instantiation with the grant's deterministic repair backoff schedule.
+pub fn drive_instantiation_with_schedule<D, W, C>(
+    grant: &AutonomyGrant,
+    instantiation: &Value,
+    dispatcher: &mut D,
+    mut waiter: W,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    W: AutopilotWait,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
     let base_mission = instantiation_mission(instantiation)?;
     let history = DriveHistory::new(base_mission)?;
     drive_loop(
@@ -321,6 +411,7 @@ where
         history,
         Some(instantiation),
         dispatcher,
+        &mut waiter,
         &mut checkpoint,
     )
 }
@@ -339,6 +430,32 @@ where
     D: MissionDispatch,
     C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
 {
+    resume_instantiation_with_schedule(
+        grant,
+        checkpoint_snapshot,
+        instantiation,
+        attempts,
+        dispatcher,
+        no_wait,
+        checkpoint,
+    )
+}
+
+/// Resume an accepted instantiation with the grant's deterministic repair backoff schedule.
+pub fn resume_instantiation_with_schedule<D, W, C>(
+    grant: &AutonomyGrant,
+    checkpoint_snapshot: &Value,
+    instantiation: &Value,
+    attempts: Vec<AttemptRecord>,
+    dispatcher: &mut D,
+    mut waiter: W,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    W: AutopilotWait,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
     let base_mission = instantiation_mission(instantiation)?;
     let history = restore_drive_history(grant, checkpoint_snapshot, base_mission, attempts)?;
     drive_loop(
@@ -346,6 +463,7 @@ where
         history,
         Some(instantiation),
         dispatcher,
+        &mut waiter,
         &mut checkpoint,
     )
 }

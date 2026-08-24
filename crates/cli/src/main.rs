@@ -27,7 +27,7 @@ use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed,
 use bioprism_autopilot::{
     drive::instantiation_mission, drive_instantiation, preview_first_action,
     verify_autopilot_report, AutonomyGrant, AutonomyGrantDocument, FinalStatus, NextAction,
-    RetryPolicyDocument,
+    RetryPolicyDocument, RetryScheduleDocument,
 };
 use bioprism_devplat::{
     audit_domain_decision_readiness, build_domain_workflow_catalogue,
@@ -1632,6 +1632,7 @@ fn autopilot_template_document() -> CliResult<Value> {
         allow_side_effects: false,
         max_attempts: 3,
         retry: RetryPolicyDocument::default(),
+        schedule: RetryScheduleDocument::default(),
         require_reconciliation_complete: true,
         stop_on_first_success: true,
     };
@@ -1659,6 +1660,13 @@ const GRANT_TEMPLATE_COMMENTED: &str = r#"{
     "retry_retryable_after_change": false,
     // An outcome that declared no retry decision is never re-sent unless this is true.
     "retry_unknown": false
+  },
+
+  // Optional deterministic repair backoff in caller-defined logical clock ticks. Zero is
+  // immediate; a non-zero base requires a maximum at least as large as the base.
+  "schedule": {
+    "retry_base_delay": 0,
+    "retry_max_delay": 0
   },
 
   // Require a reconciliation record with `complete` status and valid integrity before the

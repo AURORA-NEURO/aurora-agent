@@ -25,6 +25,9 @@ ignored knob):
   side-effecting tools.
 - `max_attempts` — required. Total mission dispatches, full and repair combined, between 1
   and 16. An undelivered dispatch (transport error, no report) still counts against the budget.
+- `schedule.retry_base_delay` and `schedule.retry_max_delay` — optional bounded logical-clock
+  ticks for deterministic exponential repair backoff. Both default to zero; they never widen the
+  retry class allow-list, and the host owns waiting and deadline enforcement.
 - `retry.retry_retryable_as_is` — default `true`. Re-dispatch steps whose recorded evidence
   declares 40.36 `retryable_as_is`.
 - `retry.retry_retryable_after_change` — default `false`. The only change the drive can make is
@@ -144,6 +147,14 @@ advance the same checkpoint head. This is restart-safe recovery, not blind repla
 cannot rehydrate the private material must stop rather than reconstruct it from incomplete
 metadata.
 
+The grant may also include a `schedule` object with `retry_base_delay` and `retry_max_delay`.
+These are bounded logical clock ticks, not seconds owned by the kernel. Repair `n` waits for
+`min(retry_base_delay * 2^(n-1), retry_max_delay)` through the caller-owned `AutopilotWait` seam;
+saturating arithmetic and a one-year logical-tick ceiling prevent overflow or unbounded delay.
+The initial full dispatch is never delayed, terminal/unknown policy decisions are unchanged, and
+an undelivered dispatch is still never retried. Resuming from a checkpoint recomputes the same
+retry index from the rehydrated attempt count, so a process restart cannot reset the backoff.
+
 ## Dry run dispatches nothing
 
 `autopilot run --dry-run` plans attempt 1 only: it prints the exact mission the drive would
@@ -195,10 +206,10 @@ failures share.
 Every autopilot report carries these lines; verification refuses a report missing any of the
 first four:
 
-1. "no scheduling or recurrence: the drive runs to a stop state in one call and nothing wakes up later"
+1. "no recurrence: the drive runs one mission to a stop state and never repeats a completed mission"
 2. "no MCP tool exposure: the autopilot is not an MCP tool and registers nothing with the server"
 3. "metadata-only cross-process resume: checkpoints retain digests and bounded status metadata, while callers must rehydrate private mission and report material"
-4. "wall-clock deadlines are unsupported: retryable-as-is failures are re-dispatched immediately or not at all, with no waiting or backoff"
+4. "wall-clock ownership and deadlines remain caller-owned: a grant may authorize logical-tick retry backoff, but the wait seam and deadline policy live outside the kernel"
 5. "an undelivered dispatch is never re-sent: a missing mission report leaves side effects unknown at mission level"
 6. "a repair attempt's reconciliation covers only the re-dispatched subset and is labelled with that scope"
 7. "succeeded steps are never re-dispatched; a binding whose retained payload is gone excludes its dependent instead"

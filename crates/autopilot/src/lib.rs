@@ -54,8 +54,9 @@
 //!
 //! # Not implemented
 //!
-//! - **No scheduling and no recurrence.** The drive runs to a stop state in one call; nothing
-//!   here wakes up later.
+//! - **No recurrence.** A drive runs one mission to a stop state in one call. Bounded retry
+//!   backoff is available through [`RetrySchedule`] and a caller-owned [`AutopilotWait`] seam,
+//!   but this crate does not repeat a completed mission.
 //! - **No MCP tool exposure.** This crate is not an MCP tool and registers nothing with the
 //!   server; the drive *calls* the mission boundary through a seam the caller supplies.
 //! - **Metadata-only cross-process resume.** [`persistence`] seals a bounded checkpoint after
@@ -63,9 +64,9 @@
 //!   private attempts before planning continues. The checkpoint intentionally does not retain
 //!   mission arguments, provider output, credentials, or evidence; a caller that cannot rehydrate
 //!   those values must stop rather than guess.
-//! - **No wall-clock deadlines, backoff, or waiting.** 40.36's `retryable_as_is` means "may
-//!   succeed later"; this crate re-dispatches immediately or not at all, and says so in every
-//!   report's limitations.
+//! - **No wall-clock ownership or deadlines.** 40.36's `retryable_as_is` means "may succeed
+//!   later"; the grant can authorize deterministic logical-tick backoff, while the caller decides
+//!   how to wait and whether a deadline has elapsed.
 //! - **No retry of an undelivered dispatch.** A transport error leaves the mission outcome
 //!   unknown at mission level — side effects may have run — so the drive stops rather than
 //!   re-sending blind.
@@ -87,12 +88,14 @@ pub mod history;
 pub mod planner;
 pub mod persistence;
 pub mod report;
+pub mod schedule;
 
 pub use classify::{classify_step_result, RetryClass, StepClass, StepClassification};
 pub use drive::{
-    drive_instantiation, drive_instantiation_with_checkpoint, drive_mission,
-    drive_mission_with_checkpoint, resume_instantiation_with_checkpoint,
-    resume_mission_with_checkpoint, DriveOutcome, MissionDispatch,
+    drive_instantiation, drive_instantiation_with_checkpoint, drive_instantiation_with_schedule,
+    drive_mission, drive_mission_with_checkpoint, drive_mission_with_schedule,
+    resume_instantiation_with_checkpoint, resume_instantiation_with_schedule,
+    resume_mission_with_checkpoint, resume_mission_with_schedule, DriveOutcome, MissionDispatch,
 };
 pub use error::{AutopilotError, GrantError};
 pub use grant::{AutonomyGrant, AutonomyGrantDocument, RetryPolicy, RetryPolicyDocument};
@@ -113,3 +116,4 @@ pub use report::{
     build_autopilot_report, verify_autopilot_report, FinalDisposition, FinalStatus,
     AUTOPILOT_REPORT_SCHEMA_VERSION, REQUIRED_LIMITATIONS,
 };
+pub use schedule::{AutopilotWait, RetrySchedule, RetryScheduleDocument, MAX_RETRY_DELAY_TICKS};

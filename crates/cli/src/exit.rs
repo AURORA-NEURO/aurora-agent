@@ -388,7 +388,8 @@ impl CliError {
             | AutopilotError::InvalidCheckpoint { .. } => CliError::invalid(message),
             AutopilotError::Canonicalisation { .. }
             | AutopilotError::Persistence { .. }
-            | AutopilotError::CompareAndSwapConflict => CliError::internal(message),
+            | AutopilotError::CompareAndSwapConflict
+            | AutopilotError::Scheduling { .. } => CliError::internal(message),
         }
     }
 
@@ -408,6 +409,7 @@ impl CliError {
             | GrantError::DuplicateTool { .. }
             | GrantError::RecursiveTool
             | GrantError::InvalidAttemptBudget { .. }
+            | GrantError::InvalidRetrySchedule { .. }
             | GrantError::UnsupportedStopOption => CliError::invalid(error.to_string()),
         }
     }

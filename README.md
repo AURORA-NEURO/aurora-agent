@@ -316,8 +316,9 @@ bioprism autopilot run --instantiation instantiation.json --grant grant.json --r
 bioprism autopilot verify --report report.json
 ```
 
-What it deliberately does not do: no scheduling or recurrence, no MCP tool exposure of the driver
-itself, no wall-clock deadlines. Restart is supported only through a caller-owned, metadata-only
+What it deliberately does not do: no recurrence, no MCP tool exposure of the driver itself, and
+no ownership of wall-clock deadlines. Grants can authorize deterministic logical-tick retry
+backoff; the host supplies the wait/deadline implementation. Restart is supported only through a caller-owned, metadata-only
 checkpoint: mission/report material is rehydrated by the host and matched by digest before the
 planner can continue. Full reference:
 [docs/AUTOPILOT.md](docs/AUTOPILOT.md).

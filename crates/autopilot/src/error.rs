@@ -28,6 +28,15 @@ pub enum GrantError {
     #[error("max_attempts is {value}; the budget must be between 1 and {maximum} total dispatches")]
     InvalidAttemptBudget { value: usize, maximum: usize },
     #[error(
+        "retry schedule is invalid: base delay {base}, maximum delay {maximum}; both must be \
+         zero for immediate retries or within the {ceiling}-tick bound with maximum >= base"
+    )]
+    InvalidRetrySchedule {
+        base: u64,
+        maximum: u64,
+        ceiling: u64,
+    },
+    #[error(
         "stop_on_first_success=false is not supported: re-dispatching a succeeded mission would \
          re-run side effects without a defined evidence meaning, so only true is accepted"
     )]
@@ -63,6 +72,9 @@ pub enum AutopilotError {
     /// A transactional checkpoint store rejected a stale writer.
     #[error("autopilot checkpoint compare-and-swap conflict")]
     CompareAndSwapConflict,
+    /// The caller-owned wait boundary could not honor an authorized retry delay.
+    #[error("autopilot scheduling wait failed: {reason}")]
+    Scheduling { reason: String },
     /// A value could not be canonically encoded for hashing. This is the one failure that is
     /// this crate's fault rather than the caller's, and it is named instead of being swallowed.
     #[error("cannot canonicalise value for digesting: {reason}")]
