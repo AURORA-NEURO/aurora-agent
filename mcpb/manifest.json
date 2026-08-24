@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "aurora-agent",
   "display_name": "AURORA Agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "The AURORA Agent (bioprism) MCP server: FIBER decision-context compilation with honest omission accounting, baseline comparison, missions, and 259 evidence-bearing tools.",
   "long_description": "Compiles a world and query into a Decision Section plus a Context Certificate \u2014 a receipt stating exactly what was omitted and whether it could have changed the decision. Includes the FIBER compiler (compile/refine/explain/verify), equal-engineering baseline comparison, world validation and indexing, mission DAGs with least-authority policies, and capability/operations evidence tools. Bundled with the reference fixtures so it works out of the box; point the AURORA data root at a full aurora-agent checkout for everything else. Research and developer infrastructure: it does not diagnose an individual, recommend treatment, triage care, enroll participants, or claim medical-device functionality.",
   "author": {
