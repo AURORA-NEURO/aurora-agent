@@ -967,6 +967,32 @@ a normalizer after preparation causes execution to stop before source dispatch. 
 register a custom normalizer for a custom profile, but the callback remains process-local and its
 output must stay within the SDK's JSON, depth, byte, and credential-shaped-field bounds.
 
+The Python façade can now compose the catalogue into the complete autonomous brain through
+`AutonomousAgent.run_with_domain_evidence_catalogue(...)`. It compiles every selected workflow
+requirement, prepares and executes the matching routes with bounded outer parallelism, verifies the
+catalogue and normalizer digests, and forwards the resulting metadata through `run()`,
+`run_cross_domain()`, or `run_auto()`. Source-dispatch approval and provider approval are separate;
+unsettled evidence blocks the provider unless `allow_incomplete_evidence=True`. The default prompt
+context is metadata-only, while an explicit `prompt_builder` may opt into transient raw and
+normalized values for caller-owned prompt formatting. Prompt text, raw values, provider responses,
+credentials, and keys remain outside the serialized result, and `run_options` still carries the
+existing memory and learning controls unchanged.
+
+```python
+result = agent.run_with_domain_evidence_catalogue(
+    task="compare two bounded reproducibility claims",
+    catalogue=catalogue,
+    domains=("science", "evaluation"),
+    credentials=credential_handles,
+    model_candidates=model_catalogue,
+    approve_source_dispatch=True,
+    approve_provider_call=True,
+    prompt_builder=caller_owned_prompt_builder,
+    run_mode="cross_domain",
+    run_options={"memory": caller_owned_memory, "ledger": caller_owned_ledger},
+)
+```
+
 The TypeScript catalogue can now be composed directly into the autonomous brain through
 `AutonomousAgent.runWithDomainEvidenceCatalogue()`. The method compiles the selected domain
 workflows into one evidence plan, prepares one digest-bound catalogue reconciliation per required
