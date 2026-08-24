@@ -3,6 +3,8 @@
 These JSON Schemas describe the public, versioned envelopes implemented by
 `bioprism-foundation`. They are transport schemas, not scientific truth schemas: evidence state,
 omissions, uncertainty, provenance and policy receipts remain mandatory parts of the wire model.
+The release-review schema additionally makes a passing production verdict impossible without
+complete provenance.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.
