@@ -16,6 +16,10 @@ use bioprism_lab::{
     instrument_preflight, InstrumentPreflightReceipt, InstrumentPreflightRequest,
     INSTRUMENT_PREFLIGHT_FEATURE_ID,
 };
+use bioprism_adapter::{
+    harmonize_multimodal, HarmonizedResearchObject, MultimodalHarmonizationRequest,
+    MULTIMODAL_HARMONIZATION_FEATURE_ID,
+};
 use bioprism_services::{ResearchReleaseReceipt, RESEARCH_RELEASE_FEATURE_ID};
 use serde_json::Value;
 
@@ -25,6 +29,7 @@ pub const WORKFLOW_EXECUTION_TOOL: &str = "runtime_workflow_execute";
 pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
 pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
 pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
+pub const MULTIMODAL_HARMONIZATION_TOOL: &str = "multimodal_harmonize";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -112,6 +117,26 @@ pub fn validate_instrument_preflight_receipt_json(
         return Err("instrument preflight feature id mismatch".into());
     }
     Ok(receipt)
+}
+
+pub fn harmonize_multimodal_json(value: &Value) -> Result<Value, String> {
+    let request: MultimodalHarmonizationRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal harmonization request: {error}"))?;
+    let object = harmonize_multimodal(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(object)
+        .map_err(|error| format!("cannot serialize harmonized research object: {error}"))
+}
+
+pub fn validate_harmonized_research_object_json(
+    value: &Value,
+) -> Result<HarmonizedResearchObject, String> {
+    let object: HarmonizedResearchObject = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid harmonized research object: {error}"))?;
+    object.validate().map_err(|error| error.to_string())?;
+    if object.feature_id != MULTIMODAL_HARMONIZATION_FEATURE_ID {
+        return Err("multimodal harmonization feature id mismatch".into());
+    }
+    Ok(object)
 }
 
 #[cfg(test)]

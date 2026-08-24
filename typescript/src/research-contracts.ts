@@ -21,6 +21,7 @@ export const WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10" as const;
 export const EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01" as const;
 export const RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02" as const;
 export const INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01" as const;
+export const MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -396,6 +397,36 @@ export function validateInstrumentPreflightReceipt(receipt: InstrumentPreflightR
 export function instrumentPreflightReceiptDigest(receipt: InstrumentPreflightReceipt): string {
   validateInstrumentPreflightReceipt(receipt);
   return digestJsonSync(receipt);
+}
+
+export interface HarmonizedResearchObject {
+  schema_version: string;
+  feature_id: string;
+  study_id: string;
+  reference_schema: string;
+  decision: "comparable" | "partial" | "blocked";
+  modality_order: readonly string[];
+  alignment: Record<string, readonly string[]>;
+  omitted_modalities: readonly string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: readonly string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateHarmonizedResearchObject(object: HarmonizedResearchObject): void {
+  if (object.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (object.feature_id !== MULTIMODAL_HARMONIZATION_FEATURE_ID || !object.study_id.trim() || !object.reference_schema.trim()) throw new Error("multimodal research object identity is incomplete");
+  if (object.boundary !== PRECLINICAL_BOUNDARY || !object.raw_data_local) throw new Error("multimodal raw data must remain local");
+  if (!object.modality_order.length || !Object.keys(object.alignment).length || !object.reasons.length) throw new Error("multimodal alignment and reasons are incomplete");
+  if (object.modality_order.some((modality) => !(modality in object.alignment))) throw new Error("multimodal alignment omits a modality projection");
+  if (typeof object.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(object.artifact.content_hash)) throw new Error("multimodal artifact digest is invalid");
+}
+
+export function harmonizedResearchObjectDigest(object: HarmonizedResearchObject): string {
+  validateHarmonizedResearchObject(object);
+  return digestJsonSync(object);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {

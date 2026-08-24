@@ -1806,6 +1806,7 @@ impl Server {
             "evaluation_observability_card" => self.evaluation_observability_card(&arguments),
             "research_release_validate" => self.research_release_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
+            "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24435,6 +24436,29 @@ impl Server {
         }))
     }
 
+    fn multimodal_harmonize(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized MultimodalHarmonizationRequest")?;
+        let object = crate::research_contracts::harmonize_multimodal_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_adapter::MULTIMODAL_HARMONIZATION_FEATURE_ID,
+            "receipt": object,
+            "guarantees": [
+                "modality ordering and feature alignment are deterministic",
+                "unit and coordinate conflicts are rejected before artifact creation",
+                "missing required modalities and missing QC digests remain explicit limitations",
+                "raw imaging and omics data remain institution-local"
+            ],
+            "limitations": [
+                "the route harmonizes caller-supplied manifests and does not inspect raw modality bytes",
+                "comparability is a manifest-level gate, not a biological validity claim"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35846,6 +35870,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "multimodal_ingestion",
+            "domains": ["modality harmonization", "unit alignment", "coordinate systems", "semantic loss", "local research objects"],
+            "crates": ["bioprism-adapter", "bioprism-modalities", "bioprism-foundation"],
+            "mcp_tools": ["multimodal_harmonize"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "runtime_execution_and_replay",
             "domains": ["effect authorization", "sandbox posture", "hash-chained replay", "checkpoint verification"],
             "crates": ["bioprism-runtime", "bioprism-trace", "bioprism-store"],
@@ -38146,6 +38178,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-lab InstrumentPreflightRequest." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "multimodal_harmonize",
+            "description": "Harmonize typed imaging and omics modality manifests into a deterministic local research object. It checks units, coordinate systems, required-modality coverage, QC digests, semantic loss, and raw-data localization without reading raw bytes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-adapter MultimodalHarmonizationRequest." }
                 },
                 "required": ["request"]
             }

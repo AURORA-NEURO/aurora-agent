@@ -90,6 +90,7 @@ pub mod loss;
 pub mod probe;
 pub mod quality_control;
 pub mod research_ingest;
+pub mod multimodal_harmonization;
 pub mod registry;
 pub mod source;
 pub mod tabular;
@@ -111,6 +112,12 @@ pub use quality_control::{
 };
 pub use research_ingest::{
     certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
+};
+pub use multimodal_harmonization::{
+    harmonize_multimodal, HarmonizationDecision, HarmonizationError,
+    HarmonizedResearchObject, ModalityManifest, MultimodalHarmonizationRequest,
+    FEATURE_ID as MULTIMODAL_HARMONIZATION_FEATURE_ID,
+    FEATURE_VERSION as MULTIMODAL_HARMONIZATION_FEATURE_VERSION,
 };
 pub use registry::{
     AdapterDescriptor, AdapterExecution, AdapterPlan, AdapterPlanCandidate, AdapterPlanRequest,

@@ -23,6 +23,8 @@ The research-release schema carries signed content-addressed publication metadat
 policy-bound localization, and explicit omissions while keeping raw data local.
 The instrument-preflight schema carries interlock, approval, budget, evidence, and emergency-stop
 decisions without claiming that hardware executed.
+The harmonized-research-object schema carries deterministic modality alignment, unit and coordinate
+compatibility, QC limitations, omissions, and local raw-data retention.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.

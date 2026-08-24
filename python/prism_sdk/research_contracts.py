@@ -26,6 +26,7 @@ WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10"
 EVALUATION_OBSERVABILITY_FEATURE_ID = "AFA-evalengine-P23-F01"
 RESEARCH_RELEASE_FEATURE_ID = "AFA-services-P16-F02"
 INSTRUMENT_PREFLIGHT_FEATURE_ID = "AFA-lab-P11-F01"
+MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02"
 
 
 class ResearchContractError(ValueError):
@@ -604,6 +605,63 @@ class InstrumentPreflightReceipt:
                 "omissions": list(self.omissions),
                 "reasons": list(self.reasons),
                 "artifact": dict(self.artifact),
+                "boundary": self.boundary,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class HarmonizedResearchObject:
+    """Transport validator for manifest-level multimodal harmonization."""
+
+    study_id: str
+    reference_schema: str
+    decision: str
+    modality_order: tuple[str, ...]
+    alignment: Mapping[str, Sequence[str]]
+    omitted_modalities: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    raw_data_local: bool
+    feature_id: str = MULTIMODAL_HARMONIZATION_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != MULTIMODAL_HARMONIZATION_FEATURE_ID:
+            raise ResearchContractError("multimodal harmonization feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local:
+            raise ResearchContractError("multimodal raw data must remain local")
+        if not self.study_id.strip() or not self.reference_schema.strip():
+            raise ResearchContractError("multimodal research object identity is incomplete")
+        if self.decision not in {"comparable", "partial", "blocked"}:
+            raise ResearchContractError("multimodal decision is unknown")
+        if not self.modality_order or not self.alignment or not self.reasons:
+            raise ResearchContractError("multimodal alignment and reasons are incomplete")
+        if any(modality not in self.alignment for modality in self.modality_order):
+            raise ResearchContractError("multimodal alignment omits a modality projection")
+        if not isinstance(self.artifact.get("content_hash"), str) or len(self.artifact["content_hash"]) != 64:
+            raise ResearchContractError("multimodal artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest(
+            {
+                "schema_version": self.schema_version,
+                "feature_id": self.feature_id,
+                "study_id": self.study_id,
+                "reference_schema": self.reference_schema,
+                "decision": self.decision,
+                "modality_order": list(self.modality_order),
+                "alignment": {key: list(value) for key, value in self.alignment.items()},
+                "omitted_modalities": list(self.omitted_modalities),
+                "semantic_loss": list(self.semantic_loss),
+                "reasons": list(self.reasons),
+                "artifact": dict(self.artifact),
+                "raw_data_local": self.raw_data_local,
                 "boundary": self.boundary,
             }
         )

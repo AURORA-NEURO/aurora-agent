@@ -41,6 +41,9 @@ import {
   INSTRUMENT_PREFLIGHT_FEATURE_ID,
   instrumentPreflightReceiptDigest,
   validateInstrumentPreflightReceipt,
+  MULTIMODAL_HARMONIZATION_FEATURE_ID,
+  harmonizedResearchObjectDigest,
+  validateHarmonizedResearchObject,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -309,4 +312,24 @@ test("instrument preflight receipt preserves no-hardware boundary", () => {
   };
   assert.doesNotThrow(() => validateInstrumentPreflightReceipt(receipt));
   assert.equal(instrumentPreflightReceiptDigest(receipt), instrumentPreflightReceiptDigest(receipt));
+});
+
+test("harmonized research object preserves local multimodal limits", () => {
+  const object = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: MULTIMODAL_HARMONIZATION_FEATURE_ID,
+    study_id: "study:organoid-1",
+    reference_schema: "aurora-multimodal/1",
+    decision: "partial",
+    modality_order: ["image", "rna"],
+    alignment: { image: ["a", "z"], rna: ["a", "z"] },
+    omitted_modalities: ["proteomics"],
+    semantic_loss: [{ field: "image.qc", reason: "not supplied" }],
+    reasons: ["required modality omitted"],
+    artifact: { content_hash: "d".repeat(64) },
+    raw_data_local: true,
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateHarmonizedResearchObject(object));
+  assert.equal(harmonizedResearchObjectDigest(object), harmonizedResearchObjectDigest(object));
 });

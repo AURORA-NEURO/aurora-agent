@@ -36,6 +36,8 @@ from .research_contracts import (
     ResearchReleaseReceipt,
     INSTRUMENT_PREFLIGHT_FEATURE_ID,
     InstrumentPreflightReceipt,
+    MULTIMODAL_HARMONIZATION_FEATURE_ID,
+    HarmonizedResearchObject,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

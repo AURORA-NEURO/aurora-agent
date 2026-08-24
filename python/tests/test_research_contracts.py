@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, MULTIMODAL_HARMONIZATION_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -248,3 +248,21 @@ def test_instrument_preflight_receipt_preserves_no_hardware_boundary():
     receipt.validate()
     assert receipt.feature_id == INSTRUMENT_PREFLIGHT_FEATURE_ID
     assert receipt.digest() == receipt.digest()
+
+
+def test_harmonized_research_object_preserves_local_multimodal_limits():
+    object_ = HarmonizedResearchObject(
+        study_id="study:organoid-1",
+        reference_schema="aurora-multimodal/1",
+        decision="partial",
+        modality_order=("image", "rna"),
+        alignment={"image": ("a", "z"), "rna": ("a", "z")},
+        omitted_modalities=("proteomics",),
+        semantic_loss=({"field": "image.qc", "reason": "not supplied"},),
+        reasons=("required modality omitted",),
+        artifact={"content_hash": "d" * 64},
+        raw_data_local=True,
+    )
+    object_.validate()
+    assert object_.feature_id == MULTIMODAL_HARMONIZATION_FEATURE_ID
+    assert object_.digest() == object_.digest()
