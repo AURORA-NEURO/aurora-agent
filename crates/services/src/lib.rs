@@ -115,6 +115,7 @@ pub mod catalog;
 pub mod conformance;
 pub mod contract;
 pub mod error;
+pub mod federation;
 pub mod graph;
 pub mod implementations;
 pub mod research;
@@ -132,6 +133,7 @@ pub use graph::{
     ServiceNode,
 };
 pub use research::{EvidenceWorkflowResult, ResearchServiceError, ResearchWorkflowService};
+pub use federation::{verify_signed_federation, FederationError, FederationSigner, SignedFederationArtifact};
 pub use topology::{Deployment, Placement, Topology, TopologyError};
 
 /// The measured share of these nine §40 modules that is template rather than content.

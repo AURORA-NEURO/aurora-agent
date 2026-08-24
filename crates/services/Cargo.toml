@@ -14,6 +14,8 @@ bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-runtime = { workspace = true }
 bioprism-scope = { workspace = true }
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
