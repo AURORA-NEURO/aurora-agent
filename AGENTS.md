@@ -95,6 +95,7 @@ Bottom of the dependency graph first.
 ids scope                    foundation: canonical bytes, hashing, typed scopes
 world store worldgen         the world, its index, and generated structural families
 section fiber                the compiler and what it emits
+domain                       declared decision questions: rule oracles and scope vocabularies as documents
 weave                        the multi-agent microkernel (a TCB — keep it small)
 prism baseline mutation      evaluation: cells, comparators, metamorphic families
 registry packs atlas         packs, trust tiers, capability coverage
