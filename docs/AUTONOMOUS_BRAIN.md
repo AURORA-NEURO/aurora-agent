@@ -3257,6 +3257,22 @@ blueprint. `run_auto(..., semantic_routing=True)` performs the same routing step
 execution. The routing call and the eventual execution call each retain their own approval and
 budget boundary.
 
+The TypeScript façade exposes the same boundary directly on its primary entry points. Setting
+`semanticRouting: true` (or supplying `AutonomousRunSemanticRoutingOptions`) on `run()`,
+`runCrossDomain()`, or `planAndRun()` invokes one approved classifier and carries the resulting
+`semantic_route` projection through the returned envelope. The classifier inherits the enclosing
+candidate catalogue, opaque credential resolver, execution controller, policy gates, abort
+signal, failover ceiling, and aggregate `AutonomousCostBudget`; a nested semantic-routing budget
+cannot be introduced to bypass the run budget. `semanticRouting.approveProviderCall` is an
+independent classifier approval, while the enclosing `approveProviderCall` remains the separate
+execution approval. A completed classifier proposal is still only a route hypothesis: provider
+abstention, malformed output, disagreement with the deterministic baseline, policy review, or
+policy block returns before blueprint/provider execution. For a successful cross-domain route,
+the outer call passes the validated route as `routeOverride` into fan-out, preventing child
+reclassification and duplicate classifier charges. Route, blueprint, and semantic-route
+digests therefore remain auditable as one identity while the task, prompt, and provider output
+remain transient.
+
 For a routed single-domain task that should follow the domain workflow instead of one provider
 decision, opt into the staged runner explicitly:
 

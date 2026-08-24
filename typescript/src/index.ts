@@ -804,6 +804,7 @@ export type {
   AutonomousPlanAndRunOptions,
   AutonomousPlanAndRunResult,
   AutonomousPlanAndRunStatus,
+  AutonomousRunSemanticRoutingOptions,
   AutonomousRunResult,
   AutonomousMemoryRunProjection,
   AutonomousGoalStepResult,

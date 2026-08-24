@@ -493,6 +493,32 @@ deterministic route remains the safety baseline: provider/deterministic disagree
 malformed output remain explicit refusals. Routing still requires `approveProviderCall: true` and
 never authorizes a tool, effect, or domain claim.
 
+The same classifier can be composed directly into the high-level TypeScript execution paths by
+passing `semanticRouting: true` (or a bounded `AutonomousRunSemanticRoutingOptions` object) to
+`run()`, `runCrossDomain()`, or `planAndRun()`. The façade performs one provider-assisted route
+proposal, binds its digest into the blueprint, and exposes the value-only proposal as
+`semantic_route` on the returned envelope. A successful classifier still does not authorize the
+execution call: the enclosing `approveProviderCall`, policy, execution controller, credential,
+abort, failover, and aggregate `AutonomousCostBudget` boundaries remain in force. Classifier
+approval can be controlled independently with `semanticRouting: { approveProviderCall: true }`.
+Provider abstention, disagreement with deterministic routing, malformed output, and policy
+holds return a typed route-review result before blueprint/provider execution. When a semantic
+route selects multiple domains, the outer run hands the already-resolved `routeOverride` to
+cross-domain fan-out so child calls do not reclassify the task or consume a second routing budget.
+
+```typescript
+const result = await agent.run(task, {
+  candidates,
+  credential,
+  semanticRouting: { approveProviderCall: true, minSemanticConfidence: 0.55 },
+  approveProviderCall: true, // separate execution approval
+  costBudget,
+});
+if (result.semantic_route?.status !== "completed") {
+  await reviewQueue.enqueue(result); // caller-owned review; no execution was authorized
+}
+```
+
 Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
 `minQuality`, and the optional `minSelectionConfidence` rank-separation floor. The same gates are
 enforced by local health-aware ranking, contextual
@@ -509,10 +535,11 @@ workers; provider attempts that reach dispatch remain charged, while pre-dispatc
 failures release their reservation. This aggregate ceiling complements, rather than replaces, the
 optional `AutonomousExecutionController` cost policy.
 
-The provider-assisted semantic classifier used by `semanticRouting.enabled` is also a model
-invocation, so decision cycles forward the caller's cost, latency, and quality gates to it before
-transport. A successful classifier result does not authorize execution: the cycle still requires
-the separate execution approval and applies the same gates again to the routed domain run.
+The provider-assisted semantic classifier used by `semanticRouting` and decision-cycle semantic
+routing is also a model invocation, so those callers forward cost, latency, and quality gates to
+it before transport. A successful classifier result does not authorize execution: the cycle still
+requires the separate execution approval and applies the same gates again to the routed domain
+run.
 
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
