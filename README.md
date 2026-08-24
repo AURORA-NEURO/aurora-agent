@@ -1417,6 +1417,13 @@ explicit program controls. `security_program_ready` is derived from seven indepe
 families and blocking issues; it is not proof that scanners ran, incidents were contained,
 disclosures were sent, or controls are live. See docs/SECURITY_PROGRAM_AUDIT.md.
 
+## Privacy Policy
+
+The MCP server and CLI are local programs: no network requests, no external
+services, no telemetry, and no collection, storage, or transmission of
+personal data. File access is confined to the data root you configure. Full
+policy: [PRIVACY.md](PRIVACY.md).
+
 ## License
 
 Apache-2.0
