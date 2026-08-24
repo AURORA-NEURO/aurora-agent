@@ -54,10 +54,11 @@ pub mod slice;
 pub mod temporal;
 
 pub use compile::{
-    compile, AdaptiveAcquisitionTrace, CompileOutput, CompileTrace, PassReceipt,
-    RateDistortionTrace,
+    compile, compile_with_oracle, AdaptiveAcquisitionTrace, CompileOutput, CompileTrace,
+    PassReceipt, RateDistortionTrace,
 };
 pub use error::FiberError;
+pub use oracle::{DecisionOracle, SplitIntegrityOracle, ORACLE_KIND};
 pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};

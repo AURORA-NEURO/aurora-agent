@@ -267,6 +267,22 @@ pub fn compile<S: WorldSource + ?Sized>(
     source: &S,
     query: &Query,
 ) -> Result<CompileOutput, FiberError> {
+    compile_with_oracle(source, query, &oracle::SplitIntegrityOracle)
+}
+
+/// The same pipeline, judged by a caller-supplied oracle.
+///
+/// Every pass before and after the oracle is identical to [`compile`]; only the verdict — and
+/// therefore the certificate bytes that carry it — depends on the oracle. [`compile`] fixes the
+/// oracle to [`oracle::SplitIntegrityOracle`], which is what the CPython parity contract pins;
+/// this entry point exists because a world whose decision the reference oracle does not know
+/// would otherwise compile to `valid` with an empty witness list and read as clean rather than
+/// as unjudged.
+pub fn compile_with_oracle<S: WorldSource + ?Sized>(
+    source: &S,
+    query: &Query,
+    decision_oracle: &dyn oracle::DecisionOracle,
+) -> Result<CompileOutput, FiberError> {
     let mut passes = Vec::new();
 
     let decision_quotient = query
@@ -442,7 +458,7 @@ pub fn compile<S: WorldSource + ?Sized>(
         .iter()
         .map(|fact| (fact.provides.as_str().to_string(), fact.value.clone()))
         .collect();
-    let verdict = oracle::evaluate(&values)?;
+    let verdict = decision_oracle.evaluate(&values)?;
     passes.push(PassReceipt {
         name: "oracle",
         retained: verdict.witnesses.len(),

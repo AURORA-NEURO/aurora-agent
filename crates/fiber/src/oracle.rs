@@ -20,6 +20,38 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const ORACLE_KIND: &str = "deterministic_split_integrity_v1";
 
+/// A deterministic oracle the compiler can run over the selected value map.
+///
+/// Blueprint 43.41's contract, held open: an implementation must be a pure function of the
+/// value map, must return witnesses a human can check by hand rather than scores, and must
+/// abstain ([`bioprism_section::OracleStatus::Underdetermined`]) rather than answer when it
+/// cannot see the evidence its decision needs. The compiler treats the verdict as data;
+/// nothing downstream branches on the concrete oracle type, so a domain oracle changes the
+/// certificate's bytes only through the verdict it returns — which is the point.
+pub trait DecisionOracle {
+    /// The oracle kind recorded on every verdict this oracle produces.
+    fn kind(&self) -> &str;
+    fn evaluate(&self, values: &BTreeMap<String, Value>) -> Result<OracleVerdict, FiberError>;
+}
+
+/// The reference split-integrity oracle, as a [`DecisionOracle`].
+///
+/// [`crate::compile::compile`] uses this implementation unconditionally, which is what keeps
+/// the reference certificate byte-identical across the three parity implementations. A caller
+/// with a different decision question supplies its own oracle to
+/// [`crate::compile::compile_with_oracle`] instead.
+pub struct SplitIntegrityOracle;
+
+impl DecisionOracle for SplitIntegrityOracle {
+    fn kind(&self) -> &str {
+        ORACLE_KIND
+    }
+
+    fn evaluate(&self, values: &BTreeMap<String, Value>) -> Result<OracleVerdict, FiberError> {
+        evaluate(values)
+    }
+}
+
 pub fn evaluate(values: &BTreeMap<String, Value>) -> Result<OracleVerdict, FiberError> {
     let mut witnesses = Vec::new();
 
