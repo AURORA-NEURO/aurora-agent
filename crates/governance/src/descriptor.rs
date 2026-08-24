@@ -269,7 +269,10 @@ impl SchemaDescriptor {
     }
 
     pub fn paths(&self) -> Vec<&str> {
-        self.fields.iter().map(|field| field.path.as_str()).collect()
+        self.fields
+            .iter()
+            .map(|field| field.path.as_str())
+            .collect()
     }
 
     pub fn hashed_paths(&self) -> Vec<&str> {

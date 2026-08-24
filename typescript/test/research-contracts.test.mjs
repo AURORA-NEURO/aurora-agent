@@ -78,6 +78,10 @@ import {
   RESOURCE_DISCOVERY_CONTRACT_VERSION,
   resourceDiscoveryContractReceiptDigest,
   validateResourceDiscoveryContractReceipt,
+  GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID,
+  GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION,
+  signedResearchObjectReceiptDigest,
+  validateSignedResearchObjectReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -583,4 +587,28 @@ test("resource discovery contract receipt preserves migration notes", () => {
   };
   assert.doesNotThrow(() => validateResourceDiscoveryContractReceipt(receipt));
   assert.equal(resourceDiscoveryContractReceiptDigest(receipt), resourceDiscoveryContractReceiptDigest(receipt));
+});
+
+test("signed research object receipt preserves locality and migration", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID,
+    contract_version: GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION,
+    run_id: "run:1",
+    release_id: "release:1",
+    origin: "site-a",
+    purpose: "federated preclinical reproduction",
+    artifact_ids: ["artifact:a"],
+    evidence_receipt_ids: ["evidence:a"],
+    release_digest: "a".repeat(64),
+    signer_public_key_hex: "b".repeat(64),
+    signer_signature_hex: "c".repeat(128),
+    migration_notes: ["migrated from v1"],
+    omissions: ["protected:raw-bytes"],
+    raw_data_local: true,
+    artifact: { content_hash: "d".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateSignedResearchObjectReceipt(receipt));
+  assert.equal(signedResearchObjectReceiptDigest(receipt), signedResearchObjectReceiptDigest(receipt));
 });

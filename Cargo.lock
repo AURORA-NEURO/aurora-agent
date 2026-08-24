@@ -434,8 +434,10 @@ dependencies = [
 name = "bioprism-governance"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-section",
+ "ed25519-dalek",
  "serde",
  "serde_json",
  "thiserror",

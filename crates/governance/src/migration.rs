@@ -59,7 +59,11 @@ pub enum MigrationStep {
     /// The exactness is what makes this usable for the `schema_version` field: a document whose
     /// value does not match `from` is not a document of the source version, and saying so is more
     /// useful than silently rewriting it.
-    Replace { path: String, from: Value, to: Value },
+    Replace {
+        path: String,
+        from: Value,
+        to: Value,
+    },
 }
 
 impl MigrationStep {
@@ -98,7 +102,9 @@ impl MigrationStep {
                 }
             }
             MigrationStep::Replace { path, from, to } => match pointer::get(document, path) {
-                None => Err(failed(format!("{path:?} is absent, so it cannot be replaced"))),
+                None => Err(failed(format!(
+                    "{path:?} is absent, so it cannot be replaced"
+                ))),
                 Some(found) if found == from => {
                     pointer::insert(document, path, to.clone()).map_err(failed)?;
                     Ok(())
@@ -561,12 +567,8 @@ mod tests {
     }
 
     fn descriptor(version: &str, fields: Vec<FieldSpec>) -> SchemaDescriptor {
-        SchemaDescriptor::new(
-            id(version),
-            CompatibilityMode::PreserveAndForward,
-            fields,
-        )
-        .expect("well formed")
+        SchemaDescriptor::new(id(version), CompatibilityMode::PreserveAndForward, fields)
+            .expect("well formed")
     }
 
     fn version_step(from: &str, to: &str) -> MigrationStep {
@@ -660,7 +662,9 @@ mod tests {
             "superseded by world_id, which carries the scope the bare name never did",
         )]);
 
-        let audit = lossy.audit_loss(&corpus()).expect("declared loss is allowed");
+        let audit = lossy
+            .audit_loss(&corpus())
+            .expect("declared loss is allowed");
         assert!(!audit.lossless());
         assert!(!audit.invertible);
         assert_eq!(audit.lost, ["world"]);
@@ -670,7 +674,10 @@ mod tests {
     #[test]
     fn a_migration_verified_against_an_empty_corpus_is_not_total() {
         let source = descriptor("1.0", vec![FieldSpec::required("world", FieldType::String)]);
-        let target = descriptor("2.0", vec![FieldSpec::required("world_id", FieldType::String)]);
+        let target = descriptor(
+            "2.0",
+            vec![FieldSpec::required("world_id", FieldType::String)],
+        );
         let report = rename_migration().totality_over(&[], &source, &target);
         assert_eq!(report.checked, 0);
         assert!(
@@ -788,7 +795,9 @@ mod tests {
             )
             .expect("second edge");
 
-        let chain = registry.path(&id("1.0"), &id("3.0")).expect("a path exists");
+        let chain = registry
+            .path(&id("1.0"), &id("3.0"))
+            .expect("a path exists");
         assert_eq!(chain.len(), 2);
 
         let migrated = registry

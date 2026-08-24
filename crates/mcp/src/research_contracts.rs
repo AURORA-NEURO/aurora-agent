@@ -25,6 +25,10 @@ use bioprism_fiber::{
     RESOURCE_WORKBENCH_FEATURE_ID,
 };
 use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
+use bioprism_governance::{
+    compile_signed_research_object, SignedResearchObject, ValidatedResearchRun,
+    RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
+};
 use bioprism_lab::{
     evaluate_design_frontier, instrument_preflight, simulate_protocol_matrix,
     DesignFrontierReceipt, DesignFrontierRequest, InstrumentPreflightReceipt,
@@ -63,6 +67,7 @@ pub const AUTONOMY_BATCH_TOOL: &str = "autonomy_batch_admit";
 pub const WORKFLOW_BATCH_TOOL: &str = "workflow_batch_execute";
 pub const RESOURCE_WORKBENCH_TOOL: &str = "resource_workbench_discover";
 pub const RESOURCE_DISCOVERY_CONTRACT_TOOL: &str = "resource_discovery_contract_v2";
+pub const GOVERNANCE_RESEARCH_RELEASE_TOOL: &str = "governance_research_release_compile";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -389,6 +394,26 @@ pub fn validate_resource_discovery_contract_v2_json(
         return Err("resource discovery contract feature id mismatch".into());
     }
     Ok(response)
+}
+
+pub fn compile_governance_research_release_json(value: &Value) -> Result<Value, String> {
+    let run: ValidatedResearchRun = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid validated research run: {error}"))?;
+    let object = compile_signed_research_object(&run).map_err(|error| error.to_string())?;
+    serde_json::to_value(object)
+        .map_err(|error| format!("cannot serialize signed research object: {error}"))
+}
+
+pub fn validate_governance_research_release_json(
+    value: &Value,
+) -> Result<SignedResearchObject, String> {
+    let object: SignedResearchObject = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid signed research object: {error}"))?;
+    object.validate().map_err(|error| error.to_string())?;
+    if object.feature_id != RESEARCH_RELEASE_CONTRACT_FEATURE_ID {
+        return Err("governance research-release feature id mismatch".into());
+    }
+    Ok(object)
 }
 
 #[cfg(test)]

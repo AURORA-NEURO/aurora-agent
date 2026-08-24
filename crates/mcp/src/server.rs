@@ -1807,6 +1807,9 @@ impl Server {
             "federated_evaluation_consensus" => self.federated_evaluation_consensus(&arguments),
             "resource_workbench_discover" => self.resource_workbench_discover(&arguments),
             "resource_discovery_contract_v2" => self.resource_discovery_contract_v2(&arguments),
+            "governance_research_release_compile" => {
+                self.governance_research_release_compile(&arguments)
+            }
             "research_release_validate" => self.research_release_validate(&arguments),
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
@@ -24468,6 +24471,28 @@ impl Server {
         }))
     }
 
+    fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a ValidatedResearchRun")?;
+        let receipt = crate::research_contracts::compile_governance_research_release_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_governance::RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "policy allow, complete provenance, local-data retention, schema migration, and detached Ed25519 verification gate release",
+                "artifact and evidence identifiers are canonicalized while omissions remain visible",
+                "the route creates local metadata only and never accepts or exports raw experimental bytes"
+            ],
+            "limitations": [
+                "the route verifies a caller-supplied signature over a content digest and does not hold private keys",
+                "a signed research object is a reproducibility and governance artifact, not a biological or clinical conclusion"
+            ]
+        }))
+    }
+
     fn research_release_validate(&self, arguments: &Value) -> Result<Value, String> {
         let receipt = arguments
             .get("receipt")
@@ -35938,7 +35963,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -38447,6 +38472,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized ResourceDiscoveryContractRequest with schema_version, feature_id, request_id, requested_by, compatibility_profile, need, candidates, and boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "governance_research_release_compile",
+            "description": "Compile a governance-owned signed research-object envelope from a validated preclinical run. The route performs policy, provenance, locality, migration, and detached-signature gates without exporting raw data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ValidatedResearchRun containing policy, content digest, artifact/evidence identifiers, migration source version, localization, public key, signature, and preclinical boundary." }
                 },
                 "required": ["request"]
             }

@@ -22,9 +22,15 @@ pub(crate) fn get<'a>(document: &'a Value, path: &str) -> Option<&'a Value> {
 }
 
 /// Inserts a value, creating intermediate objects. Returns the value that was displaced.
-pub(crate) fn insert(document: &mut Value, path: &str, value: Value) -> Result<Option<Value>, String> {
+pub(crate) fn insert(
+    document: &mut Value,
+    path: &str,
+    value: Value,
+) -> Result<Option<Value>, String> {
     let segments = splits(path);
-    let (last, parents) = segments.split_last().expect("split never yields an empty vec");
+    let (last, parents) = segments
+        .split_last()
+        .expect("split never yields an empty vec");
     let mut cursor = document;
     for segment in parents {
         if !cursor.is_object() {
@@ -45,7 +51,9 @@ pub(crate) fn insert(document: &mut Value, path: &str, value: Value) -> Result<O
 /// Removes a value. Returns what was there, or `None` if the path was absent.
 pub(crate) fn remove(document: &mut Value, path: &str) -> Option<Value> {
     let segments = splits(path);
-    let (last, parents) = segments.split_last().expect("split never yields an empty vec");
+    let (last, parents) = segments
+        .split_last()
+        .expect("split never yields an empty vec");
     let mut cursor = document;
     for segment in parents {
         cursor = cursor.as_object_mut()?.get_mut(*segment)?;
@@ -68,7 +76,10 @@ mod tests {
         assert_eq!(get(&document, "plan.backend"), Some(&json!("eager")));
         let displaced = insert(&mut document, "plan.backend", json!("indexed")).expect("inserts");
         assert_eq!(displaced, Some(json!("eager")));
-        assert_eq!(remove(&mut document, "plan.backend"), Some(json!("indexed")));
+        assert_eq!(
+            remove(&mut document, "plan.backend"),
+            Some(json!("indexed"))
+        );
         assert!(!contains(&document, "plan.backend"));
         assert!(contains(&document, "plan"));
     }

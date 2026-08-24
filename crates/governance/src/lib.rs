@@ -70,6 +70,7 @@ pub mod known;
 pub mod migration;
 pub mod mode;
 pub(crate) mod pointer;
+pub mod research_release_contract;
 pub mod version;
 
 pub use classify::{
@@ -92,4 +93,10 @@ pub use migration::{
     TotalityReport, SCHEMA_VERSION_KEY,
 };
 pub use mode::{apply_mode, negotiate, CompatibilityMode, Negotiated, UnknownFieldReport};
+pub use research_release_contract::{
+    compile_signed_research_object, research_release_contract_manifest, GovernanceReleaseError,
+    SignedResearchObject, ValidatedResearchRun,
+    CONTRACT_VERSION as RESEARCH_RELEASE_CONTRACT_VERSION,
+    FEATURE_ID as RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
+};
 pub use version::{observed_bump, SchemaId, SchemaVersion, VersionBump};

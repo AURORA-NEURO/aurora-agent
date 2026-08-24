@@ -39,6 +39,8 @@ FEDERATED_EVALUATION_FEATURE_ID = "AFA-evalengine-P23-F02"
 RESOURCE_WORKBENCH_FEATURE_ID = "AFA-fiber-P05-F20"
 RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID = "AFA-mcp-P05-F08"
 RESOURCE_DISCOVERY_CONTRACT_VERSION = "aurora-mcp-resource-discovery/2.0"
+GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID = "AFA-governance-P16-F08"
+GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION = "signed-research-object/2.0"
 
 
 class ResearchContractError(ValueError):
@@ -702,6 +704,66 @@ class ResourceDiscoveryContractReceipt:
             "compatibility_profile": self.compatibility_profile,
             "result": dict(self.result),
             "migration_notes": list(self.migration_notes),
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class SignedResearchObjectReceipt:
+    """Transport validator for governance-owned signed research-object metadata."""
+
+    run_id: str
+    release_id: str
+    origin: str
+    purpose: str
+    artifact_ids: tuple[str, ...]
+    evidence_receipt_ids: tuple[str, ...]
+    release_digest: str
+    signer_public_key_hex: str
+    signer_signature_hex: str
+    migration_notes: tuple[str, ...]
+    omissions: tuple[str, ...]
+    raw_data_local: bool
+    artifact: Mapping[str, Any]
+    feature_id: str = GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID
+    contract_version: str = GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID or self.contract_version != GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION:
+            raise ResearchContractError("governance research-release schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not all(value.strip() for value in (self.run_id, self.release_id, self.origin, self.purpose)):
+            raise ResearchContractError("signed research object identity or locality is invalid")
+        if not self.artifact_ids or len(set(self.artifact_ids)) != len(self.artifact_ids) or not self.evidence_receipt_ids or len(set(self.evidence_receipt_ids)) != len(self.evidence_receipt_ids) or not self.migration_notes:
+            raise ResearchContractError("signed research object provenance or migration is incomplete")
+        if not isinstance(self.release_digest, str) or len(self.release_digest) != 64 or any(char not in "0123456789abcdef" for char in self.release_digest):
+            raise ResearchContractError("signed research object release digest is invalid")
+        if len(self.signer_public_key_hex) != 64 or len(self.signer_signature_hex) != 128 or any(char not in "0123456789abcdef" for char in self.signer_public_key_hex + self.signer_signature_hex):
+            raise ResearchContractError("signed research object signature material is invalid")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("signed research object artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "run_id": self.run_id,
+            "release_id": self.release_id,
+            "origin": self.origin,
+            "purpose": self.purpose,
+            "artifact_ids": list(self.artifact_ids),
+            "evidence_receipt_ids": list(self.evidence_receipt_ids),
+            "release_digest": self.release_digest,
+            "signer_public_key_hex": self.signer_public_key_hex,
+            "signer_signature_hex": self.signer_signature_hex,
+            "migration_notes": list(self.migration_notes),
+            "omissions": list(self.omissions),
+            "raw_data_local": self.raw_data_local,
             "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })

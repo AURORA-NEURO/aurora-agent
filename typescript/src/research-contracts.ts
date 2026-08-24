@@ -34,6 +34,8 @@ export const FEDERATED_EVALUATION_FEATURE_ID = "AFA-evalengine-P23-F02" as const
 export const RESOURCE_WORKBENCH_FEATURE_ID = "AFA-fiber-P05-F20" as const;
 export const RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID = "AFA-mcp-P05-F08" as const;
 export const RESOURCE_DISCOVERY_CONTRACT_VERSION = "aurora-mcp-resource-discovery/2.0" as const;
+export const GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID = "AFA-governance-P16-F08" as const;
+export const GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION = "signed-research-object/2.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -741,6 +743,39 @@ export function validateResourceDiscoveryContractReceipt(receipt: ResourceDiscov
 
 export function resourceDiscoveryContractReceiptDigest(receipt: ResourceDiscoveryContractReceipt): string {
   validateResourceDiscoveryContractReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface SignedResearchObjectReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  run_id: string;
+  release_id: string;
+  origin: string;
+  purpose: string;
+  artifact_ids: string[];
+  evidence_receipt_ids: string[];
+  release_digest: string;
+  signer_public_key_hex: string;
+  signer_signature_hex: string;
+  migration_notes: string[];
+  omissions: string[];
+  raw_data_local: boolean;
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateSignedResearchObjectReceipt(receipt: SignedResearchObjectReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID || receipt.contract_version !== GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION) throw new Error("governance research-release schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || [receipt.run_id, receipt.release_id, receipt.origin, receipt.purpose].some((value) => !value.trim())) throw new Error("signed research object identity or locality is invalid");
+  if (receipt.artifact_ids.length === 0 || new Set(receipt.artifact_ids).size !== receipt.artifact_ids.length || receipt.evidence_receipt_ids.length === 0 || new Set(receipt.evidence_receipt_ids).size !== receipt.evidence_receipt_ids.length || receipt.migration_notes.length === 0) throw new Error("signed research object provenance or migration is incomplete");
+  if (!/^[0-9a-f]{64}$/.test(receipt.release_digest) || !/^[0-9a-f]{64}$/.test(receipt.signer_public_key_hex) || !/^[0-9a-f]{128}$/.test(receipt.signer_signature_hex)) throw new Error("signed research object signature material is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("signed research object artifact digest is invalid");
+}
+
+export function signedResearchObjectReceiptDigest(receipt: SignedResearchObjectReceipt): string {
+  validateSignedResearchObjectReceipt(receipt);
   return digestJsonSync(receipt);
 }
 
