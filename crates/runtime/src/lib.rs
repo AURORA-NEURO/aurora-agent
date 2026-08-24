@@ -67,6 +67,7 @@ pub mod orchestrator;
 pub mod provider;
 pub mod research_run;
 pub mod replay_audit;
+pub mod workflow_execution;
 pub mod sandbox;
 pub mod seam;
 pub mod secret;
@@ -102,6 +103,12 @@ pub use research_run::{
 pub use replay_audit::{
     audit_replay, replay_audit_manifest, ReplayAuditError, ReplayAuditRequest,
     ReplayAuditReceipt, ReplayAuditStatus,
+};
+pub use workflow_execution::{
+    execute_workflow, workflow_execution_manifest, WorkflowAction, WorkflowExecutionError,
+    WorkflowExecutionMode, WorkflowExecutionReceipt, WorkflowExecutionRequest,
+    WorkflowExecutionStatus, FEATURE_CONTRACT_VERSION as WORKFLOW_EXECUTION_FEATURE_VERSION,
+    FEATURE_ID as WORKFLOW_EXECUTION_FEATURE_ID,
 };
 pub use sandbox::{Fault, FileChange, InProcessWorld};
 pub use seam::{Clock, ExternalActions, Network, Randomness, Sandbox};

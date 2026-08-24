@@ -82,7 +82,8 @@ pub mod worldline;
 
 pub use error::ResearchContractError;
 pub use research::{
-    ApprovalRequirement, AutonomyGrant, AutonomyTier, CapabilityManifest, Compensation,
+    ApprovalRequirement, AuthorityRequirement, AutonomyGrant, AutonomyTier, CapabilityManifest,
+    Compensation,
     CompetingExplanation, DecisionImpact, Determinism, Effect, EvaluationCard, EvaluationMetric,
     EvidenceAvailability, EvidenceReceipt, EvidenceReference, EvidenceSource, EvidenceState,
     ExecutionCheckpoint, ExecutionEvent, ExecutionRun, ExecutionStatus, FederationEnvelope,

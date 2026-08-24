@@ -22,6 +22,7 @@ REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01"
 QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01"
 RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01"
 REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01"
+WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10"
 
 
 class ResearchContractError(ValueError):
@@ -355,3 +356,76 @@ class ReplayAuditReceipt:
     def digest(self) -> str:
         self.validate()
         return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})
+
+
+@dataclass(frozen=True)
+class WorkflowExecutionReceipt:
+    """Transport validator for deterministic typed workflow execution receipts."""
+
+    workflow_id: str
+    mode: str
+    status: str
+    ordered_nodes: tuple[str, ...]
+    completed_nodes: tuple[str, ...]
+    run: Mapping[str, Any]
+    run_digest: str
+    remaining_budget: Mapping[str, float]
+    artifact: Mapping[str, Any]
+    reasons: tuple[str, ...]
+    feature_id: str = WORKFLOW_EXECUTION_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION:
+            raise ResearchContractError("unsupported research contract schema")
+        if self.feature_id != WORKFLOW_EXECUTION_FEATURE_ID:
+            raise ResearchContractError("workflow-execution feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("research boundary mismatch")
+        if not self.workflow_id.strip() or self.mode not in {"dry_run", "execute"}:
+            raise ResearchContractError("workflow execution identity or mode is invalid")
+        if self.status not in {"dry_run", "succeeded"} or not self.reasons:
+            raise ResearchContractError("workflow execution status and reasons are required")
+        if not self.ordered_nodes or any(not node.strip() for node in self.ordered_nodes):
+            raise ResearchContractError("workflow execution order is incomplete")
+        if any(node not in self.ordered_nodes for node in self.completed_nodes):
+            raise ResearchContractError("completed workflow node is outside the ordered plan")
+        if self.run.get("workflow_id") != self.workflow_id:
+            raise ResearchContractError("workflow run identity does not match receipt")
+        expected_run_status = "planned" if self.status == "dry_run" else "succeeded"
+        if self.run.get("status") != expected_run_status:
+            raise ResearchContractError("workflow run status does not match receipt status")
+        if not isinstance(self.remaining_budget, Mapping) or any(
+            not isinstance(value, (int, float)) or value < 0 for value in self.remaining_budget.values()
+        ):
+            raise ResearchContractError("workflow remaining budget is invalid")
+        if not isinstance(self.run_digest, str) or len(self.run_digest) != 64 or any(
+            char not in "0123456789abcdef" for char in self.run_digest
+        ):
+            raise ResearchContractError("workflow run digest is not a canonical sha256")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(
+            char not in "0123456789abcdef" for char in digest
+        ):
+            raise ResearchContractError("workflow execution artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest(
+            {
+                "schema_version": self.schema_version,
+                "feature_id": self.feature_id,
+                "workflow_id": self.workflow_id,
+                "mode": self.mode,
+                "status": self.status,
+                "ordered_nodes": list(self.ordered_nodes),
+                "completed_nodes": list(self.completed_nodes),
+                "run": dict(self.run),
+                "run_digest": self.run_digest,
+                "remaining_budget": dict(self.remaining_budget),
+                "artifact": dict(self.artifact),
+                "reasons": list(self.reasons),
+                "boundary": self.boundary,
+            }
+        )

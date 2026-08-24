@@ -15,6 +15,8 @@ The research-context schema carries Decision Section and certificate identities,
 proof, sufficiency state, and unresolved-obligation counts.
 The replay-audit schema carries equivalent, diverged, or invalid status with baseline/candidate
 identities and the first observable difference.
+The workflow-execution schema carries deterministic node order, dry-run or succeeded status,
+execution identity, budget remainder, and the content-addressed artifact digest.
 
 The boundary is permanently preclinical. Human-subject or clinical-source data, diagnosis,
 treatment, triage, enrollment and clinical decisions are outside the product.

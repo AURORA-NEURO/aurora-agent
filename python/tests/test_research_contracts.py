@@ -1,4 +1,4 @@
-from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, research_artifact_digest
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_FEATURE_ID, PRECLINICAL_BOUNDARY, PROTOCOL_SIMULATION_FEATURE_ID, REPLICATION_FEATURE_ID, QUALITY_CONTROL_FEATURE_ID, RESEARCH_CONTEXT_FEATURE_ID, REPLAY_AUDIT_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID, EvidenceReceipt, ExperimentDesignPlan, PolicyReceipt, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, ReleaseReview, ResearchContractError, ResearchIngestionBundle, WorkflowExecutionReceipt, research_artifact_digest
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -161,4 +161,22 @@ def test_replay_audit_receipt_preserves_divergence_status():
         artifact={"content_hash": "c" * 64},
     )
     receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_workflow_execution_receipt_preserves_order_and_dry_run_state():
+    receipt = WorkflowExecutionReceipt(
+        workflow_id="workflow:demo",
+        mode="dry_run",
+        status="dry_run",
+        ordered_nodes=("a", "b"),
+        completed_nodes=(),
+        run={"workflow_id": "workflow:demo", "status": "planned"},
+        run_digest="a" * 64,
+        remaining_budget={"cpu_seconds": 4.0},
+        artifact={"content_hash": "b" * 64},
+        reasons=("preflight passed",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == WORKFLOW_EXECUTION_FEATURE_ID
     assert receipt.digest() == receipt.digest()

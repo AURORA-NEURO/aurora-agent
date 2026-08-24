@@ -136,6 +136,7 @@ export {
   QUALITY_CONTROL_FEATURE_ID,
   RESEARCH_CONTEXT_FEATURE_ID,
   REPLAY_AUDIT_FEATURE_ID,
+  WORKFLOW_EXECUTION_FEATURE_ID,
   researchArtifactDigest,
   researchIngestionBundleDigest,
   experimentDesignPlanDigest,
@@ -144,6 +145,7 @@ export {
   qualityControlReceiptDigest,
   researchContextReceiptDigest,
   replayAuditReceiptDigest,
+  workflowExecutionReceiptDigest,
   releaseReviewDigest,
   validateEvidenceReceipt,
   validatePolicyReceipt,
@@ -155,8 +157,9 @@ export {
   validateQualityControlReceipt,
   validateResearchContextReceipt,
   validateReplayAuditReceipt,
+  validateWorkflowExecutionReceipt,
 } from "./research-contracts.js";
-export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt } from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ReplicationReport, QualityControlReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt } from "./research-contracts.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,

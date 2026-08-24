@@ -17,6 +17,7 @@ export const REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F01" as const;
 export const QUALITY_CONTROL_FEATURE_ID = "AFA-adapter-P07-F01" as const;
 export const RESEARCH_CONTEXT_FEATURE_ID = "AFA-fiber-P03-F01" as const;
 export const REPLAY_AUDIT_FEATURE_ID = "AFA-runtime-P23-F01" as const;
+export const WORKFLOW_EXECUTION_FEATURE_ID = "AFA-runtime-P12-F10" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -243,6 +244,41 @@ export function validateReplayAuditReceipt(receipt: ReplayAuditReceipt): void {
 
 export function replayAuditReceiptDigest(receipt: ReplayAuditReceipt): string {
   validateReplayAuditReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface WorkflowExecutionReceipt {
+  schema_version: string;
+  feature_id: string;
+  workflow_id: string;
+  mode: "dry_run" | "execute";
+  status: "dry_run" | "succeeded";
+  ordered_nodes: readonly string[];
+  completed_nodes: readonly string[];
+  run: Record<string, unknown>;
+  run_digest: string;
+  remaining_budget: Record<string, number>;
+  artifact: Record<string, unknown>;
+  reasons: readonly string[];
+  boundary: string;
+}
+
+export function validateWorkflowExecutionReceipt(receipt: WorkflowExecutionReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
+  if (receipt.feature_id !== WORKFLOW_EXECUTION_FEATURE_ID || !receipt.workflow_id.trim()) throw new Error("workflow-execution feature or workflow is missing");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY) throw new Error("research boundary mismatch");
+  if (!receipt.ordered_nodes.length || receipt.completed_nodes.some((node) => !receipt.ordered_nodes.includes(node))) throw new Error("workflow execution order is incomplete");
+  if (!receipt.reasons.length) throw new Error("workflow execution reasons are required");
+  if (receipt.run.workflow_id !== receipt.workflow_id) throw new Error("workflow run identity does not match receipt");
+  const expectedRunStatus = receipt.status === "dry_run" ? "planned" : "succeeded";
+  if (receipt.run.status !== expectedRunStatus) throw new Error("workflow run status does not match receipt status");
+  if (!/^[0-9a-f]{64}$/.test(receipt.run_digest)) throw new Error("workflow run digest is not a canonical sha256");
+  if (Object.values(receipt.remaining_budget).some((amount) => !Number.isFinite(amount) || amount < 0)) throw new Error("workflow remaining budget is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("workflow execution artifact digest is invalid");
+}
+
+export function workflowExecutionReceiptDigest(receipt: WorkflowExecutionReceipt): string {
+  validateWorkflowExecutionReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

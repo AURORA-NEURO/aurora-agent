@@ -12,8 +12,9 @@ pub mod server;
 
 pub use rpc::{Request, Response};
 pub use research_contracts::{
-    validate_evidence_receipt_json, validate_policy_receipt_json, RESEARCH_COMPILE_TOOL,
-    RESEARCH_CONTRACT_SCHEMA_VERSION,
+    execute_workflow_json, validate_evidence_receipt_json, validate_policy_receipt_json,
+    validate_workflow_execution_receipt_json, RESEARCH_COMPILE_TOOL,
+    RESEARCH_CONTRACT_SCHEMA_VERSION, WORKFLOW_EXECUTION_TOOL,
 };
 pub use server::{
     resource_definitions, tool_definitions, workspace_capabilities, Lifecycle, Server,

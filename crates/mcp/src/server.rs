@@ -1819,6 +1819,7 @@ impl Server {
             "runtime_effect_check" => self.runtime_effect_check(&arguments),
             "runtime_tape_verify" => self.runtime_tape_verify(&arguments),
             "runtime_execution_simulate" => self.runtime_execution_simulate(&arguments),
+            "runtime_workflow_execute" => self.runtime_workflow_execute(&arguments),
             "onco_boundary_check" => self.onco_boundary_check(&arguments),
             "onco_response_assess" => self.onco_response_assess(&arguments),
             "onco_worldline_view" => self.onco_worldline_view(&arguments),
@@ -24610,6 +24611,28 @@ impl Server {
         }))
     }
 
+    fn runtime_workflow_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized WorkflowExecutionRequest")?;
+        let receipt = crate::research_contracts::execute_workflow_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_runtime::WORKFLOW_EXECUTION_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "workflow validation, deterministic topological ordering, policy, authority, evidence, and budget preflight happen before effects",
+                "dry-run uses the same ordering and gates without appending tape entries",
+                "executed nodes are recorded in one replay-bound ExecutionRun with explicit checkpoints"
+            ],
+            "limitations": [
+                "the MCP surface accepts declarative actions and never invokes an external host or instrument",
+                "a successful receipt proves admission and replayable recording, not biological validity"
+            ]
+        }))
+    }
+
     fn runtime_execution_simulate(&self, arguments: &Value) -> Result<Value, String> {
         let run = bioprism_ids::RunId::parse(
             arguments
@@ -35747,7 +35770,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "runtime_execution_and_replay",
             "domains": ["effect authorization", "sandbox posture", "hash-chained replay", "checkpoint verification"],
             "crates": ["bioprism-runtime", "bioprism-trace", "bioprism-store"],
-            "mcp_tools": ["runtime_effect_check", "runtime_tape_verify", "runtime_execution_simulate"],
+            "mcp_tools": ["runtime_effect_check", "runtime_tape_verify", "runtime_execution_simulate", "runtime_workflow_execute"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -38053,6 +38076,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "fork": { "type": "object", "description": "Optional fork {step, run, requests, world}. The prefix is inherited from the recorded tape and never re-performed." }
                 },
                 "required": ["policy", "requests"]
+            }
+        }),
+        json!({
+            "name": "runtime_workflow_execute",
+            "description": "Preflight and execute a serialized typed research workflow graph with deterministic node ordering, authority and budget gates, dry-run support, replay-bound execution events, and explicit checkpoints. The declarative MCP surface never reaches an external host or instrument.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-runtime WorkflowExecutionRequest containing workflow, capability manifest, autonomy grant, policy receipt, run_id, declarative actions, and dry_run or execute mode." }
+                },
+                "required": ["request"]
             }
         }),
         json!({

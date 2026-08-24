@@ -28,6 +28,8 @@ from .research_contracts import (
     ResearchContextReceipt,
     REPLAY_AUDIT_FEATURE_ID,
     ReplayAuditReceipt,
+    WORKFLOW_EXECUTION_FEATURE_ID,
+    WorkflowExecutionReceipt,
     ReleaseReview,
     canonical_json,
     research_artifact_digest,

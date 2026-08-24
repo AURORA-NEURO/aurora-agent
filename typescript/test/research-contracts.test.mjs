@@ -29,6 +29,9 @@ import {
   REPLAY_AUDIT_FEATURE_ID,
   replayAuditReceiptDigest,
   validateReplayAuditReceipt,
+  WORKFLOW_EXECUTION_FEATURE_ID,
+  workflowExecutionReceiptDigest,
+  validateWorkflowExecutionReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -203,4 +206,24 @@ test("replay-audit receipt preserves divergence status", () => {
   };
   assert.doesNotThrow(() => validateReplayAuditReceipt(receipt));
   assert.equal(replayAuditReceiptDigest(receipt), replayAuditReceiptDigest(receipt));
+});
+
+test("workflow-execution receipt preserves deterministic dry-run order", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: WORKFLOW_EXECUTION_FEATURE_ID,
+    workflow_id: "workflow:demo",
+    mode: "dry_run",
+    status: "dry_run",
+    ordered_nodes: ["a", "b"],
+    completed_nodes: [],
+    run: { workflow_id: "workflow:demo", status: "planned" },
+    run_digest: "a".repeat(64),
+    remaining_budget: { cpu_seconds: 4 },
+    artifact: { content_hash: "b".repeat(64) },
+    reasons: ["preflight passed"],
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateWorkflowExecutionReceipt(receipt));
+  assert.equal(workflowExecutionReceiptDigest(receipt), workflowExecutionReceiptDigest(receipt));
 });

@@ -49,7 +49,7 @@ fn main() {
                      oracle_reference_panel, oracle_missingness, bioeval_reference_audit, bioeval_acquisition_audit, bioeval_grounding_audit, bioeval_estimand_audit, bioeval_evaluator_audit, bioeval_plane_audit, bioeval_metamorphic_audit, bioeval_waiver_audit, bioeval_design_audit, bioeval_mesh_audit, bioeval_burden_audit, bioeval_reveal_audit, bioeval_boundary_audit,\n\
                      evaluation_worldline_audit,\n\
                      evaluation_reproduction_check, evaluation_trajectory_check,\n\
-                     runtime_effect_check, runtime_tape_verify, runtime_execution_simulate, onco_boundary_check,\n\
+                     runtime_effect_check, runtime_tape_verify, runtime_execution_simulate, runtime_workflow_execute, onco_boundary_check,\n\
                      onco_response_assess, onco_worldline_view, onco_classification_check,\n\
                      oncoworlds_identity_join, oncoworlds_model_transport,\n\
                      oncoworlds_methylation_classify, oncoworlds_methylation_compare,\n\
