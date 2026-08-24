@@ -102,6 +102,7 @@ from .goals import (
     validate_goal_snapshot,
 )
 from .autonomous_goal_scheduler import (
+    AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS,
     GOAL_CLAIM_SCHEMA,
     GOAL_SCHEDULE_RETENTION,
     GOAL_SCHEDULE_SCHEMA,
@@ -119,6 +120,16 @@ from .autonomous_goal_scheduler import (
     claim_autonomous_goals,
     schedule_autonomous_goals,
     validate_goal_schedule,
+)
+from .autonomous_goal_worker import (
+    GOAL_WORKER_RETENTION,
+    GOAL_WORKER_SCHEMA,
+    MAX_GOAL_WORKER_RUNS,
+    MAX_GOAL_WORKER_TASK_BYTES,
+    AutonomousGoalExecutionRequest,
+    AutonomousGoalWorker,
+    AutonomousGoalWorkerBatch,
+    AutonomousGoalWorkerRun,
 )
 from .jobs import (
     JOB_EVENT_SCHEMA,
@@ -3394,6 +3405,7 @@ __all__ = [
     "goal_task_digest",
     "validate_goal_snapshot",
     "GOAL_CLAIM_SCHEMA",
+    "AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS",
     "GOAL_SCHEDULE_RETENTION",
     "GOAL_SCHEDULE_SCHEMA",
     "MAX_GOAL_SCHEDULE_BYTES",
@@ -3410,6 +3422,14 @@ __all__ = [
     "claim_autonomous_goals",
     "schedule_autonomous_goals",
     "validate_goal_schedule",
+    "GOAL_WORKER_RETENTION",
+    "GOAL_WORKER_SCHEMA",
+    "MAX_GOAL_WORKER_RUNS",
+    "MAX_GOAL_WORKER_TASK_BYTES",
+    "AutonomousGoalExecutionRequest",
+    "AutonomousGoalWorker",
+    "AutonomousGoalWorkerBatch",
+    "AutonomousGoalWorkerRun",
     "BRAIN_CONTROL_SCHEMA",
     "AsyncBrainControlClient",
     "BrainApprovalCommand",

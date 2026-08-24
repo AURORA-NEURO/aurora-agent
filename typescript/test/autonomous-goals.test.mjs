@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   AutonomousGoalPersistenceCoordinator,
   AutonomousGoalScheduler,
+  AutonomousGoalWorker,
   AutonomousAgent,
   AutonomousLearningController,
   AutonomousOnlineLearner,
@@ -83,6 +84,74 @@ test("goal scheduler enforces cycles, budgets, retry policy, and stale claims", 
   const tampered = structuredClone(schedule);
   tampered.selected_goal_ids = [];
   assert.throws(() => validateAutonomousGoalSchedule(tampered), /schedule_digest/);
+});
+
+test("goal scheduler admits cross-domain objectives", () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 2, clock: () => 100 });
+  ledger.create({ goal_id: "cross", task_digest: goalTaskDigest("cross task"), domain: "cross_domain", now_ns: 0 });
+  const schedule = scheduleAutonomousGoals(ledger.list({ limit: 2 }), {
+    now_ns: 100,
+    max_selected: 1,
+    max_concurrent: 1,
+    required_domains: ["cross_domain"],
+  });
+  assert.deepEqual(schedule.selected_goal_ids, ["cross"]);
+  assert.deepEqual(schedule.coverage.selected_domains, ["cross_domain"]);
+  assert.deepEqual(schedule.coverage.missing_domains, []);
+});
+
+test("goal worker rehydrates and settles every domain without persisting task values", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 100 });
+  for (const domain of domains) ledger.create({ goal_id: `worker-${domain}`, task_digest: goalTaskDigest(`private task ${domain}`), domain, now_ns: 0 });
+  const observedTasks = [];
+  const worker = new AutonomousGoalWorker({
+    ledger,
+    resolver: (goal) => ({ task: `private task for ${goal.domain}`, parameters: { private: true } }),
+    executor: async (request) => {
+      observedTasks.push(request.task);
+      return { status: "completed", settlement_metadata: { progress_digest: goalTaskDigest(`progress ${request.goal.domain}`) } };
+    },
+  });
+  const batch = await worker.run({ schedule_options: { now_ns: 100, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains } });
+  assert.equal(observedTasks.length, domains.length);
+  assert.equal(batch.runs.length, domains.length);
+  assert.ok(batch.runs.every((run) => run.goal_status === "completed"));
+  assert.ok(ledger.list({ limit: domains.length }).every((goal) => goal.status === "completed"));
+  const publicValue = JSON.stringify(batch.toJSON());
+  assert.equal(publicValue.includes("private task for"), false);
+  assert.equal(publicValue.includes('"private"'), false);
+  assert.equal(batch.toJSON().counts.completed, domains.length);
+  assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
+test("goal worker single-attempt digest matches the Python reference", async () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
+  ledger.create({ goal_id: "parity", task_digest: goalTaskDigest("private"), domain: "coding", now_ns: 0 });
+  const batch = await new AutonomousGoalWorker({
+    ledger,
+    resolver: () => ({ task: "private" }),
+    executor: async () => ({ status: "completed" }),
+  }).run({ schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } });
+  assert.equal(batch.worker_digest, "ce6809a88e6a2c0c44748f9c3ec9e57b13915d8472f29da35ed8e1c1fc8baad2");
+});
+
+test("goal worker converts executor failure into redacted retry state", async () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
+  ledger.create({ goal_id: "failure", task_digest: goalTaskDigest("private failure"), domain: "operations", now_ns: 0 });
+  const batch = await new AutonomousGoalWorker({
+    ledger,
+    resolver: () => ({ task: "private failure" }),
+    executor: async () => { throw new Error("private provider response must not cross the ledger boundary"); },
+  }).run({ schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } });
+  const run = batch.runs[0];
+  assert.equal(run.execution_status, "failed");
+  assert.equal(run.goal_status, "failed");
+  assert.equal(run.error_class, "Error");
+  assert.ok(run.error_digest);
+  assert.equal(JSON.stringify(batch.toJSON()).includes("private provider response"), false);
+  assert.equal(ledger.get("failure").status, "failed");
+  assert.equal(ledger.get("failure").next_action_digest, goalTaskDigest("goal-retry"));
 });
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {

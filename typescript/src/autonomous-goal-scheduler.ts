@@ -19,8 +19,11 @@ export const AUTONOMOUS_GOAL_SCHEDULE_MAX_SIGNALS = 4_096;
 export const AUTONOMOUS_GOAL_SCHEDULE_MAX_DEPENDENCIES = 64;
 export const AUTONOMOUS_GOAL_SCHEDULE_MAX_SELECTED = 128;
 export const AUTONOMOUS_GOAL_SCHEDULE_MAX_SNAPSHOT_BYTES = 2_000_000;
+// cross_domain is already a first-class member of the shared autonomous domain catalogue.
+export const AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS = AUTONOMOUS_DOMAIN_NAMES;
 
 export type AutonomousGoalScheduleDecision = "active" | "admit" | "defer" | "ineligible";
+export type AutonomousGoalSchedulingDomain = AutonomousDomainName | "cross_domain";
 
 export interface AutonomousGoalSchedulingSignal {
   goal_id: string;
@@ -41,13 +44,13 @@ export interface AutonomousGoalSchedulingOptions {
   allow_failed_retry?: boolean;
   include_paused?: boolean;
   signals?: readonly AutonomousGoalSchedulingSignal[];
-  required_domains?: readonly AutonomousDomainName[];
+  required_domains?: readonly AutonomousGoalSchedulingDomain[];
   domain_quotas?: Readonly<Record<string, number>>;
 }
 
 export interface AutonomousGoalScheduleRow extends JsonObject {
   goal_id: string;
-  domain: AutonomousDomainName;
+  domain: AutonomousGoalSchedulingDomain;
   status: AutonomousGoalStatus;
   revision: number;
   attempt: number;
@@ -69,9 +72,9 @@ export interface AutonomousGoalScheduleRow extends JsonObject {
 }
 
 export interface AutonomousGoalScheduleCoverage extends JsonObject {
-  required_domains: AutonomousDomainName[];
-  selected_domains: AutonomousDomainName[];
-  missing_domains: AutonomousDomainName[];
+  required_domains: AutonomousGoalSchedulingDomain[];
+  selected_domains: AutonomousGoalSchedulingDomain[];
+  missing_domains: AutonomousGoalSchedulingDomain[];
 }
 
 export interface AutonomousGoalSchedule extends JsonObject {
@@ -167,9 +170,9 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-function domain(value: unknown): AutonomousDomainName {
-  if (typeof value !== "string" || !(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(value)) fail("goal domain is not a built-in autonomous domain");
-  return value as AutonomousDomainName;
+function domain(value: unknown): AutonomousGoalSchedulingDomain {
+  if (typeof value !== "string" || !(AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS as readonly string[]).includes(value)) fail("goal domain is not a supported autonomous scheduling domain");
+  return value as AutonomousGoalSchedulingDomain;
 }
 
 function normalizeSignal(value: AutonomousGoalSchedulingSignal, index: number): { goalId: string; signal: NormalizedSignal } {
@@ -240,7 +243,7 @@ function statusReason(goal: AutonomousGoalRecord, allowFailedRetry: boolean, inc
 
 function validateOptions(options: AutonomousGoalSchedulingOptions): Required<Pick<AutonomousGoalSchedulingOptions, "now_ns" | "max_selected" | "max_concurrent" | "max_cost" | "aging_window_ns" | "allow_failed_retry" | "include_paused">> {
   const requiredDomains = options.required_domains ?? [];
-  if (!Array.isArray(requiredDomains) || requiredDomains.length > AUTONOMOUS_DOMAIN_NAMES.length || new Set(requiredDomains).size !== requiredDomains.length) fail("required_domains is malformed");
+  if (!Array.isArray(requiredDomains) || requiredDomains.length > AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS.length || new Set(requiredDomains).size !== requiredDomains.length) fail("required_domains is malformed");
   requiredDomains.forEach((item) => domain(item));
   const quotas = options.domain_quotas ?? {};
   if (!isObject(quotas)) fail("domain_quotas must be an object");
@@ -435,8 +438,8 @@ export function scheduleAutonomousGoals(goals: readonly AutonomousGoalRecord[], 
     candidate.row.decision = "admit";
     candidate.row.reason = "admitted_dependency_closed_candidate";
   }
-  const requiredDomains = [...(options.required_domains ?? [])].sort((left, right) => AUTONOMOUS_DOMAIN_NAMES.indexOf(left) - AUTONOMOUS_DOMAIN_NAMES.indexOf(right));
-  const selectedDomains = AUTONOMOUS_DOMAIN_NAMES.filter((item) => selectedDomainCounts.has(item));
+  const requiredDomains = [...(options.required_domains ?? [])].sort((left, right) => AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS.indexOf(left) - AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS.indexOf(right));
+  const selectedDomains = AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS.filter((item) => selectedDomainCounts.has(item));
   const missingDomains = requiredDomains.filter((item) => !selectedDomainCounts.has(item));
   const body = {
     schema: AUTONOMOUS_GOAL_SCHEDULE_SCHEMA,

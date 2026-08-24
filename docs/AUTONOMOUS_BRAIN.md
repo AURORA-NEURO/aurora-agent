@@ -5152,6 +5152,19 @@ schedule is refused, and a successful claim returns only the schedule-bound clai
 canonical numeric projection is quantized so the same twelve-domain schedule has the same digest
 in both SDKs, making Python/TypeScript replay and worker handoff portable.
 
+The Python and TypeScript `AutonomousGoalWorker` implementations provide the execution bridge
+after admission. A worker first resolves every selected goal through a caller-owned rehydration
+callback before claiming anything; this prevents a protected task lookup failure from leaving a
+batch leased. It then claims the schedule, passes each transient task and caller-owned parameter
+mapping to an executor, and settles the bounded result status back into the goal ledger. Executor
+results may add criterion updates and digest-only evaluator, learning-state, or progress metadata.
+Exceptions become durable `failed` attempts with a redacted error class and retry marker, while a
+provider/evaluator status maps to `completed`, `paused`, `blocked`, or `failed` through the existing
+goal policy. The live task, parameters, and executor result exist only on the initiating process;
+`to_dict()` and the worker digest exclude them. The Python and TypeScript workers produce the same
+single-attempt digest, so a worker can hand off a schedule or claim across the two SDKs without
+leaking the protected execution context.
+
 The Python `AutonomousGoalLedger` now exposes the same portable restart contract as the other
 state boundaries. `snapshot()` exports the sorted current goal projection plus its complete
 hash-chained lifecycle, and `restore()` validates event order, created/transition lifecycle,

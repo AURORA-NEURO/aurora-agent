@@ -171,6 +171,12 @@ concurrency/cost budgets, per-domain quotas, and required-domain coverage, then 
 digest-bound metadata-only schedule. `claim_autonomous_goals()` rechecks every expected revision
 before moving admitted goals to `running`; stale schedules and dependency cycles fail closed.
 The Python schedule digest is portable with the TypeScript scheduler for the same goal projection.
+`AutonomousGoalWorker` closes the execution loop: it preflights caller-owned task rehydration,
+claims the admitted rows, invokes a caller-owned executor, and settles result status, criterion
+updates, evaluator digests, and retry-safe failure state. Rehydrated task text and executor output
+remain transient; `AutonomousGoalWorkerBatch.to_dict()` contains only the schedule, claim, outcome
+digests, bounded error classes, and aggregate counts. The worker supports all twelve catalogue
+domains, including `cross_domain`, and its single-attempt digest is portable with TypeScript.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

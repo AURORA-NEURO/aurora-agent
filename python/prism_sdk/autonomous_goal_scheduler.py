@@ -29,6 +29,10 @@ MAX_GOAL_SCHEDULE_SIGNALS = 4_096
 MAX_GOAL_SCHEDULE_DEPENDENCIES = 64
 MAX_GOAL_SCHEDULE_SELECTED = 128
 MAX_GOAL_SCHEDULE_BYTES = 2_000_000
+# ``cross_domain`` is a first-class member of the shared autonomous domain catalogue.  Keep an
+# explicit alias here so admission callers can depend on the scheduler's supported set without
+# accidentally introducing a second, divergent domain list.
+AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS = AUTONOMOUS_DOMAIN_NAMES
 
 ScheduleDecision = Literal["active", "admit", "defer", "ineligible"]
 
@@ -77,8 +81,8 @@ def _zero_normalized(value: float) -> float | int:
 
 
 def _domain(value: Any) -> str:
-    if not isinstance(value, str) or value not in AUTONOMOUS_DOMAIN_NAMES:
-        _fail("goal domain is not a built-in autonomous domain")
+    if not isinstance(value, str) or value not in AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS:
+        _fail("goal domain is not a supported autonomous scheduling domain")
     return value
 
 
@@ -235,7 +239,7 @@ def _lifecycle(goal: AutonomousGoalRecord, *, allow_failed_retry: bool, include_
 
 def _validate_options(options: Mapping[str, Any]) -> dict[str, Any]:
     required_domains = tuple(options.get("required_domains", ()))
-    if len(required_domains) > len(AUTONOMOUS_DOMAIN_NAMES) or len(set(required_domains)) != len(required_domains):
+    if len(required_domains) > len(AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS) or len(set(required_domains)) != len(required_domains):
         _fail("required_domains is malformed")
     for item in required_domains:
         _domain(item)
@@ -249,7 +253,7 @@ def _validate_options(options: Mapping[str, Any]) -> dict[str, Any]:
     include_paused = options.get("include_paused", True)
     if not isinstance(allow_failed_retry, bool) or not isinstance(include_paused, bool):
         _fail("retry and pause policies must be boolean")
-    return {"now_ns": _integer(options.get("now_ns", time.time_ns()), name="now_ns", minimum=0, maximum=2**63 - 1), "max_selected": _integer(options.get("max_selected", 1), name="max_selected", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED), "max_concurrent": _integer(options.get("max_concurrent", options.get("max_selected", 1)), name="max_concurrent", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED), "max_cost": _integer(options.get("max_cost", 1_000_000), name="max_cost", minimum=1, maximum=1_000_000_000), "aging_window_ns": _integer(options.get("aging_window_ns", 86_400_000), name="aging_window_ns", minimum=1, maximum=2**63 - 1), "allow_failed_retry": allow_failed_retry, "include_paused": include_paused, "required_domains": tuple(sorted(required_domains, key=AUTONOMOUS_DOMAIN_NAMES.index)), "domain_quotas": normalized_quotas}
+    return {"now_ns": _integer(options.get("now_ns", time.time_ns()), name="now_ns", minimum=0, maximum=2**63 - 1), "max_selected": _integer(options.get("max_selected", 1), name="max_selected", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED), "max_concurrent": _integer(options.get("max_concurrent", options.get("max_selected", 1)), name="max_concurrent", minimum=1, maximum=MAX_GOAL_SCHEDULE_SELECTED), "max_cost": _integer(options.get("max_cost", 1_000_000), name="max_cost", minimum=1, maximum=1_000_000_000), "aging_window_ns": _integer(options.get("aging_window_ns", 86_400_000), name="aging_window_ns", minimum=1, maximum=2**63 - 1), "allow_failed_retry": allow_failed_retry, "include_paused": include_paused, "required_domains": tuple(sorted(required_domains, key=AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS.index)), "domain_quotas": normalized_quotas}
 
 
 def _signal_map(goals: Mapping[str, AutonomousGoalRecord], signals: Sequence[AutonomousGoalSchedulingSignal | Mapping[str, Any]]) -> dict[str, AutonomousGoalSchedulingSignal]:
@@ -425,7 +429,7 @@ def schedule_autonomous_goals(goals: Sequence[AutonomousGoalRecord | Mapping[str
         used_cost += row["estimated_cost"]
         row["decision"], row["reason"] = "admit", "admitted_dependency_closed_candidate"
     required_domains = limits["required_domains"]
-    selected_domains = tuple(domain for domain in AUTONOMOUS_DOMAIN_NAMES if domain in selected_domain_counts)
+    selected_domains = tuple(domain for domain in AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS if domain in selected_domain_counts)
     missing_domains = tuple(domain for domain in required_domains if domain not in selected_domain_counts)
     body = {"schema": GOAL_SCHEDULE_SCHEMA, "now_ns": limits["now_ns"], "max_selected": limits["max_selected"], "max_concurrent": limits["max_concurrent"], "max_cost": limits["max_cost"], "active_count": active_count, "used_cost": used_cost, "selected_goal_ids": selected_goal_ids, "rows": sorted(rows.values(), key=lambda row: row["goal_id"]), "coverage": {"required_domains": list(required_domains), "selected_domains": list(selected_domains), "missing_domains": list(missing_domains)}, "retention": GOAL_SCHEDULE_RETENTION, "secret_material": "never_returned"}
     return AutonomousGoalSchedule(now_ns=body["now_ns"], max_selected=body["max_selected"], max_concurrent=body["max_concurrent"], max_cost=body["max_cost"], active_count=body["active_count"], used_cost=body["used_cost"], selected_goal_ids=tuple(selected_goal_ids), rows=tuple(AutonomousGoalScheduleRow.from_mapping(row) for row in body["rows"]), required_domains=required_domains, selected_domains=selected_domains, missing_domains=missing_domains, schedule_digest=_digest(body))

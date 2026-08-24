@@ -2522,6 +2522,7 @@ export {
   AUTONOMOUS_GOAL_SCHEDULE_MAX_SELECTED,
   AUTONOMOUS_GOAL_SCHEDULE_MAX_SIGNALS,
   AUTONOMOUS_GOAL_SCHEDULE_MAX_SNAPSHOT_BYTES,
+  AUTONOMOUS_GOAL_SCHEDULABLE_DOMAINS,
   AUTONOMOUS_GOAL_SCHEDULE_RETENTION,
   AUTONOMOUS_GOAL_SCHEDULE_SCHEMA,
   AutonomousGoalScheduler,
@@ -2536,9 +2537,28 @@ export type {
   AutonomousGoalScheduleCoverage,
   AutonomousGoalScheduleDecision,
   AutonomousGoalScheduleRow,
+  AutonomousGoalSchedulingDomain,
   AutonomousGoalSchedulingOptions,
   AutonomousGoalSchedulingSignal,
 } from "./autonomous-goal-scheduler.js";
+export {
+  AUTONOMOUS_GOAL_WORKER_MAX_RUNS,
+  AUTONOMOUS_GOAL_WORKER_MAX_TASK_BYTES,
+  AUTONOMOUS_GOAL_WORKER_RETENTION,
+  AUTONOMOUS_GOAL_WORKER_SCHEMA,
+  AutonomousGoalWorker,
+  AutonomousGoalWorkerBatch,
+} from "./autonomous-goal-worker.js";
+export type {
+  AutonomousGoalExecutionRequest,
+  AutonomousGoalExecutor,
+  AutonomousGoalResolver,
+  AutonomousGoalWorkerBatchJSON,
+  AutonomousGoalWorkerOutcome,
+  AutonomousGoalWorkerResolution,
+  AutonomousGoalWorkerRun,
+  AutonomousGoalWorkerRunStatus,
+} from "./autonomous-goal-worker.js";
 export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,
   AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS,
