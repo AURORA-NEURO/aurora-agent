@@ -95,6 +95,7 @@ pub mod quality_control;
 pub mod quality_drift;
 pub mod registry;
 pub mod research_ingest;
+pub mod retrieval_synthesis;
 pub mod source;
 pub mod tabular;
 
@@ -143,6 +144,13 @@ pub use registry::{
 };
 pub use research_ingest::{
     certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
+};
+pub use retrieval_synthesis::{
+    compile_evidence_synthesis, EvidenceSynthesis, EvidenceSynthesisDisposition,
+    EvidenceSynthesisRequest, RetrievalCandidate, RetrievalSynthesisError,
+    RetrievalSynthesisReceipt, ScopedRetrievalQuery, SynthesisEffectReceipt,
+    CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
 pub use source::{Locator, Source, SourceManifest, SourceProvenance};
 pub use tabular::{

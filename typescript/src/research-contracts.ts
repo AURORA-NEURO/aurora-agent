@@ -66,6 +66,8 @@ export const MECHANISM_GATEWAY_FEATURE_ID = "AFA-fiber-P08-F24" as const;
 export const MECHANISM_GATEWAY_CONTRACT_VERSION = "federated-mechanism-interoperability-gateway/1.0" as const;
 export const EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-adapter-P01-F09" as const;
 export const EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0" as const;
+export const RETRIEVAL_SYNTHESIS_FEATURE_ID = "AFA-adapter-P02-F06" as const;
+export const RETRIEVAL_SYNTHESIS_CONTRACT_VERSION = "multimodal-retrieval-synthesis/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1165,6 +1167,36 @@ export function validateEvidenceSurveillanceReceipt(receipt: EvidenceSurveillanc
 }
 
 export function evidenceSurveillanceReceiptDigest(receipt: EvidenceSurveillanceReceipt): string { validateEvidenceSurveillanceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface RetrievalSynthesisReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  query_id: string;
+  disposition: "passed" | "blocked" | "unknown";
+  synthesis: Record<string, unknown>;
+  effect_receipts: readonly Record<string, unknown>[];
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateRetrievalSynthesisReceipt(receipt: RetrievalSynthesisReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RETRIEVAL_SYNTHESIS_FEATURE_ID || receipt.contract_version !== RETRIEVAL_SYNTHESIS_CONTRACT_VERSION) throw new Error("retrieval synthesis schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.query_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length) throw new Error("retrieval synthesis identity or checks are incomplete");
+  if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition)) throw new Error("retrieval synthesis disposition is unknown");
+  if (receipt.synthesis.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.synthesis.query_id !== receipt.query_id || receipt.synthesis.boundary !== PRECLINICAL_BOUNDARY || typeof receipt.synthesis.comparability_profile !== "string" || !receipt.synthesis.comparability_profile.trim()) throw new Error("retrieval synthesis linkage or boundary is invalid");
+  if (JSON.stringify(receipt.synthesis.omissions) !== JSON.stringify(receipt.omissions) || JSON.stringify(receipt.synthesis.uncertainty) !== JSON.stringify(receipt.uncertainty)) throw new Error("retrieval synthesis omission linkage is invalid");
+  if (!Array.isArray(receipt.synthesis.selected_evidence_ids) || new Set(receipt.synthesis.selected_evidence_ids).size !== receipt.synthesis.selected_evidence_ids.length || receipt.synthesis.selected_evidence_ids.length !== receipt.synthesis.selected_digests.length || receipt.synthesis.selected_evidence_ids.length !== receipt.synthesis.selected_modalities.length) throw new Error("retrieval synthesis selected evidence alignment is invalid");
+  if (receipt.synthesis.evidence_state === "proven" && (receipt.omissions.length || receipt.uncertainty.length)) throw new Error("proven synthesis cannot contain unresolved omissions");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("retrieval synthesis artifact digest is invalid");
+  for (const effect of receipt.effect_receipts) if (effect.effect !== "read_local_data" || typeof effect.authorized !== "boolean" || typeof effect.reason !== "string" || typeof effect.receipt_digest !== "string" || !/^[0-9a-f]{64}$/.test(effect.receipt_digest)) throw new Error("retrieval synthesis effect receipt is invalid");
+}
+
+export function retrievalSynthesisReceiptDigest(receipt: RetrievalSynthesisReceipt): string { validateRetrievalSynthesisReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

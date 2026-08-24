@@ -72,6 +72,8 @@ MECHANISM_GATEWAY_FEATURE_ID = "AFA-fiber-P08-F24"
 MECHANISM_GATEWAY_CONTRACT_VERSION = "federated-mechanism-interoperability-gateway/1.0"
 EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-adapter-P01-F09"
 EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0"
+RETRIEVAL_SYNTHESIS_FEATURE_ID = "AFA-adapter-P02-F06"
+RETRIEVAL_SYNTHESIS_CONTRACT_VERSION = "multimodal-retrieval-synthesis/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -1984,3 +1986,45 @@ class EvidenceSurveillanceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "study_id": self.study_id, "intent": self.intent, "selected_source_ids": list(self.selected_source_ids), "disposition": self.disposition, "qualified_set": dict(self.qualified_set), "effect_receipts": [dict(item) for item in self.effect_receipts], "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class RetrievalSynthesisReceipt:
+    request_id: str
+    query_id: str
+    disposition: str
+    synthesis: Mapping[str, Any]
+    effect_receipts: tuple[Mapping[str, Any], ...]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RETRIEVAL_SYNTHESIS_FEATURE_ID
+    contract_version: str = RETRIEVAL_SYNTHESIS_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RETRIEVAL_SYNTHESIS_FEATURE_ID or self.contract_version != RETRIEVAL_SYNTHESIS_CONTRACT_VERSION:
+            raise ResearchContractError("retrieval synthesis schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.query_id.strip() or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("retrieval synthesis identity, checks, or effects are incomplete")
+        if self.disposition not in {"passed", "blocked", "unknown"}:
+            raise ResearchContractError("retrieval synthesis disposition is unknown")
+        if self.synthesis.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION or self.synthesis.get("query_id") != self.query_id or self.synthesis.get("boundary") != PRECLINICAL_BOUNDARY or not str(self.synthesis.get("comparability_profile", "")).strip():
+            raise ResearchContractError("retrieval synthesis linkage or boundary is invalid")
+        if tuple(self.synthesis.get("omissions", ())) != self.omissions or tuple(self.synthesis.get("uncertainty", ())) != self.uncertainty:
+            raise ResearchContractError("retrieval synthesis omission linkage is invalid")
+        selected = self.synthesis.get("selected_evidence_ids", ())
+        if len(set(selected)) != len(selected) or len(selected) != len(self.synthesis.get("selected_digests", ())) or len(selected) != len(self.synthesis.get("selected_modalities", ())):
+            raise ResearchContractError("retrieval synthesis selected evidence alignment is invalid")
+        if self.synthesis.get("evidence_state") == "proven" and (self.omissions or self.uncertainty):
+            raise ResearchContractError("proven synthesis cannot contain unresolved omissions")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("retrieval synthesis artifact digest is invalid")
+        for effect in self.effect_receipts:
+            if effect.get("effect") != "read_local_data" or not isinstance(effect.get("authorized"), bool) or not isinstance(effect.get("reason"), str) or not re.fullmatch(r"[0-9a-f]{64}", str(effect.get("receipt_digest", ""))):
+                raise ResearchContractError("retrieval synthesis effect receipt is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "query_id": self.query_id, "disposition": self.disposition, "synthesis": dict(self.synthesis), "effect_receipts": [dict(item) for item in self.effect_receipts], "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "artifact": dict(self.artifact), "boundary": self.boundary})

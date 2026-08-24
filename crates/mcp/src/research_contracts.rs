@@ -8,6 +8,10 @@ use crate::resource_discovery_contract::{
     ResourceDiscoveryContractResponse, FEATURE_ID as RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
 };
 use bioprism_adapter::{
+    compile_evidence_synthesis, EvidenceSynthesisRequest, RetrievalSynthesisReceipt,
+    RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+use bioprism_adapter::{
     evaluate_quality_drift, harmonize_multimodal, HarmonizedResearchObject,
     MultimodalHarmonizationRequest, QualityDriftReceipt, QualityDriftRequest,
     MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
@@ -139,6 +143,7 @@ pub const WEAVELANG_RELEASE_ASSURANCE_TOOL: &str = "weavelang_release_assurance"
 pub const MECHANISM_CONTROL_PLANE_TOOL: &str = "federated_mechanism_control_plane";
 pub const MECHANISM_GATEWAY_TOOL: &str = "federated_mechanism_gateway";
 pub const EVIDENCE_SURVEILLANCE_TOOL: &str = "evidence_surveillance_copilot";
+pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -777,6 +782,26 @@ pub fn validate_evidence_surveillance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != EVIDENCE_SURVEILLANCE_FEATURE_ID {
         return Err("evidence surveillance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn compile_evidence_synthesis_json(value: &Value) -> Result<Value, String> {
+    let request: EvidenceSynthesisRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid retrieval synthesis request: {error}"))?;
+    let receipt = compile_evidence_synthesis(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize retrieval synthesis receipt: {error}"))
+}
+
+pub fn validate_evidence_synthesis_json(
+    value: &Value,
+) -> Result<RetrievalSynthesisReceipt, String> {
+    let receipt: RetrievalSynthesisReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid retrieval synthesis receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RETRIEVAL_SYNTHESIS_FEATURE_ID {
+        return Err("retrieval synthesis feature id mismatch".into());
     }
     Ok(receipt)
 }

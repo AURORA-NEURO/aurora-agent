@@ -7,6 +7,7 @@ from prism_sdk.research_contracts import WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
 from prism_sdk.research_contracts import MECHANISM_CONTROL_PLANE_FEATURE_ID, MECHANISM_CONTROL_PLANE_CONTRACT_VERSION, MechanismControlPlaneReceipt
 from prism_sdk.research_contracts import MECHANISM_GATEWAY_FEATURE_ID, MECHANISM_GATEWAY_CONTRACT_VERSION, MechanismGatewayReceipt
 from prism_sdk.research_contracts import EVIDENCE_SURVEILLANCE_FEATURE_ID, EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, EvidenceSurveillanceReceipt
+from prism_sdk.research_contracts import RETRIEVAL_SYNTHESIS_FEATURE_ID, RETRIEVAL_SYNTHESIS_CONTRACT_VERSION, RetrievalSynthesisReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -730,4 +731,37 @@ def test_evidence_surveillance_preserves_negative_sources_and_effect_receipts():
     receipt.validate()
     assert receipt.feature_id == EVIDENCE_SURVEILLANCE_FEATURE_ID
     assert receipt.contract_version == EVIDENCE_SURVEILLANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_retrieval_synthesis_keeps_missing_modality_unknown():
+    receipt = RetrievalSynthesisReceipt(
+        request_id="request:synthesis",
+        query_id="query:multimodal",
+        disposition="unknown",
+        synthesis={
+            "schema_version": "aurora-research-contract/1.0",
+            "synthesis_id": "evidence-synthesis:request:synthesis",
+            "query_id": "query:multimodal",
+            "intent": "compare imaging and omics",
+            "comparability_profile": "protocol-v2",
+            "selected_evidence_ids": ["evidence:imaging"],
+            "selected_modalities": ["imaging"],
+            "selected_digests": ["a" * 64],
+            "evidence_state": "unknown",
+            "negative_evidence_ids": [],
+            "contradictory_evidence_ids": [],
+            "omissions": ["required modality unavailable or incomparable: omics"],
+            "uncertainty": [],
+            "boundary": PRECLINICAL_BOUNDARY,
+        },
+        effect_receipts=({"effect": "read_local_data", "authorized": True, "reason": "retrieval read is policy-authorized", "receipt_digest": "c" * 64},),
+        checks=("incomplete comparability or evidence coverage remains unknown",),
+        omissions=("required modality unavailable or incomparable: omics",),
+        uncertainty=(),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == RETRIEVAL_SYNTHESIS_FEATURE_ID
+    assert receipt.contract_version == RETRIEVAL_SYNTHESIS_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
