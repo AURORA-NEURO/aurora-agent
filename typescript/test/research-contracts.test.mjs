@@ -98,6 +98,10 @@ import {
   FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION,
   federatedKnowledgeGatewayReceiptDigest,
   validateFederatedKnowledgeGatewayReceipt,
+  FEDERATED_LENS_ASSURANCE_FEATURE_ID,
+  FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION,
+  federatedLensAssuranceReceiptDigest,
+  validateFederatedLensAssuranceReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -710,4 +714,25 @@ test("federated knowledge gateway keeps manifest projection unknown", () => {
   };
   assert.doesNotThrow(() => validateFederatedKnowledgeGatewayReceipt(receipt));
   assert.equal(federatedKnowledgeGatewayReceiptDigest(receipt), federatedKnowledgeGatewayReceiptDigest(receipt));
+});
+
+test("federated lens assurance keeps missing lens unknown", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: FEDERATED_LENS_ASSURANCE_FEATURE_ID,
+    contract_version: FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION,
+    request_id: "request:lens",
+    federation_id: "federation:lens",
+    institution_ids: ["site:a", "site:b"],
+    required_lens_ids: ["42.13.qc"],
+    report_digests: [],
+    absent_lens_ids: ["42.13.qc"],
+    disposition: "unknown",
+    checks: ["missing lens evidence remains unknown rather than negative"],
+    omissions: ["required lens not run: 42.13.qc"],
+    artifact: { content_hash: "b".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateFederatedLensAssuranceReceipt(receipt));
+  assert.equal(federatedLensAssuranceReceiptDigest(receipt), federatedLensAssuranceReceiptDigest(receipt));
 });

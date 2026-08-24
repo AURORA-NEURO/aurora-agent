@@ -49,6 +49,8 @@ FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID = "AFA-routing-P06-F28"
 FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION = "federated-multimodal-assurance/1.0"
 FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-store-P04-F24"
 FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "federated-knowledge-gateway/1.0"
+FEDERATED_LENS_ASSURANCE_FEATURE_ID = "AFA-lens-P04-F28"
+FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION = "federated-lens-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -980,6 +982,61 @@ class FederatedKnowledgeGatewayReceipt:
             "omissions": list(self.omissions),
             "artifact": dict(self.artifact),
             "raw_data_local": self.raw_data_local,
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class FederatedLensAssuranceReceipt:
+    """Transport validator for omission-aware federated lens-report admission."""
+
+    request_id: str
+    federation_id: str
+    institution_ids: tuple[str, ...]
+    required_lens_ids: tuple[str, ...]
+    report_digests: tuple[str, ...]
+    absent_lens_ids: tuple[str, ...]
+    disposition: str
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = FEDERATED_LENS_ASSURANCE_FEATURE_ID
+    contract_version: str = FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != FEDERATED_LENS_ASSURANCE_FEATURE_ID or self.contract_version != FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("federated lens assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.federation_id.strip():
+            raise ResearchContractError("federated lens assurance identity or boundary is invalid")
+        if len(self.institution_ids) < 2 or any(not institution.strip() for institution in self.institution_ids) or tuple(sorted(set(self.institution_ids))) != self.institution_ids:
+            raise ResearchContractError("federated lens institution ordering is invalid")
+        if not self.required_lens_ids or self.disposition not in {"passed", "blocked", "unknown"} or not self.checks:
+            raise ResearchContractError("federated lens required set, disposition, or checks are incomplete")
+        for digest in self.report_digests:
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise ResearchContractError("federated lens report digest is not a canonical sha256")
+        artifact_digest = self.artifact.get("content_hash")
+        if not isinstance(artifact_digest, str) or len(artifact_digest) != 64 or any(char not in "0123456789abcdef" for char in artifact_digest):
+            raise ResearchContractError("federated lens artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "institution_ids": list(self.institution_ids),
+            "required_lens_ids": list(self.required_lens_ids),
+            "report_digests": list(self.report_digests),
+            "absent_lens_ids": list(self.absent_lens_ids),
+            "disposition": self.disposition,
+            "checks": list(self.checks),
+            "omissions": list(self.omissions),
+            "artifact": dict(self.artifact),
             "boundary": self.boundary,
         })
 

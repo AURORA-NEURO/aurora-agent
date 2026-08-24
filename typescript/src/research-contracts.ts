@@ -44,6 +44,8 @@ export const FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID = "AFA-routing-P06-F28" a
 export const FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION = "federated-multimodal-assurance/1.0" as const;
 export const FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-store-P04-F24" as const;
 export const FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "federated-knowledge-gateway/1.0" as const;
+export const FEDERATED_LENS_ASSURANCE_FEATURE_ID = "AFA-lens-P04-F28" as const;
+export const FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION = "federated-lens-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -903,6 +905,36 @@ export function validateFederatedKnowledgeGatewayReceipt(receipt: FederatedKnowl
 
 export function federatedKnowledgeGatewayReceiptDigest(receipt: FederatedKnowledgeGatewayReceipt): string {
   validateFederatedKnowledgeGatewayReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
+export interface FederatedLensAssuranceReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  request_id: string;
+  federation_id: string;
+  institution_ids: string[];
+  required_lens_ids: string[];
+  report_digests: string[];
+  absent_lens_ids: string[];
+  disposition: "passed" | "blocked" | "unknown";
+  checks: string[];
+  omissions: string[];
+  artifact: Record<string, unknown>;
+  boundary: string;
+}
+
+export function validateFederatedLensAssuranceReceipt(receipt: FederatedLensAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATED_LENS_ASSURANCE_FEATURE_ID || receipt.contract_version !== FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION) throw new Error("federated lens assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.federation_id.trim()) throw new Error("federated lens assurance identity or boundary is invalid");
+  if (receipt.institution_ids.length < 2 || receipt.institution_ids.some((institution) => !institution.trim()) || JSON.stringify([...receipt.institution_ids].sort()) !== JSON.stringify(receipt.institution_ids)) throw new Error("federated lens institution ordering is invalid");
+  if (receipt.required_lens_ids.length === 0 || !new Set(["passed", "blocked", "unknown"]).has(receipt.disposition) || receipt.checks.length === 0) throw new Error("federated lens required set, disposition, or checks is incomplete");
+  if (receipt.report_digests.some((digest) => !/^[0-9a-f]{64}$/.test(digest)) || typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("federated lens digest is invalid");
+}
+
+export function federatedLensAssuranceReceiptDigest(receipt: FederatedLensAssuranceReceipt): string {
+  validateFederatedLensAssuranceReceipt(receipt);
   return digestJsonSync(receipt);
 }
 

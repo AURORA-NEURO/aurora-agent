@@ -35,6 +35,10 @@ use bioprism_lab::{
     InstrumentPreflightRequest, ProtocolMatrixReceipt, ProtocolMatrixRequest,
     DESIGN_FRONTIER_FEATURE_ID, INSTRUMENT_PREFLIGHT_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID,
 };
+use bioprism_lens::{
+    assure_federated_lens, FederatedLensAssuranceReceipt, FederatedLensAssuranceRequest,
+    FEDERATED_LENS_ASSURANCE_FEATURE_ID,
+};
 use bioprism_obligation::{
     assess_release_harness, ReleaseHarnessReceipt, ReleaseHarnessRequest,
     RELEASE_HARNESS_FEATURE_ID,
@@ -88,6 +92,7 @@ pub const RELEASE_ASSURANCE_HARNESS_TOOL: &str = "release_assurance_harness";
 pub const PROTOCOL_ASSURANCE_TOOL: &str = "protocol_assurance_harness";
 pub const FEDERATED_MULTIMODAL_ASSURANCE_TOOL: &str = "federated_multimodal_assurance";
 pub const FEDERATED_KNOWLEDGE_GATEWAY_TOOL: &str = "federated_knowledge_gateway";
+pub const FEDERATED_LENS_ASSURANCE_TOOL: &str = "federated_lens_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -509,6 +514,26 @@ pub fn validate_federated_knowledge_gateway_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID {
         return Err("federated knowledge gateway feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_federated_lens_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedLensAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated lens assurance request: {error}"))?;
+    let receipt = assure_federated_lens(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federated lens assurance receipt: {error}"))
+}
+
+pub fn validate_federated_lens_assurance_json(
+    value: &Value,
+) -> Result<FederatedLensAssuranceReceipt, String> {
+    let receipt: FederatedLensAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated lens assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_LENS_ASSURANCE_FEATURE_ID {
+        return Err("federated lens assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

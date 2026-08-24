@@ -558,6 +558,7 @@ dependencies = [
 name = "bioprism-lens"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-section",

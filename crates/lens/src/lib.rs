@@ -82,6 +82,7 @@ pub mod anytime;
 pub mod catalogue;
 pub mod claim;
 pub mod error;
+pub mod federated_assurance;
 pub mod gate;
 pub mod grammar;
 pub mod leakage;
@@ -100,6 +101,12 @@ pub use catalogue::{
 };
 pub use claim::{ClaimDossier, ClaimEvidenceLens, ClaimFinding, ClaimRecord, EvidenceItem};
 pub use error::LensError;
+pub use federated_assurance::{
+    assure_federated_lens, FederatedLensAssuranceReceipt, FederatedLensAssuranceRequest,
+    FederatedLensDisposition, FederatedLensError,
+    CONTRACT_VERSION as FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_LENS_ASSURANCE_FEATURE_ID,
+};
 pub use gate::{GateBlock, GateOutcome, ReleaseGate};
 pub use grammar::{
     run, AbsentRequirement, Completeness, Coverage, EvidenceGap, EvidenceRequirement, Lens,

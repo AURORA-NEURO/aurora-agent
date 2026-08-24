@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/federated-lens-assurance-receipt.json",
+  "title": "AURORA federated lens assurance receipt",
+  "description": "Omission-aware admission for content-addressed lens reports across research institutions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "contract_version", "request_id", "federation_id", "institution_ids", "required_lens_ids", "report_digests", "absent_lens_ids", "disposition", "checks", "omissions", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-lens-P04-F28" },
+    "contract_version": { "const": "federated-lens-assurance/1.0" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "federation_id": { "type": "string", "minLength": 1 },
+    "institution_ids": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "required_lens_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "report_digests": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+    "absent_lens_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "disposition": { "enum": ["passed", "blocked", "unknown"] },
+    "checks": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "omissions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}
