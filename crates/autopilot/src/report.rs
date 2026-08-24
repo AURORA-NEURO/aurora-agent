@@ -8,8 +8,8 @@
 //! digest field removed, so any later edit is detectable by recomputation alone.
 //!
 //! `limitations` is always present and always contains at least [`REQUIRED_LIMITATIONS`]. A
-//! report that omitted them would imply capabilities — scheduling, MCP exposure, resume,
-//! deadlines — that this crate deliberately does not have.
+//! report that omitted them would imply capabilities — scheduling, MCP exposure, unrestricted
+//! resume, deadlines — that this crate deliberately does not have.
 
 use crate::classify::classify_step_result;
 use crate::error::AutopilotError;
@@ -24,7 +24,7 @@ pub const AUTOPILOT_REPORT_SCHEMA_VERSION: &str = "bioprism-autopilot/report/0.1
 pub const REQUIRED_LIMITATIONS: [&str; 4] = [
     "no scheduling or recurrence: the drive runs to a stop state in one call and nothing wakes up later",
     "no MCP tool exposure: the autopilot is not an MCP tool and registers nothing with the server",
-    "no cross-process resume: history lives in memory for one drive; a crashed drive cannot be resumed as itself",
+    "metadata-only cross-process resume: checkpoints retain digests and bounded status metadata, while callers must rehydrate private mission and report material",
     "wall-clock deadlines are unsupported: retryable-as-is failures are re-dispatched immediately or not at all, with no waiting or backoff",
 ];
 

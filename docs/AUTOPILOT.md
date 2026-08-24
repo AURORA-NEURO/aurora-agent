@@ -124,6 +124,26 @@ is unknown at mission level, side effects may have run, and the drive stops rath
 blind. A mission report recording an operator cancellation ends the drive regardless of retry
 options.
 
+## Restart-safe driving without secret retention
+
+The Rust kernel exposes `drive_mission_with_checkpoint` and
+`drive_instantiation_with_checkpoint`. Their callback runs after each dispatch is appended to the
+private in-memory history and before another plan is constructed. Hosts can seal that history with
+`seal_autopilot_checkpoint` and persist it through the caller-owned JSON store adapters. A sealed
+checkpoint contains only the grant and mission digests, bounded attempt/step counts, step-id and
+result-metadata digests, retry status counts, reconciliation posture, generation, and a chained
+snapshot digest. It never contains mission arguments, provider output, credentials, raw evidence,
+or dispatch error text.
+
+After a process restart, `resume_mission_with_checkpoint` or
+`resume_instantiation_with_checkpoint` requires the host to supply the original mission and
+rehydrated `AttemptRecord` values. The kernel recomputes every retained projection and refuses
+before dispatch when a grant, mission, attempt, generation, or snapshot digest differs. The
+transactional persistence adapter adds compare-and-swap protection so two workers cannot both
+advance the same checkpoint head. This is restart-safe recovery, not blind replay: a host that
+cannot rehydrate the private material must stop rather than reconstruct it from incomplete
+metadata.
+
 ## Dry run dispatches nothing
 
 `autopilot run --dry-run` plans attempt 1 only: it prints the exact mission the drive would
@@ -177,14 +197,13 @@ first four:
 
 1. "no scheduling or recurrence: the drive runs to a stop state in one call and nothing wakes up later"
 2. "no MCP tool exposure: the autopilot is not an MCP tool and registers nothing with the server"
-3. "no cross-process resume: history lives in memory for one drive; a crashed drive cannot be resumed as itself"
+3. "metadata-only cross-process resume: checkpoints retain digests and bounded status metadata, while callers must rehydrate private mission and report material"
 4. "wall-clock deadlines are unsupported: retryable-as-is failures are re-dispatched immediately or not at all, with no waiting or backoff"
 5. "an undelivered dispatch is never re-sent: a missing mission report leaves side effects unknown at mission level"
 6. "a repair attempt's reconciliation covers only the re-dispatched subset and is labelled with that scope"
 7. "succeeded steps are never re-dispatched; a binding whose retained payload is gone excludes its dependent instead"
 8. "a repair re-dispatches steps without the base mission's claim requests or reviews; claim lineage exists only for attempt 1"
 
-The autopilot report itself is written only by a drive that reaches a stop state: a drive that
-fails mid-loop with an error retains nothing of its own — dispatched side effects have happened
-and whatever the mission layer itself retained still exists, but there is no partial autopilot
-report.
+The final autopilot report is written only by a drive that reaches a stop state. A checkpoint may
+survive a mid-loop error, but it is not a partial report: it is restart metadata, and the host
+must still rehydrate the private attempt records before a resumed drive can dispatch.

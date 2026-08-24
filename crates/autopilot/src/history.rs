@@ -242,6 +242,19 @@ impl DriveHistory {
         })
     }
 
+    /// Rebuild a history from caller-owned rehydrated attempts after a process restart.
+    ///
+    /// The checkpoint layer verifies that these attempts match its digest-only projections; this
+    /// constructor deliberately does not accept raw serialized state by itself.
+    pub fn from_attempts(
+        base_mission: Value,
+        attempts: Vec<AttemptRecord>,
+    ) -> Result<Self, AutopilotError> {
+        let mut history = Self::new(base_mission)?;
+        history.attempts = attempts;
+        Ok(history)
+    }
+
     pub fn base_mission(&self) -> &Value {
         &self.base_mission
     }

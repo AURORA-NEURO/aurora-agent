@@ -384,8 +384,11 @@ impl CliError {
             AutopilotError::InvalidMission { .. }
             | AutopilotError::InvalidReport { .. }
             | AutopilotError::InvalidInstantiation { .. }
-            | AutopilotError::InvalidAutopilotReport { .. } => CliError::invalid(message),
-            AutopilotError::Canonicalisation { .. } => CliError::internal(message),
+            | AutopilotError::InvalidAutopilotReport { .. }
+            | AutopilotError::InvalidCheckpoint { .. } => CliError::invalid(message),
+            AutopilotError::Canonicalisation { .. }
+            | AutopilotError::Persistence { .. }
+            | AutopilotError::CompareAndSwapConflict => CliError::internal(message),
         }
     }
 

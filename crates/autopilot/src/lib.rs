@@ -44,11 +44,13 @@
 //!
 //! # Shape of the crate
 //!
-//! [`grant`], [`classify`], [`history`], [`planner`], and [`report`] are the pure kernel: no
-//! I/O, no clock, no randomness, every digest a function of its input. [`drive`] is the one
-//! effectful module, and its only effect is calling a caller-supplied [`drive::MissionDispatch`]
-//! — in production a closure over the in-process MCP server's `execute_agent_mission` boundary,
-//! in tests a fake. The kernel never links the MCP server.
+//! [`grant`], [`classify`], [`history`], [`planner`], [`report`], and the checkpoint projection are
+//! the pure kernel: no I/O, no clock, no randomness, every digest a function of its input.
+//! [`drive`] is the effectful module, and its only execution effect is calling a caller-supplied
+//! [`drive::MissionDispatch`] — in production a closure over the in-process MCP server's
+//! `execute_agent_mission` boundary, in tests a fake. The checkpoint store is caller-owned: this
+//! crate supplies strict JSON validation and compare-and-swap orchestration, never a file,
+//! database, or credential implementation.
 //!
 //! # Not implemented
 //!
@@ -56,10 +58,11 @@
 //!   here wakes up later.
 //! - **No MCP tool exposure.** This crate is not an MCP tool and registers nothing with the
 //!   server; the drive *calls* the mission boundary through a seam the caller supplies.
-//! - **No cross-process resume.** History lives in memory for one drive and cannot be resumed as
-//!   itself. A drive that fails mid-loop with an [`AutopilotError`] retains nothing of its own:
-//!   dispatched side effects have happened and whatever the mission layer itself retained still
-//!   exists, but the autopilot report is produced only by a drive that reaches a stop state.
+//! - **Metadata-only cross-process resume.** [`persistence`] seals a bounded checkpoint after
+//!   each dispatch and [`drive::resume_mission_with_checkpoint`] verifies caller-rehydrated
+//!   private attempts before planning continues. The checkpoint intentionally does not retain
+//!   mission arguments, provider output, credentials, or evidence; a caller that cannot rehydrate
+//!   those values must stop rather than guess.
 //! - **No wall-clock deadlines, backoff, or waiting.** 40.36's `retryable_as_is` means "may
 //!   succeed later"; this crate re-dispatches immediately or not at all, and says so in every
 //!   report's limitations.
@@ -82,14 +85,30 @@ pub mod error;
 pub mod grant;
 pub mod history;
 pub mod planner;
+pub mod persistence;
 pub mod report;
 
 pub use classify::{classify_step_result, RetryClass, StepClass, StepClassification};
-pub use drive::{drive_instantiation, drive_mission, DriveOutcome, MissionDispatch};
+pub use drive::{
+    drive_instantiation, drive_instantiation_with_checkpoint, drive_mission,
+    drive_mission_with_checkpoint, resume_instantiation_with_checkpoint,
+    resume_mission_with_checkpoint, DriveOutcome, MissionDispatch,
+};
 pub use error::{AutopilotError, GrantError};
 pub use grant::{AutonomyGrant, AutonomyGrantDocument, RetryPolicy, RetryPolicyDocument};
 pub use history::{AttemptKind, AttemptRecord, DriveHistory};
 pub use planner::{plan_next_action, preview_first_action, DispatchAuthorization, NextAction};
+pub use persistence::{
+    attempt_checkpoint_projection, restore_drive_history, seal_autopilot_checkpoint,
+    validate_autopilot_checkpoint, AutopilotCheckpointPersistence,
+    AutopilotCheckpointPersistenceCoordinator, AutopilotCheckpointStore,
+    JsonAutopilotCheckpointPersistence, TransactionalAutopilotCheckpointPersistence,
+    TransactionalAutopilotCheckpointPersistenceCoordinator,
+    TransactionalAutopilotCheckpointStore, TransactionalJsonAutopilotCheckpointPersistence,
+    AUTOPILOT_CHECKPOINT_MAX_ATTEMPTS, AUTOPILOT_CHECKPOINT_MAX_BYTES,
+    AUTOPILOT_CHECKPOINT_MAX_STEP_IDS, AUTOPILOT_CHECKPOINT_RETENTION,
+    AUTOPILOT_CHECKPOINT_SCHEMA,
+};
 pub use report::{
     build_autopilot_report, verify_autopilot_report, FinalDisposition, FinalStatus,
     AUTOPILOT_REPORT_SCHEMA_VERSION, REQUIRED_LIMITATIONS,

@@ -317,7 +317,9 @@ bioprism autopilot verify --report report.json
 ```
 
 What it deliberately does not do: no scheduling or recurrence, no MCP tool exposure of the driver
-itself, no cross-process resume, no wall-clock deadlines. Full reference:
+itself, no wall-clock deadlines. Restart is supported only through a caller-owned, metadata-only
+checkpoint: mission/report material is rehydrated by the host and matched by digest before the
+planner can continue. Full reference:
 [docs/AUTOPILOT.md](docs/AUTOPILOT.md).
 
 ## Using it from an agent

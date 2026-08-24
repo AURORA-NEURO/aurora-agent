@@ -27,6 +27,7 @@
 use crate::error::AutopilotError;
 use crate::grant::AutonomyGrant;
 use crate::history::{AttemptKind, AttemptRecord, DriveHistory};
+use crate::persistence::restore_drive_history;
 use crate::planner::{never_dispatched_rows, plan_next_action, NextAction};
 use crate::report::{build_autopilot_report, FinalDisposition, FinalStatus};
 use bioprism_devplat::reconcile_domain_workflow;
@@ -82,10 +83,15 @@ fn reconciliation_for_attempt(
             .unwrap_or("the mission boundary recorded a reconciliation failure");
         return (
             None,
-            Some(format!("auto-attached reconciliation failed closed: {reason}")),
+            Some(format!(
+                "auto-attached reconciliation failed closed: {reason}"
+            )),
         );
     }
-    if mission.get("workflow_binding").is_some_and(|binding| !binding.is_null()) {
+    if mission
+        .get("workflow_binding")
+        .is_some_and(|binding| !binding.is_null())
+    {
         return (
             None,
             Some(
@@ -157,11 +163,12 @@ fn reconciliation_unavailable_accounting(grant: &AutonomyGrant, history: &DriveH
     })
 }
 
-fn drive_loop<D: MissionDispatch>(
+fn drive_loop<D: MissionDispatch, C: FnMut(&DriveHistory) -> Result<(), AutopilotError>>(
     grant: &AutonomyGrant,
     mut history: DriveHistory,
     instantiation: Option<&Value>,
     dispatcher: &mut D,
+    checkpoint: &mut C,
 ) -> Result<DriveOutcome, AutopilotError> {
     let disposition = loop {
         match plan_next_action(grant, &history)? {
@@ -173,7 +180,14 @@ fn drive_loop<D: MissionDispatch>(
                         accounting: reconciliation_unavailable_accounting(grant, &history),
                     };
                 }
-                dispatch_once(AttemptKind::Full, mission, instantiation, dispatcher, &mut history)?;
+                dispatch_once(
+                    AttemptKind::Full,
+                    mission,
+                    instantiation,
+                    dispatcher,
+                    &mut history,
+                )?;
+                checkpoint(&history)?;
             }
             NextAction::DispatchRepair { mission, .. } => {
                 dispatch_once(
@@ -183,6 +197,7 @@ fn drive_loop<D: MissionDispatch>(
                     dispatcher,
                     &mut history,
                 )?;
+                checkpoint(&history)?;
             }
             NextAction::StopSuccess { evidence } => {
                 break FinalDisposition::Succeeded { evidence };
@@ -204,6 +219,10 @@ fn drive_loop<D: MissionDispatch>(
         final_status: disposition.status(),
         report,
     })
+}
+
+fn no_checkpoint(_: &DriveHistory) -> Result<(), AutopilotError> {
+    Ok(())
 }
 
 fn dispatch_once<D: MissionDispatch>(
@@ -232,8 +251,43 @@ pub fn drive_mission<D: MissionDispatch>(
     base_mission: Value,
     dispatcher: &mut D,
 ) -> Result<DriveOutcome, AutopilotError> {
+    drive_mission_with_checkpoint(grant, base_mission, dispatcher, no_checkpoint)
+}
+
+/// Drive a bare mission while giving the caller a durable-history hook after every delivered or
+/// undelivered dispatch. The hook runs after the attempt is appended and before the next plan is
+/// constructed, so a successful flush is a restart boundary rather than a best-effort log.
+pub fn drive_mission_with_checkpoint<D, C>(
+    grant: &AutonomyGrant,
+    base_mission: Value,
+    dispatcher: &mut D,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
     let history = DriveHistory::new(base_mission)?;
-    drive_loop(grant, history, None, dispatcher)
+    drive_loop(grant, history, None, dispatcher, &mut checkpoint)
+}
+
+/// Resume a bare mission from a validated metadata-only checkpoint. The original mission and
+/// private attempt records must be supplied by the caller; the checkpoint layer proves their
+/// digests and bounded metadata match before dispatch can continue.
+pub fn resume_mission_with_checkpoint<D, C>(
+    grant: &AutonomyGrant,
+    checkpoint_snapshot: &Value,
+    base_mission: Value,
+    attempts: Vec<AttemptRecord>,
+    dispatcher: &mut D,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
+    let history = restore_drive_history(grant, checkpoint_snapshot, base_mission, attempts)?;
+    drive_loop(grant, history, None, dispatcher, &mut checkpoint)
 }
 
 /// Drive the mission carried by a workflow instantiation artifact.
@@ -246,9 +300,54 @@ pub fn drive_instantiation<D: MissionDispatch>(
     instantiation: &Value,
     dispatcher: &mut D,
 ) -> Result<DriveOutcome, AutopilotError> {
+    drive_instantiation_with_checkpoint(grant, instantiation, dispatcher, no_checkpoint)
+}
+
+/// Drive an accepted instantiation while checkpointing after each dispatch.
+pub fn drive_instantiation_with_checkpoint<D, C>(
+    grant: &AutonomyGrant,
+    instantiation: &Value,
+    dispatcher: &mut D,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
     let base_mission = instantiation_mission(instantiation)?;
     let history = DriveHistory::new(base_mission)?;
-    drive_loop(grant, history, Some(instantiation), dispatcher)
+    drive_loop(
+        grant,
+        history,
+        Some(instantiation),
+        dispatcher,
+        &mut checkpoint,
+    )
+}
+
+/// Resume an accepted instantiation from a metadata-only checkpoint and continue with the same
+/// reconciliation source used by a fresh instantiation drive.
+pub fn resume_instantiation_with_checkpoint<D, C>(
+    grant: &AutonomyGrant,
+    checkpoint_snapshot: &Value,
+    instantiation: &Value,
+    attempts: Vec<AttemptRecord>,
+    dispatcher: &mut D,
+    mut checkpoint: C,
+) -> Result<DriveOutcome, AutopilotError>
+where
+    D: MissionDispatch,
+    C: FnMut(&DriveHistory) -> Result<(), AutopilotError>,
+{
+    let base_mission = instantiation_mission(instantiation)?;
+    let history = restore_drive_history(grant, checkpoint_snapshot, base_mission, attempts)?;
+    drive_loop(
+        grant,
+        history,
+        Some(instantiation),
+        dispatcher,
+        &mut checkpoint,
+    )
 }
 
 /// Extract and check the mission from an instantiation artifact, refusing artifacts that are

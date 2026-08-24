@@ -4,9 +4,15 @@
 
 use bioprism_autopilot::{
     build_autopilot_report, classify_step_result, drive_instantiation, drive_mission,
-    plan_next_action, preview_first_action, verify_autopilot_report, AttemptKind, AttemptRecord,
-    AutonomyGrant, AutopilotError, DriveHistory, FinalDisposition, FinalStatus, GrantError,
-    NextAction, RetryClass, StepClass, REQUIRED_LIMITATIONS,
+    drive_mission_with_checkpoint, plan_next_action, preview_first_action,
+    resume_mission_with_checkpoint, seal_autopilot_checkpoint, validate_autopilot_checkpoint,
+    verify_autopilot_report, AttemptKind, AttemptRecord, AutonomyGrant, AutopilotCheckpointStore,
+    AutopilotCheckpointPersistence, AutopilotError, DriveHistory, FinalDisposition, FinalStatus,
+    GrantError, JsonAutopilotCheckpointPersistence,
+    NextAction, RetryClass, StepClass, TransactionalAutopilotCheckpointPersistence,
+    TransactionalAutopilotCheckpointPersistenceCoordinator,
+    TransactionalAutopilotCheckpointStore, TransactionalJsonAutopilotCheckpointPersistence,
+    REQUIRED_LIMITATIONS,
 };
 use bioprism_devplat::{
     plan_mission, MissionReport, MissionRequest, MissionStepResult, MISSION_SCHEMA_VERSION,
@@ -30,9 +36,20 @@ fn default_grant(tools: &[&str]) -> AutonomyGrant {
 }
 
 fn step(id: &str, tool: &str, deps: &[&str], arguments: Value, bindings: Value) -> Value {
+    step_in_domain("metrics", id, tool, deps, arguments, bindings)
+}
+
+fn step_in_domain(
+    domain: &str,
+    id: &str,
+    tool: &str,
+    deps: &[&str],
+    arguments: Value,
+    bindings: Value,
+) -> Value {
     json!({
         "id": id,
-        "domain": "metrics",
+        "domain": domain,
         "capability": "analytics",
         "objective": format!("run {id}"),
         "tool": tool,
@@ -1371,5 +1388,251 @@ mod drive {
             outcome.report["first_terminal_refusal"]["step_id"],
             json!("b")
         );
+    }
+}
+
+mod persistence {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Clone, Default)]
+    struct SharedStore(Rc<RefCell<Option<String>>>);
+
+    impl AutopilotCheckpointStore for SharedStore {
+        fn read(&mut self) -> Result<Option<String>, String> {
+            Ok(self.0.borrow().clone())
+        }
+
+        fn write(&mut self, value: String) -> Result<(), String> {
+            *self.0.borrow_mut() = Some(value);
+            Ok(())
+        }
+    }
+
+    impl TransactionalAutopilotCheckpointStore for SharedStore {
+        fn write_if_unchanged(
+            &mut self,
+            expected_snapshot_digest: Option<&str>,
+            value: String,
+        ) -> Result<bool, String> {
+            let actual_snapshot_digest = self
+                .0
+                .borrow()
+                .as_ref()
+                .and_then(|encoded| serde_json::from_str::<Value>(encoded).ok())
+                .and_then(|snapshot| snapshot.get("snapshot_digest").and_then(Value::as_str).map(str::to_owned));
+            if actual_snapshot_digest.as_deref() != expected_snapshot_digest {
+                return Ok(false);
+            }
+            *self.0.borrow_mut() = Some(value);
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn checkpoint_is_restart_safe_metadata_only_and_resume_does_not_replay_success() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a"],
+            "max_attempts": 4,
+            "require_reconciliation_complete": false,
+        }));
+        let mission = mission_of(
+            vec![step(
+                "a",
+                "tool_a",
+                &[],
+                json!({ "private_task": "do not persist this" }),
+                json!([]),
+            )],
+            None,
+        );
+        let mut rehydrated_attempts = Vec::new();
+        let mut snapshots = Vec::new();
+        let mut generation = 1;
+        let mut predecessor = None;
+        let outcome = {
+            let mut dispatcher = |dispatched: &Value| -> Result<Value, String> {
+                let report = report_for(
+                    dispatched,
+                    vec![ok_result("a", "tool_a", Some(&json!({ "provider_secret": "do not persist" })))],
+                    None,
+                );
+                rehydrated_attempts.push(
+                    AttemptRecord::delivered(
+                        AttemptKind::Full,
+                        dispatched.clone(),
+                        report.clone(),
+                        None,
+                        None,
+                    )
+                    .unwrap(),
+                );
+                Ok(report)
+            };
+            drive_mission_with_checkpoint(
+                &grant,
+                mission.clone(),
+                &mut dispatcher,
+                |history| {
+                    let snapshot = seal_autopilot_checkpoint(
+                        &grant,
+                        history,
+                        generation,
+                        predecessor.as_deref(),
+                    )?;
+                    predecessor = snapshot["snapshot_digest"].as_str().map(str::to_owned);
+                    generation += 1;
+                    snapshots.push(snapshot);
+                    Ok(())
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(outcome.final_status, FinalStatus::Succeeded);
+        assert_eq!(snapshots.len(), 1);
+        let snapshot = snapshots.last().unwrap();
+        validate_autopilot_checkpoint(snapshot).unwrap();
+        let encoded = snapshot.to_string();
+        assert!(!encoded.contains("private_task"));
+        assert!(!encoded.contains("provider_secret"));
+        assert!(!encoded.contains("arguments"));
+        assert_eq!(snapshot["attempts_used"], json!(1));
+
+        let mut redispatches = 0;
+        let resumed = resume_mission_with_checkpoint(
+            &grant,
+            snapshot,
+            mission,
+            rehydrated_attempts,
+            &mut |_dispatched: &Value| {
+                redispatches += 1;
+                Err("resume must not replay a completed attempt".into())
+            },
+            |_history| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(resumed.final_status, FinalStatus::Succeeded);
+        assert_eq!(redispatches, 0);
+    }
+
+    #[test]
+    fn checkpoint_store_is_canonical_and_stale_writers_are_rejected() {
+        let grant = grant_of(json!({
+            "allowed_tools": ["tool_a"],
+            "max_attempts": 2,
+            "require_reconciliation_complete": false,
+        }));
+        let mission = mission_of(
+            vec![step("a", "tool_a", &[], json!({ "private": true }), json!([]))],
+            None,
+        );
+        let attempt_mission = mission.clone();
+        let report = report_for(
+            &attempt_mission,
+            vec![ok_result("a", "tool_a", Some(&json!({ "result": true })))],
+            None,
+        );
+        let attempt = AttemptRecord::delivered(
+            AttemptKind::Full,
+            attempt_mission,
+            report,
+            None,
+            None,
+        )
+        .unwrap();
+        let history = DriveHistory::from_attempts(mission, vec![attempt]).unwrap();
+        let snapshot = seal_autopilot_checkpoint(&grant, &history, 1, None).unwrap();
+        let shared = SharedStore::default();
+        let mut stale = TransactionalAutopilotCheckpointPersistenceCoordinator::new(
+            TransactionalJsonAutopilotCheckpointPersistence::new(shared.clone()),
+        );
+        assert_eq!(stale.restore().unwrap(), None);
+        let mut writer = TransactionalAutopilotCheckpointPersistenceCoordinator::new(
+            TransactionalJsonAutopilotCheckpointPersistence::new(shared.clone()),
+        );
+        assert_eq!(writer.restore().unwrap(), None);
+        let stored = writer.flush(&snapshot).unwrap();
+        assert_eq!(stored, snapshot);
+
+        let mut reader = JsonAutopilotCheckpointPersistence::new(shared.clone());
+        assert_eq!(reader.read_snapshot().unwrap(), Some(snapshot.clone()));
+
+        let conflict = stale.flush(&snapshot).unwrap_err();
+        assert_eq!(conflict, AutopilotError::CompareAndSwapConflict);
+    }
+
+    #[test]
+    fn checkpoint_tampering_is_refused_before_rehydration() {
+        let grant = default_grant(&["tool_a"]);
+        let mission = mission_of(vec![step("a", "tool_a", &[], json!({}), json!([]))], None);
+        let history = DriveHistory::new(mission).unwrap();
+        let mut checkpoint = seal_autopilot_checkpoint(&grant, &history, 1, None).unwrap();
+        checkpoint["attempts_used"] = json!(1);
+        let error = validate_autopilot_checkpoint(&checkpoint).unwrap_err();
+        assert!(matches!(error, AutopilotError::InvalidCheckpoint { .. }));
+    }
+
+    #[test]
+    fn checkpoint_projection_is_domain_neutral_across_all_builtin_domains() {
+        let domains = [
+            "coding",
+            "browser",
+            "data",
+            "science",
+            "biomedical",
+            "neuroscience",
+            "operations",
+            "enterprise",
+            "multi_agent",
+            "multimodal",
+            "cross_domain",
+            "evaluation",
+        ];
+        let grant = grant_of(json!({
+            "allowed_tools": ["domain_tool"],
+            "max_attempts": 2,
+            "require_reconciliation_complete": false,
+        }));
+        let mission = mission_of(
+            domains
+                .iter()
+                .enumerate()
+                .map(|(index, domain)| {
+                    step_in_domain(
+                        domain,
+                        &format!("step-{index}"),
+                        "domain_tool",
+                        &[],
+                        json!({ "domain_private_input": domain }),
+                        json!([]),
+                    )
+                })
+                .collect(),
+            None,
+        );
+        let request: MissionRequest = serde_json::from_value(mission.clone()).unwrap();
+        let results = request
+            .steps
+            .iter()
+            .map(|step| ok_result(&step.id, &step.tool, Some(&json!({ "ok": true }))))
+            .collect();
+        let attempt = AttemptRecord::delivered(
+            AttemptKind::Full,
+            mission.clone(),
+            report_for(&mission, results, None),
+            None,
+            None,
+        )
+        .unwrap();
+        let history = DriveHistory::from_attempts(mission, vec![attempt]).unwrap();
+        let checkpoint = seal_autopilot_checkpoint(&grant, &history, 1, None).unwrap();
+        validate_autopilot_checkpoint(&checkpoint).unwrap();
+        assert_eq!(checkpoint["base_step_count"], json!(domains.len()));
+        assert_eq!(checkpoint["attempts"][0]["step_count"], json!(domains.len()));
+        let encoded = checkpoint.to_string();
+        for domain in domains {
+            assert!(!encoded.contains(domain), "raw domain material leaked: {domain}");
+        }
     }
 }

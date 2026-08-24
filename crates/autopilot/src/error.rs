@@ -53,6 +53,16 @@ pub enum AutopilotError {
     /// An autopilot report does not satisfy this crate's report contract.
     #[error("invalid autopilot report: {reason}")]
     InvalidAutopilotReport { reason: String },
+    /// A restart checkpoint was malformed, tampered with, or did not match the caller's
+    /// rehydrated mission/grant/evidence.
+    #[error("invalid autopilot checkpoint: {reason}")]
+    InvalidCheckpoint { reason: String },
+    /// A caller-owned checkpoint store could not be read or written.
+    #[error("autopilot checkpoint persistence failed: {reason}")]
+    Persistence { reason: String },
+    /// A transactional checkpoint store rejected a stale writer.
+    #[error("autopilot checkpoint compare-and-swap conflict")]
+    CompareAndSwapConflict,
     /// A value could not be canonically encoded for hashing. This is the one failure that is
     /// this crate's fault rather than the caller's, and it is named instead of being swallowed.
     #[error("cannot canonicalise value for digesting: {reason}")]
