@@ -25,6 +25,7 @@ export const MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02" as cons
 export const ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01" as const;
 export const PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02" as const;
 export const MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02" as const;
+export const QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -522,6 +523,33 @@ export function validateMultimodalReplicationReport(report: MultimodalReplicatio
 export function multimodalReplicationReportDigest(report: MultimodalReplicationReport): string {
   validateMultimodalReplicationReport(report);
   return digestJsonSync(report);
+}
+
+export interface QualityDriftReceipt {
+  schema_version: string;
+  feature_id: string;
+  dataset_id: string;
+  modality: string;
+  request_digest: string;
+  summary: Record<string, unknown>;
+  metrics: readonly Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateQualityDriftReceipt(receipt: QualityDriftReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== QUALITY_DRIFT_FEATURE_ID) throw new Error("quality drift schema or feature mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.dataset_id.trim() || !receipt.modality.trim()) throw new Error("quality drift identity or locality is invalid");
+  if (typeof receipt.summary.disposition !== "string" || !new Set(["stable", "drifted", "unknown", "blocked"]).has(receipt.summary.disposition)) throw new Error("quality drift disposition is unknown");
+  if (!receipt.metrics.length || !Array.isArray(receipt.summary.reasons) || receipt.summary.reasons.length === 0) throw new Error("quality drift metrics and reasons are incomplete");
+  if (receipt.metrics.length !== Number(receipt.summary.stable ?? 0) + Number(receipt.summary.drifted ?? 0) + Number(receipt.summary.unknown ?? 0)) throw new Error("quality drift metric counts are inconsistent");
+  if (!/^[0-9a-f]{64}$/.test(receipt.request_digest) || typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("quality drift digest is invalid");
+}
+
+export function qualityDriftReceiptDigest(receipt: QualityDriftReceipt): string {
+  validateQualityDriftReceipt(receipt);
+  return digestJsonSync(receipt);
 }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {

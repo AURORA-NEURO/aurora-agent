@@ -4,8 +4,9 @@
 //! the same schema/boundary/policy checks as the Rust service before a tool result is returned.
 
 use bioprism_adapter::{
-    harmonize_multimodal, HarmonizedResearchObject, MultimodalHarmonizationRequest,
-    MULTIMODAL_HARMONIZATION_FEATURE_ID,
+    evaluate_quality_drift, harmonize_multimodal, HarmonizedResearchObject,
+    MultimodalHarmonizationRequest, QualityDriftReceipt, QualityDriftRequest,
+    MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
 };
 use bioprism_evalengine::{
     compile_evaluation_card, evaluate_multimodal_replication, qualify_analysis,
@@ -37,6 +38,7 @@ pub const MULTIMODAL_HARMONIZATION_TOOL: &str = "multimodal_harmonize";
 pub const ANALYSIS_QUALIFICATION_TOOL: &str = "analysis_qualify";
 pub const PROTOCOL_MATRIX_TOOL: &str = "protocol_matrix_simulate";
 pub const MULTIMODAL_REPLICATION_TOOL: &str = "multimodal_replication_evaluate";
+pub const QUALITY_DRIFT_TOOL: &str = "quality_drift_evaluate";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -204,6 +206,24 @@ pub fn validate_multimodal_replication_report_json(
         return Err("multimodal replication feature id mismatch".into());
     }
     Ok(report)
+}
+
+pub fn evaluate_quality_drift_json(value: &Value) -> Result<Value, String> {
+    let request: QualityDriftRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid quality drift request: {error}"))?;
+    let receipt = evaluate_quality_drift(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize quality drift receipt: {error}"))
+}
+
+pub fn validate_quality_drift_receipt_json(value: &Value) -> Result<QualityDriftReceipt, String> {
+    let receipt: QualityDriftReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid quality drift receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != QUALITY_DRIFT_FEATURE_ID {
+        return Err("quality drift feature id mismatch".into());
+    }
+    Ok(receipt)
 }
 
 #[cfg(test)]

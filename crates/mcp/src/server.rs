@@ -1810,6 +1810,7 @@ impl Server {
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
+            "quality_drift_evaluate" => self.quality_drift_evaluate(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -24528,6 +24529,28 @@ impl Server {
         }))
     }
 
+    fn quality_drift_evaluate(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized QualityDriftRequest")?;
+        let receipt = crate::research_contracts::evaluate_quality_drift_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_adapter::QUALITY_DRIFT_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "baseline and current QC metrics are compared deterministically with explicit deltas",
+                "unmeasured metrics remain unknown and conformance or locality failures block release",
+                "the route reads only typed local QC declarations and never exports raw experimental bytes"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied metrics and does not recalculate QC from raw modality data",
+                "stable metrics certify only the declared baseline tolerance, not biological validity"
+            ]
+        }))
+    }
+
     fn evaluation_trajectory_check(&self, arguments: &Value) -> Result<Value, String> {
         let trajectory: Trajectory = serde_json::from_value(
             arguments
@@ -35942,7 +35965,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "multimodal_ingestion",
             "domains": ["modality harmonization", "unit alignment", "coordinate systems", "semantic loss", "local research objects"],
             "crates": ["bioprism-adapter", "bioprism-modalities", "bioprism-foundation"],
-            "mcp_tools": ["multimodal_harmonize", "multimodal_replication_evaluate"],
+            "mcp_tools": ["multimodal_harmonize", "multimodal_replication_evaluate", "quality_drift_evaluate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -38291,6 +38314,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-evalengine MultimodalReplicationRequest with required modalities, study manifests, outcomes, and policy." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "quality_drift_evaluate",
+            "description": "Compare typed modality QC metrics against a content-addressed baseline and return stable, drifted, unknown, or blocked states without reading raw data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-adapter QualityDriftRequest with baseline/current metrics, tolerances, conformance, and locality policy." }
                 },
                 "required": ["request"]
             }

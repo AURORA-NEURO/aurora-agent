@@ -89,6 +89,7 @@ pub mod location;
 pub mod loss;
 pub mod probe;
 pub mod quality_control;
+pub mod quality_drift;
 pub mod research_ingest;
 pub mod multimodal_harmonization;
 pub mod registry;
@@ -109,6 +110,13 @@ pub use quality_control::{
     evaluate_quality_control, manifest as quality_control_manifest, MetricDirection, MetricStatus,
     QualityControlError, QualityControlReceipt, QualityControlRequest, QualityControlSummary,
     QualityDisposition, QualityMetric,
+};
+pub use quality_drift::{
+    evaluate_quality_drift, quality_drift_manifest, DriftMetric, DriftMetricResult,
+    DriftMetricStatus, DriftDisposition, QualityDriftError, QualityDriftPolicy,
+    QualityDriftReceipt, QualityDriftRequest, QualityDriftSummary,
+    FEATURE_ID as QUALITY_DRIFT_FEATURE_ID,
+    FEATURE_VERSION as QUALITY_DRIFT_FEATURE_VERSION,
 };
 pub use research_ingest::{
     certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,

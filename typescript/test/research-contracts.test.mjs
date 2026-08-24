@@ -53,6 +53,9 @@ import {
   MULTIMODAL_REPLICATION_FEATURE_ID,
   multimodalReplicationReportDigest,
   validateMultimodalReplicationReport,
+  QUALITY_DRIFT_FEATURE_ID,
+  qualityDriftReceiptDigest,
+  validateQualityDriftReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -402,4 +405,24 @@ test("multimodal replication report preserves comparability omissions", () => {
   };
   assert.doesNotThrow(() => validateMultimodalReplicationReport(report));
   assert.equal(multimodalReplicationReportDigest(report), multimodalReplicationReportDigest(report));
+});
+
+test("quality drift receipt keeps unknown metric and baseline digest", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: QUALITY_DRIFT_FEATURE_ID,
+    dataset_id: "dataset:drift",
+    modality: "image",
+    request_digest: "a".repeat(64),
+    summary: { disposition: "unknown", stable: 1, drifted: 0, unknown: 1, reasons: ["metric snr is unmeasured"] },
+    metrics: [
+      { metric_id: "focus", status: "stable", delta: 0.01, reasons: [] },
+      { metric_id: "snr", status: "unknown", delta: null, reasons: ["metric snr is unmeasured"] },
+    ],
+    artifact: { content_hash: "b".repeat(64) },
+    raw_data_local: true,
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateQualityDriftReceipt(receipt));
+  assert.equal(qualityDriftReceiptDigest(receipt), qualityDriftReceiptDigest(receipt));
 });

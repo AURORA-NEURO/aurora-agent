@@ -30,6 +30,7 @@ MULTIMODAL_HARMONIZATION_FEATURE_ID = "AFA-adapter-P06-F02"
 ANALYSIS_QUALIFICATION_FEATURE_ID = "AFA-evalengine-P13-F01"
 PROTOCOL_MATRIX_FEATURE_ID = "AFA-lab-P10-F02"
 MULTIMODAL_REPLICATION_FEATURE_ID = "AFA-evalengine-P15-F02"
+QUALITY_DRIFT_FEATURE_ID = "AFA-adapter-P07-F02"
 
 
 class ResearchContractError(ValueError):
@@ -336,6 +337,54 @@ class QualityControlReceipt:
     def digest(self) -> str:
         self.validate()
         return research_artifact_digest({"payload": dict(self.payload), "artifact": dict(self.artifact)})
+
+
+@dataclass(frozen=True)
+class QualityDriftReceipt:
+    """Transport validator for baseline-relative continual-ingestion QC drift."""
+
+    dataset_id: str
+    modality: str
+    request_digest: str
+    summary: Mapping[str, Any]
+    metrics: tuple[Mapping[str, Any], ...]
+    artifact: Mapping[str, Any]
+    raw_data_local: bool
+    feature_id: str = QUALITY_DRIFT_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != QUALITY_DRIFT_FEATURE_ID:
+            raise ResearchContractError("quality drift schema or feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.dataset_id.strip() or not self.modality.strip():
+            raise ResearchContractError("quality drift identity, locality, or boundary is invalid")
+        if self.summary.get("disposition") not in {"stable", "drifted", "unknown", "blocked"}:
+            raise ResearchContractError("quality drift disposition is unknown")
+        if not self.metrics or not isinstance(self.summary.get("reasons"), list) or not self.summary["reasons"]:
+            raise ResearchContractError("quality drift metrics and reasons are incomplete")
+        if len(self.metrics) != int(self.summary.get("stable", 0)) + int(self.summary.get("drifted", 0)) + int(self.summary.get("unknown", 0)):
+            raise ResearchContractError("quality drift metric counts are inconsistent")
+        if not isinstance(self.request_digest, str) or len(self.request_digest) != 64 or any(char not in "0123456789abcdef" for char in self.request_digest):
+            raise ResearchContractError("quality drift request digest is invalid")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("quality drift artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "dataset_id": self.dataset_id,
+            "modality": self.modality,
+            "request_digest": self.request_digest,
+            "summary": dict(self.summary),
+            "metrics": [dict(metric) for metric in self.metrics],
+            "artifact": dict(self.artifact),
+            "raw_data_local": self.raw_data_local,
+            "boundary": self.boundary,
+        })
 
 
 @dataclass(frozen=True)
