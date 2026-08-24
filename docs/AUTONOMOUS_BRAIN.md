@@ -1735,6 +1735,19 @@ contains only adapter/manifest, health, policy, and digest metadata; it excludes
 requests, prompts, errors, and acquired values. A caller must still use the reviewed evidence
 execution controller and explicit source-dispatch approval to acquire anything.
 
+The Python provider-backed evidence path adds a second, executable admission layer for the
+provider/source boundary. `AutonomousEvidenceProviderContractRegistry` binds each selected adapter
+to its exact manifest digest, provider, protocol, operation set, domain, capability set, source
+kind, authentication posture, freshness, pagination, and required request metadata. Its acquirer
+checks those bindings immediately before invocation and refuses manifest drift or missing operation
+metadata. `create_autonomous_evidence_source_acquirer()` then evaluates a caller-owned metadata-only
+source descriptor for authority, freshness, future skew, partial/unverified status, citation and
+source digests, and records accepted or refused observations in a hash-chained ledger. JSON and
+compare-and-swap persistence restore the ledger across process boundaries; neither projection nor
+ledger stores credentials, prompts, provider responses, raw source values, or locators. This is a
+provenance/admission contract, not an authenticity oracle: callers remain responsible for provider
+registration, credential onboarding, network authorization, and the truth of a source declaration.
+
 For a deeper contract-level startup check, the TypeScript SDK also exposes
 `auditAutonomousDomainContracts()` and the same method through `AutonomousBrainFacade.domainAudit()`:
 

@@ -1176,6 +1176,7 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
         policy: AutonomousLLMEvidenceFailoverPolicy | None = None,
         health_store: InMemoryAutonomousLLMEvidenceAdapterHealthStore | None = None,
         observe_failover: Callable[[AutonomousLLMEvidenceFailoverEvent], Any] | None = None,
+        provider_contracts: Any | None = None,
     ) -> None:
         if not isinstance(registry, AutonomousLLMEvidenceAdapterRegistry):
             raise ArgumentError("LLM evidence failover requires a typed registry")
@@ -1187,11 +1188,17 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
             raise ArgumentError("LLM evidence failover health_store is malformed")
         if observe_failover is not None and not callable(observe_failover):
             raise ArgumentError("LLM evidence failover observer is malformed")
+        if provider_contracts is not None:
+            from .autonomous_evidence_provider_contract import AutonomousEvidenceProviderContractRegistry
+            if not isinstance(provider_contracts, AutonomousEvidenceProviderContractRegistry):
+                raise ArgumentError("LLM evidence failover provider_contracts is malformed")
+            provider_contracts.verify()
         self.registry = registry
         self.plan = typed_plan
         self.policy = policy or AutonomousLLMEvidenceFailoverPolicy()
         self.health_store = health_store
         self.observe_failover = observe_failover
+        self.provider_contracts = provider_contracts
         self._selected: dict[str, str] = {}
         self._lock = threading.RLock()
 
@@ -1222,7 +1229,10 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
             manifest = self.registry.manifest_for(domain, adapter_id)
             started = time.monotonic()
             try:
-                value = adapter.acquire(context)
+                if self.provider_contracts is None:
+                    value = adapter.acquire(context)
+                else:
+                    value = self.provider_contracts.create_acquirer_for_adapter(adapter_id, domain).acquire(context)
                 if self.health_store is not None:
                     self.health_store.record_acquisition(
                         adapter_id=adapter_id,
@@ -1337,6 +1347,8 @@ class AutonomousLLMEvidenceAdapterFailoverAcquirer:
             "schema": AUTONOMOUS_LLM_EVIDENCE_FAILOVER_POLICY_SCHEMA,
             "selection_plan_digest": self.plan.plan_digest,
             "registry_digest": self.plan.registry_digest,
+            "provider_contract_registry_digest": None if self.provider_contracts is None else self.provider_contracts.registry_digest,
+            "provider_contracts_enabled": self.provider_contracts is not None,
             "max_failovers": self.policy.max_failovers,
             "domains": list(self.plan.domains),
             "health_recording": self.health_store is not None,
@@ -1353,6 +1365,7 @@ def create_autonomous_llm_evidence_adapter_failover_acquirer(
     policy: AutonomousLLMEvidenceFailoverPolicy | None = None,
     health_store: InMemoryAutonomousLLMEvidenceAdapterHealthStore | None = None,
     observe_failover: Callable[[AutonomousLLMEvidenceFailoverEvent], Any] | None = None,
+    provider_contracts: Any | None = None,
 ) -> AutonomousLLMEvidenceAdapterFailoverAcquirer:
     return AutonomousLLMEvidenceAdapterFailoverAcquirer(
         registry,
@@ -1360,6 +1373,7 @@ def create_autonomous_llm_evidence_adapter_failover_acquirer(
         policy=policy,
         health_store=health_store,
         observe_failover=observe_failover,
+        provider_contracts=provider_contracts,
     )
 
 

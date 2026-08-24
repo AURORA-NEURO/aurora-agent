@@ -258,6 +258,25 @@ digest-addressed, byte-bounded, and restorable with strict field/aggregate check
 readiness. This remains a projection only: it never dispatches a source, invokes an LLM, or
 converts route health into evidence truth.
 
+The provider-contract boundary makes that route executable without making the SDK a provider
+client. `AutonomousEvidenceProviderContractRegistry` binds each approved adapter to its provider,
+protocol, operation vocabulary, domain, capability, source kind, authentication posture, freshness,
+pagination mode, and required request metadata. `create_acquirer_for_adapter()` verifies the
+registry and contract immediately before invocation, so a changed adapter manifest, missing
+operation, unsupported capability, or stale registry fails closed before a provider call. The
+contract projection contains only digests and bounded metadata; credentials, prompts, requests,
+and responses remain caller-owned.
+
+`create_autonomous_evidence_source_acquirer()` adds the provenance admission boundary around that
+contract acquirer. A caller supplies a source descriptor callback that returns only source identity,
+source digest, authority, status, observation time, expiry, citation digest, and bounded limitations.
+`AutonomousEvidenceSourcePolicy` evaluates freshness, future skew, authority, partial status, and
+digest requirements, while `AutonomousEvidenceSourceLedger` records a metadata-only hash chain of
+accepted and refused observations. JSON and compare-and-swap persistence coordinators support
+restart recovery without retaining raw source values or locators. The contract/source tests exercise
+all twelve domains, failover, refusal, secret-shaped output rejection, canonical round trips, and
+stale-writer protection.
+
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

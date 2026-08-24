@@ -1317,3 +1317,18 @@ strict round-trip validation and is composed into `AutonomousAgent.readiness()` 
 caller-owned `evidence_readiness` configuration. No source, provider, model discovery, credential,
 or learner mutation occurs during the audit, and the report excludes prompts, requests, values,
 responses, keys, and raw errors.
+
+The next Python evidence increment now makes provider and source assumptions executable. Each
+`AutonomousEvidenceProviderContract` is digest-bound to one adapter manifest and declares the
+provider protocol, operations, domains, capabilities, source kinds, auth posture, freshness,
+pagination, and required request metadata. The registry verifies those bindings immediately before
+each selected failover candidate is invoked, so stale manifests, undeclared capabilities, and
+missing operations fail closed without entering the provider boundary. The source admission layer
+adds a caller-owned descriptor contract for source identity, digest, authority, status, observation
+time, expiry, citation, and limitations; its freshness/authority policy records accepted and
+refused decisions in a metadata-only hash chain. Canonical JSON and compare-and-swap persistence
+support process restart and stale-writer rejection. All twelve domains are covered by offline
+tests for contract coverage, failover, refusal, secret-shaped values, tamper resistance, and
+restart recovery. This remains an admission and provenance boundary—not provider authentication,
+source authenticity, or truth validation—and retains no credentials, prompts, responses, source
+values, or locators.
