@@ -24,6 +24,11 @@ mod explain;
 mod io;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
+use bioprism_autopilot::{
+    drive::instantiation_mission, drive_instantiation, preview_first_action,
+    verify_autopilot_report, AutonomyGrant, AutonomyGrantDocument, FinalStatus, NextAction,
+    RetryPolicyDocument,
+};
 use bioprism_devplat::{
     audit_domain_decision_readiness, build_domain_workflow_catalogue,
     build_domain_workflow_portfolio, instantiate_domain_workflow, reconcile_domain_workflow,
@@ -43,6 +48,7 @@ use exit::{CliError, CliResult, ExitCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
 fn main() {
     std::thread::Builder::new()
@@ -418,6 +424,14 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *limit,
             *include_records,
         ),
+        Command::AutopilotGrantTemplate => autopilot_grant_template(),
+        Command::AutopilotRun {
+            instantiation,
+            grant,
+            report_out,
+            dry_run,
+        } => autopilot_run(instantiation, grant, report_out.as_deref(), *dry_run),
+        Command::AutopilotVerify { report } => autopilot_verify(report),
     }
 }
 
@@ -1609,6 +1623,244 @@ fn workflow_reconciliation_query(
     Ok(Outcome::ok(report, human))
 }
 
+/// The template autonomy grant, built from the typed document rather than a `json!` literal so a
+/// field renamed in the grant schema fails to compile here instead of drifting into a template
+/// that the validator would refuse.
+fn autopilot_template_document() -> CliResult<Value> {
+    let document = AutonomyGrantDocument {
+        allowed_tools: vec!["replace_with_an_allowed_tool_name".into()],
+        allow_side_effects: false,
+        max_attempts: 3,
+        retry: RetryPolicyDocument::default(),
+        require_reconciliation_complete: true,
+        stop_on_first_success: true,
+    };
+    serde_json::to_value(document).map_err(|error| CliError::internal(error.to_string()))
+}
+
+/// The commented rendering of the template for human mode. Comments make it non-JSON on
+/// purpose: the machine-usable object comes from `--json`, and a document an operator can paste
+/// without reading is exactly what an authority template must not be.
+const GRANT_TEMPLATE_COMMENTED: &str = r#"{
+  // Tools the drive may let missions execute: bare tool names, at least one, at most 512.
+  // An absent or empty list grants nothing, and agent_mission is always refused.
+  "allowed_tools": ["replace_with_an_allowed_tool_name"],
+
+  // Permit caller-supplied confirmation flags to reach side-effecting tools.
+  "allow_side_effects": false,
+
+  // Total mission dispatches the drive may perform, full and repair combined (1..=16).
+  "max_attempts": 3,
+
+  // Which 40.36 retry classes may be re-dispatched. There is deliberately no knob for
+  // `terminal`: a refusal is policy behaving correctly and is never re-sent.
+  "retry": {
+    "retry_retryable_as_is": true,
+    "retry_retryable_after_change": false,
+    // An outcome that declared no retry decision is never re-sent unless this is true.
+    "retry_unknown": false
+  },
+
+  // Require a reconciliation record with `complete` status and valid integrity before the
+  // drive may report success; success is never inferred from a mission report alone.
+  "require_reconciliation_complete": true,
+
+  // Only true is supported; the field exists so the unsupported option fails loudly.
+  "stop_on_first_success": true
+}"#;
+
+fn autopilot_grant_template() -> CliResult<Outcome> {
+    let template = autopilot_template_document()?;
+    let mut human = String::from(
+        "autonomy grant template\n\
+         Authority for autonomous dispatch comes only from an explicit grant; there is no \
+         default grant.\nThe commented form below is for reading; `--json` prints the bare \
+         object, directly usable as --grant.\n\n",
+    );
+    human.push_str(GRANT_TEMPLATE_COMMENTED);
+    human.push_str(
+        "\n\nNext: bioprism --json autopilot grant-template > grant.json, edit allowed_tools, \
+         then bioprism autopilot run --instantiation <instantiation.json> --grant grant.json \
+         --dry-run\n",
+    );
+    Ok(Outcome::ok(template, human))
+}
+
+fn parse_autonomy_grant(grant_path: &Path) -> CliResult<AutonomyGrant> {
+    let raw = io::read_json(grant_path)?;
+    let document: AutonomyGrantDocument = serde_json::from_value(raw).map_err(|error| {
+        CliError::invalid(format!("invalid autonomy grant document: {error}"))
+            .about(grant_path.display().to_string())
+    })?;
+    AutonomyGrant::try_from(document)
+        .map_err(|error| CliError::from_grant(error).about(grant_path.display().to_string()))
+}
+
+fn autopilot_run(
+    instantiation_path: &Path,
+    grant_path: &Path,
+    report_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let instantiation = io::read_json(instantiation_path)?;
+    let grant = parse_autonomy_grant(grant_path)?;
+    let grant_digest = grant.digest().map_err(CliError::from_autopilot)?;
+
+    if dry_run {
+        let mission = instantiation_mission(&instantiation).map_err(|error| {
+            CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+        })?;
+        let action = preview_first_action(&grant, mission).map_err(|error| {
+            CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+        })?;
+        let NextAction::DispatchFull {
+            mission: planned_mission,
+            authorization,
+        } = &action
+        else {
+            return Err(CliError::internal(format!(
+                "the planner answered an empty history with {action:?} instead of a first full \
+                 dispatch"
+            )));
+        };
+        let planned_mission_digest = bioprism_ids::ContentHash::of_value(planned_mission)
+            .map_err(|error| CliError::internal(error.to_string()))?
+            .to_string();
+        let step_count = planned_mission["steps"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or_default();
+        let mission_id = planned_mission["mission_id"].as_str().unwrap_or("unknown");
+        let document = json!({
+            "ok": true,
+            "workflow": "autopilot_run",
+            "dry_run": true,
+            "no_dispatch": true,
+            "dispatch": "not_started",
+            "execution": "not_started",
+            "writes": "none",
+            "grant_digest": grant_digest,
+            "max_attempts": grant.max_attempts(),
+            "planned_first_action": {
+                "action": "dispatch_full",
+                "attempt_index": authorization.attempt_index(),
+                "mission_id": mission_id,
+                "step_count": step_count,
+                "planned_mission_digest": planned_mission_digest,
+                "allowed_tools": grant.allowed_tools(),
+                "allow_side_effects": grant.allow_side_effects(),
+                "mission": planned_mission,
+            },
+            "report_out": report_out
+                .map(|path| json!(path.display().to_string()))
+                .unwrap_or(Value::Null),
+        });
+        let human = format!(
+            "autopilot dry run (no-dispatch)\n  grant digest: {grant_digest}\n  planned attempt \
+             1: full mission dispatch\n  mission: {mission_id} ({step_count} steps)\n  attempt \
+             budget: {}\n  dispatch: not started\n  writes: none\n\nNext: bioprism autopilot run \
+             --instantiation {} --grant {} --report-out autopilot-report.json\n",
+            grant.max_attempts(),
+            instantiation_path.display(),
+            grant_path.display(),
+        );
+        return Ok(Outcome::ok(document, human));
+    }
+
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    let cancellation = AtomicBool::new(false);
+    let mut dispatcher = |mission: &Value| -> Result<Value, String> {
+        server.execute_agent_mission_with_cancellation(mission, &cancellation)
+    };
+    let outcome = drive_instantiation(&grant, &instantiation, &mut dispatcher).map_err(|error| {
+        CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+    })?;
+    let succeeded = outcome.final_status == FinalStatus::Succeeded;
+    let report = outcome.report;
+    let artifact = report_out
+        .map(|path| io::write_artifact(path, &report, false))
+        .transpose()?;
+    let final_status = report["final_status"].as_str().unwrap_or("unknown").to_string();
+    let attempts_used = report["totals"]["attempts_used"].as_u64().unwrap_or(0);
+    let max_attempts = report["totals"]["max_attempts"].as_u64().unwrap_or(0);
+    let report_sha256 = report["report_sha256"].as_str().unwrap_or("<missing>").to_string();
+    let base_mission_id = report["base_mission_id"].as_str().unwrap_or("unknown").to_string();
+    let document = json!({
+        "ok": succeeded,
+        "workflow": "autopilot_run",
+        "dry_run": false,
+        "final_status": final_status,
+        "attempts_used": attempts_used,
+        "max_attempts": max_attempts,
+        "grant_digest": grant_digest,
+        "report_sha256": report_sha256,
+        "artifact": artifact
+            .as_ref()
+            .map(|value| {
+                json!({
+                    "path": value.path.display().to_string(),
+                    "bytes": value.bytes,
+                    "written": value.written,
+                })
+            })
+            .unwrap_or(Value::Null),
+        "report": report,
+    });
+    let mut human = format!(
+        "autopilot drive: {final_status}\n  base mission: {base_mission_id}\n  grant digest: \
+         {grant_digest}\n  attempts used: {attempts_used} of {max_attempts}\n  report sha256: \
+         {report_sha256}\n",
+    );
+    if let Some(artifact) = &artifact {
+        human.push_str(&format!(
+            "  wrote {} ({} bytes)\n",
+            artifact.path.display(),
+            artifact.bytes
+        ));
+    }
+    match report_out {
+        Some(path) => human.push_str(&format!(
+            "\nNext: bioprism autopilot verify --report {}\n",
+            path.display()
+        )),
+        None => human.push_str(&format!(
+            "\nNext: bioprism autopilot run --instantiation {} --grant {} --report-out \
+             autopilot-report.json\n",
+            instantiation_path.display(),
+            grant_path.display()
+        )),
+    }
+    Ok(Outcome::ok(document, human).failing_if(!succeeded))
+}
+
+fn autopilot_verify(report_path: &Path) -> CliResult<Outcome> {
+    let report = io::read_json(report_path)?;
+    let mut verification = verify_autopilot_report(&report).map_err(|error| {
+        CliError::from_autopilot(error).about(report_path.display().to_string())
+    })?;
+    let valid = verification
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    verification["ok"] = json!(valid);
+    verification["report"] = json!(report_path.display().to_string());
+    let human = format!(
+        "autopilot report: {}\n  claimed sha256: {}\n  recomputed sha256: {}\n  digest match: \
+         {}\n  required limitations present: {}\n  final status known: {}\n\nNext: bioprism \
+         autopilot verify --report {}\n",
+        if valid { "verified" } else { "FAILED" },
+        verification["claimed_report_sha256"].as_str().unwrap_or("<missing>"),
+        verification["recomputed_report_sha256"].as_str().unwrap_or("<missing>"),
+        verification["digest_match"].as_bool().unwrap_or(false),
+        verification["limitations_present"].as_bool().unwrap_or(false),
+        verification["final_status_known"].as_bool().unwrap_or(false),
+        report_path.display(),
+    );
+    Ok(Outcome::ok(verification, human).failing_if(!valid))
+}
+
 fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {
     let bundle = io::read_json(bundle_path)?;
     let report = verify_mission_evidence_bundle(&bundle).map_err(|error| {
@@ -2686,4 +2938,26 @@ fn context_verify(path: &Path) -> CliResult<Outcome> {
     );
 
     Ok(Outcome::ok(document, human).failing_if(!ok))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_commented_grant_template_stays_in_lockstep_with_the_typed_template_document() {
+        let stripped = GRANT_TEMPLATE_COMMENTED
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: Value = serde_json::from_str(&stripped)
+            .expect("the commented template minus its comment lines must be valid JSON");
+        let typed = autopilot_template_document()
+            .expect("the typed template document must serialize");
+        assert_eq!(
+            parsed, typed,
+            "the human-mode commented template and the --json template document have drifted"
+        );
+    }
 }

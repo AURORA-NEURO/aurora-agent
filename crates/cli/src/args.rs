@@ -174,6 +174,22 @@ COMMANDS
                     [--after <digest>] [--limit <n>] [--include-records]
                     Query a local reconciliation registry without executing a mission.
 
+  autopilot grant-template
+                    Print a template autonomy grant to stdout (with --json, the bare grant
+                    object, directly usable as --grant). Authority for autonomous dispatch
+                    comes only from an explicit grant document; there is no default grant, and
+                    nothing is written.
+  autopilot run     --instantiation <path> --grant <path> [--report-out <path>] [--dry-run]
+                    Drive an instantiated workflow's mission under an explicit autonomy grant:
+                    dispatch, classify each failure by its 40.36 retry class, repair what the
+                    grant authorises, and chain every mission report and reconciliation digest
+                    into one autopilot report. --dry-run plans attempt 1 only, no-dispatch:
+                    nothing runs and nothing is written. Exit 1 reports a completed drive whose
+                    final status is exhausted or refused rather than succeeded.
+  autopilot verify  --report <path>
+                    Recompute an autopilot report's digest and require its stated limitations.
+                    Exit 1 if the report does not verify.
+
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
   -h, --help        Show this help.
@@ -405,6 +421,16 @@ pub enum Command {
         after: Option<String>,
         limit: usize,
         include_records: bool,
+    },
+    AutopilotGrantTemplate,
+    AutopilotRun {
+        instantiation: PathBuf,
+        grant: PathBuf,
+        report_out: Option<PathBuf>,
+        dry_run: bool,
+    },
+    AutopilotVerify {
+        report: PathBuf,
     },
 }
 
@@ -803,6 +829,16 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
                     .map_err(|_| usage(format!("--limit must be a number, got {text:?}")))?,
             },
             include_records: options.take_switch("--include-records"),
+        },
+        ("autopilot", "grant-template") => Command::AutopilotGrantTemplate,
+        ("autopilot", "run") => Command::AutopilotRun {
+            instantiation: options.take_path("--instantiation")?,
+            grant: options.take_path("--grant")?,
+            report_out: options.take_optional_path("--report-out"),
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("autopilot", "verify") => Command::AutopilotVerify {
+            report: options.take_path("--report")?,
         },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
@@ -1480,6 +1516,99 @@ mod tests {
                     require_readiness: true,
                 },
             })
+        );
+    }
+
+    #[test]
+    fn autopilot_run_parses_instantiation_grant_report_out_and_dry_run() {
+        let parsed = parse(
+            [
+                "--json",
+                "autopilot",
+                "run",
+                "--instantiation",
+                "instantiation.json",
+                "--grant",
+                "grant.json",
+                "--report-out",
+                "autopilot-report.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse autopilot run");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::AutopilotRun {
+                    instantiation: PathBuf::from("instantiation.json"),
+                    grant: PathBuf::from("grant.json"),
+                    report_out: Some(PathBuf::from("autopilot-report.json")),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn autopilot_run_refuses_an_invocation_without_a_grant() {
+        let refused = parse(
+            ["autopilot", "run", "--instantiation", "instantiation.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("a run without a grant must be refused, never defaulted");
+        assert!(refused.message.contains("--grant"), "{}", refused.message);
+    }
+
+    #[test]
+    fn autopilot_grant_template_takes_no_options_and_verify_takes_a_report_path() {
+        let template = parse(["autopilot", "grant-template"].into_iter().map(String::from))
+            .expect("parse autopilot grant-template");
+        assert_eq!(
+            template,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::AutopilotGrantTemplate,
+            })
+        );
+        parse(
+            ["autopilot", "grant-template", "--out", "grant.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("grant-template writes nothing and accepts no options");
+
+        let verified = parse(
+            ["autopilot", "verify", "--report", "autopilot-report.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse autopilot verify");
+        assert_eq!(
+            verified,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::AutopilotVerify {
+                    report: PathBuf::from("autopilot-report.json"),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_every_autopilot_subcommand() {
+        let text = super::help();
+        assert!(text.contains("autopilot grant-template"));
+        assert!(text.contains(
+            "autopilot run     --instantiation <path> --grant <path> [--report-out <path>] [--dry-run]"
+        ));
+        assert!(text.contains("autopilot verify  --report <path>"));
+        assert!(
+            text.contains("only from an explicit grant document"),
+            "help must say where autonomous authority comes from"
         );
     }
 
