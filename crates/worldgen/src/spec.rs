@@ -289,7 +289,9 @@ const EXTERNAL_CONFIRMATION_CHECKS: [CheckSpec; 6] = [
 /// nothing else. A world with a genuinely different decision would compile, return `Valid` with an
 /// empty witness list, and look like a clean world rather than an unjudged one. Both variants here
 /// therefore keep the split-integrity target and differ in what feeds it, and a decision the
-/// oracle does not know needs an oracle before it needs a variant.
+/// oracle does not know needs an oracle before it needs a variant. That oracle now exists —
+/// `bioprism-domain` declares rule oracles that judge a compile through
+/// `bioprism_fiber::compile_with_oracle` — so the variant question is open again on its merits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Skeleton {

@@ -46,10 +46,16 @@ USAGE
   bioprism [--json] <command> <subcommand> [options]
 
 COMMANDS
-  world validate    --world <path>
-                    Report structural diagnostics. Exit 1 if any are errors.
+  world validate    --world <path> [--dimensions <path>]
+                    Report structural diagnostics. Exit 1 if any are errors. --dimensions loads
+                    a bioprism-scope-dimensions/0.1 document so domain scope dimensions are
+                    classified instead of reported as unclassified.
   world show        --world <path>
                     Summarise facts, factors, events, tags and factor kinds.
+  world sweep       [--distractors <n,n,...>] [--seed <n>] [--markdown]
+                    Generate the structural family grid (attachment x relay depth x tag style x
+                    distractor count, 43.39) and run the full baseline panel over every cell.
+                    Ranking is on admissibility only. Exit 1 if FIBER is inadmissible anywhere.
   world index       --world <path> --store <dir> [--dry-run]
                     Build a content-addressed index so compile cost tracks the compiled region
                     rather than the corpus. Afterwards --world accepts the store directory.
@@ -57,19 +63,24 @@ COMMANDS
                     [--world-out <path>] [--query-out <path>] [--dry-run]
                     Generate a synthetic structural family (43.39) and its matching query.
 
-  context explain   --world <path> --query <path>
+  context explain   --world <path> --query <path> [--domain <path>]
                     Show the compile plan: passes run, passes deferred, selection ratios and
                     omissions grouped by influence class. Writes nothing.
-  context compile   --world <path> --query <path>
+  context compile   --world <path> --query <path> [--domain <path>]
                     [--certificate-out <path>] [--section-out <path>]
                     [--profile reference|extended] [--dry-run] [--fail-on-invalid]
-                    Compile and optionally write artifacts.
+                    Compile and optionally write artifacts. --domain loads a bioprism-domain/0.1
+                    pack and judges the compile with its rule oracle instead of the reference
+                    split-integrity oracle; the output then carries the pack's advisories.
   context verify    --certificate <path>
                     Recompute the certificate digest. Exit 1 if it does not verify.
   context compare   --world <path> --query <path> [--markdown]
                     Run the equal-engineering baseline panel (full-context, graph k-hop,
-                    hypergraph component, query-graph, lexical top-k, FIBER) and report which
-                    strategies preserve the reference verdict and at what cost.
+                    hypergraph component, query-graph, lexical top-k, embedding top-k, directed
+                    walk, FIBER) and report which strategies preserve the reference verdict and
+                    at what cost. --domain is not supported here: the harness judges every
+                    strategy against the reference oracle directly, so a pack oracle cannot yet
+                    be applied to the whole panel.
 
   prism fork        --world <path> --query <path> [--bundle-out <path>] [--minimize]
                     Run every architecture from one frozen Decision Cell and report which
@@ -202,13 +213,20 @@ pub struct Invocation {
 pub enum Command {
     WorldValidate {
         world: PathBuf,
+        dimensions: Option<PathBuf>,
     },
     WorldShow {
         world: PathBuf,
     },
+    WorldSweep {
+        distractors: Option<Vec<usize>>,
+        seed: Option<u64>,
+        markdown: bool,
+    },
     ContextExplain {
         world: PathBuf,
         query: PathBuf,
+        domain: Option<PathBuf>,
     },
     ContextCompile(CompileOptions),
     ContextVerify {
@@ -409,6 +427,7 @@ pub enum Family {
 pub struct CompileOptions {
     pub world: PathBuf,
     pub query: PathBuf,
+    pub domain: Option<PathBuf>,
     pub certificate_out: Option<PathBuf>,
     pub section_out: Option<PathBuf>,
     pub profile: Profile,
@@ -444,9 +463,35 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
     let command = match (group.as_str(), subcommand.as_str()) {
         ("world", "validate") => Command::WorldValidate {
             world: options.take_path("--world")?,
+            dimensions: options.take_optional_path("--dimensions"),
         },
         ("world", "show") => Command::WorldShow {
             world: options.take_path("--world")?,
+        },
+        ("world", "sweep") => Command::WorldSweep {
+            distractors: match options.take_optional("--distractors") {
+                None => None,
+                Some(text) => Some(
+                    text.split(',')
+                        .map(|part| {
+                            part.trim().parse::<usize>().map_err(|_| {
+                                usage(format!(
+                                    "--distractors must be a comma-separated list of numbers, \
+                                     got {text:?}"
+                                ))
+                            })
+                        })
+                        .collect::<CliResult<Vec<usize>>>()?,
+                ),
+            },
+            seed: match options.take_optional("--seed") {
+                None => None,
+                Some(text) => Some(
+                    text.parse()
+                        .map_err(|_| usage(format!("--seed must be a number, got {text:?}")))?,
+                ),
+            },
+            markdown: options.take_switch("--markdown"),
         },
         ("world", "index") => Command::WorldIndex {
             world: options.take_path("--world")?,
@@ -476,10 +521,12 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         ("context", "explain") => Command::ContextExplain {
             world: options.take_path("--world")?,
             query: options.take_path("--query")?,
+            domain: options.take_optional_path("--domain"),
         },
         ("context", "compile") => Command::ContextCompile(CompileOptions {
             world: options.take_path("--world")?,
             query: options.take_path("--query")?,
+            domain: options.take_optional_path("--domain"),
             certificate_out: options.take_optional_path("--certificate-out"),
             section_out: options.take_optional_path("--section-out"),
             profile: match options.take_optional("--profile").as_deref() {
@@ -510,11 +557,27 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         ("prism", "minimize") => Command::PrismMinimize {
             world: options.take_path("--world")?,
         },
-        ("context", "compare") => Command::ContextCompare {
-            world: options.take_path("--world")?,
-            query: options.take_path("--query")?,
-            markdown: options.take_switch("--markdown"),
-        },
+        // `--domain` is refused here rather than silently accepted-and-ignored. The comparison
+        // harness (`bioprism_baseline::compare`) judges every strategy's selection against the
+        // reference split-integrity oracle directly, not through the injectable
+        // `DecisionOracle`, so a pack oracle cannot yet be applied to the whole panel — and a
+        // table whose reference verdict came from a different oracle than the flag named would
+        // be a half-truth, not a comparison.
+        ("context", "compare") => {
+            if options.take_optional("--domain").is_some() {
+                return Err(usage(
+                    "--domain is not supported on context compare: the comparison harness judges \
+                     every strategy against the reference split-integrity oracle directly, so a \
+                     pack oracle cannot yet be applied to the whole panel; compile under the pack \
+                     with `context compile --domain` instead",
+                ));
+            }
+            Command::ContextCompare {
+                world: options.take_path("--world")?,
+                query: options.take_path("--query")?,
+                markdown: options.take_switch("--markdown"),
+            }
+        }
         ("evidence", "verify") => Command::EvidenceBundleVerify {
             bundle: options.take_path("--bundle")?,
         },
@@ -845,6 +908,67 @@ mod tests {
     #[test]
     fn help_documents_evidence_bundle_verification() {
         assert!(super::help().contains("evidence verify   --bundle <path>"));
+    }
+
+    #[test]
+    fn help_documents_the_domain_flag_where_it_works_and_where_it_is_refused() {
+        let text = super::help();
+        assert!(text.contains("context compile   --world <path> --query <path> [--domain <path>]"));
+        assert!(text.contains("context explain   --world <path> --query <path> [--domain <path>]"));
+        assert!(
+            text.contains("--domain is not supported here"),
+            "compare's help must state the refusal rather than imply support"
+        );
+        assert!(text.contains("world validate    --world <path> [--dimensions <path>]"));
+        assert!(text.contains("world sweep       [--distractors <n,n,...>] [--seed <n>] [--markdown]"));
+    }
+
+    #[test]
+    fn context_compare_refuses_a_domain_pack_with_the_reason_in_the_message() {
+        let error = parse(
+            [
+                "context", "compare", "--world", "w.json", "--query", "q.json", "--domain",
+                "pack.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("--domain on compare must be refused, not ignored");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(
+            error.message.contains("not supported on context compare"),
+            "the refusal must say why: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn world_sweep_parses_a_comma_separated_distractor_grid_and_rejects_a_non_numeric_one() {
+        let parsed = parse(
+            ["world", "sweep", "--distractors", "50,250", "--seed", "7"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse world sweep");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorldSweep {
+                    distractors: Some(vec![50, 250]),
+                    seed: Some(7),
+                    markdown: false,
+                },
+            })
+        );
+
+        let error = parse(
+            ["world", "sweep", "--distractors", "50,many"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("a non-numeric distractor count is a usage error");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
     }
 
     #[test]

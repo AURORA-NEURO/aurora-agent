@@ -5,13 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Equal-engineering context baselines: full-context, k-hop incidence, connected component, lexical top-k and query-graph"
+description = "Equal-engineering context baselines: full-context, k-hop incidence, connected component, lexical top-k, embedding top-k, directed dependency walk, query-graph, and the structural family sweep"
 
 [dependencies]
 bioprism-fiber = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-world = { workspace = true }
+bioprism-worldgen = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

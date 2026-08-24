@@ -96,7 +96,7 @@
     },
     "decision_time": { "type": "string" },
     "distortion_tolerance": { "minimum": 0, "type": "number" },
-    "goal": { "type": "string" },
+    "goal": { "description": "The decision the section is assembled for, echoed verbatim into the Decision Section. Absent, the section reports the literal sentence recorded at `bioprism_fiber::NO_DECLARED_GOAL`; the CPython reference does not accept this version, so the fiber-query/0.1 substitution defect does not reach it.", "type": "string" },
     "permitted_actions": {
       "items": { "maxLength": 256, "minLength": 1, "type": "string" },
       "maxItems": 1000,

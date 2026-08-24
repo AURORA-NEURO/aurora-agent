@@ -253,7 +253,7 @@ fn the_comparison_serialises_for_ci_consumption() {
     let document = comparison.to_json();
     assert_eq!(document["total_facts"], Value::from(761));
     assert_eq!(document["reference"]["status"], Value::from("invalid"));
-    assert_eq!(document["results"].as_array().unwrap().len(), 10);
+    assert_eq!(document["results"].as_array().unwrap().len(), 13);
 
     let markdown = comparison.to_markdown();
     assert!(markdown.contains("Facts exposed is a cost, not a score"));

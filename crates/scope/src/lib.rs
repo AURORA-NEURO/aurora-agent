@@ -15,7 +15,7 @@ pub mod meet;
 pub mod time;
 pub mod transport;
 
-pub use class::{DimensionRegistry, ScopeClass};
+pub use class::{DimensionRegistry, ScopeClass, DIMENSIONS_SCHEMA_VERSION};
 pub use error::{ScopeError, TimeError};
 pub use key::{ScopeKey, ScopeValue};
 pub use meet::{meet, EmptyReason, Meet};

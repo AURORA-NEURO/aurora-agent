@@ -168,6 +168,21 @@ impl Witness for LeakageFinding {
                     Cell::text(detail.clone()),
                     Cell::text("fit spans splits"),
                 ],
+                LeakageWitness::DomainCheck {
+                    check,
+                    observed,
+                    detail,
+                } => vec![
+                    Cell::text(check.clone()),
+                    Cell::text(detail.clone()),
+                    Cell::text(
+                        observed
+                            .iter()
+                            .map(|(variable, value)| format!("{variable}={value}"))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    ),
+                ],
             },
             LeakageFinding::CheckNotRunnable {
                 check,
@@ -215,6 +230,9 @@ impl Witness for LeakageFinding {
                 ),
                 LeakageWitness::PreprocessingLeakage { detail } => {
                     format!("preprocessing leaked across splits: {detail}")
+                }
+                LeakageWitness::DomainCheck { check, detail, .. } => {
+                    format!("domain check {check} fired: {detail}")
                 }
             },
             LeakageFinding::CheckNotRunnable {

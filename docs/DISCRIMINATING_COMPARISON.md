@@ -15,9 +15,12 @@ Reference verdict (full-context): **invalid** with witnesses identity_leakage, p
 | query-graph | 0 | 0.00% | valid | **no** | 0% | **no** |
 | lexical-top-11 | 11 | 1.44% | invalid | yes | 91% | **no** |
 | lexical-top-50 | 50 | 6.56% | invalid | yes | 91% | **no** |
+| embedding-top-11 | 11 | 1.44% | invalid | **no** | 36% | **no** |
+| embedding-top-50 | 50 | 6.56% | invalid | **no** | 55% | **no** |
+| directed-walk-full | 11 | 1.44% | invalid | yes | 100% | yes |
 | fiber | 11 | 1.44% | invalid | yes | 100% | yes |
 
-Cheapest admissible strategy (right verdict **and** full protected closure): **fiber** at 11 facts (1.44% of world).
+Cheapest admissible strategy (right verdict **and** full protected closure): **directed-walk-full** at 11 facts (1.44% of world).
 
 - `lexical-top-11` reached the correct verdict from an **incomplete protected closure** (91%). Under 43.13 the closure is mandatory before any relevance step, so this is a contract violation that guessed right, not a pass.
 
@@ -32,6 +35,10 @@ Cheapest admissible strategy (right verdict **and** full protected closure): **f
 - `graph-7-hop` is **not sound**: missing identity_leakage, preprocessing_leakage, site_leakage, temporal_leakage
 
 - `query-graph` is **not sound**: missing identity_leakage, preprocessing_leakage, site_leakage, temporal_leakage
+
+- `embedding-top-11` is **not sound**: missing identity_leakage, site_leakage, temporal_leakage
+
+- `embedding-top-50` is **not sound**: missing identity_leakage, site_leakage, temporal_leakage
 
 ## Methods
 
@@ -53,6 +60,12 @@ Cheapest admissible strategy (right verdict **and** full protected closure): **f
   - 762 facts scored above zero; lexical proxy, not an embedding model
 - **lexical-top-50** — BM25 (k1=1.2, b=0.75) over fact id, provided variable, tags and serialised value; top 50 by score, ties broken by fact id. A lexical proxy for embedding retrieval, not a neural model.
   - 762 facts scored above zero; lexical proxy, not an embedding model
+- **embedding-top-11** — hashed character-3-gram embedding (FNV-1a into 512 fixed buckets) over fact id, provided variable, tags and serialised value; cosine similarity against the query's targets and protected tags; top 11 by score, ties broken by fact id. A fixed-basis lexical embedding, not a learned or neural model.
+  - 762 facts scored above zero; fixed-basis lexical embedding, not a learned model
+- **embedding-top-50** — hashed character-3-gram embedding (FNV-1a into 512 fixed buckets) over fact id, provided variable, tags and serialised value; cosine similarity against the query's targets and protected tags; top 50 by score, ties broken by fact id. A fixed-basis lexical embedding, not a learned or neural model.
+  - 762 facts scored above zero; fixed-basis lexical embedding, not a learned model
+- **directed-walk-full** — protected closure first (mandatory, as 43.13 orders it), then a walk of the directed factor graph backward from the query targets — needed variable to the factors that output it, to their input variables, transitively — unbounded (the full backward slice); facts providing any needed variable are selected
+  - protected closure contributed 11 fact(s), the backward slice 11 (of which 0 beyond the closure); edges are directed, so factors that only consume a hub are never entered
 - **fiber** — protected closure, then backward dependency slice, then temporal cut
 
 Facts exposed is a cost, not a score. It ranks only among verdict-preserving strategies. This world is constructed to expose hub expansion; it demonstrates compiler mechanics, not universal superiority.

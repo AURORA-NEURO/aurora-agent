@@ -31,7 +31,7 @@ reaches something that can act on it.
                         └──────────────┬────────────────┘
                                        │
    compilation          ┌──────────────┴────────────────┐
-                        │  fiber        section         │
+                        │  fiber    section    domain   │
                         └──────────────┬────────────────┘
                                        │
    world and storage    ┌──────────────┴────────────────┐
@@ -59,6 +59,12 @@ produced it. If verification required the compiler, "independently verifiable" w
 independent of the physical backend. That is only real if it is checked, so the same query compiled
 against an in-memory world and against an indexed store must produce byte-identical certificates —
 asserted in `crates/store/tests/store_parity.rs`.
+
+**`domain` is the oracle as data.** Domain packs: declarative rule oracles and scope vocabularies
+that carry the FIBER pipeline to non-biological decision questions. It depends on `fiber`,
+`section`, `scope` and `ids`, and plugs into `compile_with_oracle`; the default `compile()` and
+its parity bytes are untouched, so a pack changes certificate bytes only through the verdict it
+returns. See [GENERALIZATION](GENERALIZATION.md).
 
 **`weave`'s kernel is small on purpose.** It is a trusted computing base. Per 23.49 it enforces
 identity, protocol legality, authority, budgets and causal ordering, and explicitly does *not*

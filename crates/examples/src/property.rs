@@ -308,7 +308,7 @@ impl Property {
                 "the same missing decision_loss field: there is no loss to trade distortion against",
             ),
             Property::UnderdeterminedAbstention => Some(
-                "OracleVerdict::abstain exists in bioprism-section but no path in bioprism-fiber constructs it; the v0.1 oracle derives status solely from whether the witness list is empty",
+                "OracleVerdict::abstain exists in bioprism-section but no path in bioprism-fiber constructs it — construction now lives behind injection: bioprism_fiber::compile_with_oracle judges a compile by any DecisionOracle, and bioprism-domain's rule oracles return abstaining verdicts through it (crates/fiber/tests/oracle_injection.rs, crates/domain/tests/end_to_end.rs). The default compile's split-integrity oracle still derives status solely from whether the witness list is empty, so the underdetermined bioworld still compiles to valid on the default path, and no slice in this crate exercises abstention yet",
             ),
             Property::BoundedInfluenceOmission => Some(
                 "bioprism-fiber emits only InfluenceClass::Zero and DeferredAcquisition; nothing computes a numeric influence bound, so no group is ever Bounded",

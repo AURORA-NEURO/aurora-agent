@@ -48,6 +48,17 @@ impl ScopeClass {
             ScopeClass::Unclassified => "unclassified",
         }
     }
+
+    /// Parses a canonical class name.
+    ///
+    /// `"unclassified"` is deliberately not parseable: it is the *absence* of a classification,
+    /// and a document that declared a dimension unclassified would be asserting the very state
+    /// the registry already reports for every name it has never seen.
+    pub fn parse(name: &str) -> Option<ScopeClass> {
+        ScopeClass::CANONICAL
+            .into_iter()
+            .find(|class| class.as_str() == name)
+    }
 }
 
 /// Maps a dimension name to its class.
@@ -100,7 +111,71 @@ impl DimensionRegistry {
             .map(|n| n.to_string())
             .collect()
     }
+
+    /// Extends this registry from a dimension-classification document.
+    ///
+    /// The document is `{"schema_version": "bioprism-scope-dimensions/0.1", "dimensions":
+    /// {name: class}}`, where every class is one of the seven canonical names. This is the
+    /// data-driven half of blueprint 43.03: the default table covers the neuro-oncology
+    /// vocabulary, and a domain with a different vocabulary declares its own dimensions rather
+    /// than accepting an `unclassified_scope_dimension` diagnostic on every fact. The
+    /// reclassification rule of [`DimensionRegistry::register`] still applies, so a document
+    /// cannot silently move a canonical dimension out of protected closure.
+    ///
+    /// Returns how many dimensions were registered.
+    pub fn extend_from_json(&mut self, document: &serde_json::Value) -> Result<usize, String> {
+        let map = document
+            .as_object()
+            .ok_or_else(|| "dimension document is not an object".to_string())?;
+
+        match map.get("schema_version").and_then(serde_json::Value::as_str) {
+            Some(DIMENSIONS_SCHEMA_VERSION) => {}
+            Some(other) => {
+                return Err(format!(
+                    "unsupported dimension document schema {other:?}; expected {DIMENSIONS_SCHEMA_VERSION:?}"
+                ))
+            }
+            None => return Err("dimension document declares no schema_version".to_string()),
+        }
+        if let Some(unknown) = map
+            .keys()
+            .find(|key| !matches!(key.as_str(), "schema_version" | "dimensions"))
+        {
+            return Err(format!("undeclared key {unknown:?} in dimension document"));
+        }
+
+        let dimensions = map
+            .get("dimensions")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| "dimension document carries no \"dimensions\" object".to_string())?;
+
+        let mut registered = 0;
+        for (name, class_name) in dimensions {
+            let class_name = class_name.as_str().ok_or_else(|| {
+                format!("dimension {name:?} maps to a non-string class")
+            })?;
+            let class = ScopeClass::parse(class_name).ok_or_else(|| {
+                format!(
+                    "dimension {name:?} names unknown class {class_name:?}; the canonical classes are {}",
+                    ScopeClass::CANONICAL.map(ScopeClass::as_str).join(", ")
+                )
+            })?;
+            self.register(name.clone(), class)?;
+            registered += 1;
+        }
+        Ok(registered)
+    }
+
+    /// The default table extended by a dimension-classification document.
+    pub fn from_json(document: &serde_json::Value) -> Result<DimensionRegistry, String> {
+        let mut registry = DimensionRegistry::default();
+        registry.extend_from_json(document)?;
+        Ok(registry)
+    }
 }
+
+/// The wire version of the dimension-classification document.
+pub const DIMENSIONS_SCHEMA_VERSION: &str = "bioprism-scope-dimensions/0.1";
 
 fn is_default_dimension(name: &str) -> bool {
     DEFAULT_DIMENSIONS.iter().any(|(n, _)| *n == name)

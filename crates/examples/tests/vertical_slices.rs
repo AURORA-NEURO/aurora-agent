@@ -207,6 +207,12 @@ fn the_radiogenomic_witnesses_name_the_subjects_a_reader_would_have_to_refute() 
                 assert_eq!(future_label_sources["S004"], "2025-06-01");
             }
             LeakageWitness::PreprocessingLeakage { .. } => {}
+            LeakageWitness::DomainCheck { check, .. } => {
+                panic!(
+                    "the reference split-integrity oracle emits no domain_check witness, yet the \
+                     radiogenomic slice produced one for rule {check:?}"
+                )
+            }
         }
     }
     assert!(seen_identity && seen_site && seen_temporal);

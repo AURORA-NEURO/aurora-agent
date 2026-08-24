@@ -37,6 +37,7 @@ bioprism-evalengine = { workspace = true }
 bioprism-epistemic = { workspace = true }
 bioprism-fabric = { workspace = true }
 bioprism-factory = { workspace = true }
+bioprism-domain = { workspace = true }
 bioprism-fiber = { workspace = true }
 bioprism-foundation = { workspace = true }
 bioprism-docgraph = { workspace = true }

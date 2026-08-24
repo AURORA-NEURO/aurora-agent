@@ -216,3 +216,79 @@ fn plan_reports_selection_ratios_without_asserting_they_are_small() {
     assert_eq!(plan.fact_selection_ratio(), 1.0);
     assert_eq!(plan.factor_selection_ratio(), 1.0);
 }
+
+#[test]
+fn the_four_reference_witnesses_serialise_exactly_as_before_the_open_variant_existed() {
+    let mut site_by_split = std::collections::BTreeMap::new();
+    site_by_split.insert("test".to_string(), vec!["B".to_string()]);
+    site_by_split.insert("train".to_string(), vec!["A".to_string()]);
+    let mut future = std::collections::BTreeMap::new();
+    future.insert("S003".to_string(), "2025-06-01".to_string());
+
+    let witnesses = [
+        LeakageWitness::IdentityLeakage {
+            alias: "ALT-77".into(),
+            subjects: vec!["S001".into(), "S003".into()],
+            splits: vec!["test".into(), "train".into()],
+        },
+        LeakageWitness::SiteLeakage { site_by_split },
+        LeakageWitness::TemporalLeakage {
+            decision_time: "2025-01-01".into(),
+            future_label_sources: future,
+        },
+        LeakageWitness::PreprocessingLeakage {
+            detail: "preprocessing fit used all subjects before split".into(),
+        },
+    ];
+
+    let encoded: Vec<Value> = witnesses
+        .iter()
+        .map(|w| serde_json::to_value(w).unwrap())
+        .collect();
+    assert_eq!(
+        encoded,
+        vec![
+            json!({
+                "type": "identity_leakage",
+                "alias": "ALT-77",
+                "subjects": ["S001", "S003"],
+                "splits": ["test", "train"]
+            }),
+            json!({
+                "type": "site_leakage",
+                "site_by_split": { "test": ["B"], "train": ["A"] }
+            }),
+            json!({
+                "type": "temporal_leakage",
+                "decision_time": "2025-01-01",
+                "future_label_sources": { "S003": "2025-06-01" }
+            }),
+            json!({
+                "type": "preprocessing_leakage",
+                "detail": "preprocessing fit used all subjects before split"
+            }),
+        ]
+    );
+}
+
+#[test]
+fn a_domain_check_witness_round_trips_and_is_a_violation_not_a_score() {
+    let mut observed = std::collections::BTreeMap::new();
+    observed.insert("buyer_account".to_string(), "\"ACC-9\"".to_string());
+    observed.insert("seller_account".to_string(), "\"ACC-9\"".to_string());
+    let witness = LeakageWitness::DomainCheck {
+        check: "self_cross".into(),
+        observed,
+        detail: "buyer and seller resolve to the same account".into(),
+    };
+    assert_eq!(witness.kind(), "domain_check");
+
+    let encoded = serde_json::to_value(&witness).unwrap();
+    assert_eq!(encoded["type"], json!("domain_check"));
+    let decoded: LeakageWitness = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, witness);
+
+    let verdict = OracleVerdict::new("rule/trade-surveillance-v1", vec![witness]);
+    assert_eq!(verdict.status, OracleStatus::Invalid);
+    assert_eq!(verdict.witness_kinds(), vec!["domain_check"]);
+}

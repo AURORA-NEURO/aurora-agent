@@ -16,7 +16,7 @@ claude plugin install aurora-agent@aurora
 
 Everything needed to use the backend from any project, in one install:
 
-- **MCP server** — the bioprism server (259 tools) via a root-resolving
+- **MCP server** — the bioprism server (260 tools) via a root-resolving
   launcher (`scripts/aurora-mcp.mjs`: `AURORA_AGENT_ROOT` → `~/aurora-agent`
   → `~/bioprism`; precise stderr with the build command if the binary is
   missing).
