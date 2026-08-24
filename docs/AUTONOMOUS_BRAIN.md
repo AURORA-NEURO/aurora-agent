@@ -5201,6 +5201,18 @@ snapshot digest, and rejects stale flushes instead of silently overwriting a new
 adapters persist lifecycle/evaluator/learning digests only: they do not persist prompts, provider
 responses, tool arguments, evidence bodies, credentials, or approval authority.
 
+`AutonomousGoalControlLoop` is the bounded autonomous continuation above one worker batch. It can
+run up to 128 scheduler/worker cycles and 8,192 total runs, invoke a caller-owned metadata-only
+`options_factory` for fresh priority, urgency, dependency, retry, and required-domain signals, and
+return an explicit `all_terminal`, `no_admissible_work`, `cycle_budget_exhausted`, or
+`run_budget_exhausted` stop reason. Paused goals can be re-admitted on a later cycle when the
+schedule policy allows them; failed goals remain held unless failed retry is explicitly enabled;
+blocked or concurrently running goals never masquerade as terminal completion. Every cycle gets a
+distinct bounded batch identity when worker journaling is enabled, while the loop projection retains
+only schedule/claim/worker digests, status counts, domain coverage, and its own digest. This makes
+the control loop useful as a service-worker heartbeat across all twelve domains without allowing a
+policy callback to inject task text, provider payloads, credentials, or execution authority.
+
 ## Resumable learning jobs
 
 For work that must survive a worker restart, `BrainJobStore` adds a separate orchestration journal.

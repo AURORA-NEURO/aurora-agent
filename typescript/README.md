@@ -1030,6 +1030,13 @@ paused for safe retry, while post-dispatch claims are blocked for explicit recon
 uncertain provider effect is never replayed. Use `JsonAutonomousGoalWorkerJournalPersistence`
 and `AutonomousGoalWorkerJournalPersistenceCoordinator` for canonical caller-owned storage and
 optional compare-and-swap fencing.
+`AutonomousGoalControlLoop` continues worker passes with bounded `max_cycles` and
+`max_total_runs`; its optional `options_factory(context)` receives only prior cycle metadata and
+ledger counts, allowing fresh priority/urgency/retry/domain signals without exposing task text or
+provider payloads. It stops explicitly with `all_terminal`, `no_admissible_work`,
+`cycle_budget_exhausted`, or `run_budget_exhausted`. Paused goals can be re-admitted when the
+schedule policy permits them, while failed, blocked, or concurrently running goals remain visible
+as held work rather than being mislabeled as completed.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,

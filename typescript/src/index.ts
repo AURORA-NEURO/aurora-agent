@@ -2577,6 +2577,23 @@ export type {
   AutonomousGoalWorkerJournalTextStore,
 } from "./autonomous-goal-worker-journal.js";
 export {
+  AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_BATCH_PREFIX_BYTES,
+  AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES,
+  AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS,
+  AUTONOMOUS_GOAL_CONTROL_LOOP_RETENTION,
+  AUTONOMOUS_GOAL_CONTROL_LOOP_SCHEMA,
+  AutonomousGoalControlLoop,
+  AutonomousGoalControlLoopCycle,
+  AutonomousGoalControlLoopResult,
+} from "./autonomous-goal-control-loop.js";
+export type {
+  AutonomousGoalControlLoopContext,
+  AutonomousGoalControlLoopCycleJSON,
+  AutonomousGoalControlLoopJSON,
+  AutonomousGoalControlLoopOptionsFactory,
+  AutonomousGoalControlLoopStopReason,
+} from "./autonomous-goal-control-loop.js";
+export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,
   AUTONOMOUS_MODEL_HEALTH_MAX_EVENTS,
   AUTONOMOUS_MODEL_HEALTH_MAX_QUERY_LIMIT,

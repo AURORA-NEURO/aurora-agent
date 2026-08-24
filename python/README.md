@@ -185,6 +185,14 @@ provider effect. `JsonAutonomousGoalWorkerJournalPersistence` and
 `AutonomousGoalWorkerJournalPersistenceCoordinator` provide canonical caller-owned snapshot
 storage with optional compare-and-swap fencing. Journal snapshots exclude task text, prompts,
 parameters, credentials, and executor results just like the goal ledger.
+`AutonomousGoalControlLoop` continues those bounded worker passes until every goal is terminal,
+no safe work is admissible, or an explicit cycle/run budget is exhausted. Its optional
+`options_factory(context)` receives only prior cycle metadata and ledger counts, so a caller can
+refresh priorities, urgency, dependencies, retry policy, and required-domain coverage without
+reintroducing task payloads. Paused objectives can be re-admitted on a later cycle, while failed,
+blocked, or concurrently running objectives produce an explicit `no_admissible_work` stop rather
+than being reported as success. The result contains cycle digests, domain/status counts, and live
+executor values only on the initiating process.
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

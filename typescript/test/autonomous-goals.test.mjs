@@ -5,6 +5,7 @@ import {
   AutonomousGoalPersistenceCoordinator,
   AutonomousGoalScheduler,
   AutonomousGoalWorker,
+  AutonomousGoalControlLoop,
   AutonomousGoalWorkerJournal,
   AutonomousGoalWorkerJournalPersistenceCoordinator,
   AutonomousAgent,
@@ -204,6 +205,65 @@ test("goal worker journals the dispatch boundary and reconciles restart uncertai
   await new AutonomousGoalWorkerJournalPersistenceCoordinator(roundTripped, persistence).restore();
   assert.equal(roundTripped.head_digest, restored.head_digest);
   assert.equal(JSON.stringify(encoded).includes("private journal task"), false);
+});
+
+test("goal control loop continues all domains and re-admits paused work with fresh signals", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length + 1, clock: () => 100 });
+  for (const domain of domains) ledger.create({ goal_id: `loop-${domain}`, task_digest: goalTaskDigest(`private loop task ${domain}`), domain, now_ns: 0 });
+  const journal = new AutonomousGoalWorkerJournal({ clock: () => 101 });
+  const seenCycles = [];
+  const loop = new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      journal,
+      resolver: (goal) => ({ task: `private loop task ${goal.domain}` }),
+      executor: async () => ({ status: "completed" }),
+    }),
+    batch_id_prefix: "all-domain-loop",
+  });
+  const result = await loop.run({
+    schedule_options: { now_ns: 100, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    options_factory: (context) => {
+      seenCycles.push(context.cycle);
+      return { signals: [{ goal_id: "loop-coding", priority: 1, urgency: 1 }] };
+    },
+    max_cycles: 4,
+  });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.equal(result.cycles.length, 1);
+  assert.equal(result.total_runs, domains.length);
+  assert.deepEqual(result.domain_counts, Object.fromEntries(domains.map((domain) => [domain, 1])));
+  assert.deepEqual(seenCycles, [1]);
+  assert.deepEqual(journal.active(), []);
+  assert.equal(JSON.stringify(result.toJSON()).includes("private loop task"), false);
+
+  const retryLedger = new InMemoryAutonomousGoalLedger({ clock: () => 200 });
+  retryLedger.create({ goal_id: "paused-loop", task_digest: goalTaskDigest("private paused loop"), domain: "evaluation", now_ns: 0 });
+  let calls = 0;
+  const resumed = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger: retryLedger,
+      resolver: () => ({ task: "private paused loop" }),
+      executor: async () => ({ status: ++calls === 1 ? "paused" : "completed" }),
+    }),
+  }).run({ schedule_options: { now_ns: 200, max_selected: 1, max_concurrent: 1, include_paused: true }, max_cycles: 3 });
+  assert.equal(resumed.stop_reason, "all_terminal");
+  assert.equal(resumed.cycles.length, 2);
+  assert.equal(calls, 2);
+  assert.equal(retryLedger.get("paused-loop").status, "completed");
+
+  const failureLedger = new InMemoryAutonomousGoalLedger({ clock: () => 300 });
+  failureLedger.create({ goal_id: "failed-loop", task_digest: goalTaskDigest("private failed loop"), domain: "operations", max_attempts: 2, now_ns: 0 });
+  const failed = await new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger: failureLedger,
+      resolver: () => ({ task: "private failed loop" }),
+      executor: async () => { throw new Error("private failure"); },
+    }),
+  }).run({ schedule_options: { now_ns: 300, max_selected: 1, max_concurrent: 1 }, max_cycles: 2 });
+  assert.equal(failed.stop_reason, "no_admissible_work");
+  assert.equal(failureLedger.get("failed-loop").status, "failed");
 });
 
 test("goal execution wrapper advances approval, completion, terminal replay, and failure states", async () => {
