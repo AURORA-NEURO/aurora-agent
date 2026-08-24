@@ -203,6 +203,22 @@ fn call(server: &mut Server, name: &str, arguments: Value) -> Value {
     parsed
 }
 
+/// Run a test body on a thread with the same explicit stack reservation the server's dispatch
+/// threads use. Unoptimised builds give the widest workflow frames multi-megabyte activation
+/// records; a body that walks every capability group through the devplat library directly —
+/// without the server's guarded dispatch thread in between — overflows the default test stack,
+/// which aborts the whole test process instead of failing one test.
+fn on_a_dispatch_sized_stack<T: Send>(body: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn_scoped(scope, body)
+            .expect("test worker thread should start")
+            .join()
+            .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+    })
+}
+
 fn protocol_pack_fixture() -> PackIr {
     PackIr {
         manifest: PackManifest {
@@ -326,7 +342,7 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     let tools = tool_definitions();
-    assert_eq!(tools.len(), 259);
+    assert_eq!(tools.len(), 260);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -3440,129 +3456,133 @@ fn domain_workflow_portfolio_preflights_every_capability_group_without_dispatch(
 
 #[test]
 fn domain_workflow_reconciliation_preserves_outcomes_for_every_capability_group() {
-    let capabilities = bioprism_mcp::workspace_capabilities();
-    let definitions = Value::Array(tool_definitions());
-    let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
-    let workflows = catalogue["workflows"].as_array().unwrap();
-    assert_eq!(workflows.len(), 30);
+    on_a_dispatch_sized_stack(|| {
+        let capabilities = bioprism_mcp::workspace_capabilities();
+        let definitions = Value::Array(tool_definitions());
+        let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
+        let workflows = catalogue["workflows"].as_array().unwrap();
+        assert_eq!(workflows.len(), 30);
 
-    for workflow in workflows {
-        let workflow_id = workflow["workflow_id"].as_str().unwrap();
-        let tool = workflow["tools"]["available"]
-            .as_array()
-            .and_then(|tools| tools.first())
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| panic!("workflow {workflow_id} has no available tool"));
-        let instantiation = instantiate_domain_workflow(
-            &capabilities,
-            &definitions,
-            &json!({
-                "workflow_id": workflow_id,
-                "mission_id": format!("all-domain-reconcile-{workflow_id}"),
-                "goal": format!("exercise retained evidence states for {workflow_id}"),
-                "steps": [{"id": "outcome", "tool": tool, "arguments": {}}],
-                "policy": {"execute": true}
-            }),
-        )
-        .unwrap_or_else(|error| panic!("workflow {workflow_id} failed to instantiate: {error}"));
-        let request: MissionRequest =
-            serde_json::from_value(instantiation["mission"].clone()).unwrap();
-        let plan = plan_mission(&request).unwrap();
-        let step = &plan.steps[0];
-        let report = |status: &str, wire: Option<Value>| {
-            json!({
-                "ok": true,
-                "workflow": "agent_mission",
-                "schema_version": "bioprism-devplat-mission/0.1",
-                "plan": serde_json::to_value(&plan).unwrap(),
-                "execution": "executed",
-                "mission_status": if status == "succeeded" { "succeeded" } else { "failed" },
-                "succeeded": usize::from(status == "succeeded"),
-                "refused": usize::from(status == "refused"),
-                "blocked": usize::from(status == "blocked"),
-                "cancelled": usize::from(status == "cancelled"),
-                "required_failures": usize::from(status != "succeeded"),
-                "returned_bytes": if wire.is_some() { 12 } else { 0 },
-                "results": [{
-                    "id": step.id,
-                    "tool": step.tool,
-                    "status": status,
-                    "required": step.required,
-                    "arguments_digest": "a".repeat(64),
-                    "bytes": if wire.is_some() { 12 } else { 0 },
-                    "wire": wire,
-                    "error": if status == "succeeded" { Value::Null } else { json!("explicit refusal") }
-                }],
-                "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
-                "execution_trace": [
-                    {"sequence": 0, "event": "mission.started", "wave": null, "step_id": null, "tool": null, "status": "running", "arguments_digest": null, "bytes": 0, "detail": null},
-                    {"sequence": 1, "event": "mission.completed", "wave": null, "step_id": null, "tool": null, "status": if status == "succeeded" { "succeeded" } else { "failed" }, "arguments_digest": null, "bytes": if wire.is_some() { 12 } else { 0 }, "detail": null}
-                ],
-                "claim_requests": [],
-                "claim_lineage": {},
-                "guarantees": [],
-                "limitations": []
-            })
-        };
+        for workflow in workflows {
+            let workflow_id = workflow["workflow_id"].as_str().unwrap();
+            let tool = workflow["tools"]["available"]
+                .as_array()
+                .and_then(|tools| tools.first())
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("workflow {workflow_id} has no available tool"));
+            let instantiation = instantiate_domain_workflow(
+                &capabilities,
+                &definitions,
+                &json!({
+                    "workflow_id": workflow_id,
+                    "mission_id": format!("all-domain-reconcile-{workflow_id}"),
+                    "goal": format!("exercise retained evidence states for {workflow_id}"),
+                    "steps": [{"id": "outcome", "tool": tool, "arguments": {}}],
+                    "policy": {"execute": true}
+                }),
+            )
+            .unwrap_or_else(|error| {
+                panic!("workflow {workflow_id} failed to instantiate: {error}")
+            });
+            let request: MissionRequest =
+                serde_json::from_value(instantiation["mission"].clone()).unwrap();
+            let plan = plan_mission(&request).unwrap();
+            let step = &plan.steps[0];
+            let report = |status: &str, wire: Option<Value>| {
+                json!({
+                    "ok": true,
+                    "workflow": "agent_mission",
+                    "schema_version": "bioprism-devplat-mission/0.1",
+                    "plan": serde_json::to_value(&plan).unwrap(),
+                    "execution": "executed",
+                    "mission_status": if status == "succeeded" { "succeeded" } else { "failed" },
+                    "succeeded": usize::from(status == "succeeded"),
+                    "refused": usize::from(status == "refused"),
+                    "blocked": usize::from(status == "blocked"),
+                    "cancelled": usize::from(status == "cancelled"),
+                    "required_failures": usize::from(status != "succeeded"),
+                    "returned_bytes": if wire.is_some() { 12 } else { 0 },
+                    "results": [{
+                        "id": step.id,
+                        "tool": step.tool,
+                        "status": status,
+                        "required": step.required,
+                        "arguments_digest": "a".repeat(64),
+                        "bytes": if wire.is_some() { 12 } else { 0 },
+                        "wire": wire,
+                        "error": if status == "succeeded" { Value::Null } else { json!("explicit refusal") }
+                    }],
+                    "execution_trace_schema_version": "bioprism-devplat-mission-trace/0.1",
+                    "execution_trace": [
+                        {"sequence": 0, "event": "mission.started", "wave": null, "step_id": null, "tool": null, "status": "running", "arguments_digest": null, "bytes": 0, "detail": null},
+                        {"sequence": 1, "event": "mission.completed", "wave": null, "step_id": null, "tool": null, "status": if status == "succeeded" { "succeeded" } else { "failed" }, "arguments_digest": null, "bytes": if wire.is_some() { 12 } else { 0 }, "detail": null}
+                    ],
+                    "claim_requests": [],
+                    "claim_lineage": {},
+                    "guarantees": [],
+                    "limitations": []
+                })
+            };
 
-        let success = reconcile_domain_workflow(&json!({
-            "instantiation": instantiation,
-            "mission_report": report("succeeded", Some(json!({"result": {"ok": true}})))
-        }))
-        .unwrap_or_else(|error| {
-            panic!("workflow {workflow_id} success reconciliation failed: {error}")
-        });
-        assert_eq!(success["completion"]["status"], "complete");
-        assert_eq!(success["completion"]["ready"], true);
+            let success = reconcile_domain_workflow(&json!({
+                "instantiation": instantiation,
+                "mission_report": report("succeeded", Some(json!({"result": {"ok": true}})))
+            }))
+            .unwrap_or_else(|error| {
+                panic!("workflow {workflow_id} success reconciliation failed: {error}")
+            });
+            assert_eq!(success["completion"]["status"], "complete");
+            assert_eq!(success["completion"]["ready"], true);
 
-        let refused = reconcile_domain_workflow(&json!({
-            "instantiation": instantiation,
-            "mission_report": report("refused", None)
-        }))
-        .unwrap_or_else(|error| {
-            panic!("workflow {workflow_id} refusal reconciliation failed: {error}")
-        });
-        assert_eq!(refused["completion"]["status"], "failed");
-        assert_eq!(refused["completion"]["ready"], false);
-        assert_eq!(
-            refused["evidence"]["rows"][0]["evidence_state"],
-            "explicit_refusal"
-        );
+            let refused = reconcile_domain_workflow(&json!({
+                "instantiation": instantiation,
+                "mission_report": report("refused", None)
+            }))
+            .unwrap_or_else(|error| {
+                panic!("workflow {workflow_id} refusal reconciliation failed: {error}")
+            });
+            assert_eq!(refused["completion"]["status"], "failed");
+            assert_eq!(refused["completion"]["ready"], false);
+            assert_eq!(
+                refused["evidence"]["rows"][0]["evidence_state"],
+                "explicit_refusal"
+            );
 
-        let omitted = reconcile_domain_workflow(&json!({
-            "instantiation": instantiation,
-            "mission_report": report("succeeded", None)
-        }))
-        .unwrap_or_else(|error| {
-            panic!("workflow {workflow_id} omission reconciliation failed: {error}")
-        });
-        assert_eq!(
-            omitted["completion"]["status"],
-            "complete_with_output_omissions"
-        );
-        assert_eq!(omitted["completion"]["ready"], false);
-        assert_eq!(
-            omitted["evidence"]["rows"][0]["evidence_state"],
-            "completed_output_omitted"
-        );
+            let omitted = reconcile_domain_workflow(&json!({
+                "instantiation": instantiation,
+                "mission_report": report("succeeded", None)
+            }))
+            .unwrap_or_else(|error| {
+                panic!("workflow {workflow_id} omission reconciliation failed: {error}")
+            });
+            assert_eq!(
+                omitted["completion"]["status"],
+                "complete_with_output_omissions"
+            );
+            assert_eq!(omitted["completion"]["ready"], false);
+            assert_eq!(
+                omitted["evidence"]["rows"][0]["evidence_state"],
+                "completed_output_omitted"
+            );
 
-        let mut mismatched_report = report("succeeded", Some(json!({"result": {"ok": true}})));
-        mismatched_report["plan"]["digest"] = json!("b".repeat(64));
-        let mismatched = reconcile_domain_workflow(&json!({
-            "instantiation": instantiation,
-            "mission_report": mismatched_report
-        }))
-        .unwrap_or_else(|error| {
-            panic!("workflow {workflow_id} mismatch reconciliation failed: {error}")
-        });
-        assert_eq!(mismatched["integrity"]["valid"], false);
-        assert_eq!(mismatched["completion"]["ready"], false);
-        assert!(mismatched["integrity"]["findings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|finding| finding["code"] == "mission_plan_digest_mismatch"));
-    }
+            let mut mismatched_report = report("succeeded", Some(json!({"result": {"ok": true}})));
+            mismatched_report["plan"]["digest"] = json!("b".repeat(64));
+            let mismatched = reconcile_domain_workflow(&json!({
+                "instantiation": instantiation,
+                "mission_report": mismatched_report
+            }))
+            .unwrap_or_else(|error| {
+                panic!("workflow {workflow_id} mismatch reconciliation failed: {error}")
+            });
+            assert_eq!(mismatched["integrity"]["valid"], false);
+            assert_eq!(mismatched["completion"]["ready"], false);
+            assert!(mismatched["integrity"]["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|finding| finding["code"] == "mission_plan_digest_mismatch"));
+        }
+    })
 }
 
 #[test]
@@ -8642,12 +8662,12 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
     assert_eq!(result["total_groups"], json!(30));
-    assert_eq!(result["unique_catalog_tools"], json!(259));
-    assert_eq!(result["advertised_tool_count"], json!(259));
+    assert_eq!(result["unique_catalog_tools"], json!(260));
+    assert_eq!(result["advertised_tool_count"], json!(260));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(259));
-    assert_eq!(result["schema_quality"]["valid"], json!(259));
+    assert_eq!(result["schema_quality"]["checked"], json!(260));
+    assert_eq!(result["schema_quality"]["valid"], json!(260));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -9805,6 +9825,262 @@ fn a_refused_path_surfaces_as_a_tool_error_not_a_crash() {
     );
     assert_eq!(payload["__isError"], json!(true));
     assert!(payload["error"].as_str().unwrap().contains("refused"));
+}
+
+const TRADE_WORLD: &str = "fixtures/domains/trade-surveillance/world.json";
+const TRADE_QUERY: &str = "fixtures/domains/trade-surveillance/query.json";
+const TRADE_DOMAIN: &str = "fixtures/domains/trade-surveillance/domain.json";
+
+/// The domain parameter carries a non-biological world through the same pipeline: the pack's
+/// oracle judges it and the witness is checkable at l2, exactly as a leakage witness would be.
+#[test]
+fn a_domain_compile_judges_the_trade_world_invalid_with_the_self_cross_witness() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": TRADE_WORLD,
+            "query": TRADE_QUERY,
+            "domain": TRADE_DOMAIN,
+            "layer": "l2"
+        }),
+    );
+
+    assert_eq!(payload["verdict"]["status"], json!("invalid"));
+    assert_eq!(
+        payload["verdict"]["oracle"],
+        json!("rule/trade-surveillance-v1")
+    );
+    let witnesses = payload["witnesses"].as_array().unwrap();
+    assert!(
+        witnesses
+            .iter()
+            .any(|witness| witness["type"] == json!("domain_check")
+                && witness["check"] == json!("self_cross")),
+        "expected the self_cross domain_check witness, got {witnesses:?}"
+    );
+
+    assert_eq!(payload["domain"]["name"], json!("trade-surveillance"));
+    assert_eq!(
+        payload["domain"]["oracle_kind"],
+        json!("rule/trade-surveillance-v1")
+    );
+    assert_eq!(
+        payload["domain"]["protected_tags"],
+        json!(["identity", "time", "protected"])
+    );
+    assert_eq!(
+        payload["domain"]["advisories"],
+        json!([]),
+        "the fixture query declares the pack's goal and tags, so nothing is advisory"
+    );
+}
+
+/// A required variable withheld by the temporal cut abstains the verdict: the unjudged world
+/// crosses MCP as underdetermined, never as valid.
+#[test]
+fn a_domain_compile_reports_the_privilege_review_abstention_rather_than_valid() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": "fixtures/domains/privilege-review/world.json",
+            "query": "fixtures/domains/privilege-review/query.json",
+            "domain": "fixtures/domains/privilege-review/domain.json"
+        }),
+    );
+
+    assert_eq!(payload["verdict"]["status"], json!("underdetermined"));
+    assert_eq!(
+        payload["verdict"]["oracle"],
+        json!("rule/privilege-review-v1")
+    );
+    assert_eq!(payload["verdict"]["witnesses"], json!(["domain_check"]));
+    assert_eq!(payload["domain"]["name"], json!("privilege-review"));
+
+    let explained = call(
+        &mut server,
+        "fiber_explain",
+        json!({
+            "world": "fixtures/domains/privilege-review/world.json",
+            "query": "fixtures/domains/privilege-review/query.json",
+            "domain": "fixtures/domains/privilege-review/domain.json"
+        }),
+    );
+    assert_eq!(explained["domain"]["name"], json!("privilege-review"));
+    assert_eq!(
+        explained["domain"]["oracle_kind"],
+        json!("rule/privilege-review-v1")
+    );
+    assert_eq!(explained["domain"]["advisories"], json!([]));
+}
+
+/// Without the domain parameter nothing changed: the reference oracle judges, the pinned parity
+/// digest holds, and no domain object appears anywhere in the response.
+#[test]
+fn a_compile_without_a_domain_parameter_keeps_the_reference_digest_and_no_domain_object() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({ "world": WORLD, "query": QUERY }),
+    );
+    assert_eq!(
+        payload["certificate_sha256"],
+        json!("c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4")
+    );
+    assert!(payload.get("domain").is_none());
+    assert!(payload["refine"]["handle"].get("domain").is_none());
+}
+
+/// A domain compile's refinement handle carries the pack binding, so descending recompiles under
+/// the same oracle and the certificate digest still verifies.
+#[test]
+fn a_domain_refinement_handle_recompiles_under_the_pack_oracle() {
+    let mut server = server();
+    let compiled = call(
+        &mut server,
+        "fiber_compile",
+        json!({ "world": TRADE_WORLD, "query": TRADE_QUERY, "domain": TRADE_DOMAIN }),
+    );
+    let handle = compiled["refine"]["handle"].clone();
+    assert_eq!(handle["domain"], json!(TRADE_DOMAIN));
+
+    let refined = call(
+        &mut server,
+        "fiber_refine",
+        json!({ "handle": handle, "layer": "l2" }),
+    );
+    assert_eq!(refined["layer"], json!("l2"));
+    assert_eq!(refined["verdict"]["status"], json!("invalid"));
+    assert!(refined["witnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|witness| witness["check"] == json!("self_cross")));
+}
+
+/// A pack cannot rewrite the query it judges — the certificate binds the query's bytes — so a
+/// missing protected tag or goal is reported as an advisory instead of being injected silently.
+#[test]
+fn a_query_missing_the_packs_tags_and_goal_earns_advisories_not_silent_repair() {
+    let staged = repo_root().join("target/mcp-domain-fixtures");
+    std::fs::create_dir_all(&staged).unwrap();
+    std::fs::write(
+        staged.join("goalless_query.json"),
+        serde_json::to_string_pretty(&json!({
+            "schema_version": "fiber-query/0.2",
+            "query_id": "audit-wash-trade-goalless",
+            "targets": ["wash_trade_status"],
+            "protected_tags": ["identity", "protected"],
+            "decision_time": "2025-03-15T00:00:00Z",
+            "budgets": { "max_facts": 16 }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "fiber_compile",
+        json!({
+            "world": TRADE_WORLD,
+            "query": "target/mcp-domain-fixtures/goalless_query.json",
+            "domain": TRADE_DOMAIN
+        }),
+    );
+
+    let advisories = payload["domain"]["advisories"].as_array().unwrap();
+    assert_eq!(advisories.len(), 2, "got {advisories:?}");
+    assert!(advisories
+        .iter()
+        .any(|advisory| advisory.as_str().unwrap().contains("\"time\"")));
+    assert!(advisories
+        .iter()
+        .any(|advisory| advisory.as_str().unwrap().contains("declares no goal")));
+}
+
+#[test]
+fn domain_validate_returns_the_declared_checks_of_a_pack() {
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "domain_validate",
+        json!({ "domain": TRADE_DOMAIN }),
+    );
+
+    assert_eq!(payload["ok"], json!(true));
+    assert_eq!(payload["name"], json!("trade-surveillance"));
+    assert_eq!(payload["oracle_kind"], json!("rule/trade-surveillance-v1"));
+    assert_eq!(
+        payload["required_variables"],
+        json!(["self_match_conflicts", "reporting_window_closed"])
+    );
+    let checks = payload["checks"].as_array().unwrap();
+    assert_eq!(
+        checks
+            .iter()
+            .map(|check| check["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["self_cross", "late_reporting", "cancel_ratio_excessive"]
+    );
+    assert!(checks
+        .iter()
+        .all(|check| !check["description"].as_str().unwrap().is_empty()));
+    assert_eq!(
+        payload["protected_tags"],
+        json!(["identity", "time", "protected"])
+    );
+    assert_eq!(payload["scope_dimensions_declared"], json!(true));
+}
+
+#[test]
+fn a_malformed_domain_pack_is_refused_with_the_parse_error_not_a_crash() {
+    let staged = repo_root().join("target/mcp-domain-fixtures");
+    std::fs::create_dir_all(&staged).unwrap();
+    std::fs::write(
+        staged.join("malformed_pack.json"),
+        serde_json::to_string_pretty(&json!({
+            "schema_version": "bioprism-domain/0.1",
+            "name": "broken",
+            "description": "a pack whose oracle declares no checks",
+            "oracle": { "kind": "rule/broken-v1", "checks": [] }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut server = server();
+    let payload = call(
+        &mut server,
+        "domain_validate",
+        json!({ "domain": "target/mcp-domain-fixtures/malformed_pack.json" }),
+    );
+    assert_eq!(payload["__isError"], json!(true));
+    assert!(payload["error"].as_str().unwrap().contains("no checks"));
+}
+
+#[test]
+fn a_domain_path_escaping_the_root_is_refused() {
+    let mut server = server();
+    let compile = call(
+        &mut server,
+        "fiber_compile",
+        json!({ "world": TRADE_WORLD, "query": TRADE_QUERY, "domain": "../../../etc/passwd" }),
+    );
+    assert_eq!(compile["__isError"], json!(true));
+    assert!(compile["error"].as_str().unwrap().contains("refused"));
+
+    let validate = call(
+        &mut server,
+        "domain_validate",
+        json!({ "domain": "..\\outside-pack.json" }),
+    );
+    assert_eq!(validate["__isError"], json!(true));
+    assert!(validate["error"].as_str().unwrap().contains("refused"));
 }
 
 #[test]

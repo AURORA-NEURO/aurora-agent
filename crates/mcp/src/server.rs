@@ -203,6 +203,7 @@ use bioprism_docgraph::{
     compile_bundle, impact_of, lint, scan_markdown_tree, DocEdgeType, ModuleId, NodeStatus,
     ScanOptions, TaskRoute, TraversalPolicy,
 };
+use bioprism_domain::DomainPack;
 use bioprism_epistemic::submodularity::check_with_tolerance as epistemic_submodularity_check;
 use bioprism_epistemic::{
     adaptive_policy as epistemic_adaptive_policy,
@@ -234,7 +235,9 @@ use bioprism_fabric::synth::{
     Goal as FabricGoal,
 };
 use bioprism_factory::{ExecutionAuthoritySnapshot, Job as FactoryJob, JobStore, WorkerCapability};
-use bioprism_fiber::{compile, AdaptiveAcquisitionTrace, Query};
+use bioprism_fiber::{
+    compile, compile_with_oracle, AdaptiveAcquisitionTrace, DecisionOracle, Query,
+};
 use bioprism_foundation::contract::{ContractDraft, FalsifiableContract};
 use bioprism_foundation::maturity::ApplicabilityEnvelope;
 use bioprism_foundation::worldclass::{BioWorldDeclaration, CounterfactualClaim, Transition};
@@ -501,6 +504,44 @@ fn project_adaptive_node(
     }
 }
 
+/// The domain object a pack-judged compile carries: who judged, what it protects, and what it
+/// could only advise on.
+///
+/// Advisories exist because a pack cannot rewrite the query it judges — the certificate binds
+/// the query's bytes by hash, so a missing protected tag or goal is reported to the caller
+/// instead of being silently injected.
+fn domain_surface(pack: &DomainPack, query: &Query) -> Value {
+    let mut advisories = Vec::new();
+    let missing: Vec<&str> = pack
+        .protected_tags()
+        .iter()
+        .filter(|tag| !query.protected_tags.contains(tag.as_str()))
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        advisories.push(format!(
+            "the query's protected_tags do not include the pack's protected tag(s) {missing:?}; \
+             the pack cannot inject them, so the protected closure may be narrower than the \
+             domain expects"
+        ));
+    }
+    if query.goal.is_none() {
+        advisories.push(match pack.goal() {
+            Some(goal) => format!(
+                "the query declares no goal; the pack declares {goal:?}, which the caller must \
+                 copy into the query because a pack cannot change the bytes the certificate binds"
+            ),
+            None => "the query declares no goal, and the pack declares none either".to_string(),
+        });
+    }
+    json!({
+        "name": pack.name(),
+        "oracle_kind": pack.oracle().kind(),
+        "protected_tags": pack.protected_tags(),
+        "advisories": advisories,
+    })
+}
+
 fn project_fiber_adaptive_trace(
     trace: &AdaptiveAcquisitionTrace,
     query_sha256: &str,
@@ -731,6 +772,14 @@ fn finish_cancelled_mission(report: MissionReport, context: &str) -> Result<Valu
 const MAX_MISSION_SCHEMA_BYTES: usize = 1_000_000;
 const MAX_MISSION_SCHEMA_DEPTH: usize = 100;
 const MAX_MISSION_SCHEMA_ISSUES: usize = 64;
+
+/// Stack reservation for every tool dispatch thread and for the mission executor thread.
+///
+/// Unoptimised builds give the widest dispatch frames multi-megabyte activation records, and a
+/// mission re-enters `call_tool` from inside its own execution frame; the default thread stack
+/// aborted with `STATUS_STACK_OVERFLOW`. Sixteen mebibytes is double the reservation the CLI
+/// worker thread uses for a single (non re-entrant) dispatch chain.
+const TOOL_DISPATCH_STACK_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 struct MissionSchemaIssue {
@@ -1596,7 +1645,36 @@ impl Server {
         )
     }
 
+    /// Dispatch a tool call on a dedicated thread with an explicit stack reservation.
+    ///
+    /// Unoptimised builds give the widest tool frames multi-megabyte activation records, and a
+    /// mission re-enters this dispatcher from inside its own execution frame; on the default
+    /// thread stack that aborted with `STATUS_STACK_OVERFLOW` rather than refusing. Reserving
+    /// the stack here makes every dispatch level independent of the caller's remaining stack —
+    /// the same guard the CLI applies at its entry point. A panic inside the tool is resumed on
+    /// the caller so panic behaviour is unchanged; only a failure to start the thread becomes a
+    /// new, explicit error response.
     fn call_tool(&self, request: &Request) -> Response {
+        std::thread::scope(|scope| {
+            match std::thread::Builder::new()
+                .name("bioprism-mcp-dispatch".into())
+                .stack_size(TOOL_DISPATCH_STACK_BYTES)
+                .spawn_scoped(scope, || self.call_tool_inner(request))
+            {
+                Ok(handle) => handle
+                    .join()
+                    .unwrap_or_else(|payload| std::panic::resume_unwind(payload)),
+                Err(error) => Response::error(
+                    request.id.clone(),
+                    code::INTERNAL_ERROR,
+                    format!("cannot start the tool dispatch thread: {error}"),
+                    None,
+                ),
+            }
+        })
+    }
+
+    fn call_tool_inner(&self, request: &Request) -> Response {
         let id = request.id.clone();
         let Some(name) = request.params.get("name").and_then(Value::as_str) else {
             return Response::error(
@@ -1622,6 +1700,7 @@ impl Server {
             "projection_bundle" => self.projection_bundle(&arguments),
             "world_index" => self.world_index(&arguments),
             "world_validate" => self.world_validate(&arguments),
+            "domain_validate" => self.domain_validate(&arguments),
             "world_generate" => self.world_generate(&arguments),
             "factory_lifecycle_simulate" => self.factory_lifecycle_simulate(&arguments),
             "factory_authority_verify" => self.factory_authority_verify(&arguments),
@@ -2163,11 +2242,37 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<(bioprism_fiber::CompileOutput, RenderContext), String> {
-        let (world, query, expected_digest) = self.compile_paths(arguments)?;
+        let (out, context, _) = self.compiled_with_domain(arguments)?;
+        Ok((out, context))
+    }
+
+    /// The compile pipeline with an optional caller-chosen domain pack.
+    ///
+    /// Without a `domain` argument this is [`Server::compiled`] exactly: the reference
+    /// split-integrity oracle judges the world and the response bytes are unchanged. With one,
+    /// the pack's declared rule oracle judges it instead, and the returned surface carries what
+    /// the pack could only advise on — a pack cannot rewrite the query it judges, because that
+    /// would change the bytes the certificate binds.
+    fn compiled_with_domain(
+        &self,
+        arguments: &Value,
+    ) -> Result<(bioprism_fiber::CompileOutput, RenderContext, Option<Value>), String> {
+        let (world, query, domain, expected_digest) = self.compile_paths(arguments)?;
 
         let source = self.load_source(&world)?;
         let query_document = self.load_query(&query)?;
-        let out = compile(source.as_ref(), &query_document).map_err(|e| e.to_string())?;
+        let pack = domain
+            .as_deref()
+            .map(|relative| self.load_domain_pack(relative))
+            .transpose()?;
+        let out = match &pack {
+            Some(pack) => compile_with_oracle(source.as_ref(), &query_document, pack.oracle()),
+            None => compile(source.as_ref(), &query_document),
+        }
+        .map_err(|e| e.to_string())?;
+        let surface = pack
+            .as_ref()
+            .map(|pack| domain_surface(pack, &query_document));
 
         let context = RenderContext {
             omitted_facts: out.certificate.omissions.total_facts,
@@ -2193,10 +2298,20 @@ impl Server {
             }
         }
 
-        Ok((out, context))
+        Ok((out, context, surface))
     }
 
-    fn compile_paths(&self, arguments: &Value) -> Result<(String, String, Option<String>), String> {
+    /// Loads and validates a domain pack from a root-confined path.
+    fn load_domain_pack(&self, relative: &str) -> Result<DomainPack, String> {
+        let path = self.resolve(relative)?;
+        let raw = self.read_json(&path)?;
+        DomainPack::from_json(&raw).map_err(|error| error.to_string())
+    }
+
+    fn compile_paths(
+        &self,
+        arguments: &Value,
+    ) -> Result<(String, String, Option<String>, Option<String>), String> {
         if let Some(handle) = arguments.get("handle") {
             let handle = handle
                 .as_object()
@@ -2220,7 +2335,11 @@ impl Server {
                 .get("certificate_sha256")
                 .and_then(Value::as_str)
                 .ok_or("refinement handle is missing certificate_sha256")?;
-            return Ok((world.into(), query.into(), Some(digest.into())));
+            let domain = handle
+                .get("domain")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            return Ok((world.into(), query.into(), domain, Some(digest.into())));
         }
 
         let world = arguments
@@ -2231,11 +2350,20 @@ impl Server {
             .get("query")
             .and_then(Value::as_str)
             .ok_or("query is required (a path relative to the server root)")?;
-        Ok((world.into(), query.into(), None))
+        let domain = match arguments.get("domain") {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .ok_or("domain must be a string path relative to the server root")?
+                    .to_string(),
+            ),
+        };
+        Ok((world.into(), query.into(), domain, None))
     }
 
     fn fiber_compile(&self, arguments: &Value) -> Result<Value, String> {
-        let (out, context) = self.compiled(arguments)?;
+        let (out, context, domain_surface) = self.compiled_with_domain(arguments)?;
         let layer = arguments
             .get("layer")
             .and_then(Value::as_str)
@@ -2334,16 +2462,22 @@ impl Server {
                 .certificate_sha256
                 .as_deref()
                 .ok_or("compiled certificate has no reference digest")?;
-            let handle = json!({
+            let mut handle = json!({
                 "version": 1,
                 "world": world,
                 "query": query,
                 "certificate_sha256": digest,
             });
+            if let Some(domain) = arguments.get("domain").and_then(Value::as_str) {
+                handle["domain"] = json!(domain);
+            }
             if let Some(refine) = map.get_mut("refine").and_then(Value::as_object_mut) {
                 refine.insert("handle".into(), handle);
             } else {
                 map.insert("refine".into(), json!({ "handle": handle }));
+            }
+            if let Some(surface) = domain_surface {
+                map.insert("domain".into(), surface);
             }
         }
         Ok(rendered)
@@ -2360,8 +2494,8 @@ impl Server {
     }
 
     fn fiber_explain(&self, arguments: &Value) -> Result<Value, String> {
-        let (out, context) = self.compiled(arguments)?;
-        Ok(json!({
+        let (out, context, domain_surface) = self.compiled_with_domain(arguments)?;
+        let mut explained = json!({
             "ok": true,
             "backend": out.certificate.plan.backend.as_str(),
             "passes": out.trace.passes.iter().map(|pass| json!({
@@ -2388,6 +2522,39 @@ impl Server {
             "supports_sufficiency_claim": out.certificate.manifest.supports_sufficiency_claim(),
             "protected_closure_satisfied": out.protected_closure_satisfied(),
             "unmatched_protected_tags": out.trace.unmatched_protected_tags,
+        });
+        if let Some(surface) = domain_surface {
+            explained
+                .as_object_mut()
+                .expect("explain payload is an object")
+                .insert("domain".into(), surface);
+        }
+        Ok(explained)
+    }
+
+    /// Loads a domain pack and reports its declared surface without compiling anything.
+    fn domain_validate(&self, arguments: &Value) -> Result<Value, String> {
+        let relative = arguments
+            .get("domain")
+            .and_then(Value::as_str)
+            .ok_or("domain is required (a path relative to the server root)")?;
+        let path = self.resolve(relative)?;
+        let raw = self.read_json(&path)?;
+        let pack = DomainPack::from_json(&raw).map_err(|error| error.to_string())?;
+        Ok(json!({
+            "ok": true,
+            "name": pack.name(),
+            "description": pack.description(),
+            "oracle_kind": pack.oracle().kind(),
+            "required_variables": pack.oracle().required_variables(),
+            "checks": pack
+                .oracle()
+                .checks()
+                .iter()
+                .map(|check| json!({ "name": check.name, "description": check.description }))
+                .collect::<Vec<_>>(),
+            "protected_tags": pack.protected_tags(),
+            "scope_dimensions_declared": raw.get("scope_dimensions").is_some(),
         }))
     }
 
@@ -31336,7 +31503,36 @@ impl Server {
             .and_then(|report| self.index_mission_report(report))
     }
 
+    /// Run the mission executor on a dedicated thread with an explicit stack reservation.
+    ///
+    /// `call_tool` already reserves a stack for the dispatch that reaches it, but the executor's
+    /// own activation record is large enough that it must not share a reservation with the
+    /// dispatch frame that entered it, and the direct public entry points
+    /// (`preflight_agent_mission`, `execute_agent_mission_with_cancellation`) arrive on caller
+    /// threads with unknown headroom. A panic inside the executor is resumed on the caller so
+    /// panic behaviour is unchanged; only a failure to start the thread becomes a new, explicit
+    /// refusal.
     fn agent_mission_with_cancellation(
+        &self,
+        arguments: &Value,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<Value, String> {
+        std::thread::scope(|scope| {
+            match std::thread::Builder::new()
+                .name("bioprism-mcp-mission".into())
+                .stack_size(TOOL_DISPATCH_STACK_BYTES)
+                .spawn_scoped(scope, || {
+                    self.agent_mission_with_cancellation_inner(arguments, cancellation)
+                }) {
+                Ok(handle) => handle
+                    .join()
+                    .unwrap_or_else(|payload| std::panic::resume_unwind(payload)),
+                Err(error) => Err(format!("cannot start the mission executor thread: {error}")),
+            }
+        })
+    }
+
+    fn agent_mission_with_cancellation_inner(
         &self,
         arguments: &Value,
         cancellation: Option<&AtomicBool>,
@@ -35537,8 +35733,8 @@ pub fn workspace_capabilities() -> Value {
         {
             "id": "decision_context",
             "domains": ["typed queries", "evidence selection", "omission accounting"],
-            "crates": ["bioprism-fiber", "bioprism-section", "bioprism-obligation", "bioprism-scope", "bioprism-graph"],
-            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle", "obligation_gate_check"],
+            "crates": ["bioprism-fiber", "bioprism-section", "bioprism-obligation", "bioprism-scope", "bioprism-graph", "bioprism-domain"],
+            "mcp_tools": ["fiber_compile", "fiber_refine", "fiber_explain", "fiber_verify", "projection_bundle", "obligation_gate_check", "domain_validate"],
             "cli_entrypoints": ["context explain", "context compile", "context verify", "context compare"],
             "status": "available"
         },
@@ -35828,7 +36024,8 @@ pub fn tool_definitions() -> Vec<Value> {
         "type": "object",
         "properties": {
             "world": { "type": "string", "description": "Path to a fiber-world/0.1 document or an indexed store directory, relative to the server root." },
-            "query": { "type": "string", "description": "Path to a fiber-query/0.1 through fiber-query/0.5 document, relative to the server root. The 0.3 form carries the explicit decision-loss matrix and permitted-action boundary; 0.4 additionally carries bounded observed evidence for executable rate-distortion; 0.5 carries an exact finite-horizon adaptive acquisition plan." }
+            "query": { "type": "string", "description": "Path to a fiber-query/0.1 through fiber-query/0.5 document, relative to the server root. The 0.3 form carries the explicit decision-loss matrix and permitted-action boundary; 0.4 additionally carries bounded observed evidence for executable rate-distortion; 0.5 carries an exact finite-horizon adaptive acquisition plan." },
+            "domain": { "type": "string", "description": "Optional path to a bioprism-domain/0.1 pack, relative to the server root. When present, the pack's declared rule oracle judges the compiled value map instead of the reference split-integrity oracle, and the response carries the pack's name, oracle kind, protected tags, and advisories." }
         },
         "required": ["world", "query"]
     });
@@ -35964,7 +36161,8 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "world": { "type": "string", "description": "Path to a world document or store directory, relative to the server root." },
                     "query": { "type": "string", "description": "Path to a fiber-query/0.1 through fiber-query/0.5 document, relative to the server root." },
-                    "layer": { "type": "string", "enum": ["l0", "l1", "l2", "l3", "l4"], "description": "Starting layer. Defaults to l0." }
+                    "layer": { "type": "string", "enum": ["l0", "l1", "l2", "l3", "l4"], "description": "Starting layer. Defaults to l0." },
+                    "domain": { "type": "string", "description": "Optional path to a bioprism-domain/0.1 pack, relative to the server root. When present, the pack's declared rule oracle judges the compiled value map instead of the reference split-integrity oracle; the response and the refinement handle then carry the domain binding, and a domain object reports the pack's name, oracle kind, protected tags, and advisories." }
                 },
                 "required": ["world", "query"]
             }
@@ -36052,6 +36250,21 @@ pub fn tool_definitions() -> Vec<Value> {
                     "world": { "type": "string", "description": "Path to a fiber-world/0.1 JSON document, relative to the server root." }
                 },
                 "required": ["world"]
+            }
+        }),
+        json!({
+            "name": "domain_validate",
+            "description": "Load a bioprism-domain/0.1 pack and report its declared surface: name, \
+                description, oracle kind, required variables, every check with its description, \
+                protected tags, and whether scope dimensions are declared. A malformed pack is \
+                refused with the parse error. Nothing is compiled and nothing is written; use \
+                fiber_compile with the domain parameter to have the pack's oracle judge a world.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "domain": { "type": "string", "description": "Path to a bioprism-domain/0.1 pack JSON document, relative to the server root." }
+                },
+                "required": ["domain"]
             }
         }),
         json!({
