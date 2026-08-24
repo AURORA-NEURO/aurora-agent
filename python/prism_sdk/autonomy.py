@@ -14677,6 +14677,66 @@ class AutonomousAgent:
             journal=journal,
         )
 
+    def run_with_reviewed_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        acquirer: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        domains: Sequence[str] | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        projector: Any | None = None,
+        evaluator: Any | None = None,
+        rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None,
+        parent_evidence_digests: Sequence[str] = (),
+        stop_on_failure: bool = False,
+        reevaluate_pending: bool = False,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        journal: AutonomousEvidenceRuntimeJournal | None = None,
+        approve_source_dispatch: bool = False,
+        allow_incomplete_evidence: bool = False,
+        approve_provider_call: bool = False,
+        prompt_builder: Callable[[AutonomousEvidenceRuntimeResult], Mapping[str, Any]] | None = None,
+        run_mode: str = "auto",
+        run_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Acquire accepted evidence and compose it with the ordinary autonomous run.
+
+        This is the façade-level bridge between the provider-free evidence runtime and model
+        execution.  The bridge keeps source dispatch approval, evidence acceptance, and provider
+        approval independent.  Its serialized result is metadata-only; raw evidence values,
+        prompt projections, and provider responses remain transient caller-owned objects.
+        """
+
+        from .autonomous_evidence_brain import run_autonomous_evidence_backed
+
+        return run_autonomous_evidence_backed(
+            self,
+            task=task,
+            requests=requests,
+            acquirer=acquirer,
+            credentials=credentials,
+            domains=domains,
+            model_candidates=model_candidates,
+            projector=projector,
+            evaluator=evaluator,
+            rehydrate_value=rehydrate_value,
+            parent_evidence_digests=parent_evidence_digests,
+            stop_on_failure=stop_on_failure,
+            reevaluate_pending=reevaluate_pending,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            journal=journal,
+            approve_source_dispatch=approve_source_dispatch,
+            allow_incomplete_evidence=allow_incomplete_evidence,
+            approve_provider_call=approve_provider_call,
+            prompt_builder=prompt_builder,
+            run_mode=run_mode,
+            run_options=run_options,
+        )
+
     def workflows(self) -> list[dict[str, Any]]:
         """Return the deterministic workflow contracts available to automatic intake."""
 

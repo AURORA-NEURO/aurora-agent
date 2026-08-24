@@ -588,6 +588,13 @@ from .autonomous_evidence_runtime import (
     validate_autonomous_evidence_runtime_snapshot,
     AutonomousEvidenceRuntime,
 )
+from .autonomous_evidence_brain import (
+    AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
+    AUTONOMOUS_EVIDENCE_BACKED_RUN_STATUSES,
+    MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_BYTES,
+    AutonomousEvidenceBackedRunResult,
+    run_autonomous_evidence_backed,
+)
 from .autonomous_evidence_worker import (
     AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA,
     AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA,
@@ -5779,6 +5786,11 @@ __all__ = [
     "AutonomousEvidenceRuntimePersistenceCoordinator",
     "validate_autonomous_evidence_runtime_snapshot",
     "AutonomousEvidenceRuntime",
+    "AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA",
+    "AUTONOMOUS_EVIDENCE_BACKED_RUN_STATUSES",
+    "MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_BYTES",
+    "AutonomousEvidenceBackedRunResult",
+    "run_autonomous_evidence_backed",
     "AUTONOMOUS_EVIDENCE_WORK_ITEM_SCHEMA",
     "AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA",
     "AUTONOMOUS_EVIDENCE_WORKER_SCHEMA",
