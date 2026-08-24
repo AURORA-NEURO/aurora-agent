@@ -1341,3 +1341,14 @@ provider contract and metadata-only source admission inside every candidate rout
 retry, while the separate failover budget advances only for classifications permitted by the retry
 policy. Readiness serialization now round-trips the nested retry policy, and all-domain tests cover
 recovery, source receipts, refusal boundaries, no-raw projections, and retry telemetry.
+
+Python now adds the missing multi-source evidence adjudication layer. `AutonomousEvidenceSourceReconciler`
+creates a request-free, digest-bound plan for up to sixteen caller-owned routes, explicit quorum,
+bounded concurrency, parent evidence lineage, and a named normalizer version. Execution is approval-
+gated and produces deterministic `consensus`, `consensus_with_dissent`, `disagreement`,
+`insufficient_evidence`, or `failed` status without converting provider agreement into truth. Source
+acquisition and normalization failures become value-free per-route metadata, while transient source
+and normalized values remain available only to the caller. Strict plan/result round trips reject
+route drift, normalizer drift, tampering, credential-shaped metadata, oversized values, and missing
+approval. All twelve domains are covered by consensus/dissent, disagreement, failure, and bounded
+fan-out tests.

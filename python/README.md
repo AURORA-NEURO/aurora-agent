@@ -285,6 +285,17 @@ boundary inside each retry route, so a successful source receipt is admitted onl
 provider contract and source policy pass. Credential, argument, source-admission, and malformed
 response failures do not get retried or silently promoted to another provider.
 
+For explicit multi-source adjudication, `AutonomousEvidenceSourceReconciler` prepares a
+digest-bound `AutonomousEvidenceReconciliationPlan` from caller-owned routes. Execution requires
+`approve_source_dispatch=True`, fans out at a bounded concurrency, optionally normalizes values
+under a named/versioned callback, and classifies the result as `consensus`,
+`consensus_with_dissent`, `disagreement`, `insufficient_evidence`, or `failed`. The returned
+`AutonomousEvidenceReconciliationResult` keeps source values and normalized values transient while
+its canonical projection retains route/request/value/normalization digests, failure classes,
+quorum, and disagreement metadata. Plan and result projections round-trip strictly and reject
+route drift, normalizer drift, tampering, secret-shaped metadata, and oversized values. The
+all-domain tests exercise consensus, dissent, disagreement, explicit approval, and bounded fan-out.
+
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.

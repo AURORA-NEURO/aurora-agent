@@ -1756,6 +1756,17 @@ budget: it advances only when the classification is permitted by the same policy
 each retry attempt for every domain, so no raw response can bypass source freshness, authority,
 digest, or citation requirements. Refusals and malformed/credential failures remain non-retryable.
 
+When one provider is not enough, Python exposes `AutonomousEvidenceSourceReconciler` for reviewed
+fan-out/fan-in. `prepare()` binds the exact evidence plan, requirement, source IDs, source digests,
+request metadata digests, quorum, concurrency cap, parent evidence digests, and normalizer contract;
+it performs no dispatch. `execute()` requires explicit source approval, runs the caller-owned
+acquirers with bounded concurrency, treats each acquisition or normalization failure as a typed
+metadata-only source result, and computes deterministic consensus/dissent/disagreement status.
+Values are available only through the transient result object. The strict plan/result projections
+are restart-safe and contain no source payloads, prompts, credentials, locators, or exception text.
+This is a conflict/adjudication signal, not a truth or authenticity oracle; the caller's evaluator
+and source authority remain independent.
+
 For a deeper contract-level startup check, the TypeScript SDK also exposes
 `auditAutonomousDomainContracts()` and the same method through `AutonomousBrainFacade.domainAudit()`:
 
