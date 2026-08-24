@@ -68,6 +68,9 @@ import {
   RESEARCH_RELEASE_BATCH_FEATURE_ID,
   researchReleaseBatchReceiptDigest,
   validateResearchReleaseBatchReceipt,
+  FEDERATED_EVALUATION_FEATURE_ID,
+  federatedEvaluationReceiptDigest,
+  validateFederatedEvaluationReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -513,4 +516,28 @@ test("research-release batch receipt retains blocked release", () => {
   };
   assert.doesNotThrow(() => validateResearchReleaseBatchReceipt(receipt));
   assert.equal(researchReleaseBatchReceiptDigest(receipt), researchReleaseBatchReceiptDigest(receipt));
+});
+
+test("federated evaluation receipt preserves contradiction", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    feature_id: FEDERATED_EVALUATION_FEATURE_ID,
+    capability_id: "capability:mechanism",
+    benchmark_world: "world:preclinical",
+    minimum_sites: 2,
+    total_sites: 3,
+    agreeing_sites: 2,
+    contradictory_sites: 1,
+    blocked_sites: 0,
+    disposition: "contradicted",
+    entries: [
+      { site_id: "site:a", disposition: "accepted", card_digest: "a".repeat(64), reasons: ["matches consensus"] },
+      { site_id: "site:b", disposition: "accepted", card_digest: "a".repeat(64), reasons: ["matches consensus"] },
+      { site_id: "site:c", disposition: "contradictory", card_digest: "b".repeat(64), reasons: ["digest differs"] },
+    ],
+    artifact: { content_hash: "b".repeat(64) },
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.doesNotThrow(() => validateFederatedEvaluationReceipt(receipt));
+  assert.equal(federatedEvaluationReceiptDigest(receipt), federatedEvaluationReceiptDigest(receipt));
 });

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/federated-evaluation-receipt.json",
+  "title": "AURORA federated evaluation consensus receipt",
+  "description": "Multi-site EvaluationCard comparison with minimum-site quorum and explicit contradiction or blocked evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "capability_id", "benchmark_world", "minimum_sites", "total_sites", "agreeing_sites", "contradictory_sites", "blocked_sites", "disposition", "entries", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-evalengine-P23-F02" },
+    "capability_id": { "type": "string", "minLength": 1 },
+    "benchmark_world": { "type": "string", "minLength": 1 },
+    "minimum_sites": { "type": "integer", "minimum": 1 },
+    "total_sites": { "type": "integer", "minimum": 1 },
+    "agreeing_sites": { "type": "integer", "minimum": 0 },
+    "contradictory_sites": { "type": "integer", "minimum": 0 },
+    "blocked_sites": { "type": "integer", "minimum": 0 },
+    "disposition": { "enum": ["consensus", "partial", "contradicted", "blocked"] },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["site_id", "disposition", "card_digest", "reasons"],
+        "properties": {
+          "site_id": { "type": "string", "minLength": 1 },
+          "disposition": { "enum": ["accepted", "contradictory", "blocked"] },
+          "card_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+          "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

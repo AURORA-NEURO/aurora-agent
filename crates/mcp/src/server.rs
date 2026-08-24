@@ -1804,6 +1804,7 @@ impl Server {
             "evaluation_reproduction_check" => self.evaluation_reproduction_check(&arguments),
             "evaluation_trajectory_check" => self.evaluation_trajectory_check(&arguments),
             "evaluation_observability_card" => self.evaluation_observability_card(&arguments),
+            "federated_evaluation_consensus" => self.federated_evaluation_consensus(&arguments),
             "research_release_validate" => self.research_release_validate(&arguments),
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
@@ -24398,6 +24399,28 @@ impl Server {
         }))
     }
 
+    fn federated_evaluation_consensus(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized FederatedEvaluationRequest")?;
+        let receipt = crate::research_contracts::evaluate_federated_evaluation_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_evalengine::FEDERATED_EVALUATION_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "site cards are validated against one capability and benchmark world before comparison",
+                "canonical card-digest disagreement remains contradictory evidence rather than being averaged away",
+                "blocked or missing sites remain explicit and cannot satisfy the minimum-site consensus gate"
+            ],
+            "limitations": [
+                "the route consumes caller-supplied aggregate EvaluationCards and does not inspect raw experimental data",
+                "consensus is evidence agreement, not biological validity or a clinical decision"
+            ]
+        }))
+    }
+
     fn research_release_validate(&self, arguments: &Value) -> Result<Value, String> {
         let receipt = arguments
             .get("receipt")
@@ -35866,7 +35889,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -38342,6 +38365,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-evalengine EvaluationCardRequest with capability, benchmark world, baselines, observations, limitations, and release thresholds." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "federated_evaluation_consensus",
+            "description": "Compare independent EvaluationCards across preclinical sites with minimum-site quorum, explicit contradiction, blocked-site, and consensus receipts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-evalengine FederatedEvaluationRequest with capability, benchmark world, minimum sites, and site cards." }
                 },
                 "required": ["request"]
             }

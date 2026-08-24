@@ -35,6 +35,7 @@ DESIGN_FRONTIER_FEATURE_ID = "AFA-lab-P09-F02"
 AUTONOMY_BATCH_FEATURE_ID = "AFA-policy-P19-F02"
 WORKFLOW_BATCH_FEATURE_ID = "AFA-runtime-P12-F11"
 RESEARCH_RELEASE_BATCH_FEATURE_ID = "AFA-services-P16-F03"
+FEDERATED_EVALUATION_FEATURE_ID = "AFA-evalengine-P23-F02"
 
 
 class ResearchContractError(ValueError):
@@ -551,6 +552,58 @@ class ResearchReleaseBatchReceipt:
             "total_releases": self.total_releases,
             "published_releases": self.published_releases,
             "blocked_releases": self.blocked_releases,
+            "entries": [dict(entry) for entry in self.entries],
+            "artifact": dict(self.artifact),
+            "boundary": self.boundary,
+        })
+
+
+@dataclass(frozen=True)
+class FederatedEvaluationReceipt:
+    """Transport validator for omission-aware multi-site EvaluationCard consensus."""
+
+    capability_id: str
+    benchmark_world: str
+    minimum_sites: int
+    total_sites: int
+    agreeing_sites: int
+    contradictory_sites: int
+    blocked_sites: int
+    disposition: str
+    entries: tuple[Mapping[str, Any], ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = FEDERATED_EVALUATION_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != FEDERATED_EVALUATION_FEATURE_ID:
+            raise ResearchContractError("federated evaluation schema or feature mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.capability_id.strip() or not self.benchmark_world.strip() or self.minimum_sites <= 0 or self.total_sites <= 0 or self.total_sites != len(self.entries):
+            raise ResearchContractError("federated evaluation identity or boundary is invalid")
+        if self.agreeing_sites < 0 or self.contradictory_sites < 0 or self.blocked_sites < 0 or self.agreeing_sites + self.contradictory_sites + self.blocked_sites != self.total_sites:
+            raise ResearchContractError("federated evaluation counts are inconsistent")
+        if self.disposition not in {"consensus", "partial", "contradicted", "blocked"}:
+            raise ResearchContractError("federated evaluation disposition is unknown")
+        if any(not entry.get("site_id") or entry.get("disposition") not in {"accepted", "contradictory", "blocked"} or not entry.get("reasons") or (entry.get("disposition") == "accepted" and not entry.get("card_digest")) for entry in self.entries):
+            raise ResearchContractError("federated evaluation site entry is incomplete")
+        digest = self.artifact.get("content_hash")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ResearchContractError("federated evaluation artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate()
+        return research_artifact_digest({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "capability_id": self.capability_id,
+            "benchmark_world": self.benchmark_world,
+            "minimum_sites": self.minimum_sites,
+            "total_sites": self.total_sites,
+            "agreeing_sites": self.agreeing_sites,
+            "contradictory_sites": self.contradictory_sites,
+            "blocked_sites": self.blocked_sites,
+            "disposition": self.disposition,
             "entries": [dict(entry) for entry in self.entries],
             "artifact": dict(self.artifact),
             "boundary": self.boundary,

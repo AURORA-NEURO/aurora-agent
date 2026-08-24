@@ -42,6 +42,7 @@ pub mod bridge;
 pub mod cluster;
 pub mod error;
 pub mod evaluation_observability;
+pub mod federated_evaluation;
 pub mod ladder;
 pub mod multimodal_replication;
 pub mod posterior;
@@ -68,6 +69,13 @@ pub use evaluation_observability::{
     EvaluationCardReceipt, EvaluationCardRequest, EvaluationObservabilityError,
     FEATURE_CONTRACT_VERSION as EVALUATION_OBSERVABILITY_FEATURE_VERSION,
     FEATURE_ID as EVALUATION_OBSERVABILITY_FEATURE_ID,
+};
+pub use federated_evaluation::{
+    evaluate_federated_evaluation, federated_evaluation_manifest, FederatedEvaluationDisposition,
+    FederatedEvaluationError, FederatedEvaluationReceipt, FederatedEvaluationRequest,
+    FederatedEvaluationSite, FederatedEvaluationSiteDisposition, FederatedEvaluationSiteEntry,
+    FEATURE_ID as FEDERATED_EVALUATION_FEATURE_ID,
+    FEATURE_VERSION as FEDERATED_EVALUATION_FEATURE_VERSION,
 };
 pub use ladder::{
     compose, Contribution, Detail, Disagreement, EvidenceRef, ScoreTier, ScoredResult,

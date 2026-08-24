@@ -9,11 +9,12 @@ use bioprism_adapter::{
     MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
 };
 use bioprism_evalengine::{
-    compile_evaluation_card, evaluate_multimodal_replication, qualify_analysis,
+    compile_evaluation_card, evaluate_federated_evaluation, evaluate_multimodal_replication, qualify_analysis,
     AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
+    FederatedEvaluationReceipt, FederatedEvaluationRequest,
     MultimodalReplicationReport, MultimodalReplicationRequest, QualifiedAnalysisResult,
     ANALYSIS_QUALIFICATION_FEATURE_ID, EVALUATION_OBSERVABILITY_FEATURE_ID,
-    MULTIMODAL_REPLICATION_FEATURE_ID,
+    FEDERATED_EVALUATION_FEATURE_ID, MULTIMODAL_REPLICATION_FEATURE_ID,
 };
 use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
 use bioprism_policy::{
@@ -42,6 +43,7 @@ use serde_json::Value;
 pub const RESEARCH_COMPILE_TOOL: &str = "aurora_research_compile_evidence";
 pub const WORKFLOW_EXECUTION_TOOL: &str = "runtime_workflow_execute";
 pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
+pub const FEDERATED_EVALUATION_TOOL: &str = "federated_evaluation_consensus";
 pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
 pub const RESEARCH_RELEASE_BATCH_VALIDATE_TOOL: &str = "research_release_batch_validate";
 pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
@@ -106,6 +108,26 @@ pub fn validate_evaluation_card_receipt_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != EVALUATION_OBSERVABILITY_FEATURE_ID {
         return Err("evaluation-observability feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn evaluate_federated_evaluation_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedEvaluationRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated evaluation request: {error}"))?;
+    let receipt = evaluate_federated_evaluation(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federated evaluation receipt: {error}"))
+}
+
+pub fn validate_federated_evaluation_receipt_json(
+    value: &Value,
+) -> Result<FederatedEvaluationReceipt, String> {
+    let receipt: FederatedEvaluationReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated evaluation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_EVALUATION_FEATURE_ID {
+        return Err("federated evaluation feature id mismatch".into());
     }
     Ok(receipt)
 }
