@@ -24,14 +24,20 @@ pub struct LexicalTopK {
     pub k: usize,
 }
 
-fn tokenize(text: &str) -> Vec<String> {
+/// Shared with [`crate::embedding`], so the two retrieval baselines provably score the same
+/// searchable text and differ only in how they score it.
+pub(crate) fn tokenize(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|token| !token.is_empty())
         .map(|token| token.to_ascii_lowercase())
         .collect()
 }
 
-fn fact_tokens(world: &World, position: usize) -> Vec<String> {
+/// The searchable text of one fact: id, provided variable, tags and serialised value.
+///
+/// Also shared with [`crate::embedding`] for the reason above — an embedding baseline that read
+/// different fields would make any divergence in results unattributable to the scoring method.
+pub(crate) fn fact_tokens(world: &World, position: usize) -> Vec<String> {
     let fact = &world.facts[position];
     let mut text = String::new();
     text.push_str(fact.id.as_str());
@@ -46,6 +52,18 @@ fn fact_tokens(world: &World, position: usize) -> Vec<String> {
         text.push_str(&value);
     }
     tokenize(&text)
+}
+
+/// The query-side tokens both retrieval baselines score against: targets and protected tags.
+pub(crate) fn query_tokens(query: &Query) -> BTreeSet<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    for target in &query.targets {
+        tokens.extend(tokenize(target.as_str()));
+    }
+    for tag in &query.protected_tags {
+        tokens.extend(tokenize(tag));
+    }
+    tokens.into_iter().collect()
 }
 
 impl ContextStrategy for LexicalTopK {
@@ -81,14 +99,7 @@ impl ContextStrategy for LexicalTopK {
             }
         }
 
-        let mut query_tokens: Vec<String> = Vec::new();
-        for target in &query.targets {
-            query_tokens.extend(tokenize(target.as_str()));
-        }
-        for tag in &query.protected_tags {
-            query_tokens.extend(tokenize(tag));
-        }
-        let query_tokens: BTreeSet<String> = query_tokens.into_iter().collect();
+        let query_tokens = query_tokens(query);
 
         let mut scored: Vec<(usize, f64)> = documents
             .iter()

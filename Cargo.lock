@@ -105,6 +105,7 @@ dependencies = [
  "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
+ "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -246,6 +247,7 @@ version = "0.1.0"
 dependencies = [
  "bioprism-baseline",
  "bioprism-devplat",
+ "bioprism-domain",
  "bioprism-fiber",
  "bioprism-ids",
  "bioprism-mcp",
@@ -598,6 +600,7 @@ dependencies = [
  "bioprism-devplat",
  "bioprism-devx",
  "bioprism-docgraph",
+ "bioprism-domain",
  "bioprism-epistemic",
  "bioprism-evalengine",
  "bioprism-fabric",

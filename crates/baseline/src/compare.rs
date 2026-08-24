@@ -570,7 +570,8 @@ pub fn compare(
 /// Includes the graph walk at its *best* depth, not only at depths where it degenerates.
 /// Reporting a baseline solely at settings that make it look bad is the unequal-engineering
 /// failure 43.38 exists to prevent, and on the reference world depth 5 is where the graph walk
-/// is strongest — strong enough to tie the compiler exactly.
+/// is strongest — strong enough to tie the compiler exactly. The directed dependency walk enters
+/// unbounded, *its* strongest setting, where it ties the compiler on every shipped world.
 pub fn default_panel() -> Vec<Box<dyn ContextStrategy>> {
     vec![
         Box::new(crate::strategy::FullContext),
@@ -582,6 +583,9 @@ pub fn default_panel() -> Vec<Box<dyn ContextStrategy>> {
         Box::new(crate::incidence::QueryGraph),
         Box::new(crate::lexical::LexicalTopK { k: 11 }),
         Box::new(crate::lexical::LexicalTopK { k: 50 }),
+        Box::new(crate::embedding::EmbeddingTopK { k: 11 }),
+        Box::new(crate::embedding::EmbeddingTopK { k: 50 }),
+        Box::new(crate::directed::DirectedDependencyWalk::unbounded()),
         Box::new(crate::strategy::FiberCompiled),
     ]
 }
