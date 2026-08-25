@@ -131,6 +131,8 @@ from .research_contracts import (
     MULTIMODAL_CONTEXT_WORKBENCH_CONTRACT_VERSION,
     THROUGHPUT_CONTEXT_WORKBENCH_FEATURE_ID,
     THROUGHPUT_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+    FEDERATED_CONTEXT_WORKBENCH_FEATURE_ID,
+    FEDERATED_CONTEXT_WORKBENCH_CONTRACT_VERSION,
     FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
     FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
     FederatedContinualRetrievalReceipt,
@@ -488,6 +490,7 @@ from .brain_federated_context_workflow_fabric import FederatedContextWorkflowPee
 from .brain_context_research_workbench import ContextWorkbenchReceipt, render_context_workbench
 from .brain_multimodal_context_workbench import MultimodalContextWorkbenchReceipt, MultimodalContextWorkbenchCell, render_multimodal_context_workbench
 from .brain_throughput_context_workbench import ThroughputContextWorkbenchReceipt, ThroughputContextWorkbenchJob, render_throughput_context_workbench
+from .brain_federated_context_workbench import FederatedContextWorkbenchPeer, FederatedContextWorkbenchReceipt, render_federated_context_workbench
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

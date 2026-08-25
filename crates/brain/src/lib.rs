@@ -98,6 +98,7 @@ pub mod retrieval_synthesis;
 pub mod retrieval_workflow_fabric;
 pub mod throughput_context_compilation;
 pub mod throughput_context_workbench;
+pub mod federated_context_workbench;
 pub mod throughput_context_workflow_fabric;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
@@ -576,6 +577,13 @@ pub use throughput_context_workbench::{
     ThroughputContextWorkbenchReceipt, ThroughputContextWorkbenchRequest,
     CONTRACT_VERSION as THROUGHPUT_CONTEXT_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_CONTEXT_WORKBENCH_FEATURE_ID,
+};
+pub use federated_context_workbench::{
+    federated_context_workbench_manifest, render_federated_context_workbench,
+    FederatedContextWorkbenchError, FederatedContextWorkbenchPeer,
+    FederatedContextWorkbenchReceipt, FederatedContextWorkbenchRequest,
+    CONTRACT_VERSION as FEDERATED_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_WORKBENCH_FEATURE_ID,
 };
 pub use throughput_context_workflow_fabric::{
     compile_throughput_context_workflow, throughput_context_workflow_fabric_manifest,
