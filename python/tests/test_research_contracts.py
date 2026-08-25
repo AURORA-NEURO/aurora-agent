@@ -51,6 +51,7 @@ from prism_sdk.research_contracts import CONTEXT_ASSURANCE_FEATURE_ID, CONTEXT_A
 from prism_sdk.research_contracts import EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID, EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION, BioworldsEvaluationAssuranceReceipt
 from prism_sdk.research_contracts import QUALITY_WORKBENCH_BIOLANG_FEATURE_ID, QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION, BiolangQualityWorkbenchReceipt
 from prism_sdk.research_contracts import RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID, RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION, BiolangRetrievalAssuranceReceipt
+from prism_sdk.research_contracts import CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID, CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION, CliKnowledgeInteroperabilityReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1753,4 +1754,13 @@ def test_biolang_retrieval_assurance_preserves_missing_modality_and_negative_evi
     receipt.validate()
     assert receipt.feature_id == RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID
     assert receipt.contract_version == RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_cli_knowledge_interoperability_preserves_unknown_claim_and_exchange_gate():
+    world = {"schema_version": "aurora-research-contract/1.0", "world_id": "typed-knowledge-world:knowledge:interop", "target_schema": "typed-knowledge-world/6", "claim_order": ("claim:a", "claim:b"), "admitted_order": ("claim:a",), "blocked_order": (), "unknown_order": ("claim:b",), "subject_order": ("subject:network",), "predicate_order": ("expresses",), "evidence_order": ("a" * 64,), "provenance_order": ("b" * 64,), "omissions": ("claim:claim:b:required-but-not-admitted",), "uncertainty": ("claim:claim:b:state-unknown-not-admitted",), "negative_evidence": ("claim:claim:a:negative-result-retained",), "replay_identity": "c" * 64, "world_digest": "d" * 64, "boundary": PRECLINICAL_BOUNDARY}
+    receipt = CliKnowledgeInteroperabilityReceipt(request_id="knowledge:interop", workflow_id="workflow:knowledge", disposition="conditional", world=world, checks=("claim identity and priority ordering are deterministic",), omissions=world["omissions"], uncertainty=world["uncertainty"], negative_evidence=world["negative_evidence"], effect_receipts=("block:knowledge-world-release", "exchange:permitted-artifacts:claim:a"))
+    receipt.validate()
+    assert receipt.feature_id == CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID
+    assert receipt.contract_version == CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

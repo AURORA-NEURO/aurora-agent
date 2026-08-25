@@ -12,6 +12,7 @@ mod args;
 mod exit;
 mod explain;
 mod io;
+mod knowledge_interop;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
 use bioprism_devplat::{
@@ -205,6 +206,11 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *limit,
             *include_children,
         ),
+        Command::KnowledgeInteropVerify {
+            request,
+            receipt_out,
+            dry_run,
+        } => knowledge_interoperability_verify(request, receipt_out.as_deref(), *dry_run),
         Command::ReadinessAudit { request } => readiness_audit(request),
         Command::ReadinessQuery {
             store,
@@ -578,6 +584,62 @@ fn load_artifact_registry(store_path: &Path) -> CliResult<ArtifactRegistry> {
     ArtifactRegistry::from_snapshot(&snapshot).map_err(|error| {
         CliError::invalid(error.to_string()).about(store_path.display().to_string())
     })
+}
+
+fn knowledge_interoperability_verify(
+    request_path: &Path,
+    receipt_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let verification = knowledge_interop::verify(&request)
+        .map_err(|error| CliError::invalid(error).about(request_path.display().to_string()))?;
+    let receipt = verification
+        .document
+        .get("receipt")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let artifact = receipt_out
+        .map(|path| io::write_artifact(path, &receipt, dry_run))
+        .transpose()?;
+    let mut document = verification.document;
+    document["dry_run"] = json!(dry_run);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let disposition = document
+        .get("disposition")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let digest = document
+        .get("receipt_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "knowledge representation interoperability: {disposition}\n  request: {}\n  receipt digest: {digest}\n  receipt: {}\n  execution: verification only; no endpoint, retrieval provider, instrument, or clinical effect started\n\nNext: bioprism knowledge interop-verify --request {}{}\n",
+        request_path.display(),
+        receipt_out
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<not retained>".into()),
+        request_path.display(),
+        receipt_out
+            .map(|path| format!(" --receipt-out {}", path.display()))
+            .unwrap_or_default(),
+    );
+    let mut outcome = Outcome::ok(document, human);
+    if verification.policy_denied {
+        outcome.code = ExitCode::PolicyDenied;
+    } else if verification.disposition != knowledge_interop::KnowledgeDisposition::Passed {
+        outcome.code = ExitCode::AssertionFailed;
+    }
+    Ok(outcome)
 }
 
 fn readiness_audit(request_path: &Path) -> CliResult<Outcome> {

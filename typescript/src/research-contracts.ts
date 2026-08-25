@@ -155,6 +155,8 @@ export const QUALITY_WORKBENCH_BIOLANG_FEATURE_ID = "AFA-biolang-P07-F19" as con
 export const QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION = "biolang-prospective-quality-workbench/1.0" as const;
 export const RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID = "AFA-biolang-P02-F26" as const;
 export const RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION = "biolang-multimodal-retrieval-synthesis-assurance/1.0" as const;
+export const CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID = "AFA-cli-P04-F23" as const;
+export const CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION = "cli-prospective-knowledge-representation-interoperability/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2642,6 +2644,36 @@ export function validateBiolangRetrievalAssuranceReceipt(receipt: BiolangRetriev
 }
 
 export function biolangRetrievalAssuranceReceiptDigest(receipt: BiolangRetrievalAssuranceReceipt): string { validateBiolangRetrievalAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface CliKnowledgeInteroperabilityReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  disposition: "passed" | "conditional" | "unknown" | "blocked";
+  world: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateCliKnowledgeInteroperabilityReceipt(receipt: CliKnowledgeInteroperabilityReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID || receipt.contract_version !== CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION) throw new Error("CLI knowledge interoperability schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.world.boundary !== PRECLINICAL_BOUNDARY || JSON.stringify(receipt.omissions) !== JSON.stringify(receipt.world.omissions) || JSON.stringify(receipt.uncertainty) !== JSON.stringify(receipt.world.uncertainty) || JSON.stringify(receipt.negative_evidence) !== JSON.stringify(receipt.world.negative_evidence)) throw new Error("CLI knowledge interoperability identity, world linkage, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["passed", "conditional", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("CLI knowledge interoperability disposition is unknown");
+  for (const field of ["schema_version", "world_id", "target_schema", "replay_identity", "world_digest", "boundary"]) if (typeof receipt.world[field] !== "string" || !(receipt.world[field] as string).trim()) throw new Error("CLI typed knowledge-world identity is incomplete");
+  for (const value of [receipt.world.replay_identity, receipt.world.world_digest, ...(Array.isArray(receipt.world.evidence_order) ? receipt.world.evidence_order : []), ...(Array.isArray(receipt.world.provenance_order) ? receipt.world.provenance_order : [])]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("CLI typed knowledge-world digest is invalid");
+  for (const name of ["claim_order", "admitted_order", "blocked_order", "unknown_order", "subject_order", "predicate_order", "omissions", "uncertainty", "negative_evidence"]) { const values = Array.isArray(receipt.world[name]) ? receipt.world[name] as string[] : []; if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("CLI typed knowledge-world ordering is invalid"); }
+  for (const values of [receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("CLI knowledge interoperability receipt ordering is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:permitted-artifacts:") && effect !== "block:knowledge-world-release")) throw new Error("CLI knowledge interoperability effect is outside permitted-artifact exchange");
+}
+
+export function cliKnowledgeInteroperabilityReceiptDigest(receipt: CliKnowledgeInteroperabilityReceipt): string { validateCliKnowledgeInteroperabilityReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

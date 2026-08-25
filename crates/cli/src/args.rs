@@ -99,6 +99,10 @@ COMMANDS
                     [--after <digest>] [--limit <n>] [--no-children]
                     Trace retained domain-evidence intake digests and explicit registry lineage.
 
+  knowledge interop-verify --request <path> [--receipt-out <path>] [--dry-run]
+                    Verify a multimodal knowledge-representation interoperability request;
+                    retain a typed assurance receipt without executing retrieval or external effects.
+
   readiness audit --request <path>
                     Run the offline structural decision-readiness audit in a JSON request.
                     Catalogue binding and artifact retention remain transport responsibilities.
@@ -269,6 +273,11 @@ pub enum Command {
         after: Option<String>,
         limit: usize,
         include_children: bool,
+    },
+    KnowledgeInteropVerify {
+        request: PathBuf,
+        receipt_out: Option<PathBuf>,
+        dry_run: bool,
     },
     ReadinessAudit {
         request: PathBuf,
@@ -556,6 +565,11 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
                     .map_err(|_| usage(format!("--limit must be a number, got {text:?}")))?,
             },
             include_children: !options.take_switch("--no-children"),
+        },
+        ("knowledge", "interop-verify") => Command::KnowledgeInteropVerify {
+            request: options.take_path("--request")?,
+            receipt_out: options.take_optional_path("--receipt-out"),
+            dry_run: options.take_switch("--dry-run"),
         },
         ("readiness", "audit") => Command::ReadinessAudit {
             request: options.take_path("--request")?,
@@ -881,6 +895,41 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn knowledge_interoperability_verifier_parses_retention_and_dry_run() {
+        let parsed = parse(
+            [
+                "--json",
+                "knowledge",
+                "interop-verify",
+                "--request",
+                "retrieval.json",
+                "--receipt-out",
+                "receipt.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse knowledge interoperability verifier");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::KnowledgeInteropVerify {
+                    request: PathBuf::from("retrieval.json"),
+                    receipt_out: Some(PathBuf::from("receipt.json")),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_knowledge_interoperability_verification() {
+        assert!(super::help().contains("knowledge interop-verify --request <path>"));
     }
 
     #[test]

@@ -26,6 +26,7 @@ bioprism-world = { workspace = true }
 bioprism-worldgen = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 bioprism-devplat = { workspace = true }

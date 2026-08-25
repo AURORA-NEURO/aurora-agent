@@ -173,6 +173,8 @@ QUALITY_WORKBENCH_BIOLANG_FEATURE_ID = "AFA-biolang-P07-F19"
 QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION = "biolang-prospective-quality-workbench/1.0"
 RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID = "AFA-biolang-P02-F26"
 RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION = "biolang-multimodal-retrieval-synthesis-assurance/1.0"
+CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID = "AFA-cli-P04-F23"
+CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION = "cli-prospective-knowledge-representation-interoperability/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3966,3 +3968,49 @@ class BiolangRetrievalAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "query_id": self.query_id, "disposition": self.disposition, "summary": dict(self.summary), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class CliKnowledgeInteroperabilityReceipt:
+    """Cross-language validator for the CLI typed-knowledge interoperability gateway."""
+
+    request_id: str
+    workflow_id: str
+    disposition: str
+    world: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID
+    contract_version: str = CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID or self.contract_version != CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION:
+            raise ResearchContractError("CLI knowledge interoperability schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.checks or not self.effect_receipts or self.world.get("boundary") != PRECLINICAL_BOUNDARY or self.omissions != tuple(self.world.get("omissions", ())) or self.uncertainty != tuple(self.world.get("uncertainty", ())) or self.negative_evidence != tuple(self.world.get("negative_evidence", ())):
+            raise ResearchContractError("CLI knowledge interoperability identity, world linkage, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"passed", "conditional", "unknown", "blocked"}:
+            raise ResearchContractError("CLI knowledge interoperability disposition is unknown")
+        for field in ("schema_version", "world_id", "target_schema", "replay_identity", "world_digest", "boundary"):
+            if not isinstance(self.world.get(field), str) or not self.world[field].strip():
+                raise ResearchContractError("CLI typed knowledge-world identity is incomplete")
+        for value in (self.world.get("replay_identity"), self.world.get("world_digest")) + tuple(self.world.get("evidence_order", ())) + tuple(self.world.get("provenance_order", ())):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("CLI typed knowledge-world digest is invalid")
+        for name in ("claim_order", "admitted_order", "blocked_order", "unknown_order", "subject_order", "predicate_order", "omissions", "uncertainty", "negative_evidence"):
+            values = tuple(self.world.get(name, ()))
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("CLI typed knowledge-world ordering is invalid")
+        for values in (self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("CLI knowledge interoperability receipt ordering is invalid")
+        if any(not effect.startswith("exchange:permitted-artifacts:") and effect != "block:knowledge-world-release" for effect in self.effect_receipts):
+            raise ResearchContractError("CLI knowledge interoperability effect is outside permitted-artifact exchange")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "world": dict(self.world), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
