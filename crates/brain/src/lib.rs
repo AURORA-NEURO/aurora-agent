@@ -56,6 +56,7 @@ pub mod multimodal_operations_control_plane;
 pub mod multimodal_protocol_adapter;
 pub mod multimodal_research_workbench;
 pub mod multimodal_retrieval_contract_model;
+pub mod multimodal_retrieval_copilot;
 pub mod multimodal_retrieval_synthesis;
 pub mod multimodal_safety_assurance;
 pub mod retrieval_contract_model;
@@ -247,6 +248,13 @@ pub use multimodal_retrieval_contract_model::{
     MultimodalRetrievalContractRequest,
     CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use multimodal_retrieval_copilot::{
+    compile_multimodal_retrieval_copilot, multimodal_retrieval_copilot_manifest,
+    MultimodalRetrievalCopilotError, MultimodalRetrievalCopilotReceipt,
+    MultimodalRetrievalCopilotRequest,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_COPILOT_FEATURE_ID,
 };
 pub use multimodal_retrieval_synthesis::{
     multimodal_retrieval_synthesis_manifest, synthesize_multimodal_retrieval,
