@@ -1,8 +1,8 @@
 use bioprism_section::{
     Backend, CertificateProfile, CertificateVerification, ContextCertificate, DecisionSection,
-    EvidenceCapsule, InfluenceClass, LeakageWitness, OmissionGroup, OmissionManifest,
-    OracleStatus, OracleVerdict, PlanDescriptor, ReferenceOmissions, RefinementOption,
-    SourceHashes, UnresolvedObligation,
+    EvidenceCapsule, InfluenceClass, InformativeBound, LeakageWitness, OmissionGroup,
+    OmissionManifest, OracleStatus, OracleVerdict, PlanDescriptor, ReferenceOmissions,
+    RefinementOption, SourceHashes, UnresolvedObligation,
 };
 use serde_json::{json, Value};
 
@@ -206,6 +206,134 @@ fn zero_influence_and_unknown_influence_are_not_interchangeable() {
     assert_eq!(unchecked.total_omitted(), 751);
     assert_eq!(unchecked.count_in(InfluenceClass::Zero), 750);
     assert_eq!(unchecked.blocking_groups().count(), 1);
+}
+
+/// The only value that can be handed to the sanctioned constructor is one that excludes something.
+#[test]
+fn a_vacuous_bound_cannot_be_named_as_an_informative_bound() {
+    for refused in [1.0, 1.5, f64::INFINITY, f64::NAN, -0.1] {
+        assert!(
+            InformativeBound::new(refused).is_none(),
+            "{refused} permits every answer or is not a distance, and must not be nameable"
+        );
+    }
+    let admitted = InformativeBound::new(0.25).expect("a bound below one excludes something");
+    assert_eq!(admitted.value(), 0.25);
+
+    let group = OmissionGroup::bounded("influence bounded by 0.25", 3, admitted, Vec::new());
+    assert_eq!(group.influence, InfluenceClass::Bounded);
+    assert!(group.has_informative_bound());
+}
+
+/// A group whose bound permits every answer is admitted as unknown, and unknown voids sufficiency.
+#[test]
+fn a_vacuous_bounded_group_is_refused_admission_and_cannot_support_sufficiency() {
+    let mut manifest = OmissionManifest::default();
+    manifest.push(OmissionGroup {
+        reason: "influence bounded by 1".into(),
+        influence: InfluenceClass::Bounded,
+        count: 4,
+        bound: Some(1.0),
+        examples: vec!["fact.withheld".into()],
+    });
+
+    let admitted = &manifest.groups[0];
+    assert_eq!(admitted.influence, InfluenceClass::Unknown);
+    assert_eq!(admitted.bound, None);
+    assert!(
+        admitted.reason.contains("a bound of 1 permits every answer"),
+        "the refused value belongs on the certificate, not in a silent downgrade: {}",
+        admitted.reason
+    );
+    assert!(!manifest.supports_sufficiency_claim());
+    assert_eq!(manifest.count_in(InfluenceClass::Bounded), 0);
+    assert_eq!(
+        manifest.total_omitted(),
+        4,
+        "refusing the bound must not lose the omitted members"
+    );
+}
+
+/// Claiming the class with no number at all is the same refusal.
+#[test]
+fn a_bounded_class_with_no_bound_at_all_is_refused_admission() {
+    let manifest = OmissionManifest::from_groups([OmissionGroup {
+        reason: "influence bounded".into(),
+        influence: InfluenceClass::Bounded,
+        count: 1,
+        bound: None,
+        examples: vec![],
+    }]);
+    assert_eq!(manifest.groups[0].influence, InfluenceClass::Unknown);
+    assert!(manifest.groups[0]
+        .reason
+        .contains("a bounded class was claimed with no bound at all"));
+    assert!(!manifest.supports_sufficiency_claim());
+}
+
+/// The verifier's own entry point is gated, because it is the one facing untrusted bytes.
+///
+/// `bioprism-section` depends on neither `world` nor `fiber` so that a consumer can check a
+/// certificate without linking the engine that produced it. Every group such a consumer holds
+/// arrived through serde, so a check that ran only in the compiler's constructors would have
+/// protected the party that already knows the bound is vacuous and left the party that does not
+/// reading `supports_sufficiency_claim` as true.
+#[test]
+fn a_vacuous_bounded_group_parsed_from_a_document_cannot_reach_a_sufficiency_claim() {
+    let document = json!({
+        "groups": [
+            {
+                "reason": "no backward dependency path to target",
+                "influence": "zero",
+                "count": 750
+            },
+            {
+                "reason": "influence bounded by 1 in total variation",
+                "influence": "bounded",
+                "count": 2,
+                "bound": 1.0,
+                "examples": ["fact.withheld"]
+            }
+        ]
+    });
+    let manifest: OmissionManifest = serde_json::from_value(document).expect("manifest parses");
+
+    assert_eq!(manifest.groups[0].influence, InfluenceClass::Zero);
+    assert_eq!(
+        manifest.groups[1].influence,
+        InfluenceClass::Unknown,
+        "a bound of one on the wire is not a bound and must not be read as one"
+    );
+    assert_eq!(manifest.groups[1].bound, None);
+    assert!(
+        !manifest.supports_sufficiency_claim(),
+        "the vacuous group must block the claim it was dressed up to support"
+    );
+    assert_eq!(manifest.blocking_groups().count(), 1);
+}
+
+/// The gate refuses vacuous claims and nothing else.
+#[test]
+fn an_informative_bounded_group_survives_a_parse_unchanged() {
+    let document = json!({
+        "groups": [{
+            "reason": "influence bounded by 0.125 in total variation",
+            "influence": "bounded",
+            "count": 2,
+            "bound": 0.125,
+            "examples": ["fact.withheld"]
+        }]
+    });
+    let manifest: OmissionManifest = serde_json::from_value(document.clone()).unwrap();
+
+    assert_eq!(manifest.groups[0].influence, InfluenceClass::Bounded);
+    assert_eq!(manifest.groups[0].bound, Some(0.125));
+    assert!(manifest.supports_sufficiency_claim());
+    assert_eq!(
+        serde_json::to_value(&manifest).unwrap(),
+        document,
+        "an informative group round-trips byte for byte"
+    );
 }
 
 #[test]
