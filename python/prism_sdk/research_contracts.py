@@ -97,6 +97,8 @@ ANALYSIS_PORTFOLIO_FEATURE_ID = "AFA-adapter-P13-F01"
 ANALYSIS_PORTFOLIO_CONTRACT_VERSION = "local-analysis-model-portfolio/1.0"
 INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P14-F27"
 INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "interpretation-assurance/1.0"
+REPLICATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P15-F28"
+REPLICATION_ASSURANCE_CONTRACT_VERSION = "federated-replication-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2489,3 +2491,46 @@ class InterpretationAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "result_id": self.result_id, "verdict": self.verdict, "claim_order": list(self.claim_order), "covered_modalities": list(self.covered_modalities), "omitted_modalities": list(self.omitted_modalities), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ReplicationAssuranceReceipt:
+    claim_id: str
+    protocol_digest: str
+    verdict: str
+    observation_order: tuple[str, ...]
+    independent_site_order: tuple[str, ...]
+    positive_count: int
+    null_count: int
+    negative_count: int
+    inconclusive_count: int
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = REPLICATION_ASSURANCE_FEATURE_ID
+    contract_version: str = REPLICATION_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != REPLICATION_ASSURANCE_FEATURE_ID or self.contract_version != REPLICATION_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("replication assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.claim_id.strip() or not self.observation_order or not self.reasons:
+            raise ResearchContractError("replication assurance identity, observations, locality, boundary, or reasons are incomplete")
+        if self.verdict not in {"replicated", "partially_replicated", "contradicted", "null_result", "insufficient_evidence", "blocked"}:
+            raise ResearchContractError("replication assurance verdict is unknown")
+        if tuple(sorted(set(self.observation_order))) != self.observation_order or tuple(sorted(set(self.independent_site_order))) != self.independent_site_order:
+            raise ResearchContractError("replication assurance ordering is invalid")
+        if any(not isinstance(value, int) or value < 0 for value in (self.positive_count, self.null_count, self.negative_count, self.inconclusive_count)) or self.positive_count + self.null_count + self.negative_count + self.inconclusive_count != len(self.observation_order):
+            raise ResearchContractError("replication assurance counts do not match observations")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.protocol_digest):
+            raise ResearchContractError("replication assurance protocol digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("replication assurance artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "claim_id": self.claim_id, "protocol_digest": self.protocol_digest, "verdict": self.verdict, "observation_order": list(self.observation_order), "independent_site_order": list(self.independent_site_order), "positive_count": self.positive_count, "null_count": self.null_count, "negative_count": self.negative_count, "inconclusive_count": self.inconclusive_count, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

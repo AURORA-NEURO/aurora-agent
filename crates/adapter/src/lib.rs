@@ -104,6 +104,7 @@ pub mod quality_control;
 pub mod quality_drift;
 pub mod quality_envelope;
 pub mod registry;
+pub mod replication_assurance;
 pub mod research_ingest;
 pub mod resource_workbench;
 pub mod retrieval_synthesis;
@@ -213,6 +214,12 @@ pub use quality_envelope::{
 pub use registry::{
     AdapterDescriptor, AdapterExecution, AdapterPlan, AdapterPlanCandidate, AdapterPlanRequest,
     AdapterRegistry, PlanStatus, RegistryError, SourceKind, ADAPTER_REGISTRY_SCHEMA_VERSION,
+};
+pub use replication_assurance::{
+    assure_replication, ClaimAndProtocol, ReplicationAssuranceError, ReplicationAssuranceReceipt,
+    ReplicationAssuranceRequest, ReplicationObservation, ReplicationOutcome, ReplicationVerdict,
+    CONTRACT_VERSION as REPLICATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as REPLICATION_ASSURANCE_FEATURE_ID,
 };
 pub use research_ingest::{
     certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,

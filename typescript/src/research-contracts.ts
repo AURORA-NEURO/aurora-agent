@@ -90,6 +90,8 @@ export const ANALYSIS_PORTFOLIO_FEATURE_ID = "AFA-adapter-P13-F01" as const;
 export const ANALYSIS_PORTFOLIO_CONTRACT_VERSION = "local-analysis-model-portfolio/1.0" as const;
 export const INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P14-F27" as const;
 export const INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "interpretation-assurance/1.0" as const;
+export const REPLICATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P15-F28" as const;
+export const REPLICATION_ASSURANCE_CONTRACT_VERSION = "federated-replication-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1494,6 +1496,41 @@ export function validateInterpretationAssuranceReceipt(receipt: InterpretationAs
 }
 
 export function interpretationAssuranceReceiptDigest(receipt: InterpretationAssuranceReceipt): string { validateInterpretationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ReplicationAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  claim_id: string;
+  protocol_digest: string;
+  verdict: "replicated" | "partially_replicated" | "contradicted" | "null_result" | "insufficient_evidence" | "blocked";
+  observation_order: string[];
+  independent_site_order: string[];
+  positive_count: number;
+  null_count: number;
+  negative_count: number;
+  inconclusive_count: number;
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateReplicationAssuranceReceipt(receipt: ReplicationAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== REPLICATION_ASSURANCE_FEATURE_ID || receipt.contract_version !== REPLICATION_ASSURANCE_CONTRACT_VERSION) throw new Error("replication assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.claim_id.trim() || !receipt.observation_order.length || !receipt.reasons.length) throw new Error("replication assurance identity, observations, locality, boundary, or reasons are incomplete");
+  if (!new Set(["replicated", "partially_replicated", "contradicted", "null_result", "insufficient_evidence", "blocked"]).has(receipt.verdict)) throw new Error("replication assurance verdict is unknown");
+  if (JSON.stringify([...new Set(receipt.observation_order)].sort()) !== JSON.stringify(receipt.observation_order) || JSON.stringify([...new Set(receipt.independent_site_order)].sort()) !== JSON.stringify(receipt.independent_site_order)) throw new Error("replication assurance ordering is invalid");
+  if (![receipt.positive_count, receipt.null_count, receipt.negative_count, receipt.inconclusive_count].every((value) => Number.isInteger(value) && value >= 0) || receipt.positive_count + receipt.null_count + receipt.negative_count + receipt.inconclusive_count !== receipt.observation_order.length) throw new Error("replication assurance counts do not match observations");
+  if (!/^[0-9a-f]{64}$/.test(receipt.protocol_digest)) throw new Error("replication assurance protocol digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("replication assurance artifact digest is invalid");
+}
+
+export function replicationAssuranceReceiptDigest(receipt: ReplicationAssuranceReceipt): string { validateReplicationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

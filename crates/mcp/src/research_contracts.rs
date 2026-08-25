@@ -20,6 +20,10 @@ use bioprism_adapter::{
     INTERPRETATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_replication, ReplicationAssuranceReceipt, ReplicationAssuranceRequest,
+    REPLICATION_ASSURANCE_FEATURE_ID,
+};
+use bioprism_adapter::{
     compile_evidence_synthesis, EvidenceSynthesisRequest, RetrievalSynthesisReceipt,
     RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
@@ -203,6 +207,7 @@ pub const INSTRUMENT_MESH_TOOL: &str = "adapter_instrument_mesh";
 pub const EXECUTION_CONTROL_TOOL: &str = "adapter_execution_control";
 pub const ANALYSIS_PORTFOLIO_TOOL: &str = "adapter_analysis_portfolio";
 pub const INTERPRETATION_ASSURANCE_TOOL: &str = "adapter_interpretation_assurance";
+pub const REPLICATION_ASSURANCE_TOOL: &str = "adapter_replication_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1094,6 +1099,26 @@ pub fn validate_interpretation_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != INTERPRETATION_ASSURANCE_FEATURE_ID {
         return Err("interpretation assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_replication_json(value: &Value) -> Result<Value, String> {
+    let request: ReplicationAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid replication assurance request: {error}"))?;
+    let receipt = assure_replication(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize replication assurance receipt: {error}"))
+}
+
+pub fn validate_replication_assurance_json(
+    value: &Value,
+) -> Result<ReplicationAssuranceReceipt, String> {
+    let receipt: ReplicationAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid replication assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != REPLICATION_ASSURANCE_FEATURE_ID {
+        return Err("replication assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

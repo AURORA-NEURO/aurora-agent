@@ -19,6 +19,7 @@ from prism_sdk.research_contracts import INSTRUMENT_MESH_FEATURE_ID, INSTRUMENT_
 from prism_sdk.research_contracts import EXECUTION_CONTROL_FEATURE_ID, EXECUTION_CONTROL_CONTRACT_VERSION, ComputationalExecutionReceipt
 from prism_sdk.research_contracts import ANALYSIS_PORTFOLIO_FEATURE_ID, ANALYSIS_PORTFOLIO_CONTRACT_VERSION, AnalysisPortfolioReceipt
 from prism_sdk.research_contracts import INTERPRETATION_ASSURANCE_FEATURE_ID, INTERPRETATION_ASSURANCE_CONTRACT_VERSION, InterpretationAssuranceReceipt
+from prism_sdk.research_contracts import REPLICATION_ASSURANCE_FEATURE_ID, REPLICATION_ASSURANCE_CONTRACT_VERSION, ReplicationAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1019,4 +1020,28 @@ def test_interpretation_assurance_preserves_omitted_modality_and_negative_eviden
     receipt.validate()
     assert receipt.feature_id == INTERPRETATION_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == INTERPRETATION_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_replication_assurance_preserves_partition_and_negative_evidence():
+    receipt = ReplicationAssuranceReceipt(
+        claim_id="claim:mechanism",
+        protocol_digest="a" * 64,
+        verdict="partially_replicated",
+        observation_order=("obs:a", "obs:b"),
+        independent_site_order=("site:a", "site:b"),
+        positive_count=2,
+        null_count=0,
+        negative_count=0,
+        inconclusive_count=0,
+        omissions=("site:c: federation partition",),
+        uncertainty=("obs:a: interval remains wide",),
+        negative_evidence=("obs:b: null secondary endpoint",),
+        semantic_loss=({"field": "omissions", "severity": "decision_relevant"},),
+        reasons=("protected omission prevents unconditional replication",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == REPLICATION_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == REPLICATION_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
