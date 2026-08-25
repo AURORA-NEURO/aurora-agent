@@ -70,6 +70,7 @@ pub mod context_workflow_fabric;
 pub mod multimodal_context_workflow_fabric;
 pub mod throughput_context_workflow_fabric;
 pub mod federated_context_workflow_fabric;
+pub mod context_research_workbench;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -389,6 +390,12 @@ pub use federated_context_workflow_fabric::{
     FederatedContextWorkflowReceipt, FederatedContextWorkflowRequest,
     CONTRACT_VERSION as FEDERATED_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use context_research_workbench::{
+    context_research_workbench_manifest, render_context_workbench,
+    ContextWorkbenchError, ContextWorkbenchReceipt, ContextWorkbenchRequest,
+    CONTRACT_VERSION as CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
