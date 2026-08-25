@@ -86,6 +86,10 @@ use bioprism_adapter::{
     KNOWLEDGE_WORKFLOW_FEATURE_ID,
 };
 use bioprism_adapter::{
+    schedule_federation_workflow, FederationRequest, FederationWorkflowReceipt,
+    FEDERATION_WORKFLOW_FEATURE_ID,
+};
+use bioprism_adapter::{
     simulate_protocol_draft, ProtocolDraft, ProtocolSimulationReceipt,
     PROTOCOL_SIMULATION_FEATURE_ID,
 };
@@ -227,6 +231,7 @@ pub const RELEASE_ASSURANCE_TOOL: &str = "adapter_release_assurance";
 pub const DETERMINISM_GATEWAY_TOOL: &str = "adapter_determinism_gateway";
 pub const PROVENANCE_ASSURANCE_TOOL: &str = "adapter_provenance_assurance";
 pub const POLICY_GATEWAY_TOOL: &str = "adapter_policy_gateway";
+pub const FEDERATION_WORKFLOW_TOOL: &str = "adapter_federation_workflow";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1212,6 +1217,26 @@ pub fn validate_policy_gateway_json(value: &Value) -> Result<PolicyGatewayReceip
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != POLICY_GATEWAY_FEATURE_ID {
         return Err("policy gateway feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn schedule_federation_workflow_json(value: &Value) -> Result<Value, String> {
+    let request: FederationRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federation workflow request: {error}"))?;
+    let receipt = schedule_federation_workflow(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federation workflow receipt: {error}"))
+}
+
+pub fn validate_federation_workflow_json(
+    value: &Value,
+) -> Result<FederationWorkflowReceipt, String> {
+    let receipt: FederationWorkflowReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federation workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATION_WORKFLOW_FEATURE_ID {
+        return Err("federation workflow feature id mismatch".into());
     }
     Ok(receipt)
 }

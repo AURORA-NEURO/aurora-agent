@@ -24,6 +24,7 @@ from prism_sdk.research_contracts import RELEASE_ASSURANCE_FEATURE_ID, RELEASE_A
 from prism_sdk.research_contracts import DETERMINISM_GATEWAY_FEATURE_ID, DETERMINISM_GATEWAY_CONTRACT_VERSION, DeterminismGatewayReceipt
 from prism_sdk.research_contracts import PROVENANCE_ASSURANCE_FEATURE_ID, PROVENANCE_ASSURANCE_CONTRACT_VERSION, ProvenanceAssuranceReceipt
 from prism_sdk.research_contracts import POLICY_GATEWAY_FEATURE_ID, POLICY_GATEWAY_CONTRACT_VERSION, PolicyGatewayReceipt
+from prism_sdk.research_contracts import FEDERATION_WORKFLOW_FEATURE_ID, FEDERATION_WORKFLOW_CONTRACT_VERSION, FederationWorkflowReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1139,4 +1140,26 @@ def test_policy_gateway_preserves_tier_budget_and_unresolved_state():
     receipt.validate()
     assert receipt.feature_id == POLICY_GATEWAY_FEATURE_ID
     assert receipt.contract_version == POLICY_GATEWAY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_federation_workflow_preserves_checkpoints_compensation_and_partition():
+    receipt = FederationWorkflowReceipt(
+        workflow_id="workflow:qc",
+        decision="partial",
+        task_order=("task:a", "task:b"),
+        checkpoint_order=("checkpoint:a", "checkpoint:b"),
+        compensation_order=("retain-a", "retain-b"),
+        total_budget_units=30,
+        omissions=("network partition prevents destination confirmation",),
+        uncertainty=("destination admission remains unknown",),
+        semantic_loss=({"field": "network_partition", "severity": "decision_relevant"},),
+        reasons=("partitioned work remains local-only",),
+        effect_receipt="retain_local_checkpoint_and_block_remote_schedule",
+        envelope={"export": {"content_hash": "a" * 64}},
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == FEDERATION_WORKFLOW_FEATURE_ID
+    assert receipt.contract_version == FEDERATION_WORKFLOW_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

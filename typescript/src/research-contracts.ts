@@ -100,6 +100,8 @@ export const PROVENANCE_ASSURANCE_FEATURE_ID = "AFA-adapter-P18-F26" as const;
 export const PROVENANCE_ASSURANCE_CONTRACT_VERSION = "multimodal-provenance-signing-assurance/1.0" as const;
 export const POLICY_GATEWAY_FEATURE_ID = "AFA-adapter-P19-F24" as const;
 export const POLICY_GATEWAY_CONTRACT_VERSION = "federated-policy-autonomy-gateway/1.0" as const;
+export const FEDERATION_WORKFLOW_FEATURE_ID = "AFA-adapter-P20-F15" as const;
+export const FEDERATION_WORKFLOW_CONTRACT_VERSION = "prospective-federation-workflow-fabric/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1670,6 +1672,39 @@ export function validatePolicyGatewayReceipt(receipt: PolicyGatewayReceipt): voi
 }
 
 export function policyGatewayReceiptDigest(receipt: PolicyGatewayReceipt): string { validatePolicyGatewayReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface FederationWorkflowReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  workflow_id: string;
+  decision: "scheduled" | "approval_required" | "local_only" | "partial" | "blocked";
+  task_order: string[];
+  checkpoint_order: string[];
+  compensation_order: string[];
+  total_budget_units: number;
+  omissions: string[];
+  uncertainty: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  effect_receipt: string;
+  envelope: Record<string, unknown>;
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateFederationWorkflowReceipt(receipt: FederationWorkflowReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATION_WORKFLOW_FEATURE_ID || receipt.contract_version !== FEDERATION_WORKFLOW_CONTRACT_VERSION) throw new Error("federation workflow schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.workflow_id.trim() || !receipt.task_order.length || !receipt.checkpoint_order.length || !receipt.compensation_order.length || !receipt.reasons.length || !receipt.effect_receipt.trim()) throw new Error("federation workflow identity, tasks, checkpoints, compensation, locality, boundary, reasons, or effects are incomplete");
+  if (!new Set(["scheduled", "approval_required", "local_only", "partial", "blocked"]).has(receipt.decision)) throw new Error("federation workflow decision is unknown");
+  for (const values of [receipt.task_order, receipt.checkpoint_order, receipt.compensation_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("federation workflow ordering is invalid");
+  if (!Number.isInteger(receipt.total_budget_units) || receipt.total_budget_units <= 0) throw new Error("federation workflow budget is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("federation workflow artifact digest is invalid");
+  if (!receipt.envelope || typeof receipt.envelope !== "object") throw new Error("federation workflow envelope is invalid");
+}
+
+export function federationWorkflowReceiptDigest(receipt: FederationWorkflowReceipt): string { validateFederationWorkflowReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

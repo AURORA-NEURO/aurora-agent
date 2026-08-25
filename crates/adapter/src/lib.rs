@@ -89,6 +89,7 @@ pub mod evidence_surveillance;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
+pub mod federation_workflow;
 pub mod ingestion;
 pub mod ingestion_gateway;
 pub mod instrument_mesh;
@@ -157,6 +158,12 @@ pub use experiment_design_control::{
     FEATURE_ID as EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
 };
 pub use fact::{FactDraft, ValueQualifiers};
+pub use federation_workflow::{
+    schedule_federation_workflow, FederationRequest, FederationTask, FederationWorkflowDecision,
+    FederationWorkflowError, FederationWorkflowReceipt,
+    CONTRACT_VERSION as FEDERATION_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATION_WORKFLOW_FEATURE_ID,
+};
 pub use ingestion::Ingestion;
 pub use ingestion_gateway::{
     run_ingestion_gateway, IngestionEffectReceipt, IngestionGatewayDecision, IngestionGatewayError,

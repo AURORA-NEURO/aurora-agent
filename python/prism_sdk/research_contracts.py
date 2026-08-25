@@ -107,6 +107,8 @@ PROVENANCE_ASSURANCE_FEATURE_ID = "AFA-adapter-P18-F26"
 PROVENANCE_ASSURANCE_CONTRACT_VERSION = "multimodal-provenance-signing-assurance/1.0"
 POLICY_GATEWAY_FEATURE_ID = "AFA-adapter-P19-F24"
 POLICY_GATEWAY_CONTRACT_VERSION = "federated-policy-autonomy-gateway/1.0"
+FEDERATION_WORKFLOW_FEATURE_ID = "AFA-adapter-P20-F15"
+FEDERATION_WORKFLOW_CONTRACT_VERSION = "prospective-federation-workflow-fabric/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2703,3 +2705,45 @@ class PolicyGatewayReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "action_id": self.action_id, "decision": self.decision, "required_tier": self.required_tier, "permitted_actions": list(self.permitted_actions), "budget_order": list(self.budget_order), "reasons": list(self.reasons), "uncertainty": list(self.uncertainty), "effect_receipt": self.effect_receipt, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class FederationWorkflowReceipt:
+    workflow_id: str
+    decision: str
+    task_order: tuple[str, ...]
+    checkpoint_order: tuple[str, ...]
+    compensation_order: tuple[str, ...]
+    total_budget_units: int
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    effect_receipt: str
+    envelope: Mapping[str, Any]
+    artifact: Mapping[str, Any]
+    feature_id: str = FEDERATION_WORKFLOW_FEATURE_ID
+    contract_version: str = FEDERATION_WORKFLOW_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != FEDERATION_WORKFLOW_FEATURE_ID or self.contract_version != FEDERATION_WORKFLOW_CONTRACT_VERSION:
+            raise ResearchContractError("federation workflow schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.workflow_id.strip() or not self.task_order or not self.checkpoint_order or not self.compensation_order or not self.reasons or not self.effect_receipt.strip():
+            raise ResearchContractError("federation workflow identity, tasks, checkpoints, compensation, locality, boundary, reasons, or effects are incomplete")
+        if self.decision not in {"scheduled", "approval_required", "local_only", "partial", "blocked"}:
+            raise ResearchContractError("federation workflow decision is unknown")
+        for values in (self.task_order, self.checkpoint_order, self.compensation_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("federation workflow ordering is invalid")
+        if not isinstance(self.total_budget_units, int) or self.total_budget_units <= 0:
+            raise ResearchContractError("federation workflow budget is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("federation workflow artifact digest is invalid")
+        if not isinstance(self.envelope.get("export", self.envelope.get("export_artifact", {})), Mapping):
+            raise ResearchContractError("federation workflow envelope is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "workflow_id": self.workflow_id, "decision": self.decision, "task_order": list(self.task_order), "checkpoint_order": list(self.checkpoint_order), "compensation_order": list(self.compensation_order), "total_budget_units": self.total_budget_units, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "effect_receipt": self.effect_receipt, "envelope": dict(self.envelope), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
