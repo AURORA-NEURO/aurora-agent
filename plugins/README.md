@@ -40,13 +40,16 @@ bioprism-cli -p bioprism-mcp` (add `-p bioprism-api` for the HTTP gateway).
 | Plugin | Gives you |
 |---|---|
 | `aurora-honesty` | The honest-labelling discipline for **any** codebase (4 skills) |
+| `aurora-science` | The measurement-science methodology for **any** evaluation effort (6 skills) |
 | `aurora-workspace` | Skills for working inside this repo itself (5 skills, scope-prefixed) |
 
 ## Maintaining
 
 - `.agents/skills/` is the **source of truth** for mirrored skills; after
   editing run `python tools/sync_plugin_skills.py` (mirrors carry a
-  do-not-edit banner).
+  do-not-edit banner). `aurora-science` is authored in place under
+  `plugins/aurora-science/skills/` and has no `.agents/skills/` source —
+  edit it directly.
 - Validation gate: `claude plugin validate . --strict` (marketplace) and
   `claude plugin validate plugins/<name> --strict` per plugin.
 - Releases: bump `version` in the plugin's `plugin.json` AND its marketplace
