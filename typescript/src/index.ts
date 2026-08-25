@@ -2388,6 +2388,18 @@ export type {
   AutonomousSemanticRouteResult,
 } from "./autonomous-routing.js";
 export {
+  AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_SCHEMA,
+  createAutonomousCycleEvaluatorBridge,
+} from "./autonomous-cycle-evaluator-bridge.js";
+export type {
+  AutonomousCycleEvaluatorBridge,
+  AutonomousCycleEvaluatorBridgeOptions,
+  AutonomousCycleEvaluatorEvidenceContext,
+  AutonomousCycleEvaluatorEvidenceFactory,
+  AutonomousCycleEvaluatorMode,
+  AutonomousCycleEvaluatorRole,
+} from "./autonomous-cycle-evaluator-bridge.js";
+export {
   AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA,
   AUTONOMOUS_AUTO_REPLAN_CYCLE_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,

@@ -4584,6 +4584,17 @@ and returns the stored projection without invoking the provider again. Offline T
 cover every built-in single-domain route, bounded multi-attempt refinement, cross-domain fan-out,
 semantic approval refusal, and terminal replay idempotency.
 
+The TypeScript cycle layer also exposes `createAutonomousCycleEvaluatorBridge()`. It binds the
+reviewed all-domain `AutonomousValueEvaluatorRegistry` to four cycle callback shapes:
+single-domain ordinary evaluation, single-domain replanning, cross-domain ordinary learning, and
+cross-domain replanning. The caller supplies an `evidenceFor` function, but it receives only
+route/status/episode metadata plus the selected evaluator's required signal contract. Evidence
+values remain caller-owned and transient. Cross-domain replan settlement uses the exact routed
+domain rubric for specialist and synthesis episode rewards while the reviewed `cross_domain`
+rubric controls the aggregate pass/replan decision. The bridge refuses an incomplete registry,
+preserves evaluator identity and catalogue/policy digests, and never converts provider transport
+success, model confidence, or response presence into reward.
+
 The same cycle APIs can run provider planning as an explicit phase before invocation. A caller sets
 `providerPlanning` and receives a `plan_review_required` result containing a caller-owned,
 dependency-closed proposal; no execution provider is dispatched until the caller supplies it as

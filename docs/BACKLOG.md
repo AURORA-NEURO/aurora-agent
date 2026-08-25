@@ -1577,3 +1577,10 @@ The next depth layer remains deployment integration rather than hidden authority
 facades to caller-owned evaluator evidence, durable result/rehydration stores, effect
 reconciliation, credential provisioning, and production observability. Those integrations must
 continue to preserve the existing route, approval, secret, and value-only learning boundaries.
+
+The cycle evaluator bridge now closes the callback-plumbing gap between those built-in evaluator
+contracts and live TypeScript decision/replan cycles. `createAutonomousCycleEvaluatorBridge()`
+supports every built-in domain, ordinary and adaptive single-domain runs, and specialist/synthesis
+cross-domain credit while exposing only metadata to the caller's evidence factory. The registry,
+evaluator catalogue digest, policy digest, and explicit evidence boundary are covered offline;
+source acquisition, evaluator truth, and durable evidence storage remain caller-owned.

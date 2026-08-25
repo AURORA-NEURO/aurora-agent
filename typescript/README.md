@@ -877,6 +877,28 @@ the metadata-only `AutonomousCycleReplanStateStore`, and all explicit rehydrator
 unchanged, so a terminal restart replay returns its projection without rerouting or replaying the
 provider.
 
+For applications using the reviewed built-in value evaluators, `createAutonomousCycleEvaluatorBridge()`
+removes repetitive callback plumbing without making provider success authoritative:
+
+```typescript
+const evaluators = createAutonomousCycleEvaluatorBridge({
+  evidenceFor: async (context) => ({ evidence: await callerOwnedValueEvidence(context) }),
+});
+const adaptive = await agent.runAutoReplanCycle(task, {
+  domain: "science",
+  approveProviderCall: true,
+  evaluate: evaluators.evaluateReplan,
+  learning: { controller: learning, episodePrefix: "science-review" },
+});
+```
+
+The bridge exposes separate single-domain, ordinary cross-domain, single-replan, and
+cross-domain-replan callbacks. Cross-domain replanning uses the `cross_domain` rubric for the
+aggregate decision and the exact routed rubric for each pending specialist/synthesis episode;
+the callback receives only route/status/episode metadata and the required signal contract. The
+registry must cover all twelve built-in domains, and missing or malformed caller evidence fails
+closed before settlement.
+
 Use `AutonomousCycleReplanPersistenceCoordinator` with a caller `read()`/`write()` adapter to
 flush and restore bounded, hash-bound snapshots. The in-memory store is intended for tests and
 small workers; production deployments should place it beside the existing execution, learning,
