@@ -80,6 +80,8 @@ export const QUALITY_ENVELOPE_FEATURE_ID = "AFA-adapter-P07-F06" as const;
 export const QUALITY_ENVELOPE_CONTRACT_VERSION = "multi-study-quality-envelope/1.0" as const;
 export const EXPERIMENT_DESIGN_CONTROL_FEATURE_ID = "AFA-adapter-P09-F30" as const;
 export const EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION = "federated-experiment-design-control-plane/1.0" as const;
+export const PROTOCOL_SIMULATION_FEATURE_ID = "AFA-adapter-P10-F03" as const;
+export const PROTOCOL_SIMULATION_CONTRACT_VERSION = "prospective-protocol-simulation/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1317,6 +1319,36 @@ export function validateExperimentDesignReceipt(receipt: ExperimentDesignReceipt
 }
 
 export function experimentDesignReceiptDigest(receipt: ExperimentDesignReceipt): string { validateExperimentDesignReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ProtocolSimulationReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  protocol_id: string;
+  design_digest: string;
+  results: readonly Record<string, unknown>[];
+  passed: number;
+  failed_closed: number;
+  approval_required: number;
+  omissions: string[];
+  uncertainty: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateProtocolSimulationReceipt(receipt: ProtocolSimulationReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== PROTOCOL_SIMULATION_FEATURE_ID || receipt.contract_version !== PROTOCOL_SIMULATION_CONTRACT_VERSION) throw new Error("protocol simulation schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.protocol_id.trim() || !/^[0-9a-f]{64}$/.test(receipt.design_digest) || !receipt.results.length) throw new Error("protocol simulation identity, digest, locality, or results are incomplete");
+  if (receipt.passed + receipt.failed_closed + receipt.approval_required !== receipt.results.length) throw new Error("protocol simulation state counts do not match results");
+  const ids = receipt.results.map((result) => String(result.scenario_id ?? ""));
+  if (ids.some((id) => !id.trim()) || JSON.stringify(ids) !== JSON.stringify([...new Set(ids)].sort())) throw new Error("protocol simulation scenario ordering is invalid");
+  for (const result of receipt.results) if (!new Set(["passed", "failed_closed", "approval_required"]).has(result.state) || !Array.isArray(result.reasons) || !result.reasons.length) throw new Error("protocol simulation scenario result is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("protocol simulation artifact digest is invalid");
+}
+
+export function protocolSimulationReceiptDigest(receipt: ProtocolSimulationReceipt): string { validateProtocolSimulationReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

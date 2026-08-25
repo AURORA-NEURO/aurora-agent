@@ -87,6 +87,8 @@ QUALITY_ENVELOPE_FEATURE_ID = "AFA-adapter-P07-F06"
 QUALITY_ENVELOPE_CONTRACT_VERSION = "multi-study-quality-envelope/1.0"
 EXPERIMENT_DESIGN_CONTROL_FEATURE_ID = "AFA-adapter-P09-F30"
 EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION = "federated-experiment-design-control-plane/1.0"
+PROTOCOL_SIMULATION_FEATURE_ID = "AFA-adapter-P10-F03"
+PROTOCOL_SIMULATION_CONTRACT_VERSION = "prospective-protocol-simulation/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2269,3 +2271,40 @@ class ExperimentDesignReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "objective_id": self.objective_id, "disposition": self.disposition, "site_order": list(self.site_order), "assignments": [dict(item) for item in self.assignments], "modality_coverage": dict(self.modality_coverage), "omitted_modalities": list(self.omitted_modalities), "comparability_conflicts": list(self.comparability_conflicts), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ProtocolSimulationReceipt:
+    protocol_id: str
+    design_digest: str
+    results: tuple[Mapping[str, Any], ...]
+    passed: int
+    failed_closed: int
+    approval_required: int
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = PROTOCOL_SIMULATION_FEATURE_ID
+    contract_version: str = PROTOCOL_SIMULATION_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != PROTOCOL_SIMULATION_FEATURE_ID or self.contract_version != PROTOCOL_SIMULATION_CONTRACT_VERSION:
+            raise ResearchContractError("protocol simulation schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.protocol_id.strip() or not re.fullmatch(r"[0-9a-f]{64}", self.design_digest) or not self.results:
+            raise ResearchContractError("protocol simulation identity, digest, boundary, or results are incomplete")
+        if self.passed + self.failed_closed + self.approval_required != len(self.results):
+            raise ResearchContractError("protocol simulation state counts do not match results")
+        ids = [str(result.get("scenario_id", "")) for result in self.results]
+        if any(not item.strip() for item in ids) or ids != sorted(set(ids)):
+            raise ResearchContractError("protocol simulation scenarios are not canonically ordered")
+        for result in self.results:
+            if result.get("state") not in {"passed", "failed_closed", "approval_required"} or not isinstance(result.get("reasons"), list) or not result["reasons"]:
+                raise ResearchContractError("protocol simulation scenario result is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("protocol simulation artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "protocol_id": self.protocol_id, "design_digest": self.design_digest, "results": [dict(item) for item in self.results], "passed": self.passed, "failed_closed": self.failed_closed, "approval_required": self.approval_required, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "artifact": dict(self.artifact), "boundary": self.boundary})

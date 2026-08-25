@@ -50,6 +50,10 @@ use bioprism_adapter::{
     run_knowledge_workflow, ClaimsWorkflowRequest, KnowledgeWorkflowReceipt,
     KNOWLEDGE_WORKFLOW_FEATURE_ID,
 };
+use bioprism_adapter::{
+    simulate_protocol_draft, ProtocolDraft, ProtocolSimulationReceipt,
+    PROTOCOL_SIMULATION_FEATURE_ID,
+};
 use bioprism_atlashub::{
     synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
     FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
@@ -178,6 +182,7 @@ pub const ADAPTER_RESOURCE_WORKBENCH_TOOL: &str = "adapter_resource_workbench";
 pub const INGESTION_GATEWAY_TOOL: &str = "adapter_ingestion_gateway";
 pub const QUALITY_ENVELOPE_TOOL: &str = "adapter_quality_envelope";
 pub const EXPERIMENT_DESIGN_CONTROL_TOOL: &str = "adapter_experiment_design_control";
+pub const PROTOCOL_SIMULATION_TOOL: &str = "adapter_protocol_simulation";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -962,6 +967,26 @@ pub fn validate_experiment_design_json(value: &Value) -> Result<ExperimentDesign
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != EXPERIMENT_DESIGN_CONTROL_FEATURE_ID {
         return Err("experiment design feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn simulate_protocol_draft_json(value: &Value) -> Result<Value, String> {
+    let request: ProtocolDraft = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid protocol draft: {error}"))?;
+    let receipt = simulate_protocol_draft(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize protocol simulation receipt: {error}"))
+}
+
+pub fn validate_protocol_simulation_json(
+    value: &Value,
+) -> Result<ProtocolSimulationReceipt, String> {
+    let receipt: ProtocolSimulationReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid protocol simulation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != PROTOCOL_SIMULATION_FEATURE_ID {
+        return Err("protocol simulation feature id mismatch".into());
     }
     Ok(receipt)
 }

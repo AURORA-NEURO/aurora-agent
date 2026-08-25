@@ -95,6 +95,7 @@ pub mod loss;
 pub mod mechanism_control_plane;
 pub mod multimodal_harmonization;
 pub mod probe;
+pub mod protocol_simulation;
 pub mod quality_control;
 pub mod quality_drift;
 pub mod quality_envelope;
@@ -158,6 +159,13 @@ pub use multimodal_harmonization::{
     FEATURE_VERSION as MULTIMODAL_HARMONIZATION_FEATURE_VERSION,
 };
 pub use probe::{field_inventory, Inventory};
+pub use protocol_simulation::{
+    simulate_protocol_draft, ProtocolDraft, ProtocolOperation, ProtocolScenario,
+    ProtocolScenarioResult, ProtocolSimulationError, ProtocolSimulationReceipt,
+    ProtocolSimulationState, ProtocolStep,
+    CONTRACT_VERSION as PROTOCOL_SIMULATION_CONTRACT_VERSION,
+    FEATURE_ID as PROTOCOL_SIMULATION_FEATURE_ID,
+};
 pub use quality_control::{
     evaluate_quality_control, manifest as quality_control_manifest, MetricDirection, MetricStatus,
     QualityControlError, QualityControlReceipt, QualityControlRequest, QualityControlSummary,

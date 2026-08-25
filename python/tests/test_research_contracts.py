@@ -14,6 +14,7 @@ from prism_sdk.research_contracts import RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE
 from prism_sdk.research_contracts import INGESTION_GATEWAY_FEATURE_ID, INGESTION_GATEWAY_CONTRACT_VERSION, IngestionGatewayReceipt
 from prism_sdk.research_contracts import QUALITY_ENVELOPE_FEATURE_ID, QUALITY_ENVELOPE_CONTRACT_VERSION, QualityEnvelopeReceipt
 from prism_sdk.research_contracts import EXPERIMENT_DESIGN_CONTROL_FEATURE_ID, EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION, ExperimentDesignReceipt
+from prism_sdk.research_contracts import PROTOCOL_SIMULATION_FEATURE_ID, PROTOCOL_SIMULATION_CONTRACT_VERSION, ProtocolSimulationReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -901,4 +902,26 @@ def test_experiment_design_blocks_without_authorization_and_keeps_assignments_em
     receipt.validate()
     assert receipt.feature_id == EXPERIMENT_DESIGN_CONTROL_FEATURE_ID
     assert receipt.contract_version == EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_protocol_simulation_preserves_failed_closed_and_approval_states():
+    receipt = ProtocolSimulationReceipt(
+        protocol_id="protocol:python",
+        design_digest="a" * 64,
+        results=(
+            {"scenario_id": "scenario:approval", "state": "approval_required", "reasons": ["effect approval required"]},
+            {"scenario_id": "scenario:nominal", "state": "passed", "reasons": ["completed"]},
+        ),
+        passed=1,
+        failed_closed=0,
+        approval_required=1,
+        omissions=("scenario scenario:approval did not complete as passed",),
+        uncertainty=(),
+        semantic_loss=(),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == PROTOCOL_SIMULATION_FEATURE_ID
+    assert receipt.contract_version == PROTOCOL_SIMULATION_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
