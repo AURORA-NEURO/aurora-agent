@@ -42,6 +42,11 @@ import {
   type AutonomousRunTraceSummary,
 } from "./autonomous-run-trace.js";
 import {
+  analyzeAutonomousRunTrace,
+  type AutonomousRunTraceAnalyticsPolicy,
+  type AutonomousRunTraceAnalyticsReport,
+} from "./autonomous-run-analytics.js";
+import {
   AutonomousConnectorRegistry,
   AutonomousConnectorRuntime,
   type AutonomousConnectorDispatchRequest,
@@ -7235,6 +7240,12 @@ export class AutonomousAgent {
       await trace.fail({ failure_class: failureClass, failure_code: failureCode, detail_digest: digestJsonSync({ failure_class: failureClass, failure_code: failureCode }) }).catch(() => undefined);
       throw error;
     }
+  }
+
+  /** Analyze a verified trace without invoking providers or retaining transient values. */
+  analyzeRunTrace(snapshot: unknown, options: { policy?: Partial<AutonomousRunTraceAnalyticsPolicy> } = {}): AutonomousRunTraceAnalyticsReport {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous analyzeRunTrace options must be an object");
+    return analyzeAutonomousRunTrace(snapshot, options);
   }
 
   /** Cross-domain variant of runWithTrace; the same trace contains specialist and synthesis turns. */

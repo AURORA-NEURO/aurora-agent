@@ -520,6 +520,30 @@ export type {
   AutonomousRunTraceCompletion,
 } from "./autonomous-run-trace.js";
 export {
+  AUTONOMOUS_RUN_TRACE_ANALYTICS_AUTHORITY,
+  AUTONOMOUS_RUN_TRACE_ANALYTICS_MEASUREMENT_STATES,
+  AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION,
+  AUTONOMOUS_RUN_TRACE_ANALYTICS_SCHEMA,
+  AUTONOMOUS_RUN_TRACE_ANALYTICS_SEVERITIES,
+  AUTONOMOUS_RUN_TRACE_ANALYTICS_STATUSES,
+  MAX_AUTONOMOUS_RUN_TRACE_ANALYTICS_ALERTS,
+  MAX_AUTONOMOUS_RUN_TRACE_ANALYTICS_BYTES,
+  MAX_AUTONOMOUS_RUN_TRACE_ANALYTICS_EVENTS,
+  MAX_AUTONOMOUS_RUN_TRACE_ANALYTICS_ROWS,
+  MAX_AUTONOMOUS_RUN_TRACE_ANALYTICS_RUNS,
+  analyzeAutonomousRunTrace,
+  validateAutonomousRunTraceAnalyticsReport,
+} from "./autonomous-run-analytics.js";
+export type {
+  AutonomousRunTraceAnalyticsAlert,
+  AutonomousRunTraceAnalyticsDimension,
+  AutonomousRunTraceAnalyticsMeasurementState,
+  AutonomousRunTraceAnalyticsPolicy,
+  AutonomousRunTraceAnalyticsReport,
+  AutonomousRunTraceAnalyticsSeverity,
+  AutonomousRunTraceAnalyticsStatus,
+} from "./autonomous-run-analytics.js";
+export {
   AUTONOMOUS_MODEL_INVENTORY_SCHEMA,
   AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS,
   AUTONOMOUS_MODEL_INVENTORY_MAX_DOMAINS,

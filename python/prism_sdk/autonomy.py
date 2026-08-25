@@ -163,6 +163,11 @@ from .autonomous_run_trace import (
     AutonomousTracedRunResult,
     autonomous_run_trace_status,
 )
+from .autonomous_run_analytics import (
+    AutonomousRunTraceAnalyticsPolicy,
+    AutonomousRunTraceAnalyticsReport,
+    analyze_autonomous_run_trace,
+)
 from .autonomous_decision_persistence import (
     AutonomousDecisionCycle,
     AutonomousDecisionCycleRehydrationContext,
@@ -20651,6 +20656,20 @@ class AutonomousAgent:
         domain = kwargs.get("domain")
         _authorize_launch_admission_domains(launch_admission, (domain,))
         return self.run_with_trace(**kwargs)
+
+    @staticmethod
+    def analyze_run_trace(
+        snapshot: Mapping[str, Any] | Any,
+        policy: AutonomousRunTraceAnalyticsPolicy | Mapping[str, Any] | None = None,
+    ) -> AutonomousRunTraceAnalyticsReport:
+        """Aggregate a verified metadata-only trace into conservative health observations.
+
+        This is deliberately separate from execution: it never invokes a provider, reads a
+        credential, or treats absent latency/token observations as zero. Callers can persist
+        the returned digest-bound report or re-run the analysis with different thresholds.
+        """
+
+        return analyze_autonomous_run_trace(snapshot, policy)
 
     def run_cross_domain_with_trace(
         self,

@@ -8989,6 +8989,44 @@ The trace validator rechecks every event digest, sequence, retention marker, and
 restore. Persistence retains only the bounded metadata trace; the remote service still owns
 atomic CAS, access control, encryption, retention, and operational export policy.
 
+### Conservative run-trace analytics
+
+The SDKs now provide a second, read-only layer above the journal:
+`analyze_autonomous_run_trace(snapshot, policy=None)` in Python and
+`analyzeAutonomousRunTrace(snapshot, { policy })` in TypeScript. It first verifies the complete
+snapshot, then emits one digest-bound report for the full built-in catalogue, provider routes,
+and provider/model pairs. The report includes terminal coverage, status/phase counts, observed
+provider failures, failure codes, latency mean/p50/p95, token observation counts and sums, tool
+call counts, attribution gaps, and deterministic alerts. It is useful for restart reviews,
+operator dashboards, and model-route comparisons without turning telemetry into a task-quality
+oracle.
+
+Missing measurements remain `null` or `unmeasured`: no latency, token, cost, provider health, or
+task-correctness value is inferred. A domain that has no events is still returned as an explicit
+`measurement_state: "unmeasured"` row. Policy thresholds can flag provider failure rates,
+latency, incomplete runs, or unmeasured expected domains; informational coverage alerts do not
+escalate the report beyond `observed`, while warning and critical alerts produce `degraded` and
+`attention_required` states respectively. The report's `source_snapshot_digest`, `policy_digest`,
+and `report_digest` make the exact input and interpretation reproducible.
+
+```python
+from prism_sdk import analyze_autonomous_run_trace
+
+report = analyze_autonomous_run_trace(trace_store.snapshot())
+assert report.cost_posture == "not_measured_by_trace"
+assert report.authority == "verified_trace_aggregation_only;not_task_correctness_or_external_health"
+for domain in report.domains:
+    print(domain.identity, domain.measurement_state, domain.failure_rate)
+```
+
+The TypeScript `AutonomousAgent.analyzeRunTrace()` and Python
+`AutonomousAgent.analyze_run_trace()` methods expose the same operation at the brain facade.
+Analytics never invokes a provider, opens a credential session, or stores prompts, responses,
+tool arguments, connector values, task text, or cost data. A report is therefore an operational
+observation about the verified trace boundary—not evidence that a scientific, biomedical,
+clinical, browser, coding, enterprise, or other domain claim is correct. Persistence, tenant
+authorization, encryption, alert delivery, and retention remain caller-owned deployment policy.
+
 Run-trace snapshots in both SDKs use a versioned lineage envelope. Current `0.2` snapshots carry
 an explicit generation and predecessor snapshot digest, are cached byte-for-byte when the event
 journal has not changed, and advance the lineage only after a new event is appended. The stores

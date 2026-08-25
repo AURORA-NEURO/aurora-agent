@@ -1760,6 +1760,17 @@ deployment work is to connect these receipts to caller-owned evaluator settlemen
 stores, provider cost ledgers, and operator policy surfaces; credentials, raw payloads, reward, and
 effect authority remain explicitly outside the SDK receipt boundary.
 
+Both SDKs now also expose conservative run-trace analytics above the verified metadata journal.
+`analyze_autonomous_run_trace()` / `analyzeAutonomousRunTrace()` aggregate all twelve reviewed
+domains plus observed provider and model dimensions into digest-bound reports with terminal
+coverage, status/phase counts, failure codes, measured latency quantiles, token observation
+counts, tool-call counts, attribution gaps, and deterministic threshold alerts. Missing metrics
+remain explicitly `null`/`unmeasured`; the layer does not infer cost, provider health, task
+correctness, or domain truth. Reports retain only metadata and carry explicit authority and
+retention markers. Remaining deployment work is to connect these reports to caller-owned tenant
+authorization, durable analytics storage, alert routing, evaluator settlement, provider billing,
+and external health sources without weakening the value-free boundary.
+
 The Python SDK now closes the corresponding effect-safety gap. `AutonomousEffectBoundary` gives
 approved non-read-only domain tools a deterministic effect identity, caller-visible idempotency
 key, hash-chained `prepared`/`dispatching`/`dispatched` markers, conservative uncertain-failure

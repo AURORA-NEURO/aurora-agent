@@ -90,6 +90,12 @@ only through a hidden prompt or an explicitly named environment variable; they a
 line arguments, MCP arguments, plans, or persisted state. See [the autonomous brain guide](docs/AUTONOMOUS_BRAIN.md#operator-process-boundary)
 for model discovery, durable inventory refresh, model-selection, approval, and credential-lifecycle details.
 
+For post-run operations, both SDKs expose digest-bound, metadata-only trace analytics through
+`analyze_autonomous_run_trace()` / `analyzeAutonomousRunTrace()` and the corresponding agent
+facade methods. The report separates measured values from unmeasured domains, aggregates
+provider/model failure and latency observations, and emits conservative threshold alerts; it does
+not infer cost, task correctness, provider health, or domain truth. See the [analytics section](docs/AUTONOMOUS_BRAIN.md#conservative-run-trace-analytics).
+
 ## Status
 
 **83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
