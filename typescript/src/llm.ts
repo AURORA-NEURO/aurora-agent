@@ -2255,7 +2255,7 @@ export class LLMRuntime {
     this.fetchImplementation = implementation;
     this.clock = options.clock ?? (() => Date.now());
     this.effectBoundaryValue = options.effectBoundary;
-    if (this.effectBoundaryValue !== undefined && typeof this.effectBoundaryValue.execute !== "function") throw new ProviderRuntimeError("effectBoundary must expose an execute method");
+    if (this.effectBoundaryValue !== undefined && (typeof this.effectBoundaryValue.execute !== "function" || typeof this.effectBoundaryValue.executeStream !== "function")) throw new ProviderRuntimeError("effectBoundary must expose execute and executeStream methods");
     this.onboarding = new ProviderOnboarding(this);
   }
 
@@ -2264,7 +2264,7 @@ export class LLMRuntime {
   }
 
   bindEffectBoundary(effectBoundary: AutonomousEffectBoundary | undefined): void {
-    if (effectBoundary !== undefined && (!effectBoundary || typeof effectBoundary.execute !== "function")) throw new ProviderRuntimeError("effectBoundary must expose an execute method");
+    if (effectBoundary !== undefined && (!effectBoundary || typeof effectBoundary.execute !== "function" || typeof effectBoundary.executeStream !== "function")) throw new ProviderRuntimeError("effectBoundary must expose execute and executeStream methods");
     if (this.effectBoundaryValue !== undefined && this.effectBoundaryValue !== effectBoundary) throw new ProviderRuntimeError("a different effectBoundary is already bound to this runtime");
     this.effectBoundaryValue = effectBoundary;
   }
@@ -2591,6 +2591,74 @@ export class LLMRuntime {
     request: ProviderRequest,
     options: ProviderInvocationOptions = {},
   ): AsyncIterable<ProviderStreamEvent> {
+    const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
+    if (!selectedBoundary) {
+      for await (const event of this.invokeStreamUnbounded(provider, request, options)) yield event;
+      return;
+    }
+    if (typeof selectedBoundary.executeStream !== "function") throw new ProviderRuntimeError("effectBoundary must expose executeStream for live provider streams");
+    const requestDigest = await digestJson({
+      provider,
+      model: request.model,
+      kind: options.invocationKind ?? "provider_stream",
+      messages: request.messages,
+      max_output_tokens: request.maxOutputTokens,
+      temperature: request.temperature ?? null,
+      require_json: request.requireJson ?? false,
+      response_schema: request.responseSchema ?? null,
+      tools: request.tools ?? [],
+      tool_choice: request.toolChoice ?? null,
+    });
+    const generatedKey = request.idempotencyKey ?? generatedProviderIdempotencyKey("aurora-provider-stream");
+    const callId = `provider-stream-${(await digestJson(generatedKey)).slice(0, 48)}`;
+    const executionId = options.execution?.state.execution_id ?? null;
+    const summary: JsonObject = {
+      provider,
+      model: request.model,
+      event_count: 0,
+      text_delta_bytes: 0,
+      tool_call_count: 0,
+      done_seen: false,
+    };
+    const observe = async (event: ProviderStreamEvent, eventCount: number): Promise<void> => {
+      summary.event_count = eventCount;
+      summary.text_delta_bytes = (summary.text_delta_bytes as number) + bytes(event.textDelta);
+      if (event.toolCall) summary.tool_call_count = (summary.tool_call_count as number) + 1;
+      summary.done_seen = Boolean(summary.done_seen || event.done);
+      for (const key of ["input_tokens", "output_tokens", "total_tokens"] as const) {
+        const value = event.usage[key];
+        if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) summary[key] = value;
+      }
+      if (event.requestId) summary.request_id_digest = await digestJson(event.requestId);
+    };
+    const project = (base: JsonObject): JsonObject => ({ ...summary, event_count: base.event_count, completed: true });
+    const stream = selectedBoundary.executeStream(
+      {
+        execution_id: executionId,
+        tool: `provider.${provider}.stream`,
+        call_id: callId,
+        risk_class: "provider_invocation",
+        arguments: {
+          provider,
+          model: request.model,
+          kind: options.invocationKind ?? "provider_stream",
+          request_digest: requestDigest,
+          requested_output_tokens: request.maxOutputTokens,
+          tool_count: request.tools?.length ?? 0,
+          idempotency_key_present: request.idempotencyKey !== undefined,
+        },
+      },
+      async (context) => this.invokeStreamUnbounded(provider, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, options),
+      { execution: options.execution, summaryProjector: project, observe, definiteFailure: providerEffectFailureIsDefinite },
+    );
+    for await (const event of stream) yield event;
+  }
+
+  private async *invokeStreamUnbounded(
+    provider: string,
+    request: ProviderRequest,
+    options: ProviderInvocationOptions = {},
+  ): AsyncIterable<ProviderStreamEvent> {
     const config = this.requireProvider(provider);
     validateRequest(request);
     validateStructuredOutputSupport(config, request);
@@ -2722,7 +2790,9 @@ export class LLMRuntime {
       let model = dispatchedRequest.model;
       let requestId: string | null = null;
       let done = false;
-      for await (const event of this.invokeStream(provider, dispatchedRequest, { ...options, effectBoundary: undefined })) {
+      // collectStream owns the response-level effect boundary below; do not nest a second
+      // stream boundary around the same provider dispatch.
+      for await (const event of this.invokeStreamUnbounded(provider, dispatchedRequest, options)) {
         text.push(event.textDelta);
         if (event.toolCall) calls.push(event.toolCall);
         usage = { ...usage, ...event.usage };

@@ -2180,6 +2180,7 @@ export {
   AutonomousEffectExecutionError,
   AutonomousEffectPersistenceCoordinator,
   AutonomousEffectPolicyError,
+  AutonomousProviderEffectResolver,
   AutonomousEffectReconciliationRequiredError,
   InMemoryAutonomousEffectJournal,
   JsonAutonomousEffectSnapshotPersistence,

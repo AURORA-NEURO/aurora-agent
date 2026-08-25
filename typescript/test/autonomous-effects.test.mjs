@@ -6,6 +6,7 @@ import {
   AutonomousEffectBoundary,
   AutonomousEffectPersistenceCoordinator,
   AutonomousEffectReconciliationRequiredError,
+  AutonomousProviderEffectResolver,
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
   InMemoryAutonomousEffectJournal,
@@ -122,6 +123,25 @@ test("uncertain effects refuse replay until a resolver confirms the external out
   assert.equal(resumedExecution.state.status, "running");
   assert.equal((await journal.get(effectId)).status, "reconciled");
   assert.equal((await journal.events({ effectId })).at(-1).event.status, "reconciled");
+});
+
+test("provider effect resolver receives an explicit transient key without fabricating a response", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const boundary = new AutonomousEffectBoundary({ journal });
+  const request = { tool: "provider.offline.invoke", call_id: "provider-call-1", risk_class: "provider_invocation", arguments: { request_digest: digest("a") } };
+  await assert.rejects(() => boundary.execute(request, async () => { throw new Error("lost"); }, { cacheResult: false }), AutonomousEffectReconciliationRequiredError);
+  let observed;
+  const resolver = new AutonomousProviderEffectResolver((provider, operation, key, record) => {
+    observed = { provider, operation, key, hasArguments: Object.hasOwn(record, "arguments") };
+    return { status: "completed", result: { status_code: 200, event_count: 2 } };
+  });
+  const effectId = await boundary.effectId(request);
+  const record = await boundary.reconcile(effectId, resolver, { idempotencyKey: "caller-owned-status-key" });
+  assert.equal(record.status, "reconciled");
+  assert.deepEqual(observed, { provider: "offline", operation: "invoke", key: "caller-owned-status-key", hasArguments: false });
+  const encoded = JSON.stringify(await journal.snapshot());
+  assert.doesNotMatch(encoded, /caller-owned-status-key/);
+  await assert.rejects(() => boundary.execute(request, async () => ({ duplicate: true }), { cacheResult: false }), AutonomousEffectReconciliationRequiredError);
 });
 
 test("custom tool adapters receive approval before the idempotency-aware executor", async () => {

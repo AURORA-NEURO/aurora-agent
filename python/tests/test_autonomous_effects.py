@@ -11,6 +11,7 @@ from prism_sdk import (
     AutonomousDomainToolRuntime,
     AutonomousEffectBoundary,
     AutonomousEffectReconciliationRequiredError,
+    AutonomousProviderEffectResolver,
     AutonomousExecutionController,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
@@ -101,6 +102,34 @@ def test_uncertain_effect_requires_resolution_before_retry(tmp_path) -> None:
     assert effect_journal.get(boundary.effect_id(request)).status == "reconciled"  # type: ignore[union-attr]
 
 
+def test_provider_effect_resolver_uses_explicit_key_without_persisting_it_or_fabricating_a_response() -> None:
+    journal = InMemoryAutonomousEffectJournal()
+    boundary = AutonomousEffectBoundary(journal=journal)
+    request = {
+        "tool": "provider.offline.invoke",
+        "call_id": "provider-call-1",
+        "risk_class": "provider_invocation",
+        "arguments": {"request_digest": "a" * 64},
+    }
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        boundary.execute(request, lambda _context: (_ for _ in ()).throw(RuntimeError("lost")), cache_result=False)
+    observed: dict[str, object] = {}
+
+    def lookup(provider: str, operation: str, key: str, record: object) -> dict[str, object]:
+        observed.update(provider=provider, operation=operation, key=key, has_arguments=hasattr(record, "arguments"))
+        return {"status": "completed", "result": {"status_code": 200, "event_count": 2}}
+
+    resolver = AutonomousProviderEffectResolver(lookup)
+    effect_id = boundary.effect_id(request)
+    record = boundary.reconcile(effect_id, resolver, idempotency_key="caller-owned-status-key")
+    assert record.status == "reconciled"
+    assert observed == {"provider": "offline", "operation": "invoke", "key": "caller-owned-status-key", "has_arguments": False}
+    encoded = json.dumps(journal.snapshot().to_dict(), sort_keys=True)
+    assert "caller-owned-status-key" not in encoded
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        boundary.execute(request, lambda _context: {"duplicate": True}, cache_result=False)
+
+
 def test_effect_snapshot_persistence_is_canonical_and_cas_fenced() -> None:
     source = InMemoryAutonomousEffectJournal(clock=lambda: 1)
     boundary = AutonomousEffectBoundary(journal=source)
@@ -150,4 +179,3 @@ def test_effect_boundary_is_shared_by_every_builtin_domain() -> None:
         assert boundary.journal.events()[-1].event.status == "completed", domain
         assert "committed" not in json.dumps(boundary.journal.snapshot().to_dict())
     assert len(executions) == len(AUTONOMOUS_DOMAIN_NAMES)
-

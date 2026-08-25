@@ -4524,9 +4524,47 @@ The failure policy distinguishes a definite provider refusal (for example a non-
 and malformed post-dispatch outcomes remain `uncertain` and surface as
 `AutonomousEffectReconciliationRequiredError`. This preserves normal model-selection/failover
 classification where the runtime knows the provider rejected the request while preventing a
-restart from treating an unknown remote outcome as a fresh model attempt. Direct low-level
-stream iterators remain caller-owned; applications that need the crash-safe provider boundary
-should use `collectStream()` (or the autonomous tool-loop's collected stream mode).
+restart from treating an unknown remote outcome as a fresh model attempt.
+
+Direct low-level stream iterators now use the same crash-safe protocol in both SDKs. The iterator
+is lazy, so an application that never consumes it creates no dispatch record. On first consumption
+the boundary writes `prepared`, `dispatching`, and `dispatched` before entering the provider
+iterator. It forwards each transient event without retaining it, calls an optional observer with
+the event and a count for caller-owned bounded accounting, and writes a digest of a safe summary
+only after normal exhaustion. A consumer that closes the iterator, a stream transport that fails
+after yielding deltas, or a process that disappears before exhaustion leaves the effect uncertain.
+Completed streams are never replayed because deltas are intentionally not cached; applications
+must use a provider status endpoint or durable outbox to reconcile the remote outcome.
+
+Provider reconciliation can be made explicit without widening the journal's data surface. The
+`AutonomousProviderEffectResolver` adapter accepts a caller-owned lookup with
+`(provider, operation, idempotency_key, metadata_only_record)` and validates that it is resolving
+only `provider.<name>.invoke` or `provider.<name>.stream` effects. If the original provider key was
+caller-supplied, pass it transiently to `boundary.reconcile(..., idempotency_key=...)` in Python or
+`boundary.reconcile(..., { idempotencyKey: ... })` in TypeScript. The key is used for the status
+lookup but only its digest is retained. A resolver-confirmed provider completion supplies safe
+metadata for reconciliation; it does not fabricate a `ProviderResponse` or authorize a duplicate
+billable request. A fresh dispatch is allowed only when the resolver returns `not_found` with
+`retry_safe=true`.
+
+```python
+from prism_sdk import AutonomousProviderEffectResolver
+
+resolver = AutonomousProviderEffectResolver(
+    lambda provider, operation, key, record: provider_status_store.lookup(
+        provider=provider,
+        operation=operation,
+        idempotency_key=key,
+        effect_id=record.effect_id,
+    )
+)
+boundary.reconcile(effect_id, resolver, idempotency_key=original_provider_key)
+```
+
+The same adapter and key handoff are available in TypeScript. This makes restart recovery an
+actual provider integration seam rather than an implicit retry policy: the embedding application
+decides how to query each provider, while the SDK enforces redaction, identity, lifecycle order,
+and the no-blind-replay invariant across every built-in domain and cross-domain run.
 
 The TypeScript high-level result also exposes this audit seam directly. A completed
 `AutonomousRuntime.invoke()`, `invokeToolLoop()`, or `AutonomousAgent.run()` result carries an

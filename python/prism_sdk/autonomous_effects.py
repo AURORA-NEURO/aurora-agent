@@ -19,7 +19,7 @@ import json
 import math
 import threading
 import time
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
 from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
@@ -610,6 +610,32 @@ class AutonomousEffectResolver(Protocol):
     def resolve(self, record: AutonomousEffectRecord) -> AutonomousEffectResolution | Mapping[str, Any]: ...
 
 
+class AutonomousProviderEffectResolver:
+    """Adapt a caller-owned provider status lookup to the metadata-only effect resolver.
+
+    ``lookup`` receives the provider, operation (``invoke`` or ``stream``), the transient
+    idempotency key, and an immutable metadata-only record.  It is the application’s job to call
+    the provider's status/introspection endpoint or durable outbox.  The key is never journaled;
+    only its digest is retained by :class:`AutonomousEffectBoundary`.
+    """
+
+    def __init__(self, lookup: Callable[[str, str, str, AutonomousEffectRecord], AutonomousEffectResolution | Mapping[str, Any]]) -> None:
+        if not callable(lookup):
+            raise AutonomousEffectError("provider effect lookup must be callable")
+        self._lookup = lookup
+
+    def resolve(self, record: AutonomousEffectRecord) -> AutonomousEffectResolution | Mapping[str, Any]:
+        return self.resolve_with_key(record, f"aurora-effect-{record.effect_id}")
+
+    def resolve_with_key(self, record: AutonomousEffectRecord, idempotency_key: str) -> AutonomousEffectResolution | Mapping[str, Any]:
+        parts = record.tool.split(".")
+        if len(parts) != 3 or parts[0] != "provider" or not parts[1] or parts[2] not in {"invoke", "stream"}:
+            raise AutonomousEffectPolicyError("provider effect resolver received a non-provider effect")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key.encode("utf-8")) > 512:
+            raise AutonomousEffectError("provider effect idempotency key is outside its bounded contract")
+        return self._lookup(parts[1], parts[2], idempotency_key, record)
+
+
 def _failure_class(error: BaseException) -> str:
     name = type(error).__name__
     return name if 1 <= len(name) <= 256 and all(character in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-" for character in name) else "effect_execution_error"
@@ -694,8 +720,55 @@ class AutonomousEffectBoundary:
                 definite_failure,
             )
 
-    def reconcile(self, effect_id: str, resolver: AutonomousEffectResolver | None = None) -> AutonomousEffectRecord:
+    def execute_stream(
+        self,
+        request: AutonomousEffectRequest | Mapping[str, Any],
+        producer: Callable[[AutonomousEffectExecutionContext], Iterable[Any]],
+        *,
+        execution: Any | None = None,
+        summary_projector: Callable[[Mapping[str, Any]], Any] | None = None,
+        observe: Callable[[Any, int], None] | None = None,
+        definite_failure: Callable[[BaseException], bool] | None = None,
+    ) -> Iterator[Any]:
+        """Return a live stream guarded by the same durable effect protocol as ``execute``.
+
+        The producer is intentionally lazy: no dispatch markers are written until the caller
+        requests the first item.  Once iteration begins, ``dispatched`` is persisted before the
+        producer is entered.  Event values are yielded to the caller but never retained by this
+        boundary.  ``observe`` may update caller-owned bounded accounting, and
+        ``summary_projector`` receives only ``event_count`` and ``completed`` at normal
+        exhaustion.  Closing or abandoning the iterator is conservatively treated as uncertain.
+        """
+
+        if not callable(producer):
+            raise AutonomousEffectError("effect stream producer must be callable")
+        if summary_projector is not None and not callable(summary_projector):
+            raise AutonomousEffectError("effect stream summary_projector must be callable or None")
+        if observe is not None and not callable(observe):
+            raise AutonomousEffectError("effect stream observe must be callable or None")
+        if definite_failure is not None and not callable(definite_failure):
+            raise AutonomousEffectError("effect stream definite_failure must be callable or None")
+        normalized = self.normalize_request(request)
+        effect_id = self.effect_id(normalized)
+
+        def guarded() -> Iterator[Any]:
+            with self._exclusive(effect_id):
+                yield from self._execute_stream_exclusive(
+                    normalized,
+                    effect_id,
+                    producer,
+                    execution or self.execution,
+                    summary_projector,
+                    observe,
+                    definite_failure,
+                )
+
+        return guarded()
+
+    def reconcile(self, effect_id: str, resolver: AutonomousEffectResolver | None = None, *, idempotency_key: str | None = None) -> AutonomousEffectRecord:
         effect_id = _identifier("effect_id", effect_id, 128)
+        if idempotency_key is not None:
+            idempotency_key = _text("effect idempotency_key", idempotency_key, 512)
         selected = resolver or self.resolver
         record = self.journal.get(effect_id)
         if record is None:
@@ -703,7 +776,7 @@ class AutonomousEffectBoundary:
         if selected is None or not callable(getattr(selected, "resolve", None)):
             raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), record.status)
         with self._exclusive(effect_id):
-            return self._reconcile_exclusive(record, selected, self.execution)
+            return self._reconcile_exclusive(record, selected, self.execution, idempotency_key=idempotency_key)
 
     def authorize_and_execute(self, calls: Sequence[ProviderToolCall], *, approve: Callable[[ProviderToolCall], bool], execute: Callable[..., Any], execution_id: str | None = None, execution: Any | None = None, is_read_only: Callable[[ProviderToolCall], bool] | None = None, risk_class: Callable[[ProviderToolCall], str] | None = None) -> tuple[ProviderToolResult, ...]:
         if isinstance(calls, (str, bytes)) or not isinstance(calls, Sequence) or len(calls) > 128:
@@ -752,18 +825,18 @@ class AutonomousEffectBoundary:
             if record.tool != request.tool or record.call_id != request.call_id or record.arguments_digest != arguments_digest:
                 raise AutonomousEffectPolicyError("effect id collides with different call metadata")
             if record.status in {"completed", "reconciled"}:
-                if effect_id in self._result_cache:
+                if cache_result and effect_id in self._result_cache:
                     return _clone(self._result_cache[effect_id])
                 if self.resolver is None:
                     raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), record.status)
                 record = self._reconcile_exclusive(record, self.resolver, execution)
-                if record.status in {"completed", "reconciled"} and effect_id in self._result_cache:
+                if cache_result and record.status in {"completed", "reconciled"} and effect_id in self._result_cache:
                     return _clone(self._result_cache[effect_id])
             if record.status in {"dispatching", "dispatched", "uncertain"}:
                 if self.resolver is None:
                     raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), record.status)
                 record = self._reconcile_exclusive(record, self.resolver, execution)
-                if record.status in {"completed", "reconciled"} and effect_id in self._result_cache:
+                if cache_result and record.status in {"completed", "reconciled"} and effect_id in self._result_cache:
                     return _clone(self._result_cache[effect_id])
                 if record.status != "prepared":
                     raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), record.status)
@@ -798,11 +871,86 @@ class AutonomousEffectBoundary:
                 raise
             raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), "uncertain") from error
 
-    def _reconcile_exclusive(self, record: AutonomousEffectRecord, resolver: AutonomousEffectResolver, execution: Any | None = None) -> AutonomousEffectRecord:
+    def _execute_stream_exclusive(
+        self,
+        request: AutonomousEffectRequest,
+        effect_id: str,
+        producer: Callable[[AutonomousEffectExecutionContext], Iterable[Any]],
+        execution: Any | None,
+        summary_projector: Callable[[Mapping[str, Any]], Any] | None,
+        observe: Callable[[Any, int], None] | None,
+        definite_failure: Callable[[BaseException], bool] | None,
+    ) -> Iterator[Any]:
+        record = self.journal.get(effect_id)
+        arguments_digest = content_digest(dict(request.arguments))
+        if record is not None:
+            if record.tool != request.tool or record.call_id != request.call_id or record.arguments_digest != arguments_digest:
+                raise AutonomousEffectPolicyError("effect id collides with different call metadata")
+            # A completed live stream is not replayable: its transient deltas were deliberately
+            # never cached.  Even a resolver-confirmed completion must be surfaced to the caller
+            # so it can decide how to obtain a fresh provider result.
+            if record.status in {"completed", "reconciled"}:
+                raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), record.status)
+            if record.status in {"dispatching", "dispatched", "uncertain"}:
+                if self.resolver is None:
+                    raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), record.status)
+                record = self._reconcile_exclusive(record, self.resolver, execution)
+                if record.status != "prepared":
+                    raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), record.status)
+            if record.status == "failed":
+                raise AutonomousEffectExecutionError(effect_id, record.failure_class or "previous_effect_failure")
+
+        key_digest = content_digest(self.idempotency_key(effect_id))
+        attempt = (record.dispatch_attempt if record is not None else 0) + 1
+        base = {
+            "execution_id": request.execution_id,
+            "tool": request.tool,
+            "call_id": request.call_id,
+            "risk_class": request.risk_class,
+            "arguments_digest": arguments_digest,
+            "idempotency_key_digest": key_digest,
+            "effect_id": effect_id,
+            "dispatch_attempt": attempt,
+        }
+        self._transition({**base, "status": "prepared", "reason": None}, execution)
+        self._transition({**base, "status": "dispatching"}, execution)
+        self._transition({**base, "status": "dispatched"}, execution)
+        context = AutonomousEffectExecutionContext(effect_id, request.execution_id, request.tool, request.call_id, request.risk_class, self.idempotency_key(effect_id), attempt)
+        event_count = 0
+        try:
+            stream = producer(context)
+            if isinstance(stream, (str, bytes)) or not isinstance(stream, Iterable):
+                raise AutonomousEffectError("effect stream producer must return an iterable")
+            for item in stream:
+                event_count += 1
+                if observe is not None:
+                    observe(item, event_count)
+                yield item
+            summary_input = {"event_count": event_count, "completed": True}
+            projected = summary_input if summary_projector is None else summary_projector(summary_input)
+            _assert_metadata(projected, name="effect stream summary", maximum=MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES)
+            self._transition({**base, "status": "completed", "result_digest": content_digest(projected)}, execution)
+        except BaseException as error:
+            try:
+                is_definite_failure = bool(definite_failure(error)) if definite_failure is not None else False
+            except Exception:
+                is_definite_failure = False
+            if is_definite_failure:
+                self._transition({**base, "status": "failed", "failure_class": _failure_class(error), "reason": _failure_reason(error)}, execution)
+                raise
+            self._transition({**base, "status": "uncertain", "failure_class": _failure_class(error), "reason": _failure_reason(error)}, execution)
+            if isinstance(error, GeneratorExit):
+                return
+            if isinstance(error, AutonomousEffectError):
+                raise
+            raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), "uncertain") from error
+
+    def _reconcile_exclusive(self, record: AutonomousEffectRecord, resolver: AutonomousEffectResolver, execution: Any | None = None, *, idempotency_key: str | None = None) -> AutonomousEffectRecord:
         # The resolver receives an immutable, metadata-only record.  It can inspect the effect
         # identity and digests without gaining access to the original arguments or result.
         try:
-            resolution_raw = resolver.resolve(record)
+            resolve_with_key = getattr(resolver, "resolve_with_key", None)
+            resolution_raw = resolve_with_key(record, idempotency_key or self.idempotency_key(record.effect_id)) if callable(resolve_with_key) else resolver.resolve(record)
         except AutonomousEffectError:
             raise
         except Exception as error:
@@ -875,5 +1023,5 @@ class AutonomousEffectBoundary:
 
 
 __all__ = [
-    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
+    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectResolver", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
 ]

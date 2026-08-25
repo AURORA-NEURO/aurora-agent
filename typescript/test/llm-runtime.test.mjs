@@ -638,6 +638,59 @@ test("provider effect boundary preserves definite local provider refusals", asyn
   assert.equal((await journal.events()).at(-1).event.status, "failed");
 });
 
+test("live provider stream boundary reconciles partial consumption without retaining deltas", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("offline-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "offline-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "private delta", requestId: null, usage: {}, done: false };
+      throw new Error("connection lost after first delta");
+    },
+  });
+  const input = request("stream-model", { idempotencyKey: "stream-owner-key" });
+  await assert.rejects(async () => {
+    for await (const _event of runtime.invokeStream("offline-stream", input)) { /* consume */ }
+  }, AutonomousEffectReconciliationRequiredError);
+  assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "uncertain"]);
+  const encoded = JSON.stringify(await journal.snapshot());
+  assert.doesNotMatch(encoded, /Return a bounded answer\.|private delta/);
+});
+
+test("live provider stream boundary completes only after exhaustion and blocks replay", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("offline-complete-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "offline-complete-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "bounded", requestId: null, usage: {}, done: false };
+      yield { provider: "offline-complete-stream", model: input.model, sequence: 1, eventType: "done", textDelta: "", requestId: null, usage: {}, done: true };
+    },
+  });
+  const input = request("stream-model", { idempotencyKey: "stream-complete-key" });
+  const events = [];
+  for await (const event of runtime.invokeStream("offline-complete-stream", input)) events.push(event);
+  assert.deepEqual(events.map((event) => event.textDelta), ["bounded", ""]);
+  assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "completed"]);
+  await assert.rejects(async () => {
+    for await (const _event of runtime.invokeStream("offline-complete-stream", input)) { /* replay */ }
+  }, AutonomousEffectReconciliationRequiredError);
+});
+
+test("closing a dispatched live provider stream records uncertainty", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("offline-abandoned-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "offline-abandoned-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "first", requestId: null, usage: {}, done: false };
+      yield { provider: "offline-abandoned-stream", model: input.model, sequence: 1, eventType: "text", textDelta: "second", requestId: null, usage: {}, done: false };
+    },
+  });
+  const iterator = runtime.invokeStream("offline-abandoned-stream", request("stream-model", { idempotencyKey: "stream-abandoned-key" }))[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  assert.equal(first.done, false);
+  await iterator.return?.();
+  assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "uncertain"]);
+});
+
 test("authorized tool loops append tool results and stop at the final answer", async () => {
   const bodies = [];
   let call = 0;

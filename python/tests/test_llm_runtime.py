@@ -114,6 +114,88 @@ def test_provider_effect_boundary_keeps_definite_http_refusal_as_provider_error(
     assert journal.events()[-1].event.status == "failed"
 
 
+def test_live_provider_stream_boundary_reconciles_partial_consumption_without_retaining_deltas() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 12)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    runtime = LLMRuntime(effect_boundary=boundary)
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(
+            provider="offline-stream",
+            model=request.model,
+            sequence=0,
+            event_type="text",
+            text_delta="private delta",
+        )
+        raise RuntimeError("connection lost after first delta")
+
+    runtime.register_in_memory_provider("offline-stream", lambda _request: "unused", stream_handler=stream_handler)
+    request = ProviderRequest(
+        model="stream-model",
+        messages=({"role": "user", "content": "private prompt"},),
+        idempotency_key="stream-owner-key",
+    )
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        list(runtime.invoke_stream("offline-stream", request))
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "uncertain"]
+    encoded = json.dumps(journal.snapshot().to_dict(), sort_keys=True)
+    assert "private prompt" not in encoded
+    assert "private delta" not in encoded
+
+
+def test_live_provider_stream_boundary_completes_only_after_exhaustion_and_blocks_replay() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 13)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    runtime = LLMRuntime(effect_boundary=boundary)
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(
+            provider="offline-complete-stream",
+            model=request.model,
+            sequence=0,
+            event_type="text",
+            text_delta="bounded",
+        )
+        yield ProviderStreamEvent(
+            provider="offline-complete-stream",
+            model=request.model,
+            sequence=1,
+            event_type="done",
+            done=True,
+        )
+
+    runtime.register_in_memory_provider("offline-complete-stream", lambda _request: "unused", stream_handler=stream_handler)
+    request = ProviderRequest(
+        model="stream-model",
+        messages=({"role": "user", "content": "prompt"},),
+        idempotency_key="stream-complete-key",
+    )
+    events = list(runtime.invoke_stream("offline-complete-stream", request))
+    assert [event.text_delta for event in events] == ["bounded", ""]
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "completed"]
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        list(runtime.invoke_stream("offline-complete-stream", request))
+
+
+def test_live_provider_stream_boundary_marks_abandoned_iterator_uncertain() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 14)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    runtime = LLMRuntime(effect_boundary=boundary)
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(provider="offline-abandoned-stream", model=request.model, sequence=0, event_type="text", text_delta="first")
+        yield ProviderStreamEvent(provider="offline-abandoned-stream", model=request.model, sequence=1, event_type="text", text_delta="second")
+
+    runtime.register_in_memory_provider("offline-abandoned-stream", lambda _request: "unused", stream_handler=stream_handler)
+    iterator = runtime.invoke_stream(
+        "offline-abandoned-stream",
+        ProviderRequest(model="stream-model", messages=({"role": "user", "content": "prompt"},), idempotency_key="stream-abandoned-key"),
+    )
+    next(iterator)
+    iterator.close()
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "uncertain"]
+
+
 class _ProviderHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler protocol
         length = int(self.headers.get("Content-Length", "0"))

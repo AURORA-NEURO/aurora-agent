@@ -3092,8 +3092,11 @@ class LLMRuntime:
         their agent and runtime.
         """
 
-        if effect_boundary is not None and not callable(getattr(effect_boundary, "execute", None)):
-            raise ProviderError("effect_boundary must expose an execute method")
+        if effect_boundary is not None and (
+            not callable(getattr(effect_boundary, "execute", None))
+            or not callable(getattr(effect_boundary, "execute_stream", None))
+        ):
+            raise ProviderError("effect_boundary must expose execute and execute_stream methods")
         if self._effect_boundary is not None and effect_boundary is not self._effect_boundary:
             raise ProviderError("a different effect_boundary is already bound to this runtime")
         self._effect_boundary = effect_boundary
@@ -3624,6 +3627,110 @@ class LLMRuntime:
         credential: CredentialHandle | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "provider_stream",
+        effect_boundary: Any | None = None,
+        effect_execution: Any | None = None,
+    ) -> Iterator[ProviderStreamEvent]:
+        """Open a provider stream with a metadata-only crash-safe dispatch boundary.
+
+        The returned iterator is live and transient.  When an effect boundary is bound, it
+        persists ``dispatched`` before the underlying iterator is entered and persists only a
+        bounded completion summary.  Raw deltas never enter the effect journal.
+        """
+
+        selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
+        if selected_boundary is None:
+            return self._invoke_stream_unbounded(
+                provider,
+                request,
+                credential=credential,
+                invocation_observer=invocation_observer,
+                invocation_kind=invocation_kind,
+            )
+        if not callable(getattr(selected_boundary, "execute_stream", None)):
+            raise ProviderError("effect_boundary must expose execute_stream for live provider streams")
+        request_digest = content_digest({
+            "provider": provider,
+            "model": request.model,
+            "kind": invocation_kind,
+            "messages": request.messages,
+            "max_output_tokens": request.max_output_tokens,
+            "temperature": request.temperature,
+            "require_json": request.require_json,
+            "response_schema": request.response_schema,
+            "tools": [tool.to_dict() for tool in request.tools],
+            "tool_choice": request.tool_choice,
+        })
+        generated_key = request.idempotency_key or f"aurora-provider-stream-{uuid.uuid4().hex}"
+        call_id = f"provider-stream-{content_digest(generated_key)[:48]}"
+        boundary_execution = effect_execution or getattr(selected_boundary, "execution", None) or getattr(invocation_observer, "controller", None)
+        state = getattr(getattr(boundary_execution, "state", None), "execution_id", None)
+        effect_request = {
+            "execution_id": state,
+            "tool": f"provider.{provider}.stream",
+            "call_id": call_id,
+            "risk_class": "provider_invocation",
+            "arguments": {
+                "provider": provider,
+                "model": request.model,
+                "kind": invocation_kind,
+                "request_digest": request_digest,
+                "requested_output_tokens": request.max_output_tokens,
+                "tool_count": len(request.tools),
+                "idempotency_key_present": request.idempotency_key is not None,
+            },
+        }
+        summary: dict[str, Any] = {
+            "provider": provider,
+            "model": request.model,
+            "event_count": 0,
+            "text_delta_bytes": 0,
+            "tool_call_count": 0,
+            "done_seen": False,
+        }
+
+        def observe(event: ProviderStreamEvent, event_count: int) -> None:
+            summary["event_count"] = event_count
+            summary["text_delta_bytes"] += len(event.text_delta.encode("utf-8"))
+            if event.tool_call is not None:
+                summary["tool_call_count"] += 1
+            summary["done_seen"] = bool(summary["done_seen"] or event.done)
+            for key in ("input_tokens", "output_tokens", "total_tokens"):
+                value = event.usage.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    summary[key] = value
+            if event.request_id is not None:
+                summary["request_id_digest"] = content_digest(event.request_id)
+
+        def project(base: Mapping[str, Any]) -> Mapping[str, Any]:
+            return {**summary, "event_count": base["event_count"], "completed": True}
+
+        def dispatch(context: Any) -> Iterable[ProviderStreamEvent]:
+            dispatched_request = request if request.idempotency_key is not None else replace(request, idempotency_key=context.idempotency_key)
+            return self._invoke_stream_unbounded(
+                provider,
+                dispatched_request,
+                credential=credential,
+                invocation_observer=invocation_observer,
+                invocation_kind=invocation_kind,
+            )
+
+        return selected_boundary.execute_stream(
+            effect_request,
+            dispatch,
+            execution=boundary_execution,
+            summary_projector=project,
+            observe=observe,
+            definite_failure=_provider_effect_failure_is_definite,
+        )
+
+    def _invoke_stream_unbounded(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "provider_stream",
     ) -> Iterator[ProviderStreamEvent]:
         """Open one bounded SSE provider invocation.
 
@@ -3700,7 +3807,9 @@ class LLMRuntime:
             model = dispatched_request.model
             event_count = 0
             terminal_type: str | None = None
-            for event in self.invoke_stream(provider, dispatched_request, credential=credential):
+            # collect_stream owns the response-level effect boundary below; avoid nesting a
+            # second stream boundary around the same provider dispatch.
+            for event in self._invoke_stream_unbounded(provider, dispatched_request, credential=credential):
                 event_count += 1
                 if event_count > MAX_STREAM_EVENTS:
                     raise ProviderError("provider stream exceeded max event count")

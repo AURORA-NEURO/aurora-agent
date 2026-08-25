@@ -4,6 +4,8 @@ import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import type { JsonObject, JsonValue } from "./types.js";
 import type { ProviderToolCall } from "./llm.js";
 
+const utf8Bytes = (value: string): number => new TextEncoder().encode(value).byteLength;
+
 /** Metadata-only effect state; raw arguments, results, credentials, and provider bodies never enter this ledger. */
 export const AUTONOMOUS_EFFECT_SCHEMA = "bioprism-typescript-autonomous-effect/0.1" as const;
 export const AUTONOMOUS_EFFECT_EVENT_SCHEMA = "bioprism-typescript-autonomous-effect-event/0.1" as const;
@@ -166,6 +168,31 @@ export interface AutonomousEffectResolution {
 
 export interface AutonomousEffectResolver {
   resolve(record: AutonomousEffectRecord): Promise<AutonomousEffectResolution> | AutonomousEffectResolution;
+}
+
+/**
+ * Adapt a caller-owned provider status lookup to the metadata-only effect resolver.
+ * The idempotency key is supplied transiently to the lookup and is never written to the ledger;
+ * only its digest is retained by the effect boundary.
+ */
+export class AutonomousProviderEffectResolver implements AutonomousEffectResolver {
+  private readonly lookup: (provider: string, operation: "invoke" | "stream", idempotencyKey: string, record: AutonomousEffectRecord) => Promise<AutonomousEffectResolution> | AutonomousEffectResolution;
+
+  constructor(lookup: (provider: string, operation: "invoke" | "stream", idempotencyKey: string, record: AutonomousEffectRecord) => Promise<AutonomousEffectResolution> | AutonomousEffectResolution) {
+    if (typeof lookup !== "function") throw new AutonomousEffectError("provider effect lookup must be callable");
+    this.lookup = lookup;
+  }
+
+  resolve(record: AutonomousEffectRecord): Promise<AutonomousEffectResolution> | AutonomousEffectResolution {
+    return this.resolveWithKey(record, `aurora-effect-${record.effect_id}`);
+  }
+
+  resolveWithKey(record: AutonomousEffectRecord, idempotencyKey: string): Promise<AutonomousEffectResolution> | AutonomousEffectResolution {
+    const parts = record.tool.split(".");
+    if (parts.length !== 3 || parts[0] !== "provider" || !parts[1] || (parts[2] !== "invoke" && parts[2] !== "stream")) throw new AutonomousEffectPolicyError("provider effect resolver received a non-provider effect");
+    if (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || utf8Bytes(idempotencyKey) > 512) throw new AutonomousEffectError("provider effect idempotency key is outside its bounded contract");
+    return this.lookup(parts[1], parts[2], idempotencyKey, record);
+  }
 }
 
 export interface AutonomousEffectExecutionContext {
@@ -565,12 +592,37 @@ export class AutonomousEffectBoundary {
     return this.exclusive(effectId, async () => this.executeExclusive(normalized, effectId, executor, options.execution ?? this.execution, options.resultProjector, options.cacheResult ?? true, options.definiteFailure));
   }
 
-  async reconcile(effectId: string, resolver: AutonomousEffectResolver = this.resolver as AutonomousEffectResolver): Promise<AutonomousEffectRecord> {
+  async *executeStream<T>(
+    request: AutonomousEffectRequest,
+    producer: (context: AutonomousEffectExecutionContext) => AsyncIterable<T> | Iterable<T> | Promise<AsyncIterable<T> | Iterable<T>>,
+    options: {
+      execution?: AutonomousExecutionController;
+      summaryProjector?: (summary: JsonObject) => JsonValue | Promise<JsonValue>;
+      observe?: (item: T, eventCount: number) => void | Promise<void>;
+      definiteFailure?: (error: unknown) => boolean | Promise<boolean>;
+    } = {},
+  ): AsyncIterable<T> {
+    if (typeof producer !== "function") throw new AutonomousEffectError("effect stream producer must be callable");
+    if (options.summaryProjector !== undefined && typeof options.summaryProjector !== "function") throw new AutonomousEffectError("effect stream summaryProjector must be callable or undefined");
+    if (options.observe !== undefined && typeof options.observe !== "function") throw new AutonomousEffectError("effect stream observe must be callable or undefined");
+    if (options.definiteFailure !== undefined && typeof options.definiteFailure !== "function") throw new AutonomousEffectError("effect stream definiteFailure must be callable or undefined");
+    const normalized = this.normalizeRequest(request);
+    const effectId = await this.effectId(normalized);
+    const release = await this.acquireExclusive(effectId);
+    try {
+      for await (const item of this.executeStreamExclusive(normalized, effectId, producer, options.execution ?? this.execution, options.summaryProjector, options.observe, options.definiteFailure)) yield item;
+    } finally {
+      release();
+    }
+  }
+
+  async reconcile(effectId: string, resolver: AutonomousEffectResolver = this.resolver as AutonomousEffectResolver, options: { idempotencyKey?: string } = {}): Promise<AutonomousEffectRecord> {
     boundedIdentifier("effect_id", effectId, 128);
+    if (options.idempotencyKey !== undefined && (typeof options.idempotencyKey !== "string" || !options.idempotencyKey.trim() || utf8Bytes(options.idempotencyKey) > 512)) throw new AutonomousEffectError("effect idempotencyKey is outside its bounded contract");
     if (!resolver || typeof resolver.resolve !== "function") throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), "uncertain");
     const record = await this.journal.get(effectId);
     if (!record) throw new AutonomousEffectError(`effect ${effectId} is not present in the effect ledger`);
-    return this.exclusive(effectId, async () => this.reconcileExclusive(record, resolver));
+    return this.exclusive(effectId, async () => this.reconcileExclusive(record, resolver, options.idempotencyKey));
   }
 
   async authorizeAndExecute(
@@ -627,12 +679,12 @@ export class AutonomousEffectBoundary {
     if (record) {
       if (record.status === "completed" || record.status === "reconciled") {
         const cached = this.resultCache.get(effectId);
-        if (cached !== undefined) return clone(cached) as T;
+        if (cacheResult && cached !== undefined) return clone(cached) as T;
         if (!this.resolver) throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), record.status);
         record = await this.reconcileExclusive(record, this.resolver);
         if (record.status === "reconciled" || record.status === "completed") {
           const resolved = this.resultCache.get(effectId);
-          if (resolved !== undefined) return clone(resolved) as T;
+          if (cacheResult && resolved !== undefined) return clone(resolved) as T;
         }
       }
       if (["dispatching", "dispatched", "uncertain"].includes(record.status)) {
@@ -640,7 +692,7 @@ export class AutonomousEffectBoundary {
         record = await this.reconcileExclusive(record, this.resolver);
         if (record.status === "reconciled" || record.status === "completed") {
           const resolved = this.resultCache.get(effectId);
-          if (resolved !== undefined) return clone(resolved) as T;
+          if (cacheResult && resolved !== undefined) return clone(resolved) as T;
         }
         if (record.status !== "prepared") throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), record.status);
       }
@@ -679,10 +731,11 @@ export class AutonomousEffectBoundary {
     }
   }
 
-  private async reconcileExclusive(record: AutonomousEffectRecord, resolver: AutonomousEffectResolver): Promise<AutonomousEffectRecord> {
-    const resolution = await resolver.resolve(clone(record));
+  private async reconcileExclusive(record: AutonomousEffectRecord, resolver: AutonomousEffectResolver, idempotencyKey?: string): Promise<AutonomousEffectRecord> {
+    const resolveWithKey = (resolver as AutonomousEffectResolver & { resolveWithKey?: (record: AutonomousEffectRecord, idempotencyKey: string) => Promise<AutonomousEffectResolution> | AutonomousEffectResolution }).resolveWithKey;
+    const resolution = await (typeof resolveWithKey === "function" ? resolveWithKey.call(resolver, clone(record), idempotencyKey ?? this.idempotencyKey(record.effect_id)) : resolver.resolve(clone(record)));
     if (!isObject(resolution) || !["completed", "failed", "not_found", "unknown"].includes(resolution.status)) throw new AutonomousEffectError("effect resolver returned malformed status");
-    const idempotencyKey = this.idempotencyKey(record.effect_id);
+    const fallbackKey = this.idempotencyKey(record.effect_id);
     const base: AutonomousEffectRequest = { execution_id: record.execution_id, tool: record.tool, call_id: record.call_id, risk_class: record.risk_class, arguments: {} };
     if (resolution.status === "completed") {
       if (resolution.result === undefined) throw new AutonomousEffectError("completed effect resolution must include a result");
@@ -702,7 +755,7 @@ export class AutonomousEffectBoundary {
       await this.transition({ ...base, effect_id: record.effect_id, arguments_digest: record.arguments_digest, idempotency_key_digest: record.idempotency_key_digest, status: "prepared", dispatch_attempt: record.dispatch_attempt, reason: "resolver_confirmed_not_found_retry_safe" });
       return (await this.journal.get(record.effect_id))!;
     }
-    throw new AutonomousEffectReconciliationRequiredError(record.effect_id, idempotencyKey, record.status);
+    throw new AutonomousEffectReconciliationRequiredError(record.effect_id, fallbackKey, record.status);
   }
 
   private async transition(input: AutonomousEffectRequest & { effect_id: string; arguments_digest: string; idempotency_key_digest: string; status: AutonomousEffectStatus; dispatch_attempt: number; result_digest?: string | null; failure_class?: string | null; reason?: string | null }, execution?: AutonomousExecutionController): Promise<void> {
@@ -736,6 +789,96 @@ export class AutonomousEffectBoundary {
     const run = previous.then(operation, operation);
     this.operations.set(effectId, run);
     try { return await run; } finally { if (this.operations.get(effectId) === run) this.operations.delete(effectId); }
+  }
+
+  private async *executeStreamExclusive<T>(
+    request: AutonomousEffectRequest,
+    effectId: string,
+    producer: (context: AutonomousEffectExecutionContext) => AsyncIterable<T> | Iterable<T> | Promise<AsyncIterable<T> | Iterable<T>>,
+    execution: AutonomousExecutionController | undefined,
+    summaryProjector: ((summary: JsonObject) => JsonValue | Promise<JsonValue>) | undefined,
+    observe: ((item: T, eventCount: number) => void | Promise<void>) | undefined,
+    definiteFailure: ((error: unknown) => boolean | Promise<boolean>) | undefined,
+  ): AsyncIterable<T> {
+    let record = await this.journal.get(effectId);
+    const argumentsDigest = await digestJson(request.arguments);
+    if (record) {
+      if (record.tool !== request.tool || record.call_id !== request.call_id || record.arguments_digest !== argumentsDigest) throw new AutonomousEffectPolicyError("effect id collides with different call metadata");
+      // Stream deltas are intentionally never cached. A completed stream therefore cannot be
+      // replayed, even if a resolver can confirm that the provider finished it remotely.
+      if (record.status === "completed" || record.status === "reconciled") throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), record.status);
+      if (["dispatching", "dispatched", "uncertain"].includes(record.status)) {
+        if (!this.resolver) throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), record.status);
+        record = await this.reconcileExclusive(record, this.resolver);
+        if (record.status !== "prepared") throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), record.status);
+      }
+      if (record.status === "failed") throw new AutonomousEffectExecutionError(effectId, record.failure_class ?? "previous_effect_failure");
+    }
+    const idempotencyKey = this.idempotencyKey(effectId);
+    const base = {
+      ...request,
+      effect_id: effectId,
+      arguments_digest: argumentsDigest,
+      idempotency_key_digest: await digestJson(idempotencyKey),
+      dispatch_attempt: (record?.dispatch_attempt ?? 0) + 1,
+    };
+    await this.transition({ ...base, status: "prepared", reason: null }, execution);
+    await this.transition({ ...base, status: "dispatching" }, execution);
+    await this.transition({ ...base, status: "dispatched" }, execution);
+    const context: AutonomousEffectExecutionContext = { effect_id: effectId, execution_id: request.execution_id ?? null, tool: request.tool, call_id: request.call_id, risk_class: request.risk_class, idempotency_key: idempotencyKey, dispatch_attempt: base.dispatch_attempt };
+    let eventCount = 0;
+    let terminalRecorded = false;
+    try {
+      const stream = await producer(context);
+      if (!stream || (typeof (stream as AsyncIterable<T>)[Symbol.asyncIterator] !== "function" && typeof (stream as Iterable<T>)[Symbol.iterator] !== "function")) throw new AutonomousEffectError("effect stream producer must return an iterable");
+      for await (const item of stream) {
+        eventCount += 1;
+        await observe?.(item, eventCount);
+        yield item;
+      }
+      const summaryInput: JsonObject = { event_count: eventCount, completed: true };
+      const projected = summaryProjector ? await summaryProjector(summaryInput) : summaryInput;
+      assertMetadataBytes("effect stream summary", projected, AUTONOMOUS_EFFECT_MAX_ARGUMENT_BYTES);
+      await this.transition({ ...base, status: "completed", result_digest: await digestJson(projected) }, execution);
+      terminalRecorded = true;
+    } catch (unknownError) {
+      let isDefiniteFailure = false;
+      if (definiteFailure) {
+        try { isDefiniteFailure = await definiteFailure(unknownError); } catch { isDefiniteFailure = false; }
+      }
+      if (isDefiniteFailure) {
+        await this.transition({ ...base, status: "failed", failure_class: normalizedFailureClass(unknownError), reason: normalizedReason(unknownError) }, execution);
+        terminalRecorded = true;
+        throw unknownError;
+      }
+      await this.transition({ ...base, status: "uncertain", failure_class: normalizedFailureClass(unknownError), reason: normalizedReason(unknownError) }, execution);
+      terminalRecorded = true;
+      if (unknownError instanceof AutonomousEffectError) throw unknownError;
+      throw new AutonomousEffectReconciliationRequiredError(effectId, idempotencyKey, "uncertain");
+    } finally {
+      // AsyncIterator.return() closes a consumer without throwing through the producer. A
+      // dispatched stream that was not exhausted is still externally ambiguous.
+      if (!terminalRecorded) {
+        await this.transition({ ...base, status: "uncertain", failure_class: "stream_abandoned", reason: "consumer_closed_stream" }, execution);
+      }
+    }
+  }
+
+  private async acquireExclusive(effectId: string): Promise<() => void> {
+    const previous = this.operations.get(effectId) ?? Promise.resolve();
+    const predecessor = previous.catch(() => undefined);
+    let releaseGate: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+    const queued = predecessor.then(() => gate);
+    this.operations.set(effectId, queued);
+    await predecessor;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseGate?.();
+      if (this.operations.get(effectId) === queued) this.operations.delete(effectId);
+    };
   }
 }
 
