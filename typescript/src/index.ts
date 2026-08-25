@@ -3059,6 +3059,7 @@ export type {
 } from "./autonomous-memory-consolidation-scheduler.js";
 export {
   AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA,
+  AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA,
   AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA,
   AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA,
   AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA,
@@ -3067,6 +3068,7 @@ export {
   MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES,
   MAX_AUTONOMOUS_PROTECTED_REHYDRATION_TTL_SECONDS,
   AutonomousProtectedRehydrationBoundary,
+  AutonomousProtectedRehydrationAdapter,
   AutonomousProtectedRehydrationContext,
   AutonomousProtectedRehydrationError,
   AutonomousProtectedRehydrationPersistenceCoordinator,

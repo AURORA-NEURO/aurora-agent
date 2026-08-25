@@ -1799,4 +1799,14 @@ no protected value. The memory-consolidation scheduler now optionally binds its 
 claims, and worker results to the same execution-context digest, so a restored queue cannot be
 loaded under another tenant or authorization context. This closes the SDK contract gap while
 leaving vault encryption, identity issuance, authorization decisions, and external effect
-reconciliation explicitly deployment-owned.
+ reconciliation explicitly deployment-owned.
+
+The shared protected boundary now also has a receipt adapter in both SDKs. Evidence runtimes
+and connector-backed workflow/mission executors can derive an opaque, context-bound reference
+from a metadata-only receipt and rehydrate a caller-owned value without requiring every caller
+to implement a separate resolver callback. Explicit legacy callbacks remain supported and take
+precedence; the protected adapter is a deterministic fallback that binds purpose, domain, and
+the receipt's value/payload digest. All twelve domains are covered by cross-SDK adapter tests,
+and the TypeScript domain catalog is isolated into a dependency-leaf module so importing the
+public barrel cannot trigger an autonomous-facade module cycle. The vault, identity provider,
+authorization authority, encryption, and external effect reconciliation remain deployment-owned.

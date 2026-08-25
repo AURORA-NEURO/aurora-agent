@@ -125,6 +125,7 @@ from .autonomous_memory_consolidation_scheduler import (
 )
 from .autonomous_protected_rehydration import (
     AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA,
+    AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA,
     AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA,
     AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA,
     AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA,
@@ -133,6 +134,7 @@ from .autonomous_protected_rehydration import (
     MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES,
     MAX_AUTONOMOUS_PROTECTED_REHYDRATION_TTL_SECONDS,
     AutonomousProtectedRehydrationBoundary,
+    AutonomousProtectedRehydrationAdapter,
     AutonomousProtectedRehydrationContext,
     AutonomousProtectedRehydrationError,
     AutonomousProtectedRehydrationPersistenceCoordinator,
@@ -4174,6 +4176,7 @@ __all__ = [
     "TransactionalJsonAutonomousMemoryConsolidationSchedulerPersistence",
     "validate_autonomous_memory_consolidation_scheduler_snapshot",
     "AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA",
+    "AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA",
     "AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA",
     "AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA",
     "AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA",
@@ -4182,6 +4185,7 @@ __all__ = [
     "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES",
     "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_TTL_SECONDS",
     "AutonomousProtectedRehydrationBoundary",
+    "AutonomousProtectedRehydrationAdapter",
     "AutonomousProtectedRehydrationContext",
     "AutonomousProtectedRehydrationError",
     "AutonomousProtectedRehydrationPersistenceCoordinator",

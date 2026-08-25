@@ -29,6 +29,7 @@ from .autonomous_connectors import (
     AutonomousConnectorSelectionPlan,
 )
 from .autonomous_evidence_runtime import AutonomousEvidenceRuntime
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 from .domain_tools import _json_safe, _reject_secret_fields
 from .errors import ArgumentError
 from .autonomy import (
@@ -189,6 +190,7 @@ class AutonomousConnectorWorkflowAdapter:
         approved: bool = False,
         selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
         rehydrate_payload: Callable[[Any], Any] | None = None,
+        protected_rehydration: AutonomousProtectedRehydrationAdapter | None = None,
         evidence_runtime: AutonomousEvidenceRuntime | None = None,
         evidence_projector: Any | None = None,
         evidence_evaluator: Any | None = None,
@@ -207,6 +209,8 @@ class AutonomousConnectorWorkflowAdapter:
             raise ArgumentError("connector workflow selection_signals must be an object")
         if rehydrate_payload is not None and not callable(rehydrate_payload):
             raise ArgumentError("connector workflow rehydrate_payload must be callable")
+        if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousProtectedRehydrationAdapter):
+            raise ArgumentError("connector workflow protected_rehydration adapter is malformed")
         if evidence_runtime is not None and not isinstance(evidence_runtime, AutonomousEvidenceRuntime):
             raise ArgumentError("connector workflow evidence_runtime is invalid")
         if evidence_projector is not None and not callable(getattr(evidence_projector, "project", None)) and not callable(evidence_projector):
@@ -227,6 +231,7 @@ class AutonomousConnectorWorkflowAdapter:
         self.approved = approved
         self.selection_signals = selection_signals
         self.rehydrate_payload = rehydrate_payload
+        self.protected_rehydration = protected_rehydration
         self.evidence_runtime = evidence_runtime
         self.evidence_projector = evidence_projector
         self.evidence_evaluator = evidence_evaluator
@@ -350,9 +355,10 @@ class AutonomousConnectorWorkflowAdapter:
         if result.replay != "replayed" or result.receipt.payload_digest is None or result.value is not None:
             return result.value, False
         if self.rehydrate_payload is None:
-            return None, True
+            if self.protected_rehydration is None:
+                return None, True
         try:
-            restored = self.rehydrate_payload(result.receipt)
+            restored = self.rehydrate_payload(result.receipt) if self.rehydrate_payload is not None else self.protected_rehydration.resolve_receipt(result.receipt.to_dict(), domain=result.receipt.domain, purpose="connector_workflow_payload", value_kind="connector_payload", one_time=False)
             safe = _json_safe(
                 "connector workflow rehydrated payload",
                 restored,
@@ -669,6 +675,7 @@ def run_autonomous_connector_workflow(
     max_stage_calls: int | None = None,
     request_for_stage: Callable[[AutonomousConnectorWorkflowStageContext], Mapping[str, Any]] | None = None,
     rehydrate_payload: Callable[[Any], Any] | None = None,
+    protected_rehydration: AutonomousProtectedRehydrationAdapter | None = None,
     operation_registry: AutonomousConnectorOperationRegistry | None = None,
     selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
     evidence_runtime: AutonomousEvidenceRuntime | None = None,
@@ -690,6 +697,8 @@ def run_autonomous_connector_workflow(
         raise ArgumentError("connector workflow request_for_stage must be callable")
     if rehydrate_payload is not None and not callable(rehydrate_payload):
         raise ArgumentError("connector workflow rehydrate_payload must be callable")
+    if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousProtectedRehydrationAdapter):
+        raise ArgumentError("connector workflow protected_rehydration adapter is malformed")
     if trace_event_callback is not None and not callable(trace_event_callback):
         raise ArgumentError("connector workflow trace_event_callback must be callable")
     if max_stage_calls is None:
@@ -753,6 +762,7 @@ def run_autonomous_connector_workflow(
         approved=approved,
         selection_signals=selection_signals,
         rehydrate_payload=rehydrate_payload,
+        protected_rehydration=protected_rehydration,
         evidence_runtime=evidence_runtime,
         evidence_projector=evidence_projector,
         evidence_evaluator=evidence_evaluator,

@@ -4,6 +4,7 @@ import {
   type AutonomousEvidencePlanJSON,
   type AutonomousEvidenceRequirement,
 } from "./autonomous-evidence.js";
+import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
@@ -434,14 +435,17 @@ function makeResult(json: AutonomousEvidenceRuntimeResultJSON, values: Record<st
 export class AutonomousEvidenceRuntime {
   readonly plan: AutonomousEvidencePlan;
   readonly journal: AutonomousEvidenceRuntimeJournal | null;
+  readonly protectedRehydration: AutonomousProtectedRehydrationAdapter | null;
   private readonly recordsByRequest = new Map<string, AutonomousEvidenceRuntimeJournalEntry>();
   private readonly valuesByRequest = new Map<string, JsonValue>();
 
-  constructor(options: { plan: AutonomousEvidencePlan; journal?: AutonomousEvidenceRuntimeJournal }) {
+  constructor(options: { plan: AutonomousEvidencePlan; journal?: AutonomousEvidenceRuntimeJournal; protectedRehydration?: AutonomousProtectedRehydrationAdapter }) {
     if (!(options?.plan instanceof AutonomousEvidencePlan)) throw new ArgumentError("evidence runtime requires an AutonomousEvidencePlan");
     if (options.journal !== undefined && (!options.journal || typeof options.journal.append !== "function" || typeof options.journal.records !== "function")) throw new ArgumentError("evidence runtime journal is malformed");
+    if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("evidence runtime protectedRehydration adapter is malformed");
     this.plan = options.plan;
     this.journal = options.journal ?? null;
+    this.protectedRehydration = options.protectedRehydration ?? null;
   }
 
   async rehydrate(): Promise<{ restored: number; replayable: number; value_retention: "transient_caller_value_only" }> {
@@ -502,6 +506,10 @@ export class AutonomousEvidenceRuntime {
         if (prior.value_digest === null || await digestJson(restored) !== prior.value_digest) throw new ProviderRuntimeError("rehydrated evidence value does not match its receipt digest");
         value = restored;
       }
+    } else if (value === null && this.protectedRehydration && prior.value_digest !== null) {
+      const restored = this.protectedRehydration.resolveReceipt(prior, { purpose: "evidence_runtime_value", valueKind: "evidence_value", oneTime: false }) as JsonValue | null;
+      if (restored !== null && await digestJson(restored) !== prior.value_digest) throw new ProviderRuntimeError("protected evidence value does not match its receipt digest");
+      value = restored;
     }
     if (value === null && prior.value_digest !== null) {
       const { receipt_digest: _receiptDigest, ...descriptor } = prior;

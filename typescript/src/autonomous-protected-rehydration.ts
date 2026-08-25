@@ -7,13 +7,14 @@
  */
 
 import { ArgumentError, isObject } from "./errors.js";
-import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous.js";
+import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous-domains.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 
 export const AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA = "bioprism-typescript-autonomous-protected-rehydration/0.1" as const;
 export const AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA = "bioprism-typescript-autonomous-protected-rehydration-context/0.1" as const;
 export const AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA = "bioprism-typescript-autonomous-protected-rehydration-reference/0.1" as const;
 export const AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-protected-rehydration-snapshot/0.1" as const;
+export const AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA = "bioprism-typescript-autonomous-protected-rehydration-adapter/0.1" as const;
 export const MAX_AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCES = 4_096;
 export const MAX_AUTONOMOUS_PROTECTED_REHYDRATION_ATTEMPTS = 8;
 export const MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES = 1_000_000;
@@ -134,6 +135,45 @@ export interface AutonomousProtectedRehydrationResult {
   value: unknown;
   resolution_digest: string;
   toJSON(): Record<string, unknown>;
+}
+
+export class AutonomousProtectedRehydrationAdapter {
+  readonly boundary: AutonomousProtectedRehydrationBoundary;
+
+  constructor(boundary: AutonomousProtectedRehydrationBoundary) {
+    if (!(boundary instanceof AutonomousProtectedRehydrationBoundary)) fail("receipt adapter requires an AutonomousProtectedRehydrationBoundary");
+    this.boundary = boundary;
+  }
+
+  private metadata(receipt: unknown): Record<string, unknown> {
+    if (!isObject(receipt)) fail("receipt must be a metadata object");
+    const allowed = ["receipt_digest", "request_digest", "request_id", "dispatch_id", "work_id", "value_digest", "payload_digest", "domain", "source_id", "connector_id", "plan_digest", "workflow_digest", "stage_id", "attempt"];
+    return Object.fromEntries(allowed.filter((key) => receipt[key] !== undefined && receipt[key] !== null).map((key) => [key, receipt[key]]));
+  }
+
+  private binding(receipt: unknown, purpose: string): { referenceId: string; valueDigest: string } {
+    const metadata = this.metadata(receipt);
+    const valueDigest = typeof metadata.value_digest === "string" ? metadata.value_digest : metadata.payload_digest;
+    if (typeof valueDigest !== "string") fail("receipt has no protected value or payload digest");
+    digest("receipt protected value digest", valueDigest);
+    const normalizedPurpose = identifier("receipt purpose", purpose);
+    const bindingDigest = digestJsonSync({ schema: AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA, purpose: normalizedPurpose, receipt: metadata });
+    return { referenceId: `rehydrate-${bindingDigest.slice(0, 48)}`, valueDigest };
+  }
+
+  resolveReceipt(receipt: unknown, options: { domain?: AutonomousDomainName; purpose?: string; valueKind?: string; oneTime?: boolean; now?: number } = {}): unknown {
+    const metadata = this.metadata(receipt);
+    const domain = options.domain ?? (typeof metadata.domain === "string" ? metadata.domain as AutonomousDomainName : undefined);
+    if (!domain || !this.boundary.context.allowedDomains.includes(domain)) fail("receipt domain is outside the active context scope");
+    const purpose = options.purpose ?? "protected_receipt_value";
+    const binding = this.binding(metadata, purpose);
+    this.boundary.issue(binding.referenceId, { domain, purpose, valueDigest: binding.valueDigest, valueKind: options.valueKind ?? "opaque", oneTime: options.oneTime ?? false });
+    return this.boundary.resolve(binding.referenceId, { now: options.now }).value;
+  }
+
+  resolver(options: { domain?: AutonomousDomainName; purpose?: string; valueKind?: string; oneTime?: boolean } = {}): (receipt: unknown) => unknown {
+    return (receipt) => this.resolveReceipt(receipt, options);
+  }
 }
 
 export interface AutonomousProtectedRehydrationSnapshot {

@@ -31,6 +31,7 @@ from .autonomous_connector_worker import (
     AutonomousConnectorOperationRegistry,
     InMemoryAutonomousConnectorFeedbackLedger,
 )
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 from .autonomous_connectors import (
     MAX_AUTONOMOUS_CONNECTOR_REQUEST_BYTES,
     AutonomousConnectorDispatchRequest,
@@ -328,6 +329,7 @@ class AutonomousConnectorMissionAdapter:
         selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
         feedback_ledger: InMemoryAutonomousConnectorFeedbackLedger | None = None,
         rehydrate_payload: Callable[[Any], Any] | None = None,
+        protected_rehydration: AutonomousProtectedRehydrationAdapter | None = None,
     ) -> None:
         if not isinstance(runtime, AutonomousConnectorRuntime):
             raise ArgumentError("connector mission adapter requires an AutonomousConnectorRuntime")
@@ -341,6 +343,8 @@ class AutonomousConnectorMissionAdapter:
             raise ArgumentError("connector mission feedback_ledger is invalid")
         if rehydrate_payload is not None and not callable(rehydrate_payload):
             raise ArgumentError("connector mission rehydrate_payload must be callable")
+        if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousProtectedRehydrationAdapter):
+            raise ArgumentError("connector mission protected_rehydration adapter is malformed")
         self.runtime = runtime
         self.registry = runtime.registry
         self.operation_registry = operation_registry or AutonomousConnectorOperationRegistry()
@@ -348,6 +352,7 @@ class AutonomousConnectorMissionAdapter:
         self.selection_signals = None if selection_signals is None else {key: dict(value) for key, value in selection_signals.items()}
         self.feedback_ledger = feedback_ledger
         self.rehydrate_payload = rehydrate_payload
+        self.protected_rehydration = protected_rehydration
 
     def _signals(self, domain: str, capability: str) -> Mapping[str, Mapping[str, Any]] | None:
         signals = {} if self.selection_signals is None else {key: dict(value) for key, value in self.selection_signals.items()}
@@ -456,9 +461,10 @@ class AutonomousConnectorMissionAdapter:
         if result.replay != "replayed" or result.receipt.payload_digest is None or result.value is not None:
             return result.value, False
         if self.rehydrate_payload is None:
-            return None, True
+            if self.protected_rehydration is None:
+                return None, True
         try:
-            restored = self.rehydrate_payload(result.receipt)
+            restored = self.rehydrate_payload(result.receipt) if self.rehydrate_payload is not None else self.protected_rehydration.resolve_receipt(result.receipt.to_dict(), domain=result.receipt.domain, purpose="connector_mission_payload", value_kind="connector_payload", one_time=False)
             safe = _json_safe(
                 "connector mission rehydrated payload",
                 restored,
@@ -754,6 +760,7 @@ def run_autonomous_connector_mission(
     max_step_calls: int | None = None,
     request_for_step: Callable[[AutonomousConnectorMissionStepContext], Mapping[str, Any]] | None = None,
     rehydrate_payload: Callable[[Any], Any] | None = None,
+    protected_rehydration: AutonomousProtectedRehydrationAdapter | None = None,
     resume_outputs: Mapping[str, Any] | None = None,
     operation_registry: AutonomousConnectorOperationRegistry | None = None,
     selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
@@ -771,6 +778,8 @@ def run_autonomous_connector_mission(
         raise ArgumentError("connector mission request_for_step must be callable")
     if rehydrate_payload is not None and not callable(rehydrate_payload):
         raise ArgumentError("connector mission rehydrate_payload must be callable")
+    if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousProtectedRehydrationAdapter):
+        raise ArgumentError("connector mission protected_rehydration adapter is malformed")
     if trace_event_callback is not None and not callable(trace_event_callback):
         raise ArgumentError("connector mission trace_event_callback must be callable")
     if resume_outputs is not None:
@@ -820,6 +829,7 @@ def run_autonomous_connector_mission(
         selection_signals=selection_signals,
         feedback_ledger=feedback_ledger,
         rehydrate_payload=rehydrate_payload,
+        protected_rehydration=protected_rehydration,
     )
     by_id = {step.id: step for step in steps}
     transient_outputs: dict[str, Any] = {}

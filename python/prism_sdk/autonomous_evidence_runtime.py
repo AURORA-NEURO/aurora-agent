@@ -19,6 +19,7 @@ import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .authoring import canonical_json, content_digest
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 from .autonomous_evidence import AutonomousEvidencePlan, AutonomousEvidenceRequirement
 from .errors import ArgumentError
 
@@ -759,13 +760,16 @@ def _request_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
 class AutonomousEvidenceRuntime:
     """Run bounded acquisition/projection/evaluation without persisting raw values."""
 
-    def __init__(self, plan: AutonomousEvidencePlan, *, journal: AutonomousEvidenceRuntimeJournal | None = None) -> None:
+    def __init__(self, plan: AutonomousEvidencePlan, *, journal: AutonomousEvidenceRuntimeJournal | None = None, protected_rehydration: AutonomousProtectedRehydrationAdapter | None = None) -> None:
         if not isinstance(plan, AutonomousEvidencePlan):
             raise ArgumentError("evidence runtime requires an AutonomousEvidencePlan")
         if journal is not None and not all(callable(getattr(journal, name, None)) for name in ("append", "records")):
             raise ArgumentError("evidence runtime journal is malformed")
+        if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousProtectedRehydrationAdapter):
+            raise ArgumentError("evidence runtime protected_rehydration adapter is malformed")
         self.plan = plan
         self.journal = journal
+        self.protected_rehydration = protected_rehydration
         self._records: dict[str, AutonomousEvidenceRuntimeJournalEntry] = {}
         self._values: dict[str, Any] = {}
 
@@ -931,6 +935,17 @@ class AutonomousEvidenceRuntime:
                     restored = rehydrate_value(prior.receipt.to_dict())
                     if restored is not None and content_digest(restored) != prior.receipt.value_digest:
                         raise ArgumentError("rehydrated evidence value does not match its receipt digest")
+                    value = restored
+                elif value is None and self.protected_rehydration is not None and prior.receipt.value_digest is not None:
+                    restored = self.protected_rehydration.resolve_receipt(
+                        prior.receipt.to_dict(),
+                        domain=prior.receipt.domain,
+                        purpose="evidence_runtime_value",
+                        value_kind="evidence_value",
+                        one_time=False,
+                    )
+                    if restored is not None and content_digest(restored) != prior.receipt.value_digest:
+                        raise ArgumentError("protected evidence value does not match its receipt digest")
                     value = restored
                 replayed = prior.receipt
                 if value is None and replayed.value_digest is not None:

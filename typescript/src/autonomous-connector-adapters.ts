@@ -37,6 +37,7 @@ import {
   type AutonomousEvidenceProjector,
   type AutonomousEvidenceRuntimeResult,
 } from "./autonomous-evidence-runtime.js";
+import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
 import type { AutonomousEvidenceRequirement } from "./autonomous-evidence.js";
 import { ToolCatalogue, digestJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
@@ -75,6 +76,7 @@ export interface AutonomousWorkflowConnectorAdapterOptions {
   planForStage?: (context: AutonomousWorkflowStageExecutionContext) => AutonomousConnectorSelectionPlan | Promise<AutonomousConnectorSelectionPlan>;
   requestForStage?: (context: AutonomousWorkflowStageExecutionContext) => JsonObject | Promise<JsonObject>;
   rehydratePayload?: AutonomousConnectorPayloadRehydrator;
+  protectedRehydration?: AutonomousProtectedRehydrationAdapter;
   onDispatch?: (result: AutonomousConnectorDispatchResult, context: AutonomousWorkflowStageExecutionContext) => void | Promise<void>;
   traceEventCallback?: AutonomousConnectorTraceEventCallback;
   evidence?: AutonomousWorkflowEvidenceBinding;
@@ -93,6 +95,7 @@ export interface AutonomousMissionConnectorAdapterOptions {
   planForStep?: (context: AutonomousMissionStepExecutionContext) => AutonomousConnectorSelectionPlan | Promise<AutonomousConnectorSelectionPlan>;
   requestForStep?: (context: AutonomousMissionStepExecutionContext) => JsonObject | Promise<JsonObject>;
   rehydratePayload?: AutonomousConnectorPayloadRehydrator;
+  protectedRehydration?: AutonomousProtectedRehydrationAdapter;
   onDispatch?: (result: AutonomousConnectorDispatchResult, context: AutonomousMissionStepExecutionContext) => void | Promise<void>;
   traceEventCallback?: AutonomousConnectorTraceEventCallback;
 }
@@ -162,10 +165,14 @@ function attachOperation(request: JsonObject, operation: ReturnType<typeof opera
 async function connectorValue(
   result: AutonomousConnectorDispatchResult,
   rehydrate: AutonomousConnectorPayloadRehydrator | undefined,
+  protectedRehydration: AutonomousProtectedRehydrationAdapter | undefined,
+  domain?: AutonomousDomainName,
 ): Promise<{ value: JsonValue | null; replayRecoveryRequired: boolean }> {
   if (result.replay !== "replayed" || result.receipt.payload_digest === null || result.value !== null) return { value: result.value, replayRecoveryRequired: false };
-  if (!rehydrate) return { value: null, replayRecoveryRequired: true };
-  const restored = await rehydrate(result.receipt);
+  if (!rehydrate && !protectedRehydration) return { value: null, replayRecoveryRequired: true };
+  const restored = rehydrate
+    ? await rehydrate(result.receipt)
+    : protectedRehydration!.resolveReceipt(result.receipt, { domain, purpose: "connector_payload", valueKind: "connector_payload", oneTime: false }) as JsonValue | null;
   if (restored === null) return { value: null, replayRecoveryRequired: true };
   try {
     if (digestJsonSync(restored) !== result.receipt.payload_digest) return { value: null, replayRecoveryRequired: true };
@@ -382,6 +389,7 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
   if (options.requestForStage !== undefined && typeof options.requestForStage !== "function") throw new ArgumentError("workflow connector requestForStage must be callable");
   if (options.onDispatch !== undefined && typeof options.onDispatch !== "function") throw new ArgumentError("workflow connector onDispatch must be callable");
   if (options.traceEventCallback !== undefined && typeof options.traceEventCallback !== "function") throw new ArgumentError("workflow connector traceEventCallback must be callable");
+  if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("workflow connector protectedRehydration adapter is malformed");
   if (options.evidence !== undefined) {
     if (!(options.evidence.runtime instanceof AutonomousEvidenceRuntime)) throw new ArgumentError("workflow connector evidence runtime is invalid");
     if (options.evidence.projector !== undefined && typeof options.evidence.projector.project !== "function") throw new ArgumentError("workflow connector evidence projector is malformed");
@@ -416,7 +424,7 @@ export function autonomousConnectorWorkflowStageExecutor(options: AutonomousWork
     if (operation) operation.assertRequest(request);
     const result = await options.runtime.dispatchFromPlan(plan.plan, request, { traceEventCallback: options.traceEventCallback });
     await options.onDispatch?.(result, context);
-    const resolved = await connectorValue(result, options.rehydratePayload);
+    const resolved = await connectorValue(result, options.rehydratePayload, options.protectedRehydration, domain);
     if (resolved.replayRecoveryRequired) return connectorRun(context, result, resolved.value, true);
     const evidence = options.evidence === undefined || (result.receipt.status !== "observed" && result.receipt.status !== "partial")
       ? null
@@ -470,6 +478,7 @@ export function autonomousConnectorMissionStepExecutor(options: AutonomousMissio
   if (options.requestForStep !== undefined && typeof options.requestForStep !== "function") throw new ArgumentError("mission connector requestForStep must be callable");
   if (options.onDispatch !== undefined && typeof options.onDispatch !== "function") throw new ArgumentError("mission connector onDispatch must be callable");
   if (options.traceEventCallback !== undefined && typeof options.traceEventCallback !== "function") throw new ArgumentError("mission connector traceEventCallback must be callable");
+  if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("mission connector protectedRehydration adapter is malformed");
   return async (context): Promise<AutonomousMissionStepExecutionResult> => {
     const domain = connectorDomain(context.step.domain, "mission connector domain");
     const argumentDigest = await digestJson(context.arguments);
@@ -496,7 +505,7 @@ export function autonomousConnectorMissionStepExecutor(options: AutonomousMissio
     if (operation) operation.assertRequest(request);
     const result = await options.runtime.dispatchFromPlan(plan.plan, request, { traceEventCallback: options.traceEventCallback });
     await options.onDispatch?.(result, context);
-    const resolved = await connectorValue(result, options.rehydratePayload);
+    const resolved = await connectorValue(result, options.rehydratePayload, options.protectedRehydration, domain);
     const decision = {
       selection_digest: plan.plan.plan_digest,
       provider: result.receipt.provider,

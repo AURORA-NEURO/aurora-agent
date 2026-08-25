@@ -1,4 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
+import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous-domains.js";
+import type { AutonomousDomainName } from "./autonomous-domains.js";
 import type { ApiClient } from "./client.js";
 import { createAutonomousApiToolExecutor } from "./autonomous-api-adapter.js";
 import {
@@ -289,21 +291,8 @@ export const AUTONOMOUS_MODEL_CATALOGUE_MAX_SNAPSHOT_BYTES = 1_000_000;
 export const MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES = 250_000;
 const AUTONOMOUS_BANDIT_MAX_ARMS = 512;
 
-export const AUTONOMOUS_DOMAIN_NAMES = [
-  "coding",
-  "browser",
-  "data",
-  "science",
-  "biomedical",
-  "neuroscience",
-  "operations",
-  "enterprise",
-  "multi_agent",
-  "multimodal",
-  "cross_domain",
-  "evaluation",
-] as const;
-export type AutonomousDomainName = typeof AUTONOMOUS_DOMAIN_NAMES[number];
+export { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous-domains.js";
+export type { AutonomousDomainName } from "./autonomous-domains.js";
 
 /**
  * Reviewed workflow-to-adapter aliases. Workflow stages intentionally use a small stable

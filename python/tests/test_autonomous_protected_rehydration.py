@@ -6,6 +6,7 @@ import unittest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousProtectedRehydrationAdapter,
     AutonomousProtectedRehydrationBoundary,
     AutonomousProtectedRehydrationContext,
     AutonomousProtectedRehydrationError,
@@ -105,6 +106,36 @@ class AutonomousProtectedRehydrationTests(unittest.TestCase):
         with self.assertRaises(AutonomousProtectedRehydrationError):
             mismatch.resolve("mismatch", now=100.1)
         self.assertEqual(mismatch.get("mismatch")["last_error_class"], "value_digest_mismatch")
+
+    def test_receipt_adapter_rehydrates_all_domains_without_retaining_payloads(self) -> None:
+        values: dict[str, str] = {}
+        boundary = AutonomousProtectedRehydrationBoundary(
+            self._context(),
+            lambda reference, _context: values[reference.value_digest],
+            authorizer=lambda _reference, _context: True,
+            clock=lambda: 100.0,
+        )
+        adapter = AutonomousProtectedRehydrationAdapter(boundary)
+        for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+            value = f"transient-domain-secret-{index}"
+            receipt = {
+                "receipt_digest": _digest(f"receipt-{index}"),
+                "request_digest": _digest(f"request-{index}"),
+                "value_digest": protected_value_digest(value),
+                "domain": domain,
+            }
+            values[protected_value_digest(value)] = value
+            self.assertEqual(
+                adapter.resolve_receipt(receipt, purpose="domain_value", value_kind="credential", now=100.0),
+                value,
+            )
+
+        snapshot = boundary.snapshot()
+        encoded = json.dumps(snapshot)
+        self.assertEqual([row["domain"] for row in snapshot["coverage"]], list(AUTONOMOUS_DOMAINS))
+        self.assertEqual([row["reference_count"] for row in snapshot["coverage"]], [1] * len(AUTONOMOUS_DOMAINS))
+        self.assertNotIn("transient-domain-secret", encoded)
+        self.assertNotIn('"value":', encoded.lower())
 
     def test_snapshot_restore_is_tenant_bound_and_cas_safe(self) -> None:
         source = AutonomousProtectedRehydrationBoundary(self._context(), lambda _reference, _context: "token", clock=lambda: 100.0, max_ttl_seconds=60.0)

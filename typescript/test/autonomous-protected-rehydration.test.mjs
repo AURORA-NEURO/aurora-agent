@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousProtectedRehydrationAdapter,
   AutonomousProtectedRehydrationBoundary,
   AutonomousProtectedRehydrationContext,
   AutonomousProtectedRehydrationError,
@@ -67,6 +68,28 @@ test("authorization, expiry, digest mismatch, and tenant restore are fenced", ()
   mismatch.issue("mismatch", { domain: "coding", purpose: "credential", valueDigest: protectedValueDigest("expected"), issuedAt: 100, expiresAt: 200 });
   assert.throws(() => mismatch.resolve("mismatch", { now: 100.1 }), AutonomousProtectedRehydrationError);
   assert.equal(mismatch.get("mismatch").last_error_class, "value_digest_mismatch");
+});
+
+test("receipt adapter rehydrates all domains without retaining payloads", () => {
+  const values = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(context(), (reference) => values.get(reference.value_digest), { authorizer: () => true, clock: () => 100 });
+  const adapter = new AutonomousProtectedRehydrationAdapter(boundary);
+  AUTONOMOUS_DOMAIN_NAMES.forEach((domain, index) => {
+    const value = `transient-domain-secret-${index}`;
+    const receipt = {
+      receipt_digest: "a".repeat(63) + String(index % 10),
+      request_digest: "b".repeat(63) + String(index % 10),
+      value_digest: protectedValueDigest(value),
+      domain,
+    };
+    values.set(protectedValueDigest(value), value);
+    assert.equal(adapter.resolveReceipt(receipt, { purpose: "domain_value", valueKind: "credential", now: 100 }), value);
+  });
+  const snapshot = boundary.snapshot();
+  assert.deepEqual(snapshot.coverage.map((row) => row.domain), [...AUTONOMOUS_DOMAIN_NAMES]);
+  assert.deepEqual(snapshot.coverage.map((row) => row.reference_count), AUTONOMOUS_DOMAIN_NAMES.map(() => 1));
+  assert.equal(JSON.stringify(snapshot).includes("transient-domain-secret"), false);
+  assert.equal(JSON.stringify(snapshot).toLowerCase().includes('"value":'), false);
 });
 
 test("snapshot restore is tenant-bound and CAS-safe", () => {

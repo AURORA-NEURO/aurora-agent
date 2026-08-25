@@ -10766,3 +10766,23 @@ cross-domain, and evaluation; all twelve domains are covered by protected-rehydr
 metadata-only snapshot tests in both SDKs. This is an integrity fence, not a claim that the SDK
 can prove external identity, encrypt a provider key, authorize an effect, or provide exactly-once
 delivery by itself.
+
+### Receipt-bound rehydration across runtime seams
+
+The same boundary is available as `AutonomousProtectedRehydrationAdapter` in both SDKs. It accepts
+only the bounded metadata projection of an evidence or connector receipt, derives a deterministic
+opaque reference from that projection plus a purpose, binds the receipt's `value_digest` or
+`payload_digest`, and delegates authorization, expiry, replay, and value verification to the
+shared boundary. A caller can attach it to an evidence runtime or to connector-backed workflow
+and mission execution; the existing explicit `rehydrate_value`/`rehydratePayload` callback still
+wins when supplied. The adapter never stores the receipt or returned value, and it refuses a
+receipt whose domain is outside the active context. Connector receipts that represent domains as
+a list pass the already-validated execution domain explicitly into the adapter, preserving the
+same scope rule across both type systems.
+
+This closes the local integration gap between metadata-only replay journals and the protected
+caller store without pretending that the SDK is a vault or an identity service. A deployment
+still supplies the resolver, secret storage, authorization decision, encryption, retention, and
+external effect reconciliation. The TypeScript domain vocabulary is kept in a dependency-leaf
+module so importing the protected boundary directly or through the public SDK barrel is safe even
+though the autonomous façade itself composes evidence and connector runtimes.

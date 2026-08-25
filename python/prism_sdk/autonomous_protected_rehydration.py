@@ -32,6 +32,7 @@ AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA = "bioprism-python-autonomous-protected-
 AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA = "bioprism-python-autonomous-protected-rehydration-context/0.1"
 AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA = "bioprism-python-autonomous-protected-rehydration-reference/0.1"
 AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-protected-rehydration-snapshot/0.1"
+AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA = "bioprism-python-autonomous-protected-rehydration-adapter/0.1"
 MAX_AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCES = 4_096
 MAX_AUTONOMOUS_PROTECTED_REHYDRATION_ATTEMPTS = 8
 MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES = 1_000_000
@@ -237,6 +238,77 @@ class AutonomousProtectedRehydrationResult:
             "authority": _AUTHORITY,
             "secret_material": _SECRET_MATERIAL,
         }
+
+
+class AutonomousProtectedRehydrationAdapter:
+    """Adapt metadata-only receipts to a context-bound protected rehydration boundary.
+
+    Existing evidence and connector receipts use different identity fields. This adapter derives
+    one bounded reference identity from their non-secret identity metadata, binds the receipt's
+    value/payload digest, and delegates resolution to the shared boundary. The receipt itself is
+    never retained, and the callback supplied to the boundary receives only the reference
+    projection and active context.
+    """
+
+    def __init__(self, boundary: "AutonomousProtectedRehydrationBoundary") -> None:
+        if not isinstance(boundary, AutonomousProtectedRehydrationBoundary):
+            _fail("receipt adapter requires an AutonomousProtectedRehydrationBoundary")
+        self.boundary = boundary
+
+    @staticmethod
+    def _metadata(receipt: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(receipt, Mapping):
+            _fail("receipt must be a metadata mapping")
+        allowed = (
+            "receipt_digest", "request_digest", "request_id", "dispatch_id", "work_id", "value_digest", "payload_digest",
+            "domain", "source_id", "connector_id", "plan_digest", "workflow_digest", "stage_id", "attempt",
+        )
+        return {key: receipt[key] for key in allowed if key in receipt and receipt[key] is not None}
+
+    def _binding(self, receipt: Mapping[str, Any], purpose: str) -> tuple[str, str]:
+        metadata = self._metadata(receipt)
+        value_digest = metadata.get("value_digest") or metadata.get("payload_digest")
+        if not isinstance(value_digest, str):
+            _fail("receipt has no protected value or payload digest")
+        _digest("receipt protected value digest", value_digest)
+        purpose = _identifier("receipt purpose", purpose)
+        binding = content_digest({"schema": AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA, "purpose": purpose, "receipt": metadata})
+        return f"rehydrate-{binding[:48]}", value_digest
+
+    def resolve_receipt(
+        self,
+        receipt: Mapping[str, Any],
+        *,
+        domain: str | None = None,
+        purpose: str = "protected_receipt_value",
+        value_kind: str = "opaque",
+        one_time: bool = False,
+        now: float | None = None,
+    ) -> Any:
+        metadata = self._metadata(receipt)
+        resolved_domain = metadata.get("domain") if domain is None else domain
+        if resolved_domain not in self.boundary.context.allowed_domains:
+            _fail("receipt domain is outside the active context scope")
+        reference_id, value_digest = self._binding(metadata, purpose)
+        self.boundary.issue(
+            reference_id,
+            domain=resolved_domain,
+            purpose=purpose,
+            value_digest=value_digest,
+            value_kind=value_kind,
+            one_time=one_time,
+        )
+        return self.boundary.resolve(reference_id, now=now).value
+
+    def resolver(
+        self,
+        *,
+        domain: str | None = None,
+        purpose: str = "protected_receipt_value",
+        value_kind: str = "opaque",
+        one_time: bool = False,
+    ) -> Callable[[Mapping[str, Any]], Any]:
+        return lambda receipt: self.resolve_receipt(receipt, domain=domain, purpose=purpose, value_kind=value_kind, one_time=one_time)
 
 
 Resolver = Callable[[AutonomousProtectedRehydrationReference, AutonomousProtectedRehydrationContext], Any]
@@ -558,7 +630,7 @@ class AutonomousProtectedRehydrationPersistenceCoordinator:
 
 
 __all__ = [
-    "AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA",
+    "AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA",
     "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCES", "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_ATTEMPTS", "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES", "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_TTL_SECONDS",
-    "AutonomousProtectedRehydrationError", "AutonomousProtectedRehydrationTextStore", "AutonomousProtectedRehydrationTransactionalTextStore", "AutonomousProtectedRehydrationContext", "AutonomousProtectedRehydrationReference", "AutonomousProtectedRehydrationResult", "AutonomousProtectedRehydrationBoundary", "JsonAutonomousProtectedRehydrationPersistence", "TransactionalJsonAutonomousProtectedRehydrationPersistence", "AutonomousProtectedRehydrationPersistenceCoordinator", "protected_value_digest", "validate_autonomous_protected_rehydration_snapshot",
+    "AutonomousProtectedRehydrationError", "AutonomousProtectedRehydrationTextStore", "AutonomousProtectedRehydrationTransactionalTextStore", "AutonomousProtectedRehydrationContext", "AutonomousProtectedRehydrationReference", "AutonomousProtectedRehydrationResult", "AutonomousProtectedRehydrationAdapter", "AutonomousProtectedRehydrationBoundary", "JsonAutonomousProtectedRehydrationPersistence", "TransactionalJsonAutonomousProtectedRehydrationPersistence", "AutonomousProtectedRehydrationPersistenceCoordinator", "protected_value_digest", "validate_autonomous_protected_rehydration_snapshot",
 ]
