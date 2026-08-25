@@ -350,6 +350,7 @@ from .brain_multimodal_safety_assurance import BrainMultimodalAssuranceReceipt
 from .brain_throughput_safety_assurance import BrainThroughputAssuranceReceipt
 from .brain_federated_safety_assurance import BrainFederatedAssuranceReceipt
 from .brain_evidence_operations import BrainEvidenceOperationsReceipt
+from .brain_multimodal_operations import BrainMultimodalOperationsReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

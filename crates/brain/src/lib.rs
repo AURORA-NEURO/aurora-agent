@@ -49,6 +49,7 @@ pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
 pub mod multimodal_evidence_workflow_fabric;
+pub mod multimodal_operations_control_plane;
 pub mod multimodal_protocol_adapter;
 pub mod multimodal_research_workbench;
 pub mod multimodal_safety_assurance;
@@ -189,6 +190,13 @@ pub use multimodal_evidence_workflow_fabric::{
     MultimodalWorkflowError, MultimodalWorkflowReceipt, MultimodalWorkflowRequest,
     CONTRACT_VERSION as MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_operations_control_plane::{
+    multimodal_operations_control_plane_manifest, operate_multimodal_evidence,
+    MultimodalOperationsDisposition, MultimodalOperationsError, MultimodalOperationsReceipt,
+    MultimodalOperationsRequest,
+    CONTRACT_VERSION as MULTIMODAL_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
 };
 pub use multimodal_protocol_adapter::{
     multimodal_protocol_adapter_manifest, serve_multimodal_protocol, MultimodalProtocolError,
