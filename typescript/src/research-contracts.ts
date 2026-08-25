@@ -199,6 +199,8 @@ export const BRAIN_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F01" as con
 export const BRAIN_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance/1.0" as const;
 export const BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F02" as const;
 export const BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-multimodal/1.0" as const;
+export const HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F03" as const;
+export const HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-throughput/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3617,6 +3619,26 @@ export function validateBrainMultimodalEvidenceSurveillanceReceipt(receipt: Brai
 }
 
 export function brainMultimodalEvidenceSurveillanceReceiptDigest(receipt: BrainMultimodalEvidenceSurveillanceReceipt): string { validateBrainMultimodalEvidenceSurveillanceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainHighThroughputEvidenceReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; batch_id: string; partition: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; candidate_order: string[]; admitted_order: string[];
+  blocked_order: string[]; unknown_order: string[]; relevance_order: number[]; omissions: string[]; uncertainty: string[];
+  negative_evidence: string[]; checkpoint_seq: number; queue_digest: string; replay_identity: string; effect_receipts: string[];
+  artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainHighThroughputEvidenceReceipt(receipt: BrainHighThroughputEvidenceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_FEATURE_ID || receipt.contract_version !== HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION) throw new Error("throughput evidence schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.batch_id.trim() || !receipt.partition.trim() || !receipt.candidate_order.length || receipt.relevance_order.length !== receipt.candidate_order.length || receipt.checkpoint_seq < 1 || !receipt.effect_receipts.length) throw new Error("throughput identity, checkpoint, ranking, locality, or effects are incomplete");
+  if ([...receipt.admitted_order, ...receipt.blocked_order, ...receipt.unknown_order].some((value) => !receipt.candidate_order.includes(value))) throw new Error("throughput state is not covered by candidate order");
+  for (const values of [receipt.candidate_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("throughput ordering is invalid");
+  for (const value of [receipt.queue_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("throughput digest is invalid");
+  if (receipt.admitted_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-research-artifacts:"))) throw new Error("admitted batch requires a local-read receipt");
+  if (!receipt.admitted_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("empty batch must be explicitly blocked");
+}
+
+export function brainHighThroughputEvidenceReceiptDigest(receipt: BrainHighThroughputEvidenceReceipt): string { validateBrainHighThroughputEvidenceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

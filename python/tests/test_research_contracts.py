@@ -73,6 +73,7 @@ from prism_sdk.ops_retrieval import OpsRetrievalAssuranceReceipt
 from prism_sdk.conformance_knowledge import ConformanceKnowledgeWorldAssuranceReceipt
 from prism_sdk.brain_surveillance import BrainEvidenceSurveillanceReceipt
 from prism_sdk.brain_multimodal_surveillance import BrainMultimodalEvidenceSurveillanceReceipt
+from prism_sdk.brain_throughput_surveillance import BrainHighThroughputEvidenceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2355,6 +2356,30 @@ def test_brain_multimodal_surveillance_keeps_missing_modality_fail_closed():
         replay_identity="d" * 64,
         effect_receipts=("read:local-research-artifacts:request:multimodal",),
         artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_throughput_surveillance_keeps_capacity_omission_explicit():
+    receipt = BrainHighThroughputEvidenceReceipt(
+        request_id="request:throughput",
+        batch_id="batch:001",
+        partition="partition:imaging",
+        disposition="partial",
+        candidate_order=("evidence:a", "evidence:b"),
+        admitted_order=("evidence:a",),
+        blocked_order=("evidence:b",),
+        unknown_order=(),
+        relevance_order=(900, 800),
+        omissions=("evidence:evidence:b:batch-capacity-exceeded",),
+        uncertainty=(),
+        negative_evidence=(),
+        checkpoint_seq=2,
+        queue_digest="a" * 64,
+        replay_identity="b" * 64,
+        effect_receipts=("read:local-research-artifacts:request:throughput",),
+        artifact={"content_hash": "c" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

@@ -323,6 +323,7 @@ from .brain_surveillance import (
     BrainEvidenceSurveillanceReceipt,
 )
 from .brain_multimodal_surveillance import BrainMultimodalEvidenceSurveillanceReceipt
+from .brain_throughput_surveillance import BrainHighThroughputEvidenceReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
