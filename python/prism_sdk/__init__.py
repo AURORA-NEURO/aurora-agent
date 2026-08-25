@@ -587,6 +587,17 @@ from .autonomous_action_plan import (
     AutonomousActionPlan,
     plan_autonomous_action,
 )
+from .autonomous_action_execution import (
+    AUTONOMOUS_ACTION_EXECUTION_SCHEMA,
+    AUTONOMOUS_ACTION_EXECUTION_VERSION,
+    AUTONOMOUS_ACTION_EXECUTION_STATUSES,
+    AUTONOMOUS_ACTION_EXECUTION_RESULT_STATUSES,
+    AUTONOMOUS_ACTION_EXECUTION_PATHS,
+    MAX_AUTONOMOUS_ACTION_EXECUTION_ITEMS,
+    AutonomousActionAdmission,
+    AutonomousActionExecution,
+    admit_autonomous_action_plan,
+)
 from .autonomous_domain_response import (
     AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA,
     AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_SCHEMA,
@@ -6290,6 +6301,15 @@ __all__ = [
     "AutonomousActionCandidate",
     "AutonomousActionPlan",
     "plan_autonomous_action",
+    "AUTONOMOUS_ACTION_EXECUTION_SCHEMA",
+    "AUTONOMOUS_ACTION_EXECUTION_VERSION",
+    "AUTONOMOUS_ACTION_EXECUTION_STATUSES",
+    "AUTONOMOUS_ACTION_EXECUTION_RESULT_STATUSES",
+    "AUTONOMOUS_ACTION_EXECUTION_PATHS",
+    "MAX_AUTONOMOUS_ACTION_EXECUTION_ITEMS",
+    "AutonomousActionAdmission",
+    "AutonomousActionExecution",
+    "admit_autonomous_action_plan",
     "AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA",
     "AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_SCHEMA",
     "AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA",

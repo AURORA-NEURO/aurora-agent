@@ -17866,6 +17866,188 @@ class AutonomousAgent:
             )
         return plan_autonomous_action(blueprint).to_dict()
 
+    def admit_action_plan(
+        self,
+        plan: Mapping[str, Any] | Any,
+        *,
+        approvals: Mapping[str, bool] | None = None,
+        reviewed: bool = False,
+    ) -> dict[str, Any]:
+        """Record the caller's explicit gates against one exact action-plan digest.
+
+        Admission is provider-free and does not consume credentials.  A returned ``admitted``
+        record is still not an authorization token; it is the value-only input required by
+        :meth:`execute_action_plan` before that method may delegate to ``run_auto``.
+        """
+
+        from .autonomous_action_execution import admit_autonomous_action_plan
+
+        return admit_autonomous_action_plan(
+            plan,
+            approvals=approvals,
+            reviewed=reviewed,
+        ).to_dict()
+
+    def execute_action_plan(
+        self,
+        *,
+        task: str,
+        plan: Mapping[str, Any] | Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        approvals: Mapping[str, bool] | None = None,
+        reviewed: bool = False,
+        domain: str | None = None,
+        route_options: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Replay, admit, and execute one digest-bound action plan.
+
+        ``route_options`` (or equivalent routing keys in ``kwargs``) must reproduce the
+        provider-free plan.  The task is transient and is never copied into the plan or the
+        admission record.  If review, policy, evidence, or approval gates are incomplete, the
+        method returns an :class:`AutonomousActionExecution` without touching a provider,
+        connector, evaluator, learner, or credential.
+
+        Once admitted, the recommended path is translated into existing execution controls:
+        workflow paths opt into checkpointable workflow execution, planning paths opt into the
+        provider-planning boundary, and cross-domain paths retain the reviewed fan-out/fan-in
+        route.  The caller still owns credentials, evidence, evaluator settlement, and effects.
+        """
+
+        from .autonomous_action_execution import (
+            AutonomousActionExecution,
+            admit_autonomous_action_plan,
+        )
+        from .autonomous_action_plan import AutonomousActionPlan
+
+        if isinstance(plan, Mapping):
+            parsed_plan = AutonomousActionPlan.from_dict(plan)
+        elif isinstance(plan, AutonomousActionPlan):
+            parsed_plan = plan
+        else:
+            raise BrainRunError("execute_action_plan requires an AutonomousActionPlan or serialized plan")
+        if route_options is not None and not isinstance(route_options, Mapping):
+            raise BrainRunError("execute_action_plan route_options must be a mapping")
+        normalized_route_options = dict(route_options or {})
+        route_option_names = {
+            "hints",
+            "min_confidence",
+            "min_margin",
+            "max_domains",
+            "allow_cross_domain",
+            "context",
+            "constraints",
+            "desired_outputs",
+            "capability",
+            "risk_class",
+            "max_steps",
+            "require_json",
+            "structured_domain_response",
+            "response_schema",
+            "execution_mode",
+            "max_input_tokens",
+            "required_model_capabilities",
+            "memory_episodes",
+            "domain_policy_mode",
+            "domain_policy_evidence_ready",
+            "domain_policy_evaluator_configured",
+            "domain_policy_effects_requested",
+            "domain_policy_effects_approved",
+        }
+        execution_options = dict(kwargs)
+        for name in route_option_names:
+            if name not in execution_options:
+                continue
+            value = execution_options.pop(name)
+            if name in normalized_route_options and normalized_route_options[name] != value:
+                raise BrainRunError(f"execute_action_plan {name} differs between route_options and execution options")
+            normalized_route_options[name] = value
+        for name in ("credentials", "model_candidates", "approvals", "reviewed", "plan", "domain"):
+            if name in normalized_route_options:
+                raise BrainRunError(f"execute_action_plan route_options cannot contain {name}")
+
+        expected_public = self.action_plan(
+            task=task,
+            domain=domain,
+            **normalized_route_options,
+        )
+        expected_plan = AutonomousActionPlan.from_dict(expected_public)
+        if expected_plan.plan_digest != parsed_plan.plan_digest:
+            raise BrainRunError(
+                "action plan is stale or was compiled with different task, route, or blueprint inputs"
+            )
+
+        admission = admit_autonomous_action_plan(
+            parsed_plan,
+            approvals=approvals,
+            reviewed=reviewed,
+        )
+        if admission.status != "admitted":
+            return AutonomousActionExecution(
+                status=admission.status,
+                plan=parsed_plan,
+                admission=admission,
+            )
+        if credentials is None:
+            raise BrainRunError("admitted action-plan execution requires caller-supplied credentials")
+
+        # The automatic runner owns routing. Explicit domain plans are reproduced through the
+        # same deterministic hint boundary used by action_plan, never by bypassing the router.
+        execution_options.update(normalized_route_options)
+        if domain is not None:
+            execution_options.update(
+                {
+                    "hints": (domain,),
+                    "min_confidence": 0.0,
+                    "min_margin": 0.0,
+                    "allow_cross_domain": False,
+                }
+            )
+
+        def enable_gate(name: str) -> None:
+            current = execution_options.get(name)
+            if current is not None and current is not True:
+                raise BrainRunError(f"action-plan approval contradicts explicit {name}=False")
+            execution_options[name] = True
+
+        for gate in admission.approved_approvals:
+            if gate == "provider_call":
+                enable_gate("approve_provider_call")
+            elif gate == "evidence_dispatch":
+                enable_gate("domain_policy_evidence_ready")
+            elif gate == "plan_acceptance":
+                enable_gate("domain_policy_plan_accepted")
+            elif gate == "effect_approval":
+                enable_gate("domain_policy_effects_requested")
+                enable_gate("domain_policy_effects_approved")
+            elif gate == "evaluator_settlement":
+                # Evaluator identity/evidence remain caller-owned kwargs. The admission gate
+                # proves only that the caller reviewed the requirement, never that reward exists.
+                continue
+
+        if admission.execution_path == "workflow":
+            enable_gate("workflow_execution")
+        elif admission.execution_path == "planning":
+            current_planning_mode = execution_options.get("planning_mode")
+            if current_planning_mode is not None and current_planning_mode != "provider":
+                raise BrainRunError("planning action plans require planning_mode='provider'")
+            execution_options["planning_mode"] = "provider"
+
+        result = self.run_auto(
+            task=task,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **execution_options,
+        )
+        execution_status = getattr(result, "execution_status", None)
+        return AutonomousActionExecution(
+            status="completed" if execution_status == "completed" else "review_required",
+            plan=parsed_plan,
+            admission=admission,
+            result=result,
+        )
+
     def plan_workflow_portfolio(
         self,
         requests: Sequence[Any],

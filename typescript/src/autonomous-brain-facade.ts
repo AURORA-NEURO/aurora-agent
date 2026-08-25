@@ -11,6 +11,8 @@ import {
   type AutonomousCrossDomainRunResult,
   type AutonomousCrossDomainSubtask,
   type AutonomousDomainName,
+  type AutonomousAutoRunOptions,
+  type AutonomousAutoRunResult,
   type AutonomousPromptChunk,
   type AutonomousRouteProposal,
   type AutonomousRunOptions,
@@ -80,7 +82,14 @@ import {
 } from "./autonomous-launch-admission.js";
 import {
   AutonomousActionPlan,
+  AutonomousActionAdmission,
+  admitAutonomousActionPlan,
   buildAutonomousActionPlan,
+} from "./autonomous-action-plan.js";
+import type {
+  AutonomousActionAdmissionJSON,
+  AutonomousActionPlanApproval,
+  AutonomousActionPlanJSON,
 } from "./autonomous-action-plan.js";
 
 /**
@@ -109,6 +118,7 @@ export const MAX_AUTONOMOUS_BRAIN_OBSERVATION_BYTES = 1_000_000;
 
 export type AutonomousBrainPlanStatus = "ready" | "route_review_required" | "connector_review_required";
 export type AutonomousBrainExecutionStatus = AutonomousRunResult["status"] | AutonomousCrossDomainRunResult["status"] | "connector_blocked";
+export const AUTONOMOUS_ACTION_EXECUTION_FACADE_SCHEMA = "bioprism-typescript-autonomous-action-execution-facade/0.1" as const;
 
 export interface AutonomousBrainRequest {
   task: string;
@@ -119,6 +129,29 @@ export interface AutonomousBrainRequest {
   context?: readonly AutonomousPromptChunk[];
   /** Optional caller-owned evidence operation to run before provider invocation. */
   connector?: AutonomousConnectorOperationInput;
+}
+
+export interface AutonomousActionPlanExecutionOptions extends AutonomousAutoRunOptions {
+  /** Explicit caller-owned gates bound to the action plan digest. */
+  approvals?: Partial<Record<AutonomousActionPlanApproval, boolean>>;
+  /** Acknowledges review reasons emitted by the task-decision layer. */
+  reviewed?: boolean;
+  /** Connector execution policy used when the request includes a reviewed connector operation. */
+  connectorFirst?: boolean;
+  /** Include the connector's transient observation in the provider context. */
+  includeConnectorObservation?: boolean;
+}
+
+export interface AutonomousActionPlanExecution {
+  schema: typeof AUTONOMOUS_ACTION_EXECUTION_FACADE_SCHEMA;
+  status: "review_required" | "blocked" | "route_review_required" | "completed";
+  execution_status: string;
+  plan: AutonomousActionPlanJSON;
+  admission: AutonomousActionAdmissionJSON;
+  result: AutonomousAutoRunResult | AutonomousBrainExecution | null;
+  retention: "plan_and_admission_metadata_only;execution_result_is_caller_owned";
+  authorization: "caller_owned_execution_result;provider_and_effect_authority_remain_explicit";
+  secret_material: "never_returned";
 }
 
 export interface AutonomousBrainDomainPlanSummary extends JsonObject {
@@ -995,6 +1028,91 @@ export class AutonomousBrainFacade {
   async actionPlan(input: AutonomousBrainRequest): Promise<AutonomousActionPlan> {
     const plan = await this.plan(input);
     return buildAutonomousActionPlan(plan.toJSON());
+  }
+
+  /**
+   * Replay, admit, and execute one digest-bound action plan.
+   *
+   * The request is re-planned before admission, so a changed task, domain, connector, or
+   * deterministic route cannot reuse an old approval. Missing gates return without touching a
+   * connector or provider. Once admitted, the existing runAuto/execute boundaries retain
+   * ownership of credentials, evidence, model selection, tools, evaluators, and effects.
+   */
+  async executeActionPlan(
+    input: AutonomousBrainRequest,
+    source: AutonomousActionPlan | AutonomousActionPlanJSON,
+    options: AutonomousActionPlanExecutionOptions = {},
+  ): Promise<AutonomousActionPlanExecution> {
+    const request = validateRequest(input);
+    const actionPlan = source instanceof AutonomousActionPlan ? source : AutonomousActionPlan.fromJSON(source);
+    const expected = await this.actionPlan(request);
+    if (expected.plan_digest !== actionPlan.plan_digest) throw new ArgumentError("autonomous action plan is stale or does not match the transient request");
+    const admission = admitAutonomousActionPlan(actionPlan, { approvals: options.approvals, reviewed: options.reviewed ?? false });
+    const base = (status: AutonomousActionPlanExecution["status"], result: AutonomousActionPlanExecution["result"]): AutonomousActionPlanExecution => ({
+      schema: AUTONOMOUS_ACTION_EXECUTION_FACADE_SCHEMA,
+      status,
+      execution_status: result === null ? admission.status : (result.status ?? status),
+      plan: actionPlan.toJSON(),
+      admission: admission.toJSON(),
+      result,
+      retention: "plan_and_admission_metadata_only;execution_result_is_caller_owned",
+      authorization: "caller_owned_execution_result;provider_and_effect_authority_remain_explicit",
+      secret_material: "never_returned",
+    });
+    if (admission.status !== "admitted") return base(admission.status, null);
+
+    const {
+      approvals: _approvals,
+      reviewed: _reviewed,
+      connectorFirst,
+      includeConnectorObservation,
+      planningMode,
+      ...callerRunOptions
+    } = options;
+    const runOptions: AutonomousAutoRunOptions = {
+      ...callerRunOptions,
+      domain: request.domain,
+      capability: request.capability,
+      context: request.context,
+      hints: request.hints,
+      allowCrossDomain: request.allow_cross_domain,
+    };
+    const enableGate = (key: "approveProviderCall" | "domainPolicyEvidenceReady" | "domainPolicyPlanAccepted" | "domainPolicyEffectsRequested" | "domainPolicyEffectsApproved"): void => {
+      const current = runOptions[key];
+      if (current !== undefined && current !== true) throw new ArgumentError(`action-plan approval contradicts ${key}=false`);
+      (runOptions as Record<string, unknown>)[key] = true;
+    };
+    for (const gate of admission.approved_approvals) {
+      if (gate === "provider_call") enableGate("approveProviderCall");
+      else if (gate === "evidence_dispatch") enableGate("domainPolicyEvidenceReady");
+      else if (gate === "plan_acceptance") enableGate("domainPolicyPlanAccepted");
+      else if (gate === "effect_approval") {
+        enableGate("domainPolicyEffectsRequested");
+        enableGate("domainPolicyEffectsApproved");
+      }
+    }
+    if (admission.execution_path === "planning") {
+      if (planningMode !== undefined && planningMode !== "provider") throw new ArgumentError("planning action plans require planningMode='provider'");
+      runOptions.planningMode = "provider";
+    } else if (planningMode !== undefined) {
+      runOptions.planningMode = planningMode;
+    }
+
+    let result: AutonomousActionPlanExecution["result"];
+    if (request.connector !== undefined) {
+      if (runOptions.planningMode === "provider") throw new ArgumentError("provider planning with connector action plans must use the explicit planAndRun connector boundary");
+      const { domain: _domain, capability: _capability, context: _context, hints: _hints, allowCrossDomain: _allowCrossDomain, planningMode: _planning, ...connectorRun } = runOptions;
+      result = await this.execute(request, {
+        approveProviderCall: true,
+        connectorFirst,
+        includeConnectorObservation,
+        run: connectorRun,
+      });
+    } else {
+      result = await this.agent.runAuto(request.task, runOptions);
+    }
+    const finished = result.status === "completed";
+    return base(finished ? "completed" : result.status === "route_review_required" ? "route_review_required" : result.status === "policy_blocked" ? "blocked" : "review_required", result);
   }
 
   private async buildPlanForRoute(

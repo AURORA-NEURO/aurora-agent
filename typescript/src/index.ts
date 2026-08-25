@@ -1605,6 +1605,7 @@ export type {
 } from "./autonomous-connector-facade.js";
 export {
   AUTONOMOUS_BRAIN_FACADE_SCHEMA,
+  AUTONOMOUS_ACTION_EXECUTION_FACADE_SCHEMA,
   AUTONOMOUS_BRAIN_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA,
   AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA,
@@ -1625,6 +1626,8 @@ export {
 export type {
   AutonomousBrainPlanStatus,
   AutonomousBrainExecutionStatus,
+  AutonomousActionPlanExecutionOptions,
+  AutonomousActionPlanExecution,
   AutonomousBrainRequest,
   AutonomousBrainDomainPlanSummary,
   AutonomousBrainCrossDomainPlanSummary,
@@ -1680,15 +1683,26 @@ export {
   AUTONOMOUS_ACTION_PLAN_STATUSES,
   AUTONOMOUS_ACTION_PLAN_ROLES,
   AUTONOMOUS_ACTION_PLAN_NEXT_ACTIONS,
+  AUTONOMOUS_ACTION_EXECUTION_SCHEMA,
+  AUTONOMOUS_ACTION_EXECUTION_VERSION,
+  AUTONOMOUS_ACTION_EXECUTION_STATUSES,
+  AUTONOMOUS_ACTION_EXECUTION_RESULT_STATUSES,
+  AUTONOMOUS_ACTION_EXECUTION_PATHS,
   AutonomousActionPlan,
+  AutonomousActionAdmission,
+  admitAutonomousActionPlan,
   buildAutonomousActionPlan,
 } from "./autonomous-action-plan.js";
 export type {
   AutonomousActionPlanStatus,
   AutonomousActionPlanRole,
   AutonomousActionPlanNextAction,
+  AutonomousActionPlanApproval,
+  AutonomousActionExecutionStatus,
+  AutonomousActionExecutionPath,
   AutonomousActionCandidate,
   AutonomousActionPlanJSON,
+  AutonomousActionAdmissionJSON,
 } from "./autonomous-action-plan.js";
 export {
   AUTONOMOUS_DOMAIN_AUDIT_SCHEMA,

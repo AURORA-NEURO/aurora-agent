@@ -1645,3 +1645,13 @@ acceptance, effect review, provider approval, and evaluator settlement, and roun
 candidate-level tamper checks across all twelve domains. It remains provider/source/tool/effect
 free; production deployments still own the caller-controlled admission, credential, evaluator,
 queue, observability, and reconciliation integrations.
+
+The action-plan boundary now has an explicit admission/execution handoff. Python
+`agent.admit_action_plan(...)` / `agent.execute_action_plan(...)` and TypeScript
+`brain.executeActionPlan(...)` replay the plan from transient task and route inputs, bind review
+gates to the plan digest, and return before dispatch when any gate is missing. An admitted plan
+selects the existing provider, evidence-first, workflow, planning, or cross-domain kernel while
+leaving credentials, evidence, evaluator settlement, connector execution, effects, and durable
+authorization caller-owned. Remaining deployment work is to connect these handoffs to an
+application-owned authorization store and operator UI, then exercise them in the live worker
+and release environments.

@@ -4,10 +4,12 @@ import test from "node:test";
 import {
   AUTONOMOUS_ACTION_PLAN_SCHEMA,
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousActionAdmission,
   AutonomousActionPlan,
   AutonomousAgent,
   AutonomousBrainFacade,
   LLMRuntime,
+  admitAutonomousActionPlan,
 } from "../dist/index.js";
 
 const tasks = {
@@ -93,4 +95,60 @@ test("action plan preserves route abstention as a review action", async () => {
   assert.equal(plan.status, "route_review_required");
   assert.equal(plan.next_action, "review_route");
   assert.deepEqual(plan.candidates, []);
+});
+
+test("action-plan admission covers every domain without credentials or provider dispatch", async () => {
+  const facade = brain();
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const plan = await facade.actionPlan({ task: tasks[domain], domain, allow_cross_domain: false });
+    const approvals = Object.fromEntries(plan.required_approvals.map((gate) => [gate, true]));
+    const admission = admitAutonomousActionPlan(plan, { approvals, reviewed: true });
+    if (plan.status === "blocked") assert.equal(admission.status, "blocked", domain);
+    else {
+      assert.equal(admission.status, "admitted", domain);
+      assert.equal(admission.execution_path, plan.candidates[0].recommended_path, domain);
+    }
+    assert.equal(JSON.stringify(admission).includes(tasks[domain]), false, domain);
+  }
+});
+
+test("action-plan execution returns a metadata-only review handoff before provider dispatch", async () => {
+  const facade = brain();
+  const input = { task: "debug a bounded repository change", domain: "coding", allow_cross_domain: false };
+  const plan = await facade.actionPlan(input);
+  const admission = admitAutonomousActionPlan(plan);
+  assert.equal(admission.status, "review_required");
+  const execution = await facade.executeActionPlan(input, plan);
+  assert.equal(execution.status, "review_required");
+  assert.equal(execution.result, null);
+  assert.equal(execution.execution_status, "review_required");
+  assert.equal(JSON.stringify(execution).includes(input.task), false);
+});
+
+test("action-plan admission handles cross-domain synthesis and rejects stale or tampered replay", async () => {
+  const facade = brain();
+  const input = { task: "coordinate coding and biomedical evidence across disciplines", hints: ["coding", "biomedical"], allow_cross_domain: true };
+  const plan = await facade.actionPlan(input);
+  const approvals = Object.fromEntries(plan.required_approvals.map((gate) => [gate, true]));
+  const admission = admitAutonomousActionPlan(plan, { approvals, reviewed: true });
+  assert.equal(admission.status, "admitted");
+  assert.equal(admission.execution_path, "cross_domain");
+  const restored = AutonomousActionAdmission.fromJSON(admission.toJSON());
+  assert.deepEqual(restored.toJSON(), admission.toJSON());
+
+  const tampered = structuredClone(admission.toJSON());
+  tampered.approved_approvals = [];
+  assert.throws(() => AutonomousActionAdmission.fromJSON(tampered), /digest/);
+  await assert.rejects(
+    () => facade.executeActionPlan({ ...input, task: "coordinate a different evidence route" }, plan, { approvals, reviewed: true }),
+    /stale|match/,
+  );
+});
+
+test("action-plan admission preserves forbidden biomedical effects", async () => {
+  const facade = brain();
+  const plan = await facade.actionPlan({ task: "deploy the biomedical report and verify safety", domain: "biomedical" });
+  const admission = admitAutonomousActionPlan(plan, { approvals: Object.fromEntries(plan.required_approvals.map((gate) => [gate, true])), reviewed: true });
+  assert.equal(admission.status, "blocked");
+  assert.equal(admission.next_action, "resolve_policy_block");
 });

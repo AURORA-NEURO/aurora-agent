@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousActionAdmission,
+    AutonomousActionExecution,
     AutonomousActionPlan,
     AutonomousAgent,
     LLMRuntime,
+    admit_autonomous_action_plan,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -112,3 +116,116 @@ def test_action_plan_abstains_when_the_router_has_no_reviewed_evidence() -> None
     assert plan["next_action"] == "review_route"
     assert plan["candidates"] == []
     assert plan["required_approvals"] == []
+
+
+def test_action_plan_admission_is_explicit_and_round_trip_safe_without_credentials() -> None:
+    agent = _agent()
+    plan = agent.action_plan(
+        task="debug a bounded repository change",
+        domain="coding",
+        allow_cross_domain=False,
+    )
+
+    admission = admit_autonomous_action_plan(plan)
+    assert admission.status == "review_required"
+    assert admission.missing_approvals == tuple(plan["required_approvals"])
+    assert admission.next_action in {"review_task_decision", "approve_provider_call"}
+    restored = AutonomousActionAdmission.from_dict(admission.to_dict())
+    assert restored.to_dict() == admission.to_dict()
+
+    execution = agent.execute_action_plan(
+        task="debug a bounded repository change",
+        plan=plan,
+        domain="coding",
+        allow_cross_domain=False,
+    )
+    assert isinstance(execution, AutonomousActionExecution)
+    assert execution.status == "review_required"
+    assert execution.result is None
+    assert "debug a bounded repository change" not in json.dumps(execution.to_dict())
+
+
+def test_action_plan_admission_covers_all_domains_and_cross_domain_path() -> None:
+    agent = _agent()
+    for domain in AUTONOMOUS_DOMAINS:
+        plan = agent.action_plan(task=_TASKS[domain], domain=domain, allow_cross_domain=False)
+        approvals = {gate: True for gate in plan["required_approvals"]}
+        admission = admit_autonomous_action_plan(plan, approvals=approvals, reviewed=True)
+        if plan["status"] == "blocked":
+            assert admission.status == "blocked", domain
+        else:
+            assert admission.status == "admitted", domain
+            assert admission.execution_path == plan["candidates"][0]["recommended_path"], domain
+
+    cross_plan = agent.action_plan(
+        task="coordinate coding and biomedical evidence across disciplines",
+        hints=("coding", "biomedical"),
+        allow_cross_domain=True,
+        max_domains=3,
+    )
+    cross_admission = admit_autonomous_action_plan(
+        cross_plan,
+        approvals={gate: True for gate in cross_plan["required_approvals"]},
+        reviewed=True,
+    )
+    assert cross_admission.status == "admitted"
+    assert cross_admission.execution_path == "cross_domain"
+
+
+def test_action_plan_execution_rejects_stale_task_and_tampered_admission() -> None:
+    agent = _agent()
+    plan = agent.action_plan(task="analyze a bounded data workflow", domain="data")
+    approvals = {gate: True for gate in plan["required_approvals"]}
+    admission = admit_autonomous_action_plan(plan, approvals=approvals, reviewed=True)
+    tampered = dict(admission.to_dict())
+    tampered["approved_approvals"] = []
+    with pytest.raises(ArgumentError, match="digest"):
+        AutonomousActionAdmission.from_dict(tampered)
+    with pytest.raises(Exception, match="stale"):
+        agent.execute_action_plan(
+            task="analyze a different bounded data workflow",
+            plan=plan,
+            domain="data",
+            approvals=approvals,
+            reviewed=True,
+        )
+
+
+def test_action_plan_admission_preserves_policy_block_before_dispatch() -> None:
+    plan = _agent().action_plan(
+        task="deploy the biomedical report and verify safety",
+        domain="biomedical",
+    )
+    admission = admit_autonomous_action_plan(
+        plan,
+        approvals={gate: True for gate in plan["required_approvals"]},
+        reviewed=True,
+    )
+    assert admission.status == "blocked"
+    assert admission.next_action == "resolve_policy_block"
+
+
+def test_action_plan_execution_translates_path_and_approvals_into_existing_runner_controls() -> None:
+    agent = _agent()
+    task = "debug a bounded repository change"
+    plan = agent.action_plan(task=task, domain="coding", allow_cross_domain=False)
+    approvals = {gate: True for gate in plan["required_approvals"]}
+    calls: dict[str, object] = {}
+
+    def fake_run_auto(**kwargs: object) -> SimpleNamespace:
+        calls.update(kwargs)
+        return SimpleNamespace(execution_status="completed", to_dict=lambda: {"status": "completed"})
+
+    agent.run_auto = fake_run_auto  # type: ignore[method-assign]
+    execution = agent.execute_action_plan(
+        task=task,
+        plan=plan,
+        domain="coding",
+        approvals=approvals,
+        reviewed=True,
+        credentials=object(),
+    )
+    assert execution.status == "completed"
+    assert calls["approve_provider_call"] is True
+    assert calls["domain_policy_plan_accepted"] is True
+    assert calls["workflow_execution"] is True

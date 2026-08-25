@@ -2775,6 +2775,39 @@ contract, including domain-specific evidence and policy decisions, while cross-d
 retain independent specialist and synthesis decisions rather than flattening them into one
 unreviewable instruction.
 
+The execution handoff now provides that missing caller boundary without collapsing it into an
+implicit permission. Python `agent.admit_action_plan(...)` and
+`agent.execute_action_plan(...)`, together with TypeScript
+`brain.executeActionPlan(...)`, validate the serialized plan, replay the provider-free plan from
+the transient task and route inputs, and bind each explicit approval to the exact `plan_digest`.
+The admission record exposes `admitted`, `review_required`, `blocked`, or
+`route_review_required`, the selected execution path, approved and missing gates, and a stable
+next action. A stale task, changed route, changed domain blueprint, or tampered approval record
+fails before credentials are consumed.
+
+When admitted, the handoff maps the reviewed decision to the existing execution kernel: workflow
+decisions opt into checkpointable workflow execution, planning decisions use the provider-planning
+boundary, cross-domain decisions retain specialist fan-out and synthesis, and evidence/effect
+gates become strict caller-supplied policy flags. The handoff never fabricates evidence,
+evaluator reward, credentials, connector observations, or effect approval. Missing gates return a
+metadata-only result, so a UI can resume the same plan after review without accidentally invoking
+a provider. The admission and execution projections retain no task text, prompt, source value,
+tool argument, provider response, credential, or secret material.
+
+```python
+plan = agent.action_plan(task="analyze a bounded dataset", domain="data")
+execution = agent.execute_action_plan(
+    task="analyze a bounded dataset",
+    plan=plan,
+    domain="data",
+    approvals={gate: True for gate in plan["required_approvals"]},
+    reviewed=True,
+    credentials=caller_credentials,
+)
+if execution.status == "review_required":
+    show_next_action(execution.admission.next_action)
+```
+
 ### Provider-assisted mission ordering with replay-safe acceptance
 
 Mission execution now has the same planner boundary as workflow and portfolio execution. The
