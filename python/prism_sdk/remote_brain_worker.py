@@ -19,6 +19,8 @@ from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 
 from .brain import BrainRunError
 from .brain_api import AsyncBrainControlClient, BrainControlClient
+from .autonomous_action_execution import AutonomousActionAdmission
+from .autonomous_action_plan import AutonomousActionPlan
 
 
 AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA = "bioprism-python-autonomous-remote-brain-worker/0.1"
@@ -86,6 +88,8 @@ class RemoteBrainJobSubmission:
     mode: str
     plan_digest: str | None = None
     route_digest: str | None = None
+    action_plan_digest: str | None = None
+    action_admission_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +100,8 @@ class RemoteBrainJobSubmission:
             "mode": self.mode,
             "plan_digest": self.plan_digest,
             "route_digest": self.route_digest,
+            "action_plan_digest": self.action_plan_digest,
+            "action_admission_digest": self.action_admission_digest,
             "private_spec": "caller_owned;request_and_execution_kwargs_not_sent_to_control_plane",
             "secret_material": "never_returned",
         }
@@ -181,6 +187,8 @@ class RemoteBrainJobResolution:
     policy_digest: str | None = None
     plan_digest: str | None = None
     route_digest: str | None = None
+    action_plan: AutonomousActionPlan | Mapping[str, Any] | None = None
+    action_admission: AutonomousActionAdmission | Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,6 +403,8 @@ def autonomous_remote_brain_job_spec_digest(
     policy_digest: str | None = None,
     plan_digest: str | None = None,
     route_digest: str | None = None,
+    action_plan_digest: str | None = None,
+    action_admission_digest: str | None = None,
 ) -> str:
     """Bind request/mode/policy and optional reviewed identities without retaining private values.
 
@@ -409,6 +419,10 @@ def autonomous_remote_brain_job_spec_digest(
     policy_digest = _validate_optional_digest("policy_digest", policy_digest)
     plan_digest = _validate_optional_digest("plan_digest", plan_digest)
     route_digest = _validate_optional_digest("route_digest", route_digest)
+    action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
+    action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
+    if action_admission_digest is not None and action_plan_digest is None:
+        raise RemoteBrainWorkerError("action_admission_digest requires action_plan_digest")
     payload: dict[str, Any] = {
         "schema": AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA,
         "mode": mode,
@@ -419,6 +433,10 @@ def autonomous_remote_brain_job_spec_digest(
         payload["plan_digest"] = plan_digest
     if route_digest is not None:
         payload["route_digest"] = route_digest
+    if action_plan_digest is not None:
+        payload["action_plan_digest"] = action_plan_digest
+    if action_admission_digest is not None:
+        payload["action_admission_digest"] = action_admission_digest
     return _digest_json(payload)
 
 
@@ -522,6 +540,34 @@ def _mapping_value(value: Any, key: str) -> Any:
     return getattr(value, key, None)
 
 
+def _action_plan_value(value: Any) -> AutonomousActionPlan | None:
+    if value is None:
+        return None
+    if isinstance(value, AutonomousActionPlan):
+        return value
+    if not isinstance(value, Mapping):
+        raise RemoteBrainWorkerError("remote brain action_plan must be metadata mapping", code="protocol")
+    _assert_no_private_fields(value)
+    try:
+        return AutonomousActionPlan.from_dict(value)
+    except Exception as error:
+        raise RemoteBrainWorkerError("remote brain action_plan metadata is invalid", code="protocol") from error
+
+
+def _action_admission_value(value: Any) -> AutonomousActionAdmission | None:
+    if value is None:
+        return None
+    if isinstance(value, AutonomousActionAdmission):
+        return value
+    if not isinstance(value, Mapping):
+        raise RemoteBrainWorkerError("remote brain action_admission must be metadata mapping", code="protocol")
+    _assert_no_private_fields(value)
+    try:
+        return AutonomousActionAdmission.from_dict(value)
+    except Exception as error:
+        raise RemoteBrainWorkerError("remote brain action_admission metadata is invalid", code="protocol") from error
+
+
 class RemoteBrainJobWorker:
     """Pull and execute private Python brain requests through a remote job control plane.
 
@@ -593,6 +639,8 @@ class RemoteBrainJobWorker:
         policy_digest: str | None = None,
         plan_digest: str | None = None,
         route_digest: str | None = None,
+        action_plan_digest: str | None = None,
+        action_admission_digest: str | None = None,
         priority: int = 0,
         max_attempts: int = 3,
         checkpoint_digest: str | None = None,
@@ -609,6 +657,8 @@ class RemoteBrainJobWorker:
         policy_digest = _validate_optional_digest("policy_digest", policy_digest)
         plan_digest = _validate_optional_digest("plan_digest", plan_digest)
         route_digest = _validate_optional_digest("route_digest", route_digest)
+        action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
+        action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
         checkpoint_digest = _validate_optional_digest("checkpoint_digest", checkpoint_digest)
         spec_digest = autonomous_remote_brain_job_spec_digest(
             request=request,
@@ -616,6 +666,8 @@ class RemoteBrainJobWorker:
             policy_digest=policy_digest,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
         )
         payload = self.control.submit_job({
             "idempotency_key": idempotency_key,
@@ -634,6 +686,8 @@ class RemoteBrainJobWorker:
             mode=mode,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
         )
 
     def status(self, job_id: str) -> Mapping[str, Any]:
@@ -805,7 +859,7 @@ class RemoteBrainJobWorker:
             return raw
         if not isinstance(raw, Mapping):
             raise RemoteBrainWorkerError("remote brain resolver must return a mapping")
-        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "mode", "request", "kwargs"}
+        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "action_plan", "action_admission", "mode", "request", "kwargs"}
         unknown = sorted(set(raw).difference(allowed))
         if unknown:
             raise RemoteBrainWorkerError("remote brain resolver returned unsupported fields")
@@ -817,6 +871,8 @@ class RemoteBrainJobWorker:
             kwargs=raw.get("kwargs"),
             plan_digest=raw.get("plan_digest"),
             route_digest=raw.get("route_digest"),
+            action_plan=raw.get("action_plan"),
+            action_admission=raw.get("action_admission"),
         )
 
     @staticmethod
@@ -826,6 +882,17 @@ class RemoteBrainJobWorker:
         policy_digest = _validate_optional_digest("resolver policy_digest", resolution.policy_digest)
         plan_digest = _validate_optional_digest("resolver plan_digest", resolution.plan_digest)
         route_digest = _validate_optional_digest("resolver route_digest", resolution.route_digest)
+        action_plan = _action_plan_value(resolution.action_plan)
+        action_admission = _action_admission_value(resolution.action_admission)
+        if (action_plan is None) != (action_admission is None):
+            raise RemoteBrainWorkerError("remote brain action_plan and action_admission must be supplied together", code="protocol")
+        action_plan_digest = action_plan.plan_digest if action_plan is not None else None
+        action_admission_digest = action_admission.admission_digest if action_admission is not None else None
+        if action_plan is not None and action_admission is not None:
+            if action_admission.plan_digest != action_plan.plan_digest:
+                raise RemoteBrainWorkerError("remote brain action admission is bound to a different action plan", code="protocol")
+            if action_admission.status != "admitted":
+                raise RemoteBrainWorkerError("remote brain action admission must be admitted before worker dispatch", code="protocol")
         if spec_digest != job["spec_digest"]:
             raise RemoteBrainWorkerError("remote brain resolver spec_digest does not match the durable job")
         if not isinstance(resolution.request, Mapping) or not isinstance(resolution.kwargs, Mapping):
@@ -836,9 +903,11 @@ class RemoteBrainJobWorker:
             policy_digest=policy_digest,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
         )
         if expected != job["spec_digest"]:
-            raise RemoteBrainWorkerError("remote brain request, mode, policy, and reviewed identities do not match the durable job")
+            raise RemoteBrainWorkerError("remote brain request, mode, policy, reviewed identities, and action admission do not match the durable job")
         task = resolution.request.get("task")
         if not isinstance(task, str) or not task.strip():
             raise RemoteBrainWorkerError("remote brain resolver request must contain a bounded task")
@@ -964,6 +1033,8 @@ class AsyncRemoteBrainJobWorker:
         policy_digest: str | None = None,
         plan_digest: str | None = None,
         route_digest: str | None = None,
+        action_plan_digest: str | None = None,
+        action_admission_digest: str | None = None,
         priority: int = 0,
         max_attempts: int = 3,
         checkpoint_digest: str | None = None,
@@ -980,6 +1051,8 @@ class AsyncRemoteBrainJobWorker:
         policy_digest = _validate_optional_digest("policy_digest", policy_digest)
         plan_digest = _validate_optional_digest("plan_digest", plan_digest)
         route_digest = _validate_optional_digest("route_digest", route_digest)
+        action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
+        action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
         checkpoint_digest = _validate_optional_digest("checkpoint_digest", checkpoint_digest)
         spec_digest = autonomous_remote_brain_job_spec_digest(
             request=request,
@@ -987,6 +1060,8 @@ class AsyncRemoteBrainJobWorker:
             policy_digest=policy_digest,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
         )
         payload = await self.control.submit_job({
             "idempotency_key": idempotency_key,
@@ -1005,6 +1080,8 @@ class AsyncRemoteBrainJobWorker:
             mode=mode,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
         )
 
     async def status(self, job_id: str) -> Mapping[str, Any]:
@@ -1212,7 +1289,7 @@ class AsyncRemoteBrainJobWorker:
             return raw
         if not isinstance(raw, Mapping):
             raise RemoteBrainWorkerError("async remote brain resolver must return a mapping")
-        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "mode", "request", "kwargs"}
+        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "action_plan", "action_admission", "mode", "request", "kwargs"}
         unknown = sorted(set(raw).difference(allowed))
         if unknown:
             raise RemoteBrainWorkerError("async remote brain resolver returned unsupported fields")
@@ -1224,6 +1301,8 @@ class AsyncRemoteBrainJobWorker:
             kwargs=raw.get("kwargs"),
             plan_digest=raw.get("plan_digest"),
             route_digest=raw.get("route_digest"),
+            action_plan=raw.get("action_plan"),
+            action_admission=raw.get("action_admission"),
         )
 
     @staticmethod

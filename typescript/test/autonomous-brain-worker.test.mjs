@@ -13,6 +13,7 @@ import {
   LLMRuntime,
   AutonomousBrainJobSchedulerPersistenceCoordinator,
   ProviderRuntimeError,
+  admitAutonomousActionPlan,
   autonomousBrainJobSpecDigest,
 } from "../dist/index.js";
 
@@ -215,6 +216,80 @@ test("worker traces closed-loop cycle and evaluator-guided cross-domain learning
   assert.ok(adaptive.trace.provider_invocations >= 2);
   assert.ok(adaptive.trace.event_count >= 7);
   assert.equal(runtime.providerStatus("worker-offline").attempts >= 3, true);
+});
+
+test("durable worker binds action admission before credential or provider dispatch and rejects stale metadata", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 10_000 });
+  const request = requestFor("data");
+  const policy = policyDigest("a");
+  const actionPlan = await brain.actionPlan(request);
+  const actionAdmission = admitAutonomousActionPlan(actionPlan, {
+    approvals: Object.fromEntries(actionPlan.required_approvals.map((approval) => [approval, true])),
+    reviewed: true,
+  });
+  scheduler.submit({
+    jobId: "worker-action-admission",
+    idempotencyKey: "worker-action-admission-private-task",
+    specDigest: autonomousBrainJobSpecDigest({ request, mode: "execute", policyDigest: policy, actionPlanDigest: actionPlan.plan_digest, actionAdmissionDigest: actionAdmission.admission_digest }),
+    domain: request.domain,
+    capability: request.capability,
+    riskClass: "review",
+    maxAttempts: 3,
+  }, 10_000);
+  const staleRequest = requestFor("data");
+  const staleActionPlan = await brain.actionPlan({ ...staleRequest, task: "profile a different dataset schema and missingness" });
+  const staleAdmission = admitAutonomousActionPlan(staleActionPlan, {
+    approvals: Object.fromEntries(staleActionPlan.required_approvals.map((approval) => [approval, true])),
+    reviewed: true,
+  });
+  scheduler.submit({
+    jobId: "worker-action-admission-stale",
+    idempotencyKey: "worker-action-admission-stale-private-task",
+    specDigest: autonomousBrainJobSpecDigest({ request, mode: "execute", policyDigest: policy, actionPlanDigest: actionPlan.plan_digest, actionAdmissionDigest: actionAdmission.admission_digest }),
+    domain: request.domain,
+    capability: request.capability,
+    riskClass: "review",
+    maxAttempts: 3,
+  }, 10_000);
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "worker-action-admission",
+    resolve: ({ job }) => job.job_id === "worker-action-admission"
+      ? {
+        specDigest: job.spec_digest,
+        policyDigest: policy,
+        request,
+        mode: "execute",
+        actionPlan: actionPlan.toJSON(),
+        actionAdmission: actionAdmission.toJSON(),
+        execute: { approveProviderCall: true, run: { candidates: [model] } },
+      }
+      : {
+        specDigest: job.spec_digest,
+        policyDigest: policy,
+        request,
+        mode: "execute",
+        actionPlan: staleActionPlan.toJSON(),
+        actionAdmission: staleAdmission.toJSON(),
+        execute: { approveProviderCall: true, run: { candidates: [model] } },
+      },
+  });
+
+  const waiting = await worker.runOnce("worker-action-admission", 10_000);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.equal(providerCalls, 0);
+  scheduler.resumeApproval("worker-action-admission", "operator-action", "action admission reviewed", 10_001);
+  const completed = await worker.runOnce("worker-action-admission", 10_002);
+  assert.equal(completed.status, "succeeded");
+  assert.equal(providerCalls, 1);
+
+  const stale = await worker.runOnce("worker-action-admission-stale", 10_003);
+  assert.equal(stale.status, "failed");
+  assert.equal(providerCalls, 1);
+  assert.equal(scheduler.get("worker-action-admission-stale").state, "failed");
 });
 
 test("worker rejects spec drift before dispatch and quarantines uncertain provider failures", async () => {

@@ -549,6 +549,14 @@ remote boundary. If a resolver returns the corresponding private `blueprint` or 
 rehashes it before dispatch and refuses a changed plan or route. Both bindings are optional, and
 omitting them preserves the pre-extension job digest for existing callers.
 
+The remote worker also accepts `action_plan_digest` and `action_admission_digest`. The resolver
+returns the matching metadata-only `action_plan` and `action_admission`; both are parsed and
+rehashed before a claim can invoke a runner. The admission must be `admitted`, must reference the
+exact plan digest, and must reproduce the composite job digest. This is enforced identically by
+the synchronous and asynchronous workers. A stale or swapped plan is rejected in preflight with
+zero runner calls, while generic durable provider approval remains a separate gate. Existing
+remote jobs omit these fields and retain their original digest behavior.
+
 The remote worker uses the same approval, retry, and uncertainty contract as the local worker. It
 parks provider or route approval before dispatch, forces the provider approval bit on the
 rehydrated retry, renews leases during long calls, retries only typed preflight failures when

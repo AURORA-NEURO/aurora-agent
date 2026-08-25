@@ -13,9 +13,12 @@ from prism_sdk import (
     BrainControlClient,
     BrainJobStore,
     DurableBrainControlPlaneAdapter,
+    AutonomousAgent,
+    LLMRuntime,
     RemoteBrainJobWorker,
     RemoteBrainWorkerError,
     ProvisionedRemoteBrainCredentialScope,
+    admit_autonomous_action_plan,
     autonomous_remote_brain_job_spec_digest,
     autonomous_remote_brain_plan_digest,
     autonomous_remote_brain_route_digest,
@@ -409,8 +412,148 @@ def test_remote_worker_binds_reviewed_plan_and_route_identity_without_remote_pri
     store.close()
 
 
+def test_remote_worker_binds_action_plan_admission_to_control_plane_identity(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = _control(tmp_path, seen)
+    brain = _Brain()
+    request = {"task": "private action admission task", "domain": "coding"}
+    action_agent = AutonomousAgent(object(), LLMRuntime())
+    action_plan = action_agent.action_plan(task=request["task"], domain="coding", allow_cross_domain=False)
+    action_admission = admit_autonomous_action_plan(
+        action_plan,
+        approvals={approval: True for approval in action_plan["required_approvals"]},
+        reviewed=True,
+    )
+    policy = _policy("a")
+    worker = RemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="action-admission-worker",
+        resolver=lambda context: {
+            "spec_digest": context["job"]["spec_digest"],
+            "policy_digest": policy,
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+            "action_plan": action_plan,
+            "action_admission": action_admission,
+        },
+    )
+    submission = worker.submit(
+        idempotency_key="action-admission",
+        request=request,
+        mode="autonomous",
+        domain="coding",
+        capability="bounded",
+        risk_class="review",
+        policy_digest=policy,
+        action_plan_digest=action_plan["plan_digest"],
+        action_admission_digest=action_admission.admission_digest,
+    )
+    assert submission.action_plan_digest == action_plan["plan_digest"]
+    assert submission.action_admission_digest == action_admission.admission_digest
+    assert submission.to_dict()["secret_material"] == "never_returned"
+    waiting = worker.run_once(submission.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    assert brain.calls == []
+    worker.approval(submission.job["job_id"], "approve", authorization_digest="b" * 64)
+    completed = worker.run_once(submission.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert len(brain.calls) == 1
+
+    other_request = {"task": "private stale action admission task", "domain": "coding"}
+    other_plan = action_agent.action_plan(task=other_request["task"], domain="coding", allow_cross_domain=False)
+    other_admission = admit_autonomous_action_plan(
+        other_plan,
+        approvals={approval: True for approval in other_plan["required_approvals"]},
+        reviewed=True,
+    )
+    stale_worker = RemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="stale-action-admission-worker",
+        resolver=lambda context: {
+            "spec_digest": context["job"]["spec_digest"],
+            "policy_digest": policy,
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+            "action_plan": other_plan,
+            "action_admission": other_admission,
+        },
+    )
+    stale = stale_worker.submit(
+        idempotency_key="stale-action-admission",
+        request=request,
+        mode="autonomous",
+        domain="coding",
+        capability="bounded",
+        risk_class="review",
+        policy_digest=policy,
+        action_plan_digest=action_plan["plan_digest"],
+        action_admission_digest=action_admission.admission_digest,
+    )
+    rejected = stale_worker.run_once(stale.job["job_id"])
+    assert rejected is not None and rejected.status == "failed"
+    assert len(brain.calls) == 1
+    store.close()
+
+
 def test_async_remote_worker_preserves_all_domains_modes_and_metadata_boundary(tmp_path):
     asyncio.run(_run_async_remote_worker(tmp_path))
+
+
+def test_async_remote_worker_binds_action_plan_admission_before_dispatch(tmp_path):
+    asyncio.run(_run_async_action_admission(tmp_path))
+
+
+async def _run_async_action_admission(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = await _async_control(tmp_path, seen)
+    brain = _Brain()
+    request = {"task": "private async action admission task", "domain": "science"}
+    action_agent = AutonomousAgent(object(), LLMRuntime())
+    action_plan = action_agent.action_plan(task=request["task"], domain="science", allow_cross_domain=False)
+    action_admission = admit_autonomous_action_plan(
+        action_plan,
+        approvals={approval: True for approval in action_plan["required_approvals"]},
+        reviewed=True,
+    )
+    policy = _policy("c")
+
+    async def resolved(context):
+        return {
+            "spec_digest": context["job"]["spec_digest"],
+            "policy_digest": policy,
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+            "action_plan": action_plan,
+            "action_admission": action_admission,
+        }
+
+    worker = AsyncRemoteBrainJobWorker(brain, control, worker_id="async-action-worker", resolver=resolved)
+    submission = await worker.submit(
+        idempotency_key="async-action-admission",
+        request=request,
+        mode="autonomous",
+        domain="science",
+        capability="bounded",
+        risk_class="review",
+        policy_digest=policy,
+        action_plan_digest=action_plan["plan_digest"],
+        action_admission_digest=action_admission.admission_digest,
+    )
+    assert submission.action_plan_digest == action_plan["plan_digest"]
+    assert submission.action_admission_digest == action_admission.admission_digest
+    waiting = await worker.run_once(submission.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    assert brain.calls == []
+    await worker.approval(submission.job["job_id"], "approve", authorization_digest="d" * 64)
+    completed = await worker.run_once(submission.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert len(brain.calls) == 1
+    store.close()
 
 
 def test_async_remote_worker_binds_reviewed_identities(tmp_path):

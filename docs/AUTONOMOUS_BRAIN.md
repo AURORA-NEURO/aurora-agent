@@ -7112,6 +7112,39 @@ scheduler.resumeApproval("science-job-1", "operator-42", "reviewed scope");
 const result = await worker.runOnce("science-job-1");
 ```
 
+For an action-plan-first worker, bind the metadata-only plan and explicit admission to the same
+job identity. `brain.actionPlan(request)` is compiled before any provider boundary; the caller
+reviews its next action and approvals, then includes `actionPlanDigest` and
+`actionAdmissionDigest` in `autonomousBrainJobSpecDigest()`. The resolver rehydrates the plan and
+admission as value-only objects. The worker parses both, checks that the admission is `admitted`
+and names the exact plan, recompiles the live request plan, and compares the resulting plan
+digest before opening credentials or invoking any provider. A changed task, route, domain,
+approval set, or admission record therefore fails closed even when the durable job id and generic
+provider approval are unchanged:
+
+```typescript
+const actionPlan = await brain.actionPlan(request);
+const actionAdmission = admitAutonomousActionPlan(actionPlan, {
+  approvals: Object.fromEntries(actionPlan.required_approvals.map((gate) => [gate, true])),
+  reviewed: true,
+});
+const specDigest = autonomousBrainJobSpecDigest({
+  request,
+  mode: "adaptive",
+  policyDigest,
+  actionPlanDigest: actionPlan.plan_digest,
+  actionAdmissionDigest: actionAdmission.admission_digest,
+});
+// Submit specDigest, then return actionPlan.toJSON() and actionAdmission.toJSON()
+// from the private resolver. No task, prompt, credential, or provider value is persisted.
+```
+
+The action digests are optional fields omitted from the canonical payload when unused, preserving
+digest compatibility for older jobs. Once either action digest is present, the worker requires
+both metadata objects and refuses review-required, blocked, stale, tampered, or cross-boundary
+admissions before dispatch. Checkpoint digests include the action identities so operators can
+audit the exact plan → admission → provider transition without storing the plan's task text.
+
 The worker never writes the resolver's task or policy values to the scheduler. By default, a typed
 `ProviderRuntimeError` with `retryable: true` is retried only when it occurs before the facade is
 invoked. The scheduler's `maxAttempts` ceiling owns the bound: a queued retry is returned as
