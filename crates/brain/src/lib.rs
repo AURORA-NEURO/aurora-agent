@@ -31,6 +31,7 @@ pub mod evidence_contract_model;
 pub mod evidence_research_copilot;
 pub mod evidence_surveillance;
 pub mod federated_contract_model;
+pub mod federated_evidence_copilot;
 pub mod federated_evidence_surveillance;
 pub mod high_throughput_evidence_copilot;
 pub mod high_throughput_evidence_surveillance;
@@ -62,6 +63,12 @@ pub use federated_contract_model::{
     FederatedContractModelError, FederatedContractModelReceipt, FederatedContractModelRequest,
     CONTRACT_VERSION as FEDERATED_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use federated_evidence_copilot::{
+    compile_federated_evidence_copilot, federated_evidence_research_copilot_manifest,
+    FederatedCopilotError, FederatedCopilotReceipt, FederatedCopilotRequest,
+    CONTRACT_VERSION as FEDERATED_EVIDENCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EVIDENCE_COPILOT_FEATURE_ID,
 };
 pub use federated_evidence_surveillance::{
     admit_federated_evidence, federated_evidence_surveillance_manifest,

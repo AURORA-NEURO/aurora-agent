@@ -235,6 +235,8 @@ MULTIMODAL_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F10"
 MULTIMODAL_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-multimodal-evidence-research-copilot/1.0"
 HIGH_THROUGHPUT_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F11"
 HIGH_THROUGHPUT_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-high-throughput-evidence-research-copilot/1.0"
+FEDERATED_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F12"
+FEDERATED_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-federated-evidence-research-copilot/1.0"
 
 
 class ResearchContractError(ValueError):

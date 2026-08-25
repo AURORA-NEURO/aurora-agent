@@ -82,6 +82,7 @@ from prism_sdk.brain_federated_contract import BrainFederatedContractModelReceip
 from prism_sdk.brain_evidence_copilot import BrainEvidenceResearchCopilotReceipt
 from prism_sdk.brain_multimodal_copilot import BrainMultimodalEvidenceResearchCopilotReceipt
 from prism_sdk.brain_high_throughput_copilot import BrainHighThroughputEvidenceResearchCopilotReceipt
+from prism_sdk.brain_federated_copilot import BrainFederatedEvidenceResearchCopilotReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2624,6 +2625,40 @@ def test_brain_high_throughput_copilot_keeps_capacity_block_explicit():
         negative_evidence=(),
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_federated_copilot_keeps_signer_block_explicit():
+    receipt = BrainFederatedEvidenceResearchCopilotReceipt(
+        request_id="request:federated-copilot",
+        operator_id="operator:researcher",
+        federation_id="federation:commons",
+        institution_id="institution:a",
+        purpose="benchmarking",
+        semantic_profile="preclinical-evidence/v1",
+        endpoint="https://hub.example/research",
+        disposition="blocked",
+        plan_order=("plan:exchange-permitted-summary",),
+        action_order=("action:exchange-permitted-summary",),
+        tool_order=("tool:federated-evidence",),
+        candidate_order=("evidence:a",),
+        admitted_order=("evidence:a",),
+        blocked_order=(),
+        unknown_order=(),
+        aggregate_order=("a" * 64,),
+        envelope_digest="b" * 64,
+        evidence_receipt_digest="c" * 64,
+        plan_digest="d" * 64,
+        approval_reference="e" * 64,
+        replay_identity="f" * 64,
+        budget_units=1,
+        omissions=("federation:permitted-artifact-missing",),
+        uncertainty=(),
+        negative_evidence=("request:signer-invalid",),
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "1" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
