@@ -1486,3 +1486,10 @@ explicit registry selection plan; no provider, key, tool, effect, or learner aut
 implicit. Python and TypeScript tests cover complete twelve-domain coverage, capability-bound
 selection, subset construction, duplicate/unsupported/missing-objective refusal, and projection
 redaction.
+
+Provider-assisted planning now uses the versioned prompt control plane as well. Single-domain,
+cross-domain, ordered-step, and plan-and-run planner calls accept prompt template/registry/
+selection controls at the explicit `planning` stage, verify stale selections before dispatch,
+and bind the transient planner prompt digest into the planner outcome identity. Planner messages
+remain transient and all result projections remain digest-only; offline Python and TypeScript
+coverage exercises approval gating, specialist prompt delivery, and all-domain planner parity.

@@ -1802,6 +1802,7 @@ def test_provider_plan_refinement_is_dependency_closed_and_approval_gated():
                 blueprint=blueprint,
                 credentials=session,
                 approve_provider_call=True,
+                prompt_registry=builtin_autonomous_prompt_registry(),
             )
             assert refined.status == "completed"
             assert refined.priority_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
@@ -1814,6 +1815,7 @@ def test_provider_plan_refinement_is_dependency_closed_and_approval_gated():
                 "task_family": blueprint.workflow.workflow_id,
             }
             assert refined.planner_context_digest == _planner_context_digest(refined.planner_context)
+            assert "coding specialist" in server.request_body.decode("utf-8")  # type: ignore[attr-defined]
             assert refined.to_dict()["authorization"].startswith("plan_proposal_only")
             public = json.dumps(refined.to_dict())
             assert "plan-refinement-secret" not in public

@@ -9800,3 +9800,20 @@ Consequently, a registry replacement or prompt-contract change cannot silently r
 checkpoint created under a different prompt implementation; the caller must explicitly
 rehydrate with the matching prompt metadata. The workflow stage tests exercise this across
 all built-in domains and verify that transient prompt projections carry the actual stage id.
+
+Provider-assisted planning now crosses the same versioned boundary. Python
+`plan_with_provider()` / `plan_cross_domain_with_provider()` and TypeScript
+`planWithProvider()` / `planCrossDomainWithProvider()` accept the prompt template, registry,
+selection plan, and `planning` stage controls. `planOrderedStepsWithProvider()` uses the same
+planner stage, so workflow, cross-domain, and mission/portfolio refinements cannot silently use
+an unversioned prompt implementation. `planAndRun()` inherits the outer prompt controls unless
+its nested planning options override them; `planningPromptStage` (or Python's
+`planning_prompt_stage`) keeps the planner stage independent from the execution answer stage.
+
+The planner retains only the digest of the exact transient prompt boundary. That digest includes
+the selected manifest/selection metadata and the final transient message identity, and it is
+bound into the planner outcome digest. A stale or tampered selection therefore fails before model
+selection or provider dispatch, while planner transcripts, task text, credentials, and rendered
+messages remain caller-transient. Built-in wildcard specialist templates cover the `planning`
+stage for all twelve domains; custom templates must explicitly cover `planning` or use a
+stage-specific override.

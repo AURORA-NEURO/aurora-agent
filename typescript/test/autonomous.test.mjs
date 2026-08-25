@@ -290,11 +290,13 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
     (error) => error instanceof AutonomousCostBudgetError,
   );
   assert.equal(calls.length, 0, "a zero planning budget refuses before provider dispatch");
-  const planned = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true, costBudget: planningBudget });
+  const planningPrompts = builtinAutonomousPromptRegistry();
+  const planned = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true, costBudget: planningBudget, promptRegistry: planningPrompts });
   assert.equal(planned.status, "completed");
   assert.deepEqual(planned.priority_stage_ids, blueprint.blueprint.workflow.stages.map((stage) => stage.id));
   assert.equal(planned.focus_stage_ids.length, 1);
   assert.equal(planned.planner_prompt_digest.length, 64);
+  assert.match(calls[0].messages.find((message) => message.role === "system").content, /coding specialist/);
   assert.equal(planned.selection_digest.length, 64);
   assert.deepEqual(planned.planner_context, {
     domain: "coding",
@@ -337,10 +339,10 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
     const domainBudget = new AutonomousCostBudget(1);
     let result;
     if (routed.cross_domain_blueprint) {
-      result = await agent.planCrossDomainWithProvider(routed.cross_domain_blueprint, { approveProviderCall: true, costBudget: domainBudget });
+      result = await agent.planCrossDomainWithProvider(routed.cross_domain_blueprint, { approveProviderCall: true, costBudget: domainBudget, promptRegistry: planningPrompts });
     } else {
       assert.ok(routed.blueprint, domain);
-      result = await agent.planWithProvider(routed.blueprint, { approveProviderCall: true, costBudget: domainBudget });
+      result = await agent.planWithProvider(routed.blueprint, { approveProviderCall: true, costBudget: domainBudget, promptRegistry: planningPrompts });
     }
     assert.equal(result.status, "completed", domain);
     assert.equal(result.cost_budget.max_cost_units, 1, domain);
@@ -387,6 +389,7 @@ test("planAndRun requires explicit planning acceptance and binds the accepted pr
   const reviewBudget = new AutonomousCostBudget(2);
   const review = await agent.planAndRun("Debug this coding repository and report verified tests.", {
     domain: "coding",
+    promptRegistry: builtinAutonomousPromptRegistry(),
     planning: { approveProviderCall: true, costBudget: reviewBudget },
     costBudget: reviewBudget,
     approveProviderCall: true,
@@ -395,6 +398,7 @@ test("planAndRun requires explicit planning acceptance and binds the accepted pr
   assert.equal(review.plan_refinement.status, "completed");
   assert.equal(review.result, null);
   assert.equal(calls.length, 1, "planning acceptance pauses before execution dispatch");
+  assert.match(calls[0].messages.find((message) => message.role === "system").content, /coding specialist/);
 
   const executeBudget = new AutonomousCostBudget(2);
   const executed = await agent.planAndRun("Debug this coding repository and report verified tests.", {

@@ -7914,6 +7914,32 @@ def _apply_versioned_prompt(
     return replace(blueprint, prompt=prompt)
 
 
+def _planner_prompt_digest(blueprint: AutonomousTaskBlueprint) -> str:
+    """Return a digest of the transient planner prompt plus its versioned identity metadata."""
+
+    prompt = blueprint.prompt
+    base_digest = prompt.get("prompt_digest")
+    if not isinstance(base_digest, str):
+        if not isinstance(prompt, Mapping):
+            raise BrainRunError("planner prompt is missing its bounded digest and request")
+        base_digest = _json_digest(dict(prompt))
+    override = prompt.get("_provider_messages_override")
+    if not isinstance(override, Mapping):
+        return base_digest
+    messages = override.get("messages")
+    metadata = override.get("metadata")
+    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)) or not isinstance(metadata, Mapping):
+        raise BrainRunError("planner prompt override is malformed")
+    return _json_digest(
+        {
+            "schema": "bioprism-python-autonomous-planner-prompt/0.1",
+            "base_prompt_digest": base_digest,
+            "message_digest": _json_digest(list(messages)),
+            "versioned_prompt": dict(metadata),
+        }
+    )
+
+
 class AutonomousTaskOrchestrator:
     """Compose domain intake with adaptive execution and optional online learning."""
 
@@ -8403,6 +8429,10 @@ class AutonomousTaskOrchestrator:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "planning",
         domain_policy_mode: str = "audit",
         domain_policy_evidence_ready: bool | None = None,
         domain_policy_evaluator_configured: bool | None = None,
@@ -8485,6 +8515,15 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=blueprint.required_capabilities,
         )
+        planner_blueprint = _apply_versioned_prompt(
+            planner_blueprint,
+            route=None,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
+        )
+        planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
         planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
             planner_blueprint.selection_context,
             task_family=blueprint.workflow.workflow_id,
@@ -8505,7 +8544,7 @@ class AutonomousTaskOrchestrator:
                 task_digest=blueprint.spec.task_digest,
                 base_plan_digest=base_plan_digest,
                 workflow_digest=blueprint.workflow.workflow_digest,
-                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_prompt_digest=planner_prompt_digest,
                 planner_context=planner_learning_context,
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
@@ -8516,7 +8555,7 @@ class AutonomousTaskOrchestrator:
                 task_digest=blueprint.spec.task_digest,
                 base_plan_digest=base_plan_digest,
                 workflow_digest=blueprint.workflow.workflow_digest,
-                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_prompt_digest=planner_prompt_digest,
                 planner_context=planner_learning_context,
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
@@ -8573,11 +8612,12 @@ class AutonomousTaskOrchestrator:
             "workflow_digest": blueprint.workflow.workflow_digest,
             "selected_model": safe_model,
             "selection_digest": selection.get("decision_digest"),
-            "planner_prompt_digest": run.prompt.get("prompt_digest"),
+            "planner_prompt_digest": planner_prompt_digest,
             "planner_plan_digest": planner_plan_digest,
             "outcome_digest": _json_digest({
                 "provider_outcome_digest": run.outcome_digest,
                 "learning_context_digest": planner_learning_context_digest,
+                "planner_prompt_digest": planner_prompt_digest,
             }),
             "planner_context": planner_learning_context,
             "planner_context_digest": planner_learning_context_digest,
@@ -8659,6 +8699,10 @@ class AutonomousTaskOrchestrator:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "planning",
         domain_policy_mode: str = "audit",
         domain_policy_evidence_ready: bool | None = None,
         domain_policy_evaluator_configured: bool | None = None,
@@ -8757,6 +8801,15 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=required_model_capabilities,
         )
+        planner_blueprint = _apply_versioned_prompt(
+            planner_blueprint,
+            route=None,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
+        )
+        planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
         planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
             planner_blueprint.selection_context,
             task_family=blueprint.synthesis_blueprint.workflow.workflow_id,
@@ -8776,7 +8829,7 @@ class AutonomousTaskOrchestrator:
                 status=("policy_blocked" if domain_policy_admission.decision == "blocked" else "policy_review_required"),
                 task_digest=blueprint.task_digest,
                 base_plan_digest=base_plan_digest,
-                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_prompt_digest=planner_prompt_digest,
                 planner_context=planner_learning_context,
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
@@ -8786,7 +8839,7 @@ class AutonomousTaskOrchestrator:
                 status="approval_required",
                 task_digest=blueprint.task_digest,
                 base_plan_digest=base_plan_digest,
-                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_prompt_digest=planner_prompt_digest,
                 planner_context=planner_learning_context,
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
@@ -8834,11 +8887,12 @@ class AutonomousTaskOrchestrator:
             "base_plan_digest": base_plan_digest,
             "selected_model": safe_model,
             "selection_digest": run.selection.get("decision_digest"),
-            "planner_prompt_digest": run.prompt.get("prompt_digest"),
+            "planner_prompt_digest": planner_prompt_digest,
             "planner_plan_digest": planner_plan_digest,
             "outcome_digest": _json_digest({
                 "provider_outcome_digest": run.outcome_digest,
                 "learning_context_digest": planner_learning_context_digest,
+                "planner_prompt_digest": planner_prompt_digest,
             }),
             "planner_context": planner_learning_context,
             "planner_context_digest": planner_learning_context_digest,
@@ -20178,6 +20232,10 @@ class AutonomousAgent:
                 "run_id": planning_run_id,
                 "max_output_tokens": planning_max_output_tokens,
                 "temperature": kwargs.get("temperature"),
+                "prompt_template": kwargs.get("planning_prompt_template", kwargs.get("prompt_template")),
+                "prompt_registry": kwargs.get("planning_prompt_registry", kwargs.get("prompt_registry")),
+                "prompt_selection": kwargs.get("planning_prompt_selection", kwargs.get("prompt_selection")),
+                "prompt_stage": kwargs.get("planning_prompt_stage", "planning"),
                 "domain_policy_mode": domain_policy_mode,
                 "domain_policy_evidence_ready": domain_policy_evidence_ready,
                 "domain_policy_evaluator_configured": domain_policy_evaluator_configured,
@@ -20268,6 +20326,10 @@ class AutonomousAgent:
             "max_input_tokens",
             "required_model_capabilities",
             "memory_episodes",
+            "planning_prompt_template",
+            "planning_prompt_registry",
+            "planning_prompt_selection",
+            "planning_prompt_stage",
         }:
             execution_kwargs.pop(key, None)
         routed_context = self.orchestrator._route_context(kwargs.get("context"), blueprint.route)

@@ -1229,6 +1229,14 @@ export interface AutonomousProviderPlanningOptions {
   credential?: CredentialHandle;
   credentialFor?: (provider: string) => CredentialHandle | undefined;
   context?: readonly AutonomousPromptChunk[];
+  /** Explicit versioned prompt implementation for the planner; rendered messages remain transient. */
+  promptTemplate?: AutonomousPromptTemplate;
+  /** Reviewed prompt registry used to select the planner implementation. */
+  promptRegistry?: AutonomousPromptRegistry;
+  /** Optional digest-bound planner prompt selection; omitted plans are selected at call time. */
+  promptSelection?: AutonomousPromptSelectionPlan | AutonomousPromptSelectionPlanJSON;
+  /** Versioned planner prompt stage; defaults to `planning`. */
+  promptStage?: string;
   maxInputTokens?: number;
   maxOutputTokens?: number;
   maxCostPerMillionTokens?: number;
@@ -1519,6 +1527,8 @@ export type AutonomousPlanAndRunStatus =
 export interface AutonomousPlanAndRunOptions extends AutonomousRunOptions {
   /** Provider planning is disabled unless supplied; its own approval is separate from execution approval. */
   planning?: AutonomousProviderPlanningOptions;
+  /** Prompt stage used when the outer run supplies prompt controls to nested provider planning. */
+  planningPromptStage?: string;
   /** Only true allows a completed, non-review proposal to shape the subsequent invocation. */
   acceptPlan?: boolean;
 }
@@ -2367,7 +2377,36 @@ type RenderedAutonomousRunPrompt = {
 async function renderAutonomousRunPrompt(
   task: string,
   blueprint: AutonomousTaskBlueprint,
-  route: AutonomousRouteProposal,
+  route: AutonomousRouteProposal | null,
+  options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage">,
+  contextIds: readonly string[] = blueprint.prompt.included_context_ids,
+): Promise<RenderedAutonomousRunPrompt | null> {
+  const domain = blueprint.domain_profile.domain;
+  return renderVersionedAutonomousPrompt(
+    {
+      task,
+      objective: task,
+      requirement: {
+        domain,
+        stage_id: options.promptStage ?? "answer",
+        objective: task,
+        workflow_id: blueprint.workflow.workflow_id,
+        required_capabilities: [...blueprint.required_capabilities],
+      },
+      route: {
+        route_digest: route?.route_digest ?? blueprint.route_digest,
+        selected_domains: route ? [...route.selected_domains] : [domain],
+        primary_domain: route?.primary_domain ?? domain,
+        cross_domain: route?.cross_domain ?? domain === "cross_domain",
+      },
+      context_ids: [...contextIds],
+    },
+    options,
+  );
+}
+
+async function renderVersionedAutonomousPrompt(
+  context: Readonly<Record<string, unknown>>,
   options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage">,
 ): Promise<RenderedAutonomousRunPrompt | null> {
   const template = options.promptTemplate;
@@ -2378,28 +2417,16 @@ async function renderAutonomousRunPrompt(
   if (template !== undefined && (registry !== undefined || selection !== undefined)) throw new ArgumentError("autonomous promptTemplate cannot be combined with promptRegistry or promptSelection");
   if (selection !== undefined && registry === undefined) throw new ArgumentError("autonomous promptSelection requires promptRegistry");
   if (registry === undefined && template === undefined) return null;
-  const stage = boundedIdentifier("autonomous promptStage", options.promptStage ?? "answer");
-  const domain = blueprint.domain_profile.domain;
-  const context = {
-    task,
-    objective: task,
-    requirement: {
-      domain,
-      stage_id: stage,
-      objective: task,
-      workflow_id: blueprint.workflow.workflow_id,
-      required_capabilities: [...blueprint.required_capabilities],
-    },
-    route: {
-      route_digest: route.route_digest,
-      selected_domains: [...route.selected_domains],
-      primary_domain: route.primary_domain,
-      cross_domain: route.cross_domain,
-    },
-    context_ids: [...blueprint.prompt.included_context_ids],
-  } as const;
+  const requirement = context.requirement;
+  if (!requirement || typeof requirement !== "object") throw new ArgumentError("autonomous prompt context requirement is malformed");
+  const requirementRecord = requirement as Record<string, unknown>;
+  const domainValue = requirementRecord.domain;
+  const stage = boundedIdentifier("autonomous promptStage", requirementRecord.stage_id ?? options.promptStage ?? "answer");
+  if (typeof domainValue !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(domainValue as AutonomousDomainName)) throw new ArgumentError("autonomous prompt context domain is unsupported");
+  const domain = domainValue as AutonomousDomainName;
+  const normalizedContext = { ...context, requirement: { ...requirementRecord, domain, stage_id: stage } } as const;
   if (template !== undefined) {
-    const rendered = await template.renderTransient(context);
+    const rendered = await template.renderTransient(normalizedContext);
     return { messages: rendered.messages, metadata: rendered.metadata, mode: "versioned_template" };
   }
   const resolvedSelection = selection ?? registry!.selectFor([
@@ -2408,7 +2435,7 @@ async function renderAutonomousRunPrompt(
     // advertises only its rendering concerns, so selection starts with no implicit model labels.
     { domain, stage, requiredCapabilities: [] },
   ]);
-  const rendered = await registry!.render(resolvedSelection, context);
+  const rendered = await registry!.render(resolvedSelection, normalizedContext);
   return { messages: rendered.messages, metadata: rendered.metadata, mode: "registry_selection" };
 }
 
@@ -2915,9 +2942,71 @@ function planningResponseSchema(ids: readonly string[], focusField: "focus_stage
 
 interface PreparedProviderPlanning {
   prompt: AutonomousPromptResult;
+  /** Digest of the exact transient planner prompt boundary, including version metadata. */
+  promptDigest: string;
   plan: AutonomousExecutionPlan;
   learningContext: BrainBanditContext;
   learningContextDigest: string;
+}
+
+/**
+ * Bind provider planning to the same reviewed prompt controls as ordinary execution.
+ *
+ * The legacy assembled prompt remains the bounded source of planning-contract context and
+ * input-budget accounting. A versioned renderer replaces only the planner framing/task
+ * messages; the contract and optional caller context are inserted before the rendered user
+ * message. The raw messages never enter a planning result or digest projection.
+ */
+async function prepareVersionedPlanningMessages(
+  plannerTask: string,
+  profile: AutonomousDomainProfile,
+  prompt: AutonomousPromptResult,
+  planningContext: readonly AutonomousPromptChunk[],
+  options: AutonomousProviderPlanningOptions,
+): Promise<{ messages: readonly ProviderMessage[]; promptDigest: string }> {
+  const stage = options.promptStage ?? "planning";
+  const rendered = await renderVersionedAutonomousPrompt(
+    {
+      task: plannerTask,
+      objective: plannerTask,
+      requirement: {
+        domain: profile.domain,
+        stage_id: stage,
+        objective: plannerTask,
+        workflow_id: profile.workflow.workflow_id,
+        required_capabilities: [...profile.required_model_capabilities],
+      },
+      route: {
+        route_digest: null,
+        selected_domains: [profile.domain],
+        primary_domain: profile.domain,
+        cross_domain: profile.domain === "cross_domain",
+      },
+      context_ids: planningContext.map((chunk) => chunk.id),
+    },
+    {
+      promptTemplate: options.promptTemplate,
+      promptRegistry: options.promptRegistry,
+      promptSelection: options.promptSelection,
+    },
+  );
+  const legacyMessages = prompt.messages.map(({ role, content }) => ({ role, content } satisfies ProviderMessage));
+  if (rendered === null) return { messages: legacyMessages, promptDigest: prompt.prompt_digest };
+
+  const supportingMessages = prompt.messages
+    .filter((message) => !["domain-system", "domain-developer", "task"].includes(message.source_id))
+    .map(({ role, content }) => ({ role, content } satisfies ProviderMessage));
+  const messages = [...rendered.messages];
+  const lastUserIndex = messages.reduce((index, message, current) => message.role === "user" ? current : index, -1);
+  const insertionIndex = lastUserIndex < 0 ? messages.length : lastUserIndex;
+  messages.splice(insertionIndex, 0, ...supportingMessages);
+  const promptDigest = await digestJson({
+    schema: AUTONOMOUS_PROMPT_SCHEMA,
+    base_prompt_digest: prompt.prompt_digest,
+    rendered_prompt: rendered.metadata,
+    message_digest: await digestJson(messages),
+  });
+  return { messages, promptDigest };
 }
 
 function validatePlanningWorkflow(stages: readonly AutonomousWorkflowStage[]): string[] {
@@ -2964,6 +3053,7 @@ async function prepareProviderPlanning(
     maxInputTokens: options.maxInputTokens,
     outputContract: `Return JSON with priority_order, ${focusField}, review_required, confidence, and abstain. Use only identifiers from the planning contract.`,
   });
+  const plannerMessages = await prepareVersionedPlanningMessages(plannerTask, profile, prompt, planningContext, options);
   const responseSchema = planningResponseSchema(ids, focusField);
   const requiredCapabilities = [...new Set([...blueprint.required_capabilities, "structured_output"])];
   // Provider planning is its own learner context. The execution blueprint's digest is keyed
@@ -2978,7 +3068,7 @@ async function prepareProviderPlanning(
   const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(planningLearnerContext));
   const request: ProviderRequest = {
     model: "selection-delegated",
-    messages: prompt.messages.map(({ role, content }) => ({ role, content })),
+    messages: plannerMessages.messages,
     maxOutputTokens: options.maxOutputTokens ?? 1_024,
     ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
     requireJson: true,
@@ -2987,6 +3077,7 @@ async function prepareProviderPlanning(
   };
   return {
     prompt,
+    promptDigest: plannerMessages.promptDigest,
     plan: {
       task: plannerTask,
       domain: profile.domain,
@@ -3014,6 +3105,7 @@ function planningModelProjection(selection: AutonomousSelectionDecision): { prov
 async function planningOutcomeDigest(
   execution: { selection: AutonomousSelectionDecision; response: ProviderResponse },
   learningContextDigest: string | null = null,
+  promptDigest: string | null = null,
 ): Promise<string> {
   const responseDigest = await digestJson({
     provider: execution.response.provider,
@@ -3024,7 +3116,7 @@ async function planningOutcomeDigest(
     text: execution.response.text,
     structured: execution.response.structured,
   });
-  return digestJson({ selection: execution.selection, response_digest: responseDigest, learning_context_digest: learningContextDigest });
+  return digestJson({ selection: execution.selection, response_digest: responseDigest, learning_context_digest: learningContextDigest, prompt_digest: promptDigest });
 }
 
 /** Project a malformed provider response into a digest-only planning refusal. */
@@ -3104,6 +3196,7 @@ async function prepareOrderedStepPlanning(
     risk_class: profile.risk_class,
     task_family: "ordered_step_plan",
   };
+  const plannerMessages = await prepareVersionedPlanningMessages(plannerTask, profile, prompt, planningContext, options);
   // Only the stable four-field learner identity is hashed. Descriptive selection metadata
   // cannot be passed through this digest because the local, Rust, and Python learners all
   // normalize the same bounded BrainBanditContext shape before selecting or settling.
@@ -3130,7 +3223,7 @@ async function prepareOrderedStepPlanning(
     candidates: options.candidates ?? [],
     request: {
       model: "selection-delegated",
-      messages: prompt.messages.map(({ role, content }) => ({ role, content })),
+      messages: plannerMessages.messages,
       maxOutputTokens: options.maxOutputTokens ?? 1_024,
       ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
       requireJson: true,
@@ -3138,7 +3231,7 @@ async function prepareOrderedStepPlanning(
       ...(options.runId === undefined ? {} : { idempotencyKey: boundedIdentifier("ordered-step planning run id", options.runId) }),
     },
   };
-  return { prompt, plan, learningContext, learningContextDigest };
+  return { prompt, promptDigest: plannerMessages.promptDigest, plan, learningContext, learningContextDigest };
 }
 
 export interface AutonomousAcceptedCrossDomainPlan {
@@ -5760,7 +5853,7 @@ export class AutonomousAgent {
       confidence: 0,
       selected_model: null,
       selection_digest: null,
-      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_prompt_digest: prepared.promptDigest,
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,
@@ -5795,7 +5888,7 @@ export class AutonomousAgent {
       selected_model: planningModelProjection(execution.selection),
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
-      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest),
+      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest, prepared.promptDigest),
       cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
@@ -5863,7 +5956,7 @@ export class AutonomousAgent {
       confidence: 0,
       selected_model: null,
       selection_digest: null,
-      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_prompt_digest: prepared.promptDigest,
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,
@@ -5900,7 +5993,7 @@ export class AutonomousAgent {
       };
     }
     const selectionDigest = await digestJson(execution.selection);
-    const outcomeDigest = await planningOutcomeDigest(execution, prepared.learningContextDigest);
+    const outcomeDigest = await planningOutcomeDigest(execution, prepared.learningContextDigest, prepared.promptDigest);
     const plannerPlanDigest = await digestJson({ planner_output: execution.response.structured });
     const metadata = { ...base, selected_model: planningModelProjection(execution.selection), selection_digest: selectionDigest, planner_plan_digest: plannerPlanDigest, outcome_digest: outcomeDigest, cost_budget: budgetSnapshot() };
     const raw = execution.response.structured;
@@ -5961,7 +6054,7 @@ export class AutonomousAgent {
       confidence: 0,
       selected_model: null,
       selection_digest: null,
-      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_prompt_digest: prepared.promptDigest,
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,
@@ -6003,7 +6096,7 @@ export class AutonomousAgent {
       selected_model: planningModelProjection(execution.selection),
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
-      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest),
+      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest, prepared.promptDigest),
       cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
@@ -6062,6 +6155,10 @@ export class AutonomousAgent {
     }
     const planningOptions: AutonomousProviderPlanningOptions = {
       ...(planning ?? {}),
+      ...(planning?.promptTemplate === undefined && options.promptTemplate !== undefined ? { promptTemplate: options.promptTemplate } : {}),
+      ...(planning?.promptRegistry === undefined && options.promptRegistry !== undefined ? { promptRegistry: options.promptRegistry } : {}),
+      ...(planning?.promptSelection === undefined && options.promptSelection !== undefined ? { promptSelection: options.promptSelection } : {}),
+      ...(planning?.promptStage === undefined ? { promptStage: options.planningPromptStage ?? "planning" } : {}),
       ...(sharedBudget ? { costBudget: sharedBudget, maxTotalCostUnits: undefined } : {}),
       ...(options.domainPolicyMode === undefined ? {} : { domainPolicyMode: options.domainPolicyMode }),
       ...(options.domainPolicyEvidenceReady === undefined ? {} : { domainPolicyEvidenceReady: options.domainPolicyEvidenceReady }),
@@ -6078,6 +6175,7 @@ export class AutonomousAgent {
       acceptedCrossDomainPlanRefinement: undefined,
     };
     delete (executionOptions as AutonomousPlanAndRunOptions).planning;
+    delete (executionOptions as AutonomousPlanAndRunOptions).planningPromptStage;
     delete (executionOptions as AutonomousPlanAndRunOptions).acceptPlan;
     if (envelope.cross_domain_blueprint) {
       const proposal = await this.planCrossDomainWithProvider(envelope.cross_domain_blueprint, planningOptions);
