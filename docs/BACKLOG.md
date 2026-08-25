@@ -1538,3 +1538,11 @@ extraction plus evaluator settlement helpers. Python and TypeScript coverage exe
 domains, specialist fan-out, synthesis, generation persistence, restart recovery, secret/task
 redaction, and refusal of external state overrides. Provider success still cannot credit a prompt
 arm: only the caller's evaluator settlement advances the CAS-fenced learner.
+
+Provider planning is now settlement-visible at the same boundary. Single-domain, cross-domain,
+ordered-step, and automatic planning results expose the exact adaptive selection metadata used to
+render the transient planner prompt. Direct planning methods and automatic runs bind the configured
+persistent coordinator, including planning-specific option aliases, and reject registry/state
+replacement attempts. This closes the planning-to-learning handoff without persisting prompts,
+tasks, credentials, provider transcripts, or evaluator payloads; the remaining production work is
+caller integration of explicit evaluator signals and durable storage policy for each deployment.

@@ -159,7 +159,8 @@ export function extractAutonomousPromptLearningSelections(
       const autonomousPrompt = prompt.autonomous_prompt;
       if (isObject(autonomousPrompt) && autonomousPrompt.adaptive_selection !== undefined) add(autonomousPrompt.adaptive_selection);
     }
-    for (const key of ["child_runs", "child_results", "synthesis", "synthesis_result", "cross_domain", "attempts", "final_result", "result", "stage_results"] as const) {
+    if (value.adaptive_selection !== undefined) add(value.adaptive_selection);
+    for (const key of ["planning", "plan_refinement", "child_runs", "child_results", "synthesis", "synthesis_result", "cross_domain", "attempts", "final_result", "result", "stage_results"] as const) {
       const child = value[key];
       if (child !== undefined) visit(child);
     }

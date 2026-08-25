@@ -9860,3 +9860,14 @@ an explicit arm, evaluator identity, bounded reward, pass signal, and outcome di
 CAS-fenced coordinator advances state. The same path walks direct attempts, specialist children,
 synthesis, workflow, and replan envelopes, so selection credit cannot be silently lost when the
 agent changes execution shape.
+
+Provider planning now returns the same exact adaptive receipt at its public result boundary. Python
+single-domain and cross-domain plan refinements expose `adaptive_selection`, while TypeScript adds
+the receipt to direct planning, ordered-step planning, cross-domain planning, and `planAndRun()`'s
+`plan_refinement`. Persistent coordinators bind automatically through `run_auto()` and direct
+planning facades, including Python's planning-specific aliases, so a provider planning call cannot
+silently select against an unpersisted learner. The receipt remains settlement-ready metadata only:
+registry and plan digests, arm identities, generation, exploration policy, and prompt manifest rows;
+rendered planner messages, task text, credentials, provider responses, and evaluator payloads stay
+transient. Focused coverage settles direct, ordered-step, and automatic planning choices and checks
+that persisted snapshots contain no raw planning contract or provider transcript.

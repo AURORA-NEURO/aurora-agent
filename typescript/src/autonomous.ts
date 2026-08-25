@@ -2991,6 +2991,8 @@ interface PreparedProviderPlanning {
   prompt: AutonomousPromptResult;
   /** Digest of the exact transient planner prompt boundary, including version metadata. */
   promptDigest: string;
+  /** Exact registry-bound adaptive prompt receipt; rendered messages remain transient. */
+  adaptiveSelection?: AutonomousPromptAdaptiveSelectionJSON;
   plan: AutonomousExecutionPlan;
   learningContext: BrainBanditContext;
   learningContextDigest: string;
@@ -3010,7 +3012,7 @@ async function prepareVersionedPlanningMessages(
   prompt: AutonomousPromptResult,
   planningContext: readonly AutonomousPromptChunk[],
   options: AutonomousProviderPlanningOptions,
-): Promise<{ messages: readonly ProviderMessage[]; promptDigest: string }> {
+): Promise<{ messages: readonly ProviderMessage[]; promptDigest: string; adaptiveSelection?: AutonomousPromptAdaptiveSelectionJSON }> {
   const stage = options.promptStage ?? "planning";
   const rendered = await renderVersionedAutonomousPrompt(
     {
@@ -3055,7 +3057,7 @@ async function prepareVersionedPlanningMessages(
     rendered_prompt: rendered.metadata,
     message_digest: await digestJson(messages),
   });
-  return { messages, promptDigest };
+  return { messages, promptDigest, adaptiveSelection: rendered.metadata.adaptive_selection };
 }
 
 function validatePlanningWorkflow(stages: readonly AutonomousWorkflowStage[]): string[] {
@@ -3127,6 +3129,7 @@ async function prepareProviderPlanning(
   return {
     prompt,
     promptDigest: plannerMessages.promptDigest,
+    adaptiveSelection: plannerMessages.adaptiveSelection,
     plan: {
       task: plannerTask,
       domain: profile.domain,
@@ -3280,7 +3283,7 @@ async function prepareOrderedStepPlanning(
       ...(options.runId === undefined ? {} : { idempotencyKey: boundedIdentifier("ordered-step planning run id", options.runId) }),
     },
   };
-  return { prompt, promptDigest: plannerMessages.promptDigest, plan, learningContext, learningContextDigest };
+  return { prompt, promptDigest: plannerMessages.promptDigest, adaptiveSelection: plannerMessages.adaptiveSelection, plan, learningContext, learningContextDigest };
 }
 
 export interface AutonomousAcceptedCrossDomainPlan {
@@ -5877,6 +5880,7 @@ export class AutonomousAgent {
     request: AutonomousOrderedStepPlanRequest,
     options: AutonomousProviderPlanningOptions = {},
   ): Promise<AutonomousOrderedStepPlanRefinementResult> {
+    options = this.withPromptLearningOptions(options);
     if (!isObject(request) || typeof request.task !== "string" || !Array.isArray(request.steps)) throw new ArgumentError("ordered-step provider planning requires a task and step array");
     const taskText = boundedText("ordered-step planning task", request.task, 32_000);
     const steps = request.steps.map((step) => structuredClone(step));
@@ -5906,6 +5910,7 @@ export class AutonomousAgent {
       selected_model: null,
       selection_digest: null,
       planner_prompt_digest: prepared.promptDigest,
+      ...(prepared.adaptiveSelection === undefined ? {} : { adaptive_selection: prepared.adaptiveSelection }),
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,
@@ -5971,6 +5976,7 @@ export class AutonomousAgent {
     blueprint: AutonomousTaskBlueprint,
     options: AutonomousProviderPlanningOptions = {},
   ): Promise<AutonomousPlanRefinementResult> {
+    options = this.withPromptLearningOptions(options);
     if (!isObject(blueprint) || blueprint.schema !== "bioprism-python-autonomous-task/0.1") throw new ArgumentError("provider planning requires an AutonomousTaskBlueprint");
     if (!isObject(blueprint.workflow) || !Array.isArray(blueprint.workflow.stages)) throw new ProviderRuntimeError("provider planning workflow is malformed");
     let costBudget = resolveAutonomousCostBudget(options);
@@ -6009,6 +6015,7 @@ export class AutonomousAgent {
       selected_model: null,
       selection_digest: null,
       planner_prompt_digest: prepared.promptDigest,
+      ...(prepared.adaptiveSelection === undefined ? {} : { adaptive_selection: prepared.adaptiveSelection }),
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,
@@ -6069,6 +6076,7 @@ export class AutonomousAgent {
     blueprint: AutonomousCrossDomainBlueprint,
     options: AutonomousProviderPlanningOptions = {},
   ): Promise<AutonomousCrossDomainPlanRefinementResult> {
+    options = this.withPromptLearningOptions(options);
     if (!isObject(blueprint) || blueprint.schema !== AUTONOMOUS_CROSS_DOMAIN_SCHEMA) throw new ArgumentError("cross-domain provider planning requires an AutonomousCrossDomainBlueprint");
     if (!Array.isArray(blueprint.child_ids) || !isObject(blueprint.dependency_graph) || !Array.isArray(blueprint.dependency_graph.fan_out)) throw new ProviderRuntimeError("cross-domain provider planning blueprint is malformed");
     let costBudget = resolveAutonomousCostBudget(options);
@@ -6107,6 +6115,7 @@ export class AutonomousAgent {
       selected_model: null,
       selection_digest: null,
       planner_prompt_digest: prepared.promptDigest,
+      ...(prepared.adaptiveSelection === undefined ? {} : { adaptive_selection: prepared.adaptiveSelection }),
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,

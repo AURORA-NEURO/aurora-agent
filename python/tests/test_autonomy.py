@@ -3719,6 +3719,15 @@ def test_agent_persistent_prompt_learner_rehydrates_high_level_direct_and_cross_
         prompt_learning_coordinator=coordinator,
     )
     try:
+        with pytest.raises(BrainRunError, match="planning_prompt_registry"):
+            agent.run_auto(
+                task="Reject a planning registry replacement.",
+                credentials={"openai": handle},
+                hints=("coding",),
+                max_domains=1,
+                allow_cross_domain=False,
+                planning_prompt_registry=builtin_autonomous_prompt_registry(),
+            )
         for domain in AUTONOMOUS_DOMAINS:
             result = agent.run(
                 task=f"Review a bounded {domain} task with explicit evaluator feedback.",
@@ -3767,7 +3776,58 @@ def test_agent_persistent_prompt_learner_rehydrates_high_level_direct_and_cross_
                 passed=True,
                 outcome_digest=content_digest({"selection": selection.selection_digest}),
             )
-        assert coordinator.state.generation == len(AUTONOMOUS_DOMAINS) + len(cross_selections)
+
+        planning_blueprint = agent.prepare(
+            task="Review a coding workflow before provider-assisted planning.",
+            domain="coding",
+        )
+        planning = agent.plan_with_provider(
+            blueprint=planning_blueprint,
+            credentials={"openai": handle},
+            approve_provider_call=True,
+        )
+        planning_selections = agent.prompt_learning_selections(planning)
+        assert len(planning_selections) == 1
+        assert planning_selections[0].plan.rows[0].stage == "planning"
+        assert planning.to_dict()["adaptive_selection"]["selection_digest"] == planning_selections[0].selection_digest
+        assert "Review a coding workflow" not in json.dumps(planning.to_dict())
+        agent.settle_prompt_learning(
+            planning_selections[0],
+            arm_id=planning_selections[0].arm_ids[0],
+            evaluator_id="planning-rubric",
+            evaluator_version="1",
+            reward=0.75,
+            passed=True,
+            outcome_digest=content_digest({"planning": planning_selections[0].selection_digest}),
+        )
+
+        automatic = agent.run_auto(
+            task="Review a coding workflow with provider-assisted planning.",
+            credentials={"openai": handle},
+            hints=("coding",),
+            max_domains=1,
+            allow_cross_domain=False,
+            planning_mode="provider",
+            approve_provider_call=True,
+        )
+        automatic_selections = agent.prompt_learning_selections(automatic)
+        assert automatic.planning is not None, automatic.to_dict()
+        assert automatic.planning.adaptive_selection is not None, automatic.planning.to_dict()
+        automatic_planning = next(
+            selection for selection in automatic_selections if selection.plan.rows[0].stage == "planning"
+        )
+        assert automatic.planning is not None
+        assert automatic.planning.to_dict()["adaptive_selection"]["selection_digest"] == automatic_planning.selection_digest
+        agent.settle_prompt_learning(
+            automatic_planning,
+            arm_id=automatic_planning.arm_ids[0],
+            evaluator_id="automatic-planning-rubric",
+            evaluator_version="1",
+            reward=0.7,
+            passed=True,
+            outcome_digest=content_digest({"automatic_planning": automatic_planning.selection_digest}),
+        )
+        assert coordinator.state.generation == len(AUTONOMOUS_DOMAINS) + len(cross_selections) + 2
         persisted = persistence.read()
         assert persisted is not None
         assert persisted.state.generation == coordinator.state.generation

@@ -412,7 +412,12 @@ def extract_autonomous_prompt_learning_selections(
             prompt = value.get("prompt")
             if isinstance(prompt, Mapping):
                 inspect_prompt(prompt)
+            adaptive = value.get("adaptive_selection")
+            if isinstance(adaptive, Mapping):
+                add(adaptive)
             for key in (
+                "planning",
+                "plan_refinement",
                 "child_runs",
                 "child_results",
                 "synthesis",
@@ -441,7 +446,14 @@ def extract_autonomous_prompt_learning_selections(
         prompt = getattr(value, "prompt", None)
         if isinstance(prompt, Mapping):
             inspect_prompt(prompt)
+        adaptive = getattr(value, "adaptive_selection", None)
+        if isinstance(adaptive, AutonomousPromptAdaptiveSelection):
+            add(adaptive.to_dict())
+        elif isinstance(adaptive, Mapping):
+            add(adaptive)
         for attribute in (
+            "planning",
+            "plan_refinement",
             "child_runs",
             "child_results",
             "synthesis",
@@ -453,7 +465,7 @@ def extract_autonomous_prompt_learning_selections(
             "stage_results",
         ):
             child = getattr(value, attribute, None)
-            if isinstance(child, (Mapping, Sequence)) or hasattr(child, "prompt"):
+            if isinstance(child, (Mapping, Sequence)) or hasattr(child, "prompt") or hasattr(child, "adaptive_selection"):
                 visit(child)
 
     visit(result)

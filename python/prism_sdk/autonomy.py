@@ -1240,6 +1240,7 @@ class AutonomousPlanRefinementResult:
     selected_model: Mapping[str, str] | None = None
     selection_digest: str | None = None
     planner_prompt_digest: str | None = None
+    adaptive_selection: AutonomousPromptAdaptiveSelection | None = None
     planner_plan_digest: str | None = None
     outcome_digest: str | None = None
     # Exact contextual identity used by the planner model-selection request.
@@ -1287,6 +1288,8 @@ class AutonomousPlanRefinementResult:
         ):
             if value is not None:
                 _route_digest(value, f"plan refinement {name}")
+        if self.adaptive_selection is not None and not isinstance(self.adaptive_selection, AutonomousPromptAdaptiveSelection):
+            raise BrainRunError("plan refinement adaptive prompt selection is malformed")
         if (self.planner_context is None) != (self.planner_context_digest is None):
             raise BrainRunError("plan refinement planner_context and planner_context_digest must be supplied together")
         if self.planner_context is not None and self.planner_context_digest is not None:
@@ -1322,6 +1325,8 @@ class AutonomousPlanRefinementResult:
             "retention": "stage_ids_and_digests_only; planner_transcript_not_retained",
             "authorization": "plan_proposal_only; no_tools_or_effects_authorized",
         }
+        if self.adaptive_selection is not None:
+            result["adaptive_selection"] = self.adaptive_selection.to_dict()
         if self.planner_context is not None:
             result["planner_context"] = dict(self.planner_context)
             result["planner_context_digest"] = self.planner_context_digest
@@ -4660,6 +4665,7 @@ class AutonomousCrossDomainPlanRefinementResult:
     selected_model: Mapping[str, str] | None = None
     selection_digest: str | None = None
     planner_prompt_digest: str | None = None
+    adaptive_selection: AutonomousPromptAdaptiveSelection | None = None
     planner_plan_digest: str | None = None
     outcome_digest: str | None = None
     # Exact contextual identity used by the cross-domain planner model-selection request.
@@ -4714,6 +4720,8 @@ class AutonomousCrossDomainPlanRefinementResult:
         ):
             if value is not None:
                 _route_digest(value, f"cross-domain plan refinement {name}")
+        if self.adaptive_selection is not None and not isinstance(self.adaptive_selection, AutonomousPromptAdaptiveSelection):
+            raise BrainRunError("cross-domain plan refinement adaptive prompt selection is malformed")
         if (self.planner_context is None) != (self.planner_context_digest is None):
             raise BrainRunError("cross-domain plan refinement planner_context and planner_context_digest must be supplied together")
         if self.planner_context is not None and self.planner_context_digest is not None:
@@ -4748,6 +4756,8 @@ class AutonomousCrossDomainPlanRefinementResult:
             "retention": "child_ids_and_digests_only; planner_transcript_not_retained",
             "authorization": "plan_proposal_only; caller_acceptance_required",
         }
+        if self.adaptive_selection is not None:
+            result["adaptive_selection"] = self.adaptive_selection.to_dict()
         if self.planner_context is not None:
             result["planner_context"] = dict(self.planner_context)
             result["planner_context_digest"] = self.planner_context_digest
@@ -7975,6 +7985,34 @@ def _planner_prompt_digest(blueprint: AutonomousTaskBlueprint) -> str:
     )
 
 
+def _planner_adaptive_prompt_selection(
+    blueprint: AutonomousTaskBlueprint,
+    prompt_registry: AutonomousPromptRegistry | None,
+) -> AutonomousPromptAdaptiveSelection | None:
+    """Recover the exact adaptive prompt receipt attached to a transient planner blueprint."""
+
+    if prompt_registry is None:
+        return None
+    prompt = blueprint.prompt
+    override = prompt.get("_provider_messages_override")
+    if not isinstance(override, Mapping):
+        return None
+    metadata = override.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise BrainRunError("planner prompt override metadata is malformed")
+    raw = metadata.get("adaptive_selection")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise BrainRunError("planner adaptive prompt selection is malformed")
+    try:
+        selection = AutonomousPromptAdaptiveSelection.from_dict(raw)
+        prompt_registry.verify_selection(selection.plan)
+    except ArgumentError as error:
+        raise BrainRunError("planner adaptive prompt selection is stale or malformed") from error
+    return selection
+
+
 class AutonomousTaskOrchestrator:
     """Compose domain intake with adaptive execution and optional online learning."""
 
@@ -8563,6 +8601,7 @@ class AutonomousTaskOrchestrator:
             prompt_learning_exploration=prompt_learning_exploration,
         )
         planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
+        adaptive_selection = _planner_adaptive_prompt_selection(planner_blueprint, prompt_registry)
         planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
             planner_blueprint.selection_context,
             task_family=blueprint.workflow.workflow_id,
@@ -8584,6 +8623,7 @@ class AutonomousTaskOrchestrator:
                 base_plan_digest=base_plan_digest,
                 workflow_digest=blueprint.workflow.workflow_digest,
                 planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
                 planner_context=planner_learning_context,
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
@@ -8595,6 +8635,7 @@ class AutonomousTaskOrchestrator:
                 base_plan_digest=base_plan_digest,
                 workflow_digest=blueprint.workflow.workflow_digest,
                 planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
                 planner_context=planner_learning_context,
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
@@ -8652,6 +8693,7 @@ class AutonomousTaskOrchestrator:
             "selected_model": safe_model,
             "selection_digest": selection.get("decision_digest"),
             "planner_prompt_digest": planner_prompt_digest,
+            "adaptive_selection": adaptive_selection,
             "planner_plan_digest": planner_plan_digest,
             "outcome_digest": _json_digest({
                 "provider_outcome_digest": run.outcome_digest,
@@ -8853,6 +8895,7 @@ class AutonomousTaskOrchestrator:
             prompt_learning_exploration=prompt_learning_exploration,
         )
         planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
+        adaptive_selection = _planner_adaptive_prompt_selection(planner_blueprint, prompt_registry)
         planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
             planner_blueprint.selection_context,
             task_family=blueprint.synthesis_blueprint.workflow.workflow_id,
@@ -8873,6 +8916,7 @@ class AutonomousTaskOrchestrator:
                 task_digest=blueprint.task_digest,
                 base_plan_digest=base_plan_digest,
                 planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
                 planner_context=planner_learning_context,
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
@@ -8883,6 +8927,7 @@ class AutonomousTaskOrchestrator:
                 task_digest=blueprint.task_digest,
                 base_plan_digest=base_plan_digest,
                 planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
                 planner_context=planner_learning_context,
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
@@ -8931,6 +8976,7 @@ class AutonomousTaskOrchestrator:
             "selected_model": safe_model,
             "selection_digest": run.selection.get("decision_digest"),
             "planner_prompt_digest": planner_prompt_digest,
+            "adaptive_selection": adaptive_selection,
             "planner_plan_digest": planner_plan_digest,
             "outcome_digest": _json_digest({
                 "provider_outcome_digest": run.outcome_digest,
@@ -17595,6 +17641,7 @@ class AutonomousAgent:
     ) -> AutonomousPlanRefinementResult:
         """Ask a BYOK provider to prioritize an existing blueprint's reviewed workflow stages."""
 
+        kwargs = self._prompt_learning_options(kwargs)
         self._assert_selection_promotion_admitted()
         candidates = self._resolve_candidates(
             model_candidates,
@@ -17624,6 +17671,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainPlanRefinementResult:
         """Ask a BYOK provider to prioritize an existing cross-domain fan-out."""
 
+        kwargs = self._prompt_learning_options(kwargs)
         self._assert_selection_promotion_admitted()
         candidates = self._resolve_candidates(
             model_candidates,
@@ -18913,6 +18961,16 @@ class AutonomousAgent:
             raise BrainRunError(
                 "prompt_registry must be the same registry as the agent's prompt learner"
             )
+        supplied_planning_state = resolved.get("planning_prompt_learning_state")
+        if supplied_planning_state is not None and supplied_planning_state is not coordinator.state:
+            raise BrainRunError(
+                "planning_prompt_learning_state cannot override the agent's persistent prompt learner"
+            )
+        supplied_planning_registry = resolved.get("planning_prompt_registry")
+        if supplied_planning_registry is not None and supplied_planning_registry is not coordinator.registry:
+            raise BrainRunError(
+                "planning_prompt_registry must be the same registry as the agent's prompt learner"
+            )
         resolved["prompt_registry"] = coordinator.registry
         resolved["prompt_learning_state"] = coordinator.state
         return resolved
@@ -19960,6 +20018,9 @@ class AutonomousAgent:
         An abstained route never invokes a provider.
         """
 
+        # Bind the persistent prompt learner before routing or provider-assisted planning so the
+        # automatic path cannot silently use a different prompt state than direct execution.
+        kwargs = self._prompt_learning_options(kwargs)
         if (decision_cycle_id is None) != (decision_cycle_store is None):
             raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
         if not isinstance(resume_decision_cycle, bool):

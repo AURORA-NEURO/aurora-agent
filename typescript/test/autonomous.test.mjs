@@ -2229,6 +2229,70 @@ test("persistent prompt learning binds every high-level domain and exposes settl
   );
 });
 
+test("adaptive prompt receipts survive direct, ordered-step, and automatic provider planning", async () => {
+  const calls = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body);
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (!planningMessage) return jsonResponse({ choices: [{ message: { role: "assistant", content: "provider execution" }, finish_reason: "stop" }] });
+      const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+      const catalogue = contract.stage_catalogue ?? contract.child_catalogue ?? contract.step_catalogue;
+      const ids = catalogue.map((row) => row.id);
+      const focusField = contract.stage_catalogue ? "focus_stage_ids" : contract.child_catalogue ? "focus_child_ids" : "focus_step_ids";
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, [focusField]: ids.slice(0, 1), review_required: false, confidence: 0.92, abstain: false }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("planning-persistent", "https://planning-persistent.test", { requiresCredential: false, structuredOutputMode: "json_schema" }));
+  const registry = builtinAutonomousPromptRegistry();
+  const store = new PromptLearningCasTextStore();
+  const persistence = new TransactionalJsonAutonomousPromptLearningSnapshotPersistence(store);
+  const coordinator = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  const agent = new AutonomousAgent(llm, { promptLearningCoordinator: coordinator });
+  agent.registerModel(candidate("planning-persistent", "planning-model", ["reasoning", "code", "science", "biomedical", "neuroscience", "coordination", "data", "web", "operations", "enterprise", "multimodal", "evaluation", "structured_output"]));
+
+  const blueprint = await agent.blueprint("Review this coding workflow before execution.", { domain: "coding" });
+  const plan = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true, costBudget: new AutonomousCostBudget(10) });
+  assert.equal(plan.status, "completed");
+  assert.equal(plan.adaptive_selection.plan.rows[0].stage, "planning");
+  const planSelections = agent.promptLearningSelections(plan);
+  assert.equal(planSelections.length, 1);
+  assert.equal(planSelections[0].selectionDigest, plan.adaptive_selection.selection_digest);
+  assert.doesNotMatch(JSON.stringify(plan), /Review this coding workflow|Context planning-contract|provider execution/);
+  await agent.settlePromptLearning(planSelections[0], { armId: planSelections[0].armIds[0], evaluatorId: "planning-rubric", evaluatorVersion: "1", reward: 0.75, passed: true, outcomeDigest: digestJsonSync({ selection: planSelections[0].selectionDigest }) });
+
+  const ordered = await agent.planOrderedStepsWithProvider({
+    task: "Order the reviewed coding steps.",
+    domain: "coding",
+    steps: [{ id: "scope", domain: "coding", capability: "implementation", objective: "Inspect the reviewed change." }],
+  }, { approveProviderCall: true, costBudget: new AutonomousCostBudget(10) });
+  assert.equal(ordered.status, "completed");
+  const orderedSelections = agent.promptLearningSelections(ordered);
+  assert.equal(orderedSelections.length, 1);
+  assert.equal(orderedSelections[0].plan.rows[0].stage, "planning");
+  await agent.settlePromptLearning(orderedSelections[0], { armId: orderedSelections[0].armIds[0], evaluatorId: "ordered-rubric", evaluatorVersion: "1", reward: 0.7, passed: true, outcomeDigest: digestJsonSync({ selection: orderedSelections[0].selectionDigest }) });
+
+  const automaticBudget = new AutonomousCostBudget(10);
+  const automatic = await agent.planAndRun("Review this coding workflow end to end.", {
+    domain: "coding",
+    planning: { approveProviderCall: true, costBudget: automaticBudget },
+    acceptPlan: true,
+    approveProviderCall: true,
+    costBudget: automaticBudget,
+  });
+  assert.equal(automatic.status, "completed");
+  assert.equal(automatic.plan_refinement.adaptive_selection.plan.rows[0].stage, "planning");
+  const automaticSelections = agent.promptLearningSelections(automatic);
+  const automaticPlanning = automaticSelections.find((selection) => selection.plan.rows[0].stage === "planning");
+  assert.ok(automaticPlanning);
+  await agent.settlePromptLearning(automaticPlanning, { armId: automaticPlanning.armIds[0], evaluatorId: "automatic-rubric", evaluatorVersion: "1", reward: 0.65, passed: true, outcomeDigest: digestJsonSync({ selection: automaticPlanning.selectionDigest }) });
+  assert.equal(coordinator.state.generation, 3);
+  assert.equal(calls.length >= 3, true);
+  assert.doesNotMatch(store.value, /Review this coding workflow|Context planning-contract|provider execution/);
+});
+
 test("keyless readiness composes all-domain evidence routing posture without source dispatch", async () => {
   let fetchCalls = 0;
   let sourceCalls = 0;

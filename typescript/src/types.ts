@@ -1,4 +1,6 @@
 /** JSON values accepted by the dependency-free Prism client. */
+import type { AutonomousPromptAdaptiveSelectionJSON } from "./autonomous-prompt-registry.js";
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export interface JsonObject {
@@ -399,6 +401,8 @@ export interface AutonomousPlanRefinementResult extends JsonObject {
   selected_model: { provider: string; model: string } | null;
   selection_digest: string | null;
   planner_prompt_digest: string | null;
+  /** Exact registry-bound adaptive planning prompt receipt; rendered messages remain transient. */
+  adaptive_selection?: AutonomousPromptAdaptiveSelectionJSON;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
   /** Exact contextual identity used by the planner model-selection request. */
@@ -429,6 +433,8 @@ export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
   selected_model: { provider: string; model: string } | null;
   selection_digest: string | null;
   planner_prompt_digest: string | null;
+  /** Exact registry-bound adaptive planning prompt receipt; rendered messages remain transient. */
+  adaptive_selection?: AutonomousPromptAdaptiveSelectionJSON;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
   /** Exact contextual identity used by the cross-domain planner selection request. */
@@ -466,6 +472,8 @@ export interface AutonomousOrderedStepPlanRefinementResult extends JsonObject {
   selected_model: { provider: string; model: string } | null;
   selection_digest: string | null;
   planner_prompt_digest: string | null;
+  /** Exact registry-bound adaptive planning prompt receipt; rendered messages remain transient. */
+  adaptive_selection?: AutonomousPromptAdaptiveSelectionJSON;
   planner_plan_digest: string | null;
   outcome_digest: string | null;
   /** Exact contextual identity used by ordered-step planner selection. */
