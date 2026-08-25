@@ -5,8 +5,15 @@ import {
   AutonomousDomainToolRuntime,
   AutonomousEffectBoundary,
   AutonomousEffectPersistenceCoordinator,
+  AutonomousEffectPolicyError,
   AutonomousEffectReconciliationRequiredError,
+  AUTONOMOUS_DOMAIN_NAMES,
+  AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA,
   AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
+  AutonomousProtectedProviderEffectResolver,
+  AutonomousProtectedRehydrationAdapter,
+  AutonomousProtectedRehydrationBoundary,
+  AutonomousProtectedRehydrationContext,
   AutonomousProviderEffectResolver,
   AutonomousProviderEffectReconciliationWorker,
   AutonomousExecutionController,
@@ -16,6 +23,7 @@ import {
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
   AutonomousDomainToolRegistry,
+  protectedValueDigest,
 } from "../dist/index.js";
 
 const digest = (character) => character.repeat(64);
@@ -144,6 +152,87 @@ test("provider effect resolver receives an explicit transient key without fabric
   const encoded = JSON.stringify(await journal.snapshot());
   assert.doesNotMatch(encoded, /caller-owned-status-key/);
   await assert.rejects(() => boundary.execute(request, async () => ({ duplicate: true }), { cacheResult: false }), AutonomousEffectReconciliationRequiredError);
+});
+
+test("protected provider effect receipts bind every effect identity across all domains and keep keys transient", async () => {
+  assert.equal(AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA, "bioprism-typescript-autonomous-protected-provider-effect-rehydration/0.1");
+  const values = new Map();
+  const protectedBoundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "tenant-effects", actorId: "effect-worker", sessionId: "protected", authorizationDigest: digest("e") }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 500 },
+  );
+  const adapter = new AutonomousProtectedRehydrationAdapter(protectedBoundary);
+  const observedKeys = [];
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const journal = new InMemoryAutonomousEffectJournal();
+    const boundary = new AutonomousEffectBoundary({ journal });
+    const request = { execution_id: domain, tool: "provider.offline.invoke", call_id: `protected-provider-${domain}`, risk_class: "provider_invocation", arguments: { request_digest: digest("c") } };
+    await assert.rejects(() => boundary.execute(request, async () => { throw new Error("lost_after_dispatch"); }, { cacheResult: false }), AutonomousEffectReconciliationRequiredError);
+    const effectId = await boundary.effectId(request);
+    const record = await journal.get(effectId);
+    const value = { status: "completed", result: { status_code: 200, domain } };
+    const valueDigest = protectedValueDigest(value);
+    values.set(valueDigest, value);
+    const resolver = new AutonomousProtectedProviderEffectResolver({
+      adapter,
+      domain,
+      receiptResolver: async (context) => {
+        observedKeys.push(context.idempotencyKey);
+        return {
+          effect_id: context.effectId,
+          execution_id: context.executionId,
+          tool: context.tool,
+          call_id: context.callId,
+          risk_class: context.riskClass,
+          arguments_digest: context.argumentsDigest,
+          idempotency_key_digest: context.idempotencyKeyDigest,
+          dispatch_attempt: context.dispatchAttempt,
+          provider: context.provider,
+          operation: context.operation,
+          domain: context.domain,
+          value_digest: valueDigest,
+        };
+      },
+    });
+    const updated = await boundary.reconcile(effectId, resolver, { idempotencyKey: `protected-status-${domain}` });
+    assert.equal(updated.status, "reconciled", domain);
+    assert.deepEqual((await boundary.execute(request, async () => ({ duplicate: true }), { cacheResult: true })), value.result, domain);
+    assert.doesNotMatch(JSON.stringify(await journal.snapshot()), new RegExp(`protected-status-${domain}`));
+  }
+  assert.equal(observedKeys.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(observedKeys.every((key, index) => key === `protected-status-${AUTONOMOUS_DOMAIN_NAMES[index]}`));
+
+  const tamperJournal = new InMemoryAutonomousEffectJournal();
+  const tamperBoundary = new AutonomousEffectBoundary({ journal: tamperJournal });
+  const tamperRequest = { execution_id: "coding", tool: "provider.offline.invoke", call_id: "protected-tamper", risk_class: "provider_invocation", arguments: { request_digest: digest("d") } };
+  await assert.rejects(() => tamperBoundary.execute(tamperRequest, async () => { throw new Error("lost_after_dispatch"); }, { cacheResult: false }), AutonomousEffectReconciliationRequiredError);
+  const tamperId = await tamperBoundary.effectId(tamperRequest);
+  const tamperRecord = await tamperJournal.get(tamperId);
+  const tamperValue = { status: "completed", result: { confirmed: true } };
+  const tamperDigest = protectedValueDigest(tamperValue);
+  values.set(tamperDigest, tamperValue);
+  const tamperedResolver = new AutonomousProtectedProviderEffectResolver({
+    adapter,
+    domain: "coding",
+    receiptResolver: (context) => ({
+      effect_id: "0".repeat(64),
+      execution_id: context.executionId,
+      tool: context.tool,
+      call_id: context.callId,
+      risk_class: context.riskClass,
+      arguments_digest: context.argumentsDigest,
+      idempotency_key_digest: context.idempotencyKeyDigest,
+      dispatch_attempt: context.dispatchAttempt,
+      provider: context.provider,
+      operation: context.operation,
+      domain: context.domain,
+      value_digest: tamperDigest,
+    }),
+  });
+  await assert.rejects(() => tamperBoundary.reconcile(tamperId, tamperedResolver), /effect_id/);
+  assert.equal((await tamperJournal.get(tamperId)).status, "uncertain");
+  assert.ok(tamperRecord);
 });
 
 test("provider reconciliation worker recovers pending effects across every domain", async () => {

@@ -1,5 +1,7 @@
 import { ArgumentError, isObject } from "./errors.js";
+import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
 import { canonicalJson, digestJson } from "./tooling.js";
+import type { AutonomousDomainName } from "./autonomous-domains.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import type { JsonObject, JsonValue } from "./types.js";
 import type { ProviderToolCall } from "./llm.js";
@@ -193,6 +195,149 @@ export class AutonomousProviderEffectResolver implements AutonomousEffectResolve
     if (parts.length !== 3 || parts[0] !== "provider" || !parts[1] || (parts[2] !== "invoke" && parts[2] !== "stream")) throw new AutonomousEffectPolicyError("provider effect resolver received a non-provider effect");
     if (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || utf8Bytes(idempotencyKey) > 512) throw new AutonomousEffectError("provider effect idempotency key is outside its bounded contract");
     return this.lookup(parts[1], parts[2], idempotencyKey, record);
+  }
+}
+
+export const AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA = "bioprism-typescript-autonomous-protected-provider-effect-rehydration/0.1" as const;
+
+/** Identity supplied to a protected provider-status receipt lookup. The raw key is transient. */
+export interface AutonomousProviderEffectProtectedRehydrationContext {
+  effectId: string;
+  executionId: string | null;
+  tool: string;
+  callId: string;
+  riskClass: string;
+  argumentsDigest: string;
+  idempotencyKeyDigest: string;
+  dispatchAttempt: number;
+  provider: string;
+  operation: "invoke" | "stream";
+  idempotencyKey: string;
+  domain: AutonomousDomainName | null;
+}
+
+export type AutonomousProviderEffectProtectedReceiptResolver = (
+  context: AutonomousProviderEffectProtectedRehydrationContext,
+) => unknown | Promise<unknown>;
+
+function providerEffectParts(record: AutonomousEffectRecord): { provider: string; operation: "invoke" | "stream" } {
+  const parts = record.tool.split(".");
+  if (parts.length !== 3 || parts[0] !== "provider" || !parts[1] || (parts[2] !== "invoke" && parts[2] !== "stream")) throw new AutonomousEffectPolicyError("protected provider effect resolver received a non-provider effect");
+  return { provider: parts[1], operation: parts[2] };
+}
+
+function assertProtectedProviderEffectReceipt(receipt: unknown, context: AutonomousProviderEffectProtectedRehydrationContext): asserts receipt is Record<string, unknown> {
+  if (!isObject(receipt)) throw new AutonomousEffectPolicyError("protected provider effect receipt must be a metadata object");
+  const forbidden = new Set(["idempotencykey", "apikey", "credential", "credentials", "secret", "token", "authorization", "password"]);
+  if (Object.keys(receipt).some((key) => forbidden.has(key.toLowerCase().replace(/[^a-z0-9]/g, "")))) throw new AutonomousEffectPolicyError("protected provider effect receipt contains transient or secret-shaped material");
+  const expected: Record<string, unknown> = {
+    effect_id: context.effectId,
+    execution_id: context.executionId,
+    tool: context.tool,
+    call_id: context.callId,
+    risk_class: context.riskClass,
+    arguments_digest: context.argumentsDigest,
+    idempotency_key_digest: context.idempotencyKeyDigest,
+    dispatch_attempt: context.dispatchAttempt,
+    provider: context.provider,
+    operation: context.operation,
+  };
+  for (const [key, value] of Object.entries(expected)) if (receipt[key] !== value) throw new AutonomousEffectPolicyError(`protected provider effect receipt ${key} does not match the effect record`);
+  if (context.domain !== null && receipt.domain !== context.domain) throw new AutonomousEffectPolicyError("protected provider effect receipt domain does not match the configured scope");
+  if (typeof receipt.domain !== "string" || !receipt.domain.trim()) throw new AutonomousEffectPolicyError("protected provider effect receipt must declare a domain scope");
+}
+
+function validateProtectedEffectResolution(value: unknown): AutonomousEffectResolution {
+  if (!isObject(value)) throw new AutonomousEffectError("protected provider effect value must be a metadata object");
+  const allowed = new Set(["status", "result", "failure_class", "reason", "retry_safe"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw new AutonomousEffectError("protected provider effect value contains unsupported fields");
+  if (typeof value.status !== "string" || !["completed", "failed", "not_found", "unknown"].includes(value.status)) throw new AutonomousEffectError("protected provider effect value has an unsupported status");
+  if (value.status === "completed" && !Object.prototype.hasOwnProperty.call(value, "result")) throw new AutonomousEffectError("completed protected provider effect value must include a result");
+  if (value.failure_class !== undefined && (typeof value.failure_class !== "string" || !/^[A-Za-z0-9_.:-]{1,256}$/.test(value.failure_class))) throw new AutonomousEffectError("protected provider effect failure_class is malformed");
+  if (value.reason !== undefined && (typeof value.reason !== "string" || !/^[A-Za-z0-9_.:-]{1,256}$/.test(value.reason))) throw new AutonomousEffectError("protected provider effect reason is malformed");
+  if (value.retry_safe !== undefined && typeof value.retry_safe !== "boolean") throw new AutonomousEffectError("protected provider effect retry_safe must be boolean");
+  return value as unknown as AutonomousEffectResolution;
+}
+
+/**
+ * Rehydrates provider-status outcomes from a caller-owned protected receipt.
+ *
+ * The effect journal never stores the idempotency key or provider response. This resolver binds
+ * the receipt to every durable effect identity field, gives the transient key only to the caller
+ * lookup, and delegates tenant/authorization/expiry/replay/digest enforcement to the shared
+ * protected boundary. A domain is required on the receipt because generic effect records do not
+ * themselves own a domain authority.
+ */
+export class AutonomousProtectedProviderEffectResolver implements AutonomousEffectResolver {
+  readonly adapter: AutonomousProtectedRehydrationAdapter;
+  readonly receiptResolver: AutonomousProviderEffectProtectedReceiptResolver;
+  readonly valueDecoder?: (value: unknown) => unknown | Promise<unknown>;
+  readonly domain: AutonomousDomainName | undefined;
+  readonly purpose: string;
+  readonly valueKind: string;
+  readonly oneTime: boolean;
+  readonly digestScheme: string;
+
+  constructor(options: {
+    adapter: AutonomousProtectedRehydrationAdapter;
+    receiptResolver: AutonomousProviderEffectProtectedReceiptResolver;
+    valueDecoder?: (value: unknown) => unknown | Promise<unknown>;
+    domain?: AutonomousDomainName;
+    purpose?: string;
+    valueKind?: string;
+    oneTime?: boolean;
+    digestScheme?: string;
+  }) {
+    if (!options || !(options.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new AutonomousEffectError("protected provider effect resolver requires a protected receipt adapter");
+    if (typeof options.receiptResolver !== "function") throw new AutonomousEffectError("protected provider effect receiptResolver must be callable");
+    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new AutonomousEffectError("protected provider effect valueDecoder must be callable");
+    if (options.domain !== undefined && (typeof options.domain !== "string" || !options.domain.trim())) throw new AutonomousEffectError("protected provider effect domain is malformed");
+    this.adapter = options.adapter;
+    this.receiptResolver = options.receiptResolver;
+    this.valueDecoder = options.valueDecoder;
+    this.domain = options.domain;
+    this.purpose = boundedIdentifier("protected provider effect purpose", options.purpose ?? "autonomous_provider_effect_resolution", 256);
+    this.valueKind = boundedIdentifier("protected provider effect valueKind", options.valueKind ?? "autonomous_provider_effect_resolution", 256);
+    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new AutonomousEffectError("protected provider effect oneTime must be boolean");
+    this.oneTime = options.oneTime ?? false;
+    this.digestScheme = options.digestScheme ?? "canonical_json";
+    if (this.digestScheme !== "canonical_json" && this.digestScheme !== "utf8_sha256") throw new AutonomousEffectError("protected provider effect digestScheme is unsupported");
+  }
+
+  resolve(record: AutonomousEffectRecord): Promise<AutonomousEffectResolution> {
+    return this.resolveWithKey(record, `aurora-effect-${record.effect_id}`);
+  }
+
+  async resolveWithKey(record: AutonomousEffectRecord, idempotencyKey: string): Promise<AutonomousEffectResolution> {
+    if (!record || typeof record !== "object") throw new AutonomousEffectError("protected provider effect record is malformed");
+    if (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || utf8Bytes(idempotencyKey) > 512) throw new AutonomousEffectError("protected provider effect idempotency key is outside its bounded contract");
+    const { provider, operation } = providerEffectParts(record);
+    const context: AutonomousProviderEffectProtectedRehydrationContext = {
+      effectId: record.effect_id,
+      executionId: record.execution_id,
+      tool: record.tool,
+      callId: record.call_id,
+      riskClass: record.risk_class,
+      argumentsDigest: record.arguments_digest,
+      idempotencyKeyDigest: record.idempotency_key_digest,
+      dispatchAttempt: record.dispatch_attempt,
+      provider,
+      operation,
+      idempotencyKey,
+      domain: this.domain ?? null,
+    };
+    try {
+      const receipt = await this.receiptResolver(context);
+      assertProtectedProviderEffectReceipt(receipt, context);
+      const protectedValue = this.adapter.resolveReceipt(receipt, { domain: this.domain, purpose: this.purpose, valueKind: this.valueKind, oneTime: this.oneTime, digestScheme: this.digestScheme });
+      const decoded = this.valueDecoder ? await this.valueDecoder(protectedValue) : protectedValue;
+      return validateProtectedEffectResolution(decoded);
+    } catch (error) {
+      if (error instanceof AutonomousEffectError) throw error;
+      const wrapped = new AutonomousEffectError("protected provider effect receipt could not be resolved");
+      (wrapped as Error & { cause?: unknown }).cause = error;
+      throw wrapped;
+    }
   }
 }
 

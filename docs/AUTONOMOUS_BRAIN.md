@@ -10854,3 +10854,20 @@ checked against the leased remote job before the shared adapter resolves the cal
 so approval release, retry attempt, domain, capability, and spec drift remain part of the same
 fence. This closes parity across local, remote, synchronous, and asynchronous worker paths;
 explicit `resolve` callbacks remain authoritative and remote job projections remain metadata-only.
+
+### Protected provider-effect reconciliation
+
+Uncertain provider invocations can now be reconciled through
+`AutonomousProtectedProviderEffectResolver` in both SDKs. The caller supplies a protected receipt
+lookup and an existing `AutonomousProtectedRehydrationAdapter`; the receipt must repeat the
+effect ID, execution ID, tool, call ID, risk class, argument digest, idempotency-key digest,
+dispatch attempt, provider, operation, and domain. The raw idempotency key is passed transiently
+to the caller lookup only. The shared boundary performs tenant, authorization, expiry, replay,
+and protected-value digest checks before the effect ledger accepts a completed, failed, or safe
+retry outcome. Tampered receipts remain uncertain and cannot trigger a duplicate dispatch.
+
+This extends the metadata-only guarantee through the last provider recovery seam without claiming
+exactly-once external execution. The effect journal still stores only digests and lifecycle
+labels; the deployment supplies the protected receipt store, provider status authority, identity,
+authorization, and final reconciliation policy. Tests cover all built-in domains, transient-key
+handling, journal secrecy, and receipt identity drift in Python and TypeScript.

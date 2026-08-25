@@ -10,7 +10,13 @@ from prism_sdk import (
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
     AutonomousEffectBoundary,
+    AutonomousEffectPolicyError,
     AutonomousEffectReconciliationRequiredError,
+    AutonomousProtectedProviderEffectResolver,
+    AutonomousProtectedRehydrationAdapter,
+    AutonomousProtectedRehydrationBoundary,
+    AutonomousProtectedRehydrationContext,
+    AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA,
     AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
     AutonomousProviderEffectResolver,
     AutonomousProviderEffectReconciliationWorker,
@@ -22,6 +28,7 @@ from prism_sdk import (
     ProviderToolCall,
     TransactionalJsonAutonomousEffectSnapshotPersistence,
     AutonomousEffectPersistenceCoordinator,
+    protected_value_digest,
 )
 
 
@@ -130,6 +137,70 @@ def test_provider_effect_resolver_uses_explicit_key_without_persisting_it_or_fab
     assert "caller-owned-status-key" not in encoded
     with pytest.raises(AutonomousEffectReconciliationRequiredError):
         boundary.execute(request, lambda _context: {"duplicate": True}, cache_result=False)
+
+
+def test_protected_provider_effect_receipts_bind_every_effect_identity_across_all_domains_and_keep_keys_transient() -> None:
+    assert AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA == "bioprism-python-autonomous-protected-provider-effect-rehydration/0.1"
+    values: dict[str, object] = {}
+    protected_boundary = AutonomousProtectedRehydrationBoundary(
+        AutonomousProtectedRehydrationContext(tenant_id="tenant-effects", actor_id="effect-worker", session_id="protected", authorization_digest="e" * 64),
+        lambda reference, _context: values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 500,
+    )
+    adapter = AutonomousProtectedRehydrationAdapter(protected_boundary)
+    observed_keys: list[str] = []
+    for domain in AUTONOMOUS_DOMAIN_NAMES:
+        journal = InMemoryAutonomousEffectJournal()
+        boundary = AutonomousEffectBoundary(journal=journal)
+        request = {"execution_id": domain, "tool": "provider.offline.invoke", "call_id": f"protected-provider-{domain}", "risk_class": "provider_invocation", "arguments": {"request_digest": "c" * 64}}
+        with pytest.raises(AutonomousEffectReconciliationRequiredError):
+            boundary.execute(request, lambda _context: (_ for _ in ()).throw(RuntimeError("lost_after_dispatch")), cache_result=False)
+        effect_id = boundary.effect_id(request)
+        record = journal.get(effect_id)
+        value = {"status": "completed", "result": {"status_code": 200, "domain": domain}}
+        value_digest = protected_value_digest(value)
+        values[value_digest] = value
+
+        def receipt_resolver(context: object, *, _domain: str = domain, _value_digest: str = value_digest) -> dict[str, object]:
+            observed_keys.append(context.idempotency_key)  # type: ignore[attr-defined]
+            return {
+                "effect_id": context.effect_id, "execution_id": context.execution_id, "tool": context.tool,
+                "call_id": context.call_id, "risk_class": context.risk_class, "arguments_digest": context.arguments_digest,
+                "idempotency_key_digest": context.idempotency_key_digest, "dispatch_attempt": context.dispatch_attempt,
+                "provider": context.provider, "operation": context.operation, "domain": _domain, "value_digest": _value_digest,
+            }
+
+        resolver = AutonomousProtectedProviderEffectResolver(adapter, receipt_resolver, domain=domain)
+        updated = boundary.reconcile(effect_id, resolver, idempotency_key=f"protected-status-{domain}")
+        assert updated.status == "reconciled", domain
+        assert boundary.execute(request, lambda _context: {"duplicate": True}, cache_result=True) == value["result"]
+        assert f"protected-status-{domain}" not in json.dumps(journal.snapshot().to_dict(), sort_keys=True)
+        assert record is not None
+    assert observed_keys == [f"protected-status-{domain}" for domain in AUTONOMOUS_DOMAIN_NAMES]
+
+    tamper_journal = InMemoryAutonomousEffectJournal()
+    tamper_boundary = AutonomousEffectBoundary(journal=tamper_journal)
+    tamper_request = {"execution_id": "coding", "tool": "provider.offline.invoke", "call_id": "protected-tamper", "risk_class": "provider_invocation", "arguments": {"request_digest": "d" * 64}}
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        tamper_boundary.execute(tamper_request, lambda _context: (_ for _ in ()).throw(RuntimeError("lost_after_dispatch")), cache_result=False)
+    tamper_id = tamper_boundary.effect_id(tamper_request)
+    tamper_value = {"status": "completed", "result": {"confirmed": True}}
+    tamper_digest = protected_value_digest(tamper_value)
+    values[tamper_digest] = tamper_value
+    tampered_resolver = AutonomousProtectedProviderEffectResolver(
+        adapter,
+        lambda context: {
+            "effect_id": "0" * 64, "execution_id": context.execution_id, "tool": context.tool,
+            "call_id": context.call_id, "risk_class": context.risk_class, "arguments_digest": context.arguments_digest,
+            "idempotency_key_digest": context.idempotency_key_digest, "dispatch_attempt": context.dispatch_attempt,
+            "provider": context.provider, "operation": context.operation, "domain": "coding", "value_digest": tamper_digest,
+        },
+        domain="coding",
+    )
+    with pytest.raises(AutonomousEffectPolicyError, match="effect_id"):
+        tamper_boundary.reconcile(tamper_id, tampered_resolver)
+    assert tamper_journal.get(tamper_id).status == "uncertain"  # type: ignore[union-attr]
 
 
 def test_provider_reconciliation_worker_recovers_pending_effects_across_every_domain() -> None:

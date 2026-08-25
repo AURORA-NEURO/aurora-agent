@@ -1844,3 +1844,11 @@ rehydrate every built-in domain through the queue, verify approval-gated restart
 tampered spec identity before dispatch, and prove explicit resolver precedence. The remaining
 deployment work is still intentionally external: receipt storage, encryption, identity and
 authorization issuance, retention/rotation, and reconciliation of uncertain effects.
+
+Protected provider-effect reconciliation is now implemented in both SDKs. A caller-owned receipt
+resolver can rehydrate provider status through the shared tenant-bound protected boundary while
+the journal retains only effect identity digests and lifecycle metadata. The receipt is bound to
+effect/call/provider/operation/attempt identity, raw idempotency keys remain transient, and all
+built-in domains are covered by tamper and replay tests. Remaining deployment work is the actual
+provider status authority, encrypted receipt storage, identity/authorization issuance, rotation,
+and operator policy for genuinely uncertain external effects.

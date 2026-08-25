@@ -19,11 +19,14 @@ import json
 import math
 import threading
 import time
-from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
 from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
 from .llm_runtime import ProviderToolCall, ProviderToolResult
+
+if TYPE_CHECKING:
+    from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 
 
 AUTONOMOUS_EFFECT_SCHEMA = "bioprism-python-autonomous-effect/0.1"
@@ -637,6 +640,185 @@ class AutonomousProviderEffectResolver:
         return self._lookup(parts[1], parts[2], idempotency_key, record)
 
 
+AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA = "bioprism-python-autonomous-protected-provider-effect-rehydration/0.1"
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousProviderEffectProtectedRehydrationContext:
+    """Identity supplied to a protected provider-status receipt lookup.
+
+    The idempotency key is available only during the lookup and is never part of a receipt or
+    effect journal projection. Generic effect records do not own a domain, so the resolver may
+    require one explicitly or receive it from the caller-owned receipt.
+    """
+
+    effect_id: str
+    execution_id: str | None
+    tool: str
+    call_id: str
+    risk_class: str
+    arguments_digest: str
+    idempotency_key_digest: str
+    dispatch_attempt: int
+    provider: str
+    operation: str
+    idempotency_key: str
+    domain: str | None
+
+
+AutonomousProviderEffectProtectedReceiptResolver = Callable[
+    [AutonomousProviderEffectProtectedRehydrationContext],
+    AutonomousEffectResolution | Mapping[str, Any] | Any,
+]
+
+
+def _protected_provider_effect_parts(record: AutonomousEffectRecord) -> tuple[str, str]:
+    parts = record.tool.split(".")
+    if len(parts) != 3 or parts[0] != "provider" or not parts[1] or parts[2] not in {"invoke", "stream"}:
+        raise AutonomousEffectPolicyError("protected provider effect resolver received a non-provider effect")
+    return parts[1], parts[2]
+
+
+def _assert_protected_provider_effect_receipt(
+    receipt: Any,
+    context: AutonomousProviderEffectProtectedRehydrationContext,
+) -> Mapping[str, Any]:
+    if not isinstance(receipt, Mapping):
+        raise AutonomousEffectPolicyError("protected provider effect receipt must be a metadata mapping")
+    forbidden = {"idempotencykey", "apikey", "credential", "credentials", "secret", "token", "authorization", "password"}
+    if any("".join(character for character in str(key).lower() if character.isalnum()) in forbidden for key in receipt):
+        raise AutonomousEffectPolicyError("protected provider effect receipt contains transient or secret-shaped material")
+    expected = {
+        "effect_id": context.effect_id,
+        "execution_id": context.execution_id,
+        "tool": context.tool,
+        "call_id": context.call_id,
+        "risk_class": context.risk_class,
+        "arguments_digest": context.arguments_digest,
+        "idempotency_key_digest": context.idempotency_key_digest,
+        "dispatch_attempt": context.dispatch_attempt,
+        "provider": context.provider,
+        "operation": context.operation,
+    }
+    for key, value in expected.items():
+        if receipt.get(key) != value:
+            raise AutonomousEffectPolicyError(f"protected provider effect receipt {key} does not match the effect record")
+    if context.domain is not None and receipt.get("domain") != context.domain:
+        raise AutonomousEffectPolicyError("protected provider effect receipt domain does not match the configured scope")
+    if not isinstance(receipt.get("domain"), str) or not receipt["domain"].strip():
+        raise AutonomousEffectPolicyError("protected provider effect receipt must declare a domain scope")
+    return receipt
+
+
+def _validate_protected_effect_resolution(value: Any) -> AutonomousEffectResolution:
+    if isinstance(value, AutonomousEffectResolution):
+        return value
+    if not isinstance(value, Mapping):
+        raise AutonomousEffectError("protected provider effect value must be a metadata mapping")
+    allowed = {"status", "result", "failure_class", "reason", "retry_safe"}
+    if any(key not in allowed for key in value):
+        raise AutonomousEffectError("protected provider effect value contains unsupported fields")
+    status = value.get("status")
+    if status not in {"completed", "failed", "not_found", "unknown"}:
+        raise AutonomousEffectError("protected provider effect value has an unsupported status")
+    if status == "completed" and "result" not in value:
+        raise AutonomousEffectError("completed protected provider effect value must include a result")
+    failure_class = value.get("failure_class")
+    reason = value.get("reason")
+    if failure_class is not None:
+        _identifier("protected provider effect failure_class", failure_class, 256)
+    if reason is not None:
+        _identifier("protected provider effect reason", reason, 256)
+    retry_safe = value.get("retry_safe", False)
+    if not isinstance(retry_safe, bool):
+        raise AutonomousEffectError("protected provider effect retry_safe must be boolean")
+    return AutonomousEffectResolution(status, value.get("result"), failure_class, reason, retry_safe)
+
+
+class AutonomousProtectedProviderEffectResolver:
+    """Resolve uncertain provider effects through the shared protected receipt boundary.
+
+    Every durable effect identity field is repeated by the receipt before its protected value is
+    opened. The caller-owned resolver receives the transient idempotency key for provider lookup,
+    while the adapter enforces tenant, authorization, expiry, replay, and value-digest checks.
+    """
+
+    def __init__(
+        self,
+        adapter: "AutonomousProtectedRehydrationAdapter",
+        receipt_resolver: AutonomousProviderEffectProtectedReceiptResolver,
+        *,
+        value_decoder: Callable[[Any], Any] | None = None,
+        domain: str | None = None,
+        purpose: str = "autonomous_provider_effect_resolution",
+        value_kind: str = "autonomous_provider_effect_resolution",
+        one_time: bool = False,
+        digest_scheme: str = "canonical_json",
+    ) -> None:
+        from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter as ProtectedRehydrationAdapter
+
+        if not isinstance(adapter, ProtectedRehydrationAdapter):
+            raise AutonomousEffectError("protected provider effect resolver requires a protected receipt adapter")
+        if not callable(receipt_resolver):
+            raise AutonomousEffectError("protected provider effect receipt_resolver must be callable")
+        if value_decoder is not None and not callable(value_decoder):
+            raise AutonomousEffectError("protected provider effect value_decoder must be callable")
+        if domain is not None:
+            _identifier("protected provider effect domain", domain, 256)
+        if digest_scheme not in {"canonical_json", "utf8_sha256"}:
+            raise AutonomousEffectError("protected provider effect digest_scheme is unsupported")
+        self.adapter = adapter
+        self.receipt_resolver = receipt_resolver
+        self.value_decoder = value_decoder
+        self.domain = domain
+        self.purpose = _identifier("protected provider effect purpose", purpose, 256)
+        self.value_kind = _identifier("protected provider effect value_kind", value_kind, 256)
+        if not isinstance(one_time, bool):
+            raise AutonomousEffectError("protected provider effect one_time must be boolean")
+        self.one_time = one_time
+        self.digest_scheme = digest_scheme
+
+    def resolve(self, record: AutonomousEffectRecord) -> AutonomousEffectResolution:
+        return self.resolve_with_key(record, f"aurora-effect-{record.effect_id}")
+
+    def resolve_with_key(self, record: AutonomousEffectRecord, idempotency_key: str) -> AutonomousEffectResolution:
+        if not isinstance(record, AutonomousEffectRecord):
+            raise AutonomousEffectError("protected provider effect record is malformed")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key.encode("utf-8")) > 512:
+            raise AutonomousEffectError("protected provider effect idempotency key is outside its bounded contract")
+        provider, operation = _protected_provider_effect_parts(record)
+        context = AutonomousProviderEffectProtectedRehydrationContext(
+            effect_id=record.effect_id,
+            execution_id=record.execution_id,
+            tool=record.tool,
+            call_id=record.call_id,
+            risk_class=record.risk_class,
+            arguments_digest=record.arguments_digest,
+            idempotency_key_digest=record.idempotency_key_digest,
+            dispatch_attempt=record.dispatch_attempt,
+            provider=provider,
+            operation=operation,
+            idempotency_key=idempotency_key,
+            domain=self.domain,
+        )
+        try:
+            receipt = _assert_protected_provider_effect_receipt(self.receipt_resolver(context), context)
+            protected_value = self.adapter.resolve_receipt(
+                receipt,
+                domain=self.domain,
+                purpose=self.purpose,
+                value_kind=self.value_kind,
+                one_time=self.one_time,
+                digest_scheme=self.digest_scheme,
+            )
+            decoded = self.value_decoder(protected_value) if self.value_decoder is not None else protected_value
+            return _validate_protected_effect_resolution(decoded)
+        except AutonomousEffectError:
+            raise
+        except Exception as error:
+            raise AutonomousEffectError("protected provider effect receipt could not be resolved") from error
+
+
 def _failure_class(error: BaseException) -> str:
     name = type(error).__name__
     return name if 1 <= len(name) <= 256 and all(character in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-" for character in name) else "effect_execution_error"
@@ -1131,5 +1313,5 @@ class AutonomousProviderEffectReconciliationWorker:
 
 
 __all__ = [
-    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectResolver", "AutonomousProviderEffectReconciliationWorker", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
+    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectProtectedRehydrationContext", "AutonomousProviderEffectProtectedReceiptResolver", "AutonomousProtectedProviderEffectResolver", "AutonomousProviderEffectResolver", "AutonomousProviderEffectReconciliationWorker", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
 ]
