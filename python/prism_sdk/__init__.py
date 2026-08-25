@@ -121,6 +121,8 @@ from .research_contracts import (
     CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
     MULTIMODAL_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
     MULTIMODAL_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    THROUGHPUT_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+    THROUGHPUT_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
     FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
     FederatedContinualRetrievalReceipt,
@@ -473,6 +475,7 @@ from .brain_context_decision_projection import BrainContextDecisionProjectionRec
 from .brain_federated_decision_projection import FederatedDecisionProjectionReceipt, PeerDecisionAttestation, project_federated_decision_section
 from .brain_context_workflow_fabric import ContextWorkflowReceipt, ContextWorkflowStage, compile_context_workflow
 from .brain_multimodal_context_workflow_fabric import ModalContextInput, MultimodalContextWorkflowReceipt, compile_multimodal_context_workflow
+from .brain_throughput_context_workflow_fabric import ThroughputContextJob, ThroughputContextWorkflowReceipt, compile_throughput_context_workflow
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
