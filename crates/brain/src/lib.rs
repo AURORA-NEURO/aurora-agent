@@ -56,6 +56,7 @@ pub mod multimodal_protocol_adapter;
 pub mod multimodal_research_workbench;
 pub mod multimodal_retrieval_synthesis;
 pub mod multimodal_safety_assurance;
+pub mod retrieval_contract_model;
 pub mod retrieval_synthesis;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
@@ -240,6 +241,12 @@ pub use multimodal_safety_assurance::{
     MultimodalAssuranceReceipt, MultimodalAssuranceVerdict,
     CONTRACT_VERSION as MULTIMODAL_SAFETY_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_SAFETY_ASSURANCE_FEATURE_ID,
+};
+pub use retrieval_contract_model::{
+    model_retrieval_contract, retrieval_contract_model_manifest, RetrievalContractModelError,
+    RetrievalContractModelReceipt, RetrievalContractModelRequest,
+    CONTRACT_VERSION as RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use retrieval_synthesis::{
     retrieval_synthesis_manifest, synthesize_retrieval, EvidenceSynthesis, RetrievalCandidate,
