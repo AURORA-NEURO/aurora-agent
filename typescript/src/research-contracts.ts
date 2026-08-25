@@ -205,6 +205,8 @@ export const FEDERATED_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F04" as
 export const FEDERATED_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-federated/1.0" as const;
 export const EVIDENCE_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F05" as const;
 export const EVIDENCE_CONTRACT_MODEL_CONTRACT_VERSION = "brain-evidence-contract-model/1.0" as const;
+export const MULTIMODAL_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F06" as const;
+export const MULTIMODAL_CONTRACT_MODEL_CONTRACT_VERSION = "brain-multimodal-evidence-contract/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3684,6 +3686,27 @@ export function validateBrainEvidenceContractModelReceipt(receipt: BrainEvidence
 }
 
 export function brainEvidenceContractModelReceiptDigest(receipt: BrainEvidenceContractModelReceipt): string { validateBrainEvidenceContractModelReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainMultimodalContractModelReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; study_order: string[]; scope: string; comparability_profile: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; compatibility: "additive" | "migration_required" | "breaking" | "unknown";
+  input_schema: string; output_schema: string; modality_order: string[]; binding_order: string[]; missing_order: string[]; semantic_disagreement_order: string[];
+  schema_order: string[]; unit_order: string[]; coordinate_order: string[]; semantic_order: string[]; artifact_order: string[]; provenance_order: string[];
+  contract_digest: string; replay_identity: string; omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[];
+  artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainMultimodalContractModelReceipt(receipt: BrainMultimodalContractModelReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== MULTIMODAL_CONTRACT_MODEL_FEATURE_ID || receipt.contract_version !== MULTIMODAL_CONTRACT_MODEL_CONTRACT_VERSION) throw new Error("multimodal contract schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || receipt.study_order.length < 2 || !receipt.scope.trim() || !receipt.comparability_profile.trim() || receipt.input_schema !== "EvidenceFeed2@1" || receipt.output_schema !== "QualifiedEvidenceSet2@1" || receipt.modality_order.length < 2 || !receipt.binding_order.length || !receipt.effect_receipts.length) throw new Error("multimodal identity, schemas, study/modality closure, locality, or effects are incomplete");
+  for (const values of [receipt.study_order, receipt.modality_order, receipt.binding_order, receipt.missing_order, receipt.semantic_disagreement_order, receipt.schema_order, receipt.unit_order, receipt.coordinate_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("multimodal contract ordering is invalid");
+  for (const values of [receipt.semantic_order, receipt.artifact_order, receipt.provenance_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("multimodal contract digest ordering is invalid");
+  for (const value of [...receipt.semantic_order, ...receipt.artifact_order, ...receipt.provenance_order, receipt.contract_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("multimodal contract digest is invalid");
+  if (receipt.disposition === "qualified" && receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-research-artifacts:"))) throw new Error("qualified multimodal contract requires a local-read receipt");
+  if (receipt.disposition !== "qualified" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("non-qualified multimodal contract must be explicitly blocked");
+}
+
+export function brainMultimodalContractModelReceiptDigest(receipt: BrainMultimodalContractModelReceipt): string { validateBrainMultimodalContractModelReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

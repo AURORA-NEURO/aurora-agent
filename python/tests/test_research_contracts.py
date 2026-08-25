@@ -76,6 +76,7 @@ from prism_sdk.brain_multimodal_surveillance import BrainMultimodalEvidenceSurve
 from prism_sdk.brain_throughput_surveillance import BrainHighThroughputEvidenceReceipt
 from prism_sdk.brain_federated_surveillance import BrainFederatedEvidenceReceipt
 from prism_sdk.brain_evidence_contract import BrainEvidenceContractModelReceipt
+from prism_sdk.brain_multimodal_contract import BrainMultimodalContractModelReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2435,6 +2436,38 @@ def test_brain_evidence_contract_keeps_missing_field_explicit():
         negative_evidence=(),
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_multimodal_contract_keeps_semantic_disagreement_explicit():
+    receipt = BrainMultimodalContractModelReceipt(
+        request_id="request:multimodal-contract",
+        study_order=("study:a", "study:b"),
+        scope="organoid:neural",
+        comparability_profile="preclinical-multimodal/v1",
+        disposition="partial",
+        compatibility="additive",
+        input_schema="EvidenceFeed2@1",
+        output_schema="QualifiedEvidenceSet2@1",
+        modality_order=("imaging", "transcriptomics"),
+        binding_order=("study:a:imaging", "study:a:transcriptomics", "study:b:imaging", "study:b:transcriptomics"),
+        missing_order=(),
+        semantic_disagreement_order=("modality:imaging:semantic-digest-disagreement",),
+        schema_order=("imaging:ome-ngff/5", "transcriptomics:anndata/0.10"),
+        unit_order=("imaging:si", "transcriptomics:si"),
+        coordinate_order=("imaging:sample-relative", "transcriptomics:sample-relative"),
+        semantic_order=("a" * 64, "b" * 64, "c" * 64),
+        artifact_order=("d" * 64,),
+        provenance_order=("e" * 64,),
+        contract_digest="f" * 64,
+        replay_identity="1" * 64,
+        omissions=(),
+        uncertainty=(),
+        negative_evidence=("modality:imaging:semantic-digest-disagreement",),
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "2" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
