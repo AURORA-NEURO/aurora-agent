@@ -6,6 +6,7 @@ import {
   AutonomousAgent,
   AutonomousBrainFacade,
   AutonomousBrainJobWorker,
+  AutonomousBrainJobProtectedRehydrator,
   InMemoryAutonomousBrainJobScheduler,
   InMemoryAutonomousBrainJobSchedulerPersistence,
   InMemoryAutonomousModelHealthStore,
@@ -18,6 +19,10 @@ import {
   admitAutonomousActionPlan,
   autonomousBrainJobSpecDigest,
   autonomousBrainJobSpecDigestForHandoff,
+  AutonomousProtectedRehydrationAdapter,
+  AutonomousProtectedRehydrationBoundary,
+  AutonomousProtectedRehydrationContext,
+  protectedValueDigest,
 } from "../dist/index.js";
 
 const tasks = {
@@ -144,6 +149,119 @@ test("durable brain worker preserves approval gates and completes every domain t
   assert.equal(traces.verifyIntegrity().verified, true);
   assert.equal(JSON.stringify(scheduler.snapshot()).includes("private-task-never-retained"), false);
   assert.equal(scheduler.inventory({ limit: 32 }).every((job) => job.state === "succeeded"), true);
+});
+
+test("durable brain worker rehydrates protected private resolutions and preserves explicit resolver precedence", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 8, clock: () => 2_000 });
+  const request = requestFor("coding");
+  const policy = policyDigest("a");
+  const job = jobFor(10, request, "execute", policy);
+  scheduler.submit(job, 2_000);
+  const values = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "tenant-worker", actorId: "worker", sessionId: "protected", authorizationDigest: "a".repeat(64) }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 100 },
+  );
+  const resolution = {
+    specDigest: job.specDigest,
+    policyDigest: policy,
+    request,
+    mode: "execute",
+    execute: { approveProviderCall: true, run: { candidates: [model] } },
+  };
+  const resolutionDigest = protectedValueDigest(resolution);
+  values.set(resolutionDigest, resolution);
+  const protectedRehydration = new AutonomousBrainJobProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => ({
+      job_id: context.jobId,
+      spec_digest: context.specDigest,
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+      value_digest: resolutionDigest,
+    }),
+  });
+  const worker = new AutonomousBrainJobWorker({ brain, scheduler, workerId: "protected-worker", protectedRehydration });
+  const waiting = await worker.runOnce(job.jobId, 2_000);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.equal(providerCalls, 0);
+  assert.doesNotMatch(JSON.stringify(scheduler.snapshot()), /debug and verify a bounded repository change|private-task-never-retained/);
+  scheduler.resumeApproval(job.jobId, "operator", "protected scope reviewed", 2_001);
+  const completed = await worker.runOnce(job.jobId, 2_002);
+  assert.equal(completed.status, "succeeded");
+  assert.equal(providerCalls, 1);
+
+  const explicitScheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 2, clock: () => 3_000 });
+  const explicitJob = jobFor(11, request, "execute", policy);
+  explicitScheduler.submit(explicitJob, 3_000);
+  let explicitCalls = 0;
+  let fallbackCalls = 0;
+  const explicitWorker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler: explicitScheduler,
+    workerId: "explicit-worker",
+    protectedRehydration: new AutonomousBrainJobProtectedRehydrator({
+      adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+      receiptResolver: () => { fallbackCalls += 1; throw new Error("fallback must remain dormant"); },
+    }),
+    resolve: ({ job: explicitClaim }) => {
+      explicitCalls += 1;
+      return { ...resolution, specDigest: explicitClaim.spec_digest };
+    },
+  });
+  await explicitWorker.runOnce(explicitJob.jobId, 3_000);
+  explicitScheduler.resumeApproval(explicitJob.jobId, "operator", "explicit resolver reviewed", 3_001);
+  assert.equal((await explicitWorker.runOnce(explicitJob.jobId, 3_002)).status, "succeeded");
+  assert.equal(explicitCalls, 2);
+  assert.equal(fallbackCalls, 0);
+});
+
+test("protected durable brain worker receipts cover every domain and fail closed on identity drift", async () => {
+  const values = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "tenant-all-worker", actorId: "worker", sessionId: "all-domains", authorizationDigest: "b".repeat(64) }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 200 },
+  );
+  const rehydrator = new AutonomousBrainJobProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => ({
+      job_id: context.jobId,
+      spec_digest: context.specDigest,
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+      value_digest: protectedValueDigest(values.get(context.domain)),
+    }),
+  });
+  for (let index = 0; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) {
+    const domain = AUTONOMOUS_DOMAIN_NAMES[index];
+    const specDigest = `${index % 10}`.repeat(64);
+    const value = { specDigest, request: { task: `task-${domain}`, domain }, mode: "execute" };
+    values.set(domain, value);
+    values.set(protectedValueDigest(value), value);
+    const resolved = await rehydrator.resolve({ jobId: `protected-${domain}`, specDigest, domain, capability: "bounded", attempt: 1, approvalReleased: false });
+    assert.equal(resolved.request.domain, domain);
+  }
+  const tampered = new AutonomousBrainJobProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => ({
+      job_id: context.jobId,
+      spec_digest: "0".repeat(64),
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+      value_digest: protectedValueDigest(values.get(context.domain)),
+    }),
+  });
+  await assert.rejects(tampered.resolve({ jobId: "protected-coding", specDigest: "1".repeat(64), domain: "coding", capability: "bounded", attempt: 1, approvalReleased: false }), /spec_digest/);
 });
 
 test("worker traces closed-loop cycle and evaluator-guided cross-domain learning without replaying the provider", async () => {

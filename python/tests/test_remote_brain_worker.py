@@ -16,8 +16,13 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousActionAdmissionController,
     InMemoryAutonomousActionAdmissionLedger,
+    AutonomousProtectedRehydrationAdapter,
+    AutonomousProtectedRehydrationBoundary,
+    AutonomousProtectedRehydrationContext,
     LLMRuntime,
     RemoteBrainJobWorker,
+    RemoteBrainProtectedRehydration,
+    RemoteBrainProtectedRehydrationContext,
     RemoteBrainWorkerError,
     ProvisionedRemoteBrainCredentialScope,
     admit_autonomous_action_plan,
@@ -25,6 +30,7 @@ from prism_sdk import (
     autonomous_remote_brain_job_spec_digest_for_handoff,
     autonomous_remote_brain_plan_digest,
     autonomous_remote_brain_route_digest,
+    protected_value_digest,
 )
 
 
@@ -235,6 +241,128 @@ async def _run_async_provisioned_scope(tmp_path):
     assert brain.calls[-1][1]["credentials"] == {"groq": brain.sessions[0].handle}
     assert all("credentials" not in arguments for _name, arguments in seen)
     store.close()
+
+
+def _protected_boundary(values: dict[str, object], *, authorization: str = "protected-worker") -> AutonomousProtectedRehydrationBoundary:
+    return AutonomousProtectedRehydrationBoundary(
+        AutonomousProtectedRehydrationContext("tenant-remote-worker", "worker", authorization, "a" * 64),
+        lambda reference, _context: values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 100.0,
+    )
+
+
+def test_remote_worker_rehydrates_private_resolution_from_protected_receipt_and_keeps_explicit_resolver_authoritative(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = _control(tmp_path, seen)
+    brain = _Brain()
+    request = {"task": "private protected remote task", "domain": "coding"}
+    values: dict[str, object] = {}
+    protected = RemoteBrainProtectedRehydration(
+        AutonomousProtectedRehydrationAdapter(_protected_boundary(values)),
+        lambda context: {
+            **context.to_dict(),
+            "value_digest": protected_value_digest(values[resolution_digest]),
+        },
+    )
+    worker = RemoteBrainJobWorker(brain, control, worker_id="protected-worker", protected_rehydration=protected)
+    submitted = worker.submit(
+        idempotency_key="protected-remote-job",
+        request=request,
+        mode="autonomous",
+        domain="coding",
+        capability="bounded",
+        risk_class="review",
+    )
+    assert submitted.job is not None
+    resolution = {
+        "spec_digest": submitted.spec_digest,
+        "mode": "autonomous",
+        "request": request,
+        "kwargs": {"task": request["task"], "domain": request["domain"]},
+    }
+    resolution_digest = protected_value_digest(resolution)
+    values[resolution_digest] = resolution
+    waiting = worker.run_once(submitted.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    assert brain.calls == []
+    worker.approval(submitted.job["job_id"], "approve", authorization_digest="b" * 64)
+    completed = worker.run_once(submitted.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert brain.calls[-1][1]["task"] == request["task"]
+    assert "private protected remote task" not in json.dumps([record.to_dict() for record in store.inventory(limit=16)])
+
+    explicit_calls: list[str] = []
+    explicit_worker = RemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="protected-explicit-worker",
+        protected_rehydration=RemoteBrainProtectedRehydration(
+            AutonomousProtectedRehydrationAdapter(_protected_boundary(values, authorization="explicit")),
+            lambda _context: (_ for _ in ()).throw(AssertionError("protected fallback should not run")),
+        ),
+        resolver=lambda context: (
+            explicit_calls.append(context["job"]["job_id"])
+            or {"spec_digest": context["job"]["spec_digest"], "mode": "autonomous", "request": request, "kwargs": {"task": request["task"], "domain": request["domain"]}}
+        ),
+    )
+    explicit_submission = explicit_worker.submit(
+        idempotency_key="protected-explicit-job",
+        request=request,
+        mode="autonomous",
+        domain="coding",
+        capability="bounded",
+        risk_class="review",
+    )
+    explicit_worker.run_once(explicit_submission.job["job_id"])
+    explicit_worker.approval(explicit_submission.job["job_id"], "approve", authorization_digest="c" * 64)
+    explicit_worker.run_once(explicit_submission.job["job_id"])
+    assert explicit_calls == [explicit_submission.job["job_id"], explicit_submission.job["job_id"]]
+    store.close()
+
+
+def test_async_remote_worker_accepts_async_protected_receipt_resolvers(tmp_path):
+    asyncio.run(_run_async_protected_remote_worker(tmp_path))
+
+
+async def _run_async_protected_remote_worker(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = await _async_control(tmp_path, seen)
+    brain = _Brain()
+    request = {"task": "private async protected task", "domain": "science"}
+    values: dict[str, object] = {}
+    async def receipt(context):
+        return {**context.to_dict(), "value_digest": protected_value_digest(values["resolution"])}
+    protected = RemoteBrainProtectedRehydration(AutonomousProtectedRehydrationAdapter(_protected_boundary(values, authorization="async")), receipt)
+    worker = AsyncRemoteBrainJobWorker(brain, control, worker_id="async-protected-worker", protected_rehydration=protected)
+    submitted = await worker.submit(idempotency_key="async-protected-job", request=request, mode="autonomous", domain="science", capability="bounded", risk_class="review")
+    values["resolution"] = {"spec_digest": submitted.spec_digest, "mode": "autonomous", "request": request, "kwargs": {"task": request["task"], "domain": request["domain"]}}
+    values[protected_value_digest(values["resolution"])] = values["resolution"]
+    waiting = await worker.run_once(submitted.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    await worker.approval(submitted.job["job_id"], "approve", authorization_digest="d" * 64)
+    completed = await worker.run_once(submitted.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert brain.calls[-1][1]["task"] == request["task"]
+    store.close()
+
+
+def test_remote_worker_protected_rehydration_binds_every_domain_and_rejects_identity_drift():
+    values: dict[str, object] = {}
+    boundary = _protected_boundary(values, authorization="all-domains")
+    rehydrator = RemoteBrainProtectedRehydration(AutonomousProtectedRehydrationAdapter(boundary), lambda context: {**context.to_dict(), "value_digest": protected_value_digest(values[context.domain])})
+    for index, domain in enumerate(AUTONOMOUS_DOMAIN_NAMES):
+        spec_digest = f"{index % 10}" * 64
+        values[domain] = {"spec_digest": spec_digest, "mode": "autonomous", "request": {"task": f"task-{domain}", "domain": domain}, "kwargs": {"task": f"task-{domain}", "domain": domain}}
+        values[protected_value_digest(values[domain])] = values[domain]
+        resolved = rehydrator.resolve(RemoteBrainProtectedRehydrationContext(f"job-{domain}", spec_digest, domain, "bounded", 1, False))
+        assert resolved["request"]["domain"] == domain
+    tampered = RemoteBrainProtectedRehydration(
+        AutonomousProtectedRehydrationAdapter(boundary),
+        lambda context: {**context.to_dict(), "spec_digest": "0" * 64, "value_digest": protected_value_digest(values["coding"])},
+    )
+    with pytest.raises(RemoteBrainWorkerError, match="spec_digest"):
+        tampered.resolve(RemoteBrainProtectedRehydrationContext("job-coding", "1" * 64, "coding", "bounded", 1, False))
 
 
 def test_remote_worker_approval_gates_all_modes_and_all_domains_without_remote_private_values(tmp_path):

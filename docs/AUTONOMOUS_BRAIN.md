@@ -10826,3 +10826,23 @@ protected digest, a wrong tenant or authorization context, expiry, quarantine, a
 or plan-mismatched decoded result all stop the restart. Tests exercise partial-failure restart,
 callback precedence, canonical result decoding, tampered identity, and the entire twelve-domain
 catalog in Python and TypeScript.
+
+### Protected receipt rehydration for durable brain workers
+
+The durable high-level workers now share the protected receipt fallback as well. Python's
+`RemoteBrainJobWorker` and `AsyncRemoteBrainJobWorker` accept `protected_rehydration=` alongside
+the TypeScript `AutonomousBrainJobWorker`'s `protectedRehydration=` option. The fallback receives
+only a typed job identity: `job_id`, `spec_digest`, `domain`, `capability`, `attempt`, and
+`approval_released`. The caller-owned receipt must repeat those fields exactly and provide a
+protected `value_digest` or `payload_digest`; the shared adapter then performs tenant, actor,
+session, authorization, expiry, replay, and digest checks before returning a transient private
+resolution.
+
+An explicit resolver remains authoritative when both options are present. This lets deployments
+migrate from bespoke resolver code without changing approval or reconciliation behavior, while
+async Python deployments can use an async receipt store. Neither worker persists the receipt,
+private request, prompt, credentials, provider response, or decoded resolution. Unknown outcomes
+after the dispatch checkpoint still require caller reconciliation; protected rehydration only
+solves restart-safe pre-dispatch identity recovery. Tests cover approval-gated restart behavior,
+async receipt lookup, explicit precedence, receipt tampering, metadata-only persistence, and all
+twelve built-in domains in both SDKs.

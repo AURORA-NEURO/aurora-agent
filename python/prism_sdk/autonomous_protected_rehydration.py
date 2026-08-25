@@ -281,7 +281,7 @@ class AutonomousProtectedRehydrationAdapter:
             "receipt_digest", "request_digest", "request_id", "dispatch_id", "work_id", "value_digest", "payload_digest",
             "domain", "source_id", "connector_id", "plan_digest", "workflow_digest", "stage_id", "attempt",
             "goal_id", "goal_digest", "task_digest", "schedule_digest", "claim_digest", "revision", "execution_binding_digest",
-            "job_id", "index", "mode", "expected_result_digest",
+            "job_id", "index", "mode", "expected_result_digest", "spec_digest", "capability", "approval_released",
         )
         return {key: receipt[key] for key in allowed if key in receipt and receipt[key] is not None}
 

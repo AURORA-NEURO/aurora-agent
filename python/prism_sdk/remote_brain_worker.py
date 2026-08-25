@@ -22,6 +22,7 @@ from .brain_api import AsyncBrainControlClient, BrainControlClient
 from .autonomous_action_execution import AutonomousActionAdmission
 from .autonomous_action_plan import AutonomousActionPlan
 from .autonomous_action_admission_controller import validate_autonomous_action_dispatch_handoff
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 
 
 AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA = "bioprism-python-autonomous-remote-brain-worker/0.1"
@@ -365,6 +366,131 @@ RemoteBrainJobResolver = Callable[[Mapping[str, Any]], RemoteBrainJobResolution 
 AsyncRemoteBrainJobResolver = Callable[[Mapping[str, Any]], Any]
 
 
+@dataclass(frozen=True, slots=True)
+class RemoteBrainProtectedRehydrationContext:
+    """Metadata-only identity presented to a protected remote-job receipt resolver."""
+
+    job_id: str
+    spec_digest: str
+    domain: str
+    capability: str
+    attempt: int
+    approval_released: bool
+
+    def __post_init__(self) -> None:
+        _validate_identifier("protected remote brain job_id", self.job_id)
+        _validate_digest("protected remote brain spec_digest", self.spec_digest)
+        _validate_identifier("protected remote brain domain", self.domain)
+        _validate_identifier("protected remote brain capability", self.capability)
+        if not isinstance(self.attempt, int) or isinstance(self.attempt, bool) or self.attempt < 1:
+            raise RemoteBrainWorkerError("protected remote brain attempt must be a positive integer")
+        if not isinstance(self.approval_released, bool):
+            raise RemoteBrainWorkerError("protected remote brain approval_released must be boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "spec_digest": self.spec_digest,
+            "domain": self.domain,
+            "capability": self.capability,
+            "attempt": self.attempt,
+            "approval_released": self.approval_released,
+        }
+
+
+RemoteBrainProtectedReceiptResolver = Callable[
+    [RemoteBrainProtectedRehydrationContext],
+    Mapping[str, Any] | Awaitable[Mapping[str, Any]],
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteBrainProtectedRehydration:
+    """Rehydrate a private job resolution from a caller-owned protected receipt.
+
+    The worker stores neither the receipt nor the returned resolution.  The receipt resolver is
+    given only durable metadata and must return a short-lived receipt whose identity exactly
+    matches that metadata before the shared protected boundary releases the value.
+    """
+
+    adapter: AutonomousProtectedRehydrationAdapter
+    receipt_resolver: RemoteBrainProtectedReceiptResolver
+    value_decoder: Callable[[Any], Any] | None = None
+    domain: str | None = None
+    purpose: str = "remote_brain_job_resolution"
+    value_kind: str = "remote_brain_job_resolution"
+    one_time: bool = False
+    digest_scheme: str = "canonical_json"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.adapter, AutonomousProtectedRehydrationAdapter):
+            raise RemoteBrainWorkerError("protected remote brain rehydration requires a protected receipt adapter")
+        if not callable(self.receipt_resolver):
+            raise RemoteBrainWorkerError("protected remote brain receipt_resolver must be callable")
+        if self.value_decoder is not None and not callable(self.value_decoder):
+            raise RemoteBrainWorkerError("protected remote brain value_decoder must be callable")
+        if self.domain is not None:
+            _validate_identifier("protected remote brain domain", self.domain)
+        _validate_identifier("protected remote brain purpose", self.purpose)
+        _validate_identifier("protected remote brain value_kind", self.value_kind)
+        if self.digest_scheme not in {"canonical_json", "utf8_sha256"}:
+            raise RemoteBrainWorkerError("protected remote brain digest_scheme is unsupported")
+        if not isinstance(self.one_time, bool):
+            raise RemoteBrainWorkerError("protected remote brain one_time must be boolean")
+
+    @staticmethod
+    def _assert_receipt_identity(receipt: Mapping[str, Any], context: RemoteBrainProtectedRehydrationContext) -> None:
+        if not isinstance(receipt, Mapping):
+            raise RemoteBrainWorkerError("protected remote brain receipt_resolver must return a mapping", code="protocol")
+        expected = context.to_dict()
+        for key, value in expected.items():
+            if receipt.get(key) != value:
+                raise RemoteBrainWorkerError(
+                    f"protected remote brain receipt {key} does not match the durable job",
+                    code="protocol",
+                )
+
+    def _resolve_receipt(self, receipt: Mapping[str, Any], context: RemoteBrainProtectedRehydrationContext) -> Any:
+        self._assert_receipt_identity(receipt, context)
+        if self.domain is not None and self.domain != context.domain:
+            raise RemoteBrainWorkerError("protected remote brain configured domain does not match the durable job", code="protocol")
+        try:
+            value = self.adapter.resolve_receipt(
+                receipt,
+                domain=self.domain or context.domain,
+                purpose=self.purpose,
+                value_kind=self.value_kind,
+                one_time=self.one_time,
+                digest_scheme=self.digest_scheme,
+            )
+            return self.value_decoder(value) if self.value_decoder is not None else value
+        except RemoteBrainWorkerError:
+            raise
+        except Exception as error:
+            raise RemoteBrainWorkerError("protected remote brain receipt could not be resolved", code="rehydration") from error
+
+    def resolve(self, context: RemoteBrainProtectedRehydrationContext) -> Any:
+        if not isinstance(context, RemoteBrainProtectedRehydrationContext):
+            raise RemoteBrainWorkerError("protected remote brain rehydration context is malformed")
+        receipt = self.receipt_resolver(context)
+        if inspect.isawaitable(receipt):
+            raise RemoteBrainWorkerError("async protected remote brain receipt resolver requires the async worker", code="configuration")
+        return self._resolve_receipt(receipt, context)
+
+    async def resolve_async(self, context: RemoteBrainProtectedRehydrationContext) -> Any:
+        if not isinstance(context, RemoteBrainProtectedRehydrationContext):
+            raise RemoteBrainWorkerError("protected remote brain rehydration context is malformed")
+        try:
+            receipt = self.receipt_resolver(context)
+            if inspect.isawaitable(receipt):
+                receipt = await receipt
+            return self._resolve_receipt(receipt, context)
+        except RemoteBrainWorkerError:
+            raise
+        except Exception as error:
+            raise RemoteBrainWorkerError("protected remote brain receipt could not be resolved", code="rehydration") from error
+
+
 def _digest_json(value: Any) -> str:
     try:
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -639,7 +765,8 @@ class RemoteBrainJobWorker:
         control: BrainControlClient,
         *,
         worker_id: str,
-        resolver: RemoteBrainJobResolver,
+        resolver: RemoteBrainJobResolver | None = None,
+        protected_rehydration: RemoteBrainProtectedRehydration | None = None,
         lease_ms: int = 300_000,
         heartbeat_ms: int | None = None,
         retry_preflight_failures: bool = True,
@@ -651,11 +778,16 @@ class RemoteBrainJobWorker:
             raise RemoteBrainWorkerError("remote brain facade does not expose every supported execution mode")
         if not isinstance(control, BrainControlClient):
             raise RemoteBrainWorkerError("remote brain worker requires a BrainControlClient")
-        if not callable(resolver):
+        if resolver is not None and not callable(resolver):
             raise RemoteBrainWorkerError("remote brain resolver must be callable")
+        if protected_rehydration is not None and not isinstance(protected_rehydration, RemoteBrainProtectedRehydration):
+            raise RemoteBrainWorkerError("remote brain protected_rehydration is malformed")
+        if resolver is None and protected_rehydration is None:
+            raise RemoteBrainWorkerError("remote brain worker requires resolver or protected_rehydration")
         self.brain = brain
         self.control = control
         self.resolver = resolver
+        self.protected_rehydration = protected_rehydration
         self.worker_id = _validate_identifier("remote brain worker_id", worker_id)
         if not isinstance(lease_ms, int) or isinstance(lease_ms, bool) or not 100 <= lease_ms <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_LEASE_MS:
             raise RemoteBrainWorkerError("remote brain lease_ms is outside its bounds")
@@ -944,7 +1076,19 @@ class RemoteBrainJobWorker:
         return RemoteBrainJobBatch(status, tuple(runs), len(runs), succeeded, waiting, retryable, reconciliation, failed)
 
     def _resolve(self, job: Mapping[str, Any], approval_released: bool) -> RemoteBrainJobResolution:
-        raw = self.resolver({"job": dict(job), "approval_released": approval_released, "attempt": job["attempts"]})
+        context = {"job": dict(job), "approval_released": approval_released, "attempt": job["attempts"]}
+        if self.resolver is not None:
+            raw = self.resolver(context)
+        else:
+            assert self.protected_rehydration is not None
+            raw = self.protected_rehydration.resolve(RemoteBrainProtectedRehydrationContext(
+                job_id=job["job_id"],
+                spec_digest=job["spec_digest"],
+                domain=job["domain"],
+                capability=job["capability"],
+                attempt=job["attempts"],
+                approval_released=approval_released,
+            ))
         if isinstance(raw, RemoteBrainJobResolution):
             return raw
         if not isinstance(raw, Mapping):
@@ -1099,7 +1243,8 @@ class AsyncRemoteBrainJobWorker:
         control: AsyncBrainControlClient,
         *,
         worker_id: str,
-        resolver: AsyncRemoteBrainJobResolver,
+        resolver: AsyncRemoteBrainJobResolver | None = None,
+        protected_rehydration: RemoteBrainProtectedRehydration | None = None,
         lease_ms: int = 300_000,
         heartbeat_ms: int | None = None,
         retry_preflight_failures: bool = True,
@@ -1111,11 +1256,16 @@ class AsyncRemoteBrainJobWorker:
             raise RemoteBrainWorkerError("async remote brain facade does not expose every supported execution mode")
         if not isinstance(control, AsyncBrainControlClient):
             raise RemoteBrainWorkerError("async remote brain worker requires an AsyncBrainControlClient")
-        if not callable(resolver):
+        if resolver is not None and not callable(resolver):
             raise RemoteBrainWorkerError("async remote brain resolver must be callable")
+        if protected_rehydration is not None and not isinstance(protected_rehydration, RemoteBrainProtectedRehydration):
+            raise RemoteBrainWorkerError("async remote brain protected_rehydration is malformed")
+        if resolver is None and protected_rehydration is None:
+            raise RemoteBrainWorkerError("async remote brain worker requires resolver or protected_rehydration")
         self.brain = brain
         self.control = control
         self.resolver = resolver
+        self.protected_rehydration = protected_rehydration
         self.worker_id = _validate_identifier("async remote brain worker_id", worker_id)
         if not isinstance(lease_ms, int) or isinstance(lease_ms, bool) or not 100 <= lease_ms <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_LEASE_MS:
             raise RemoteBrainWorkerError("async remote brain lease_ms is outside its bounds")
@@ -1435,10 +1585,20 @@ class AsyncRemoteBrainJobWorker:
 
     async def _resolve(self, job: Mapping[str, Any], approval_released: bool) -> RemoteBrainJobResolution:
         context = {"job": dict(job), "approval_released": approval_released, "attempt": job["attempts"]}
-        if inspect.iscoroutinefunction(self.resolver):
+        if self.resolver is not None and inspect.iscoroutinefunction(self.resolver):
             raw = await self.resolver(context)
-        else:
+        elif self.resolver is not None:
             raw = await asyncio.to_thread(self.resolver, context)
+        else:
+            assert self.protected_rehydration is not None
+            raw = await self.protected_rehydration.resolve_async(RemoteBrainProtectedRehydrationContext(
+                job_id=job["job_id"],
+                spec_digest=job["spec_digest"],
+                domain=job["domain"],
+                capability=job["capability"],
+                attempt=job["attempts"],
+                approval_released=approval_released,
+            ))
         if inspect.isawaitable(raw):
             raw = await raw
         if isinstance(raw, RemoteBrainJobResolution):
@@ -1577,6 +1737,9 @@ __all__ = [
     "RemoteBrainJobRun",
     "RemoteBrainJobBatch",
     "RemoteBrainJobResolution",
+    "RemoteBrainProtectedRehydrationContext",
+    "RemoteBrainProtectedReceiptResolver",
+    "RemoteBrainProtectedRehydration",
     "RemoteBrainCredentialBinding",
     "RemoteBrainCredentialScope",
     "ProvisionedRemoteBrainCredentialScope",

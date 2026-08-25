@@ -1830,3 +1830,10 @@ fail closed before new provider work. Python and TypeScript tests cover partial 
 callback precedence, protected result lookup, tampering, and all twelve built-in domains. The
 remaining deployment responsibility is still the encrypted result store, identity/authorization
 authority, retention/rotation policy, and reconciliation of genuinely uncertain external effects.
+
+The protected receipt boundary now reaches the durable high-level brain workers. Python sync/async
+remote workers and the TypeScript durable worker can reconstruct private job resolutions from
+caller-owned receipts bound to job/spec/domain/capability/attempt/approval identity, with explicit
+resolver precedence and async lookup support. Focused tests cover all domains, tampering, approval
+gates, and metadata-only persistence. Deployment work remains the caller-owned receipt/vault,
+authorization, rotation, and external-effect reconciliation integration.

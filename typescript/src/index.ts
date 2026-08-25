@@ -1878,6 +1878,7 @@ export {
   autonomousBrainJobSpecDigest,
   autonomousBrainJobSpecDigestForHandoff,
   AutonomousBrainJobWorker,
+  AutonomousBrainJobProtectedRehydrator,
 } from "./autonomous-brain-worker.js";
 export type {
   AutonomousBrainJobExecutionMode,
@@ -1887,6 +1888,8 @@ export type {
   AutonomousBrainJobResolution,
   AutonomousBrainJobResolverContext,
   AutonomousBrainJobResolver,
+  AutonomousBrainJobProtectedRehydrationContext,
+  AutonomousBrainJobProtectedReceiptResolver,
   AutonomousBrainJobWorkerOptions,
   AutonomousBrainJobWorkerRun,
   AutonomousBrainJobWorkerBatch,

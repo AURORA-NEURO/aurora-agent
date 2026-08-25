@@ -22,6 +22,8 @@ import {
 } from "./autonomous-brain-jobs.js";
 import type { AutonomousRunTraceStore, AutonomousRunTraceSummary } from "./autonomous-run-trace.js";
 import type { AutonomousCredentialBinding, AutonomousCredentialScope } from "./autonomous-credential-scope.js";
+import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
+import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous-domains.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 import {
@@ -86,11 +88,109 @@ export type AutonomousBrainJobResolver = (
   context: AutonomousBrainJobResolverContext,
 ) => AutonomousBrainJobResolution | Promise<AutonomousBrainJobResolution>;
 
+export interface AutonomousBrainJobProtectedRehydrationContext {
+  jobId: string;
+  specDigest: string;
+  domain: AutonomousDomainName;
+  capability: string;
+  attempt: number;
+  approvalReleased: boolean;
+}
+
+export type AutonomousBrainJobProtectedReceiptResolver = (
+  context: AutonomousBrainJobProtectedRehydrationContext,
+) => unknown | Promise<unknown>;
+
+/** Rehydrates a private job resolution from a caller-owned, identity-bound receipt. */
+export class AutonomousBrainJobProtectedRehydrator {
+  readonly adapter: AutonomousProtectedRehydrationAdapter;
+  readonly receiptResolver: AutonomousBrainJobProtectedReceiptResolver;
+  readonly valueDecoder?: (value: unknown) => unknown;
+  readonly domain?: AutonomousDomainName;
+  readonly purpose: string;
+  readonly valueKind: string;
+  readonly oneTime: boolean;
+  readonly digestScheme: string;
+
+  constructor(options: {
+    adapter: AutonomousProtectedRehydrationAdapter;
+    receiptResolver: AutonomousBrainJobProtectedReceiptResolver;
+    valueDecoder?: (value: unknown) => unknown;
+    domain?: AutonomousDomainName;
+    purpose?: string;
+    valueKind?: string;
+    oneTime?: boolean;
+    digestScheme?: string;
+  }) {
+    if (!options || !(options.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("protected brain job rehydrator requires a protected receipt adapter");
+    if (typeof options.receiptResolver !== "function") throw new ArgumentError("protected brain job receiptResolver must be callable");
+    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new ArgumentError("protected brain job valueDecoder must be callable");
+    this.adapter = options.adapter;
+    this.receiptResolver = options.receiptResolver;
+    this.valueDecoder = options.valueDecoder;
+    this.domain = options.domain;
+    this.purpose = identifier("protected brain job purpose", options.purpose ?? "autonomous_brain_job_resolution");
+    this.valueKind = identifier("protected brain job valueKind", options.valueKind ?? "autonomous_brain_job_resolution");
+    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new ArgumentError("protected brain job oneTime must be boolean");
+    this.oneTime = options.oneTime ?? false;
+    this.digestScheme = options.digestScheme ?? "canonical_json";
+    if (this.digestScheme !== "canonical_json" && this.digestScheme !== "utf8_sha256") throw new ArgumentError("protected brain job digestScheme is unsupported");
+  }
+
+  private assertReceiptIdentity(receipt: unknown, context: AutonomousBrainJobProtectedRehydrationContext): asserts receipt is Record<string, unknown> {
+    if (!isObject(receipt)) throw new ProviderRuntimeError("protected brain job receipt must be a metadata object", { code: "protocol" });
+    const expected: Record<string, unknown> = {
+      job_id: context.jobId,
+      spec_digest: context.specDigest,
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+    };
+    for (const [key, value] of Object.entries(expected)) {
+      if (receipt[key] !== value) throw new ProviderRuntimeError(`protected brain job receipt ${key} does not match the durable job`, { code: "protocol" });
+    }
+  }
+
+  async resolve(context: AutonomousBrainJobProtectedRehydrationContext): Promise<AutonomousBrainJobResolution> {
+    if (!context || typeof context !== "object" || !context.jobId || !context.specDigest || !context.domain || !context.capability || !Number.isSafeInteger(context.attempt) || context.attempt < 1 || typeof context.approvalReleased !== "boolean") {
+      throw new ArgumentError("protected brain job rehydration context is malformed");
+    }
+    identifier("protected brain job_id", context.jobId);
+    digest("protected brain specDigest", context.specDigest);
+    identifier("protected brain capability", context.capability);
+    if (!AUTONOMOUS_DOMAIN_NAMES.includes(context.domain)) throw new ArgumentError("protected brain job domain is unsupported");
+    if (this.domain !== undefined && this.domain !== context.domain) throw new ProviderRuntimeError("protected brain configured domain does not match the durable job", { code: "protocol" });
+    try {
+      const receipt = await this.receiptResolver(context);
+      this.assertReceiptIdentity(receipt, context);
+      const value = this.adapter.resolveReceipt(receipt, {
+        domain: this.domain ?? context.domain,
+        purpose: this.purpose,
+        valueKind: this.valueKind,
+        oneTime: this.oneTime,
+        digestScheme: this.digestScheme,
+      });
+      const decoded = this.valueDecoder ? this.valueDecoder(value) : value;
+      if (!isObject(decoded)) throw new ProviderRuntimeError("protected brain job resolution must be a metadata object", { code: "protocol" });
+      return decoded as unknown as AutonomousBrainJobResolution;
+    } catch (error) {
+      if (error instanceof ProviderRuntimeError) throw error;
+      const wrapped = new ProviderRuntimeError("protected brain job receipt could not be resolved", { code: "configuration" });
+      (wrapped as Error & { cause?: unknown }).cause = error;
+      throw wrapped;
+    }
+  }
+}
+
 export interface AutonomousBrainJobWorkerOptions {
   brain: AutonomousBrainFacade;
   scheduler: InMemoryAutonomousBrainJobScheduler;
   workerId: string;
-  resolve: AutonomousBrainJobResolver;
+  /** Explicit resolver remains authoritative when both resolution paths are configured. */
+  resolve?: AutonomousBrainJobResolver;
+  /** Optional protected receipt fallback for restart-safe caller-owned private specs. */
+  protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   traceStore?: AutonomousRunTraceStore;
   persistence?: AutonomousBrainJobSchedulerPersistenceCoordinator;
   leaseMs?: number;
@@ -267,7 +367,8 @@ export class AutonomousBrainJobWorker {
   readonly brain: AutonomousBrainFacade;
   readonly scheduler: InMemoryAutonomousBrainJobScheduler;
   readonly workerId: string;
-  readonly resolve: AutonomousBrainJobResolver;
+  readonly resolve?: AutonomousBrainJobResolver;
+  readonly protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   readonly traceStore?: AutonomousRunTraceStore;
   readonly persistence?: AutonomousBrainJobSchedulerPersistenceCoordinator;
   readonly leaseMs: number;
@@ -282,8 +383,11 @@ export class AutonomousBrainJobWorker {
     this.brain = options.brain;
     this.scheduler = options.scheduler;
     this.workerId = identifier("autonomous brain workerId", options.workerId);
-    if (typeof options.resolve !== "function") throw new ArgumentError("autonomous brain job worker resolver must be callable");
+    if (options.resolve !== undefined && typeof options.resolve !== "function") throw new ArgumentError("autonomous brain job worker resolver must be callable");
+    if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousBrainJobProtectedRehydrator)) throw new ArgumentError("autonomous brain job worker protectedRehydration is malformed");
+    if (options.resolve === undefined && options.protectedRehydration === undefined) throw new ArgumentError("autonomous brain job worker requires resolve or protectedRehydration");
     this.resolve = options.resolve;
+    this.protectedRehydration = options.protectedRehydration;
     if (options.traceStore !== undefined && (typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function")) throw new ArgumentError("autonomous brain job worker traceStore is malformed");
     this.traceStore = options.traceStore;
     if (options.persistence !== undefined && (!(options.persistence instanceof AutonomousBrainJobSchedulerPersistenceCoordinator) || options.persistence.scheduler !== this.scheduler)) throw new ArgumentError("autonomous brain job worker persistence must own the supplied scheduler");
@@ -373,7 +477,16 @@ export class AutonomousBrainJobWorker {
         checkpointDigest: digestJsonSync({ schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, job_id: claimed.job_id, spec_digest: claimed.spec_digest, attempt: claimed.attempts }),
         sideEffectBoundary: claimed.side_effect_boundary === "not_started" ? "not_started" : "preflight",
       });
-      resolution = await this.resolve({ job: claimed, approvalReleased, attempt: claimed.attempts });
+      resolution = this.resolve !== undefined
+        ? await this.resolve({ job: claimed, approvalReleased, attempt: claimed.attempts })
+        : await this.protectedRehydration!.resolve({
+          jobId: claimed.job_id,
+          specDigest: claimed.spec_digest,
+          domain: claimed.domain,
+          capability: claimed.capability,
+          attempt: claimed.attempts,
+          approvalReleased,
+        });
       this.validateResolution(claimed, resolution);
       const plan = await this.brain.plan(resolution.request);
       if (!requestDomainCovered(plan, claimed.domain)) throw new ArgumentError("rehydrated brain request is outside the durable job domain");
