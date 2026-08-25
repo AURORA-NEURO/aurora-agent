@@ -67,6 +67,7 @@ pub mod context_dependency_closure;
 pub mod context_decision_projection;
 pub mod federated_decision_projection;
 pub mod context_workflow_fabric;
+pub mod multimodal_context_workflow_fabric;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -365,6 +366,13 @@ pub use context_workflow_fabric::{
     ContextWorkflowReceipt, ContextWorkflowRequest, ContextWorkflowStage,
     CONTRACT_VERSION as CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_context_workflow_fabric::{
+    compile_multimodal_context_workflow, multimodal_context_workflow_fabric_manifest,
+    ModalContextInput, MultimodalContextWorkflowError, MultimodalContextWorkflowReceipt,
+    MultimodalContextWorkflowRequest,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
