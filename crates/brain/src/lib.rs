@@ -61,6 +61,7 @@ pub mod federated_context_compilation;
 pub mod context_omission_adjudication;
 pub mod context_release_admission;
 pub mod context_freshness_drift;
+pub mod context_uncertainty_envelope;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -317,6 +318,13 @@ pub use context_freshness_drift::{
     ContextFreshnessDriftRequest, ContextSnapshot,
     CONTRACT_VERSION as CONTEXT_FRESHNESS_DRIFT_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_FRESHNESS_DRIFT_FEATURE_ID,
+};
+pub use context_uncertainty_envelope::{
+    compile_context_uncertainty_envelope, context_uncertainty_envelope_manifest,
+    ContextUncertaintyEnvelopeError, ContextUncertaintyEnvelopeReceipt,
+    ContextUncertaintyEnvelopeRequest, ContextUncertaintyObservation,
+    CONTRACT_VERSION as CONTEXT_UNCERTAINTY_ENVELOPE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_UNCERTAINTY_ENVELOPE_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
