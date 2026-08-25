@@ -11,6 +11,7 @@ export const AUTONOMOUS_EFFECT_SCHEMA = "bioprism-typescript-autonomous-effect/0
 export const AUTONOMOUS_EFFECT_EVENT_SCHEMA = "bioprism-typescript-autonomous-effect-event/0.1" as const;
 export const AUTONOMOUS_EFFECT_JOURNAL_SCHEMA = "bioprism-typescript-autonomous-effect-journal/0.1" as const;
 export const AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-effect-snapshot/0.1" as const;
+export const AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA = "bioprism-typescript-provider-effect-reconciliation/0.1" as const;
 
 export const AUTONOMOUS_EFFECT_STATUSES = [
   "prepared",
@@ -573,6 +574,33 @@ export class AutonomousEffectBoundary {
     return (await digestJson({ schema: AUTONOMOUS_EFFECT_SCHEMA, execution_id: normalized.execution_id, tool: normalized.tool, call_id: normalized.call_id, arguments_digest: argumentsDigest })).slice(0, 64);
   }
 
+  async pendingRecords(options: { toolPrefix?: string; maximum?: number } = {}): Promise<AutonomousEffectRecord[]> {
+    const toolPrefix = options.toolPrefix;
+    const maximum = options.maximum ?? 128;
+    if (toolPrefix !== undefined && (typeof toolPrefix !== "string" || !toolPrefix || toolPrefix.length > 128)) throw new AutonomousEffectError("effect pending toolPrefix is outside its bounds");
+    if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 1_024) throw new AutonomousEffectError("effect pending maximum is outside its bounds");
+    const latest = new Map<string, AutonomousEffectJournalRow>();
+    let afterSequence = 0;
+    while (true) {
+      const rows = await this.journal.events({ afterSequence, limit: 256 });
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        latest.set(row.event.effect_id, row);
+        afterSequence = Math.max(afterSequence, row.sequence);
+      }
+      if (rows.length < 256) break;
+    }
+    const pending: AutonomousEffectRecord[] = [];
+    for (const [effectId, row] of [...latest.entries()].sort((left, right) => left[1].sequence - right[1].sequence || left[0].localeCompare(right[0]))) {
+      if (!["dispatching", "dispatched", "uncertain"].includes(row.event.status)) continue;
+      if (toolPrefix !== undefined && !row.event.tool.startsWith(toolPrefix)) continue;
+      const record = await this.journal.get(effectId);
+      if (record) pending.push(record);
+      if (pending.length >= maximum) break;
+    }
+    return pending;
+  }
+
   async execute<T>(
     request: AutonomousEffectRequest,
     executor: (context: AutonomousEffectExecutionContext) => T | Promise<T>,
@@ -622,7 +650,14 @@ export class AutonomousEffectBoundary {
     if (!resolver || typeof resolver.resolve !== "function") throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), "uncertain");
     const record = await this.journal.get(effectId);
     if (!record) throw new AutonomousEffectError(`effect ${effectId} is not present in the effect ledger`);
-    return this.exclusive(effectId, async () => this.reconcileExclusive(record, resolver, options.idempotencyKey));
+    return this.exclusive(effectId, async () => {
+      const current = await this.journal.get(effectId);
+      if (!current) throw new AutonomousEffectError(`effect ${effectId} disappeared from the effect ledger`);
+      // Refresh under the per-effect queue so concurrent restart workers do not resolve or append
+      // a second transition from a stale pre-lock record.
+      if (!["dispatching", "dispatched", "uncertain"].includes(current.status)) return current;
+      return this.reconcileExclusive(current, resolver, options.idempotencyKey);
+    });
   }
 
   async authorizeAndExecute(
@@ -878,6 +913,86 @@ export class AutonomousEffectBoundary {
       released = true;
       releaseGate?.();
       if (this.operations.get(effectId) === queued) this.operations.delete(effectId);
+    };
+  }
+}
+
+/** A bounded report from a restart reconciliation pass. It contains no provider key or payload. */
+export interface AutonomousProviderEffectReconciliationReport extends JsonObject {
+  schema: typeof AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA;
+  inspected: number;
+  reconciled: number;
+  failed: number;
+  retry_ready: number;
+  uncertain: number;
+  errors: number;
+  outcomes: JsonValue[];
+  retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material";
+  secret_material: "never_returned";
+}
+
+/**
+ * Scan restored provider effects and ask a caller-owned resolver about each one.
+ * The worker never retries a provider call itself; `prepared` is reported as retry-ready and
+ * remains subject to the normal runtime admission gates on a later fresh dispatch.
+ */
+export class AutonomousProviderEffectReconciliationWorker {
+  readonly boundary: AutonomousEffectBoundary;
+  readonly resolver: AutonomousEffectResolver;
+  readonly keyResolver?: (record: AutonomousEffectRecord) => string | null | Promise<string | null>;
+  readonly maximumRecords: number;
+
+  constructor(
+    boundary: AutonomousEffectBoundary,
+    resolver: AutonomousEffectResolver,
+    options: { keyResolver?: (record: AutonomousEffectRecord) => string | null | Promise<string | null>; maximumRecords?: number } = {},
+  ) {
+    if (!(boundary instanceof AutonomousEffectBoundary)) throw new AutonomousEffectError("provider reconciliation boundary is malformed");
+    if (!resolver || typeof resolver.resolve !== "function") throw new AutonomousEffectError("provider reconciliation resolver is malformed");
+    if (options.keyResolver !== undefined && typeof options.keyResolver !== "function") throw new AutonomousEffectError("provider reconciliation keyResolver must be callable or undefined");
+    const maximumRecords = options.maximumRecords ?? 128;
+    if (!Number.isSafeInteger(maximumRecords) || maximumRecords < 1 || maximumRecords > 1_024) throw new AutonomousEffectError("provider reconciliation maximumRecords is outside its bounds");
+    this.boundary = boundary;
+    this.resolver = resolver;
+    this.keyResolver = options.keyResolver;
+    this.maximumRecords = maximumRecords;
+  }
+
+  async runOnce(options: { maximumRecords?: number } = {}): Promise<AutonomousProviderEffectReconciliationReport> {
+    const maximumRecords = options.maximumRecords ?? this.maximumRecords;
+    if (!Number.isSafeInteger(maximumRecords) || maximumRecords < 1 || maximumRecords > this.maximumRecords) throw new AutonomousEffectError("provider reconciliation run limit is outside its bounds");
+    const pending = await this.boundary.pendingRecords({ toolPrefix: "provider.", maximum: maximumRecords });
+    const outcomes: JsonValue[] = [];
+    const counts = { reconciled: 0, failed: 0, retry_ready: 0, uncertain: 0, errors: 0 };
+    for (const record of pending) {
+      try {
+        const key = this.keyResolver ? await this.keyResolver(record) : undefined;
+        const updated = await this.boundary.reconcile(record.effect_id, this.resolver, { idempotencyKey: key ?? undefined });
+        if (updated.status === "reconciled") counts.reconciled += 1;
+        else if (updated.status === "failed") counts.failed += 1;
+        else if (updated.status === "prepared") counts.retry_ready += 1;
+        else counts.uncertain += 1;
+        outcomes.push({ effect_id: record.effect_id, status: updated.status, dispatch_attempt: updated.dispatch_attempt });
+      } catch (error) {
+        if (error instanceof AutonomousEffectReconciliationRequiredError) {
+          counts.uncertain += 1;
+          outcomes.push({ effect_id: record.effect_id, status: "uncertain", dispatch_attempt: record.dispatch_attempt, reason: error.status });
+        } else if (error instanceof AutonomousEffectError) {
+          counts.errors += 1;
+          outcomes.push({ effect_id: record.effect_id, status: "worker_error", dispatch_attempt: record.dispatch_attempt, error_class: "effect_error" });
+        } else {
+          counts.errors += 1;
+          outcomes.push({ effect_id: record.effect_id, status: "worker_error", dispatch_attempt: record.dispatch_attempt, error_class: "resolver_error" });
+        }
+      }
+    }
+    return {
+      schema: AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
+      inspected: pending.length,
+      ...counts,
+      outcomes,
+      retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material",
+      secret_material: "never_returned",
     };
   }
 }

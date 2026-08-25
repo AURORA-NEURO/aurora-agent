@@ -6,7 +6,9 @@ import {
   AutonomousEffectBoundary,
   AutonomousEffectPersistenceCoordinator,
   AutonomousEffectReconciliationRequiredError,
+  AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
   AutonomousProviderEffectResolver,
+  AutonomousProviderEffectReconciliationWorker,
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
   InMemoryAutonomousEffectJournal,
@@ -142,6 +144,34 @@ test("provider effect resolver receives an explicit transient key without fabric
   const encoded = JSON.stringify(await journal.snapshot());
   assert.doesNotMatch(encoded, /caller-owned-status-key/);
   await assert.rejects(() => boundary.execute(request, async () => ({ duplicate: true }), { cacheResult: false }), AutonomousEffectReconciliationRequiredError);
+});
+
+test("provider reconciliation worker recovers pending effects across every domain", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const boundary = new AutonomousEffectBoundary({ journal });
+  const profiles = await builtinAutonomousDomainProfiles();
+  for (const profile of profiles) {
+    const request = { execution_id: profile.domain, tool: "provider.offline.invoke", call_id: `provider-${profile.domain}`, risk_class: "provider_invocation", arguments: { request_digest: digest("b") } };
+    await assert.rejects(() => boundary.execute(request, async () => { throw new Error("lost"); }, { cacheResult: false }), AutonomousEffectReconciliationRequiredError);
+  }
+  const seen = [];
+  const resolver = new AutonomousProviderEffectResolver((provider, operation, key) => {
+    seen.push({ provider, operation, key });
+    return { status: "not_found", retry_safe: true };
+  });
+  const worker = new AutonomousProviderEffectReconciliationWorker(boundary, resolver, {
+    keyResolver: (record) => `status-key-${record.effect_id}`,
+    maximumRecords: 32,
+  });
+  const report = await worker.runOnce();
+  assert.equal(report.schema, AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA);
+  assert.equal(report.inspected, profiles.length);
+  assert.equal(report.retry_ready, profiles.length);
+  assert.equal(report.uncertain, 0);
+  assert.equal(seen.length, profiles.length);
+  assert.ok(seen.every((row) => row.provider === "offline" && row.operation === "invoke"));
+  assert.doesNotMatch(JSON.stringify(await journal.snapshot()), /status-key-/);
+  assert.equal((await worker.runOnce()).inspected, 0);
 });
 
 test("custom tool adapters receive approval before the idempotency-aware executor", async () => {

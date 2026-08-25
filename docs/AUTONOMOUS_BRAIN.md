@@ -4566,6 +4566,22 @@ actual provider integration seam rather than an implicit retry policy: the embed
 decides how to query each provider, while the SDK enforces redaction, identity, lifecycle order,
 and the no-blind-replay invariant across every built-in domain and cross-domain run.
 
+For a durable worker, construct `AutonomousProviderEffectReconciliationWorker` with the restored
+effect boundary, the provider resolver, and an optional transient key lookup. `run_once()` /
+`runOnce()` scans the hash-chained ledger for the latest `dispatching`, `dispatched`, and
+`uncertain` provider records, bounds the number inspected, and returns counts for reconciled,
+failed, retry-ready, still-uncertain, and worker-error outcomes. It never performs a fresh
+provider call. A `not_found` result with `retry_safe=true` transitions to `prepared` and is
+reported as retry-ready; the normal provider runtime must still re-run model selection, budget,
+approval, and effect admission before a new request. Unknown outcomes remain quarantined. The
+report contains only effect ids, statuses, attempts, bounded classifications, and retention
+markers, so it can be checkpointed by a remote queue without copying a prompt, response,
+credential, or provider key.
+
+This worker is intentionally domain-neutral: provider effects created by every built-in domain,
+specialist fan-out, and synthesis share the same recovery contract. Domain identity remains in
+the execution envelope and is not used to weaken provider uncertainty handling.
+
 The TypeScript high-level result also exposes this audit seam directly. A completed
 `AutonomousRuntime.invoke()`, `invokeToolLoop()`, or `AutonomousAgent.run()` result carries an
 ordered `provider_invocations` array using

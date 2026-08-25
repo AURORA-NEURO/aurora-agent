@@ -11,7 +11,9 @@ from prism_sdk import (
     AutonomousDomainToolRuntime,
     AutonomousEffectBoundary,
     AutonomousEffectReconciliationRequiredError,
+    AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
     AutonomousProviderEffectResolver,
+    AutonomousProviderEffectReconciliationWorker,
     AutonomousExecutionController,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
@@ -128,6 +130,45 @@ def test_provider_effect_resolver_uses_explicit_key_without_persisting_it_or_fab
     assert "caller-owned-status-key" not in encoded
     with pytest.raises(AutonomousEffectReconciliationRequiredError):
         boundary.execute(request, lambda _context: {"duplicate": True}, cache_result=False)
+
+
+def test_provider_reconciliation_worker_recovers_pending_effects_across_every_domain() -> None:
+    journal = InMemoryAutonomousEffectJournal()
+    boundary = AutonomousEffectBoundary(journal=journal)
+    for domain in AUTONOMOUS_DOMAIN_NAMES:
+        request = {
+            "execution_id": domain,
+            "tool": "provider.offline.invoke",
+            "call_id": f"provider-{domain}",
+            "risk_class": "provider_invocation",
+            "arguments": {"request_digest": "b" * 64},
+        }
+        with pytest.raises(AutonomousEffectReconciliationRequiredError):
+            boundary.execute(request, lambda _context: (_ for _ in ()).throw(RuntimeError("lost")), cache_result=False)
+
+    seen: list[tuple[str, str, str]] = []
+
+    def lookup(provider: str, operation: str, key: str, record: object) -> dict[str, object]:
+        seen.append((provider, operation, key))
+        return {"status": "not_found", "retry_safe": True}
+
+    worker = AutonomousProviderEffectReconciliationWorker(
+        boundary,
+        AutonomousProviderEffectResolver(lookup),
+        key_resolver=lambda record: f"status-key-{record.effect_id}",
+        maximum_records=32,
+    )
+    report = worker.run_once()
+    assert report["schema"] == AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA
+    assert report["inspected"] == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert report["retry_ready"] == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert report["uncertain"] == 0
+    assert all(operation == "invoke" and provider == "offline" for provider, operation, _key in seen)
+    assert len({key for _provider, _operation, key in seen}) == len(AUTONOMOUS_DOMAIN_NAMES)
+    encoded = json.dumps(journal.snapshot().to_dict(), sort_keys=True)
+    assert "status-key-" not in encoded
+    second_report = worker.run_once()
+    assert second_report["inspected"] == 0
 
 
 def test_effect_snapshot_persistence_is_canonical_and_cas_fenced() -> None:

@@ -30,6 +30,7 @@ AUTONOMOUS_EFFECT_SCHEMA = "bioprism-python-autonomous-effect/0.1"
 AUTONOMOUS_EFFECT_EVENT_SCHEMA = "bioprism-python-autonomous-effect-event/0.1"
 AUTONOMOUS_EFFECT_JOURNAL_SCHEMA = "bioprism-python-autonomous-effect-journal/0.1"
 AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-effect-snapshot/0.1"
+AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA = "bioprism-python-provider-effect-reconciliation/0.1"
 AUTONOMOUS_EFFECT_STATUSES = (
     "prepared",
     "dispatching",
@@ -689,6 +690,37 @@ class AutonomousEffectBoundary:
         arguments_digest = content_digest(dict(normalized.arguments))
         return content_digest({"schema": AUTONOMOUS_EFFECT_SCHEMA, "execution_id": normalized.execution_id, "tool": normalized.tool, "call_id": normalized.call_id, "arguments_digest": arguments_digest})
 
+    def pending_records(self, *, tool_prefix: str | None = None, maximum: int = 128) -> tuple[AutonomousEffectRecord, ...]:
+        """List latest in-flight effect records for a restart worker without exposing payloads."""
+
+        if tool_prefix is not None and (not isinstance(tool_prefix, str) or not tool_prefix or len(tool_prefix) > 128):
+            raise AutonomousEffectError("effect pending tool_prefix is outside its bounds")
+        if isinstance(maximum, bool) or not isinstance(maximum, int) or not 1 <= maximum <= 1_024:
+            raise AutonomousEffectError("effect pending maximum is outside its bounds")
+        latest: dict[str, AutonomousEffectJournalRow] = {}
+        after_sequence = 0
+        while True:
+            rows = self.journal.events(after_sequence=after_sequence, limit=256)
+            if not rows:
+                break
+            for row in rows:
+                latest[row.event.effect_id] = row
+                after_sequence = max(after_sequence, row.sequence)
+            if len(rows) < 256:
+                break
+        pending: list[AutonomousEffectRecord] = []
+        for effect_id, row in sorted(latest.items(), key=lambda item: (item[1].sequence, item[0])):
+            if row.event.status not in {"dispatching", "dispatched", "uncertain"}:
+                continue
+            if tool_prefix is not None and not row.event.tool.startswith(tool_prefix):
+                continue
+            record = self.journal.get(effect_id)
+            if record is not None:
+                pending.append(record)
+            if len(pending) >= maximum:
+                break
+        return tuple(pending)
+
     def execute(
         self,
         request: AutonomousEffectRequest | Mapping[str, Any],
@@ -776,7 +808,14 @@ class AutonomousEffectBoundary:
         if selected is None or not callable(getattr(selected, "resolve", None)):
             raise AutonomousEffectReconciliationRequiredError(effect_id, self.idempotency_key(effect_id), record.status)
         with self._exclusive(effect_id):
-            return self._reconcile_exclusive(record, selected, self.execution, idempotency_key=idempotency_key)
+            current = self.journal.get(effect_id)
+            if current is None:
+                raise AutonomousEffectError(f"effect {effect_id} disappeared from the effect ledger")
+            # Refresh under the per-effect lock so concurrent restart workers do not resolve or
+            # append a second terminal transition from a stale pre-lock record.
+            if current.status not in {"dispatching", "dispatched", "uncertain"}:
+                return current
+            return self._reconcile_exclusive(current, selected, self.execution, idempotency_key=idempotency_key)
 
     def authorize_and_execute(self, calls: Sequence[ProviderToolCall], *, approve: Callable[[ProviderToolCall], bool], execute: Callable[..., Any], execution_id: str | None = None, execution: Any | None = None, is_read_only: Callable[[ProviderToolCall], bool] | None = None, risk_class: Callable[[ProviderToolCall], str] | None = None) -> tuple[ProviderToolResult, ...]:
         if isinstance(calls, (str, bytes)) or not isinstance(calls, Sequence) or len(calls) > 128:
@@ -1022,6 +1061,75 @@ class AutonomousEffectBoundary:
         return _LockContext(self, effect_id)
 
 
+class AutonomousProviderEffectReconciliationWorker:
+    """Bounded restart worker for provider effects restored from a metadata-only journal.
+
+    The worker never retries a provider call itself. It asks a caller-owned resolver about each
+    pending ``provider.<name>.invoke`` or ``provider.<name>.stream`` effect, records the boundary's
+    normal reconciliation transition, and returns a bounded report suitable for a queue/checkpoint
+    adapter. Caller-supplied provider keys are obtained transiently through ``key_resolver`` and
+    are never returned or persisted by the worker.
+    """
+
+    def __init__(
+        self,
+        boundary: AutonomousEffectBoundary,
+        resolver: AutonomousEffectResolver,
+        *,
+        key_resolver: Callable[[AutonomousEffectRecord], str | None] | None = None,
+        maximum_records: int = 128,
+    ) -> None:
+        if not isinstance(boundary, AutonomousEffectBoundary):
+            raise AutonomousEffectError("provider reconciliation boundary is malformed")
+        if not callable(getattr(resolver, "resolve", None)):
+            raise AutonomousEffectError("provider reconciliation resolver is malformed")
+        if key_resolver is not None and not callable(key_resolver):
+            raise AutonomousEffectError("provider reconciliation key_resolver must be callable or None")
+        if isinstance(maximum_records, bool) or not isinstance(maximum_records, int) or not 1 <= maximum_records <= 1_024:
+            raise AutonomousEffectError("provider reconciliation maximum_records is outside its bounds")
+        self.boundary = boundary
+        self.resolver = resolver
+        self.key_resolver = key_resolver
+        self.maximum_records = maximum_records
+
+    def run_once(self, *, maximum_records: int | None = None) -> dict[str, Any]:
+        limit = self.maximum_records if maximum_records is None else maximum_records
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= self.maximum_records:
+            raise AutonomousEffectError("provider reconciliation run limit is outside its bounds")
+        pending = self.boundary.pending_records(tool_prefix="provider.", maximum=limit)
+        outcomes: list[dict[str, Any]] = []
+        counts = {"reconciled": 0, "failed": 0, "retry_ready": 0, "uncertain": 0, "errors": 0}
+        for record in pending:
+            key: str | None = None
+            try:
+                if self.key_resolver is not None:
+                    key = self.key_resolver(record)
+                updated = self.boundary.reconcile(record.effect_id, self.resolver, idempotency_key=key)
+                if updated.status == "reconciled":
+                    counts["reconciled"] += 1
+                elif updated.status == "failed":
+                    counts["failed"] += 1
+                elif updated.status == "prepared":
+                    counts["retry_ready"] += 1
+                else:
+                    counts["uncertain"] += 1
+                outcomes.append({"effect_id": record.effect_id, "status": updated.status, "dispatch_attempt": updated.dispatch_attempt})
+            except AutonomousEffectReconciliationRequiredError as error:
+                counts["uncertain"] += 1
+                outcomes.append({"effect_id": record.effect_id, "status": "uncertain", "dispatch_attempt": record.dispatch_attempt, "reason": error.status})
+            except AutonomousEffectError as error:
+                counts["errors"] += 1
+                outcomes.append({"effect_id": record.effect_id, "status": "worker_error", "dispatch_attempt": record.dispatch_attempt, "error_class": type(error).__name__})
+        return {
+            "schema": AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
+            "inspected": len(pending),
+            **counts,
+            "outcomes": outcomes,
+            "retention": "metadata_only_no_arguments_outputs_credentials_or_provider_material",
+            "secret_material": "never_returned",
+        }
+
+
 __all__ = [
-    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectResolver", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
+    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectResolver", "AutonomousProviderEffectReconciliationWorker", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
 ]

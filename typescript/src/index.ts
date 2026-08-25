@@ -2175,12 +2175,14 @@ export {
   AUTONOMOUS_EFFECT_SCHEMA,
   AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA,
   AUTONOMOUS_EFFECT_STATUSES,
+  AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
   AutonomousEffectBoundary,
   AutonomousEffectError,
   AutonomousEffectExecutionError,
   AutonomousEffectPersistenceCoordinator,
   AutonomousEffectPolicyError,
   AutonomousProviderEffectResolver,
+  AutonomousProviderEffectReconciliationWorker,
   AutonomousEffectReconciliationRequiredError,
   InMemoryAutonomousEffectJournal,
   JsonAutonomousEffectSnapshotPersistence,
@@ -2204,6 +2206,7 @@ export type {
   AutonomousEffectSnapshotTextStore,
   AutonomousEffectTransactionalSnapshotTextStore,
   AutonomousEffectStatus,
+  AutonomousProviderEffectReconciliationReport,
   ProviderToolResultLike,
 } from "./autonomous-effects.js";
 export {
