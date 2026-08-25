@@ -48,6 +48,7 @@ pub mod multimodal_evidence_workflow_fabric;
 pub mod multimodal_protocol_adapter;
 pub mod multimodal_research_workbench;
 pub mod throughput_contract_model;
+pub mod throughput_protocol_adapter;
 pub mod throughput_research_workbench;
 
 pub use evidence_contract_model::{
@@ -176,6 +177,12 @@ pub use throughput_contract_model::{
     ThroughputContractModelError, ThroughputContractModelReceipt, ThroughputContractModelRequest,
     CONTRACT_VERSION as THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_protocol_adapter::{
+    serve_throughput_protocol, throughput_protocol_adapter_manifest, ThroughputProtocolError,
+    ThroughputProtocolReceipt, ThroughputProtocolRequest,
+    CONTRACT_VERSION as THROUGHPUT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_PROTOCOL_ADAPTER_FEATURE_ID,
 };
 pub use throughput_research_workbench::{
     compile_throughput_research_workbench, throughput_research_workbench_manifest,
