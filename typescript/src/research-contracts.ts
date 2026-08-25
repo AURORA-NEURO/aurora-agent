@@ -114,6 +114,8 @@ export const CONTRACT_FRONTIER_FEATURE_ID = "AFA-adapter-P25-F22" as const;
 export const CONTRACT_FRONTIER_CONTRACT_VERSION = "adapter-contract-frontier/1.0" as const;
 export const LIMITATION_CLOSURE_FEATURE_ID = "AFA-adapter-P26-F24" as const;
 export const LIMITATION_CLOSURE_CONTRACT_VERSION = "adapter-limitation-closure/1.0" as const;
+export const DEPENDENCY_COMPOSITION_FEATURE_ID = "AFA-adapter-P27-F18" as const;
+export const DEPENDENCY_COMPOSITION_CONTRACT_VERSION = "adapter-dependency-composition/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1912,6 +1914,40 @@ export function validateLimitationClosureReceipt(receipt: LimitationClosureRecei
 }
 
 export function limitationClosureReceiptDigest(receipt: LimitationClosureReceipt): string { validateLimitationClosureReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface AdapterCompositionReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  objective_id: string;
+  disposition: "composed" | "partial" | "unknown" | "blocked";
+  component_order: string[];
+  selected_order: string[];
+  missing_capability_order: string[];
+  dependency_order: string[];
+  modality_order: string[];
+  artifact_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  reasons: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateAdapterCompositionReceipt(receipt: AdapterCompositionReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== DEPENDENCY_COMPOSITION_FEATURE_ID || receipt.contract_version !== DEPENDENCY_COMPOSITION_CONTRACT_VERSION) throw new Error("adapter dependency composition schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.objective_id.trim() || !receipt.component_order.length || !receipt.reasons.length || !receipt.effect_receipts.length) throw new Error("adapter dependency composition identity, components, reasons, effects, locality, or boundary are incomplete");
+  if (!new Set(["composed", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("adapter dependency composition disposition is unknown");
+  for (const values of [receipt.component_order, receipt.selected_order, receipt.missing_capability_order, receipt.dependency_order, receipt.modality_order, receipt.artifact_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.reasons, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("adapter dependency composition ordering is invalid");
+  if (receipt.artifact_order.some((value) => !/^[0-9a-f]{64}$/.test(value))) throw new Error("adapter dependency composition artifact digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("adapter dependency composition receipt digest is invalid");
+}
+
+export function adapterCompositionReceiptDigest(receipt: AdapterCompositionReceipt): string { validateAdapterCompositionReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

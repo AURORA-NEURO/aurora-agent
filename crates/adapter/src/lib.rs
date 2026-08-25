@@ -84,6 +84,7 @@ pub mod conformance;
 pub mod context_assurance;
 pub mod contract_frontier;
 pub mod csv;
+pub mod dependency_composition;
 pub mod determinism_gateway;
 pub mod error;
 pub mod evaluation_assurance;
@@ -145,6 +146,12 @@ pub use contract_frontier::{
     FEATURE_ID as CONTRACT_FRONTIER_FEATURE_ID,
 };
 pub use csv::Table;
+pub use dependency_composition::{
+    infer_adapter_dependency_composition, AdapterCompositionReceipt, AdapterCompositionRequest,
+    AdapterDependencyComponent, CompositionDisposition, DependencyCompositionError,
+    CONTRACT_VERSION as DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+    FEATURE_ID as DEPENDENCY_COMPOSITION_FEATURE_ID,
+};
 pub use determinism_gateway::{
     negotiate_capability, CanonicalCapabilityOutput, DeterminismGatewayError,
     DeterminismGatewayVerdict, TypedCapabilityInput,

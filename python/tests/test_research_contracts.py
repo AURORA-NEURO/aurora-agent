@@ -31,6 +31,7 @@ from prism_sdk.research_contracts import EVALUATION_ASSURANCE_FEATURE_ID, EVALUA
 from prism_sdk.research_contracts import RESEARCH_WORKBENCH_FEATURE_ID, RESEARCH_WORKBENCH_CONTRACT_VERSION, ResearchWorkbenchReceipt
 from prism_sdk.research_contracts import CONTRACT_FRONTIER_FEATURE_ID, CONTRACT_FRONTIER_CONTRACT_VERSION, ContractFrontierReceipt
 from prism_sdk.research_contracts import LIMITATION_CLOSURE_FEATURE_ID, LIMITATION_CLOSURE_CONTRACT_VERSION, LimitationClosureReceipt
+from prism_sdk.research_contracts import DEPENDENCY_COMPOSITION_FEATURE_ID, DEPENDENCY_COMPOSITION_CONTRACT_VERSION, AdapterCompositionReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1303,4 +1304,28 @@ def test_limitation_closure_preserves_unresolved_cases_and_digest_only_effects()
     receipt.validate()
     assert receipt.feature_id == LIMITATION_CLOSURE_FEATURE_ID
     assert receipt.contract_version == LIMITATION_CLOSURE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_adapter_dependency_composition_preserves_missing_capability_and_provider_order():
+    receipt = AdapterCompositionReceipt(
+        request_id="composition:multimodal",
+        objective_id="objective:qc",
+        disposition="partial",
+        component_order=("component:features", "component:final"),
+        selected_order=("component:features", "component:final"),
+        missing_capability_order=("capability:missing",),
+        dependency_order=("component:final->capability:features",),
+        modality_order=("imaging", "omics"),
+        artifact_order=("a" * 64, "b" * 64),
+        omissions=("capability:missing:no-compatible-provider",),
+        uncertainty=("capability:features:multiple-providers-ranked-by-component-id",),
+        negative_evidence=("capability:missing:negative-provider-evidence",),
+        reasons=("missing capabilities remain explicit and cannot be executed",),
+        effect_receipts=("exchange:permitted-composition-manifest-and-digests",),
+        artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == DEPENDENCY_COMPOSITION_FEATURE_ID
+    assert receipt.contract_version == DEPENDENCY_COMPOSITION_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
