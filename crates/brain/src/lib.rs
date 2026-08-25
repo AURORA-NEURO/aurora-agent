@@ -66,6 +66,7 @@ pub mod context_contradiction_resolution;
 pub mod context_dependency_closure;
 pub mod context_decision_projection;
 pub mod federated_decision_projection;
+pub mod context_workflow_fabric;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -358,6 +359,12 @@ pub use federated_decision_projection::{
     FederatedDecisionProjectionRequest, PeerDecisionAttestation,
     CONTRACT_VERSION as FEDERATED_DECISION_PROJECTION_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_DECISION_PROJECTION_FEATURE_ID,
+};
+pub use context_workflow_fabric::{
+    compile_context_workflow, context_workflow_fabric_manifest, ContextWorkflowError,
+    ContextWorkflowReceipt, ContextWorkflowRequest, ContextWorkflowStage,
+    CONTRACT_VERSION as CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,

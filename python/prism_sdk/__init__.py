@@ -117,6 +117,8 @@ from .research_contracts import (
     CONTEXT_DECISION_PROJECTION_CONTRACT_VERSION,
     FEDERATED_DECISION_PROJECTION_FEATURE_ID,
     FEDERATED_DECISION_PROJECTION_CONTRACT_VERSION,
+    CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+    CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
     FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
     FederatedContinualRetrievalReceipt,
@@ -467,6 +469,7 @@ from .brain_context_contradiction_resolution import BrainContextContradictionRes
 from .brain_context_dependency_closure import BrainContextDependencyClosureReceipt, compile_context_dependency_closure
 from .brain_context_decision_projection import BrainContextDecisionProjectionReceipt, project_context_to_decision_section
 from .brain_federated_decision_projection import FederatedDecisionProjectionReceipt, PeerDecisionAttestation, project_federated_decision_section
+from .brain_context_workflow_fabric import ContextWorkflowReceipt, ContextWorkflowStage, compile_context_workflow
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
