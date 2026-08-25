@@ -103,6 +103,8 @@ RELEASE_ASSURANCE_FEATURE_ID = "AFA-adapter-P16-F26"
 RELEASE_ASSURANCE_CONTRACT_VERSION = "multimodal-research-release-assurance/1.0"
 DETERMINISM_GATEWAY_FEATURE_ID = "AFA-adapter-P17-F24"
 DETERMINISM_GATEWAY_CONTRACT_VERSION = "typed-determinism-gateway/1.0"
+PROVENANCE_ASSURANCE_FEATURE_ID = "AFA-adapter-P18-F26"
+PROVENANCE_ASSURANCE_CONTRACT_VERSION = "multimodal-provenance-signing-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2618,3 +2620,48 @@ class DeterminismGatewayReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "capability_id": self.capability_id, "endpoint_id": self.endpoint_id, "negotiated_version": self.negotiated_version, "verdict": self.verdict, "canonical_field_order": list(self.canonical_field_order), "canonical_input_digest": self.canonical_input_digest, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "effect_receipt": self.effect_receipt, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ProvenanceAssuranceReceipt:
+    envelope_id: str
+    root_artifact_id: str
+    root_digest: str
+    verdict: str
+    lineage_order: tuple[str, ...]
+    derivation_order: tuple[str, ...]
+    study_order: tuple[str, ...]
+    modality_order: tuple[str, ...]
+    tool_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    signer_public_key_hex: str
+    signer_signature_hex: str
+    effect_receipt: str
+    artifact: Mapping[str, Any]
+    feature_id: str = PROVENANCE_ASSURANCE_FEATURE_ID
+    contract_version: str = PROVENANCE_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != PROVENANCE_ASSURANCE_FEATURE_ID or self.contract_version != PROVENANCE_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("provenance assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.envelope_id.strip() or not self.root_artifact_id.strip() or not self.lineage_order or not self.derivation_order or not self.reasons or not self.effect_receipt.strip():
+            raise ResearchContractError("provenance identity, lineage, derivations, locality, boundary, reasons, or effects are incomplete")
+        if self.verdict not in {"signed", "conditional", "unresolved", "contradicted", "blocked"}:
+            raise ResearchContractError("provenance assurance verdict is unknown")
+        for values in (self.lineage_order, self.derivation_order, self.study_order, self.modality_order, self.tool_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("provenance assurance ordering is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.root_digest) or any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in self.tool_order):
+            raise ResearchContractError("provenance digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("provenance artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "envelope_id": self.envelope_id, "root_artifact_id": self.root_artifact_id, "root_digest": self.root_digest, "verdict": self.verdict, "lineage_order": list(self.lineage_order), "derivation_order": list(self.derivation_order), "study_order": list(self.study_order), "modality_order": list(self.modality_order), "tool_order": list(self.tool_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "signer_public_key_hex": self.signer_public_key_hex, "signer_signature_hex": self.signer_signature_hex, "effect_receipt": self.effect_receipt, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

@@ -101,6 +101,7 @@ pub mod mechanism_control_plane;
 pub mod multimodal_harmonization;
 pub mod probe;
 pub mod protocol_simulation;
+pub mod provenance_assurance;
 pub mod quality_control;
 pub mod quality_drift;
 pub mod quality_envelope;
@@ -201,6 +202,12 @@ pub use protocol_simulation::{
     ProtocolSimulationState, ProtocolStep,
     CONTRACT_VERSION as PROTOCOL_SIMULATION_CONTRACT_VERSION,
     FEATURE_ID as PROTOCOL_SIMULATION_FEATURE_ID,
+};
+pub use provenance_assurance::{
+    assure_provenance, ArtifactAndDerivation, DerivationStep, ProvenanceArtifact,
+    ProvenanceAssuranceError, ProvenanceAssuranceVerdict, SignedProvenanceEnvelope,
+    CONTRACT_VERSION as PROVENANCE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as PROVENANCE_ASSURANCE_FEATURE_ID,
 };
 pub use quality_control::{
     evaluate_quality_control, manifest as quality_control_manifest, MetricDirection, MetricStatus,

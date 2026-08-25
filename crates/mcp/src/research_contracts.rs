@@ -20,6 +20,10 @@ use bioprism_adapter::{
     INTERPRETATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_provenance, ArtifactAndDerivation, ProvenanceAssuranceError, SignedProvenanceEnvelope,
+    PROVENANCE_ASSURANCE_FEATURE_ID,
+};
+use bioprism_adapter::{
     assure_release, ReleaseAssuranceReceipt, ValidatedResearchRun as AdapterValidatedResearchRun,
     RELEASE_ASSURANCE_FEATURE_ID,
 };
@@ -218,6 +222,7 @@ pub const INTERPRETATION_ASSURANCE_TOOL: &str = "adapter_interpretation_assuranc
 pub const REPLICATION_ASSURANCE_TOOL: &str = "adapter_replication_assurance";
 pub const RELEASE_ASSURANCE_TOOL: &str = "adapter_release_assurance";
 pub const DETERMINISM_GATEWAY_TOOL: &str = "adapter_determinism_gateway";
+pub const PROVENANCE_ASSURANCE_TOOL: &str = "adapter_provenance_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1165,6 +1170,26 @@ pub fn validate_determinism_json(value: &Value) -> Result<CanonicalCapabilityOut
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != DETERMINISM_GATEWAY_FEATURE_ID {
         return Err("typed determinism feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_provenance_json(value: &Value) -> Result<Value, String> {
+    let request: ArtifactAndDerivation = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid provenance assurance request: {error}"))?;
+    let receipt = assure_provenance(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize signed provenance envelope: {error}"))
+}
+
+pub fn validate_provenance_json(value: &Value) -> Result<SignedProvenanceEnvelope, String> {
+    let receipt: SignedProvenanceEnvelope = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid signed provenance envelope: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: ProvenanceAssuranceError| error.to_string())?;
+    if receipt.feature_id != PROVENANCE_ASSURANCE_FEATURE_ID {
+        return Err("provenance assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

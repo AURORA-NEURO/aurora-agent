@@ -96,6 +96,8 @@ export const RELEASE_ASSURANCE_FEATURE_ID = "AFA-adapter-P16-F26" as const;
 export const RELEASE_ASSURANCE_CONTRACT_VERSION = "multimodal-research-release-assurance/1.0" as const;
 export const DETERMINISM_GATEWAY_FEATURE_ID = "AFA-adapter-P17-F24" as const;
 export const DETERMINISM_GATEWAY_CONTRACT_VERSION = "typed-determinism-gateway/1.0" as const;
+export const PROVENANCE_ASSURANCE_FEATURE_ID = "AFA-adapter-P18-F26" as const;
+export const PROVENANCE_ASSURANCE_CONTRACT_VERSION = "multimodal-provenance-signing-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1600,6 +1602,43 @@ export function validateDeterminismGatewayReceipt(receipt: DeterminismGatewayRec
 }
 
 export function determinismGatewayReceiptDigest(receipt: DeterminismGatewayReceipt): string { validateDeterminismGatewayReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ProvenanceAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  envelope_id: string;
+  root_artifact_id: string;
+  root_digest: string;
+  verdict: "signed" | "conditional" | "unresolved" | "contradicted" | "blocked";
+  lineage_order: string[];
+  derivation_order: string[];
+  study_order: string[];
+  modality_order: string[];
+  tool_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  signer_public_key_hex: string;
+  signer_signature_hex: string;
+  effect_receipt: string;
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateProvenanceAssuranceReceipt(receipt: ProvenanceAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== PROVENANCE_ASSURANCE_FEATURE_ID || receipt.contract_version !== PROVENANCE_ASSURANCE_CONTRACT_VERSION) throw new Error("provenance assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.envelope_id.trim() || !receipt.root_artifact_id.trim() || !receipt.lineage_order.length || !receipt.derivation_order.length || !receipt.reasons.length || !receipt.effect_receipt.trim()) throw new Error("provenance identity, lineage, derivations, locality, boundary, reasons, or effects are incomplete");
+  if (!new Set(["signed", "conditional", "unresolved", "contradicted", "blocked"]).has(receipt.verdict)) throw new Error("provenance assurance verdict is unknown");
+  for (const values of [receipt.lineage_order, receipt.derivation_order, receipt.study_order, receipt.modality_order, receipt.tool_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("provenance assurance ordering is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.root_digest) || receipt.tool_order.some((value) => !/^[0-9a-f]{64}$/.test(value))) throw new Error("provenance digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("provenance artifact digest is invalid");
+}
+
+export function provenanceAssuranceReceiptDigest(receipt: ProvenanceAssuranceReceipt): string { validateProvenanceAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

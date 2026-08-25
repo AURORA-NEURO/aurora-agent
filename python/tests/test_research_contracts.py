@@ -22,6 +22,7 @@ from prism_sdk.research_contracts import INTERPRETATION_ASSURANCE_FEATURE_ID, IN
 from prism_sdk.research_contracts import REPLICATION_ASSURANCE_FEATURE_ID, REPLICATION_ASSURANCE_CONTRACT_VERSION, ReplicationAssuranceReceipt
 from prism_sdk.research_contracts import RELEASE_ASSURANCE_FEATURE_ID, RELEASE_ASSURANCE_CONTRACT_VERSION, ReleaseAssuranceReceipt
 from prism_sdk.research_contracts import DETERMINISM_GATEWAY_FEATURE_ID, DETERMINISM_GATEWAY_CONTRACT_VERSION, DeterminismGatewayReceipt
+from prism_sdk.research_contracts import PROVENANCE_ASSURANCE_FEATURE_ID, PROVENANCE_ASSURANCE_CONTRACT_VERSION, ProvenanceAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1091,4 +1092,31 @@ def test_determinism_gateway_preserves_migration_and_canonical_digest():
     receipt.validate()
     assert receipt.feature_id == DETERMINISM_GATEWAY_FEATURE_ID
     assert receipt.contract_version == DETERMINISM_GATEWAY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_provenance_assurance_preserves_lineage_and_signing_boundary():
+    receipt = ProvenanceAssuranceReceipt(
+        envelope_id="envelope:qc",
+        root_artifact_id="artifact:root",
+        root_digest="a" * 64,
+        verdict="conditional",
+        lineage_order=("artifact:imaging", "artifact:omics", "artifact:root"),
+        derivation_order=("step:root",),
+        study_order=("study:1", "study:2"),
+        modality_order=("imaging", "omics"),
+        tool_order=("b" * 64,),
+        omissions=("tool attestation pending",),
+        uncertainty=("lineage integrity is not signer authorization",),
+        negative_evidence=("null secondary endpoint",),
+        semantic_loss=({"field": "omissions", "severity": "decision_relevant"},),
+        reasons=("protected provenance gap prevents unconditional signing",),
+        signer_public_key_hex="c" * 64,
+        signer_signature_hex="d" * 128,
+        effect_receipt="block_unsafe_release_and_retain_provenance_receipt",
+        artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == PROVENANCE_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == PROVENANCE_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
