@@ -187,6 +187,8 @@ SERVICES_MECHANISM_WORKBENCH_FEATURE_ID = "AFA-services-P08-F19"
 SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION = "services-prospective-mechanism-workbench/1.0"
 GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-governance-P14-F27"
 GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "governance-interpretation-assurance/1.0"
+ORACLE_INGESTION_CONTROL_FEATURE_ID = "AFA-oracle-P06-F30"
+ORACLE_INGESTION_CONTROL_CONTRACT_VERSION = "oracle-federated-multimodal-ingestion-control/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4361,3 +4363,53 @@ class GovernanceInterpretationAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "objective_id": self.objective_id, "scope": self.scope, "disposition": self.disposition, "ranked_order": list(self.ranked_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "result_order": list(self.result_order), "visualization_order": list(self.visualization_order), "support_order": list(self.support_order), "semantic_order": list(self.semantic_order), "artifact_order": list(self.artifact_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "baseline_order": list(self.baseline_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class OracleIngestionControlReceipt:
+    """Cross-language validator for aggregate-only federated modality admission."""
+
+    request_id: str
+    workflow_id: str
+    federation_id: str
+    disposition: str
+    modality_order: tuple[str, ...]
+    accepted_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    unknown_order: tuple[str, ...]
+    study_order: tuple[str, ...]
+    semantic_profile_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    replay_identity: str
+    effect_receipts: tuple[str, ...]
+    aggregate_manifest: Mapping[str, Any]
+    feature_id: str = ORACLE_INGESTION_CONTROL_FEATURE_ID
+    contract_version: str = ORACLE_INGESTION_CONTROL_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != ORACLE_INGESTION_CONTROL_FEATURE_ID or self.contract_version != ORACLE_INGESTION_CONTROL_CONTRACT_VERSION:
+            raise ResearchContractError("oracle ingestion control schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.federation_id.strip() or not self.modality_order or not self.effect_receipts:
+            raise ResearchContractError("oracle ingestion identity, modality order, locality, or effects are incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("oracle ingestion disposition is unknown")
+        for values in (self.modality_order, self.accepted_order, self.blocked_order, self.unknown_order, self.study_order, self.semantic_profile_order, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts, self.artifact_order, self.provenance_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("oracle ingestion ordering is invalid")
+        for value in (*self.artifact_order, *self.provenance_order, self.replay_identity, self.aggregate_manifest.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("oracle ingestion digest is invalid")
+        if self.accepted_order and any(not effect.startswith("exchange:aggregate-ingestion-manifest:") for effect in self.effect_receipts):
+            raise ResearchContractError("accepted modalities require aggregate manifest exchange")
+        if not self.accepted_order and self.effect_receipts != ("block:federated-ingestion-release",):
+            raise ResearchContractError("empty ingestion result must be explicitly blocked")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "federation_id": self.federation_id, "disposition": self.disposition, "modality_order": list(self.modality_order), "accepted_order": list(self.accepted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "study_order": list(self.study_order), "semantic_profile_order": list(self.semantic_profile_order), "artifact_order": list(self.artifact_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "aggregate_manifest": dict(self.aggregate_manifest), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

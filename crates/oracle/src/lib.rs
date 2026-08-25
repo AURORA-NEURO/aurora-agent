@@ -60,11 +60,12 @@
 //! manifest says so in its own `cannot_establish` set, which is the only form of that admission
 //! a downstream consumer can act on.
 
+pub mod assurance;
 pub mod combine;
 pub mod disagreement;
 pub mod error;
 pub mod evidence;
-pub mod assurance;
+pub mod ingestion_control;
 pub mod judgement;
 pub mod ladder;
 pub mod manifest;
@@ -74,22 +75,29 @@ pub mod oracles;
 pub mod plane;
 pub mod time;
 
+pub use assurance::{
+    operate_oracle_assurance, OracleAssuranceDisposition, OracleAssuranceError,
+    OracleCapabilityManifest, OracleContractEvidence, OracleContractInput, OracleEvidenceState,
+    OracleManifestArtifact, CONTRACT_VERSION as ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as ASSURANCE_FEATURE_ID, PRECLINICAL_BOUNDARY as ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as ASSURANCE_SCHEMA_VERSION,
+};
 pub use combine::{
     CombinedVerdict, MeshPolicy, OracleFailure, OverrideRule, RetryClass, SuppressedOverride,
     VerdictBasis,
-};
-pub use assurance::{
-    operate_oracle_assurance, OracleAssuranceDisposition, OracleAssuranceError,
-    OracleCapabilityManifest, OracleContractEvidence, OracleContractInput,
-    OracleEvidenceState, OracleManifestArtifact, CONTRACT_VERSION as ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as ASSURANCE_FEATURE_ID, PRECLINICAL_BOUNDARY as ASSURANCE_PRECLINICAL_BOUNDARY,
-    SCHEMA_VERSION as ASSURANCE_SCHEMA_VERSION,
 };
 pub use disagreement::{
     Appeal, AppealGrounds, Disagreement, DisagreementSource, Resolution, Settlement,
 };
 pub use error::OracleError;
 pub use evidence::Evidence;
+pub use ingestion_control::{
+    control_federated_ingestion, federated_ingestion_control_manifest,
+    FederatedIngestionControlReceipt, FederatedIngestionControlRequest,
+    IngestionControlDisposition, IngestionControlError, ModalityManifest, ModalityState,
+    CONTRACT_VERSION as INGESTION_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as INGESTION_CONTROL_FEATURE_ID,
+};
 pub use judgement::{
     Confidence, ConfidenceEnvelope, Finding, Judgement, Position, PositionDistribution,
 };

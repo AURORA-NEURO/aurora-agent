@@ -763,6 +763,7 @@ dependencies = [
 name = "bioprism-oracle"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-section",
  "bioprism-world",

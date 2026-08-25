@@ -58,6 +58,7 @@ from prism_sdk.research_contracts import HUBAPI_QUALITY_ASSURANCE_FEATURE_ID, HU
 from prism_sdk.research_contracts import REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID, REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION, RegistryResourceDiscoveryAssuranceReceipt
 from prism_sdk.research_contracts import SERVICES_MECHANISM_WORKBENCH_FEATURE_ID, SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION, ServicesMechanismWorkbenchReceipt
 from prism_sdk.research_contracts import GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID, GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION, GovernanceInterpretationAssuranceReceipt
+from prism_sdk.research_contracts import ORACLE_INGESTION_CONTROL_FEATURE_ID, ORACLE_INGESTION_CONTROL_CONTRACT_VERSION, OracleIngestionControlReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1884,4 +1885,31 @@ def test_governance_interpretation_assurance_preserves_unknown_and_baseline_gate
     receipt.validate()
     assert receipt.feature_id == GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_oracle_ingestion_control_preserves_missing_modality_and_aggregate_exchange():
+    receipt = OracleIngestionControlReceipt(
+        request_id="request:ingestion",
+        workflow_id="workflow:ingestion",
+        federation_id="federation:organoid",
+        disposition="partial",
+        modality_order=("imaging", "omics"),
+        accepted_order=("imaging",),
+        blocked_order=("omics",),
+        unknown_order=("omics",),
+        study_order=("study:organoid",),
+        semantic_profile_order=("ome-ngff/0.5",),
+        artifact_order=("a" * 64,),
+        provenance_order=("b" * 64,),
+        omissions=("modality:omics:required-but-not-admitted",),
+        uncertainty=("modality:omics:state-unknown-not-admitted",),
+        negative_evidence=(),
+        replay_identity="c" * 64,
+        effect_receipts=("exchange:aggregate-ingestion-manifest:request:ingestion",),
+        aggregate_manifest={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == ORACLE_INGESTION_CONTROL_FEATURE_ID
+    assert receipt.contract_version == ORACLE_INGESTION_CONTROL_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

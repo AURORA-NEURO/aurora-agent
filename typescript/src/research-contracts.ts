@@ -169,6 +169,8 @@ export const SERVICES_MECHANISM_WORKBENCH_FEATURE_ID = "AFA-services-P08-F19" as
 export const SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION = "services-prospective-mechanism-workbench/1.0" as const;
 export const GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-governance-P14-F27" as const;
 export const GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "governance-interpretation-assurance/1.0" as const;
+export const ORACLE_INGESTION_CONTROL_FEATURE_ID = "AFA-oracle-P06-F30" as const;
+export const ORACLE_INGESTION_CONTROL_CONTRACT_VERSION = "oracle-federated-multimodal-ingestion-control/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2934,6 +2936,44 @@ export function validateGovernanceInterpretationAssuranceReceipt(receipt: Govern
 }
 
 export function governanceInterpretationAssuranceReceiptDigest(receipt: GovernanceInterpretationAssuranceReceipt): string { validateGovernanceInterpretationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface OracleIngestionControlReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  federation_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  modality_order: string[];
+  accepted_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  study_order: string[];
+  semantic_profile_order: string[];
+  artifact_order: string[];
+  provenance_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  effect_receipts: string[];
+  aggregate_manifest: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateOracleIngestionControlReceipt(receipt: OracleIngestionControlReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ORACLE_INGESTION_CONTROL_FEATURE_ID || receipt.contract_version !== ORACLE_INGESTION_CONTROL_CONTRACT_VERSION) throw new Error("oracle ingestion control schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.federation_id.trim() || !receipt.modality_order.length || !receipt.effect_receipts.length) throw new Error("oracle ingestion identity, modalities, locality, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("oracle ingestion disposition is unknown");
+  for (const values of [receipt.modality_order, receipt.accepted_order, receipt.blocked_order, receipt.unknown_order, receipt.study_order, receipt.semantic_profile_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts, receipt.artifact_order, receipt.provenance_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("oracle ingestion ordering is invalid");
+  for (const value of [...receipt.artifact_order, ...receipt.provenance_order, receipt.replay_identity, receipt.aggregate_manifest.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("oracle ingestion digest is invalid");
+  if (receipt.accepted_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:aggregate-ingestion-manifest:"))) throw new Error("accepted modalities require aggregate manifest exchange");
+  if (!receipt.accepted_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:federated-ingestion-release"])) throw new Error("empty ingestion result must be explicitly blocked");
+}
+
+export function oracleIngestionControlReceiptDigest(receipt: OracleIngestionControlReceipt): string { validateOracleIngestionControlReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
