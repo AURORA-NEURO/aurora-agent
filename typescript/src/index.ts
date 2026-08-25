@@ -464,6 +464,10 @@ export {
   SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION,
   servicesMechanismWorkbenchReceiptDigest,
   validateServicesMechanismWorkbenchReceipt,
+  GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID,
+  GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  governanceInterpretationAssuranceReceiptDigest,
+  validateGovernanceInterpretationAssuranceReceipt,
 } from "./research-contracts.js";
 export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ProtocolSimulationReceipt, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, FederatedMultimodalAssuranceReceipt, FederatedKnowledgeGatewayReceipt, FederatedLensAssuranceReceipt, LabSemanticParityReceipt, FederatedRetrievalAssuranceReceipt, FederatedContinualRetrievalReceipt, RetrievalSourceUpdate, ContextCompilationAssuranceReceipt, KnowledgeRepresentationAssuranceReceipt, ResourceControlPlaneReceipt, WeaveLangReleaseAssuranceReceipt, MechanismControlPlaneReceipt, MechanismGatewayReceipt, EvidenceSurveillanceReceipt, RetrievalSynthesisReceipt, AdapterContextCompilationReceipt, KnowledgeWorkflowReceipt, ResourceWorkbenchReceipt, IngestionGatewayReceipt, QualityEnvelopeReceipt, ExperimentDesignReceipt, InstrumentMeshReceipt, ComputationalExecutionReceipt, AnalysisPortfolioReceipt, InterpretationAssuranceReceipt, ReplicationAssuranceReceipt, ReleaseAssuranceReceipt, DeterminismGatewayReceipt, ProvenanceAssuranceReceipt, PolicyGatewayReceipt, FederationWorkflowReceipt, ReliabilityCopilotReceipt, InteroperabilityGatewayReceipt, EvaluationAssuranceReceipt, ResearchWorkbenchReceipt, ContractFrontierReceipt, LimitationClosureReceipt, AdapterCompositionReceipt, AdapterSemanticParityReceipt, ScaleFrontierReceipt, AdversarialRecoveryReceipt, FederatedCommonsReceipt, BoundedEvolutionReceipt, EvolutionIdentityReceipt, EvolutionAssuranceReceipt, InterpretationPlaneReceipt, KnowledgeGatewayReceipt, OracleCapabilityManifestReceipt, FederatedMultimodalIngestionReceipt, QualityAssuranceReceipt, MechanismControlReceipt, EvidenceWorkbenchReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
 export type { AnalysisControlReceipt } from "./research-contracts.js";
@@ -477,6 +481,7 @@ export type { FiberMechanismAssuranceReceipt } from "./research-contracts.js";
 export type { HubapiQualityAssuranceReceipt } from "./research-contracts.js";
 export type { RegistryResourceDiscoveryAssuranceReceipt } from "./research-contracts.js";
 export type { ServicesMechanismWorkbenchReceipt } from "./research-contracts.js";
+export type { GovernanceInterpretationAssuranceReceipt } from "./research-contracts.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,

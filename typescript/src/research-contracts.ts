@@ -167,6 +167,8 @@ export const REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID = "AFA-registry-P0
 export const REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION = "registry-federated-resource-discovery-assurance/1.0" as const;
 export const SERVICES_MECHANISM_WORKBENCH_FEATURE_ID = "AFA-services-P08-F19" as const;
 export const SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION = "services-prospective-mechanism-workbench/1.0" as const;
+export const GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-governance-P14-F27" as const;
+export const GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "governance-interpretation-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2888,6 +2890,50 @@ export function validateServicesMechanismWorkbenchReceipt(receipt: ServicesMecha
 }
 
 export function servicesMechanismWorkbenchReceiptDigest(receipt: ServicesMechanismWorkbenchReceipt): string { validateServicesMechanismWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface GovernanceInterpretationAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  objective_id: string;
+  scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  ranked_order: string[];
+  admitted_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  result_order: string[];
+  visualization_order: string[];
+  support_order: number[];
+  semantic_order: string[];
+  artifact_order: string[];
+  evidence_order: string[];
+  provenance_order: string[];
+  baseline_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateGovernanceInterpretationAssuranceReceipt(receipt: GovernanceInterpretationAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID || receipt.contract_version !== GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION) throw new Error("governance interpretation assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.objective_id.trim() || !receipt.scope.trim() || !receipt.ranked_order.length) throw new Error("governance interpretation identity, ranking, locality, or boundary is incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("governance interpretation disposition is unknown");
+  if (receipt.support_order.length !== receipt.ranked_order.length || [...receipt.admitted_order, ...receipt.blocked_order, ...receipt.unknown_order].some((value) => !receipt.ranked_order.includes(value))) throw new Error("governance interpretation support or disposition linkage is incomplete");
+  for (const values of [receipt.ranked_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order, receipt.result_order, receipt.visualization_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts, receipt.semantic_order, receipt.artifact_order, receipt.evidence_order, receipt.provenance_order, receipt.baseline_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("governance interpretation ordering is invalid");
+  for (const value of [...receipt.semantic_order, ...receipt.artifact_order, ...receipt.evidence_order, ...receipt.provenance_order, ...receipt.baseline_order, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("governance interpretation digest is invalid");
+  if (receipt.admitted_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("evaluate:interpretation-assurance:"))) throw new Error("admitted interpretations require an evaluation receipt");
+  if (!receipt.admitted_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:interpretation-assurance-release"])) throw new Error("empty interpretation result must be explicitly blocked");
+}
+
+export function governanceInterpretationAssuranceReceiptDigest(receipt: GovernanceInterpretationAssuranceReceipt): string { validateGovernanceInterpretationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

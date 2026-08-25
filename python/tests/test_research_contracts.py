@@ -57,6 +57,7 @@ from prism_sdk.research_contracts import FIBER_MECHANISM_ASSURANCE_FEATURE_ID, F
 from prism_sdk.research_contracts import HUBAPI_QUALITY_ASSURANCE_FEATURE_ID, HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION, HubapiQualityAssuranceReceipt
 from prism_sdk.research_contracts import REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID, REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION, RegistryResourceDiscoveryAssuranceReceipt
 from prism_sdk.research_contracts import SERVICES_MECHANISM_WORKBENCH_FEATURE_ID, SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION, ServicesMechanismWorkbenchReceipt
+from prism_sdk.research_contracts import GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID, GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION, GovernanceInterpretationAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1851,4 +1852,36 @@ def test_services_mechanism_workbench_preserves_unknown_and_negative_candidates(
     receipt.validate()
     assert receipt.feature_id == SERVICES_MECHANISM_WORKBENCH_FEATURE_ID
     assert receipt.contract_version == SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_governance_interpretation_assurance_preserves_unknown_and_baseline_gate():
+    receipt = GovernanceInterpretationAssuranceReceipt(
+        request_id="request:interpretation",
+        workflow_id="workflow:visualization",
+        objective_id="objective:organoid",
+        scope="organoid:neural",
+        disposition="partial",
+        ranked_order=("interpretation:a", "interpretation:b"),
+        admitted_order=("interpretation:a",),
+        blocked_order=("interpretation:b",),
+        unknown_order=("interpretation:b",),
+        result_order=("result:a",),
+        visualization_order=("view:a",),
+        support_order=(900, 700),
+        semantic_order=("a" * 64,),
+        artifact_order=("b" * 64,),
+        evidence_order=("c" * 64,),
+        provenance_order=("d" * 64,),
+        baseline_order=("e" * 64,),
+        omissions=("interpretation:interpretation:b:baseline-missing",),
+        uncertainty=("interpretation:interpretation:b:state-unknown-not-admitted",),
+        negative_evidence=(),
+        replay_identity="f" * 64,
+        effect_receipts=("evaluate:interpretation-assurance:request:interpretation",),
+        artifact={"content_hash": "0" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

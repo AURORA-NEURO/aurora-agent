@@ -66,6 +66,7 @@ pub mod deprecation;
 pub mod descriptor;
 pub mod diff;
 pub mod error;
+pub mod interpretation_assurance;
 pub mod known;
 pub mod migration;
 pub mod mode;
@@ -87,6 +88,13 @@ pub use diff::{diff, FieldChange, SchemaDiff};
 pub use error::{
     CompatibilityError, DeprecationError, DescriptorError, DigestBreach, GovernanceError,
     MigrationError, VersionError,
+};
+pub use interpretation_assurance::{
+    assure_interpretations, interpretation_assurance_manifest, InterpretationAssuranceError,
+    InterpretationAssuranceReport, InterpretationAssuranceRequest, InterpretationCandidate,
+    InterpretationDisposition, InterpretationState,
+    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
 };
 pub use migration::{
     DocumentFailure, LossAudit, LossItem, Migration, MigrationRegistry, MigrationStep,
