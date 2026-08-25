@@ -2025,6 +2025,15 @@ task, prompt, request, response, credential, token, message, header, or raw effe
 is rejected before it reaches the monitor projection. Monitoring and approval routing observe or
 request control-plane state; they do not execute providers, tools, sources, or effects.
 
+The higher-level `agent.launch_preflight()` composes the structural domain audit with the current
+model/provider readiness and deployment-owned capability report. It returns one digest-bound
+summary covering all twelve domains, retaining only source-report digests, gate states, blocker
+and warning counts, bounded next actions, and a zero-dispatch ledger. A domain is `blocked` when
+its reviewed contract or deployment gate blocks, `partial` when caller-owned inventories or
+runtime gates are incomplete, and `ready_for_review` only when all local preflight gates clear.
+This state is intentionally not an authorization decision: provider credentials, evidence truth,
+approval, effects, and durable scheduling remain separate caller-owned boundaries.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

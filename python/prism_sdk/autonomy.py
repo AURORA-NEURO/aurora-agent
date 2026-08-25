@@ -17956,6 +17956,37 @@ class AutonomousAgent:
             completed_stages=completed_stages,
         )
 
+    def launch_preflight(
+        self,
+        *,
+        available_tool_names: Sequence[str] | None = None,
+        available_evidence: Sequence[str] | None = None,
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        readiness_options: Mapping[str, Any] | None = None,
+        deployment_policy: Mapping[str, Any] | Any | None = None,
+        deployment_capabilities: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compose every local launch gate into one all-domain review artifact.
+
+        This is deliberately a preflight projection, not an activation or authorization call.
+        It joins contract, model/provider, evidence, deployment, and learning posture while
+        consuming no credential, contacting no provider/source, executing no tool, and mutating
+        no learner.  Callers still own approval, source truth, credential provisioning, effect
+        authorization, and durable runtime scheduling.
+        """
+
+        from .autonomous_launch_preflight import audit_autonomous_agent_launch_preflight
+
+        return audit_autonomous_agent_launch_preflight(
+            self,
+            available_tool_names=available_tool_names,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            readiness_options=readiness_options,
+            deployment_policy=deployment_policy,
+            deployment_capabilities=deployment_capabilities,
+        )
+
     def domain_evaluator(
         self,
         domain: str,

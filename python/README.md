@@ -807,6 +807,13 @@ report = agent.domain_audit(
 validate_autonomous_domain_audit_report(report)
 ```
 
+`agent.launch_preflight()` composes that structural audit with the agent's model/provider
+readiness and deployment-owned capability gates into one twelve-domain review artifact. Each row
+has a combined `blocked`, `partial`, or `ready_for_review` state and bounded next actions; the
+report also includes source-report digests and an explicit zero-dispatch ledger. It is useful for
+startup dashboards and approval UX, but it never authorizes a provider, source, tool, effect, or
+learning update.
+
 `AutonomousBrainControlPlaneMonitor` and `AsyncAutonomousBrainControlPlaneMonitor` provide the
 operator-side lifecycle for jobs returned by `BrainControlClient`. They fan out bounded status
 reads across the twelve domains, validate hash-chained event cursors, issue explicit approval

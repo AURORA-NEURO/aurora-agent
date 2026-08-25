@@ -272,6 +272,14 @@ from .autonomous_brain_control_plane import (
     AutonomousBrainControlPlaneMonitor,
     AsyncAutonomousBrainControlPlaneMonitor,
 )
+from .autonomous_launch_preflight import (
+    AUTONOMOUS_LAUNCH_PREFLIGHT_SCHEMA,
+    AUTONOMOUS_LAUNCH_PREFLIGHT_DOMAIN_SCHEMA,
+    MAX_AUTONOMOUS_LAUNCH_PREFLIGHT_BYTES,
+    MAX_AUTONOMOUS_LAUNCH_PREFLIGHT_ACTIONS,
+    audit_autonomous_agent_launch_preflight,
+    validate_autonomous_launch_preflight_report,
+)
 from .remote_brain_worker import (
     AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA,
     AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA,
@@ -4032,6 +4040,12 @@ __all__ = [
     "MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_EVENTS",
     "AutonomousBrainControlPlaneMonitor",
     "AsyncAutonomousBrainControlPlaneMonitor",
+    "AUTONOMOUS_LAUNCH_PREFLIGHT_SCHEMA",
+    "AUTONOMOUS_LAUNCH_PREFLIGHT_DOMAIN_SCHEMA",
+    "MAX_AUTONOMOUS_LAUNCH_PREFLIGHT_BYTES",
+    "MAX_AUTONOMOUS_LAUNCH_PREFLIGHT_ACTIONS",
+    "audit_autonomous_agent_launch_preflight",
+    "validate_autonomous_launch_preflight_report",
     "BRAIN_EVALUATOR_REPLAY_SCHEMA",
     "BRAIN_CONTEXT_LEARNING_STATE_SCHEMA",
     "BRAIN_LEARNING_EPISODE_SCHEMA",

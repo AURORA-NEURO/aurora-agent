@@ -1607,3 +1607,11 @@ all twelve domains, hash-chain event cursor validation, explicit approval routin
 reached/timed-out polling. Unsafe projection fields are refused before return, and task text,
 prompts, credentials, provider responses, tool arguments, and effect values remain outside the
 monitor. This is operator lifecycle infrastructure, not a provider worker or authorization oracle.
+
+Python now adds the unified `agent.launch_preflight()` handoff. It composes the all-domain
+structural contract audit, model/provider/evidence readiness, and deployment capability gates into
+one digest-bound report with per-domain combined state, source-report digests, blocker/warning
+counts, bounded remediation, and an explicit zero-dispatch ledger. The default posture remains
+blocked or partial until caller-owned inventories and deployment gates are supplied; a
+`ready_for_review` row still does not grant provider, source, tool, effect, credential, or learner
+authority.
