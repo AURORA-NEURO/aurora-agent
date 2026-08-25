@@ -27,6 +27,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
+pub mod context_compilation;
 pub mod evidence_contract_model;
 pub mod evidence_operations_control_plane;
 pub mod evidence_protocol_adapter;
@@ -92,6 +93,12 @@ pub mod throughput_retrieval_workbench;
 pub mod throughput_retrieval_workflow_fabric;
 pub mod throughput_safety_assurance;
 
+pub use context_compilation::{
+    compile_research_context, context_compilation_manifest, ContextCompilationDisposition,
+    ContextCompilationError, ContextFact, ResearchContextCompilationReceipt,
+    ResearchContextCompilationRequest, CONTRACT_VERSION as CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_FEATURE_ID,
+};
 pub use evidence_contract_model::{
     evidence_contract_model_manifest, model_evidence_contract, ContractCompatibility,
     ContractDisposition, EvidenceContractModelError, EvidenceContractModelReceipt,
