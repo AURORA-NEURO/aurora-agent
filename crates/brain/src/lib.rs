@@ -60,6 +60,7 @@ pub mod throughput_context_compilation;
 pub mod federated_context_compilation;
 pub mod context_omission_adjudication;
 pub mod context_release_admission;
+pub mod context_freshness_drift;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -309,6 +310,13 @@ pub use context_release_admission::{
     ContextReleaseAdmissionRequest, RELEASE_ACTION,
     CONTRACT_VERSION as CONTEXT_RELEASE_ADMISSION_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_RELEASE_ADMISSION_FEATURE_ID,
+};
+pub use context_freshness_drift::{
+    context_freshness_drift_manifest, evaluate_context_freshness_drift,
+    ContextFreshnessDriftError, ContextFreshnessDriftReceipt,
+    ContextFreshnessDriftRequest, ContextSnapshot,
+    CONTRACT_VERSION as CONTEXT_FRESHNESS_DRIFT_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_FRESHNESS_DRIFT_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
