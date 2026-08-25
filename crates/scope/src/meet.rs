@@ -41,10 +41,6 @@ impl Meet {
             _ => None,
         }
     }
-
-    pub fn is_inhabited(&self) -> bool {
-        matches!(self, Meet::Scope(_))
-    }
 }
 
 pub fn meet(left: &ScopeKey, right: &ScopeKey) -> Meet {

@@ -189,11 +189,6 @@ impl LifecycleObject {
         self
     }
 
-    pub fn in_state(mut self, state: ObjectState) -> Self {
-        self.state = state;
-        self
-    }
-
     pub fn expiring_at(mut self, at: u64) -> Self {
         self.expires_at = Some(LogicalTime(at));
         self

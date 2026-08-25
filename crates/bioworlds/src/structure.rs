@@ -108,12 +108,6 @@ impl Neighbourhood {
             .copied()
     }
 
-    pub fn variable_distance(&self, variable: &str) -> Option<usize> {
-        self.distances
-            .get(&Node::Variable(variable.to_string()))
-            .copied()
-    }
-
     /// Fact ids within `radius` hops, i.e. what a neighbourhood walk of that depth would admit.
     pub fn facts_within(&self, radius: usize) -> BTreeSet<String> {
         self.distances

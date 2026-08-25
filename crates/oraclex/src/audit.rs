@@ -122,10 +122,6 @@ impl RoleAssignment {
         self.held.keys().map(String::as_str)
     }
 
-    pub fn roles_of(&self, party: &str) -> BTreeSet<Role> {
-        self.held.get(party).cloned().unwrap_or_default()
-    }
-
     pub fn holders_of(&self, role: Role) -> BTreeSet<&str> {
         self.held
             .iter()

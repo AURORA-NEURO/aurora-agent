@@ -121,10 +121,6 @@ impl<B> View<B> {
         &self.body
     }
 
-    pub fn into_body(self) -> B {
-        self.body
-    }
-
     /// Recomputes this view's provenance against the section and certificate a consumer holds.
     pub fn verify(
         &self,

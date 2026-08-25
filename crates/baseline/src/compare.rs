@@ -46,12 +46,13 @@
 //! out of the shipped fixture by deleting one subject's split arm. Leaving the state out would make
 //! the old swallow reappear silently the day any of those moves.
 
+use crate::index::PanelIndex;
 use crate::strategy::{ContextStrategy, Selection};
 use bioprism_fiber::{oracle, FiberError, Query};
 use bioprism_section::{OracleStatus, OracleVerdict};
 use bioprism_world::World;
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 /// Why no comparison exists to report.
 ///
@@ -173,7 +174,8 @@ impl StrategyResult {
     /// Three-valued rather than a `bool`, for the reason 43.40 gives: `false` would report that the
     /// oracle had examined this selection and found it wanting, and a refusal is not a refutation.
     pub fn verdict_preserving(&self) -> Option<bool> {
-        self.judgement().map(|judgement| judgement.verdict_preserving)
+        self.judgement()
+            .map(|judgement| judgement.verdict_preserving)
     }
 
     /// Whether the mandatory protected closure was delivered in full.
@@ -344,7 +346,11 @@ impl Comparison {
             let (verdict, sound, admissible) = match &result.verdict {
                 RowVerdict::Judged(judgement) => (
                     judgement.status.as_str().to_string(),
-                    if judgement.verdict_preserving { "yes" } else { "**no**" },
+                    if judgement.verdict_preserving {
+                        "yes"
+                    } else {
+                        "**no**"
+                    },
                     if result.admissible() { "yes" } else { "**no**" },
                 ),
                 RowVerdict::Refused(_) => ("**refused**".to_string(), "—", "—"),
@@ -384,9 +390,7 @@ impl Comparison {
                 "\n- `{}` was **not judged**: {}. It is ranked as neither sound nor unsound and \
                  cannot be admissible, because nothing about its verdict was established.",
                 result.name,
-                result
-                    .refusal()
-                    .expect("a refused row carries its refusal")
+                result.refusal().expect("a refused row carries its refusal")
             );
         }
 
@@ -422,10 +426,7 @@ impl Comparison {
             );
         }
 
-        let _ = writeln!(
-            text,
-            "\n## Methods\n"
-        );
+        let _ = writeln!(text, "\n## Methods\n");
         for result in &self.results {
             let _ = writeln!(text, "- **{}** — {}", result.name, result.method);
             for note in &result.notes {
@@ -445,13 +446,7 @@ impl Comparison {
 }
 
 fn verdict_for(world: &World, selection: &Selection) -> Result<OracleVerdict, FiberError> {
-    let values: BTreeMap<String, Value> = selection
-        .facts
-        .iter()
-        .filter_map(|id| world.fact(id))
-        .map(|fact| (fact.provides.as_str().to_string(), fact.value.clone()))
-        .collect();
-    oracle::evaluate(&values)
+    oracle::evaluate_selected(world, &selection.facts)
 }
 
 fn witness_kinds(verdict: &OracleVerdict) -> BTreeSet<String> {
@@ -497,8 +492,12 @@ pub fn compare(
         .filter(|fact| fact.has_any_tag(&query.protected_tags))
         .count();
 
+    // One index for the whole panel. Several strategies derive the same structure from the world
+    // before they diverge, and each used to derive its own; see [`crate::index`].
+    let index = PanelIndex::new(world, query);
+
     let full = crate::strategy::FullContext;
-    let reference_selection = full.select(world, query);
+    let reference_selection = full.select_indexed(&index);
     let reference = verdict_for(world, &reference_selection).map_err(|source| {
         CompareError::OracleRefusedReference {
             facts: reference_selection.facts.len(),
@@ -509,7 +508,7 @@ pub fn compare(
 
     let mut results = Vec::new();
     for strategy in strategies {
-        let selection = strategy.select(world, query);
+        let selection = strategy.select_indexed(&index);
         let facts_exposed = selection.facts.len();
         let verdict = match verdict_for(world, &selection) {
             Ok(verdict) => {

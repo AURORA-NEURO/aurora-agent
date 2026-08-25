@@ -10,20 +10,25 @@
 //! all 761 facts, because 750 distractor factors consume the same protected `cohort_id` hub.
 //! Hub expansion is a property of the substrate, not a bug in the baseline.
 
+use crate::index::PanelIndex;
 use crate::strategy::{ContextStrategy, Selection};
 use bioprism_fiber::Query;
 use bioprism_world::World;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum Node {
+pub(crate) enum Node {
     Variable(String),
     Factor(String),
     Fact(String),
 }
 
-fn incidence(world: &World) -> BTreeMap<Node, BTreeSet<Node>> {
-    let mut adjacency: BTreeMap<Node, BTreeSet<Node>> = BTreeMap::new();
+/// The projection every walk in this module traverses. A function of the world alone, which is why
+/// [`PanelIndex`] can build it once and lend it to all four depths and the unbounded component.
+pub(crate) type Adjacency = BTreeMap<Node, BTreeSet<Node>>;
+
+pub(crate) fn build_incidence(world: &World) -> Adjacency {
+    let mut adjacency: Adjacency = BTreeMap::new();
     let mut link = |a: Node, b: Node| {
         adjacency.entry(a.clone()).or_default().insert(b.clone());
         adjacency.entry(b).or_default().insert(a);
@@ -49,8 +54,7 @@ fn incidence(world: &World) -> BTreeMap<Node, BTreeSet<Node>> {
     adjacency
 }
 
-fn reachable(world: &World, query: &Query, max_depth: Option<usize>) -> BTreeSet<String> {
-    let adjacency = incidence(world);
+fn reachable(adjacency: &Adjacency, query: &Query, max_depth: Option<usize>) -> BTreeSet<String> {
     let mut seen: BTreeSet<Node> = query
         .targets
         .iter()
@@ -99,7 +103,11 @@ impl ContextStrategy for KHopIncidence {
     }
 
     fn select(&self, world: &World, query: &Query) -> Selection {
-        Selection::new(reachable(world, query, Some(self.depth)))
+        self.select_indexed(&PanelIndex::new(world, query))
+    }
+
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        Selection::new(reachable(index.incidence(), index.query(), Some(self.depth)))
             .noting("undirected incidence projection; edges carry no direction, so hubs expand")
     }
 }
@@ -117,7 +125,11 @@ impl ContextStrategy for ConnectedComponent {
     }
 
     fn select(&self, world: &World, query: &Query) -> Selection {
-        Selection::new(reachable(world, query, None))
+        self.select_indexed(&PanelIndex::new(world, query))
+    }
+
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        Selection::new(reachable(index.incidence(), index.query(), None))
             .noting("no depth limit; returns the entire connected component")
     }
 }

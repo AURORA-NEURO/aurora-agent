@@ -310,11 +310,6 @@ impl QuorumRule {
         }
     }
 
-    pub fn vetoed_by(mut self, role: impl Into<Role>) -> Self {
-        self.veto_roles.insert(role.into());
-        self
-    }
-
     pub fn requiring(mut self, prerequisite: impl Into<String>) -> Self {
         self.prerequisites.push(prerequisite.into());
         self

@@ -179,21 +179,6 @@ impl TemporalCut {
         }
     }
 
-    pub fn with_valid(mut self, valid: ValidTime) -> Self {
-        self.as_of_valid = Some(valid);
-        self
-    }
-
-    pub fn with_record(mut self, record: RecordTime) -> Self {
-        self.as_of_record = Some(record);
-        self
-    }
-
-    pub fn with_release(mut self, release: ReleaseTime) -> Self {
-        self.as_of_release = Some(release);
-        self
-    }
-
     /// Whether an event's stamps fall inside every bound this cut sets.
     pub fn admits(&self, times: &EventTimes) -> bool {
         self.as_of_valid.is_none_or(|bound| times.valid <= bound)

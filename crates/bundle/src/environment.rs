@@ -76,16 +76,6 @@ impl EnvironmentFacts {
         self
     }
 
-    pub fn with_cpu_model(mut self, model: impl Into<String>) -> Self {
-        self.cpu_model = Some(model.into());
-        self
-    }
-
-    pub fn with_accelerator(mut self, accelerator: impl Into<String>) -> Self {
-        self.accelerator = Some(accelerator.into());
-        self
-    }
-
     pub fn with_container_image_digest(mut self, digest: impl Into<String>) -> Self {
         self.container_image_digest = Some(digest.into());
         self

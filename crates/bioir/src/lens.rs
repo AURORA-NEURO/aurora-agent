@@ -333,11 +333,6 @@ impl Measurement {
         self
     }
 
-    pub fn at_site(mut self, site: impl Into<String>) -> Self {
-        self.site = Some(site.into());
-        self
-    }
-
     pub fn with_qc(mut self, qc: QcOutcome) -> Self {
         self.qc = qc;
         self

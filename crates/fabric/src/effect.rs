@@ -436,10 +436,6 @@ impl EffectSet {
         self.effects.is_empty()
     }
 
-    pub fn contains_kind(&self, kind: EffectKind) -> bool {
-        self.effects.iter().any(|e| e.kind == kind)
-    }
-
     /// The highest irreversibility class in the set, or [`Irreversibility::E0`] when empty.
     pub fn peak_class(&self) -> Irreversibility {
         self.effects

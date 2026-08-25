@@ -61,19 +61,6 @@ impl Perturbation {
         }
     }
 
-    /// The interval the joint measure's pointwise reweighting is confined to.
-    ///
-    /// For [`Perturbation::Removal`] this is derived from the factor's own entries, so a factor
-    /// with no table cannot be classed here; the caller must have already rejected that case.
-    /// For [`Perturbation::MultiplicativeRange`] the range is stated and the table is irrelevant,
-    /// which is what lets a stated-range bound be computed on a region the executor would decline.
-    pub fn ratio_range(&self, table: &[f64]) -> Result<RatioRange, InfluenceError> {
-        match self {
-            Perturbation::Removal => RatioRange::of_removal(table),
-            Perturbation::MultiplicativeRange { range } => Ok(*range),
-        }
-    }
-
     /// The table that replaces the original under this perturbation's most extreme admissible
     /// realisation, for a brute-force search to start from.
     ///

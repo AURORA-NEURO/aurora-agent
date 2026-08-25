@@ -97,16 +97,18 @@ pub fn maximum_influence(
                         best_witness: &mut Vec<Vec<f64>>,
                         evaluated: &mut usize|
      -> Result<(), InfluenceError> {
-        let mut altered = region.clone();
+        let mut altered: Option<QueryRegion> = None;
         for (id, table) in factor_ids.iter().zip(candidate) {
-            altered = perturbed::with_replaced_table(
-                &altered,
+            let base: &QueryRegion = altered.as_ref().unwrap_or(region);
+            let next = perturbed::with_replaced_table(
+                base,
                 id,
                 table.clone(),
                 "brute-force perturbation of a soundness fixture",
             )?;
+            altered = Some(next);
         }
-        let moved = total_variation(&baseline, &answer(&altered)?)?;
+        let moved = total_variation(&baseline, &answer(altered.as_ref().unwrap_or(region))?)?;
         *evaluated += 1;
         if moved > *best {
             *best = moved;

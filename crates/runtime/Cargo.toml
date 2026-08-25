@@ -9,8 +9,6 @@ description = "Execution runtime: run orchestrator, executor providers, WorldTap
 
 [dependencies]
 bioprism-ids = { workspace = true }
-bioprism-scope = { workspace = true }
-bioprism-world = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

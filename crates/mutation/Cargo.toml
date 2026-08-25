@@ -18,4 +18,3 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 bioprism-worldgen = { workspace = true }
-bioprism-ids = { workspace = true }

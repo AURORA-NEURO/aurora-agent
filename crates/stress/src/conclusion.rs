@@ -190,13 +190,6 @@ impl ConclusionValue {
         }
     }
 
-    pub fn as_membership(&self) -> Option<&[String]> {
-        match self {
-            ConclusionValue::Membership(items) => Some(items),
-            _ => None,
-        }
-    }
-
     pub fn ids(&self) -> Vec<&str> {
         match self {
             ConclusionValue::Scalar(_) => Vec::new(),

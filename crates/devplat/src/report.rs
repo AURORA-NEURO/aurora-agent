@@ -412,13 +412,6 @@ impl Rendering {
             .find(|rendered| rendered.figure.name() == name)
     }
 
-    /// The part of every figure that must match the evidence state exactly.
-    pub fn invariant_cores(&self) -> Vec<Value> {
-        self.figures
-            .iter()
-            .map(|rendered| rendered.figure.invariant_core())
-            .collect()
-    }
 }
 
 /// Project an evidence state for one audience.

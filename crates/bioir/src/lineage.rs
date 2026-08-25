@@ -386,10 +386,6 @@ impl LineageGraph {
         })
     }
 
-    pub fn parent_of(&self, id: &SpecimenId) -> Result<Option<&SpecimenId>, LineageError> {
-        Ok(self.get(id)?.origin.parent())
-    }
-
     /// Ancestors nearest first, excluding `id` itself.
     ///
     /// Fails rather than looping on a cycle. [`LineageGraph::validate`] catches that failure
@@ -481,14 +477,6 @@ impl LineageGraph {
             }
         }
         Ok(found)
-    }
-
-    pub fn is_ancestor_of(
-        &self,
-        ancestor: &SpecimenId,
-        descendant: &SpecimenId,
-    ) -> Result<bool, LineageError> {
-        Ok(self.ancestors(descendant)?.contains(ancestor))
     }
 
     /// The nearest piece of material both specimens descend from, if any.

@@ -12,10 +12,8 @@ serde_json = { workspace = true }
 bioprism-ids = { workspace = true }
 
 [dev-dependencies]
-serde = { workspace = true }
 sha2 = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-autopilot = { workspace = true }
 bioprism-research = { workspace = true }
 bioprism-devplat = { workspace = true }
-bioprism-figures = { workspace = true }

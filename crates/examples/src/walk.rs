@@ -21,7 +21,6 @@ use crate::report::{DepthObservation, GraphWalkObservation};
 use bioprism_fiber::{oracle, Query};
 use bioprism_section::OracleVerdict;
 use bioprism_world::{World, WorldSource};
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -99,13 +98,13 @@ pub fn facts_at(world: &World, query: &Query, depth: usize) -> BTreeSet<String> 
 /// but on whether the same oracle, given only its selection, reaches the same verdict with the
 /// same witnesses as it does on the whole world.
 fn verdict_over(world: &World, selection: &BTreeSet<String>) -> Option<OracleVerdict> {
-    let values: BTreeMap<String, Value> = world
-        .facts
-        .iter()
-        .filter(|fact| selection.contains(fact.id.as_str()))
-        .map(|fact| (fact.provides.as_str().to_string(), fact.value.clone()))
-        .collect();
-    oracle::evaluate(&values).ok()
+    oracle::evaluate_facts(
+        world
+            .facts
+            .iter()
+            .filter(|fact| selection.contains(fact.id.as_str())),
+    )
+    .ok()
 }
 
 /// Sweeps a depth-limited incidence walk from depth 1 to `max_depth`.

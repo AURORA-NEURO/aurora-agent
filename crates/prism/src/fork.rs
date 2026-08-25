@@ -14,14 +14,14 @@
 //! for the reason 43.40 gives about missing evidence generally: an arm nobody could judge and an
 //! arm nobody attempted are both "nobody checked", and neither is an arm that ran and lost.
 
-use crate::cell::{Acceptance, DecisionCell};
 use crate::architecture::Architecture;
+use crate::cell::{Acceptance, DecisionCell};
 use bioprism_fiber::{oracle, FiberError, Query};
 use bioprism_section::{OracleStatus, OracleVerdict};
 use bioprism_world::World;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -51,7 +51,10 @@ pub enum ArmFailure {
     /// question the oracle declined to answer was reported as an architecture that answered it
     /// wrongly. `facts_exposed` is retained because the cost of the attempt was still incurred.
     #[error("the oracle refused the {facts_exposed} fact(s) this arm selected: {detail}")]
-    OracleRefused { facts_exposed: usize, detail: String },
+    OracleRefused {
+        facts_exposed: usize,
+        detail: String,
+    },
 }
 
 /// Why an arm was never attempted.
@@ -179,12 +182,7 @@ impl ForkResult {
 }
 
 fn verdict_for(world: &World, facts: &BTreeSet<String>) -> Result<OracleVerdict, FiberError> {
-    let values: BTreeMap<String, Value> = facts
-        .iter()
-        .filter_map(|id| world.fact(id))
-        .map(|fact| (fact.provides.as_str().to_string(), fact.value.clone()))
-        .collect();
-    oracle::evaluate(&values)
+    oracle::evaluate_selected(world, facts)
 }
 
 /// Runs every architecture from the identical frozen state.
@@ -392,14 +390,12 @@ pub fn render_table(result: &ForkResult) -> String {
                 trial.protected_recall * 100.0,
                 if trial.passed { "pass" } else { "**fail**" }
             ),
-            Arm::Unjudged { architecture, .. } => writeln!(
-                text,
-                "| {architecture} | — | — | — | **unjudged** |"
-            ),
-            Arm::NotAttempted { architecture, .. } => writeln!(
-                text,
-                "| {architecture} | — | — | — | *not attempted* |"
-            ),
+            Arm::Unjudged { architecture, .. } => {
+                writeln!(text, "| {architecture} | — | — | — | **unjudged** |")
+            }
+            Arm::NotAttempted { architecture, .. } => {
+                writeln!(text, "| {architecture} | — | — | — | *not attempted* |")
+            }
         };
     }
     for arm in &result.arms {

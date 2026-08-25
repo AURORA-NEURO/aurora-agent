@@ -30,13 +30,4 @@ bioprism-repair = { workspace = true }
 bioprism-research = { workspace = true }
 bioprism-world = { workspace = true }
 bioprism-worldgen = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-
-[dev-dependencies]
-bioprism-autopilot = { workspace = true }
-bioprism-devplat = { workspace = true }
-bioprism-ids = { workspace = true }
-bioprism-repair = { workspace = true }
-bioprism-research = { workspace = true }
 serde_json = { workspace = true }

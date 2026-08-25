@@ -401,10 +401,6 @@ impl AccessGrant {
         self.purposes.contains(purpose)
     }
 
-    pub fn covers_field(&self, field: &str) -> bool {
-        self.fields.contains(field)
-    }
-
     /// Whether the grant is live at `epoch`. Expiry is inclusive of the granted epoch and exclusive
     /// of the expiry epoch, so a grant "to epoch 10" does not authorise anything at epoch 10.
     pub fn live_at(&self, epoch: Epoch) -> bool {

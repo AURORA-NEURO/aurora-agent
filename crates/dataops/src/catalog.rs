@@ -323,10 +323,6 @@ impl OutboxCursor {
     pub const fn consumed(self) -> u64 {
         self.0
     }
-
-    pub const fn advanced_by(self, count: u64) -> Self {
-        OutboxCursor(self.0.saturating_add(count))
-    }
 }
 
 /// Everything a mutation needs to produce an audit record.

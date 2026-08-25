@@ -352,11 +352,6 @@ impl SessionCapabilities {
         self
     }
 
-    pub fn resuming_at(mut self, fidelity: impl Into<String>) -> Self {
-        self.continuation_fidelities.insert(fidelity.into());
-        self
-    }
-
     pub fn with_payload_limit(mut self, bytes: u64) -> Self {
         self.max_payload_bytes = bytes;
         self

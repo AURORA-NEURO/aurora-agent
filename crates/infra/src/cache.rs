@@ -288,13 +288,28 @@ impl ComputationKey {
             .to_string()
     }
 
-    /// Re-checks a key against the schema the cache actually holds.
+    /// Re-checks a key against a schema, hashing that schema to get its address.
     ///
-    /// Run on every insert and lookup. A key that arrived over the wire carries a schema digest
-    /// but not the schema, so this is where a deserialized key that names the right schema and
-    /// the wrong components is caught.
+    /// A key that arrived over the wire carries a schema digest but not the schema, so this is
+    /// where a deserialized key that names the right schema and the wrong components is caught.
+    /// It is the entry point for a holder of a loose key and a loose schema; [`Cache`] runs the
+    /// same check on every insert and lookup through the address it already has.
     pub fn validate_against(&self, schema: &KeySchema) -> Result<(), CacheError> {
-        if self.schema_digest != schema.digest() {
+        self.validate_against_digest(schema, &schema.digest())
+    }
+
+    /// [`ComputationKey::validate_against`] with the schema's address supplied by the caller.
+    ///
+    /// A [`Cache`] holds one schema for its whole life, so it hashes that schema once at
+    /// construction and hands the address down. Routing lookups through the public entry point
+    /// instead would rebuild the schema document and re-run SHA-256 over it on every lookup and
+    /// every insert, to arrive at a string the cache already had.
+    fn validate_against_digest(
+        &self,
+        schema: &KeySchema,
+        schema_digest: &str,
+    ) -> Result<(), CacheError> {
+        if self.schema_digest != schema_digest {
             return Err(CacheError::ForeignSchema {
                 expected: schema.name.clone(),
                 presented: self.schema_name.clone(),
@@ -495,6 +510,8 @@ pub struct ApplyReport {
 #[derive(Debug)]
 pub struct Cache {
     schema: KeySchema,
+    /// The address of `schema`, hashed once here because the schema is never replaced.
+    schema_digest: String,
     entries: BTreeMap<String, CacheEntry>,
     hits: u64,
     misses: BTreeMap<&'static str, u64>,
@@ -503,6 +520,7 @@ pub struct Cache {
 impl Cache {
     pub fn new(schema: KeySchema) -> Self {
         Cache {
+            schema_digest: schema.digest(),
             schema,
             entries: BTreeMap::new(),
             hits: 0,
@@ -542,7 +560,7 @@ impl Cache {
         written_at: Epoch,
         dependencies: DependencyDeclaration,
     ) -> Result<String, CacheError> {
-        key.validate_against(&self.schema)?;
+        key.validate_against_digest(&self.schema, &self.schema_digest)?;
         let digest = key.digest();
         self.entries.insert(
             digest.clone(),
@@ -576,7 +594,7 @@ impl Cache {
         key: &ComputationKey,
         requested_by: &CodeIdentity,
     ) -> Result<Lookup, CacheError> {
-        key.validate_against(&self.schema)?;
+        key.validate_against_digest(&self.schema, &self.schema_digest)?;
         let digest = key.digest();
 
         let Some(entry) = self.entries.get(&digest) else {

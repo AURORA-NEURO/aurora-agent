@@ -360,11 +360,6 @@ impl Subscription {
         }
     }
 
-    pub fn from_authors(mut self, authors: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.authors = Some(authors.into_iter().map(Into::into).collect());
-        self
-    }
-
     fn matches(&self, entry: &Entry) -> bool {
         entry.topic.as_str().starts_with(&self.topic_prefix)
             && self

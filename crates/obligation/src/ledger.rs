@@ -36,7 +36,7 @@ use crate::state::ObligationState;
 use bioprism_scope::Timestamp;
 use bioprism_section::{InfluenceClass, OmissionGroup, OmissionManifest};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Why a candidate was left out of the projection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,12 +202,11 @@ impl OmissionLedger {
     /// Rejects the failure classes 39.17 names: unclassified omissions, unreproducible policy
     /// reasons, and influence claims that assert more than their argument supports.
     pub fn validate(&self) -> Result<(), LedgerError> {
-        let mut seen: Vec<&str> = Vec::with_capacity(self.rows.len());
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
         for row in &self.rows {
-            if seen.contains(&row.candidate_id.as_str()) {
+            if !seen.insert(row.candidate_id.as_str()) {
                 return Err(LedgerError::DuplicateCandidate(row.candidate_id.clone()));
             }
-            seen.push(&row.candidate_id);
 
             if row.mandatory && !row.reason.is_classified() {
                 return Err(LedgerError::UnclassifiedMandatoryOmission(

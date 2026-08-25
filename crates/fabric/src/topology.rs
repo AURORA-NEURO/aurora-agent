@@ -192,10 +192,6 @@ impl Topology {
         self.step
     }
 
-    pub fn is_connected(&self, from: &ComponentId, to: &ComponentId) -> bool {
-        self.edges.contains(&(from.clone(), to.clone()))
-    }
-
     pub fn molecule_members(&self, molecule: &ComponentId) -> Option<&BTreeSet<ComponentId>> {
         self.molecules.get(molecule)
     }

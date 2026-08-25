@@ -441,11 +441,6 @@ impl CardLinks {
         CardLinks::default()
     }
 
-    pub fn to_world(mut self, world: WorldId) -> CardLinks {
-        self.worlds.push(world);
-        self
-    }
-
     pub fn to_cell(mut self, cell: impl Into<String>) -> CardLinks {
         self.cells.push(cell.into());
         self

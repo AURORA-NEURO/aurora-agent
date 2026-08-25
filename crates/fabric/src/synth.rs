@@ -203,11 +203,6 @@ impl Candidate {
         self
     }
 
-    pub fn carded(mut self, card: CapabilityCard) -> Self {
-        self.cards.push(card);
-        self
-    }
-
     pub fn terminating_at(mut self, state: impl Into<String>) -> Self {
         self.terminal_states.insert(state.into());
         self

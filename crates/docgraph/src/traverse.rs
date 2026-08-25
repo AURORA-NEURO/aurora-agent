@@ -144,9 +144,6 @@ pub struct Traversal {
 }
 
 impl Traversal {
-    pub fn reached_ids(&self) -> impl Iterator<Item = &ModuleId> {
-        self.reached.keys()
-    }
 
     pub fn was_reached(&self, id: &ModuleId) -> bool {
         self.reached.contains_key(id)

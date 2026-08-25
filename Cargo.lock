@@ -15,7 +15,6 @@ dependencies = [
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-world",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -27,7 +26,6 @@ version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-section",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -99,7 +97,6 @@ dependencies = [
 name = "bioprism-backends"
 version = "0.1.0"
 dependencies = [
- "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
@@ -117,7 +114,6 @@ dependencies = [
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
- "serde",
  "serde_json",
  "thiserror",
 ]
@@ -178,8 +174,6 @@ version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-scope",
- "bioprism-world",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -274,7 +268,6 @@ dependencies = [
  "bioprism-store",
  "bioprism-world",
  "bioprism-worldgen",
- "serde",
  "serde_json",
 ]
 
@@ -364,7 +357,6 @@ dependencies = [
  "bioprism-scope",
  "bioprism-section",
  "bioprism-world",
- "serde",
  "serde_json",
  "thiserror",
 ]
@@ -462,7 +454,6 @@ version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-scope",
- "bioprism-world",
  "serde",
  "serde_json",
  "thiserror",
@@ -792,7 +783,6 @@ dependencies = [
  "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -873,11 +863,9 @@ version = "0.1.0"
 dependencies = [
  "bioprism-autopilot",
  "bioprism-devplat",
- "bioprism-figures",
  "bioprism-ids",
  "bioprism-research",
  "bioprism-section",
- "serde",
  "serde_json",
  "sha2",
 ]
@@ -957,8 +945,6 @@ name = "bioprism-runtime"
 version = "0.1.0"
 dependencies = [
  "bioprism-ids",
- "bioprism-scope",
- "bioprism-world",
  "serde",
  "serde_json",
  "thiserror",
@@ -1015,7 +1001,6 @@ dependencies = [
  "bioprism-ids",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -1058,7 +1043,6 @@ version = "0.1.0"
 dependencies = [
  "bioprism-fiber",
  "bioprism-ids",
- "bioprism-scope",
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",

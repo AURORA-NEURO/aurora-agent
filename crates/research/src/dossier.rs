@@ -83,12 +83,9 @@ pub struct RecordedArtifact {
 
 /// Builds the record for one named artifact, applying the inline cap.
 pub fn artifact_record(name: &str, artifact: &Value) -> Result<RecordedArtifact, ResearchError> {
-    let digest = ContentHash::of_value(artifact)
-        .map_err(canonicalisation)?
-        .to_string();
-    let canonical_bytes = to_canonical_string(artifact)
-        .map_err(canonicalisation)?
-        .len();
+    let canonical = to_canonical_string(artifact).map_err(canonicalisation)?;
+    let canonical_bytes = canonical.len();
+    let digest = ContentHash::of_bytes(canonical.as_bytes()).to_string();
     let inlined = canonical_bytes <= INLINE_ARTIFACT_CAP_BYTES;
     let mut record = Map::new();
     record.insert("name".into(), json!(name));
@@ -244,8 +241,7 @@ pub fn verify_dossier(dossier: &Value) -> Result<Value, ResearchError> {
         .and_then(Value::as_array)
         .map(|steps| {
             steps.iter().all(|step| {
-                step.get("outcome").and_then(Value::as_str)
-                    == Some(StepOutcome::Completed.as_str())
+                step.get("outcome").and_then(Value::as_str) == Some(StepOutcome::Completed.as_str())
             })
         })
         .unwrap_or(false);
@@ -254,9 +250,9 @@ pub fn verify_dossier(dossier: &Value) -> Result<Value, ResearchError> {
     let findings_present = findings_array.is_some();
     let finding_levels_valid = findings_array
         .map(|findings| {
-            findings.iter().all(|entry| {
-                entry.get("level").and_then(Value::as_str) == Some("observation")
-            })
+            findings
+                .iter()
+                .all(|entry| entry.get("level").and_then(Value::as_str) == Some("observation"))
         })
         .unwrap_or(false);
     let known_digests = artifact_digests(dossier);

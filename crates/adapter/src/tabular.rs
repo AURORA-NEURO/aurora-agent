@@ -265,11 +265,6 @@ impl TabularProfile {
         self
     }
 
-    pub fn with_empty_as_value(mut self) -> Self {
-        self.empty_is_null = false;
-        self
-    }
-
     /// Digest of the policy, recorded in the source manifest so that two worlds built from the
     /// same bytes under different policies are distinguishable without diffing their facts.
     pub fn digest(&self) -> Option<ContentHash> {

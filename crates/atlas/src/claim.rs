@@ -85,10 +85,6 @@ impl ClaimTier {
             EvidenceTier::ProspectiveWorkflow => ClaimTier::ProspectiveWorkflow,
         }
     }
-
-    pub fn licenses_anything(self) -> bool {
-        self != ClaimTier::NoClaim
-    }
 }
 
 impl fmt::Display for ClaimTier {

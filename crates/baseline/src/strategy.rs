@@ -9,6 +9,7 @@
 //! selection still supports the correct decision, which [`crate::compare`] measures by running the
 //! deterministic oracle over each selection and comparing verdicts.
 
+use crate::index::PanelIndex;
 use bioprism_fiber::Query;
 use bioprism_world::World;
 use std::collections::BTreeSet;
@@ -42,6 +43,18 @@ pub trait ContextStrategy {
     fn method(&self) -> String;
 
     fn select(&self, world: &World, query: &Query) -> Selection;
+
+    /// The same selection, offered the intermediates [`crate::compare::compare`] built once for
+    /// the whole panel.
+    ///
+    /// Defaulted to [`ContextStrategy::select`] so that a strategy defined outside this crate needs
+    /// no change and no strategy is obliged to know what the index happens to hold. The four
+    /// members of the shipped panel that would otherwise rebuild a shared structure override it;
+    /// each then defines `select` as this method over a private index of one, so the two entry
+    /// points cannot drift apart — there is only ever one implementation of the selection.
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        self.select(index.world(), index.query())
+    }
 }
 
 /// Every fact in the world. The upper bound on recall and the thing to beat on cost.

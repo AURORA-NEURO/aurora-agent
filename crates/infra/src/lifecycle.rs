@@ -283,14 +283,6 @@ impl LocalLayout {
         )
     }
 
-    pub fn run_path(&self, run: &str) -> String {
-        format!("{}/{run}", self.area(StorageArea::Runs))
-    }
-
-    pub fn workspace_path(&self, lease: &str) -> String {
-        format!("{}/{lease}", self.area(StorageArea::Workspaces))
-    }
-
     /// Areas a restore must carry, in the sense of [`Durability::Canonical`].
     pub fn canonical_areas() -> Vec<StorageArea> {
         StorageArea::ALL

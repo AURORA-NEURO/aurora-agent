@@ -1293,25 +1293,6 @@ impl Server {
         )
     }
 
-    /// Construct a server over caller-owned registries.
-    ///
-    /// The HTTP adapter and MCP dispatcher must share these indexes: otherwise a reconciliation
-    /// imported or produced through one transport is invisible to the other transport's gate and
-    /// operator projections. The registries remain bounded and mutex-protected at the process
-    /// boundary; this constructor only joins their ownership graph.
-    pub fn with_registries(
-        root: PathBuf,
-        evidence_registry: Arc<Mutex<EvidenceBundleRegistry>>,
-        workflow_reconciliation_registry: Arc<Mutex<DomainWorkflowReconciliationRegistry>>,
-    ) -> Self {
-        Self::with_registries_and_artifacts(
-            root,
-            evidence_registry,
-            workflow_reconciliation_registry,
-            Arc::new(Mutex::new(ArtifactRegistry::new())),
-        )
-    }
-
     /// Construct a server over all caller-owned cross-domain registries.
     ///
     /// The artifact index is separate from evidence and reconciliation storage because it joins
@@ -3180,7 +3161,9 @@ impl Server {
             }
         }
 
-        let items = |field: &str, with_rationale: bool| -> Result<Vec<RepairDeclaredItem>, String> {
+        let items = |field: &str,
+                     with_rationale: bool|
+         -> Result<Vec<RepairDeclaredItem>, String> {
             let Some(value) = map.get(field) else {
                 return Ok(Vec::new());
             };
@@ -3198,8 +3181,7 @@ impl Server {
                     let entry = entry
                         .as_object()
                         .ok_or_else(|| format!("every entry in {field:?} is an object"))?;
-                    if let Some(unknown) =
-                        entry.keys().find(|key| !fields.contains(&key.as_str()))
+                    if let Some(unknown) = entry.keys().find(|key| !fields.contains(&key.as_str()))
                     {
                         return Err(format!(
                             "undeclared field {unknown:?} on an entry in {field:?}; the declared \
@@ -3211,20 +3193,15 @@ impl Server {
                             .get(key)
                             .and_then(Value::as_str)
                             .map(str::to_string)
-                            .ok_or_else(|| {
-                                format!("an entry in {field:?} needs a string {key:?}")
-                            })
+                            .ok_or_else(|| format!("an entry in {field:?} needs a string {key:?}"))
                     };
-                    let predicate = predicate_from_json(
-                        entry
-                            .get("predicate")
-                            .ok_or_else(|| {
-                                format!("an entry in {field:?} declares no \"predicate\"")
-                            })?,
-                    )
-                    .map_err(|error| {
-                        format!("an entry in {field:?} carries no predicate: {error}")
-                    })?;
+                    let predicate =
+                        predicate_from_json(entry.get("predicate").ok_or_else(|| {
+                            format!("an entry in {field:?} declares no \"predicate\"")
+                        })?)
+                        .map_err(|error| {
+                            format!("an entry in {field:?} carries no predicate: {error}")
+                        })?;
                     let item =
                         RepairDeclaredItem::new(text("name")?, text("statement")?, predicate);
                     Ok(if with_rationale {
@@ -3290,11 +3267,7 @@ impl Server {
         let (_scan, assembled) = self.project_scan_and_assemble(arguments)?;
 
         let query_document = assembled.issue_queries.get(&issue_id).ok_or_else(|| {
-            let known: Vec<&str> = assembled
-                .issue_queries
-                .keys()
-                .map(String::as_str)
-                .collect();
+            let known: Vec<&str> = assembled.issue_queries.keys().map(String::as_str).collect();
             format!(
                 "no issue {issue_id:?} is declared in the issues file; it declares {}",
                 if known.is_empty() {
@@ -3412,10 +3385,9 @@ impl Server {
     /// rather than worked around by verifying against the new world and calling the difference
     /// immaterial.
     fn repair_verify(&self, arguments: &Value) -> Result<Value, String> {
-        let plan_relative = arguments
-            .get("plan")
-            .and_then(Value::as_str)
-            .ok_or("plan is required (a path to a repair plan document, relative to the server root)")?;
+        let plan_relative = arguments.get("plan").and_then(Value::as_str).ok_or(
+            "plan is required (a path to a repair plan document, relative to the server root)",
+        )?;
         let plan_path = self.resolve(plan_relative)?;
         let text = std::fs::read_to_string(&plan_path)
             .map_err(|error| format!("cannot read plan {plan_relative:?}: {error}"))?;

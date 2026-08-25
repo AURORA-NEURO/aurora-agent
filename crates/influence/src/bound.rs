@@ -221,13 +221,6 @@ impl InfluenceEstimate {
         }
     }
 
-    pub fn unknown_reason(&self) -> Option<&UnknownReason> {
-        match self {
-            InfluenceEstimate::Bounded(_) => None,
-            InfluenceEstimate::Unknown(reason) => Some(reason),
-        }
-    }
-
     pub fn is_bounded(&self) -> bool {
         matches!(self, InfluenceEstimate::Bounded(_))
     }

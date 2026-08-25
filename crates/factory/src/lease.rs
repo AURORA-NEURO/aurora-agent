@@ -59,10 +59,6 @@ impl Lease {
         now >= self.expires_at
     }
 
-    pub fn remaining_nanos(&self, now: Timestamp) -> i128 {
-        (self.expires_at.as_nanos_utc() - now.as_nanos_utc()).max(0)
-    }
-
     /// Extends the lease from `now`. Refuses once expired.
     ///
     /// A worker that missed its window must not be able to reclaim by heartbeating late: the store

@@ -30,6 +30,7 @@ pub mod compare;
 pub mod directed;
 pub mod embedding;
 pub mod incidence;
+pub mod index;
 pub mod lexical;
 pub mod strategy;
 pub mod sweep;
@@ -41,6 +42,7 @@ pub use compare::{
 pub use directed::DirectedDependencyWalk;
 pub use embedding::EmbeddingTopK;
 pub use incidence::{ConnectedComponent, KHopIncidence, QueryGraph};
+pub use index::PanelIndex;
 pub use lexical::LexicalTopK;
 pub use strategy::{ContextStrategy, FiberCompiled, FullContext, Selection};
 pub use sweep::{run_cell, run_sweep, sweep_panel, SweepCell, SweepError, SweepGrid, SweepRow, SweepTable};

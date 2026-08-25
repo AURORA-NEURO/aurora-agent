@@ -145,10 +145,6 @@ pub struct Classification {
 }
 
 impl Classification {
-    pub fn is_compatible(&self) -> bool {
-        self.class == CompatibilityClass::Compatible
-    }
-
     pub fn digest_affecting(&self) -> Vec<&ChangeVerdict> {
         self.verdicts
             .iter()

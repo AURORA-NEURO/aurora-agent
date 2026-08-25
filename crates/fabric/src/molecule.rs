@@ -103,11 +103,6 @@ impl Guarantees {
         self.forbidden_effects = effects;
         self
     }
-
-    pub fn prohibiting_claim(mut self, claim: impl Into<String>) -> Self {
-        self.prohibited_claims.insert(claim.into());
-        self
-    }
 }
 
 /// A versioned composition exposing one interface.

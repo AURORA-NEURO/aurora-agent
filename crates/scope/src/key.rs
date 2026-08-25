@@ -35,14 +35,6 @@ impl ScopeValue {
         }
     }
 
-    pub fn is_same_kind(&self, other: &ScopeValue) -> bool {
-        use ScopeValue::*;
-        matches!(
-            (self, other),
-            (Exact(_) | OneOf(_), Exact(_) | OneOf(_)) | (Window(_), Window(_))
-        )
-    }
-
     pub fn describe(&self) -> String {
         match self {
             ScopeValue::Exact(v) => v.clone(),

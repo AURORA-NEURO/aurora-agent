@@ -15,8 +15,36 @@
 
 use crate::error::FiberError;
 use bioprism_section::{LeakageWitness, OracleVerdict};
+use bioprism_world::{Fact, World};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A value map the oracle can read without owning it.
+///
+/// Every check below reaches the map through [`object`] or a single `get`, so the oracle never
+/// needs a `Value` it can keep. Borrowing is what lets [`evaluate_facts`] judge a selection
+/// without deep-cloning the selected evidence, which the minimizer does once per removal.
+type ValueRefs<'a> = BTreeMap<&'a str, &'a Value>;
+
+/// The six variables the reference oracle reads.
+///
+/// This list is an optimisation, not a contract: [`evaluate_facts`] uses it to skip facts whose
+/// values no check can consult. Narrowing is sound only because [`evaluate_refs`] never iterates
+/// the map — it looks up these six keys and nothing else — so a dropped entry is unobservable.
+///
+/// [`evaluate`] deliberately does *not* narrow. Keeping the general entry point reading the whole
+/// map is what makes the two paths distinguishable, so the test
+/// `narrowing_to_the_variables_the_oracle_reads_preserves_the_verdict` compares a full map against
+/// a narrowed one and fails the moment a check learns to read a seventh variable that is not
+/// listed here.
+const INPUT_VARIABLES: [&str; 6] = [
+    "label_source_time",
+    "preprocess_fit_scope",
+    "site_assignment",
+    "split_assignment",
+    "subject_aliases",
+    "training_decision_time",
+];
 
 pub const ORACLE_KIND: &str = "deterministic_split_integrity_v1";
 
@@ -53,6 +81,49 @@ impl DecisionOracle for SplitIntegrityOracle {
 }
 
 pub fn evaluate(values: &BTreeMap<String, Value>) -> Result<OracleVerdict, FiberError> {
+    evaluate_refs(
+        &values
+            .iter()
+            .map(|(key, value)| (key.as_str(), value))
+            .collect(),
+    )
+}
+
+/// Runs the reference oracle over facts directly, without building an owned value map.
+///
+/// The callers that judge a *selection* — the baseline panel, both prism passes, the mutation
+/// lineage and the example walks — all reached the oracle by cloning every selected fact's value
+/// into a fresh map. Nothing consumed those clones: the verdict borrows nothing from the map, and
+/// the map died on the next line. Under `prism::minimize` that cost was quadratic, because
+/// delta-debugging rebuilds the map once per attempted removal.
+///
+/// Where two facts provide the same variable the last one wins, matching what `collect` into a
+/// map did before, so the caller's iteration order still decides.
+pub fn evaluate_facts<'a>(
+    facts: impl IntoIterator<Item = &'a Fact>,
+) -> Result<OracleVerdict, FiberError> {
+    let values: ValueRefs<'a> = facts
+        .into_iter()
+        .filter(|fact| INPUT_VARIABLES.contains(&fact.provides.as_str()))
+        .map(|fact| (fact.provides.as_str(), &fact.value))
+        .collect();
+    evaluate_refs(&values)
+}
+
+/// Runs the reference oracle over the facts a selection names.
+///
+/// The baseline panel and both prism passes each resolved a set of fact ids against the world and
+/// built the identical map to ask the identical question. Ids the world does not know are skipped,
+/// exactly as before: a selection naming a fact that is not there is judged on what it does name,
+/// because the alternative would turn a strategy's bookkeeping slip into an oracle refusal.
+pub fn evaluate_selected(
+    world: &World,
+    facts: &BTreeSet<String>,
+) -> Result<OracleVerdict, FiberError> {
+    evaluate_facts(facts.iter().filter_map(|id| world.fact(id)))
+}
+
+fn evaluate_refs(values: &ValueRefs<'_>) -> Result<OracleVerdict, FiberError> {
     let mut witnesses = Vec::new();
 
     witnesses.extend(identity_witnesses(values)?);
@@ -63,17 +134,15 @@ pub fn evaluate(values: &BTreeMap<String, Value>) -> Result<OracleVerdict, Fiber
     Ok(OracleVerdict::new(ORACLE_KIND, witnesses))
 }
 
-fn object<'a>(values: &'a BTreeMap<String, Value>, key: &str) -> Option<&'a Map<String, Value>> {
-    values.get(key).and_then(Value::as_object)
+fn object<'a>(values: &ValueRefs<'a>, key: &str) -> Option<&'a Map<String, Value>> {
+    values.get(key).copied().and_then(Value::as_object)
 }
 
 /// One alias shared by subjects that were split apart.
 ///
 /// The reverse index is built in the document order of `subject_aliases` so that the `subjects`
 /// list in the witness matches the reference byte for byte, then iterated in sorted alias order.
-fn identity_witnesses(
-    values: &BTreeMap<String, Value>,
-) -> Result<Vec<LeakageWitness>, FiberError> {
+fn identity_witnesses(values: &ValueRefs<'_>) -> Result<Vec<LeakageWitness>, FiberError> {
     let Some(aliases) = object(values, "subject_aliases") else {
         return Ok(Vec::new());
     };
@@ -81,7 +150,9 @@ fn identity_witnesses(
 
     let mut reverse: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (subject, names) in aliases {
-        let Some(names) = names.as_array() else { continue };
+        let Some(names) = names.as_array() else {
+            continue;
+        };
         for name in names {
             let Some(name) = name.as_str() else { continue };
             reverse
@@ -121,7 +192,7 @@ fn identity_witnesses(
 }
 
 /// Each split draws from exactly one site, and those sites differ.
-fn site_witnesses(values: &BTreeMap<String, Value>) -> Vec<LeakageWitness> {
+fn site_witnesses(values: &ValueRefs<'_>) -> Vec<LeakageWitness> {
     let (Some(site), Some(split)) = (
         object(values, "site_assignment"),
         object(values, "split_assignment"),
@@ -134,7 +205,9 @@ fn site_witnesses(values: &BTreeMap<String, Value>) -> Vec<LeakageWitness> {
 
     let mut by_split: BTreeMap<String, BTreeSet<Option<&str>>> = BTreeMap::new();
     for (subject, assigned) in split {
-        let Some(assigned) = assigned.as_str() else { continue };
+        let Some(assigned) = assigned.as_str() else {
+            continue;
+        };
         by_split
             .entry(assigned.to_string())
             .or_default()
@@ -169,10 +242,8 @@ fn site_witnesses(values: &BTreeMap<String, Value>) -> Vec<LeakageWitness> {
 /// zero-offset `...Z` form used throughout the packs this agrees with instant ordering; for
 /// mixed offsets or differing precision it does not, which is recorded as a known limitation on
 /// every certificate rather than silently corrected here.
-fn temporal_witnesses(
-    values: &BTreeMap<String, Value>,
-) -> Result<Vec<LeakageWitness>, FiberError> {
-    let Some(cut) = values.get("training_decision_time") else {
+fn temporal_witnesses(values: &ValueRefs<'_>) -> Result<Vec<LeakageWitness>, FiberError> {
+    let Some(cut) = values.get("training_decision_time").copied() else {
         return Ok(Vec::new());
     };
     let Some(cut) = cut.as_str() else {
@@ -207,9 +278,10 @@ fn temporal_witnesses(
     }
 }
 
-fn preprocessing_witnesses(values: &BTreeMap<String, Value>) -> Vec<LeakageWitness> {
+fn preprocessing_witnesses(values: &ValueRefs<'_>) -> Vec<LeakageWitness> {
     let fit_across_everything = values
         .get("preprocess_fit_scope")
+        .copied()
         .and_then(Value::as_str)
         .is_some_and(|scope| scope == "all_subjects_before_split");
 

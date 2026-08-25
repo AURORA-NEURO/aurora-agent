@@ -152,11 +152,6 @@ impl Observation {
             quality_adequate: None,
         }
     }
-
-    pub fn with_quality(mut self, adequate: bool) -> Self {
-        self.quality_adequate = Some(adequate);
-        self
-    }
 }
 
 /// Why two modalities might disagree without either being wrong about the claim.

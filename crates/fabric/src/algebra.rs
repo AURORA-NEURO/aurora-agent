@@ -997,14 +997,6 @@ impl EquivalenceReport {
             .map(|(d, _)| *d)
             .collect()
     }
-
-    pub fn dimensions_not_comparable(&self) -> Vec<EquivalenceDimension> {
-        self.dimensions
-            .iter()
-            .filter(|(_, v)| matches!(v, DimensionVerdict::NotComparable { .. }))
-            .map(|(d, _)| *d)
-            .collect()
-    }
 }
 
 /// Compare two contracts on all eight dimensions.

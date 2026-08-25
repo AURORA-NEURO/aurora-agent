@@ -11,4 +11,3 @@ description = "Decision Section IR and Context Certificate: the model-facing con
 bioprism-ids = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }

@@ -90,11 +90,6 @@ impl SemanticLossDeclaration {
         }
     }
 
-    pub fn with_audit_digest(mut self, digest: ContentHash) -> Self {
-        self.audit_digest = Some(digest);
-        self
-    }
-
     pub fn noting(mut self, note: impl Into<String>) -> Self {
         self.notes.push(note.into());
         self

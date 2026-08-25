@@ -9,7 +9,6 @@ description = "Benchmark packs, promotion, trust tiers and the CI release gate"
 
 [dependencies]
 bioprism-ids = { workspace = true }
-bioprism-section = { workspace = true }
 bioprism-prism = { workspace = true }
 bioprism-mutation = { workspace = true }
 serde = { workspace = true }
@@ -17,4 +16,5 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+bioprism-section = { workspace = true }
 bioprism-worldgen = { workspace = true }

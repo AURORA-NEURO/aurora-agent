@@ -29,6 +29,7 @@ use crate::mode::CompatibilityMode;
 use crate::version::SchemaId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeSet;
 use std::fmt;
 
 /// The coarse shape of a field's value.
@@ -69,10 +70,6 @@ impl FieldType {
             FieldType::Any => true,
             FieldType::Const(expected) => value.as_str() == Some(expected.as_str()),
         }
-    }
-
-    pub fn is_opaque(&self) -> bool {
-        matches!(self, FieldType::Object | FieldType::Any)
     }
 }
 
@@ -291,14 +288,6 @@ impl SchemaDescriptor {
         self.fields.iter().find(|field| field.ty == expected)
     }
 
-    pub fn top_level_paths(&self) -> Vec<&str> {
-        self.fields
-            .iter()
-            .filter(|field| !field.path.contains('.'))
-            .map(|field| field.path.as_str())
-            .collect()
-    }
-
     /// Every path a document actually carries, using this descriptor's opacity decisions.
     ///
     /// Descent stops at any declared field that is not a [`FieldType::Group`]: the interior of an
@@ -362,9 +351,9 @@ impl SchemaDescriptor {
             }
         }
 
-        let declared: Vec<&str> = self.paths();
+        let declared: BTreeSet<&str> = self.paths().into_iter().collect();
         for path in self.observed_paths(document) {
-            if !declared.contains(&path.as_str()) {
+            if !declared.contains(path.as_str()) {
                 check.unknown.push(path);
             }
         }

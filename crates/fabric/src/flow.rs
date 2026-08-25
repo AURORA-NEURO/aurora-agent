@@ -185,11 +185,6 @@ impl FlowLabel {
         self
     }
 
-    pub fn with_legal_basis(mut self, basis: impl Into<String>) -> Self {
-        self.legal_basis = Some(basis.into());
-        self
-    }
-
     /// The join of two labels: the least label that dominates both.
     ///
     /// Compartments union (more restrictive), purposes intersect, residency intersects, retention

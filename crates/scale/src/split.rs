@@ -31,7 +31,7 @@
 //! artefact that belongs with `bioprism-governance`, not a data structure.
 
 use crate::corpus::Corpus;
-use crate::error::{ScaleError, SplitError};
+use crate::error::SplitError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -98,11 +98,6 @@ impl FamilySplit {
         self.families.get(family).copied()
     }
 
-    /// The tier an item inherits, resolved through its lineage root.
-    pub fn tier_of_item(&self, corpus: &Corpus, id: &str) -> Result<Option<Tier>, ScaleError> {
-        Ok(self.tier_of_family(&corpus.family_of(id)?))
-    }
-
     /// Expands to the item→tier table a release actually ships, refusing to leave any item
     /// unassigned. An unassigned item is not "public by default"; it is a release blocker.
     pub fn resolve(&self, corpus: &Corpus) -> Result<BTreeMap<String, Tier>, SplitError> {
@@ -115,9 +110,7 @@ impl FamilySplit {
                     family: "<unresolvable lineage>".into(),
                 })?;
             let tier = self
-                .families
-                .get(&family)
-                .copied()
+                .tier_of_family(&family)
                 .ok_or_else(|| SplitError::UnassignedItem {
                     item: item.id.clone(),
                     family: family.clone(),
@@ -195,13 +188,14 @@ impl SplitReport {
                     item: item.id.clone(),
                     family: "<unresolvable lineage>".into(),
                 })?;
-            let tier = assignment
-                .get(&item.id)
-                .copied()
-                .ok_or_else(|| SplitError::UnassignedItem {
-                    item: item.id.clone(),
-                    family: family.clone(),
-                })?;
+            let tier =
+                assignment
+                    .get(&item.id)
+                    .copied()
+                    .ok_or_else(|| SplitError::UnassignedItem {
+                        item: item.id.clone(),
+                        family: family.clone(),
+                    })?;
             *items_by_tier.entry(tier.as_str().to_string()).or_default() += 1;
             tiers_per_family.entry(family).or_default().insert(tier);
         }
@@ -212,7 +206,9 @@ impl SplitReport {
             if tiers.len() == 1 {
                 intact_families += 1;
                 if let Some(tier) = tiers.iter().next() {
-                    *families_by_tier.entry(tier.as_str().to_string()).or_default() += 1;
+                    *families_by_tier
+                        .entry(tier.as_str().to_string())
+                        .or_default() += 1;
                 }
             }
         }

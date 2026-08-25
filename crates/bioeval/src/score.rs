@@ -526,17 +526,24 @@ impl Grader {
         }
     }
 
-    pub fn with_abstention_threshold(mut self, bits: f64) -> Self {
-        self.abstention_entropy_threshold = bits;
-        self
-    }
-
     pub fn grader_id(&self) -> &str {
         &self.grader_id
     }
 
     pub fn requirement(&self) -> &ComparabilityRequirement {
         &self.requirement
+    }
+
+    /// Sets the reference entropy above which declining to answer is recorded as warranted.
+    ///
+    /// The only writer of `abstention_entropy_threshold`, which [`Grader::new`] fixes at one bit.
+    /// A domain where a reference carrying one bit of genuine spread still admits an answer needs
+    /// a higher bar, and without this builder every grader in the workspace would silently share
+    /// the default — so an abstention's `warranted` flag would stop being a property of the
+    /// grader that recorded it.
+    pub fn with_abstention_threshold(mut self, bits: f64) -> Self {
+        self.abstention_entropy_threshold = bits;
+        self
     }
 
     /// Gates two measurement frames and grades in one step.

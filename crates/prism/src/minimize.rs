@@ -48,8 +48,7 @@ use bioprism_fiber::{oracle, FiberError};
 use bioprism_section::{OracleStatus, OracleVerdict};
 use bioprism_world::World;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 /// Why no minimization exists to report.
 ///
@@ -161,18 +160,17 @@ impl Preservation {
 }
 
 fn verdict_for(world: &World, facts: &BTreeSet<String>) -> Result<OracleVerdict, FiberError> {
-    let values: BTreeMap<String, Value> = facts
-        .iter()
-        .filter_map(|id| world.fact(id))
-        .map(|fact| (fact.provides.as_str().to_string(), fact.value.clone()))
-        .collect();
-    oracle::evaluate(&values)
+    oracle::evaluate_selected(world, facts)
 }
 
 fn signature(verdict: &OracleVerdict) -> (OracleStatus, BTreeSet<String>) {
     (
         verdict.status,
-        verdict.witness_kinds().into_iter().map(str::to_string).collect(),
+        verdict
+            .witness_kinds()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
     )
 }
 
@@ -202,12 +200,11 @@ pub fn minimize(
     world: &World,
     candidate: &BTreeSet<String>,
 ) -> Result<Minimization, MinimizeError> {
-    let reference = verdict_for(world, candidate).map_err(|error| {
-        MinimizeError::OracleRefusedCandidate {
+    let reference =
+        verdict_for(world, candidate).map_err(|error| MinimizeError::OracleRefusedCandidate {
             facts: candidate.len(),
             detail: error.to_string(),
-        }
-    })?;
+        })?;
     let target = signature(&reference);
     let mut kept = candidate.clone();
     let mut evaluations = 1usize;

@@ -101,10 +101,6 @@ impl Workspace {
         &self.root
     }
 
-    pub fn package_names(&self) -> impl Iterator<Item = &str> {
-        self.packages.keys().map(String::as_str)
-    }
-
     pub fn contains_package(&self, name: &CrateName) -> bool {
         self.packages.contains_key(name.as_str())
     }

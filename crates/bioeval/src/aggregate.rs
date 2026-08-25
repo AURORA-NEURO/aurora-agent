@@ -45,7 +45,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AggregationError;
 use crate::reference::{Dispersion, ReferenceDistribution, ReferenceStandard};
 use crate::score::{BioScore, CollapsePolicy};
-use crate::wrongness::{BiologicalErrorClass, Severity};
+use crate::wrongness::BiologicalErrorClass;
 
 /// One reader's or oracle's position on a case.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,10 +82,6 @@ impl Rating {
     pub fn because(mut self, rationale: impl Into<String>) -> Self {
         self.rationale = Some(rationale.into());
         self
-    }
-
-    pub fn worst_flagged(&self) -> Option<Severity> {
-        self.flagged.iter().map(|c| c.severity()).max()
     }
 }
 

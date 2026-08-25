@@ -99,13 +99,6 @@ impl Budget {
             }
         }
     }
-
-    pub fn total_remaining(&self) -> u64 {
-        self.allowances
-            .keys()
-            .map(|resource| self.remaining(*resource))
-            .sum()
-    }
 }
 
 impl Default for Budget {

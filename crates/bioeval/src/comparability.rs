@@ -140,10 +140,6 @@ impl MeasurementFrame {
     pub fn get(&self, dimension: FrameDimension) -> Option<&str> {
         self.declared.get(&dimension).map(String::as_str)
     }
-
-    pub fn declared_dimensions(&self) -> impl Iterator<Item = FrameDimension> + '_ {
-        self.declared.keys().copied()
-    }
 }
 
 /// A named, caller-supplied transformation that makes two values on one dimension comparable.

@@ -320,16 +320,6 @@ impl BudgetLedger {
         self.events.push(event);
     }
 
-    pub fn total_spent(&self) -> usize {
-        self.events
-            .iter()
-            .filter_map(|event| match event {
-                BudgetEvent::Spent { tokens, .. } => Some(*tokens),
-                _ => None,
-            })
-            .sum()
-    }
-
     pub fn spent_by(&self, holder: &str) -> usize {
         self.events
             .iter()

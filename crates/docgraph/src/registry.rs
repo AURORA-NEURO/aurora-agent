@@ -343,11 +343,6 @@ impl ModuleNode {
         self
     }
 
-    pub fn with_deep(mut self, deep: impl Into<String>) -> Self {
-        self.body.deep = Some(deep.into());
-        self
-    }
-
     /// The text this node renders to at a level, or `None` when the level has no text.
     ///
     /// [`ProfileLevel::Handle`] is always available because identity is always known;
@@ -453,10 +448,6 @@ impl DocGraph {
 
     pub fn node_count(&self) -> usize {
         self.nodes.len()
-    }
-
-    pub fn out_edges<'a>(&'a self, id: &'a ModuleId) -> impl Iterator<Item = &'a DocEdge> + 'a {
-        self.edges.iter().filter(move |edge| &edge.from == id)
     }
 
     pub fn in_edges<'a>(&'a self, id: &'a ModuleId) -> impl Iterator<Item = &'a DocEdge> + 'a {

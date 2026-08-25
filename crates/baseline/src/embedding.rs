@@ -24,7 +24,8 @@
 //! character-level similarity alone gets, under exactly equal data access, with the difference
 //! from a learned model stated rather than implied.
 
-use crate::lexical::{fact_tokens, query_tokens};
+use crate::index::PanelIndex;
+use crate::lexical::query_tokens;
 use crate::strategy::{ContextStrategy, Selection};
 use bioprism_fiber::Query;
 use bioprism_world::World;
@@ -54,7 +55,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// convention: it lets a whole short token (`#id#`) be its own feature and keeps prefixes
 /// distinguishable from infixes. `#` cannot collide with token content because
 /// [`crate::lexical::tokenize`] emits ASCII alphanumerics only.
-fn embed(tokens: impl IntoIterator<Item = String>) -> Vec<f64> {
+fn embed(tokens: &[String]) -> Vec<f64> {
     let mut vector = vec![0.0_f64; DIMENSION];
     for token in tokens {
         let wrapped = format!("#{token}#");
@@ -65,6 +66,15 @@ fn embed(tokens: impl IntoIterator<Item = String>) -> Vec<f64> {
         }
     }
     vector
+}
+
+/// One vector per fact, in world order.
+///
+/// Separated from the ranking because the vectors depend on the world alone while the ranking
+/// depends on the query too, so [`PanelIndex`] can keep both and rebuild neither: the two shipped
+/// `k` budgets previously embedded the whole corpus twice.
+pub(crate) fn embed_documents(documents: &[Vec<String>]) -> Vec<Vec<f64>> {
+    documents.iter().map(|tokens| embed(tokens)).collect()
 }
 
 fn cosine(a: &[f64], b: &[f64]) -> f64 {
@@ -98,21 +108,12 @@ impl ContextStrategy for EmbeddingTopK {
     }
 
     fn select(&self, world: &World, query: &Query) -> Selection {
-        let query_vector = embed(query_tokens(query));
+        self.select_indexed(&PanelIndex::new(world, query))
+    }
 
-        let mut scored: Vec<(usize, f64)> = (0..world.facts.len())
-            .map(|position| {
-                let fact_vector = embed(fact_tokens(world, position));
-                (position, cosine(&fact_vector, &query_vector))
-            })
-            .filter(|(_, score)| *score > 0.0)
-            .collect();
-
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| world.facts[a.0].id.as_str().cmp(world.facts[b.0].id.as_str()))
-        });
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        let world = index.world();
+        let scored = index.embedding_ranking();
 
         let facts: BTreeSet<String> = scored
             .iter()
@@ -125,4 +126,26 @@ impl ContextStrategy for EmbeddingTopK {
             scored.len()
         ))
     }
+}
+
+/// Every fact scoring above zero by cosine similarity to the query, best first, ties broken by
+/// fact id. Whole rather than per-budget for the reason [`crate::lexical::rank`] gives.
+pub(crate) fn rank(world: &World, query: &Query, embeddings: &[Vec<f64>]) -> Vec<(usize, f64)> {
+    let query_tokens: Vec<String> = query_tokens(query).into_iter().collect();
+    let query_vector = embed(&query_tokens);
+
+    let mut scored: Vec<(usize, f64)> = embeddings
+        .iter()
+        .enumerate()
+        .map(|(position, fact_vector)| (position, cosine(fact_vector, &query_vector)))
+        .filter(|(_, score)| *score > 0.0)
+        .collect();
+
+    scored.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| world.facts[a.0].id.as_str().cmp(world.facts[b.0].id.as_str()))
+    });
+
+    scored
 }
