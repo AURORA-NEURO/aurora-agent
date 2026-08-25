@@ -232,6 +232,10 @@ remote workers to verify plan → admission → provider execution → evidence 
 metadata alone. Queue storage, leases, approval, and source/evaluator authority remain caller
 responsibilities.
 
+The worker adapters now also accept the verified action dispatch handoff as the rehydration
+boundary: the handoff digest is bound into the durable job identity, and sync/async workers
+refuse domain, plan, admission, gate-list, or outer-digest drift before runner invocation.
+
 Domain evidence adapters now also have a digest-bound selector. It supports deterministic
 lexicographic routing, caller-supplied health/success/reward/latency/cost scoring, conservative
 abstention, candidate/registry drift detection, and an explicit acquirer handoff without putting

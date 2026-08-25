@@ -31,6 +31,10 @@ import {
   type AutonomousActionAdmissionJSON,
   type AutonomousActionPlanJSON,
 } from "./autonomous-action-plan.js";
+import {
+  validateAutonomousActionDispatchHandoff,
+  type AutonomousActionDispatchHandoff,
+} from "./autonomous-action-admission-controller.js";
 
 /** Metadata-only worker lifecycle for one rehydrated autonomous brain job. */
 export const AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA = "bioprism-typescript-autonomous-brain-job-worker/0.2" as const;
@@ -50,6 +54,12 @@ export interface AutonomousBrainJobSpecDigestInput {
   actionPlanDigest?: string | null;
   /** Optional digest of the explicit gates bound to that action plan. */
   actionAdmissionDigest?: string | null;
+  /** Optional digest of the verified dispatch handoff that carries the plan and admission. */
+  actionHandoffDigest?: string | null;
+}
+
+export interface AutonomousBrainJobHandoffSpecDigestInput extends Omit<AutonomousBrainJobSpecDigestInput, "actionPlanDigest" | "actionAdmissionDigest" | "actionHandoffDigest"> {
+  actionHandoff: unknown;
 }
 
 export interface AutonomousBrainJobResolution {
@@ -62,6 +72,8 @@ export interface AutonomousBrainJobResolution {
   adaptive?: AutonomousBrainAdaptiveCycleOptions;
   actionPlan?: AutonomousActionPlan | AutonomousActionPlanJSON | null;
   actionAdmission?: AutonomousActionAdmission | AutonomousActionAdmissionJSON | null;
+  /** A verified operator handoff may replace the separate actionPlan/actionAdmission fields. */
+  actionHandoff?: AutonomousActionDispatchHandoff | null;
 }
 
 export interface AutonomousBrainJobResolverContext {
@@ -186,6 +198,11 @@ function actionAdmissionFromResolution(value: AutonomousBrainJobResolution["acti
   return value instanceof AutonomousActionAdmission ? value : AutonomousActionAdmission.fromJSON(value);
 }
 
+function actionHandoffFromResolution(value: AutonomousBrainJobResolution["actionHandoff"]): AutonomousActionDispatchHandoff | null {
+  if (value === undefined || value === null) return null;
+  return validateAutonomousActionDispatchHandoff(value);
+}
+
 function approvalBoundary(result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution): "preflight" | "dispatched" {
   if ("connector" in result && result.connector !== null) return "dispatched";
   if ("run" in result && result.run !== null) return "dispatched";
@@ -211,7 +228,9 @@ export function autonomousBrainJobSpecDigest(input: AutonomousBrainJobSpecDigest
   const policyDigest = digest("job policyDigest", input.policyDigest ?? null, true);
   const actionPlanDigest = digest("job actionPlanDigest", input.actionPlanDigest ?? null, true);
   const actionAdmissionDigest = digest("job actionAdmissionDigest", input.actionAdmissionDigest ?? null, true);
+  const actionHandoffDigest = digest("job actionHandoffDigest", input.actionHandoffDigest ?? null, true);
   if (actionAdmissionDigest !== null && actionPlanDigest === null) throw new ArgumentError("action admission digest requires an action plan digest");
+  if (actionHandoffDigest !== null && (actionPlanDigest === null || actionAdmissionDigest === null)) throw new ArgumentError("action handoff digest requires action plan and admission digests");
   if (!input.request || typeof input.request !== "object") throw new ArgumentError("autonomous brain job spec digest request is malformed");
   return digestJsonSync({
     schema: AUTONOMOUS_BRAIN_JOB_SPEC_SCHEMA,
@@ -220,6 +239,21 @@ export function autonomousBrainJobSpecDigest(input: AutonomousBrainJobSpecDigest
     policy_digest: policyDigest,
     ...(actionPlanDigest === null ? {} : { action_plan_digest: actionPlanDigest }),
     ...(actionAdmissionDigest === null ? {} : { action_admission_digest: actionAdmissionDigest }),
+    ...(actionHandoffDigest === null ? {} : { action_handoff_digest: actionHandoffDigest }),
+  });
+}
+
+/** Compute a durable job identity directly from a verified action dispatch handoff. */
+export function autonomousBrainJobSpecDigestForHandoff(input: AutonomousBrainJobHandoffSpecDigestInput): string {
+  if (!input || typeof input !== "object") throw new ArgumentError("autonomous brain handoff spec digest input is malformed");
+  const handoff = validateAutonomousActionDispatchHandoff(input.actionHandoff);
+  return autonomousBrainJobSpecDigest({
+    request: input.request,
+    mode: input.mode,
+    policyDigest: input.policyDigest ?? null,
+    actionPlanDigest: handoff.plan_digest,
+    actionAdmissionDigest: handoff.admission_digest,
+    actionHandoffDigest: handoff.handoff_digest,
   });
 }
 
@@ -343,24 +377,25 @@ export class AutonomousBrainJobWorker {
       this.validateResolution(claimed, resolution);
       const plan = await this.brain.plan(resolution.request);
       if (!requestDomainCovered(plan, claimed.domain)) throw new ArgumentError("rehydrated brain request is outside the durable job domain");
-      const actionPlan = actionPlanFromResolution(resolution.actionPlan);
-      const actionAdmission = actionAdmissionFromResolution(resolution.actionAdmission);
+      const actionHandoff = actionHandoffFromResolution(resolution.actionHandoff);
+      const actionPlan = actionPlanFromResolution(resolution.actionPlan) ?? (actionHandoff === null ? null : actionPlanFromResolution(actionHandoff.plan));
+      const actionAdmission = actionAdmissionFromResolution(resolution.actionAdmission) ?? (actionHandoff === null ? null : actionAdmissionFromResolution(actionHandoff.admission));
       if (actionPlan !== null && actionAdmission !== null) {
         const liveActionPlan = buildAutonomousActionPlan(plan.toJSON());
         if (liveActionPlan.plan_digest !== actionPlan.plan_digest) throw new ArgumentError("durable action plan is stale or does not match the compiled request");
         if (actionAdmission.plan_digest !== liveActionPlan.plan_digest || actionAdmission.status !== "admitted") throw new ArgumentError("durable action admission is not admitted for the compiled request");
       }
       if (plan.status === "route_review_required") {
-        await this.checkpoint(claimed.job_id, { phase: "route_review_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null }), sideEffectBoundary: "preflight", waitingForApproval: true });
+        await this.checkpoint(claimed.job_id, { phase: "route_review_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight", waitingForApproval: true });
         return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
       }
       planCompiled = true;
-      await this.checkpoint(claimed.job_id, { phase: "plan_compiled", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, mode: resolution.mode, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null }), sideEffectBoundary: "preflight" });
+      await this.checkpoint(claimed.job_id, { phase: "plan_compiled", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, mode: resolution.mode, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight" });
       // The durable worker owns a second approval gate around the entire rehydrated dispatch.
       // Do not even invoke the facade before the scheduler records an explicit release; this
       // prevents a connector or provider-planning callback from doing work during a pause.
       if (!approvalReleased) {
-        await this.checkpoint(claimed.job_id, { phase: "provider_approval_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, mode: resolution.mode, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null }), sideEffectBoundary: "preflight", waitingForApproval: true });
+        await this.checkpoint(claimed.job_id, { phase: "provider_approval_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, mode: resolution.mode, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight", waitingForApproval: true });
         return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
       }
       let approvedResolution = this.approvalBoundResolution(resolution, approvalReleased);
@@ -370,7 +405,7 @@ export class AutonomousBrainJobWorker {
         approvedResolution = this.bindCredentialResolution(approvedResolution, credentialBinding);
       }
       const shouldTrace = this.traceStore !== undefined;
-      await this.checkpoint(claimed.job_id, { phase: "dispatch_started", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, attempt: claimed.attempts, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null }), sideEffectBoundary: "dispatched" });
+      await this.checkpoint(claimed.job_id, { phase: "dispatch_started", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, attempt: claimed.attempts, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "dispatched" });
       executionStarted = true;
       if (heartbeatError !== null) throw heartbeatError;
       let result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution;
@@ -549,15 +584,28 @@ export class AutonomousBrainJobWorker {
   private validateResolution(job: AutonomousBrainJob, value: AutonomousBrainJobResolution): void {
     if (!value || typeof value !== "object") throw new ArgumentError("brain job resolver must return an object");
     const selectedMode = mode(value.mode);
-    const actionPlan = actionPlanFromResolution(value.actionPlan);
-    const actionAdmission = actionAdmissionFromResolution(value.actionAdmission);
+    const actionHandoff = actionHandoffFromResolution(value.actionHandoff);
+    const handoffPlan = actionHandoff === null ? null : actionPlanFromResolution(actionHandoff.plan);
+    const handoffAdmission = actionHandoff === null ? null : actionAdmissionFromResolution(actionHandoff.admission);
+    const explicitActionPlan = actionPlanFromResolution(value.actionPlan);
+    const explicitActionAdmission = actionAdmissionFromResolution(value.actionAdmission);
+    if (actionHandoff !== null && explicitActionPlan !== null && explicitActionPlan.plan_digest !== handoffPlan?.plan_digest) throw new ArgumentError("durable action plan does not match the verified handoff");
+    if (actionHandoff !== null && explicitActionAdmission !== null && explicitActionAdmission.admission_digest !== handoffAdmission?.admission_digest) throw new ArgumentError("durable action admission does not match the verified handoff");
+    const actionPlan = explicitActionPlan ?? handoffPlan;
+    const actionAdmission = explicitActionAdmission ?? handoffAdmission;
     if ((actionPlan === null) !== (actionAdmission === null)) throw new ArgumentError("durable action plan and admission must be supplied together");
     if (actionPlan !== null && actionAdmission !== null) {
       if (actionAdmission.plan_digest !== actionPlan.plan_digest) throw new ArgumentError("durable action admission is bound to a different action plan");
       if (actionAdmission.status !== "admitted") throw new ArgumentError("durable action admission must be admitted before worker dispatch");
     }
     if (digest("job resolution specDigest", value.specDigest) !== job.spec_digest) throw new ArgumentError("brain job resolver specDigest does not match the durable job");
-    if (autonomousBrainJobSpecDigest({ request: value.request, mode: selectedMode, policyDigest: value.policyDigest ?? null, actionPlanDigest: actionPlan?.plan_digest ?? null, actionAdmissionDigest: actionAdmission?.admission_digest ?? null }) !== job.spec_digest) throw new ArgumentError("brain job request, mode, policy, and action admission do not match the durable spec");
+    const requestDomain = isObject(value.request) && typeof value.request.domain === "string" ? value.request.domain : null;
+    if (actionHandoff !== null) {
+      if (job.domain === "cross_domain" && !actionHandoff.cross_domain) throw new ArgumentError("cross-domain job requires a cross-domain action handoff");
+      if (job.domain !== "cross_domain" && !actionHandoff.selected_domains.includes(job.domain as typeof actionHandoff.selected_domains[number])) throw new ArgumentError("action handoff does not cover the durable job domain");
+      if (requestDomain !== null && requestDomain !== "cross_domain" && !actionHandoff.selected_domains.includes(requestDomain as typeof actionHandoff.selected_domains[number])) throw new ArgumentError("action handoff does not cover the request domain");
+    }
+    if (autonomousBrainJobSpecDigest({ request: value.request, mode: selectedMode, policyDigest: value.policyDigest ?? null, actionPlanDigest: actionPlan?.plan_digest ?? null, actionAdmissionDigest: actionAdmission?.admission_digest ?? null, actionHandoffDigest: actionHandoff?.handoff_digest ?? null }) !== job.spec_digest) throw new ArgumentError("brain job request, mode, policy, and action handoff do not match the durable spec");
     if (!value.request || typeof value.request !== "object" || typeof value.request.task !== "string" || !value.request.task.trim()) throw new ArgumentError("brain job resolver request is invalid");
     if (selectedMode === "adaptive" && (!value.adaptive || typeof value.adaptive !== "object" || typeof value.adaptive.adaptive?.evaluate !== "function")) throw new ArgumentError("adaptive brain job requires an evaluator policy");
   }

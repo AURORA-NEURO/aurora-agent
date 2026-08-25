@@ -2888,6 +2888,16 @@ credentials, provider/source readiness, evaluator truth, or effect safety; those
 separate gates after verification. A verified handoff is therefore a continuity proof for a
 worker resolver, never an execution token.
 
+Durable workers can bind that continuity proof into the job identity. In TypeScript,
+`autonomousBrainJobSpecDigestForHandoff({ request, mode, policyDigest, actionHandoff })`
+validates the handoff and includes its plan, admission, and handoff digests in the opaque
+`spec_digest`; the resolver can return `actionHandoff` without separately reconstructing the
+embedded plan and admission. In Python, `RemoteBrainJobWorker.submit_handoff()` and
+`AsyncRemoteBrainJobWorker.submit_handoff()` provide the same operation. Both worker runtimes
+revalidate the handoff after rehydration, require the durable job/request domains to be covered,
+and reject handoff drift before credentials, providers, tools, sources, evaluators, or effects
+are reached. The older separate plan/admission fields remain supported for existing jobs.
+
 ```python
 plan = agent.action_plan(task="analyze a bounded dataset", domain="data")
 execution = agent.execute_action_plan(
@@ -6080,6 +6090,14 @@ any mismatch. Use `autonomous_remote_brain_plan_digest()` and
 Remote projections are recursively checked for task, prompt, credential, secret, token, provider
 response, and tool-output shaped fields. `RemoteBrainJobRun.result` is transient for the caller;
 `to_dict()` emits only status and bounded result metadata.
+
+For action-admission work, prefer `submit_handoff()` after the application has verified a
+metadata-only dispatch handoff. The helper derives and binds the plan, admission, and handoff
+digests into the opaque job identity. A resolver can then return only `action_handoff`; the sync
+and async workers revalidate its embedded plan/admission, selected-domain closure, downstream
+gates, and outer digest before approval release or runner invocation. This closes the
+plan → admission → worker continuity gap without treating the handoff as a credential,
+reviewer authorization, provider approval, or execution token.
 
 ```python
 from prism_sdk import (

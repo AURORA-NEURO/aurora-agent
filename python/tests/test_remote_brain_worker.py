@@ -14,12 +14,15 @@ from prism_sdk import (
     BrainJobStore,
     DurableBrainControlPlaneAdapter,
     AutonomousAgent,
+    AutonomousActionAdmissionController,
+    InMemoryAutonomousActionAdmissionLedger,
     LLMRuntime,
     RemoteBrainJobWorker,
     RemoteBrainWorkerError,
     ProvisionedRemoteBrainCredentialScope,
     admit_autonomous_action_plan,
     autonomous_remote_brain_job_spec_digest,
+    autonomous_remote_brain_job_spec_digest_for_handoff,
     autonomous_remote_brain_plan_digest,
     autonomous_remote_brain_route_digest,
 )
@@ -503,6 +506,80 @@ def test_async_remote_worker_preserves_all_domains_modes_and_metadata_boundary(t
     asyncio.run(_run_async_remote_worker(tmp_path))
 
 
+def test_remote_worker_derives_action_identity_from_verified_handoff(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = _control(tmp_path, seen)
+    brain = _Brain()
+    request = {"task": "private verified handoff task", "domain": "science"}
+    action_agent = AutonomousAgent(object(), LLMRuntime())
+    action_plan = action_agent.action_plan(task=request["task"], domain="science", allow_cross_domain=False)
+    controller = AutonomousActionAdmissionController(InMemoryAutonomousActionAdmissionLedger(max_records=4))
+    controller.submit(
+        "remote-verified-handoff",
+        action_plan,
+        approvals={approval: True for approval in action_plan["required_approvals"]},
+        reviewed=True,
+        authorization_digest="a" * 64,
+    )
+    handoff = controller.dispatch_handoff("remote-verified-handoff")
+    policy = _policy("a")
+
+    worker = RemoteBrainJobWorker(
+        brain,
+        control,
+        worker_id="verified-handoff-worker",
+        resolver=lambda context: {
+            "spec_digest": context["job"]["spec_digest"],
+            "policy_digest": policy,
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+            "action_handoff": handoff,
+        },
+    )
+    submission = worker.submit_handoff(
+        idempotency_key="remote-verified-handoff",
+        request=request,
+        mode="autonomous",
+        domain="science",
+        capability="bounded",
+        risk_class="review",
+        policy_digest=policy,
+        action_handoff=handoff,
+    )
+    assert submission.action_handoff_digest == handoff["handoff_digest"]
+    assert submission.action_plan_digest == handoff["plan_digest"]
+    waiting = worker.run_once(submission.job["job_id"])
+    assert waiting is not None and waiting.status == "waiting_approval"
+    assert brain.calls == []
+    worker.approval(submission.job["job_id"], "approve", authorization_digest="b" * 64)
+    completed = worker.run_once(submission.job["job_id"])
+    assert completed is not None and completed.status == "succeeded"
+    assert len(brain.calls) == 1
+    with pytest.raises(RemoteBrainWorkerError, match="action_handoff|gates"):
+        worker.submit_handoff(
+            idempotency_key="remote-tampered-handoff",
+            request=request,
+            mode="autonomous",
+            domain="science",
+            capability="bounded",
+            risk_class="review",
+            action_handoff={**handoff, "downstream_gates": ["credential_scope"]},
+        )
+    with pytest.raises(RemoteBrainWorkerError, match="plan_digest"):
+        worker.submit_handoff(
+            idempotency_key="remote-mismatched-plan-handoff",
+            request=request,
+            mode="autonomous",
+            domain="science",
+            capability="bounded",
+            risk_class="review",
+            plan_digest="0" * 64,
+            action_handoff=handoff,
+        )
+    store.close()
+
+
 def test_async_remote_worker_binds_action_plan_admission_before_dispatch(tmp_path):
     asyncio.run(_run_async_action_admission(tmp_path))
 
@@ -519,6 +596,15 @@ async def _run_async_action_admission(tmp_path):
         approvals={approval: True for approval in action_plan["required_approvals"]},
         reviewed=True,
     )
+    controller = AutonomousActionAdmissionController(InMemoryAutonomousActionAdmissionLedger(max_records=4))
+    controller.submit(
+        "async-verified-handoff",
+        action_plan,
+        approvals={approval: True for approval in action_plan["required_approvals"]},
+        reviewed=True,
+        authorization_digest="b" * 64,
+    )
+    handoff = controller.dispatch_handoff("async-verified-handoff")
     policy = _policy("c")
 
     async def resolved(context):
@@ -528,12 +614,11 @@ async def _run_async_action_admission(tmp_path):
             "mode": "autonomous",
             "request": request,
             "kwargs": {"task": request["task"], "domain": request["domain"]},
-            "action_plan": action_plan,
-            "action_admission": action_admission,
+            "action_handoff": handoff,
         }
 
     worker = AsyncRemoteBrainJobWorker(brain, control, worker_id="async-action-worker", resolver=resolved)
-    submission = await worker.submit(
+    submission = await worker.submit_handoff(
         idempotency_key="async-action-admission",
         request=request,
         mode="autonomous",
@@ -541,11 +626,11 @@ async def _run_async_action_admission(tmp_path):
         capability="bounded",
         risk_class="review",
         policy_digest=policy,
-        action_plan_digest=action_plan["plan_digest"],
-        action_admission_digest=action_admission.admission_digest,
+        action_handoff=handoff,
     )
     assert submission.action_plan_digest == action_plan["plan_digest"]
     assert submission.action_admission_digest == action_admission.admission_digest
+    assert submission.action_handoff_digest == handoff["handoff_digest"]
     waiting = await worker.run_once(submission.job["job_id"])
     assert waiting is not None and waiting.status == "waiting_approval"
     assert brain.calls == []

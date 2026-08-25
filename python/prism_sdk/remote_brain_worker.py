@@ -21,6 +21,7 @@ from .brain import BrainRunError
 from .brain_api import AsyncBrainControlClient, BrainControlClient
 from .autonomous_action_execution import AutonomousActionAdmission
 from .autonomous_action_plan import AutonomousActionPlan
+from .autonomous_action_admission_controller import validate_autonomous_action_dispatch_handoff
 
 
 AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA = "bioprism-python-autonomous-remote-brain-worker/0.1"
@@ -90,6 +91,7 @@ class RemoteBrainJobSubmission:
     route_digest: str | None = None
     action_plan_digest: str | None = None
     action_admission_digest: str | None = None
+    action_handoff_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +104,7 @@ class RemoteBrainJobSubmission:
             "route_digest": self.route_digest,
             "action_plan_digest": self.action_plan_digest,
             "action_admission_digest": self.action_admission_digest,
+            "action_handoff_digest": self.action_handoff_digest,
             "private_spec": "caller_owned;request_and_execution_kwargs_not_sent_to_control_plane",
             "secret_material": "never_returned",
         }
@@ -189,6 +192,7 @@ class RemoteBrainJobResolution:
     route_digest: str | None = None
     action_plan: AutonomousActionPlan | Mapping[str, Any] | None = None
     action_admission: AutonomousActionAdmission | Mapping[str, Any] | None = None
+    action_handoff: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,6 +409,7 @@ def autonomous_remote_brain_job_spec_digest(
     route_digest: str | None = None,
     action_plan_digest: str | None = None,
     action_admission_digest: str | None = None,
+    action_handoff_digest: str | None = None,
 ) -> str:
     """Bind request/mode/policy and optional reviewed identities without retaining private values.
 
@@ -421,8 +426,11 @@ def autonomous_remote_brain_job_spec_digest(
     route_digest = _validate_optional_digest("route_digest", route_digest)
     action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
     action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
+    action_handoff_digest = _validate_optional_digest("action_handoff_digest", action_handoff_digest)
     if action_admission_digest is not None and action_plan_digest is None:
         raise RemoteBrainWorkerError("action_admission_digest requires action_plan_digest")
+    if action_handoff_digest is not None and (action_plan_digest is None or action_admission_digest is None):
+        raise RemoteBrainWorkerError("action_handoff_digest requires action plan and admission digests")
     payload: dict[str, Any] = {
         "schema": AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA,
         "mode": mode,
@@ -437,7 +445,31 @@ def autonomous_remote_brain_job_spec_digest(
         payload["action_plan_digest"] = action_plan_digest
     if action_admission_digest is not None:
         payload["action_admission_digest"] = action_admission_digest
+    if action_handoff_digest is not None:
+        payload["action_handoff_digest"] = action_handoff_digest
     return _digest_json(payload)
+
+
+def autonomous_remote_brain_job_spec_digest_for_handoff(
+    *,
+    request: Mapping[str, Any],
+    mode: str,
+    action_handoff: Mapping[str, Any],
+    policy_digest: str | None = None,
+) -> str:
+    """Compute a durable job identity from a validated dispatch handoff."""
+
+    handoff = _action_handoff_value(action_handoff)
+    if handoff is None:
+        raise RemoteBrainWorkerError("action_handoff must be a metadata mapping", code="protocol")
+    return autonomous_remote_brain_job_spec_digest(
+        request=request,
+        mode=mode,
+        policy_digest=policy_digest,
+        action_plan_digest=handoff["plan_digest"],
+        action_admission_digest=handoff["admission_digest"],
+        action_handoff_digest=handoff["handoff_digest"],
+    )
 
 
 def _bounded_json(name: str, value: Any, maximum: int) -> Any:
@@ -568,6 +600,18 @@ def _action_admission_value(value: Any) -> AutonomousActionAdmission | None:
         raise RemoteBrainWorkerError("remote brain action_admission metadata is invalid", code="protocol") from error
 
 
+def _action_handoff_value(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise RemoteBrainWorkerError("remote brain action_handoff must be metadata mapping", code="protocol")
+    _assert_no_private_fields(value)
+    try:
+        return validate_autonomous_action_dispatch_handoff(value)
+    except Exception as error:
+        raise RemoteBrainWorkerError("remote brain action_handoff metadata is invalid", code="protocol") from error
+
+
 class RemoteBrainJobWorker:
     """Pull and execute private Python brain requests through a remote job control plane.
 
@@ -641,6 +685,7 @@ class RemoteBrainJobWorker:
         route_digest: str | None = None,
         action_plan_digest: str | None = None,
         action_admission_digest: str | None = None,
+        action_handoff_digest: str | None = None,
         priority: int = 0,
         max_attempts: int = 3,
         checkpoint_digest: str | None = None,
@@ -659,6 +704,7 @@ class RemoteBrainJobWorker:
         route_digest = _validate_optional_digest("route_digest", route_digest)
         action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
         action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
+        action_handoff_digest = _validate_optional_digest("action_handoff_digest", action_handoff_digest)
         checkpoint_digest = _validate_optional_digest("checkpoint_digest", checkpoint_digest)
         spec_digest = autonomous_remote_brain_job_spec_digest(
             request=request,
@@ -668,6 +714,7 @@ class RemoteBrainJobWorker:
             route_digest=route_digest,
             action_plan_digest=action_plan_digest,
             action_admission_digest=action_admission_digest,
+            action_handoff_digest=action_handoff_digest,
         )
         payload = self.control.submit_job({
             "idempotency_key": idempotency_key,
@@ -688,6 +735,49 @@ class RemoteBrainJobWorker:
             route_digest=route_digest,
             action_plan_digest=action_plan_digest,
             action_admission_digest=action_admission_digest,
+            action_handoff_digest=action_handoff_digest,
+        )
+
+    def submit_handoff(
+        self,
+        *,
+        idempotency_key: str,
+        request: Mapping[str, Any],
+        mode: str,
+        domain: str,
+        capability: str,
+        risk_class: str,
+        action_handoff: Mapping[str, Any],
+        policy_digest: str | None = None,
+        plan_digest: str | None = None,
+        route_digest: str | None = None,
+        priority: int = 0,
+        max_attempts: int = 3,
+        checkpoint_digest: str | None = None,
+    ) -> RemoteBrainJobSubmission:
+        """Submit a job whose action identity is derived from one verified handoff."""
+
+        handoff = _action_handoff_value(action_handoff)
+        if handoff is None:
+            raise RemoteBrainWorkerError("action_handoff must be a metadata mapping", code="protocol")
+        if plan_digest is not None and plan_digest != handoff["plan_digest"]:
+            raise RemoteBrainWorkerError("plan_digest does not match the verified action handoff", code="protocol")
+        return self.submit(
+            idempotency_key=idempotency_key,
+            request=request,
+            mode=mode,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+            policy_digest=policy_digest,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
+            action_plan_digest=handoff["plan_digest"],
+            action_admission_digest=handoff["admission_digest"],
+            action_handoff_digest=handoff["handoff_digest"],
+            priority=priority,
+            max_attempts=max_attempts,
+            checkpoint_digest=checkpoint_digest,
         )
 
     def status(self, job_id: str) -> Mapping[str, Any]:
@@ -859,7 +949,7 @@ class RemoteBrainJobWorker:
             return raw
         if not isinstance(raw, Mapping):
             raise RemoteBrainWorkerError("remote brain resolver must return a mapping")
-        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "action_plan", "action_admission", "mode", "request", "kwargs"}
+        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "action_plan", "action_admission", "action_handoff", "mode", "request", "kwargs"}
         unknown = sorted(set(raw).difference(allowed))
         if unknown:
             raise RemoteBrainWorkerError("remote brain resolver returned unsupported fields")
@@ -873,6 +963,7 @@ class RemoteBrainJobWorker:
             route_digest=raw.get("route_digest"),
             action_plan=raw.get("action_plan"),
             action_admission=raw.get("action_admission"),
+            action_handoff=raw.get("action_handoff"),
         )
 
     @staticmethod
@@ -882,8 +973,17 @@ class RemoteBrainJobWorker:
         policy_digest = _validate_optional_digest("resolver policy_digest", resolution.policy_digest)
         plan_digest = _validate_optional_digest("resolver plan_digest", resolution.plan_digest)
         route_digest = _validate_optional_digest("resolver route_digest", resolution.route_digest)
-        action_plan = _action_plan_value(resolution.action_plan)
-        action_admission = _action_admission_value(resolution.action_admission)
+        action_handoff = _action_handoff_value(resolution.action_handoff)
+        handoff_plan = _action_plan_value(None if action_handoff is None else action_handoff["plan"])
+        handoff_admission = _action_admission_value(None if action_handoff is None else action_handoff["admission"])
+        explicit_action_plan = _action_plan_value(resolution.action_plan)
+        explicit_action_admission = _action_admission_value(resolution.action_admission)
+        if action_handoff is not None and explicit_action_plan is not None and explicit_action_plan.plan_digest != handoff_plan.plan_digest:
+            raise RemoteBrainWorkerError("remote brain action plan does not match the verified handoff", code="protocol")
+        if action_handoff is not None and explicit_action_admission is not None and explicit_action_admission.admission_digest != handoff_admission.admission_digest:
+            raise RemoteBrainWorkerError("remote brain action admission does not match the verified handoff", code="protocol")
+        action_plan = explicit_action_plan or handoff_plan
+        action_admission = explicit_action_admission or handoff_admission
         if (action_plan is None) != (action_admission is None):
             raise RemoteBrainWorkerError("remote brain action_plan and action_admission must be supplied together", code="protocol")
         action_plan_digest = action_plan.plan_digest if action_plan is not None else None
@@ -893,6 +993,15 @@ class RemoteBrainJobWorker:
                 raise RemoteBrainWorkerError("remote brain action admission is bound to a different action plan", code="protocol")
             if action_admission.status != "admitted":
                 raise RemoteBrainWorkerError("remote brain action admission must be admitted before worker dispatch", code="protocol")
+        if action_handoff is not None:
+            selected_domains = action_handoff["selected_domains"]
+            request_domain = resolution.request.get("domain") if isinstance(resolution.request, Mapping) else None
+            if job["domain"] == "cross_domain" and action_handoff["cross_domain"] is not True:
+                raise RemoteBrainWorkerError("cross-domain job requires a cross-domain action handoff", code="protocol")
+            if job["domain"] != "cross_domain" and job["domain"] not in selected_domains:
+                raise RemoteBrainWorkerError("action handoff does not cover the durable job domain", code="protocol")
+            if isinstance(request_domain, str) and request_domain != "cross_domain" and request_domain not in selected_domains:
+                raise RemoteBrainWorkerError("action handoff does not cover the request domain", code="protocol")
         if spec_digest != job["spec_digest"]:
             raise RemoteBrainWorkerError("remote brain resolver spec_digest does not match the durable job")
         if not isinstance(resolution.request, Mapping) or not isinstance(resolution.kwargs, Mapping):
@@ -905,9 +1014,10 @@ class RemoteBrainJobWorker:
             route_digest=route_digest,
             action_plan_digest=action_plan_digest,
             action_admission_digest=action_admission_digest,
+            action_handoff_digest=None if action_handoff is None else action_handoff["handoff_digest"],
         )
         if expected != job["spec_digest"]:
-            raise RemoteBrainWorkerError("remote brain request, mode, policy, reviewed identities, and action admission do not match the durable job")
+            raise RemoteBrainWorkerError("remote brain request, mode, policy, reviewed identities, and action handoff do not match the durable job")
         task = resolution.request.get("task")
         if not isinstance(task, str) or not task.strip():
             raise RemoteBrainWorkerError("remote brain resolver request must contain a bounded task")
@@ -1035,6 +1145,7 @@ class AsyncRemoteBrainJobWorker:
         route_digest: str | None = None,
         action_plan_digest: str | None = None,
         action_admission_digest: str | None = None,
+        action_handoff_digest: str | None = None,
         priority: int = 0,
         max_attempts: int = 3,
         checkpoint_digest: str | None = None,
@@ -1053,6 +1164,7 @@ class AsyncRemoteBrainJobWorker:
         route_digest = _validate_optional_digest("route_digest", route_digest)
         action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
         action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
+        action_handoff_digest = _validate_optional_digest("action_handoff_digest", action_handoff_digest)
         checkpoint_digest = _validate_optional_digest("checkpoint_digest", checkpoint_digest)
         spec_digest = autonomous_remote_brain_job_spec_digest(
             request=request,
@@ -1062,6 +1174,7 @@ class AsyncRemoteBrainJobWorker:
             route_digest=route_digest,
             action_plan_digest=action_plan_digest,
             action_admission_digest=action_admission_digest,
+            action_handoff_digest=action_handoff_digest,
         )
         payload = await self.control.submit_job({
             "idempotency_key": idempotency_key,
@@ -1082,6 +1195,49 @@ class AsyncRemoteBrainJobWorker:
             route_digest=route_digest,
             action_plan_digest=action_plan_digest,
             action_admission_digest=action_admission_digest,
+            action_handoff_digest=action_handoff_digest,
+        )
+
+    async def submit_handoff(
+        self,
+        *,
+        idempotency_key: str,
+        request: Mapping[str, Any],
+        mode: str,
+        domain: str,
+        capability: str,
+        risk_class: str,
+        action_handoff: Mapping[str, Any],
+        policy_digest: str | None = None,
+        plan_digest: str | None = None,
+        route_digest: str | None = None,
+        priority: int = 0,
+        max_attempts: int = 3,
+        checkpoint_digest: str | None = None,
+    ) -> RemoteBrainJobSubmission:
+        """Submit a job whose action identity is derived from one verified handoff."""
+
+        handoff = _action_handoff_value(action_handoff)
+        if handoff is None:
+            raise RemoteBrainWorkerError("action_handoff must be a metadata mapping", code="protocol")
+        if plan_digest is not None and plan_digest != handoff["plan_digest"]:
+            raise RemoteBrainWorkerError("plan_digest does not match the verified action handoff", code="protocol")
+        return await self.submit(
+            idempotency_key=idempotency_key,
+            request=request,
+            mode=mode,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+            policy_digest=policy_digest,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
+            action_plan_digest=handoff["plan_digest"],
+            action_admission_digest=handoff["admission_digest"],
+            action_handoff_digest=handoff["handoff_digest"],
+            priority=priority,
+            max_attempts=max_attempts,
+            checkpoint_digest=checkpoint_digest,
         )
 
     async def status(self, job_id: str) -> Mapping[str, Any]:
@@ -1289,7 +1445,7 @@ class AsyncRemoteBrainJobWorker:
             return raw
         if not isinstance(raw, Mapping):
             raise RemoteBrainWorkerError("async remote brain resolver must return a mapping")
-        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "action_plan", "action_admission", "mode", "request", "kwargs"}
+        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "action_plan", "action_admission", "action_handoff", "mode", "request", "kwargs"}
         unknown = sorted(set(raw).difference(allowed))
         if unknown:
             raise RemoteBrainWorkerError("async remote brain resolver returned unsupported fields")
@@ -1303,6 +1459,7 @@ class AsyncRemoteBrainJobWorker:
             route_digest=raw.get("route_digest"),
             action_plan=raw.get("action_plan"),
             action_admission=raw.get("action_admission"),
+            action_handoff=raw.get("action_handoff"),
         )
 
     @staticmethod

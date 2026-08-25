@@ -1849,12 +1849,14 @@ export {
   MAX_AUTONOMOUS_BRAIN_WORKER_HEARTBEAT_MS,
   MAX_AUTONOMOUS_BRAIN_WORKER_BATCH,
   autonomousBrainJobSpecDigest,
+  autonomousBrainJobSpecDigestForHandoff,
   AutonomousBrainJobWorker,
 } from "./autonomous-brain-worker.js";
 export type {
   AutonomousBrainJobExecutionMode,
   AutonomousBrainJobWorkerStatus,
   AutonomousBrainJobSpecDigestInput,
+  AutonomousBrainJobHandoffSpecDigestInput,
   AutonomousBrainJobResolution,
   AutonomousBrainJobResolverContext,
   AutonomousBrainJobResolver,

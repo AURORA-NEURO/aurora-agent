@@ -472,6 +472,15 @@ admitted status, selected/requested-domain closure, downstream-gate list, and ou
 digest. It proves metadata continuity only; external reviewer authorization, credential and
 provider readiness, source truth, evaluator quality, and effect approval remain independent.
 
+The remote worker can bind that verified object directly to a durable job. Prefer
+`submit_handoff()` when the action admission is the worker's dispatch boundary: it validates the
+handoff, derives `action_plan_digest`, `action_admission_digest`, and `action_handoff_digest`,
+and includes all three in the opaque job identity. The resolver may then return only
+`action_handoff`; the worker revalidates it after the process boundary, checks domain coverage,
+and refuses stale or swapped metadata before it calls a runner. `AsyncRemoteBrainJobWorker`
+provides the same `await submit_handoff(...)` path. The handoff digest is continuity metadata,
+not a provider credential, reviewer authorization, or execution token.
+
 ### One-call deployment-managed execution
 
 When an application has already registered an environment source or secret-manager resolver,

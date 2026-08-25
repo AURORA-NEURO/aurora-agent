@@ -12,9 +12,12 @@ import {
   InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   AutonomousBrainJobSchedulerPersistenceCoordinator,
+  AutonomousActionAdmissionController,
+  InMemoryAutonomousActionAdmissionLedger,
   ProviderRuntimeError,
   admitAutonomousActionPlan,
   autonomousBrainJobSpecDigest,
+  autonomousBrainJobSpecDigestForHandoff,
 } from "../dist/index.js";
 
 const tasks = {
@@ -290,6 +293,54 @@ test("durable worker binds action admission before credential or provider dispat
   assert.equal(stale.status, "failed");
   assert.equal(providerCalls, 1);
   assert.equal(scheduler.get("worker-action-admission-stale").state, "failed");
+});
+
+test("durable worker derives action identity from a verified single-domain handoff", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const ledger = new InMemoryAutonomousActionAdmissionLedger({ maxRecords: 8 });
+  const controller = new AutonomousActionAdmissionController(ledger);
+  const request = requestFor("science");
+  const actionPlan = await brain.actionPlan(request);
+  controller.submit("worker-verified-handoff", actionPlan, {
+    approvals: Object.fromEntries(actionPlan.required_approvals.map((approval) => [approval, true])),
+    reviewed: true,
+    authorizationDigest: "a".repeat(64),
+  });
+  const handoff = controller.dispatchHandoff("worker-verified-handoff");
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 20_000 });
+  scheduler.submit({
+    jobId: "worker-verified-handoff",
+    idempotencyKey: "worker-verified-handoff-private-task",
+    specDigest: autonomousBrainJobSpecDigestForHandoff({ request, mode: "execute", policyDigest: policyDigest("a"), actionHandoff: handoff }),
+    domain: "science",
+    capability: request.capability,
+    riskClass: "review",
+    maxAttempts: 3,
+  }, 20_000);
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "worker-verified-handoff",
+    resolve: ({ job }) => ({
+      specDigest: job.spec_digest,
+      policyDigest: policyDigest("a"),
+      request,
+      mode: "execute",
+      actionHandoff: handoff,
+      execute: { approveProviderCall: true, run: { candidates: [model] } },
+    }),
+  });
+  const waiting = await worker.runOnce("worker-verified-handoff", 20_000);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.equal(providerCalls, 0);
+  scheduler.resumeApproval("worker-verified-handoff", "operator-handoff", "handoff released", 20_001);
+  const completed = await worker.runOnce("worker-verified-handoff", 20_002);
+  assert.equal(completed.status, "succeeded");
+  assert.equal(providerCalls, 1);
+
+  const tampered = { ...handoff, downstream_gates: ["credential_scope"] };
+  assert.throws(() => autonomousBrainJobSpecDigestForHandoff({ request, mode: "execute", actionHandoff: tampered }), /handoff/);
 });
 
 test("worker rejects spec drift before dispatch and quarantines uncertain provider failures", async () => {
