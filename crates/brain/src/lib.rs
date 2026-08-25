@@ -66,6 +66,7 @@ pub mod multimodal_retrieval_synthesis;
 pub mod multimodal_retrieval_workbench;
 pub mod multimodal_retrieval_workflow_fabric;
 pub mod multimodal_safety_assurance;
+pub mod retrieval_assurance_harness;
 pub mod retrieval_contract_model;
 pub mod retrieval_protocol_gateway;
 pub mod retrieval_research_copilot;
@@ -330,6 +331,12 @@ pub use multimodal_safety_assurance::{
     MultimodalAssuranceReceipt, MultimodalAssuranceVerdict,
     CONTRACT_VERSION as MULTIMODAL_SAFETY_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_SAFETY_ASSURANCE_FEATURE_ID,
+};
+pub use retrieval_assurance_harness::{
+    retrieval_assurance_harness_manifest, verify_retrieval_assurance, RetrievalAssuranceError,
+    RetrievalAssuranceReceipt, RetrievalAssuranceVerdict,
+    CONTRACT_VERSION as RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_ASSURANCE_FEATURE_ID,
 };
 pub use retrieval_contract_model::{
     model_retrieval_contract, retrieval_contract_model_manifest, RetrievalContractModelError,
