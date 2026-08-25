@@ -71,6 +71,7 @@ from prism_sdk.bioevalx_federation import BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID
 from prism_sdk.section_interpretation import SectionInterpretationAssuranceReceipt
 from prism_sdk.ops_retrieval import OpsRetrievalAssuranceReceipt
 from prism_sdk.conformance_knowledge import ConformanceKnowledgeWorldAssuranceReceipt
+from prism_sdk.brain_surveillance import BrainEvidenceSurveillanceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2299,6 +2300,33 @@ def test_conformance_knowledge_world_assurance_keeps_comparability_omission_unkn
         benchmark_digest="b" * 64,
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_evidence_surveillance_keeps_empty_feed_fail_closed():
+    receipt = BrainEvidenceSurveillanceReceipt(
+        request_id="request:evidence",
+        study_id="study:organoid",
+        scope="organoid:neural",
+        disposition="unknown",
+        candidate_order=("evidence:a",),
+        qualified_order=(),
+        blocked_order=("evidence:a",),
+        unknown_order=("evidence:a",),
+        source_order=(),
+        modality_order=(),
+        relevance_order=(900,),
+        semantic_order=(),
+        artifact_order=(),
+        provenance_order=(),
+        omissions=(),
+        uncertainty=("evidence:evidence:a:state-unknown-not-qualified",),
+        negative_evidence=(),
+        replay_identity="a" * 64,
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "b" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

@@ -27,6 +27,15 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
+pub mod evidence_surveillance;
+
+pub use evidence_surveillance::{
+    evidence_surveillance_manifest, surveil_evidence, EvidenceFeedRequest, EvidenceObservation,
+    EvidenceSurveillanceDisposition, EvidenceSurveillanceError, QualifiedEvidenceSet,
+    CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+
 pub const BRAIN_SCHEMA_VERSION: &str = "bioprism-autonomous-brain/0.1";
 pub const MODEL_SELECTION_SCHEMA: &str = "bioprism-brain-model-selection/0.1";
 pub const CONTEXTUAL_MODEL_SELECTION_SCHEMA: &str = "bioprism-brain-contextual-model-selection/0.1";

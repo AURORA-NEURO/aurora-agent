@@ -195,6 +195,8 @@ export const OPS_RETRIEVAL_ASSURANCE_FEATURE_ID = "AFA-ops-P02-F25" as const;
 export const OPS_RETRIEVAL_ASSURANCE_CONTRACT_VERSION = "ops-local-retrieval-assurance/1.0" as const;
 export const CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_FEATURE_ID = "AFA-conformance-P04-F26" as const;
 export const CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_CONTRACT_VERSION = "conformance-knowledge-world-assurance/1.0" as const;
+export const BRAIN_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F01" as const;
+export const BRAIN_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3547,6 +3549,49 @@ export function validateConformanceKnowledgeWorldAssuranceReceipt(receipt: Confo
 }
 
 export function conformanceKnowledgeWorldAssuranceReceiptDigest(receipt: ConformanceKnowledgeWorldAssuranceReceipt): string { validateConformanceKnowledgeWorldAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainEvidenceSurveillanceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  study_id: string;
+  scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  candidate_order: string[];
+  qualified_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  source_order: string[];
+  modality_order: string[];
+  relevance_order: number[];
+  semantic_order: string[];
+  artifact_order: string[];
+  provenance_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateBrainEvidenceSurveillanceReceipt(receipt: BrainEvidenceSurveillanceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== BRAIN_EVIDENCE_SURVEILLANCE_FEATURE_ID || receipt.contract_version !== BRAIN_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION) throw new Error("brain surveillance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.study_id.trim() || !receipt.scope.trim() || !receipt.candidate_order.length || receipt.relevance_order.length !== receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("evidence identity, ranking, relevance, locality, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("brain surveillance disposition is unknown");
+  if ([...receipt.qualified_order, ...receipt.blocked_order, ...receipt.unknown_order].some((value) => !receipt.candidate_order.includes(value))) throw new Error("evidence state is not covered by candidate order");
+  for (const values of [receipt.candidate_order, receipt.qualified_order, receipt.blocked_order, receipt.unknown_order, receipt.source_order, receipt.modality_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("brain surveillance ordering is invalid");
+  for (const values of [receipt.semantic_order, receipt.artifact_order, receipt.provenance_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("brain surveillance digest ordering is invalid");
+  const digests = [...receipt.semantic_order, ...receipt.artifact_order, ...receipt.provenance_order, receipt.replay_identity, receipt.artifact.content_hash];
+  for (const value of digests) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("brain surveillance digest is invalid");
+  if (receipt.qualified_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-research-artifacts:"))) throw new Error("qualified evidence requires a local-read receipt");
+  if (!receipt.qualified_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("empty evidence result must be explicitly blocked");
+}
+
+export function brainEvidenceSurveillanceReceiptDigest(receipt: BrainEvidenceSurveillanceReceipt): string { validateBrainEvidenceSurveillanceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

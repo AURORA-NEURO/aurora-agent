@@ -317,6 +317,11 @@ from .conformance_knowledge import (
     CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_CONTRACT_VERSION,
     ConformanceKnowledgeWorldAssuranceReceipt,
 )
+from .brain_surveillance import (
+    BRAIN_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+    BRAIN_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+    BrainEvidenceSurveillanceReceipt,
+)
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
