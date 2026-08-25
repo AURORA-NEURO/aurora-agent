@@ -179,6 +179,8 @@ export const STORE_EVIDENCE_OPERATIONS_FEATURE_ID = "AFA-store-P01-F31" as const
 export const STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION = "store-prospective-evidence-federated-control-plane/1.0" as const;
 export const POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID = "AFA-policy-P22-F32" as const;
 export const POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION = "policy-federated-interoperability-control-plane/1.0" as const;
+export const SAFETY_MECHANISM_WORKFLOW_FEATURE_ID = "AFA-safety-P08-F16" as const;
+export const SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION = "safety-federated-mechanism-workflow/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3149,6 +3151,48 @@ export function validatePolicyInteroperabilityControlReceipt(receipt: PolicyInte
 }
 
 export function policyInteroperabilityControlReceiptDigest(receipt: PolicyInteroperabilityControlReceipt): string { validatePolicyInteroperabilityControlReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface SafetyMechanismWorkflowReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  federation_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  candidate_order: string[];
+  ranked_order: string[];
+  admitted_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  mechanism_order: string[];
+  evidence_order: string[];
+  provenance_order: string[];
+  action_order: string[];
+  replay_identity: string;
+  benchmark_digest: string;
+  checkpoint_id: string;
+  checkpoint_digest: string;
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  workflow_artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateSafetyMechanismWorkflowReceipt(receipt: SafetyMechanismWorkflowReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== SAFETY_MECHANISM_WORKFLOW_FEATURE_ID || receipt.contract_version !== SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION) throw new Error("safety mechanism workflow schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.federation_id.trim() || !receipt.checkpoint_id.trim() || !receipt.candidate_order.length || !receipt.ranked_order.length || !receipt.effect_receipts.length) throw new Error("safety mechanism workflow identity, candidates, checkpoint, locality, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("safety mechanism workflow disposition is unknown");
+  for (const values of [receipt.candidate_order, receipt.ranked_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order, receipt.mechanism_order, receipt.action_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts, receipt.evidence_order, receipt.provenance_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("safety mechanism workflow ordering is invalid");
+  if ([...receipt.ranked_order, ...receipt.admitted_order, ...receipt.blocked_order, ...receipt.unknown_order].some((candidate) => !receipt.candidate_order.includes(candidate))) throw new Error("safety mechanism workflow state is not covered by candidate order");
+  for (const value of [...receipt.evidence_order, ...receipt.provenance_order, receipt.replay_identity, receipt.benchmark_digest, receipt.checkpoint_digest, receipt.workflow_artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("safety mechanism workflow digest is invalid");
+  if (!receipt.effect_receipts.some((effect) => effect.startsWith("schedule:approved-workflow:") || effect.startsWith("checkpoint:mechanism-workflow:") || effect.startsWith("block:safety-workflow:"))) throw new Error("safety mechanism workflow effect is not schedule, checkpoint, or fail-closed block");
+}
+
+export function safetyMechanismWorkflowReceiptDigest(receipt: SafetyMechanismWorkflowReceipt): string { validateSafetyMechanismWorkflowReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

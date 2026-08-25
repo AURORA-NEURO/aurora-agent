@@ -141,6 +141,7 @@ pub mod disclosure;
 pub mod error;
 pub mod incident;
 pub mod integrity;
+pub mod mechanism_workflow;
 pub mod model;
 pub mod provenance;
 pub mod release;
@@ -148,4 +149,10 @@ pub mod supply;
 pub mod threat;
 
 pub use error::{ErrorFamily, SafetyError};
+pub use mechanism_workflow::{
+    orchestrate_mechanism_workflow, safety_workflow_manifest, MechanismCandidate,
+    MechanismWorkflowError, MechanismWorkflowReceipt, MechanismWorkflowRequest, SafetyDisposition,
+    WorkflowEvidenceState, CONTRACT_VERSION as MECHANISM_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_WORKFLOW_FEATURE_ID,
+};
 pub use threat::{Mitigation, Threat, ThreatModel, ThreatStatus, Unrepresentable};

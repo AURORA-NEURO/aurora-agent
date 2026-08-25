@@ -63,6 +63,7 @@ from prism_sdk.research_contracts import STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_I
 from prism_sdk.research_contracts import API_ANALYSIS_ASSURANCE_FEATURE_ID, API_ANALYSIS_ASSURANCE_CONTRACT_VERSION, ApiAnalysisAssuranceReceipt
 from prism_sdk.research_contracts import STORE_EVIDENCE_OPERATIONS_FEATURE_ID, STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION, StoreEvidenceOperationsReceipt
 from prism_sdk.research_contracts import POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID, POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION, PolicyInteroperabilityControlReceipt
+from prism_sdk.research_contracts import SAFETY_MECHANISM_WORKFLOW_FEATURE_ID, SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION, SafetyMechanismWorkflowReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2037,4 +2038,35 @@ def test_policy_interoperability_control_preserves_schema_migration_gate():
     receipt.validate()
     assert receipt.feature_id == POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID
     assert receipt.contract_version == POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_safety_mechanism_workflow_preserves_unsafe_action_block():
+    receipt = SafetyMechanismWorkflowReceipt(
+        request_id="request:mechanism-workflow",
+        workflow_id="workflow:mechanism",
+        federation_id="federation:commons",
+        disposition="unknown",
+        candidate_order=("candidate:a",),
+        ranked_order=("candidate:a",),
+        admitted_order=(),
+        blocked_order=(),
+        unknown_order=("candidate:a",),
+        mechanism_order=(),
+        evidence_order=(),
+        provenance_order=(),
+        action_order=(),
+        replay_identity="a" * 64,
+        benchmark_digest="b" * 64,
+        checkpoint_id="checkpoint:mechanism:7",
+        checkpoint_digest="c" * 64,
+        omissions=("candidate:candidate:a:requested-action-not-permitted",),
+        uncertainty=("candidate:candidate:a:state-unknown-not-admitted",),
+        negative_evidence=(),
+        effect_receipts=("block:safety-workflow:request:mechanism-workflow", "checkpoint:mechanism-workflow:checkpoint:mechanism:7"),
+        workflow_artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == SAFETY_MECHANISM_WORKFLOW_FEATURE_ID
+    assert receipt.contract_version == SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

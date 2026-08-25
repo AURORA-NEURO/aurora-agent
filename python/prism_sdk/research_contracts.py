@@ -197,6 +197,8 @@ STORE_EVIDENCE_OPERATIONS_FEATURE_ID = "AFA-store-P01-F31"
 STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION = "store-prospective-evidence-federated-control-plane/1.0"
 POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID = "AFA-policy-P22-F32"
 POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION = "policy-federated-interoperability-control-plane/1.0"
+SAFETY_MECHANISM_WORKFLOW_FEATURE_ID = "AFA-safety-P08-F16"
+SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION = "safety-federated-mechanism-workflow/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4636,3 +4638,57 @@ class PolicyInteroperabilityControlReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "federation_id": self.federation_id, "disposition": self.disposition, "offer_order": list(self.offer_order), "accepted_order": list(self.accepted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "capability_order": list(self.capability_order), "schema_order": list(self.schema_order), "input_order": list(self.input_order), "output_order": list(self.output_order), "provenance_order": list(self.provenance_order), "evidence_order": list(self.evidence_order), "migration_order": list(self.migration_order), "replay_identity": self.replay_identity, "benchmark_digest": self.benchmark_digest, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "integration_artifact": dict(self.integration_artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class SafetyMechanismWorkflowReceipt:
+    """Cross-language validator for fail-closed mechanism workflow scheduling."""
+
+    request_id: str
+    workflow_id: str
+    federation_id: str
+    disposition: str
+    candidate_order: tuple[str, ...]
+    ranked_order: tuple[str, ...]
+    admitted_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    unknown_order: tuple[str, ...]
+    mechanism_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    action_order: tuple[str, ...]
+    replay_identity: str
+    benchmark_digest: str
+    checkpoint_id: str
+    checkpoint_digest: str
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    workflow_artifact: Mapping[str, Any]
+    feature_id: str = SAFETY_MECHANISM_WORKFLOW_FEATURE_ID
+    contract_version: str = SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != SAFETY_MECHANISM_WORKFLOW_FEATURE_ID or self.contract_version != SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION:
+            raise ResearchContractError("safety mechanism workflow schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.federation_id.strip() or not self.checkpoint_id.strip() or not self.candidate_order or not self.ranked_order or not self.effect_receipts:
+            raise ResearchContractError("safety mechanism workflow identity, candidates, checkpoint, locality, or effects are incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("safety mechanism workflow disposition is unknown")
+        for values in (self.candidate_order, self.ranked_order, self.admitted_order, self.blocked_order, self.unknown_order, self.mechanism_order, self.action_order, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts, self.evidence_order, self.provenance_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("safety mechanism workflow ordering is invalid")
+        if any(candidate not in self.candidate_order for candidate in (*self.ranked_order, *self.admitted_order, *self.blocked_order, *self.unknown_order)):
+            raise ResearchContractError("safety mechanism workflow state is not covered by candidate order")
+        for value in (*self.evidence_order, *self.provenance_order, self.replay_identity, self.benchmark_digest, self.checkpoint_digest, self.workflow_artifact.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("safety mechanism workflow digest is invalid")
+        if not any(effect.startswith("schedule:approved-workflow:") or effect.startswith("checkpoint:mechanism-workflow:") or effect.startswith("block:safety-workflow:") for effect in self.effect_receipts):
+            raise ResearchContractError("safety mechanism workflow effect is not schedule, checkpoint, or fail-closed block")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "federation_id": self.federation_id, "disposition": self.disposition, "candidate_order": list(self.candidate_order), "ranked_order": list(self.ranked_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "mechanism_order": list(self.mechanism_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "action_order": list(self.action_order), "replay_identity": self.replay_identity, "benchmark_digest": self.benchmark_digest, "checkpoint_id": self.checkpoint_id, "checkpoint_digest": self.checkpoint_digest, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "workflow_artifact": dict(self.workflow_artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

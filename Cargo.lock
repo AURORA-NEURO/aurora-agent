@@ -888,6 +888,7 @@ dependencies = [
 name = "bioprism-safety"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-scope",
  "serde",
