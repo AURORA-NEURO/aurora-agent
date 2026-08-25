@@ -10871,3 +10871,34 @@ exactly-once external execution. The effect journal still stores only digests an
 labels; the deployment supplies the protected receipt store, provider status authority, identity,
 authorization, and final reconciliation policy. Tests cover all built-in domains, transient-key
 handling, journal secrecy, and receipt identity drift in Python and TypeScript.
+
+## Generic evidence adapter selection in Python
+
+The Python SDK now exposes the provider-neutral counterpart to the TypeScript evidence adapter
+registry. `AutonomousEvidenceAdapterRegistry` stores caller-owned acquire/project callbacks behind
+metadata-only manifests with explicit domain, capability, and source-kind scope. A registration
+does not retain the callback's values, arguments, credentials, prompts, or transport state. Use
+`register_autonomous_evidence_adapters_for_all_domains()` when a deployment has one reviewed
+adapter factory per built-in domain; the registry projection reports missing coverage rather than
+inventing an adapter.
+
+`AutonomousEvidenceAdapterSelector` produces a digest-bound row for every requested domain. The
+lexicographic strategy is deterministic for static deployments. `weighted_evidence` accepts only
+bounded caller/evaluator signals for health, success rate, evaluator reward, latency, and cost;
+missing or ineligible signals abstain, and score/margin floors make low-confidence selection
+explicit. `AutonomousEvidenceAdapterSelectionPlan.verify()` must succeed again immediately before
+acquisition so a changed registry or candidate manifest cannot silently redirect a run.
+
+`InMemoryAutonomousEvidenceAdapterHealthStore` records hash-chained acquisition and evaluator
+observations and projects circuits plus selection signals without storing source values. Its
+canonical JSON persistence, optional CAS writer, and `AutonomousEvidenceAdapterHealthPersistenceCoordinator`
+support restart and stale-writer fencing. `AutonomousEvidenceAdapterHealthController` joins that
+ledger to adaptive per-domain selection and observed acquirer/evaluator wrappers.
+
+`AutonomousEvidenceAdapterFailoverAcquirer` executes only eligible candidates from the verified
+plan. It composes the typed evidence retry policy, emits bounded candidate/fallback/exhaustion
+events, and advances only within an explicit `max_failovers` budget. Failover does not authorize a
+source, provide credentials, or claim evaluator truth; source contracts, approval, external
+storage, and network policy remain caller-owned. Cross-domain Python tests cover all twelve
+domains, persistence recovery, open circuits, transient failure fallback, tamper refusal, and
+secret-shaped metadata rejection.

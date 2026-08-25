@@ -1852,3 +1852,15 @@ effect/call/provider/operation/attempt identity, raw idempotency keys remain tra
 built-in domains are covered by tamper and replay tests. Remaining deployment work is the actual
 provider status authority, encrypted receipt storage, identity/authorization issuance, rotation,
 and operator policy for genuinely uncertain external effects.
+
+Generic provider-neutral evidence adapter orchestration is now at parity across the SDKs. Python
+exposes `AutonomousEvidenceAdapterRegistry`, digest-bound deterministic/weighted selection plans,
+metadata-only health observations with hash-chained JSON/CAS restart persistence, an adaptive
+health controller, and explicitly budgeted retry/failover over reviewed candidates. The surface
+covers all twelve built-in domains and rejects registry/selection drift, open circuits, tampered
+snapshots, unsupported signals, and secret-shaped metadata before source dispatch. The existing
+LLM-specific orchestration remains available for prompt/model-backed evidence; the generic layer
+is for caller-owned file, browser, database, scientific, enterprise, and connector adapters.
+Deployment responsibilities remain unchanged: source truth, credentials, approval, encrypted
+storage, distributed leases, external network authorization, and evaluator authority stay outside
+the SDK.
