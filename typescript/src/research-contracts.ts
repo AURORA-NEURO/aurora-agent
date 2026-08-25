@@ -133,6 +133,8 @@ export const EVOLUTION_ASSURANCE_CONTRACT_VERSION = "mcp-bounded-evolution-assur
 export const EVOLUTION_ASSURANCE_REQUIRED_CHECKS = ["adversarial-containment", "canonical-order", "locality", "negative-evidence", "policy-authority", "protected-closure", "release-boundary", "replay-integrity", "signed-approval", "source-receipt"] as const;
 export const INTERPRETATION_PLANE_FEATURE_ID = "AFA-ids-P14-F31" as const;
 export const INTERPRETATION_PLANE_CONTRACT_VERSION = "ids-interpretation-federation/1.0" as const;
+export const KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-docgraph-P04-F24" as const;
+export const KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "docgraph-knowledge-gateway/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2231,6 +2233,37 @@ export function validateInterpretationPlaneReceipt(receipt: InterpretationPlaneR
 }
 
 export function interpretationPlaneReceiptDigest(receipt: InterpretationPlaneReceipt): string { validateInterpretationPlaneReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface KnowledgeGatewayReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  federation_id: string;
+  disposition: "shared" | "partial" | "unknown" | "blocked";
+  world: Record<string, unknown>;
+  replay_identity: string;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateKnowledgeGatewayReceipt(receipt: KnowledgeGatewayReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== KNOWLEDGE_GATEWAY_FEATURE_ID || receipt.contract_version !== KNOWLEDGE_GATEWAY_CONTRACT_VERSION) throw new Error("knowledge gateway schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.effect_receipts.length || !receipt.checks.length || receipt.world.boundary !== PRECLINICAL_BOUNDARY) throw new Error("knowledge gateway identity, world, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["shared", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("knowledge gateway disposition is unknown");
+  for (const values of [receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts, Array.isArray(receipt.world.claim_order) ? receipt.world.claim_order as string[] : [], Array.isArray(receipt.world.omissions) ? receipt.world.omissions as string[] : [], Array.isArray(receipt.world.uncertainty) ? receipt.world.uncertainty as string[] : [], Array.isArray(receipt.world.negative_evidence) ? receipt.world.negative_evidence as string[] : []]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("knowledge gateway ordering is invalid");
+  const claimOrder = Array.isArray(receipt.world.claim_order) ? receipt.world.claim_order : [];
+  if (!claimOrder.length && !(Array.isArray(receipt.world.omissions) && receipt.world.omissions.length) && !(Array.isArray(receipt.world.uncertainty) && receipt.world.uncertainty.length) && !(Array.isArray(receipt.world.negative_evidence) && receipt.world.negative_evidence.length)) throw new Error("knowledge gateway world is empty without an explicit unresolved state");
+  if (typeof receipt.world.world_id !== "string" || !receipt.world.world_id.trim() || typeof receipt.world.scope !== "string" || !receipt.world.scope.trim() || typeof receipt.world.target_schema !== "string" || !receipt.world.target_schema.trim()) throw new Error("knowledge gateway world identity and schema are incomplete");
+  for (const value of [...(Array.isArray(receipt.world.artifact_order) ? receipt.world.artifact_order : []), ...(Array.isArray(receipt.world.evidence_order) ? receipt.world.evidence_order : []), ...(Array.isArray(receipt.world.provenance_order) ? receipt.world.provenance_order : []), receipt.world.world_digest, receipt.replay_identity]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("knowledge gateway digest is invalid");
+}
+
+export function knowledgeGatewayReceiptDigest(receipt: KnowledgeGatewayReceipt): string { validateKnowledgeGatewayReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

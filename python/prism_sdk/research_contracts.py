@@ -151,6 +151,8 @@ EVOLUTION_ASSURANCE_REQUIRED_CHECKS = (
 )
 INTERPRETATION_PLANE_FEATURE_ID = "AFA-ids-P14-F31"
 INTERPRETATION_PLANE_CONTRACT_VERSION = "ids-interpretation-federation/1.0"
+KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-docgraph-P04-F24"
+KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "docgraph-knowledge-gateway/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3412,3 +3414,45 @@ class InterpretationPlaneReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "interpretation_order": list(self.interpretation_order), "blocked_order": list(self.blocked_order), "replay_identity": self.replay_identity, "budget": self.budget, "budget_remaining": self.budget_remaining, "max_concurrency": self.max_concurrency, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class KnowledgeGatewayReceipt:
+    """Cross-language validator for federated typed-knowledge exchange."""
+
+    request_id: str
+    federation_id: str
+    disposition: str
+    world: Mapping[str, Any]
+    replay_identity: str
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = KNOWLEDGE_GATEWAY_FEATURE_ID
+    contract_version: str = KNOWLEDGE_GATEWAY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != KNOWLEDGE_GATEWAY_FEATURE_ID or self.contract_version != KNOWLEDGE_GATEWAY_CONTRACT_VERSION:
+            raise ResearchContractError("knowledge gateway schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.federation_id.strip() or not self.effect_receipts or not self.checks or self.world.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("knowledge gateway identity, world, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"shared", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("knowledge gateway disposition is unknown")
+        for values in (self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts, tuple(self.world.get("claim_order", ())), tuple(self.world.get("omissions", ())), tuple(self.world.get("uncertainty", ())), tuple(self.world.get("negative_evidence", ()) )):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("knowledge gateway ordering is invalid")
+        if not tuple(self.world.get("claim_order", ())) and not (self.world.get("omissions") or self.world.get("uncertainty") or self.world.get("negative_evidence")):
+            raise ResearchContractError("knowledge gateway world is empty without an explicit unresolved state")
+        if not isinstance(self.world.get("world_id"), str) or not self.world["world_id"].strip() or not isinstance(self.world.get("scope"), str) or not self.world["scope"].strip() or not isinstance(self.world.get("target_schema"), str) or not self.world["target_schema"].strip():
+            raise ResearchContractError("knowledge gateway world identity and schema are incomplete")
+        for value in tuple(self.world.get("artifact_order", ())) + tuple(self.world.get("evidence_order", ())) + tuple(self.world.get("provenance_order", ())) + (self.world.get("world_digest"), self.replay_identity):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("knowledge gateway digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "federation_id": self.federation_id, "disposition": self.disposition, "world": dict(self.world), "replay_identity": self.replay_identity, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

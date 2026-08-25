@@ -111,6 +111,7 @@ pub mod bundle;
 pub mod error;
 pub mod fixture;
 pub mod impact;
+pub mod knowledge_gateway;
 pub mod lint;
 pub mod markdown;
 pub mod protocol;
@@ -127,6 +128,12 @@ pub use bundle::{
 };
 pub use error::{BundleError, DocGraphError};
 pub use impact::{impact_of, ImpactHop, ImpactReport, PropagationStop};
+pub use knowledge_gateway::{
+    operate_knowledge_gateway, ClaimState, KnowledgeGatewayDisposition, KnowledgeGatewayError,
+    KnowledgeGatewayReceipt, ScopedResearchClaim, ScopedResearchClaims, TypedKnowledgeWorld,
+    CONTRACT_VERSION as KNOWLEDGE_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_GATEWAY_FEATURE_ID,
+};
 pub use lint::{lint, LintFinding, LintReport, LintSeverity};
 pub use markdown::{first_h1, headings, link_targets, parse_document, FrontMatter, Heading};
 pub use protocol::{check_receipt, Citation, Claim, ClaimKind, ProtocolViolation, ReadingReceipt};

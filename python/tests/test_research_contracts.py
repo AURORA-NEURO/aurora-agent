@@ -40,6 +40,7 @@ from prism_sdk.research_contracts import BOUNDED_EVOLUTION_FEATURE_ID, BOUNDED_E
 from prism_sdk.research_contracts import EVOLUTION_IDENTITY_FEATURE_ID, EVOLUTION_IDENTITY_CONTRACT_VERSION, EvolutionIdentityReceipt
 from prism_sdk.research_contracts import EVOLUTION_ASSURANCE_FEATURE_ID, EVOLUTION_ASSURANCE_CONTRACT_VERSION, EvolutionAssuranceReceipt
 from prism_sdk.research_contracts import INTERPRETATION_PLANE_FEATURE_ID, INTERPRETATION_PLANE_CONTRACT_VERSION, InterpretationPlaneReceipt
+from prism_sdk.research_contracts import KNOWLEDGE_GATEWAY_FEATURE_ID, KNOWLEDGE_GATEWAY_CONTRACT_VERSION, KnowledgeGatewayReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1522,4 +1523,23 @@ def test_interpretation_plane_preserves_digest_only_federation_boundary():
     receipt.validate()
     assert receipt.feature_id == INTERPRETATION_PLANE_FEATURE_ID
     assert receipt.contract_version == INTERPRETATION_PLANE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_knowledge_gateway_preserves_unknown_typed_world_state():
+    receipt = KnowledgeGatewayReceipt(
+        request_id="gateway:knowledge",
+        federation_id="federation:commons",
+        disposition="unknown",
+        world={"world_id": "knowledge-world:gateway:knowledge", "scope": "organoid:neural", "target_schema": "typed-knowledge-world/6", "claim_order": (), "artifact_order": (), "evidence_order": (), "provenance_order": (), "omissions": (), "uncertainty": ("request:protected-closure-incomplete",), "negative_evidence": (), "world_digest": "a" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        replay_identity="b" * 64,
+        checks=("scope and protected-closure gates remain explicit",),
+        omissions=(),
+        uncertainty=("request:protected-closure-incomplete",),
+        negative_evidence=(),
+        effect_receipts=("block:knowledge-gateway:unknown",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == KNOWLEDGE_GATEWAY_FEATURE_ID
+    assert receipt.contract_version == KNOWLEDGE_GATEWAY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
