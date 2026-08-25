@@ -211,6 +211,8 @@ export const THROUGHPUT_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F07" as const
 export const THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION = "brain-throughput-evidence-contract/1.0" as const;
 export const FEDERATED_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F08" as const;
 export const FEDERATED_CONTRACT_MODEL_CONTRACT_VERSION = "brain-federated-evidence-contract/1.0" as const;
+export const EVIDENCE_RESEARCH_COPILOT_FEATURE_ID = "AFA-brain-P01-F09" as const;
+export const EVIDENCE_RESEARCH_COPILOT_CONTRACT_VERSION = "brain-evidence-research-copilot/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3751,6 +3753,27 @@ export function validateBrainFederatedContractModelReceipt(receipt: BrainFederat
 }
 
 export function brainFederatedContractModelReceiptDigest(receipt: BrainFederatedContractModelReceipt): string { validateBrainFederatedContractModelReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainEvidenceResearchCopilotReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; operator_id: string; study_id: string; scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; plan_order: string[]; action_order: string[]; candidate_order: string[];
+  qualified_order: string[]; blocked_order: string[]; unknown_order: string[]; evidence_receipt_digest: string; plan_digest: string;
+  replay_identity: string; budget_units: number; omissions: string[]; uncertainty: string[]; negative_evidence: string[];
+  effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainEvidenceResearchCopilotReceipt(receipt: BrainEvidenceResearchCopilotReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVIDENCE_RESEARCH_COPILOT_FEATURE_ID || receipt.contract_version !== EVIDENCE_RESEARCH_COPILOT_CONTRACT_VERSION) throw new Error("evidence copilot schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.operator_id.trim() || !receipt.study_id.trim() || !receipt.scope.trim() || !receipt.plan_order.length || !receipt.action_order.length || receipt.plan_order.length !== receipt.action_order.length || !receipt.effect_receipts.length || !Number.isInteger(receipt.budget_units) || receipt.budget_units <= 0) throw new Error("evidence copilot identity, bounded plan, locality, budget, or effects are incomplete");
+  if (receipt.qualified_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.blocked_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.unknown_order.some((value) => !receipt.candidate_order.includes(value))) throw new Error("evidence copilot state is not covered by candidate order");
+  for (const values of [receipt.plan_order, receipt.action_order, receipt.candidate_order, receipt.qualified_order, receipt.blocked_order, receipt.unknown_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("evidence copilot ordering is invalid");
+  for (const value of [receipt.evidence_receipt_digest, receipt.plan_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("evidence copilot digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-research-artifacts:") && effect !== "block:unsafe-release")) throw new Error("evidence copilot effect is outside local read/compute gate");
+  if (receipt.qualified_order.length && !receipt.effect_receipts.some((effect) => effect.startsWith("read:local-research-artifacts:"))) throw new Error("qualified copilot plan requires a local read receipt");
+  if (!receipt.qualified_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("non-qualified copilot plan must be explicitly blocked");
+}
+
+export function brainEvidenceResearchCopilotReceiptDigest(receipt: BrainEvidenceResearchCopilotReceipt): string { validateBrainEvidenceResearchCopilotReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
