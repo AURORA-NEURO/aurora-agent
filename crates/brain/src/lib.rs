@@ -63,6 +63,7 @@ pub mod multimodal_safety_assurance;
 pub mod retrieval_contract_model;
 pub mod retrieval_research_copilot;
 pub mod retrieval_synthesis;
+pub mod retrieval_workflow_fabric;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -294,6 +295,12 @@ pub use retrieval_synthesis::{
     RetrievalSynthesisError, ScopedRetrievalQuery, SynthesisDisposition,
     CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use retrieval_workflow_fabric::{
+    compile_retrieval_workflow, retrieval_workflow_fabric_manifest, RetrievalWorkflowError,
+    RetrievalWorkflowReceipt, RetrievalWorkflowRequest,
+    CONTRACT_VERSION as RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use throughput_contract_model::{
     model_throughput_contract, throughput_contract_model_manifest, ThroughputContractDisposition,

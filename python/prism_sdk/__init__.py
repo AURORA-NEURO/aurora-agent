@@ -132,6 +132,8 @@ from .research_contracts import (
     THROUGHPUT_RETRIEVAL_COPILOT_CONTRACT_VERSION,
     FEDERATED_RETRIEVAL_COPILOT_FEATURE_ID,
     FEDERATED_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+    RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+    RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
     RetrievalSynthesisReceipt,
     ADAPTER_CONTEXT_COMPILATION_FEATURE_ID,
     ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION,
@@ -353,6 +355,7 @@ from .brain_evidence_copilot import BrainEvidenceResearchCopilotReceipt
 from .brain_multimodal_copilot import BrainMultimodalEvidenceResearchCopilotReceipt
 from .brain_high_throughput_copilot import BrainHighThroughputEvidenceResearchCopilotReceipt
 from .brain_federated_copilot import BrainFederatedEvidenceResearchCopilotReceipt
+from .brain_retrieval_workflow import BrainRetrievalWorkflowFabricReceipt
 from .brain_evidence_workflow import BrainEvidenceWorkflowFabricReceipt
 from .brain_multimodal_workflow import BrainMultimodalEvidenceWorkflowFabricReceipt
 from .brain_high_throughput_workflow import BrainHighThroughputEvidenceWorkflowFabricReceipt
