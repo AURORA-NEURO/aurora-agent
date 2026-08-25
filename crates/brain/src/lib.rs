@@ -62,6 +62,7 @@ pub mod context_omission_adjudication;
 pub mod context_release_admission;
 pub mod context_freshness_drift;
 pub mod context_uncertainty_envelope;
+pub mod context_contradiction_resolution;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -325,6 +326,14 @@ pub use context_uncertainty_envelope::{
     ContextUncertaintyEnvelopeRequest, ContextUncertaintyObservation,
     CONTRACT_VERSION as CONTEXT_UNCERTAINTY_ENVELOPE_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_UNCERTAINTY_ENVELOPE_FEATURE_ID,
+};
+pub use context_contradiction_resolution::{
+    compile_context_contradiction_resolution,
+    context_contradiction_resolution_manifest,
+    ContextContradictionClaim, ContextContradictionResolutionError,
+    ContextContradictionResolutionReceipt, ContextContradictionResolutionRequest,
+    CONTRACT_VERSION as CONTEXT_CONTRADICTION_RESOLUTION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_CONTRADICTION_RESOLUTION_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,

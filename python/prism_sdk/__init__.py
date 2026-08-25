@@ -109,6 +109,8 @@ from .research_contracts import (
     CONTEXT_FRESHNESS_DRIFT_CONTRACT_VERSION,
     CONTEXT_UNCERTAINTY_ENVELOPE_FEATURE_ID,
     CONTEXT_UNCERTAINTY_ENVELOPE_CONTRACT_VERSION,
+    CONTEXT_CONTRADICTION_RESOLUTION_FEATURE_ID,
+    CONTEXT_CONTRADICTION_RESOLUTION_CONTRACT_VERSION,
     FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
     FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
     FederatedContinualRetrievalReceipt,
@@ -455,6 +457,7 @@ from .brain_context_omission_adjudication import BrainContextOmissionAdjudicatio
 from .brain_context_release_admission import BrainContextReleaseAdmissionReceipt, admit_context_release
 from .brain_context_freshness_drift import BrainContextFreshnessDriftReceipt, evaluate_context_freshness_drift
 from .brain_context_uncertainty_envelope import BrainContextUncertaintyEnvelopeReceipt, compile_context_uncertainty_envelope
+from .brain_context_contradiction_resolution import BrainContextContradictionResolutionReceipt, compile_context_contradiction_resolution
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
