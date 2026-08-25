@@ -25,6 +25,8 @@ from prism_sdk.research_contracts import DETERMINISM_GATEWAY_FEATURE_ID, DETERMI
 from prism_sdk.research_contracts import PROVENANCE_ASSURANCE_FEATURE_ID, PROVENANCE_ASSURANCE_CONTRACT_VERSION, ProvenanceAssuranceReceipt
 from prism_sdk.research_contracts import POLICY_GATEWAY_FEATURE_ID, POLICY_GATEWAY_CONTRACT_VERSION, PolicyGatewayReceipt
 from prism_sdk.research_contracts import FEDERATION_WORKFLOW_FEATURE_ID, FEDERATION_WORKFLOW_CONTRACT_VERSION, FederationWorkflowReceipt
+from prism_sdk.research_contracts import RELIABILITY_COPILOT_FEATURE_ID, RELIABILITY_COPILOT_CONTRACT_VERSION, ReliabilityCopilotReceipt
+from prism_sdk.research_contracts import INTEROPERABILITY_GATEWAY_FEATURE_ID, INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, InteroperabilityGatewayReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1162,4 +1164,47 @@ def test_federation_workflow_preserves_checkpoints_compensation_and_partition():
     receipt.validate()
     assert receipt.feature_id == FEDERATION_WORKFLOW_FEATURE_ID
     assert receipt.contract_version == FEDERATION_WORKFLOW_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_reliability_copilot_preserves_dry_run_retry_and_failure_receipts():
+    receipt = ReliabilityCopilotReceipt(
+        workload_id="workload:qc",
+        decision="partial",
+        invocation_order=("invoke:a", "invoke:b"),
+        retry_order=("invoke:b",),
+        tool_order=("tool:qc",),
+        budget_used_units=15,
+        timeout_order=("invoke:a", "invoke:b"),
+        omissions=("failed or timed-out invocations remain unresolved",),
+        uncertainty=(),
+        failure_reasons=("invoke:b: timeout",),
+        effect_receipts=("bounded-tool-invocation:invoke:a:not-executed",),
+        artifact={"content_hash": "a" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == RELIABILITY_COPILOT_FEATURE_ID
+    assert receipt.contract_version == RELIABILITY_COPILOT_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_interoperability_gateway_preserves_migration_loss_and_digest_only_effects():
+    receipt = InteroperabilityGatewayReceipt(
+        request_id="request:qc",
+        endpoint_id="endpoint:site-a",
+        negotiated_version="1.0.0",
+        disposition="migrated",
+        capability_order=("artifact-digest", "qc-summary"),
+        artifact_digest_order=("a" * 64,),
+        replay_token="b" * 64,
+        omissions=("legacy fields remain unknown",),
+        uncertainty=(),
+        semantic_loss=({"field": "legacy_fields", "severity": "unknown"},),
+        checks=("capability names canonicalized",),
+        effect_receipts=("exchange:permitted-artifact-digests-only",),
+        artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == INTEROPERABILITY_GATEWAY_FEATURE_ID
+    assert receipt.contract_version == INTEROPERABILITY_GATEWAY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

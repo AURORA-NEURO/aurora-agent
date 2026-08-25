@@ -93,6 +93,7 @@ pub mod federation_workflow;
 pub mod ingestion;
 pub mod ingestion_gateway;
 pub mod instrument_mesh;
+pub mod interoperability_gateway;
 pub mod interpretation_assurance;
 pub mod inventory;
 pub mod knowledge_workflow;
@@ -109,6 +110,7 @@ pub mod quality_drift;
 pub mod quality_envelope;
 pub mod registry;
 pub mod release_assurance;
+pub mod reliability_copilot;
 pub mod replication_assurance;
 pub mod research_ingest;
 pub mod resource_workbench;
@@ -175,6 +177,14 @@ pub use instrument_mesh::{
     integrate_instrument_mesh, InstrumentActionRequest, InstrumentCapability,
     InstrumentEffectReceipt, InstrumentMeshDecision, InstrumentMeshError, InstrumentMeshReceipt,
     CONTRACT_VERSION as INSTRUMENT_MESH_CONTRACT_VERSION, FEATURE_ID as INSTRUMENT_MESH_FEATURE_ID,
+};
+pub use interoperability_gateway::{
+    negotiate_interoperability, ExternalCapability, InteroperabilityDisposition,
+    InteroperabilityGatewayError, InteroperabilityRequest, NegotiatedIntegration,
+    COMPATIBLE_CONTRACT_VERSION as INTEROPERABILITY_COMPATIBLE_CONTRACT_VERSION,
+    CONTRACT_VERSION as INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as INTEROPERABILITY_GATEWAY_FEATURE_ID,
+    TARGET_CONTRACT_VERSION as INTEROPERABILITY_TARGET_CONTRACT_VERSION,
 };
 pub use interpretation_assurance::{
     assure_interpretation, EvidenceBackedResult, InterpretationAssuranceError,
@@ -248,6 +258,12 @@ pub use release_assurance::{
     ReleaseStudyManifest, ValidatedResearchRun,
     CONTRACT_VERSION as RELEASE_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as RELEASE_ASSURANCE_FEATURE_ID,
+};
+pub use reliability_copilot::{
+    plan_reliable_capability, CapabilityWorkload, ReliabilityCopilotError, ReliabilityDecision,
+    ReliableCapabilityResult, ToolInvocation, ToolManifest,
+    CONTRACT_VERSION as RELIABILITY_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as RELIABILITY_COPILOT_FEATURE_ID,
 };
 pub use replication_assurance::{
     assure_replication, ClaimAndProtocol, ReplicationAssuranceError, ReplicationAssuranceReceipt,

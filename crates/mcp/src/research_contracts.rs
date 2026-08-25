@@ -66,8 +66,16 @@ use bioprism_adapter::{
     DETERMINISM_GATEWAY_FEATURE_ID,
 };
 use bioprism_adapter::{
+    negotiate_interoperability, InteroperabilityGatewayError, InteroperabilityRequest,
+    NegotiatedIntegration, INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+use bioprism_adapter::{
     operate_mechanism_control_plane, MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
     MECHANISM_CONTROL_PLANE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    plan_reliable_capability, CapabilityWorkload, ReliabilityCopilotError,
+    ReliableCapabilityResult, RELIABILITY_COPILOT_FEATURE_ID,
 };
 use bioprism_adapter::{
     qualify_analysis_portfolio, AnalysisPortfolioReceipt, AnalysisPortfolioRequest,
@@ -232,6 +240,8 @@ pub const DETERMINISM_GATEWAY_TOOL: &str = "adapter_determinism_gateway";
 pub const PROVENANCE_ASSURANCE_TOOL: &str = "adapter_provenance_assurance";
 pub const POLICY_GATEWAY_TOOL: &str = "adapter_policy_gateway";
 pub const FEDERATION_WORKFLOW_TOOL: &str = "adapter_federation_workflow";
+pub const RELIABILITY_COPILOT_TOOL: &str = "adapter_reliability_copilot";
+pub const INTEROPERABILITY_GATEWAY_TOOL: &str = "adapter_interoperability_gateway";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1237,6 +1247,50 @@ pub fn validate_federation_workflow_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FEDERATION_WORKFLOW_FEATURE_ID {
         return Err("federation workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn plan_reliable_capability_json(value: &Value) -> Result<Value, String> {
+    let request: CapabilityWorkload = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid reliability copilot workload: {error}"))?;
+    let receipt = plan_reliable_capability(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize reliable capability result: {error}"))
+}
+
+pub fn validate_reliability_copilot_json(
+    value: &Value,
+) -> Result<ReliableCapabilityResult, String> {
+    let receipt: ReliableCapabilityResult = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid reliable capability result: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: ReliabilityCopilotError| error.to_string())?;
+    if receipt.feature_id != RELIABILITY_COPILOT_FEATURE_ID {
+        return Err("reliability copilot feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn negotiate_interoperability_json(value: &Value) -> Result<Value, String> {
+    let request: InteroperabilityRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid interoperability gateway request: {error}"))?;
+    let receipt = negotiate_interoperability(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize negotiated integration: {error}"))
+}
+
+pub fn validate_interoperability_gateway_json(
+    value: &Value,
+) -> Result<NegotiatedIntegration, String> {
+    let receipt: NegotiatedIntegration = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid negotiated integration: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: InteroperabilityGatewayError| error.to_string())?;
+    if receipt.feature_id != INTEROPERABILITY_GATEWAY_FEATURE_ID {
+        return Err("interoperability gateway feature id mismatch".into());
     }
     Ok(receipt)
 }

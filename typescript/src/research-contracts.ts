@@ -102,6 +102,10 @@ export const POLICY_GATEWAY_FEATURE_ID = "AFA-adapter-P19-F24" as const;
 export const POLICY_GATEWAY_CONTRACT_VERSION = "federated-policy-autonomy-gateway/1.0" as const;
 export const FEDERATION_WORKFLOW_FEATURE_ID = "AFA-adapter-P20-F15" as const;
 export const FEDERATION_WORKFLOW_CONTRACT_VERSION = "prospective-federation-workflow-fabric/1.0" as const;
+export const RELIABILITY_COPILOT_FEATURE_ID = "AFA-adapter-P21-F12" as const;
+export const RELIABILITY_COPILOT_CONTRACT_VERSION = "federated-reliability-copilot/1.0" as const;
+export const INTEROPERABILITY_GATEWAY_FEATURE_ID = "AFA-adapter-P22-F24" as const;
+export const INTEROPERABILITY_GATEWAY_CONTRACT_VERSION = "federated-interoperability-gateway/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1705,6 +1709,69 @@ export function validateFederationWorkflowReceipt(receipt: FederationWorkflowRec
 }
 
 export function federationWorkflowReceiptDigest(receipt: FederationWorkflowReceipt): string { validateFederationWorkflowReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ReliabilityCopilotReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  workload_id: string;
+  decision: "completed" | "dry_run" | "partial" | "degraded" | "blocked";
+  invocation_order: string[];
+  retry_order: string[];
+  tool_order: string[];
+  budget_used_units: number;
+  timeout_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  failure_reasons: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateReliabilityCopilotReceipt(receipt: ReliabilityCopilotReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RELIABILITY_COPILOT_FEATURE_ID || receipt.contract_version !== RELIABILITY_COPILOT_CONTRACT_VERSION) throw new Error("reliability copilot schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.workload_id.trim() || !receipt.invocation_order.length || !receipt.tool_order.length || !receipt.effect_receipts.length) throw new Error("reliability copilot identity, invocations, tools, effects, locality, or boundary are incomplete");
+  if (!new Set(["completed", "dry_run", "partial", "degraded", "blocked"]).has(receipt.decision)) throw new Error("reliability copilot decision is unknown");
+  for (const values of [receipt.invocation_order, receipt.retry_order, receipt.tool_order, receipt.timeout_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("reliability copilot ordering is invalid");
+  if (!Number.isInteger(receipt.budget_used_units) || receipt.budget_used_units < 0) throw new Error("reliability copilot budget is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("reliability copilot artifact digest is invalid");
+}
+
+export function reliabilityCopilotReceiptDigest(receipt: ReliabilityCopilotReceipt): string { validateReliabilityCopilotReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface InteroperabilityGatewayReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  endpoint_id: string;
+  negotiated_version: string;
+  disposition: "accepted" | "migrated" | "approval_required" | "blocked" | "incompatible" | "unknown";
+  capability_order: string[];
+  artifact_digest_order: string[];
+  replay_token: string;
+  omissions: string[];
+  uncertainty: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  checks: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateInteroperabilityGatewayReceipt(receipt: InteroperabilityGatewayReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== INTEROPERABILITY_GATEWAY_FEATURE_ID || receipt.contract_version !== INTEROPERABILITY_GATEWAY_CONTRACT_VERSION) throw new Error("interoperability gateway schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.endpoint_id.trim() || !receipt.negotiated_version.trim() || !receipt.capability_order.length || !receipt.checks.length || !receipt.effect_receipts.length) throw new Error("interoperability gateway identity, capabilities, checks, effects, locality, or boundary are incomplete");
+  if (!new Set(["accepted", "migrated", "approval_required", "blocked", "incompatible", "unknown"]).has(receipt.disposition)) throw new Error("interoperability gateway disposition is unknown");
+  for (const values of [receipt.capability_order, receipt.artifact_digest_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("interoperability gateway ordering is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.replay_token) || receipt.artifact_digest_order.some((value) => !/^[0-9a-f]{64}$/.test(value))) throw new Error("interoperability gateway digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("interoperability gateway artifact digest is invalid");
+}
+
+export function interoperabilityGatewayReceiptDigest(receipt: InteroperabilityGatewayReceipt): string { validateInteroperabilityGatewayReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

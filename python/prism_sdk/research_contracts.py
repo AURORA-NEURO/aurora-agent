@@ -109,6 +109,10 @@ POLICY_GATEWAY_FEATURE_ID = "AFA-adapter-P19-F24"
 POLICY_GATEWAY_CONTRACT_VERSION = "federated-policy-autonomy-gateway/1.0"
 FEDERATION_WORKFLOW_FEATURE_ID = "AFA-adapter-P20-F15"
 FEDERATION_WORKFLOW_CONTRACT_VERSION = "prospective-federation-workflow-fabric/1.0"
+RELIABILITY_COPILOT_FEATURE_ID = "AFA-adapter-P21-F12"
+RELIABILITY_COPILOT_CONTRACT_VERSION = "federated-reliability-copilot/1.0"
+INTEROPERABILITY_GATEWAY_FEATURE_ID = "AFA-adapter-P22-F24"
+INTEROPERABILITY_GATEWAY_CONTRACT_VERSION = "federated-interoperability-gateway/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2747,3 +2751,82 @@ class FederationWorkflowReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "workflow_id": self.workflow_id, "decision": self.decision, "task_order": list(self.task_order), "checkpoint_order": list(self.checkpoint_order), "compensation_order": list(self.compensation_order), "total_budget_units": self.total_budget_units, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "effect_receipt": self.effect_receipt, "envelope": dict(self.envelope), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ReliabilityCopilotReceipt:
+    workload_id: str
+    decision: str
+    invocation_order: tuple[str, ...]
+    retry_order: tuple[str, ...]
+    tool_order: tuple[str, ...]
+    budget_used_units: int
+    timeout_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    failure_reasons: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RELIABILITY_COPILOT_FEATURE_ID
+    contract_version: str = RELIABILITY_COPILOT_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RELIABILITY_COPILOT_FEATURE_ID or self.contract_version != RELIABILITY_COPILOT_CONTRACT_VERSION:
+            raise ResearchContractError("reliability copilot schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.workload_id.strip() or not self.invocation_order or not self.tool_order or not self.effect_receipts:
+            raise ResearchContractError("reliability copilot identity, invocations, tools, effects, locality, or boundary are incomplete")
+        if self.decision not in {"completed", "dry_run", "partial", "degraded", "blocked"}:
+            raise ResearchContractError("reliability copilot decision is unknown")
+        for values in (self.invocation_order, self.retry_order, self.tool_order, self.timeout_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("reliability copilot ordering is invalid")
+        if not isinstance(self.budget_used_units, int) or self.budget_used_units < 0:
+            raise ResearchContractError("reliability copilot budget is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("reliability copilot artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "workload_id": self.workload_id, "decision": self.decision, "invocation_order": list(self.invocation_order), "retry_order": list(self.retry_order), "tool_order": list(self.tool_order), "budget_used_units": self.budget_used_units, "timeout_order": list(self.timeout_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "failure_reasons": list(self.failure_reasons), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class InteroperabilityGatewayReceipt:
+    request_id: str
+    endpoint_id: str
+    negotiated_version: str
+    disposition: str
+    capability_order: tuple[str, ...]
+    artifact_digest_order: tuple[str, ...]
+    replay_token: str
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    checks: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = INTEROPERABILITY_GATEWAY_FEATURE_ID
+    contract_version: str = INTEROPERABILITY_GATEWAY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != INTEROPERABILITY_GATEWAY_FEATURE_ID or self.contract_version != INTEROPERABILITY_GATEWAY_CONTRACT_VERSION:
+            raise ResearchContractError("interoperability gateway schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.endpoint_id.strip() or not self.negotiated_version.strip() or not self.capability_order or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("interoperability gateway identity, capabilities, checks, effects, locality, or boundary are incomplete")
+        if self.disposition not in {"accepted", "migrated", "approval_required", "blocked", "incompatible", "unknown"}:
+            raise ResearchContractError("interoperability gateway disposition is unknown")
+        for values in (self.capability_order, self.artifact_digest_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("interoperability gateway ordering is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.replay_token) or any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in self.artifact_digest_order):
+            raise ResearchContractError("interoperability gateway digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("interoperability gateway artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "endpoint_id": self.endpoint_id, "negotiated_version": self.negotiated_version, "disposition": self.disposition, "capability_order": list(self.capability_order), "artifact_digest_order": list(self.artifact_digest_order), "replay_token": self.replay_token, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "checks": list(self.checks), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
