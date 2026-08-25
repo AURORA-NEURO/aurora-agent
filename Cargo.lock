@@ -38,6 +38,7 @@ dependencies = [
 name = "bioprism-api"
 version = "0.1.0"
 dependencies = [
+ "bioprism-adapter",
  "bioprism-devplat",
  "bioprism-factory",
  "bioprism-ids",
