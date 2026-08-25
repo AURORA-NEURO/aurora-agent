@@ -72,6 +72,7 @@ from prism_sdk.section_interpretation import SectionInterpretationAssuranceRecei
 from prism_sdk.ops_retrieval import OpsRetrievalAssuranceReceipt
 from prism_sdk.conformance_knowledge import ConformanceKnowledgeWorldAssuranceReceipt
 from prism_sdk.brain_surveillance import BrainEvidenceSurveillanceReceipt
+from prism_sdk.brain_multimodal_surveillance import BrainMultimodalEvidenceSurveillanceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2327,6 +2328,33 @@ def test_brain_evidence_surveillance_keeps_empty_feed_fail_closed():
         replay_identity="a" * 64,
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_multimodal_surveillance_keeps_missing_modality_fail_closed():
+    receipt = BrainMultimodalEvidenceSurveillanceReceipt(
+        request_id="request:multimodal",
+        study_order=("study:a", "study:b"),
+        scope="organoid:neural",
+        disposition="partial",
+        candidate_order=("evidence:a",),
+        qualified_order=("evidence:a",),
+        blocked_order=(),
+        unknown_order=(),
+        source_order=("source:a",),
+        modality_order=("imaging",),
+        relevance_order=(900,),
+        semantic_order=("a" * 64,),
+        artifact_order=("b" * 64,),
+        provenance_order=("c" * 64,),
+        omissions=("modality:transcriptomics:required-coverage-missing",),
+        uncertainty=(),
+        negative_evidence=(),
+        replay_identity="d" * 64,
+        effect_receipts=("read:local-research-artifacts:request:multimodal",),
+        artifact={"content_hash": "e" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

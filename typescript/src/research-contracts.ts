@@ -197,6 +197,8 @@ export const CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_FEATURE_ID = "AFA-conformance
 export const CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_CONTRACT_VERSION = "conformance-knowledge-world-assurance/1.0" as const;
 export const BRAIN_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F01" as const;
 export const BRAIN_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance/1.0" as const;
+export const BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F02" as const;
+export const BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-multimodal/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3592,6 +3594,29 @@ export function validateBrainEvidenceSurveillanceReceipt(receipt: BrainEvidenceS
 }
 
 export function brainEvidenceSurveillanceReceiptDigest(receipt: BrainEvidenceSurveillanceReceipt): string { validateBrainEvidenceSurveillanceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainMultimodalEvidenceSurveillanceReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; study_order: string[]; scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; candidate_order: string[]; qualified_order: string[];
+  blocked_order: string[]; unknown_order: string[]; source_order: string[]; modality_order: string[]; relevance_order: number[];
+  semantic_order: string[]; artifact_order: string[]; provenance_order: string[]; omissions: string[]; uncertainty: string[];
+  negative_evidence: string[]; replay_identity: string; effect_receipts: string[]; artifact: Record<string, unknown>;
+  raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainMultimodalEvidenceSurveillanceReceipt(receipt: BrainMultimodalEvidenceSurveillanceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_FEATURE_ID || receipt.contract_version !== BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION) throw new Error("multimodal brain surveillance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.scope.trim() || receipt.study_order.length < 2 || !receipt.candidate_order.length || receipt.relevance_order.length !== receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("multimodal identity, study coverage, ranking, locality, or effects are incomplete");
+  if ([...receipt.qualified_order, ...receipt.blocked_order, ...receipt.unknown_order].some((value) => !receipt.candidate_order.includes(value))) throw new Error("multimodal state is not covered by candidate order");
+  for (const values of [receipt.study_order, receipt.candidate_order, receipt.qualified_order, receipt.blocked_order, receipt.unknown_order, receipt.source_order, receipt.modality_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("multimodal ordering is invalid");
+  for (const values of [receipt.semantic_order, receipt.artifact_order, receipt.provenance_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("multimodal digest ordering is invalid");
+  const digests = [...receipt.semantic_order, ...receipt.artifact_order, ...receipt.provenance_order, receipt.replay_identity, receipt.artifact.content_hash];
+  for (const value of digests) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("multimodal brain surveillance digest is invalid");
+  if (receipt.qualified_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-research-artifacts:"))) throw new Error("qualified multimodal evidence requires a local-read receipt");
+  if (!receipt.qualified_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("empty multimodal evidence result must be explicitly blocked");
+}
+
+export function brainMultimodalEvidenceSurveillanceReceiptDigest(receipt: BrainMultimodalEvidenceSurveillanceReceipt): string { validateBrainMultimodalEvidenceSurveillanceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

@@ -28,12 +28,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub mod evidence_surveillance;
+pub mod multimodal_evidence_surveillance;
 
 pub use evidence_surveillance::{
     evidence_surveillance_manifest, surveil_evidence, EvidenceFeedRequest, EvidenceObservation,
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, QualifiedEvidenceSet,
     CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance::{
+    multimodal_evidence_surveillance_manifest, surveil_multimodal_evidence,
+    MultimodalEvidenceDisposition, MultimodalEvidenceError, MultimodalEvidenceFeedRequest,
+    QualifiedMultimodalEvidenceSet, CONTRACT_VERSION as MULTIMODAL_EVIDENCE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_EVIDENCE_FEATURE_ID,
 };
 
 pub const BRAIN_SCHEMA_VERSION: &str = "bioprism-autonomous-brain/0.1";
