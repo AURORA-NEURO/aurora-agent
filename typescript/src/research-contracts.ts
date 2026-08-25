@@ -78,6 +78,8 @@ export const INGESTION_GATEWAY_FEATURE_ID = "AFA-adapter-P06-F23" as const;
 export const INGESTION_GATEWAY_CONTRACT_VERSION = "1.0" as const;
 export const QUALITY_ENVELOPE_FEATURE_ID = "AFA-adapter-P07-F06" as const;
 export const QUALITY_ENVELOPE_CONTRACT_VERSION = "multi-study-quality-envelope/1.0" as const;
+export const EXPERIMENT_DESIGN_CONTROL_FEATURE_ID = "AFA-adapter-P09-F30" as const;
+export const EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION = "federated-experiment-design-control-plane/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1283,6 +1285,38 @@ export function validateQualityEnvelopeReceipt(receipt: QualityEnvelopeReceipt):
 }
 
 export function qualityEnvelopeReceiptDigest(receipt: QualityEnvelopeReceipt): string { validateQualityEnvelopeReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ExperimentDesignReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  objective_id: string;
+  decision: "admitted" | "partial" | "blocked";
+  site_order: string[];
+  assignments: readonly Record<string, unknown>[];
+  modality_coverage: Record<string, number>;
+  omitted_modalities: string[];
+  comparability_conflicts: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateExperimentDesignReceipt(receipt: ExperimentDesignReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EXPERIMENT_DESIGN_CONTROL_FEATURE_ID || receipt.contract_version !== EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION) throw new Error("experiment design schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.objective_id.trim() || !receipt.reasons.length) throw new Error("experiment design identity, locality, or reasons are incomplete");
+  if (!new Set(["admitted", "partial", "blocked"]).has(receipt.decision)) throw new Error("experiment design decision is unknown");
+  if (!receipt.site_order.length || JSON.stringify([...new Set(receipt.site_order)].sort()) !== JSON.stringify(receipt.site_order)) throw new Error("experiment design site ordering is invalid");
+  if (receipt.decision === "blocked" && receipt.assignments.length) throw new Error("blocked experiment design cannot contain assignments");
+  for (const assignment of receipt.assignments) if (typeof assignment.site_id !== "string" || !assignment.site_id.trim() || typeof assignment.modality !== "string" || !assignment.modality.trim() || typeof assignment.instrument_profile !== "string" || !assignment.instrument_profile.trim() || assignment.authorized !== true || typeof assignment.budget !== "number" || !Number.isFinite(assignment.budget)) throw new Error("experiment design assignment is invalid");
+  for (const [modality, count] of Object.entries(receipt.modality_coverage)) if (!modality.trim() || !Number.isInteger(count) || count < 0) throw new Error("experiment design modality coverage is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("experiment design artifact digest is invalid");
+}
+
+export function experimentDesignReceiptDigest(receipt: ExperimentDesignReceipt): string { validateExperimentDesignReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

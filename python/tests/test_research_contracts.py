@@ -13,6 +13,7 @@ from prism_sdk.research_contracts import KNOWLEDGE_WORKFLOW_FEATURE_ID, KNOWLEDG
 from prism_sdk.research_contracts import RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE_WORKBENCH_CONTRACT_VERSION, ResourceWorkbenchReceipt
 from prism_sdk.research_contracts import INGESTION_GATEWAY_FEATURE_ID, INGESTION_GATEWAY_CONTRACT_VERSION, IngestionGatewayReceipt
 from prism_sdk.research_contracts import QUALITY_ENVELOPE_FEATURE_ID, QUALITY_ENVELOPE_CONTRACT_VERSION, QualityEnvelopeReceipt
+from prism_sdk.research_contracts import EXPERIMENT_DESIGN_CONTROL_FEATURE_ID, EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION, ExperimentDesignReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -880,4 +881,24 @@ def test_quality_envelope_preserves_incompatible_multi_study_profiles():
     receipt.validate()
     assert receipt.feature_id == QUALITY_ENVELOPE_FEATURE_ID
     assert receipt.contract_version == QUALITY_ENVELOPE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_experiment_design_blocks_without_authorization_and_keeps_assignments_empty():
+    receipt = ExperimentDesignReceipt(
+        request_id="design:python",
+        objective_id="objective:organoid",
+        disposition="blocked",
+        site_order=("site:a", "site:b"),
+        assignments=(),
+        modality_coverage={"imaging": 1, "transcriptomics": 1},
+        omitted_modalities=(),
+        comparability_conflicts=(),
+        semantic_loss=({"field": "authorization", "reason": "missing", "severity": "decision_relevant"},),
+        reasons=("policy or independent authorization is incomplete",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == EXPERIMENT_DESIGN_CONTROL_FEATURE_ID
+    assert receipt.contract_version == EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

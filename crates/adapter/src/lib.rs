@@ -84,6 +84,7 @@ pub mod context_assurance;
 pub mod csv;
 pub mod error;
 pub mod evidence_surveillance;
+pub mod experiment_design_control;
 pub mod fact;
 pub mod ingestion;
 pub mod ingestion_gateway;
@@ -119,6 +120,13 @@ pub use evidence_surveillance::{
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceReceipt,
     QualifiedEvidenceSet, CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use experiment_design_control::{
+    compile_experiment_design, DesignDecision, DesignSite, ExperimentAssignment,
+    ExperimentDesignError, ExperimentDesignReceipt, ExperimentObjective,
+    FederatedExperimentDesignRequest,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
 };
 pub use fact::{FactDraft, ValueQualifiers};
 pub use ingestion::Ingestion;

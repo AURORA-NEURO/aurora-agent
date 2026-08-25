@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+import math
 import re
 from typing import Any, Mapping, Sequence
 
@@ -84,6 +85,8 @@ INGESTION_GATEWAY_FEATURE_ID = "AFA-adapter-P06-F23"
 INGESTION_GATEWAY_CONTRACT_VERSION = "1.0"
 QUALITY_ENVELOPE_FEATURE_ID = "AFA-adapter-P07-F06"
 QUALITY_ENVELOPE_CONTRACT_VERSION = "multi-study-quality-envelope/1.0"
+EXPERIMENT_DESIGN_CONTROL_FEATURE_ID = "AFA-adapter-P09-F30"
+EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION = "federated-experiment-design-control-plane/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2225,3 +2228,44 @@ class QualityEnvelopeReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "envelope_id": self.envelope_id, "reference_schema": self.reference_schema, "comparability_profile": self.comparability_profile, "disposition": self.disposition, "study_order": list(self.study_order), "modality_coverage": dict(self.modality_coverage), "verdicts": [dict(item) for item in self.verdicts], "omitted_modalities": list(self.omitted_modalities), "comparability_conflicts": list(self.comparability_conflicts), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ExperimentDesignReceipt:
+    request_id: str
+    objective_id: str
+    disposition: str
+    site_order: tuple[str, ...]
+    assignments: tuple[Mapping[str, Any], ...]
+    modality_coverage: Mapping[str, int]
+    omitted_modalities: tuple[str, ...]
+    comparability_conflicts: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = EXPERIMENT_DESIGN_CONTROL_FEATURE_ID
+    contract_version: str = EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != EXPERIMENT_DESIGN_CONTROL_FEATURE_ID or self.contract_version != EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION:
+            raise ResearchContractError("experiment design schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.objective_id.strip() or not self.reasons:
+            raise ResearchContractError("experiment design identity, boundary, or reasons are incomplete")
+        if self.disposition not in {"admitted", "partial", "blocked"}:
+            raise ResearchContractError("experiment design disposition is unknown")
+        if not self.site_order or tuple(sorted(set(self.site_order))) != self.site_order:
+            raise ResearchContractError("experiment design site ordering is invalid")
+        if self.disposition == "blocked" and self.assignments:
+            raise ResearchContractError("blocked experiment design cannot contain assignments")
+        for assignment in self.assignments:
+            if not str(assignment.get("site_id", "")).strip() or not str(assignment.get("modality", "")).strip() or not str(assignment.get("instrument_profile", "")).strip() or assignment.get("authorized") is not True or not isinstance(assignment.get("budget"), (int, float)) or not math.isfinite(float(assignment["budget"])):
+                raise ResearchContractError("experiment design assignment is invalid")
+        if any(not str(key).strip() or not isinstance(value, int) or value < 0 for key, value in self.modality_coverage.items()):
+            raise ResearchContractError("experiment design modality coverage is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("experiment design artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "objective_id": self.objective_id, "disposition": self.disposition, "site_order": list(self.site_order), "assignments": [dict(item) for item in self.assignments], "modality_coverage": dict(self.modality_coverage), "omitted_modalities": list(self.omitted_modalities), "comparability_conflicts": list(self.comparability_conflicts), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "boundary": self.boundary})
