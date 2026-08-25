@@ -39,7 +39,8 @@ use bioprism_ids::ContentHash;
 use bioprism_influence::summarise;
 use bioprism_section::{
     ContextCertificate, DecisionSection, EvidenceCapsule, InfluenceClass, OmissionGroup,
-    OmissionManifest, ReferenceOmissions, RefinementOption, SourceHashes, UnresolvedObligation,
+    OmissionManifest, ProvenUnreachable, ReferenceOmissions, RefinementOption, SourceHashes,
+    UnresolvedObligation,
 };
 use bioprism_world::{Fact, WorldSource};
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,22 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 const REFERENCE_LIMITATION: &str = "Reference slicer uses dependency reachability and protected tags; it does not yet implement sheaf cohomology, FAQ-width optimization, abstract interpretation, or formal influence bounds.";
+
+/// The frozen `fiber-context-certificate/0.1` classification string.
+///
+/// A constant, and *not* a computed classification of this compile's omissions. The v0.1 wire
+/// format gives the omitted population one count and one string, and one string cannot name the
+/// several structural reasons a fact can be omitted for. It is emitted verbatim by all three parity
+/// implementations, so it is a schema literal in the same family as `schema_version`; changing it
+/// would move the reference digest and is a version bump, not an edit.
+///
+/// It is also, read as a classification, incomplete: a fact shadowed by a later fact providing the
+/// same variable *does* have a backward dependency path and *is* accessible at the cut, and this
+/// string names neither case. [`CertificateProfile::Extended`]'s manifest is where the omitted
+/// population is actually classified, per group and per class, and where a shadowed omission is
+/// separated from a proven-irrelevant one. A consumer that needs the distinction must read the
+/// manifest; a consumer reading only this field has a count and a label, which is what
+/// `bioprism_section::certificate` says about the v0.1 shape in its own documentation.
 const OMISSION_CLASSIFICATION: &str = "no_backward_dependency_path_or_temporally_inaccessible";
 const RETROSPECTIVE_ACTION: &str = "advance_time_cut_or_use_retrospective_mode";
 
@@ -526,6 +543,13 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
     // Counted, never enumerated: the omitted set is the corpus minus the selection, and
     // materialising it would reintroduce the very whole-world traversal the design rejects.
     let omitted_total = source.total_facts().saturating_sub(selected_facts.len());
+    let reachable_but_unselected = reachable_but_unselected(
+        source,
+        &slice.needed_variables,
+        &selected_facts,
+        &withheld_by_policy,
+        &inaccessible,
+    );
     let selected_exploratory = ordered_facts
         .iter()
         .filter(|fact| fact.has_tag("exploratory"))
@@ -559,6 +583,7 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         omitted_total,
         &withheld_influence,
         &withheld_by_policy,
+        &reachable_but_unselected,
         omitted_exploratory,
     );
     let bounded = summarise(manifest.groups.iter());
@@ -625,11 +650,62 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
     })
 }
 
+/// Omitted facts that provide a variable the slice needs, and that nothing else accounts for.
+///
+/// The structural predicate behind [`InfluenceClass::Zero`]. A fact whose variable is not in
+/// `needed` cannot reach a target through any factor chain, because the backward slice is by
+/// construction the set of variables that can; its omission provably cannot move the decision. A
+/// fact whose variable *is* in `needed` has such a path, so its omission is proved to be
+/// irrelevant by nothing at all.
+///
+/// Exactly one fact per needed variable survives selection —
+/// [`bioprism_world::WorldSource::fact_providing`] returns the last in document order — so every
+/// other provider of that variable was dropped by a document-order tiebreak. Before this pass
+/// existed they fell into the zero group by subtraction and were published with a bound of `0.0`,
+/// which asserts a proof of irrelevance for a fact the compiler never looked at. `AGENTS.md` names
+/// this exact collapse as non-negotiable: "provably cannot matter" and "nobody checked" must never
+/// share a representation.
+///
+/// Policy-withheld and temporally withheld facts are excluded here because they already carry
+/// their own class; leaving them in would count one omission in two groups and inflate
+/// [`OmissionManifest::total_omitted`] past the corpus.
+///
+/// Output-sensitive: one lookup per needed variable, and no traversal of the omitted population.
+/// Enumerated rather than counted, because unlike the unreachable group this one is bounded by the
+/// compiled region and its members can therefore be named on the certificate.
+fn reachable_but_unselected<S: WorldSource + ?Sized>(
+    source: &S,
+    needed: &BTreeSet<String>,
+    selected: &BTreeSet<String>,
+    withheld_by_policy: &[String],
+    inaccessible: &[String],
+) -> Vec<String> {
+    let mut unselected: BTreeSet<String> = BTreeSet::new();
+    for variable in needed {
+        for id in source.shadowed_provider_ids(variable) {
+            if selected.contains(&id)
+                || withheld_by_policy.contains(&id)
+                || inaccessible.contains(&id)
+            {
+                continue;
+            }
+            unselected.insert(id);
+        }
+    }
+    unselected.into_iter().collect()
+}
+
 /// Groups omissions by structural reason and assigns each an influence class.
 ///
 /// Facts with no backward dependency path are classed [`InfluenceClass::Zero`] *conditional on
 /// the declared factor graph being complete* — the reason string states that assumption, because
 /// an incomplete factor graph would turn a zero-influence claim into an unknown-influence one.
+/// That class is now minted from [`ProvenUnreachable`] rather than from a bare remainder, so the
+/// population computed by [`reachable_but_unselected`] has to be named at the call site before a
+/// zero-influence count can exist at all. Those facts get [`InfluenceClass::Unknown`], which voids
+/// the sufficiency claim, and that is the correct verdict: a decision compiled while a competing
+/// value for a needed variable sat unexamined in the corpus is not one the compiler can certify.
+///
 /// Temporally withheld facts are [`InfluenceClass::DeferredAcquisition`], never zero: they might
 /// well change the decision, they are simply not readable yet.
 ///
@@ -650,22 +726,35 @@ fn build_manifest(
     omitted_total: usize,
     withheld: &WithheldSplit,
     withheld_by_policy: &[String],
+    reachable_but_unselected: &[String],
     exploratory: usize,
 ) -> OmissionManifest {
     let mut manifest = OmissionManifest::default();
-    let unreachable = omitted_total
+    let accounted_for = omitted_total
         .saturating_sub(withheld.bounded.len())
         .saturating_sub(withheld.deferred.len())
         .saturating_sub(withheld_by_policy.len());
 
-    if unreachable > 0 {
+    if let Some(proven) =
+        ProvenUnreachable::remainder(accounted_for, reachable_but_unselected.len())
+            .filter(|proven| proven.count() > 0)
+    {
+        manifest.push(OmissionGroup::structurally_zero(
+            "no backward dependency path to any target under the declared factor graph",
+            proven,
+            Vec::new(),
+        ));
+    }
+    if !reachable_but_unselected.is_empty() {
         manifest.push(OmissionGroup {
-            reason: "no backward dependency path to any target under the declared factor graph"
+            reason: "provides a variable the slice needs but was shadowed by a later fact \
+                     providing the same variable; the omission has a backward dependency path to \
+                     the target and no bound on it was computed"
                 .into(),
-            influence: InfluenceClass::Zero,
-            count: unreachable,
-            bound: Some(0.0),
-            examples: Vec::new(),
+            influence: InfluenceClass::Unknown,
+            count: reachable_but_unselected.len(),
+            bound: None,
+            examples: reachable_but_unselected.iter().take(3).cloned().collect(),
         });
     }
     if !withheld_by_policy.is_empty() {

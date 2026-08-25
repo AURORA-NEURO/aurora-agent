@@ -25,6 +25,7 @@ pub struct LazyWorld {
     factors: SortedIndex,
     producers: SortedIndex,
     tags: SortedIndex,
+    shadowed: SortedIndex,
     events: Vec<CausalEvent>,
 }
 
@@ -52,6 +53,7 @@ impl LazyWorld {
             factors: SortedIndex::open(directory, "factors")?,
             producers: SortedIndex::open(directory, "producers")?,
             tags: SortedIndex::open(directory, "tags")?,
+            shadowed: SortedIndex::open(directory, "shadowed")?,
             events,
             manifest,
         })
@@ -111,6 +113,10 @@ impl WorldSource for LazyWorld {
     fn fact_providing(&self, variable: &str) -> Option<Fact> {
         let id = self.variables.get(variable).ok().flatten()?;
         self.fact(&id)
+    }
+
+    fn shadowed_provider_ids(&self, variable: &str) -> Vec<String> {
+        Self::lookup_ids(&self.shadowed, variable)
     }
 
     fn factor(&self, id: &str) -> Option<Factor> {

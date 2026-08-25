@@ -281,3 +281,92 @@ fn a_wrong_query_schema_is_rejected() {
         Err(FiberError::UnsupportedQuerySchema { .. })
     ));
 }
+
+fn reference_example(name: &str) -> Value {
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "reference",
+        "fiber_runtime",
+        "examples",
+        name,
+    ]
+    .iter()
+    .collect();
+    serde_json::from_str(&std::fs::read_to_string(&path).expect("reference example is readable"))
+        .expect("reference example is valid JSON")
+}
+
+/// The two worlds added to catch the slicer divergence and the shadowed-omission collapse.
+///
+/// Both defects were invisible on the shipped reference world, so the fixtures that expose them
+/// are worthless unless CPython and Rust agree about them too — otherwise the fix would have been
+/// checked against one implementation's opinion. The digests here were produced by
+/// `reference/fiber_runtime/fiber_compile.py` and pasted in the direction that keeps the assertion
+/// cross-language: Python computed them, Rust must reproduce them.
+///
+/// `multi_output_world` is the one whose factor emits two variables at once; a slicer that walked
+/// backwards from the sibling output would select three factors instead of two and change
+/// `compiled_factor_count` in these bytes. `shadowed_evidence_world` is the one where two facts
+/// provide `risk_score`; the v0.1 profile cannot say which omission was proved and which was a
+/// tiebreak, and these bytes are what it says instead.
+#[test]
+fn the_new_multi_output_and_shadowed_fixtures_reproduce_the_cpython_digests() {
+    for (world, query, digest) in [
+        (
+            "multi_output_world.json",
+            "multi_output_query.json",
+            "2901acb37cae28eba10631327b2c14f9e5a936c58457e246f149908501835c0d",
+        ),
+        (
+            "shadowed_evidence_world.json",
+            "shadowed_evidence_query.json",
+            "f5eb61c99fe60c2d1283857c5cbb7e433ca9e7488aeaa800697f34288446bb4e",
+        ),
+    ] {
+        let world = World::from_json(reference_example(world)).expect("world loads");
+        let query = Query::from_json(reference_example(query)).expect("query loads");
+        let out = compile(&world, &query).expect("compiles");
+        assert_eq!(
+            out.certificate
+                .digest(CertificateProfile::Reference)
+                .unwrap()
+                .as_str(),
+            digest
+        );
+    }
+}
+
+/// The manifest is where the shadowed omission is separated, and it is not in the v0.1 bytes.
+///
+/// Both new fixtures emit the same frozen `classification` string, and on the shadowed world that
+/// string is not a true description of every omission it covers. That is a property of the v0.1
+/// wire format rather than of this compile, and the extended profile is where the compiler says
+/// what it actually determined — so the two profiles must disagree about sufficiency here, and a
+/// reader who only has the reference profile must not be able to infer the manifest's verdict from
+/// it.
+#[test]
+fn the_v0_1_classification_string_is_a_constant_and_not_a_verdict_about_the_omissions() {
+    let unreachable = compile(
+        &World::from_json(reference_example("multi_output_world.json")).unwrap(),
+        &Query::from_json(reference_example("multi_output_query.json")).unwrap(),
+    )
+    .unwrap();
+    let shadowed = compile(
+        &World::from_json(reference_example("shadowed_evidence_world.json")).unwrap(),
+        &Query::from_json(reference_example("shadowed_evidence_query.json")).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        unreachable.certificate.omissions.classification,
+        shadowed.certificate.omissions.classification,
+        "the string does not vary with what the compiler proved, so it cannot be read as a proof"
+    );
+    assert!(unreachable.certificate.manifest.supports_sufficiency_claim());
+    assert!(
+        !shadowed.certificate.manifest.supports_sufficiency_claim(),
+        "the manifest, unlike the string, distinguishes the two worlds"
+    );
+}

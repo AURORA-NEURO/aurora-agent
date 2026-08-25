@@ -37,6 +37,14 @@ pub enum CertificateProfile {
 pub struct ReferenceOmissions {
     pub total_facts: usize,
     pub exploratory_facts: usize,
+    /// A schema literal, not a computed verdict about this compile's omissions.
+    ///
+    /// Every producer of a `fiber-context-certificate/0.1` writes the same string here whatever
+    /// the omitted population turns out to contain, so it cannot be read as a claim that each
+    /// omitted fact met the condition it names — and on a world with a shadowed variable, some do
+    /// not. The honest reading is that the v0.1 wire carries a count and a fixed label; the
+    /// per-class verdict lives in [`crate::OmissionManifest`], which
+    /// [`CertificateProfile::Extended`] emits and this profile has no room for.
     pub classification: String,
     pub inaccessible_selected_before_cut: Vec<String>,
 }

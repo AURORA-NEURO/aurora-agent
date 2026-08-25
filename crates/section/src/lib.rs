@@ -19,7 +19,9 @@ pub use certificate::{
     CertificateProfile, CertificateVerification, ContextCertificate, ReferenceOmissions,
     SourceHashes, CERTIFICATE_SCHEMA_VERSION, CERTIFICATE_SCHEMA_VERSION_EXTENDED,
 };
-pub use omission::{InfluenceClass, OmissionGroup, OmissionManifest};
+pub use omission::{
+    InfluenceClass, InformativeBound, OmissionGroup, OmissionManifest, ProvenUnreachable,
+};
 pub use plan::{Backend, Fallback, FallbackReason, PlanDescriptor};
 pub use section::{
     DecisionSection, EvidenceCapsule, RefinementOption, UnresolvedObligation,

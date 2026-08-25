@@ -21,6 +21,22 @@ fn scratch(name: &str) -> PathBuf {
     path
 }
 
+fn reference_example(name: &str) -> Value {
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "reference",
+        "fiber_runtime",
+        "examples",
+        name,
+    ]
+    .iter()
+    .collect();
+    serde_json::from_str(&std::fs::read_to_string(&path).expect("reference example readable"))
+        .expect("valid JSON")
+}
+
 fn reference_fixture(name: &str) -> Value {
     let path: PathBuf = [
         env!("CARGO_MANIFEST_DIR"),
@@ -201,4 +217,68 @@ fn an_empty_index_is_openable_and_answers_nothing() {
     let index = SortedIndex::open(&directory, "nothing").expect("empty index opens");
     assert!(index.is_empty());
     assert_eq!(index.get("anything").unwrap(), None);
+}
+
+/// The third implementation must see shadowing too, or it would classify omissions differently.
+///
+/// `bioprism-fiber` decides whether an omission is provably irrelevant or merely unexamined by
+/// asking the world source which facts a later fact displaced. An indexed store that could not
+/// answer would compile the same world to a *more confident* certificate than the eager path —
+/// a shadowed fact folded into the zero group with a bound of `0.0` — which is the worst possible
+/// direction for the two backends to disagree in. The `variables` index keeps only the winner, so
+/// the store carries a separate `shadowed` index and `bioprism-store/0.2` refuses a directory
+/// written before it existed.
+#[test]
+fn the_lazy_path_reports_the_same_shadowed_providers_as_the_eager_world() {
+    let world_json = reference_example("shadowed_evidence_world.json");
+    let query = Query::from_json(reference_example("shadowed_evidence_query.json")).unwrap();
+
+    let directory = scratch("shadowed");
+    build(&world_json, &directory).expect("store builds");
+    let lazy = LazyWorld::open(&directory).expect("store opens");
+    let eager = World::from_json(world_json).expect("world loads");
+
+    assert_eq!(
+        eager.shadowed_provider_ids("risk_score"),
+        vec!["fact.risk_score_provisional".to_string()]
+    );
+    assert_eq!(
+        lazy.shadowed_provider_ids("risk_score"),
+        eager.shadowed_provider_ids("risk_score")
+    );
+    assert!(lazy.shadowed_provider_ids("cohort_id").is_empty());
+
+    let from_eager = compile(&eager, &query).expect("eager compiles");
+    let from_lazy = compile(&lazy, &query).expect("lazy compiles");
+
+    assert_eq!(
+        to_canonical_string(
+            &from_lazy.certificate.to_json(CertificateProfile::Extended).unwrap()
+        )
+        .unwrap(),
+        to_canonical_string(
+            &from_eager.certificate.to_json(CertificateProfile::Extended).unwrap()
+        )
+        .unwrap(),
+        "the two backends must agree about which omission was proved and which was not"
+    );
+    assert!(!from_lazy.certificate.manifest.supports_sufficiency_claim());
+}
+
+/// A store written before the `shadowed` index existed is refused rather than read as unshadowed.
+#[test]
+fn a_store_from_an_earlier_schema_is_rejected_instead_of_reporting_nothing_shadowed() {
+    let directory = scratch("stale-schema");
+    build(&reference_example("shadowed_evidence_world.json"), &directory).expect("store builds");
+
+    let manifest_path = directory.join("manifest.json");
+    let mut manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["schema_version"] = Value::String("bioprism-store/0.1".into());
+    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+
+    assert!(matches!(
+        LazyWorld::open(&directory),
+        Err(StoreError::UnsupportedSchema { .. })
+    ));
 }

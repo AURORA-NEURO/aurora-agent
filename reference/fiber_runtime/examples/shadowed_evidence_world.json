@@ -1,0 +1,91 @@
+{
+  "description": "A world in which two facts provide the same variable. fact.risk_score_provisional and fact.risk_score_final both provide risk_score, which factor.claim_support consumes, so the later one wins the document-order tiebreak and the earlier one is omitted from the compiled section. The omitted fact has a backward dependency path to the target and nobody bounded what its value would have done to the decision, so it is not structurally zero. Used by crates/fiber to show that the omission manifest separates a shadowed omission from a proven-irrelevant one. fact.aside is the control: nothing consumes aside_marker, so its omission really is proved by the factor graph.",
+  "events": [],
+  "factors": [
+    {
+      "id": "factor.claim_support",
+      "inputs": [
+        "risk_score",
+        "cohort_id"
+      ],
+      "kind": "rule",
+      "outputs": [
+        "split_integrity_status"
+      ],
+      "scope": {
+        "cohort": "SHADOW-001"
+      }
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact.aside",
+      "provenance": [
+        "assay/aside.json"
+      ],
+      "provides": "aside_marker",
+      "scope": {
+        "cohort": "SHADOW-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "absent",
+        "present"
+      ]
+    },
+    {
+      "id": "fact.cohort",
+      "provenance": [
+        "registry/cohort.json"
+      ],
+      "provides": "cohort_id",
+      "scope": {
+        "cohort": "SHADOW-001"
+      },
+      "tags": [
+        "identity",
+        "protected"
+      ],
+      "value": "SHADOW-001"
+    },
+    {
+      "id": "fact.risk_score_provisional",
+      "provenance": [
+        "assay/risk_provisional.json"
+      ],
+      "provides": "risk_score",
+      "scope": {
+        "cohort": "SHADOW-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "low",
+        "high"
+      ]
+    },
+    {
+      "id": "fact.risk_score_final",
+      "provenance": [
+        "assay/risk_final.json"
+      ],
+      "provides": "risk_score",
+      "scope": {
+        "cohort": "SHADOW-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  ],
+  "schema_version": "fiber-world/0.1",
+  "world_id": "shadowed-evidence-demo-v1"
+}

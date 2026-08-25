@@ -41,6 +41,34 @@
 //! return `Unknown` for the same reason. Both report their finding on [`CompileTrace`]; neither
 //! changes a byte of the certificate on any world `fiber-world/0.1` can state, and the modules say
 //! so rather than leaving a reader to infer it from a digest that did not move.
+//!
+//! ## What the zero-influence group is, and what it is not
+//!
+//! The omitted population is *counted* rather than enumerated — `total_facts - |selection|` — so
+//! that compile cost tracks the compiled region rather than the corpus (43.34). A consequence is
+//! that [`bioprism_section::InfluenceClass::Zero`] is arrived at as a remainder: every population
+//! known not to be zero is subtracted, and what is left is published as provably unable to move the
+//! decision. That is sound exactly to the extent that the subtracted populations are exhaustive,
+//! and it is where the strongest claim on the certificate is at its weakest.
+//!
+//! One population was demonstrably missing from the subtraction and is now computed structurally.
+//! A fact shadowed by a later fact providing the same variable has a backward dependency path to
+//! the target whenever the slice needs that variable, so its omission is a document-order tiebreak
+//! and not a proof; it used to be published in the zero group with a bound of `0.0`.
+//! [`bioprism_world::WorldSource::shadowed_provider_ids`] makes it visible per variable, the
+//! compiler enumerates it — the population is bounded by the compiled region, so naming its members
+//! costs nothing the design forbids — and it is classified
+//! [`bioprism_section::InfluenceClass::Unknown`], which voids the sufficiency claim.
+//! [`bioprism_section::ProvenUnreachable`] is the type that forces the subtraction to be named at
+//! the point the zero count is minted.
+//!
+//! What that does **not** establish is that the remainder is now proven per fact. It is still a
+//! remainder, and a population nobody has thought of would still land in it silently. The honest
+//! statement of the current guarantee is: no omission the compiler can *see* a dependency path for
+//! is classified zero. Turning that into a per-fact proof requires enumerating the omitted set,
+//! which this engine will not do, or a world index that answers "does any fact outside the
+//! selection provide a needed variable" directly — which is the same question this pass asks, and
+//! generalising it beyond shadowing is future work rather than a property to assume.
 
 pub mod closure;
 pub mod compile;
