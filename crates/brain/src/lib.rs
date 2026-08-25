@@ -53,6 +53,7 @@ pub mod multimodal_safety_assurance;
 pub mod throughput_contract_model;
 pub mod throughput_protocol_adapter;
 pub mod throughput_research_workbench;
+pub mod throughput_safety_assurance;
 
 pub use evidence_contract_model::{
     evidence_contract_model_manifest, model_evidence_contract, ContractCompatibility,
@@ -210,6 +211,12 @@ pub use throughput_research_workbench::{
     ThroughputWorkbenchError, ThroughputWorkbenchReceipt, ThroughputWorkbenchRequest,
     CONTRACT_VERSION as THROUGHPUT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use throughput_safety_assurance::{
+    throughput_safety_assurance_manifest, verify_throughput_safety, ThroughputAssuranceError,
+    ThroughputAssuranceReceipt, ThroughputAssuranceVerdict,
+    CONTRACT_VERSION as THROUGHPUT_SAFETY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_SAFETY_ASSURANCE_FEATURE_ID,
 };
 
 pub const BRAIN_SCHEMA_VERSION: &str = "bioprism-autonomous-brain/0.1";

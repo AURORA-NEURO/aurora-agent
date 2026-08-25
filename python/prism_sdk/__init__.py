@@ -347,6 +347,7 @@ from .brain_throughput_protocol import BrainThroughputProtocolReceipt
 from .brain_federated_protocol import BrainFederatedProtocolReceipt
 from .brain_evidence_safety_assurance import BrainEvidenceAssuranceReceipt
 from .brain_multimodal_safety_assurance import BrainMultimodalAssuranceReceipt
+from .brain_throughput_safety_assurance import BrainThroughputAssuranceReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
