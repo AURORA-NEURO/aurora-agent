@@ -18,9 +18,17 @@
 
 #![recursion_limit = "512"]
 
+pub mod analysis_assurance;
 pub mod events;
 pub mod http;
 pub mod router;
+
+pub use analysis_assurance::{
+    analysis_assurance_manifest, assure_analysis, AnalysisAssuranceError, AnalysisAssuranceReceipt,
+    AnalysisAssuranceRequest, AnalysisCandidate, AnalysisDisposition, AnalysisEvidenceState,
+    QualifiedAnalysisResult, ANALYSIS_ASSURANCE_CONTRACT_VERSION, ANALYSIS_ASSURANCE_FEATURE_ID,
+    ANALYSIS_ASSURANCE_PRECLINICAL_BOUNDARY, ANALYSIS_ASSURANCE_SCHEMA_VERSION,
+};
 
 pub use events::{
     ApiEvent, DeliveryAttempt, DeliveryAttemptPage, DeliveryFailure, DeliveryPage,

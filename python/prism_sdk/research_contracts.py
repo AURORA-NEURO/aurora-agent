@@ -191,6 +191,8 @@ ORACLE_INGESTION_CONTROL_FEATURE_ID = "AFA-oracle-P06-F30"
 ORACLE_INGESTION_CONTROL_CONTRACT_VERSION = "oracle-federated-multimodal-ingestion-control/1.0"
 STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID = "AFA-stewardship-P16-F20"
 STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION = "stewardship-federated-release-workbench/1.0"
+API_ANALYSIS_ASSURANCE_FEATURE_ID = "AFA-api-P13-F28"
+API_ANALYSIS_ASSURANCE_CONTRACT_VERSION = "api-federated-analysis-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4466,3 +4468,61 @@ class StewardshipReleaseWorkbenchReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "federation_id": self.federation_id, "disposition": self.disposition, "object_order": list(self.object_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "origin_order": list(self.origin_order), "artifact_order": list(self.artifact_order), "provenance_order": list(self.provenance_order), "evidence_order": list(self.evidence_order), "release_order": list(self.release_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "federation_manifest": dict(self.federation_manifest), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ApiAnalysisAssuranceReceipt:
+    """Cross-language validator for federated continual analysis assurance."""
+
+    request_id: str
+    workflow_id: str
+    question_id: str
+    disposition: str
+    result_id: str
+    estimand: str
+    candidate_order: tuple[str, ...]
+    admitted_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    selected_candidate: str | None
+    class_order: tuple[str, ...]
+    result_order: tuple[str, ...]
+    model_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    replay_identity: str
+    benchmark_digest: str
+    evidence_receipt_digest: str
+    artifact: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = API_ANALYSIS_ASSURANCE_FEATURE_ID
+    contract_version: str = API_ANALYSIS_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != API_ANALYSIS_ASSURANCE_FEATURE_ID or self.contract_version != API_ANALYSIS_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("API analysis assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.question_id.strip() or not self.result_id.strip() or not self.estimand.strip() or not self.candidate_order or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("API analysis assurance identity, candidates, checks, locality, or effects are incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("API analysis assurance disposition is unknown")
+        if self.disposition == "qualified" and self.selected_candidate is None:
+            raise ResearchContractError("qualified analysis assurance needs a selected candidate")
+        if tuple(sorted(set(self.candidate_order))) != self.candidate_order or any(candidate not in self.candidate_order for candidate in self.admitted_order) or tuple(sorted(set(self.blocked_order))) != self.blocked_order or tuple(sorted(set(self.class_order))) != self.class_order:
+            raise ResearchContractError("API analysis assurance ordering or candidate coverage is invalid")
+        for values in (self.result_order, self.model_order, self.evidence_order, self.provenance_order, self.omissions, self.uncertainty, self.negative_evidence, self.checks, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("API analysis assurance ordering is invalid")
+        for value in (*self.result_order, *self.model_order, *self.evidence_order, *self.provenance_order, self.replay_identity, self.benchmark_digest, self.evidence_receipt_digest, self.artifact.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("API analysis assurance digest is invalid")
+        if not any(effect.startswith("exchange:digest-only-analysis-assurance:") or effect.startswith("block:unsafe-release:") for effect in self.effect_receipts):
+            raise ResearchContractError("API analysis assurance effect receipt is not an exchange or fail-closed block")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "question_id": self.question_id, "disposition": self.disposition, "result_id": self.result_id, "estimand": self.estimand, "candidate_order": list(self.candidate_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "selected_candidate": self.selected_candidate, "class_order": list(self.class_order), "result_order": list(self.result_order), "model_order": list(self.model_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "replay_identity": self.replay_identity, "benchmark_digest": self.benchmark_digest, "evidence_receipt_digest": self.evidence_receipt_digest, "artifact": dict(self.artifact), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

@@ -41,12 +41,14 @@ dependencies = [
  "bioprism-adapter",
  "bioprism-devplat",
  "bioprism-factory",
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-mcp",
  "bioprism-scope",
  "serde",
  "serde_json",
  "sha2",
+ "thiserror",
 ]
 
 [[package]]

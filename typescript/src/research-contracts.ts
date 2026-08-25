@@ -173,6 +173,8 @@ export const ORACLE_INGESTION_CONTROL_FEATURE_ID = "AFA-oracle-P06-F30" as const
 export const ORACLE_INGESTION_CONTROL_CONTRACT_VERSION = "oracle-federated-multimodal-ingestion-control/1.0" as const;
 export const STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID = "AFA-stewardship-P16-F20" as const;
 export const STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION = "stewardship-federated-release-workbench/1.0" as const;
+export const API_ANALYSIS_ASSURANCE_FEATURE_ID = "AFA-api-P13-F28" as const;
+export const API_ANALYSIS_ASSURANCE_CONTRACT_VERSION = "api-federated-analysis-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3015,6 +3017,51 @@ export function validateStewardshipReleaseWorkbenchReceipt(receipt: StewardshipR
 }
 
 export function stewardshipReleaseWorkbenchReceiptDigest(receipt: StewardshipReleaseWorkbenchReceipt): string { validateStewardshipReleaseWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ApiAnalysisAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  question_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  result_id: string;
+  estimand: string;
+  candidate_order: string[];
+  admitted_order: string[];
+  blocked_order: string[];
+  selected_candidate: string | null;
+  class_order: string[];
+  result_order: string[];
+  model_order: string[];
+  evidence_order: string[];
+  provenance_order: string[];
+  replay_identity: string;
+  benchmark_digest: string;
+  evidence_receipt_digest: string;
+  artifact: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateApiAnalysisAssuranceReceipt(receipt: ApiAnalysisAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== API_ANALYSIS_ASSURANCE_FEATURE_ID || receipt.contract_version !== API_ANALYSIS_ASSURANCE_CONTRACT_VERSION) throw new Error("API analysis assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.question_id.trim() || !receipt.result_id.trim() || !receipt.estimand.trim() || !receipt.candidate_order.length || !receipt.checks.length || !receipt.effect_receipts.length) throw new Error("API analysis assurance identity, candidates, checks, locality, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("API analysis assurance disposition is unknown");
+  if (receipt.disposition === "qualified" && receipt.selected_candidate === null) throw new Error("qualified analysis assurance needs a selected candidate");
+  for (const values of [receipt.candidate_order, receipt.blocked_order, receipt.class_order, receipt.result_order, receipt.model_order, receipt.evidence_order, receipt.provenance_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.checks, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("API analysis assurance ordering is invalid");
+  if (receipt.admitted_order.some((candidate) => !receipt.candidate_order.includes(candidate))) throw new Error("API analysis assurance admitted candidate is not covered");
+  for (const value of [...receipt.result_order, ...receipt.model_order, ...receipt.evidence_order, ...receipt.provenance_order, receipt.replay_identity, receipt.benchmark_digest, receipt.evidence_receipt_digest, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("API analysis assurance digest is invalid");
+  if (!receipt.effect_receipts.some((effect) => effect.startsWith("exchange:digest-only-analysis-assurance:") || effect.startsWith("block:unsafe-release:"))) throw new Error("API analysis assurance effect receipt is not an exchange or fail-closed block");
+}
+
+export function apiAnalysisAssuranceReceiptDigest(receipt: ApiAnalysisAssuranceReceipt): string { validateApiAnalysisAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

@@ -60,6 +60,7 @@ from prism_sdk.research_contracts import SERVICES_MECHANISM_WORKBENCH_FEATURE_ID
 from prism_sdk.research_contracts import GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID, GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION, GovernanceInterpretationAssuranceReceipt
 from prism_sdk.research_contracts import ORACLE_INGESTION_CONTROL_FEATURE_ID, ORACLE_INGESTION_CONTROL_CONTRACT_VERSION, OracleIngestionControlReceipt
 from prism_sdk.research_contracts import STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID, STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION, StewardshipReleaseWorkbenchReceipt
+from prism_sdk.research_contracts import API_ANALYSIS_ASSURANCE_FEATURE_ID, API_ANALYSIS_ASSURANCE_CONTRACT_VERSION, ApiAnalysisAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1941,4 +1942,37 @@ def test_stewardship_release_workbench_preserves_unknown_and_signed_manifest_exc
     receipt.validate()
     assert receipt.feature_id == STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID
     assert receipt.contract_version == STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_api_analysis_assurance_preserves_influence_gap_and_fail_closed_effect():
+    receipt = ApiAnalysisAssuranceReceipt(
+        request_id="request:analysis",
+        workflow_id="workflow:analysis",
+        question_id="question:organoid",
+        disposition="partial",
+        result_id="qualified-analysis:request:analysis",
+        estimand="synaptic-density-delta",
+        candidate_order=("candidate:a", "candidate:b"),
+        admitted_order=("candidate:a",),
+        blocked_order=("candidate:b",),
+        selected_candidate="candidate:a",
+        class_order=("causal",),
+        result_order=("a" * 64,),
+        model_order=("b" * 64,),
+        evidence_order=("c" * 64,),
+        provenance_order=("d" * 64,),
+        replay_identity="e" * 64,
+        benchmark_digest="f" * 64,
+        evidence_receipt_digest="0" * 64,
+        artifact={"content_hash": "1" * 64},
+        checks=("comparability, influence, policy, federation, locality, approval, and budget gates are explicit",),
+        omissions=("candidate:candidate:b:influence-evidence-missing",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("exchange:digest-only-analysis-assurance:request:analysis",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == API_ANALYSIS_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == API_ANALYSIS_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
