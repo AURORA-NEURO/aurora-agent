@@ -1206,6 +1206,8 @@ export {
   AUTONOMOUS_PROMPT_SELECTION_ROW_SCHEMA,
   AUTONOMOUS_PROMPT_RENDER_SCHEMA,
   AUTONOMOUS_PROMPT_SELECTION_POLICY,
+  AUTONOMOUS_BUILTIN_PROMPT_SCHEMA,
+  AUTONOMOUS_BUILTIN_PROMPT_VERSION,
   MAX_AUTONOMOUS_PROMPT_TEMPLATES,
   MAX_AUTONOMOUS_PROMPT_CAPABILITIES,
   MAX_AUTONOMOUS_PROMPT_STAGES,
@@ -1215,6 +1217,8 @@ export {
   AutonomousPromptTemplate,
   AutonomousPromptSelectionPlan,
   AutonomousPromptRegistry,
+  builtinAutonomousPromptTemplates,
+  builtinAutonomousPromptRegistry,
 } from "./autonomous-prompt-registry.js";
 export type {
   AutonomousPromptContext,

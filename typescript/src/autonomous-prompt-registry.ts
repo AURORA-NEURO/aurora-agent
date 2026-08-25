@@ -11,6 +11,8 @@ export const AUTONOMOUS_PROMPT_SELECTION_SCHEMA = "bioprism-typescript-autonomou
 export const AUTONOMOUS_PROMPT_SELECTION_ROW_SCHEMA = "bioprism-typescript-autonomous-prompt-selection-row/0.1" as const;
 export const AUTONOMOUS_PROMPT_RENDER_SCHEMA = "bioprism-typescript-autonomous-prompt-render/0.1" as const;
 export const AUTONOMOUS_PROMPT_SELECTION_POLICY = "deterministic_specificity_v1" as const;
+export const AUTONOMOUS_BUILTIN_PROMPT_SCHEMA = "bioprism-typescript-autonomous-builtin-prompt/0.1" as const;
+export const AUTONOMOUS_BUILTIN_PROMPT_VERSION = "1.0.0" as const;
 export const MAX_AUTONOMOUS_PROMPT_TEMPLATES = 1_024;
 export const MAX_AUTONOMOUS_PROMPT_CAPABILITIES = 64;
 export const MAX_AUTONOMOUS_PROMPT_STAGES = 64;
@@ -20,6 +22,36 @@ export const MAX_AUTONOMOUS_PROMPT_BYTES = 1_000_000;
 
 const PROMPT_ROLES = new Set(["system", "developer", "user", "assistant", "tool"]);
 const SECRET_FIELD_MARKERS = new Set(["apikey", "authorization", "bearer", "credential", "credentials", "password", "secret", "secretkey", "token", "accesstoken", "refreshtoken", "privatekey", "clientsecret"]);
+
+const BUILTIN_PROMPT_INSTRUCTIONS: Readonly<Record<AutonomousDomainName, string>> = {
+  coding: "Inspect the repository and constraints first. Prefer small, testable changes, explain assumptions, preserve compatibility, and report exact verification evidence.",
+  browser: "Use only approved navigation and retrieval boundaries. Separate observed page facts from inference, preserve source locators transiently, and abstain when the page or authority is ambiguous.",
+  data: "State the schema, units, missingness, provenance, and transformation path before interpreting results. Quantify uncertainty and never manufacture values for absent observations.",
+  science: "Frame a falsifiable hypothesis, identify controls and estimands, distinguish measurement from interpretation, and surface confounders, replication limits, and alternative explanations.",
+  biomedical: "Stay advisory and evidence-bound. Separate mechanistic plausibility from clinical evidence, flag safety and population limitations, and never diagnose, prescribe, enroll, or claim clinical authority.",
+  neuroscience: "Specify signal, acquisition, preprocessing, temporal alignment, and confound assumptions. Distinguish neural evidence from proxy measures and preserve uncertainty around localization and causality.",
+  operations: "Prefer reversible, observable, least-privilege actions. Establish impact, dependencies, rollback, incident severity, and approval gates before proposing any external effect.",
+  enterprise: "Respect ownership, policy, compliance, privacy, and audit boundaries. Make decisions traceable, identify stakeholders and escalation paths, and keep recommendations separate from authorization.",
+  multi_agent: "Decompose work into bounded specialist responsibilities with explicit handoffs, shared evidence identity, conflict handling, and synthesis criteria. Never treat delegation or consensus as authority.",
+  multimodal: "Declare each modality and its transport limitations, align observations before synthesis, account for missing or incomparable channels, and avoid inferring a modality that was not observed.",
+  cross_domain: "Coordinate domain specialists without flattening their rubrics. Preserve per-domain evidence and dissent, gate synthesis on dependency completion, and make omissions and unresolved conflicts explicit.",
+  evaluation: "Use a named rubric, independent evidence, held-out or prospective checks where applicable, and explicit unscored/inapplicable states. Report failure modes and avoid turning a score into truth or authority.",
+};
+
+const BUILTIN_PROMPT_DOMAIN_CAPABILITIES: Readonly<Record<AutonomousDomainName, readonly string[]>> = {
+  coding: ["implementation", "debugging", "testing"],
+  browser: ["navigation", "web_research", "source_comparison"],
+  data: ["data_analysis", "schema_validation", "lineage"],
+  science: ["hypothesis", "literature", "experiment"],
+  biomedical: ["biomedical_review", "safety_boundary", "provenance"],
+  neuroscience: ["neuroscience_analysis", "signal_interpretation", "study_design"],
+  operations: ["observability", "incident_response", "rollback"],
+  enterprise: ["governance", "compliance", "workflow"],
+  multi_agent: ["coordination", "delegation", "conflict_resolution"],
+  multimodal: ["cross_modal_alignment", "image", "audio"],
+  cross_domain: ["coordination", "synthesis", "evidence_alignment"],
+  evaluation: ["rubric", "benchmarking", "failure_analysis"],
+};
 
 export type AutonomousPromptContext = Readonly<Record<string, unknown>>;
 export type AutonomousPromptRenderer = (context: AutonomousPromptContext) => readonly ProviderMessage[] | Promise<readonly ProviderMessage[]>;
@@ -114,7 +146,7 @@ function digest(name: string, value: unknown, optional = false): string | null {
 
 function items(name: string, value: unknown, maximum: number, allowWildcard = false, allowEmpty = false): string[] {
   if (!Array.isArray(value) || (!allowEmpty && value.length < 1) || value.length > maximum) throw new ArgumentError(`${name} is outside its bounds`);
-  const result = value.map((item) => identifier(`${name} entry`, item));
+  const result = value.map((item) => item === "*" && allowWildcard ? "*" : identifier(`${name} entry`, item));
   if (!allowWildcard && result.includes("*")) throw new ArgumentError(`${name} does not allow wildcard entries`);
   if (new Set(result).size !== result.length) throw new ArgumentError(`${name} contains duplicate entries`);
   return result;
@@ -429,4 +461,66 @@ export class AutonomousPromptRegistry {
     if (!selectedRow) throw new ArgumentError("prompt selection plan has no unique row for render context");
     return this.templateFor(selectedRow.selected_prompt_id).renderTransient(context, verified.planDigest);
   }
+}
+
+function builtinPromptSubject(context: AutonomousPromptContext): string {
+  const requirement = context.requirement;
+  const source = requirement && typeof requirement === "object" ? requirement as Record<string, unknown> : context;
+  const candidate = source.objective || source.label || context.task || context.objective || context.label;
+  if (typeof candidate !== "string" || !candidate.trim() || candidate.includes("\u0000")) throw new ArgumentError("built-in prompt context requires a bounded objective");
+  const subject = boundedText("built-in prompt objective", candidate, 32_000);
+  return subject;
+}
+
+function createBuiltinPromptTemplate(domain: AutonomousDomainName): AutonomousPromptTemplate {
+  const instruction = BUILTIN_PROMPT_INSTRUCTIONS[domain];
+  const capabilities = [
+    "analysis",
+    "llm_evidence",
+    "structured_output",
+    "safe_reasoning",
+    ...BUILTIN_PROMPT_DOMAIN_CAPABILITIES[domain],
+    `domain:${domain}`,
+  ];
+  const templateDigest = digestJsonSync({
+    schema: AUTONOMOUS_BUILTIN_PROMPT_SCHEMA,
+    version: AUTONOMOUS_BUILTIN_PROMPT_VERSION,
+    domain,
+    instruction,
+    capabilities,
+  });
+  return new AutonomousPromptTemplate({
+    promptId: `builtin.${domain}.specialist`,
+    version: AUTONOMOUS_BUILTIN_PROMPT_VERSION,
+    domain,
+    capabilities,
+    stages: ["*"],
+    templateDigest,
+    render: (context) => {
+      const { domain: contextDomain, stage } = contextDomainStage(context);
+      const subject = builtinPromptSubject(context);
+      return [
+        {
+          role: "system",
+          content: `You are AURORA's ${domain} specialist for the ${stage} stage. ${instruction} Treat provider output as an observation, preserve explicit approval boundaries, and do not invent evidence, credentials, permissions, or external effects.`,
+        },
+        {
+          role: "user",
+          content: `Reviewed objective for ${contextDomain}: ${subject}`,
+        },
+      ];
+    },
+  });
+}
+
+/** Return the reviewed built-in specialist template for each requested autonomous domain. */
+export function builtinAutonomousPromptTemplates(domains: readonly AutonomousDomainName[] = AUTONOMOUS_DOMAIN_NAMES): readonly AutonomousPromptTemplate[] {
+  if (!Array.isArray(domains) || domains.length < 1 || domains.length > AUTONOMOUS_DOMAIN_NAMES.length) throw new ArgumentError("built-in prompt domains are outside their bounds");
+  if (new Set(domains).size !== domains.length || domains.some((domain) => !(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(domain))) throw new ArgumentError("built-in prompt domains contain an unsupported or duplicate domain");
+  return domains.map((domain) => createBuiltinPromptTemplate(domain));
+}
+
+/** Create a complete caller-owned registry of domain-specialist prompt templates. */
+export function builtinAutonomousPromptRegistry(domains: readonly AutonomousDomainName[] = AUTONOMOUS_DOMAIN_NAMES): AutonomousPromptRegistry {
+  return new AutonomousPromptRegistry(builtinAutonomousPromptTemplates(domains));
 }

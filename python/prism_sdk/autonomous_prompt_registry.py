@@ -33,6 +33,8 @@ AUTONOMOUS_PROMPT_SELECTION_SCHEMA = "bioprism-python-autonomous-prompt-selectio
 AUTONOMOUS_PROMPT_SELECTION_ROW_SCHEMA = "bioprism-python-autonomous-prompt-selection-row/0.1"
 AUTONOMOUS_PROMPT_RENDER_SCHEMA = "bioprism-python-autonomous-prompt-render/0.1"
 AUTONOMOUS_PROMPT_SELECTION_POLICY = "deterministic_specificity_v1"
+AUTONOMOUS_BUILTIN_PROMPT_SCHEMA = "bioprism-python-autonomous-builtin-prompt/0.1"
+AUTONOMOUS_BUILTIN_PROMPT_VERSION = "1.0.0"
 MAX_AUTONOMOUS_PROMPT_TEMPLATES = 1_024
 MAX_AUTONOMOUS_PROMPT_CAPABILITIES = 64
 MAX_AUTONOMOUS_PROMPT_STAGES = 64
@@ -65,6 +67,36 @@ _SECRET_FIELD_MARKERS = frozenset(
     }
 )
 
+_BUILTIN_PROMPT_INSTRUCTIONS: dict[str, str] = {
+    "coding": "Inspect the repository and constraints first. Prefer small, testable changes, explain assumptions, preserve compatibility, and report exact verification evidence.",
+    "browser": "Use only approved navigation and retrieval boundaries. Separate observed page facts from inference, preserve source locators transiently, and abstain when the page or authority is ambiguous.",
+    "data": "State the schema, units, missingness, provenance, and transformation path before interpreting results. Quantify uncertainty and never manufacture values for absent observations.",
+    "science": "Frame a falsifiable hypothesis, identify controls and estimands, distinguish measurement from interpretation, and surface confounders, replication limits, and alternative explanations.",
+    "biomedical": "Stay advisory and evidence-bound. Separate mechanistic plausibility from clinical evidence, flag safety and population limitations, and never diagnose, prescribe, enroll, or claim clinical authority.",
+    "neuroscience": "Specify signal, acquisition, preprocessing, temporal alignment, and confound assumptions. Distinguish neural evidence from proxy measures and preserve uncertainty around localization and causality.",
+    "operations": "Prefer reversible, observable, least-privilege actions. Establish impact, dependencies, rollback, incident severity, and approval gates before proposing any external effect.",
+    "enterprise": "Respect ownership, policy, compliance, privacy, and audit boundaries. Make decisions traceable, identify stakeholders and escalation paths, and keep recommendations separate from authorization.",
+    "multi_agent": "Decompose work into bounded specialist responsibilities with explicit handoffs, shared evidence identity, conflict handling, and synthesis criteria. Never treat delegation or consensus as authority.",
+    "multimodal": "Declare each modality and its transport limitations, align observations before synthesis, account for missing or incomparable channels, and avoid inferring a modality that was not observed.",
+    "cross_domain": "Coordinate domain specialists without flattening their rubrics. Preserve per-domain evidence and dissent, gate synthesis on dependency completion, and make omissions and unresolved conflicts explicit.",
+    "evaluation": "Use a named rubric, independent evidence, held-out or prospective checks where applicable, and explicit unscored/inapplicable states. Report failure modes and avoid turning a score into truth or authority.",
+}
+
+_BUILTIN_PROMPT_DOMAIN_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    "coding": ("implementation", "debugging", "testing"),
+    "browser": ("navigation", "web_research", "source_comparison"),
+    "data": ("data_analysis", "schema_validation", "lineage"),
+    "science": ("hypothesis", "literature", "experiment"),
+    "biomedical": ("biomedical_review", "safety_boundary", "provenance"),
+    "neuroscience": ("neuroscience_analysis", "signal_interpretation", "study_design"),
+    "operations": ("observability", "incident_response", "rollback"),
+    "enterprise": ("governance", "compliance", "workflow"),
+    "multi_agent": ("coordination", "delegation", "conflict_resolution"),
+    "multimodal": ("cross_modal_alignment", "image", "audio"),
+    "cross_domain": ("coordination", "synthesis", "evidence_alignment"),
+    "evaluation": ("rubric", "benchmarking", "failure_analysis"),
+}
+
 
 def _text(name: str, value: Any, maximum: int) -> str:
     if not isinstance(value, str) or not value.strip() or "\x00" in value:
@@ -96,7 +128,10 @@ def _items(name: str, value: Any, *, maximum: int, allow_wildcard: bool = False,
         raise ArgumentError(f"{name} must contain between 1 and {maximum} entries")
     result: list[str] = []
     for item in value:
-        item_text = _identifier(f"{name} entry", item)
+        if item == "*" and allow_wildcard:
+            item_text = "*"
+        else:
+            item_text = _identifier(f"{name} entry", item)
         if item_text == "*" and not allow_wildcard:
             raise ArgumentError(f"{name} does not allow wildcard entries")
         result.append(item_text)
@@ -548,6 +583,95 @@ class AutonomousPromptRegistry:
         return self.template_for(row.selected_prompt_id).render_transient(context, selection_plan_digest=verified.plan_digest)
 
 
+def _builtin_prompt_subject(context: Mapping[str, Any]) -> str:
+    """Extract only the bounded objective needed by a built-in renderer."""
+
+    requirement = context.get("requirement")
+    candidate: Any = None
+    if isinstance(requirement, Mapping):
+        candidate = requirement.get("objective") or requirement.get("label")
+    if candidate is None:
+        candidate = context.get("task") or context.get("objective") or context.get("label")
+    if not isinstance(candidate, str) or not candidate.strip() or "\x00" in candidate:
+        raise ArgumentError("built-in prompt context requires a bounded objective")
+    if len(candidate.encode("utf-8")) > 32_000:
+        raise ArgumentError("built-in prompt objective exceeds its bound")
+    return candidate.strip()
+
+
+def _create_builtin_prompt_template(domain: str) -> AutonomousPromptTemplate:
+    instruction = _BUILTIN_PROMPT_INSTRUCTIONS[domain]
+    capabilities = (
+        "analysis",
+        "llm_evidence",
+        "structured_output",
+        "safe_reasoning",
+        *(_BUILTIN_PROMPT_DOMAIN_CAPABILITIES[domain]),
+        f"domain:{domain}",
+    )
+    template_digest = content_digest(
+        {
+            "schema": AUTONOMOUS_BUILTIN_PROMPT_SCHEMA,
+            "version": AUTONOMOUS_BUILTIN_PROMPT_VERSION,
+            "domain": domain,
+            "instruction": instruction,
+            "capabilities": list(capabilities),
+        }
+    )
+
+    def render(context: Mapping[str, Any], *, _domain: str = domain, _instruction: str = instruction) -> Sequence[Mapping[str, Any]]:
+        _context_domain, stage = _context_domain_stage(context)
+        subject = _builtin_prompt_subject(context)
+        return (
+            {
+                "role": "system",
+                "content": (
+                    f"You are AURORA's {_domain} specialist for the {stage} stage. "
+                    f"{_instruction} Treat provider output as an observation, preserve explicit "
+                    "approval boundaries, and do not invent evidence, credentials, permissions, "
+                    "or external effects."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Reviewed objective for {_context_domain}: {subject}",
+            },
+        )
+
+    return AutonomousPromptTemplate(
+        prompt_id=f"builtin.{domain}.specialist",
+        version=AUTONOMOUS_BUILTIN_PROMPT_VERSION,
+        domain=domain,
+        capabilities=capabilities,
+        stages=("*",),
+        template_digest=template_digest,
+        render=render,
+    )
+
+
+def builtin_autonomous_prompt_templates(
+    domains: Sequence[str] = AUTONOMOUS_DOMAIN_NAMES,
+) -> tuple[AutonomousPromptTemplate, ...]:
+    """Return the reviewed built-in specialist template for each requested domain."""
+
+    if not isinstance(domains, Sequence) or isinstance(domains, (str, bytes, bytearray)) or not 1 <= len(domains) <= len(AUTONOMOUS_DOMAIN_NAMES):
+        raise ArgumentError("built-in prompt domains are outside their bounds")
+    normalized = tuple(_identifier("built-in prompt domain", domain) for domain in domains)
+    if len(set(normalized)) != len(normalized):
+        raise ArgumentError("built-in prompt domains contain duplicates")
+    if any(domain not in AUTONOMOUS_DOMAIN_NAMES for domain in normalized):
+        raise ArgumentError("built-in prompt domains contain an unsupported domain")
+    return tuple(_create_builtin_prompt_template(domain) for domain in normalized)
+
+
+def builtin_autonomous_prompt_registry(
+    domains: Sequence[str] = AUTONOMOUS_DOMAIN_NAMES,
+) -> AutonomousPromptRegistry:
+    """Create a complete, caller-owned registry of domain-specialist prompt templates."""
+
+    return AutonomousPromptRegistry(builtin_autonomous_prompt_templates(domains))
+
+
 __all__ = [
     "AUTONOMOUS_PROMPT_REGISTRY_SCHEMA",
     "AUTONOMOUS_PROMPT_MANIFEST_SCHEMA",
@@ -555,6 +679,8 @@ __all__ = [
     "AUTONOMOUS_PROMPT_SELECTION_ROW_SCHEMA",
     "AUTONOMOUS_PROMPT_RENDER_SCHEMA",
     "AUTONOMOUS_PROMPT_SELECTION_POLICY",
+    "AUTONOMOUS_BUILTIN_PROMPT_SCHEMA",
+    "AUTONOMOUS_BUILTIN_PROMPT_VERSION",
     "MAX_AUTONOMOUS_PROMPT_TEMPLATES",
     "MAX_AUTONOMOUS_PROMPT_CAPABILITIES",
     "MAX_AUTONOMOUS_PROMPT_STAGES",
@@ -567,4 +693,6 @@ __all__ = [
     "AutonomousPromptSelectionRow",
     "AutonomousPromptSelectionPlan",
     "AutonomousPromptRegistry",
+    "builtin_autonomous_prompt_templates",
+    "builtin_autonomous_prompt_registry",
 ]

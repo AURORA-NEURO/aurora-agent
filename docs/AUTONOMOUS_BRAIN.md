@@ -9762,3 +9762,17 @@ online learning remain separate boundaries; this prompt layer makes their linkag
 without granting the model any additional authority. The all-domain tests exercise template
 selection, registry drift, plan tampering, secret-shaped prompt material, transient redaction,
 and live offline invocation in both Python and TypeScript.
+
+Both SDKs now ship an opt-in built-in specialist pack through
+`builtin_autonomous_prompt_registry()` / `builtinAutonomousPromptRegistry()`. It registers one
+content-addressed template for every built-in domain, including domain-specific capabilities and
+operating guidance for implementation, navigation, data lineage, scientific design, biomedical
+safety, neuroscience signal interpretation, reversible operations, enterprise governance,
+multi-agent handoffs, multimodal alignment, cross-domain synthesis, and evaluation. Each built-in
+renderer accepts only a bounded reviewed objective from its transient context and emits a
+system/user pair; the registry still requires an explicit stage/capability selection plan before
+rendering. This makes the evidence adapter usable immediately after a caller has registered a
+provider and supplied a credential handle, while preserving caller ownership of task text,
+provider authorization, external effects, and prompt customization. Applications can select a
+subset for a specialist service, but duplicate, unsupported, missing-objective, stale, and
+credential-shaped inputs fail closed.

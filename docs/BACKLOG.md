@@ -1475,3 +1475,14 @@ all-domain tests cover selection, stale replacement, tampered plans, secret-shap
 metadata redaction, and offline invocation. This is still not provider authorization: provider
 credentials, model dispatch, source acquisition, tool execution, effects, evaluator credit, and
 online learning remain separate explicit gates.
+
+The built-in prompt pack now turns the generic prompt control plane into an immediately useful
+cross-domain starting point. `builtin_autonomous_prompt_registry()` and
+`builtinAutonomousPromptRegistry()` provide one content-addressed specialist renderer for every
+autonomous domain, with domain-specific reasoning, provenance, safety, coordination, multimodal,
+operations, governance, or evaluation guidance and capability labels. Built-in rendering accepts
+only a bounded reviewed objective, returns transient system/user messages, and remains behind an
+explicit registry selection plan; no provider, key, tool, effect, or learner authority is
+implicit. Python and TypeScript tests cover complete twelve-domain coverage, capability-bound
+selection, subset construction, duplicate/unsupported/missing-objective refusal, and projection
+redaction.
