@@ -400,6 +400,32 @@ handles, source observations, tool arguments, or authorization. It is a review h
 replacement for the explicit provider, evidence, connector, tool, evaluator, launch-admission,
 queue, or effect boundary.
 
+For the final caller-owned handoff, `agent.admit_action_plan(...)` records explicit approvals
+against the plan digest and `agent.execute_action_plan(...)` replays the transient task and route
+inputs before delegating to `run_auto()`. Missing review, evidence, plan, effect, evaluator, or
+provider gates return an `AutonomousActionExecution` with no credential or provider access. An
+admitted plan maps `workflow`, `planning`, `evidence_first`, and `cross_domain` decisions to the
+existing execution controls; credentials and all external authority remain caller-owned:
+
+```python
+plan = agent.action_plan(task="analyze a bounded dataset", domain="data")
+execution = agent.execute_action_plan(
+    task="analyze a bounded dataset",
+    plan=plan,
+    domain="data",
+    approvals={gate: True for gate in plan["required_approvals"]},
+    reviewed=True,
+    credentials=caller_credentials,
+)
+if execution.status != "completed":
+    print(execution.admission.next_action)
+```
+
+The execution method rejects a changed task or route-options digest and refuses tampered
+admission records before dispatch. Its metadata projections retain only plan/admission identity,
+selected domains, gate state, and bounded next actions; task text, prompts, credentials, source
+values, tool arguments, provider responses, and secret material remain transient.
+
 ### One-call deployment-managed execution
 
 When an application has already registered an environment source or secret-manager resolver,
