@@ -31,16 +31,23 @@ fn pool_of(likelihoods: &[(&str, [f64; 2])]) -> EvidencePool {
     .expect("unique ids")
 }
 
-fn seeded_instance(rng: &mut SplitMix64, models: usize, actions: usize, items: usize) -> (DecisionProblem, Belief, EvidencePool) {
-    let loss: Vec<f64> = (0..actions * models).map(|_| rng.between(0.0, 1.0)).collect();
+fn seeded_instance(
+    rng: &mut SplitMix64,
+    models: usize,
+    actions: usize,
+    items: usize,
+) -> (DecisionProblem, Belief, EvidencePool) {
+    let loss: Vec<f64> = (0..actions * models)
+        .map(|_| rng.between(0.0, 1.0))
+        .collect();
     let problem = DecisionProblem::new(
         (0..actions).map(|a| format!("a{a}")).collect(),
         (0..models).map(|m| format!("m{m}")).collect(),
         loss,
     )
     .expect("well-formed problem");
-    let prior = Belief::new((0..models).map(|_| rng.between(0.2, 1.0)).collect())
-        .expect("positive prior");
+    let prior =
+        Belief::new((0..models).map(|_| rng.between(0.2, 1.0)).collect()).expect("positive prior");
     let pool = EvidencePool::new(
         (0..items)
             .map(|i| {
@@ -190,8 +197,8 @@ fn pairwise_frontier_points(
     let candidates: Vec<(f64, f64, Vec<usize>)> = (0..1u64 << n)
         .map(|mask| {
             let subset: BTreeSet<usize> = (0..n).filter(|i| (mask >> i) & 1 == 1).collect();
-            let evaluation =
-                evaluate_context(problem, prior, pool, &subset, criterion, FLOOR).expect("evaluable");
+            let evaluation = evaluate_context(problem, prior, pool, &subset, criterion, FLOOR)
+                .expect("evaluable");
             (evaluation.rate, evaluation.distortion, evaluation.retained)
         })
         .collect();
@@ -209,7 +216,11 @@ fn pairwise_frontier_points(
         })
         .cloned()
         .collect();
-    points.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+    points.sort_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then(a.1.total_cmp(&b.1))
+            .then(a.2.cmp(&b.2))
+    });
     points.dedup_by(|a, b| (a.0 - b.0).abs() <= epsilon && (a.1 - b.1).abs() <= epsilon);
     points
 }
@@ -274,7 +285,10 @@ fn candidates_whose_rates_differ_by_less_than_the_tolerance_are_resolved_identic
             .points;
         assert_eq!(actual.len(), expected.len(), "under {criterion:?}");
         for (point, (rate, distortion, retained)) in actual.iter().zip(expected.iter()) {
-            assert_eq!((point.rate, point.distortion, &point.retained), (*rate, *distortion, retained));
+            assert_eq!(
+                (point.rate, point.distortion, &point.retained),
+                (*rate, *distortion, retained)
+            );
         }
     }
 }
@@ -472,7 +486,9 @@ fn the_minimax_action_never_has_worse_worst_case_regret_than_any_other_action() 
     for _ in 0..80 {
         let models = 4;
         let actions = 4;
-        let loss: Vec<f64> = (0..actions * models).map(|_| rng.between(0.0, 1.0)).collect();
+        let loss: Vec<f64> = (0..actions * models)
+            .map(|_| rng.between(0.0, 1.0))
+            .collect();
         let problem = DecisionProblem::new(
             (0..actions).map(|a| format!("a{a}")).collect(),
             (0..models).map(|m| format!("m{m}")).collect(),

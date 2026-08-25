@@ -181,8 +181,14 @@ impl CertificateVerification {
 fn plan_to_json(plan: &PlanDescriptor) -> Value {
     let mut map = Map::new();
     map.insert("backend".into(), json!(plan.backend.as_str()));
-    map.insert("compiled_factor_count".into(), json!(plan.compiled_factor_count));
-    map.insert("compiled_fact_count".into(), json!(plan.compiled_fact_count));
+    map.insert(
+        "compiled_factor_count".into(),
+        json!(plan.compiled_factor_count),
+    );
+    map.insert(
+        "compiled_fact_count".into(),
+        json!(plan.compiled_fact_count),
+    );
     map.insert("total_factor_count".into(), json!(plan.total_factor_count));
     map.insert("total_fact_count".into(), json!(plan.total_fact_count));
     map.insert(

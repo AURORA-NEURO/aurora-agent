@@ -86,16 +86,16 @@ pub use compile::{
     PassReceipt, RateDistortionTrace,
 };
 pub use error::FiberError;
-pub use oracle::{DecisionOracle, SplitIntegrityOracle, ORACLE_KIND};
 pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
+pub use oracle::{DecisionOracle, SplitIntegrityOracle, ORACLE_KIND};
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
 pub use qir::{
     AdaptiveAcquisitionContract, Budgets, DecisionContract, DecisionSense, Query,
-    RateDistortionContract, ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_ADAPTIVE_FIELD_PATHS,
-    QUERY_ADAPTIVE_SCHEMA_VERSION, QUERY_DECISION_FIELD_PATHS, QUERY_DECISION_SCHEMA_VERSION,
-    QUERY_FIELD_PATHS, QUERY_RATE_DISTORTION_FIELD_PATHS, QUERY_RATE_DISTORTION_SCHEMA_VERSION,
-    NO_DECLARED_GOAL, QUERY_SCHEMA_VERSION, REFERENCE_GOAL,
+    RateDistortionContract, ACCEPTED_QUERY_SCHEMA_VERSIONS, NO_DECLARED_GOAL,
+    QUERY_ADAPTIVE_FIELD_PATHS, QUERY_ADAPTIVE_SCHEMA_VERSION, QUERY_DECISION_FIELD_PATHS,
+    QUERY_DECISION_SCHEMA_VERSION, QUERY_FIELD_PATHS, QUERY_RATE_DISTORTION_FIELD_PATHS,
+    QUERY_RATE_DISTORTION_SCHEMA_VERSION, QUERY_SCHEMA_VERSION, REFERENCE_GOAL,
 };
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};

@@ -59,10 +59,13 @@ impl World {
             });
         }
 
-        let world_id_text = map
-            .get("world_id")
-            .and_then(Value::as_str)
-            .ok_or(WorldError::MissingField { field: "world_id", subject: "world".into() })?;
+        let world_id_text =
+            map.get("world_id")
+                .and_then(Value::as_str)
+                .ok_or(WorldError::MissingField {
+                    field: "world_id",
+                    subject: "world".into(),
+                })?;
         let world_id = WorldId::parse(world_id_text).map_err(|e| WorldError::Identifier {
             subject: "world".into(),
             message: e.to_string(),
@@ -74,7 +77,10 @@ impl World {
 
         let world = World {
             world_id,
-            description: map.get("description").and_then(Value::as_str).map(str::to_string),
+            description: map
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             index: WorldIndex::build(&facts, &factors),
             facts,
             factors,
@@ -101,7 +107,9 @@ impl World {
         let mut seen_factors = BTreeSet::new();
         for factor in &self.factors {
             if !seen_factors.insert(factor.id.as_str()) {
-                return Err(WorldError::DuplicateFactorId(factor.id.as_str().to_string()));
+                return Err(WorldError::DuplicateFactorId(
+                    factor.id.as_str().to_string(),
+                ));
             }
         }
 
@@ -168,7 +176,10 @@ impl World {
     }
 
     pub fn producers_of(&self, variable: &str) -> impl Iterator<Item = &Factor> {
-        self.index.producers(variable).iter().map(|p| &self.factors[*p])
+        self.index
+            .producers(variable)
+            .iter()
+            .map(|p| &self.factors[*p])
     }
 
     /// Variables that some event governs. A variable in this set is readable only once its
@@ -187,7 +198,10 @@ fn parse_seq<T>(
     parse: impl Fn(&Value) -> Result<T, WorldError>,
 ) -> Result<Vec<T>, WorldError> {
     match value {
-        None => Err(WorldError::MissingField { field, subject: "world".into() }),
+        None => Err(WorldError::MissingField {
+            field,
+            subject: "world".into(),
+        }),
         Some(Value::Array(items)) => items.iter().map(parse).collect(),
         Some(_) => Err(WorldError::WrongType {
             field,

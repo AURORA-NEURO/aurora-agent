@@ -51,7 +51,10 @@ fn deferred_compile() -> bioprism_fiber::CompileOutput {
         Query::from_json(reference_example("deferred_evidence_query.json")).expect("query loads");
     let out = compile(&world, &query).expect("compiles");
     assert_eq!(
-        out.certificate.omissions.inaccessible_selected_before_cut.len(),
+        out.certificate
+            .omissions
+            .inaccessible_selected_before_cut
+            .len(),
         2,
         "this fixture must withhold evidence at the cut or the checks below prove nothing"
     );
@@ -67,10 +70,16 @@ fn the_reference_world_withholds_nothing_so_the_split_is_empty() {
 
     assert!(out.trace.withheld_influence.attempted.is_empty());
     assert_eq!(out.trace.withheld_influence.promoted(), 0);
-    assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Bounded), 0);
+    assert_eq!(
+        out.certificate.manifest.count_in(InfluenceClass::Bounded),
+        0
+    );
     assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Zero), 750);
     assert_eq!(
-        out.certificate.digest(CertificateProfile::Reference).unwrap().as_str(),
+        out.certificate
+            .digest(CertificateProfile::Reference)
+            .unwrap()
+            .as_str(),
         "c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4"
     );
 }
@@ -121,7 +130,11 @@ fn a_withheld_fact_outside_the_compiled_region_is_not_analysable_rather_than_zer
         .expect("the withheld aside was analysed");
 
     assert!(analysis.subject_factors.is_empty());
-    match analysis.outcome.as_ref().expect_err("no question was posable") {
+    match analysis
+        .outcome
+        .as_ref()
+        .expect_err("no question was posable")
+    {
         NotPosable::OutsideCompiledRegion { variable } => assert_eq!(variable, "aside_marker"),
         other => panic!("expected an outside-region refusal, got {other:?}"),
     }
@@ -177,12 +190,18 @@ fn a_withheld_fact_stays_deferred_and_keeps_its_refinement_frontier_entry() {
             .count_in(InfluenceClass::DeferredAcquisition),
         2
     );
-    assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Bounded), 0);
+    assert_eq!(
+        out.certificate.manifest.count_in(InfluenceClass::Bounded),
+        0
+    );
     assert!(!out.certificate.manifest.supports_sufficiency_claim());
 
     let frontier = &out.section.refinement_frontier;
     assert_eq!(frontier.len(), 1);
-    assert_eq!(frontier[0].action, "advance_time_cut_or_use_retrospective_mode");
+    assert_eq!(
+        frontier[0].action,
+        "advance_time_cut_or_use_retrospective_mode"
+    );
     assert_eq!(frontier[0].facts, vec!["fact.aside", "fact.future_marker"]);
 }
 
@@ -250,7 +269,11 @@ fn a_shadowed_fact_is_not_classified_as_structurally_zero() {
     let shadowed = manifest
         .groups
         .iter()
-        .find(|group| group.examples.contains(&"fact.risk_score_provisional".to_string()))
+        .find(|group| {
+            group
+                .examples
+                .contains(&"fact.risk_score_provisional".to_string())
+        })
         .expect("the shadowed fact is named on the manifest rather than folded into a count");
     assert_eq!(
         shadowed.influence,
@@ -308,7 +331,10 @@ fn an_unreachable_omission_and_a_shadowed_one_are_different_groups_with_differen
         .certificate
         .to_json(CertificateProfile::Extended)
         .expect("certificate serialises");
-    assert_eq!(extended["supports_sufficiency_claim"], serde_json::json!(false));
+    assert_eq!(
+        extended["supports_sufficiency_claim"],
+        serde_json::json!(false)
+    );
 }
 
 /// A world with nothing shadowed keeps the whole omitted population in the proven class.
@@ -323,6 +349,9 @@ fn a_world_with_no_shadowed_variable_keeps_every_omission_in_the_proven_zero_gro
     let out = compile(&world, &query).expect("compiles");
 
     assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Zero), 750);
-    assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Unknown), 0);
+    assert_eq!(
+        out.certificate.manifest.count_in(InfluenceClass::Unknown),
+        0
+    );
     assert!(out.certificate.manifest.supports_sufficiency_claim());
 }

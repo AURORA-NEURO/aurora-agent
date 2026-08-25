@@ -14,11 +14,11 @@ pub mod plan;
 pub mod section;
 pub mod verdict;
 
-pub use layers::{Layer, RenderContext};
 pub use certificate::{
     CertificateProfile, CertificateVerification, ContextCertificate, ReferenceOmissions,
     SourceHashes, CERTIFICATE_SCHEMA_VERSION, CERTIFICATE_SCHEMA_VERSION_EXTENDED,
 };
+pub use layers::{Layer, RenderContext};
 pub use omission::{
     InfluenceClass, InformativeBound, OmissionGroup, OmissionManifest, ProvenUnreachable,
 };

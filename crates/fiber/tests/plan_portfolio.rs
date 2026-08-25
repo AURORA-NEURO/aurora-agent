@@ -99,7 +99,10 @@ fn no_portfolio_member_can_execute_a_region_whose_factors_carry_no_potential() {
         .as_ref()
         .expect("the region carries no tables");
     assert!(
-        matches!(refusal, bioprism_backends::Declined::MissingFactorTable { .. }),
+        matches!(
+            refusal,
+            bioprism_backends::Declined::MissingFactorTable { .. }
+        ),
         "expected a missing-table refusal, got {refusal:?}"
     );
     assert!(refusal.to_string().contains("carries no table"));
@@ -206,7 +209,9 @@ fn the_plan_receipt_names_the_argmin_and_the_reason_it_is_not_runnable() {
         .find(|pass| pass.name == "plan_selection")
         .expect("the pass emits a receipt");
 
-    assert!(receipt.note.contains("backend backward_factor_slice_reference"));
+    assert!(receipt
+        .note
+        .contains("backend backward_factor_slice_reference"));
     assert!(receipt.note.contains("argmin faq_inside_out"));
     assert!(receipt.note.contains("no costed plan is runnable"));
 }
@@ -226,8 +231,10 @@ fn the_plan_receipt_names_the_argmin_and_the_reason_it_is_not_runnable() {
 /// `len(selected_factor_ids)` from a slice that pushes a factor's inputs and never its outputs.
 #[test]
 fn a_multi_output_factor_does_not_drag_its_siblings_producers_into_the_compiled_region() {
-    let world = World::from_json(reference_example("multi_output_world.json")).expect("world loads");
-    let query = Query::from_json(reference_example("multi_output_query.json")).expect("query loads");
+    let world =
+        World::from_json(reference_example("multi_output_world.json")).expect("world loads");
+    let query =
+        Query::from_json(reference_example("multi_output_query.json")).expect("query loads");
     let out = compile(&world, &query).expect("compiles");
 
     assert_eq!(
@@ -257,7 +264,8 @@ fn a_multi_output_factor_does_not_drag_its_siblings_producers_into_the_compiled_
 /// are separate facts about it.
 #[test]
 fn a_sibling_output_stays_a_region_variable_even_though_it_is_not_a_slicing_frontier() {
-    let world = World::from_json(reference_example("multi_output_world.json")).expect("world loads");
+    let world =
+        World::from_json(reference_example("multi_output_world.json")).expect("world loads");
     let region = bioprism_backends::QueryRegion::from_world_slice(
         &world,
         "multi-output",

@@ -7,7 +7,7 @@
 use bioprism_fiber::{compile, Query};
 use bioprism_ids::to_canonical_string;
 use bioprism_section::CertificateProfile;
-use bioprism_store::{build, LazyWorld, StoreError, SortedIndexWriter, SortedIndex};
+use bioprism_store::{build, LazyWorld, SortedIndex, SortedIndexWriter, StoreError};
 use bioprism_world::{World, WorldSource};
 use bioprism_worldgen::{generate, WorldSpec};
 use serde_json::Value;
@@ -66,17 +66,27 @@ fn the_lazy_path_reproduces_the_reference_certificate_byte_for_byte() {
     let from_lazy = compile(&lazy, &query).expect("lazy compiles");
 
     let eager_certificate = to_canonical_string(
-        &from_eager.certificate.to_json(CertificateProfile::Reference).unwrap(),
+        &from_eager
+            .certificate
+            .to_json(CertificateProfile::Reference)
+            .unwrap(),
     )
     .unwrap();
     let lazy_certificate = to_canonical_string(
-        &from_lazy.certificate.to_json(CertificateProfile::Reference).unwrap(),
+        &from_lazy
+            .certificate
+            .to_json(CertificateProfile::Reference)
+            .unwrap(),
     )
     .unwrap();
 
     assert_eq!(eager_certificate, lazy_certificate, "backends disagree");
     assert_eq!(
-        from_lazy.certificate.digest(CertificateProfile::Reference).unwrap().as_str(),
+        from_lazy
+            .certificate
+            .digest(CertificateProfile::Reference)
+            .unwrap()
+            .as_str(),
         "c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4",
         "the lazy path must reproduce the published CPython digest"
     );
@@ -104,8 +114,14 @@ fn the_two_backends_agree_on_generated_worlds_too() {
         let from_lazy = compile(&lazy, &query).expect("lazy compiles");
 
         assert_eq!(
-            from_eager.certificate.digest(CertificateProfile::Reference).unwrap(),
-            from_lazy.certificate.digest(CertificateProfile::Reference).unwrap(),
+            from_eager
+                .certificate
+                .digest(CertificateProfile::Reference)
+                .unwrap(),
+            from_lazy
+                .certificate
+                .digest(CertificateProfile::Reference)
+                .unwrap(),
             "{label}: backends disagree"
         );
     }
@@ -145,7 +161,8 @@ fn point_lookups_return_the_same_records() {
     }
 
     assert_eq!(
-        lazy.fact_providing("split_assignment").map(|f| f.id.as_str().to_string()),
+        lazy.fact_providing("split_assignment")
+            .map(|f| f.id.as_str().to_string()),
         Some("fact.split".to_string())
     );
     assert_eq!(
@@ -253,11 +270,17 @@ fn the_lazy_path_reports_the_same_shadowed_providers_as_the_eager_world() {
 
     assert_eq!(
         to_canonical_string(
-            &from_lazy.certificate.to_json(CertificateProfile::Extended).unwrap()
+            &from_lazy
+                .certificate
+                .to_json(CertificateProfile::Extended)
+                .unwrap()
         )
         .unwrap(),
         to_canonical_string(
-            &from_eager.certificate.to_json(CertificateProfile::Extended).unwrap()
+            &from_eager
+                .certificate
+                .to_json(CertificateProfile::Extended)
+                .unwrap()
         )
         .unwrap(),
         "the two backends must agree about which omission was proved and which was not"
@@ -269,13 +292,21 @@ fn the_lazy_path_reports_the_same_shadowed_providers_as_the_eager_world() {
 #[test]
 fn a_store_from_an_earlier_schema_is_rejected_instead_of_reporting_nothing_shadowed() {
     let directory = scratch("stale-schema");
-    build(&reference_example("shadowed_evidence_world.json"), &directory).expect("store builds");
+    build(
+        &reference_example("shadowed_evidence_world.json"),
+        &directory,
+    )
+    .expect("store builds");
 
     let manifest_path = directory.join("manifest.json");
     let mut manifest: Value =
         serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
     manifest["schema_version"] = Value::String("bioprism-store/0.1".into());
-    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
 
     assert!(matches!(
         LazyWorld::open(&directory),

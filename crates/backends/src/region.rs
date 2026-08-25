@@ -42,7 +42,10 @@ pub struct RegionFactor {
 
 impl RegionFactor {
     /// A factor known only by its signature. Costable, not executable.
-    pub fn structural(id: impl Into<String>, scope: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn structural(
+        id: impl Into<String>,
+        scope: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         RegionFactor {
             id: id.into(),
             scope: scope.into_iter().map(Into::into).collect(),

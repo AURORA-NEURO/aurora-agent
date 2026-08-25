@@ -81,7 +81,10 @@ pub fn build(world: &Value, directory: &Path) -> Result<StoreManifest, StoreErro
         if let Some(tags) = fact.get("tags").and_then(Value::as_array) {
             for tag in tags.iter().filter_map(Value::as_str) {
                 *tag_counts.entry(tag.to_string()).or_default() += 1;
-                tag_members.entry(tag.to_string()).or_default().push(id.to_string());
+                tag_members
+                    .entry(tag.to_string())
+                    .or_default()
+                    .push(id.to_string());
             }
         }
     }

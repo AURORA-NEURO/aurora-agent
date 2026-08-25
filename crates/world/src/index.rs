@@ -42,12 +42,16 @@ impl WorldIndex {
         let mut index = WorldIndex::default();
 
         for (position, fact) in facts.iter().enumerate() {
-            index.fact_by_id.insert(fact.id.as_str().to_string(), position);
+            index
+                .fact_by_id
+                .insert(fact.id.as_str().to_string(), position);
             if let Some(displaced) = index
                 .fact_by_variable
                 .insert(fact.provides.as_str().to_string(), position)
             {
-                index.shadowed_variables.push(fact.provides.as_str().to_string());
+                index
+                    .shadowed_variables
+                    .push(fact.provides.as_str().to_string());
                 index
                     .shadowed_by_variable
                     .entry(fact.provides.as_str().to_string())
@@ -55,7 +59,11 @@ impl WorldIndex {
                     .push(displaced);
             }
             for tag in &fact.tags {
-                index.facts_by_tag.entry(tag.clone()).or_default().push(position);
+                index
+                    .facts_by_tag
+                    .entry(tag.clone())
+                    .or_default()
+                    .push(position);
             }
         }
 
@@ -104,9 +112,6 @@ impl WorldIndex {
 
     /// Positions of the facts carrying `tag`, in document order.
     pub fn tagged(&self, tag: &str) -> &[usize] {
-        self.facts_by_tag
-            .get(tag)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
+        self.facts_by_tag.get(tag).map(Vec::as_slice).unwrap_or(&[])
     }
 }

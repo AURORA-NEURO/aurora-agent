@@ -105,7 +105,10 @@ impl BoundMethod {
 
     /// Whether this method's number is the true influence rather than an upper bound on it.
     pub fn is_exact(self) -> bool {
-        matches!(self, BoundMethod::ExactRemoval | BoundMethod::StructuralZero)
+        matches!(
+            self,
+            BoundMethod::ExactRemoval | BoundMethod::StructuralZero
+        )
     }
 }
 

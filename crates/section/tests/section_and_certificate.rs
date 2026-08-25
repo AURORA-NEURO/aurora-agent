@@ -108,12 +108,17 @@ fn section_emits_the_v0_1_field_set() {
     );
     assert!(section.requires_refinement());
     assert_eq!(map["oracle"]["status"], json!("invalid"));
-    assert_eq!(map["oracle"]["witnesses"][0]["type"], json!("preprocessing_leakage"));
+    assert_eq!(
+        map["oracle"]["witnesses"][0]["type"],
+        json!("preprocessing_leakage")
+    );
 }
 
 #[test]
 fn certificate_digest_covers_the_body_and_detects_tampering() {
-    let document = certificate().to_json(CertificateProfile::Reference).unwrap();
+    let document = certificate()
+        .to_json(CertificateProfile::Reference)
+        .unwrap();
     assert!(ContextCertificate::verify(&document).unwrap().is_valid());
 
     let mut tampered = document.clone();
@@ -124,7 +129,10 @@ fn certificate_digest_covers_the_body_and_detects_tampering() {
     }
 
     let mut stripped = document;
-    stripped.as_object_mut().unwrap().remove("certificate_sha256");
+    stripped
+        .as_object_mut()
+        .unwrap()
+        .remove("certificate_sha256");
     assert!(matches!(
         ContextCertificate::verify(&stripped).unwrap(),
         CertificateVerification::Malformed(_)
@@ -133,7 +141,9 @@ fn certificate_digest_covers_the_body_and_detects_tampering() {
 
 #[test]
 fn a_shape_broken_certificate_digest_is_malformed_rather_than_a_mismatch() {
-    let document = certificate().to_json(CertificateProfile::Reference).unwrap();
+    let document = certificate()
+        .to_json(CertificateProfile::Reference)
+        .unwrap();
     for broken in [
         "NOT-64-LOWERCASE-HEX-CHARACTERS",
         &"AB".repeat(32),
@@ -168,12 +178,18 @@ fn extended_profile_changes_schema_version_and_therefore_the_digest() {
     let reference = cert.to_json(CertificateProfile::Reference).unwrap();
     let extended = cert.to_json(CertificateProfile::Extended).unwrap();
 
-    assert_eq!(reference["schema_version"], json!("fiber-context-certificate/0.1"));
+    assert_eq!(
+        reference["schema_version"],
+        json!("fiber-context-certificate/0.1")
+    );
     assert_eq!(
         extended["schema_version"],
         json!("fiber-context-certificate/0.2-extended")
     );
-    assert_ne!(reference["certificate_sha256"], extended["certificate_sha256"]);
+    assert_ne!(
+        reference["certificate_sha256"],
+        extended["certificate_sha256"]
+    );
     assert!(reference.get("omission_manifest").is_none());
     assert!(extended.get("omission_manifest").is_some());
     assert!(ContextCertificate::verify(&extended).unwrap().is_valid());
@@ -241,7 +257,9 @@ fn a_vacuous_bounded_group_is_refused_admission_and_cannot_support_sufficiency()
     assert_eq!(admitted.influence, InfluenceClass::Unknown);
     assert_eq!(admitted.bound, None);
     assert!(
-        admitted.reason.contains("a bound of 1 permits every answer"),
+        admitted
+            .reason
+            .contains("a bound of 1 permits every answer"),
         "the refused value belongs on the certificate, not in a silent downgrade: {}",
         admitted.reason
     );
@@ -343,7 +361,10 @@ fn policy_blocked_and_deferred_omissions_never_support_sufficiency() {
         InfluenceClass::DeferredAcquisition,
         InfluenceClass::Unknown,
     ] {
-        assert!(!class.supports_sufficiency(), "{class:?} must not count as sufficient");
+        assert!(
+            !class.supports_sufficiency(),
+            "{class:?} must not count as sufficient"
+        );
     }
     for class in [InfluenceClass::Zero, InfluenceClass::Bounded] {
         assert!(class.supports_sufficiency());

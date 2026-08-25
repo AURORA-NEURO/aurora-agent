@@ -145,10 +145,11 @@ pub fn summarise<'a>(groups: impl IntoIterator<Item = &'a OmissionGroup>) -> Bou
                 if is_informative(group) {
                     summary.informative_groups += 1;
                     let value = group.bound.unwrap_or(1.0);
-                    summary.worst_informative_bound =
-                        Some(summary.worst_informative_bound.map_or(value, |seen: f64| {
-                            seen.max(value)
-                        }));
+                    summary.worst_informative_bound = Some(
+                        summary
+                            .worst_informative_bound
+                            .map_or(value, |seen: f64| seen.max(value)),
+                    );
                 } else {
                     summary.vacuous_groups += 1;
                 }

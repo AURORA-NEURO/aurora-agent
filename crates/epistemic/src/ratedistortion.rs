@@ -111,8 +111,15 @@ pub fn evaluate_context(
     compatibility_floor: f64,
 ) -> Result<ContextEvaluation, EpistemicError> {
     let full = FullEvidence::resolve(problem, prior, pool, compatibility_floor)?;
-    let (action, distortion) =
-        decide_and_measure(problem, prior, pool, subset, criterion, compatibility_floor, &full)?;
+    let (action, distortion) = decide_and_measure(
+        problem,
+        prior,
+        pool,
+        subset,
+        criterion,
+        compatibility_floor,
+        &full,
+    )?;
 
     Ok(ContextEvaluation {
         retained: subset.iter().copied().collect(),

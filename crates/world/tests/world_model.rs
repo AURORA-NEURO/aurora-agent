@@ -141,7 +141,10 @@ fn the_tag_index_answers_what_a_full_corpus_scan_answers() {
             .flat_map(|fact| fact.tags.iter().cloned())
             .collect();
 
-        for tag in every_tag.iter().chain(["absent-from-this-world".to_string()].iter()) {
+        for tag in every_tag
+            .iter()
+            .chain(["absent-from-this-world".to_string()].iter())
+        {
             assert_eq!(
                 WorldSource::count_with_tag(world, tag),
                 scan_count(world, tag),
@@ -180,7 +183,9 @@ fn the_tag_index_answers_what_a_full_corpus_scan_answers() {
 fn indexes_facts_factors_and_producers() {
     let world = World::from_json(golden_world_json()).unwrap();
 
-    let aliases = world.fact("fact.subject_aliases").expect("protected fact present");
+    let aliases = world
+        .fact("fact.subject_aliases")
+        .expect("protected fact present");
     assert_eq!(aliases.provides.as_str(), "subject_aliases");
     assert!(aliases.has_tag("protected"));
     assert!(aliases.has_tag("identity"));
@@ -315,7 +320,10 @@ fn golden_world_has_no_structural_errors() {
         .iter()
         .filter(|d| d.severity == Severity::Error)
         .collect();
-    assert!(errors.is_empty(), "golden world reported errors: {errors:#?}");
+    assert!(
+        errors.is_empty(),
+        "golden world reported errors: {errors:#?}"
+    );
 }
 
 #[test]
@@ -386,7 +394,9 @@ fn a_shadowed_fact_stays_reachable_through_the_index_rather_than_being_lost() {
     let world = World::from_json(minimal_world(facts, json!([]), json!([]))).unwrap();
 
     assert_eq!(
-        world.fact_providing("risk_score").map(|f| f.id.as_str().to_string()),
+        world
+            .fact_providing("risk_score")
+            .map(|f| f.id.as_str().to_string()),
         Some("fact.second".to_string()),
         "the later fact still wins, because the reference runtime's semantics are the contract"
     );
