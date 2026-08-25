@@ -211,6 +211,24 @@ driver itself, no cross-process resume, no wall-clock deadlines.
 
 ---
 
+## Research runner (docs/RESEARCH.md)
+
+`bioprism research template | run | verify` runs a fixed protocol over synthetic decision worlds
+and nothing else: generate, compile and certify, equal-engineering baseline panel, then optional
+structural sweep, metamorphic mutation, and minimization. Findings are derived by fixed public
+rules, locked to level `observation` (no stronger level is representable), and each cites the
+sha256 of every artifact it came from; figure footers carry the sha256 of the value rendered. The
+dossier is digest-sealed, `research verify` catches a one-byte tamper, `--dry-run` writes nothing.
+The committed example (`docs/research-example/`, discriminating family, distractor points
+50/250/750) runs 12 steps in about four seconds for 9 findings — 7 negative — and 7 figures,
+reproduced byte-identically by an independent re-run. Its headline is a negative about the
+project's own compiler: FIBER is tied by directed-walk-full at every distractor level (both
+admissible at 11 facts) and is not separated in 36 of 36 sweep cells. Limitations: synthetic worlds
+only; no biology, literature coverage, or external-world claims; oracle review is a human gate; the
+sweep does not vary decision-defining knobs; negative findings are first-class results.
+
+---
+
 ## Architecture (docs/ARCHITECTURE.md)
 
 Layers, top to bottom: agent surface (cli, mcp) -> evaluation (prism, baseline, mutation,
@@ -312,6 +330,8 @@ A: Apache-2.0.
 - Findings: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/FINDINGS.md
 - Capability dashboard: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/CAPABILITY_DASHBOARD.md
 - Autopilot: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md
+- Research runner: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/RESEARCH.md
+- Research page: https://aurora-neuro.github.io/aurora-agent/research.html
 - HTTP API: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/HTTP_API.md
 - Python SDK: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/PYTHON_SDK.md
 - TypeScript SDK: https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/TYPESCRIPT_SDK.md

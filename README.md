@@ -331,6 +331,36 @@ checkpoint: mission/report material is rehydrated by the host and matched by dig
 planner can continue. Full reference:
 [docs/AUTOPILOT.md](docs/AUTOPILOT.md).
 
+## Autonomous research
+
+`bioprism research` executes a fixed protocol over **synthetic decision worlds** — generate,
+compile and certify, equal-engineering baseline panel, then optional structural sweep, metamorphic
+mutation, and minimization — and writes a digest-sealed dossier, a rendered report, and figures.
+Findings are derived by fixed public rules and locked to level `observation`: a single-variant
+enum, so no stronger level is representable. Each finding cites the sha256 of every artifact it was
+derived from, and each figure's footer carries the sha256 of the exact value rendered.
+`research verify` recomputes the seal and detects a one-byte tamper; `--dry-run` prints the plan
+and writes nothing.
+
+```bash
+bioprism --json research template > request.json
+  # edit request.json: research_id, question, family, distractor_points, seed
+bioprism research run --request request.json --out-dir out
+bioprism research verify --dossier out/dossier.json
+```
+
+A committed worked example lives in [`docs/research-example/`](docs/research-example/): the
+`discriminating` family at distractor points 50/250/750, 12 steps in about four seconds, **9
+findings of which 7 are negative**, and 7 figures. Its headline is a negative about this
+repository's own compiler — FIBER is tied by `directed-walk-full` at every declared distractor
+level (both admissible at 11 facts) and is not separated in 36 of 36 sweep cells. The run is
+deterministic: an independent re-run reproduced it byte-identically across all nine files.
+
+Limitations, carried verbatim in every dossier: measurement over synthetic decision worlds only;
+no biology, no literature or prior-work coverage, and no external-world claims; oracle review is a
+human gate; the sweep deliberately does not vary decision-defining knobs; and negative findings are
+first-class results. Full reference: [docs/RESEARCH.md](docs/RESEARCH.md).
+
 ## Using it from an agent
 
 ```bash

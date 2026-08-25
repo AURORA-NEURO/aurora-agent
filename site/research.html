@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURORA Agent research runner — a fixed protocol, a sealed dossier, a negative headline</title>
+<meta name="description" content="An autonomous research runner over synthetic decision worlds: a fixed protocol, a digest-sealed dossier, and a headline negative — FIBER is tied by a baseline.">
+<link rel="canonical" href="https://aurora-neuro.github.io/aurora-agent/research.html">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AURORA Agent research runner">
+<meta property="og:description" content="A fixed protocol over synthetic decision worlds, a digest-sealed dossier, and a headline negative: FIBER is tied by a baseline at every distractor level.">
+<meta property="og:url" content="https://aurora-neuro.github.io/aurora-agent/research.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="AURORA Agent research runner">
+<meta name="twitter:description" content="A fixed protocol over synthetic decision worlds, a digest-sealed dossier, and a headline negative: FIBER is tied by a baseline at every distractor level.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "name": "AURORA Agent research runner",
+  "url": "https://aurora-neuro.github.io/aurora-agent/research.html",
+  "description": "An autonomous research runner over synthetic decision worlds: a fixed protocol, a digest-sealed dossier, and a headline negative — FIBER is tied by a baseline.",
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "AURORA Agent",
+    "url": "https://aurora-neuro.github.io/aurora-agent/"
+  },
+  "license": "https://www.apache.org/licenses/LICENSE-2.0"
+}
+</script>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="10" fill="var(--accent)"/><path d="M32 14 L50 50 L42 50 L32 28 L22 50 L14 50 Z" fill="var(--bg)"/><rect x="27" y="41" width="10" height="5" rx="1.5" fill="var(--bg)"/></svg>
+      AURORA Agent
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="./">Overview</a>
+      <a href="install.html">Install</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="research.html" aria-current="page">Research</a>
+      <a href="explore.html">Explorer</a>
+      <a href="docs.html">Docs</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <h1>A research run you can recompute</h1>
+
+    <p class="lede"><code>bioprism research template | run | verify</code> executes a fixed protocol
+    over <strong>synthetic decision worlds</strong> and writes a digest-sealed dossier, a rendered
+    report, and figures. Nothing about the run is a judgement call: the protocol is a pure function
+    of the request, every finding is derived by a fixed public rule, and every number cites the
+    sha256 of the artifact it came from.</p>
+
+    <div class="callout">
+      <p><strong>The committed example's headline is a negative about this project's own
+      compiler.</strong> FIBER is <em>tied</em> by <code>directed-walk-full</code> at every declared
+      distractor level — both admissible at 11 facts, on worlds of 62, 262, and 762 facts — and is
+      <strong>not separated in 36 of 36 sweep cells</strong>. Of the run's nine findings, seven are
+      negative. That is the point of the runner, not an embarrassment: a runner that could not
+      report a tie against its own engine would not be measuring anything.</p>
+    </div>
+
+    <h2>1. The protocol</h2>
+
+    <p><code>plan_protocol</code> is a pure function of the request document — no I/O, no clock, no
+    randomness — so the same request always plans the same protocol, and the dossier echoes the plan
+    next to the executed steps with nothing to reconcile. In order:</p>
+
+    <ol>
+      <li><strong>Anchor.</strong> Step 0 is always the committed <code>fixtures/fiber-v0.1</code>
+      pair, embedded at build time: it is compiled and its certificate digest is required to equal
+      the pinned cross-language parity value
+      <code>c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4</code> — the digest
+      CPython, the eager Rust path, and the indexed store agree on. A mismatch aborts the run: a
+      dossier whose anchor is broken would be a lie from step 0.</li>
+      <li><strong>Generate.</strong> Per declared distractor point, the preset world and query are
+      generated from one of four committed world-family presets (<code>reference_like</code>,
+      <code>discriminating</code>, <code>external_confirmation</code>,
+      <code>policy_restricted</code>). Only the seed and the world id are overridden on the preset.</li>
+      <li><strong>Compile and certify.</strong> The pair is compiled and the certificate is
+      round-tripped through verification.</li>
+      <li><strong>Equal-engineering baseline panel.</strong> The full default panel — 13 strategies
+      — is run over the same pair, ranked on admissibility rather than on getting the right
+      answer.</li>
+      <li><strong>Structural sweep</strong> (optional). The committed structural grid, run at the
+      grid's own seed because that grid is the benchmark.</li>
+      <li><strong>Metamorphic mutation</strong> (optional). The standard metamorphic suite over the
+      base world — the first declared distractor point.</li>
+      <li><strong>Minimize</strong> (optional). The 1-minimal reduction of the base world,
+      re-verified.</li>
+    </ol>
+
+    <p>A step that cannot complete is a typed error that aborts the run: there is no “step skipped”
+    and no partial dossier. An invalid request exits 3 with the rule that refused it, not just the
+    field. <code>research run --dry-run</code> prints exactly this plan and dispatches nothing —
+    nothing runs and nothing is written.</p>
+
+    <h2>2. The worked example</h2>
+
+    <p>The repository commits a full run of one request — <code>discriminating</code> family,
+    distractor points 50 / 250 / 750, seed <code>20260823</code>, sweep and mutation on. It executes
+    <strong>12 steps in about four seconds</strong> and produces <strong>9 findings, of which 7 are
+    negative</strong>, plus 7 figures.</p>
+
+    <div class="table-scroll">
+    <table>
+      <tr><th>Distractor point</th><th class="num">World size</th><th>Cheapest admissible</th><th class="num">Facts</th><th class="num">% of world</th><th>FIBER separated?</th></tr>
+      <tr class="hl"><td>d=50</td><td class="num">62</td><td>directed-walk-full</td><td class="num">11</td><td class="num">17.74%</td><td class="no">no — tie</td></tr>
+      <tr class="hl"><td>d=250</td><td class="num">262</td><td>directed-walk-full</td><td class="num">11</td><td class="num">4.20%</td><td class="no">no — tie</td></tr>
+      <tr class="hl"><td>d=750</td><td class="num">762</td><td>directed-walk-full</td><td class="num">11</td><td class="num">1.44%</td><td class="no">no — tie</td></tr>
+    </table>
+    </div>
+
+    <p>The sweep says the same thing at grid scale: <em>fiber is not separated in 36 of 36 sweep
+    cells</em> — at least one baseline is admissible alongside it in every cell (full-context
+    excluded, admissible by construction). The metamorphic step is the run's one clean positive:
+    8 accepted, 0 rejected, 0 duplicates, yield 100%, and 8 independent equivalence classes from 8
+    instances — inflation ×1.00, because instance count is not benchmark count.</p>
+
+    <p>The dossier's own digest is
+    <code>46a740c5396151064a075ae213acf50b2508e26e2cd72ec429c0b87beac02802</code>, over a request
+    whose digest is
+    <code>336831b83c47f73fbf197b1b82d92afa8b2bebfd21f3fc05078d64e153b13e6e</code>. Both are in the
+    committed <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/research-example/REPORT.md">REPORT.md</a>
+    and <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/research-example/dossier.json">dossier.json</a>.</p>
+
+    <h2>3. Figures from the committed run</h2>
+
+    <p>These are the run's own SVGs, copied unmodified. Each one's footer carries the sha256 of the
+    exact value rendered, so figure, caption, and dossier record can all be checked against each
+    other.</p>
+
+    <figure class="research-figure">
+      <img src="figures/selection-ratio-reference.svg" alt="Context selection ratio for the reference fixture: the compiled selection against the full world.">
+      <figcaption>Step 0, the anchor. Source artifact <code>reference-certificate</code>, sha256
+      <code>3ea822496a0c98cc6d1ec37633f4076f7a425dccf8f90b739eee5dc4c12de030</code> — the same
+      digest the figure's own footer carries.</figcaption>
+    </figure>
+
+    <figure class="research-figure">
+      <img src="figures/baseline-panel-d50.svg" alt="Equal-engineering baseline panel at 50 distractors, with each strategy scored for soundness, closure, and admissibility.">
+      <figcaption>The baseline panel at 50 distractors — the world on which
+      <code>directed-walk-full</code> ties FIBER at 11 facts. Source artifact
+      <code>comparison-d50</code>, sha256
+      <code>39a74e35520fcc95965848fd264baa79c382753b0e3b1dac3a142122ce3b72a9</code>.</figcaption>
+    </figure>
+
+    <figure class="research-figure">
+      <img src="figures/sweep-grid.svg" alt="Structural family sweep grid, showing whether FIBER is separated from the baseline panel in each cell.">
+      <figcaption>The structural family sweep — the 36-of-36 non-separation, rendered cell by cell.
+      Source artifact <code>sweep-table</code>, sha256
+      <code>9af36453c1fcfac4806db579b415f1dce8f2f2598c309bba72ba775d38b65ccc</code>.</figcaption>
+    </figure>
+
+    <figure class="research-figure">
+      <img src="figures/mutation-diversity.svg" alt="Mutation effective diversity: independent equivalence classes counted against raw instance count.">
+      <figcaption>Metamorphic yield and <em>effective</em> diversity — equivalence classes, not
+      instances. Source artifact <code>mutation-diversity</code>, sha256
+      <code>459cada5fd43bcd69e9cbd88a79de040140dd15f1bb0fa72000fad8d0c06a4fb</code>.</figcaption>
+    </figure>
+
+    <h2>4. How a finding is derived</h2>
+
+    <p>A finding is never written by the runner in prose. Each one is produced by a <strong>fixed
+    public rule</strong> from a cited measurement — <code>reference_anchor</code>,
+    <code>cheapest_admissible</code>, <code>fiber_tied_by_baseline</code>, <code>sweep_ties</code>,
+    <code>mutation_yield</code> — and each carries:</p>
+
+    <ul>
+      <li><strong>A level that cannot be inflated.</strong> Every finding is at level
+      <code>observation</code>. That is a single-variant enum: no stronger level is representable in
+      the type system, so no run can emit one.</li>
+      <li><strong>The digests it was derived from.</strong> Every finding cites the sha256 of each
+      artifact supporting it, and every cited digest must resolve to an artifact the dossier itself
+      carries — a finding whose support names nothing in the dossier fails verification.</li>
+      <li><strong>Negative status as data, not tone.</strong> A tie between the compiler and a
+      baseline is a <em>required</em> finding, flagged <code>negative: true</code>, in the same shape
+      as any positive result and rendered in the same table, same register — no appendix, no smaller
+      type.</li>
+    </ul>
+
+    <p>The dossier carries the request verbatim and its content digest, the planned protocol, one
+    record per executed step with input digests and every output artifact's name, sha256, and
+    canonical byte count, the findings, the seven required limitations verbatim, and
+    <code>dossier_sha256</code> computed over the canonical document with the digest field removed.
+    Artifacts at or below 131072 canonical bytes are inlined whole; larger ones are digest-only and
+    never truncated, because a truncated JSON copy would be a malformed artifact pretending to be
+    real — and the worlds regenerate deterministically from the request anyway.</p>
+
+    <h2>5. The verification contract</h2>
+
+    <p><code>research verify --dossier &lt;path&gt;</code> recomputes the digest and checks the
+    structural contract, printing a projection rather than a bare boolean: digest shape and match (a
+    malformed claimed digest is reported as <code>digest_malformed</code>, distinctly from
+    tampering), request digest match, required limitations present, step outcomes known, findings
+    present, finding levels valid, and finding support digests resolving to carried artifacts.
+    A one-byte tamper is caught. Exit 1 if the dossier does not verify; a document that is not a
+    research dossier at all — wrong shape, wrong schema — exits 3, because there is nothing to
+    verify.</p>
+
+    <p>Exit 0 reports a completed run whatever the findings say. A run whose every finding is
+    negative exits 0, because a measured tie is a result, not a failure.</p>
+
+    <div class="callout">
+      <p><strong>What verification proves, and what it does not.</strong> It proves the dossier is
+      the unaltered output of a run and that its findings cite carried evidence. It does
+      <em>not</em> prove the findings matter, that the question was answered, or that any measurement
+      generalises beyond the synthetic worlds it ran on.</p>
+    </div>
+
+    <h2>6. Reproducing it</h2>
+
+    <p>The run is deterministic: the same request produces the same dossier, byte for byte, figures
+    included. An independent re-run reproduced the committed example byte-identically across all
+    nine files.</p>
+
+    <pre><code>bioprism --json research template &gt; request.json
+  (edit request.json to the committed example's document)
+bioprism research run --request request.json --out-dir out --dry-run
+bioprism research run --request request.json --out-dir out
+bioprism research verify --dossier out/dossier.json</code></pre>
+
+    <p>The request schema uses <code>deny_unknown_fields</code>: any unrecognised field is a parse
+    error, not an ignored knob. The <code>question</code> field is recorded <strong>verbatim</strong>
+    in the dossier and report and <strong>never interpreted</strong> — no code path anywhere branches
+    on its content. It exists so the dossier can state what was asked next to what was measured, and
+    the reader, not the runner, judges whether the measurements bear on it.</p>
+
+    <h2>7. The methodology, as skills</h2>
+
+    <p>The <code>aurora-science</code> plugin adds six methodology skills to the in-repo Claude Code
+    marketplace: <code>equal-engineering-baselines</code>,
+    <code>discriminating-experiment-design</code>, <code>certificate-audited-analysis</code>,
+    <code>metamorphic-evaluation</code>, <code>honest-figures</code>, and
+    <code>research-dossier-discipline</code>. They package the measurement discipline this runner
+    enforces for use in any evaluation or benchmarking effort.</p>
+
+    <h2>8. Limitations</h2>
+
+    <p>These seven travel with every dossier, verbatim, and verification fails if they are missing:</p>
+
+    <ul>
+      <li>autonomous measurement science over synthetic decision worlds: every measurement in this
+      dossier is over committed fixtures and seeded generators</li>
+      <li>no biology or medicine, no literature or prior-work coverage, no external-world
+      observation, and no release-level claims from fixture evidence</li>
+      <li>the question is recorded verbatim and never interpreted: the runner executes the protocol;
+      it does not understand the question</li>
+      <li>oracle review is a human gate: this runner accepts nothing, approves nothing, and releases
+      nothing</li>
+      <li>the sweep does not vary decision-defining knobs (skeleton, events, protected set, decision
+      time, policy): they change what the decision is, not the structure around it, and a sweep that
+      varied them would be comparing strategies across different questions</li>
+      <li>negative findings are first-class results: ties and null separations are reported in the
+      same register as positive findings, and the repository's own headline finding is a tie</li>
+      <li>research and developer infrastructure: it does not diagnose an individual, recommend
+      treatment, triage care, enroll participants, or claim medical-device functionality</li>
+    </ul>
+
+    <p>Full reference:
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/RESEARCH.md">docs/RESEARCH.md</a>.
+    The wider measurement story is on the <a href="benchmarks.html">benchmarks page</a>.</p>
+
+    <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
+    recommend treatment, triage care, enroll participants, or claim medical-device functionality.</div>
+
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>AURORA Agent — Apache-2.0 ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">Source</a> ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">Privacy</a> ·
+      MCP registry: <code>io.github.MurariAmbati/aurora-agent</code></p>
+    <p>Research and developer infrastructure: it does not diagnose an individual, recommend treatment,
+    triage care, enroll participants, or claim medical-device functionality.</p>
+  </div>
+</footer>
+
+</body>
+</html>
