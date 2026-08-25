@@ -78,6 +78,8 @@ ADAPTER_CONTEXT_COMPILATION_FEATURE_ID = "AFA-adapter-P03-F27"
 ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION = "prospective-context-compilation-assurance/1.0"
 KNOWLEDGE_WORKFLOW_FEATURE_ID = "AFA-adapter-P04-F14"
 KNOWLEDGE_WORKFLOW_CONTRACT_VERSION = "multimodal-knowledge-workflow-fabric/1.0"
+RESOURCE_WORKBENCH_FEATURE_ID = "AFA-adapter-P05-F18"
+RESOURCE_WORKBENCH_CONTRACT_VERSION = "multimodal-resource-workbench/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2101,3 +2103,39 @@ class KnowledgeWorkflowReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "world": dict(self.world), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ResourceWorkbenchReceipt:
+    request_id: str
+    need_id: str
+    disposition: str
+    qualified_resources: tuple[Mapping[str, Any], ...]
+    omissions: tuple[Mapping[str, Any], ...]
+    checks: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RESOURCE_WORKBENCH_FEATURE_ID
+    contract_version: str = RESOURCE_WORKBENCH_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RESOURCE_WORKBENCH_FEATURE_ID or self.contract_version != RESOURCE_WORKBENCH_CONTRACT_VERSION:
+            raise ResearchContractError("resource workbench schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.need_id.strip() or not self.checks:
+            raise ResearchContractError("resource workbench identity or checks are incomplete")
+        if self.disposition not in {"qualified", "partial", "blocked", "unknown"}:
+            raise ResearchContractError("resource workbench disposition is unknown")
+        for index, item in enumerate(self.qualified_resources, start=1):
+            if item.get("rank") != index or not str(item.get("resource_id", "")).strip() or not str(item.get("origin", "")).strip() or not item.get("reasons"):
+                raise ResearchContractError("qualified resource ranking or reasons are invalid")
+            if not re.fullmatch(r"[0-9a-f]{64}", str(item.get("artifact_digest", ""))):
+                raise ResearchContractError("qualified resource digest is invalid")
+        for item in self.omissions:
+            if not str(item.get("resource_id", "")).strip() or not str(item.get("reason", "")).strip():
+                raise ResearchContractError("resource omission is incomplete")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("resource workbench artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "need_id": self.need_id, "disposition": self.disposition, "qualified_resources": [dict(item) for item in self.qualified_resources], "omissions": [dict(item) for item in self.omissions], "checks": list(self.checks), "artifact": dict(self.artifact), "boundary": self.boundary})

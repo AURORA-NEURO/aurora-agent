@@ -1838,6 +1838,7 @@ impl Server {
                 self.adapter_context_compilation_assurance(&arguments)
             }
             "multimodal_knowledge_workflow" => self.multimodal_knowledge_workflow(&arguments),
+            "adapter_resource_workbench" => self.adapter_resource_workbench(&arguments),
             "research_release_validate" => self.research_release_validate(&arguments),
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
@@ -24928,6 +24929,25 @@ impl Server {
         }))
     }
 
+    fn adapter_resource_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let receipt = crate::research_contracts::discover_adapter_resources_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_adapter::RESOURCE_WORKBENCH_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "resource qualification is ranked deterministically",
+                "stale, protected, non-local, and out-of-scope resources remain omissions",
+                "raw resource bytes never enter the workbench receipt"
+            ],
+            "limitations": [
+                "the workbench qualifies metadata and does not fetch or execute a resource",
+                "unknown and partial results require downstream policy admission"
+            ]
+        }))
+    }
+
     fn research_release_validate(&self, arguments: &Value) -> Result<Value, String> {
         let receipt = arguments
             .get("receipt")
@@ -36398,7 +36418,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "multimodal_retrieval_synthesis", "adapter_context_compilation_assurance", "multimodal_knowledge_workflow", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "multimodal_retrieval_synthesis", "adapter_context_compilation_assurance", "multimodal_knowledge_workflow", "adapter_resource_workbench", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -39063,6 +39083,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "request": { "type": "object", "description": "Serialized ClaimsWorkflowRequest with study scope, required/resolved claims, evidence receipt, policy, protected closure, locality, and preclinical boundary." }
                 },
                 "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "adapter_resource_workbench",
+            "description": "Qualify multimodal research resources with deterministic trust ranking, capability/origin/locality gates, and explicit protected or unavailable omissions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_id": { "type": "string" },
+                    "need": { "type": "object", "description": "Serialized ResourceNeed." },
+                    "candidates": { "type": "array", "description": "Serialized ResourceCandidate array." }
+                },
+                "required": ["request_id", "need", "candidates"]
             }
         }),
         json!({

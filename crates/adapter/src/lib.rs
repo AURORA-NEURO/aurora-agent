@@ -97,6 +97,7 @@ pub mod quality_control;
 pub mod quality_drift;
 pub mod registry;
 pub mod research_ingest;
+pub mod resource_workbench;
 pub mod retrieval_synthesis;
 pub mod source;
 pub mod tabular;
@@ -158,6 +159,12 @@ pub use registry::{
 };
 pub use research_ingest::{
     certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
+};
+pub use resource_workbench::{
+    discover_resources, QualifiedResource, ResourceCandidate, ResourceNeed, ResourceOmission,
+    ResourceWorkbenchDisposition, ResourceWorkbenchError, ResourceWorkbenchReceipt,
+    CONTRACT_VERSION as RESOURCE_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RESOURCE_WORKBENCH_FEATURE_ID,
 };
 pub use retrieval_synthesis::{
     compile_evidence_synthesis, EvidenceSynthesis, EvidenceSynthesisDisposition,

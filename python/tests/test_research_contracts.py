@@ -10,6 +10,7 @@ from prism_sdk.research_contracts import EVIDENCE_SURVEILLANCE_FEATURE_ID, EVIDE
 from prism_sdk.research_contracts import RETRIEVAL_SYNTHESIS_FEATURE_ID, RETRIEVAL_SYNTHESIS_CONTRACT_VERSION, RetrievalSynthesisReceipt
 from prism_sdk.research_contracts import ADAPTER_CONTEXT_COMPILATION_FEATURE_ID, ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION, AdapterContextCompilationReceipt
 from prism_sdk.research_contracts import KNOWLEDGE_WORKFLOW_FEATURE_ID, KNOWLEDGE_WORKFLOW_CONTRACT_VERSION, KnowledgeWorkflowReceipt
+from prism_sdk.research_contracts import RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE_WORKBENCH_CONTRACT_VERSION, ResourceWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -812,4 +813,20 @@ def test_knowledge_workflow_keeps_missing_claim_unknown():
     receipt.validate()
     assert receipt.feature_id == KNOWLEDGE_WORKFLOW_FEATURE_ID
     assert receipt.contract_version == KNOWLEDGE_WORKFLOW_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_resource_workbench_omits_protected_resource():
+    receipt = ResourceWorkbenchReceipt(
+        request_id="request:resources",
+        need_id="need:imaging",
+        disposition="unknown",
+        qualified_resources=(),
+        omissions=({"resource_id": "resource:protected", "reason": "resource is protected by institution policy"},),
+        checks=("no resource could be qualified; unknown is preserved",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == RESOURCE_WORKBENCH_FEATURE_ID
+    assert receipt.contract_version == RESOURCE_WORKBENCH_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

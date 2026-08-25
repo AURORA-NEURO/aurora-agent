@@ -154,6 +154,10 @@ import {
   KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
   knowledgeWorkflowReceiptDigest,
   validateKnowledgeWorkflowReceipt,
+  RESOURCE_WORKBENCH_FEATURE_ID,
+  RESOURCE_WORKBENCH_CONTRACT_VERSION,
+  resourceWorkbenchReceiptDigest,
+  validateResourceWorkbenchReceipt,
 } from "../dist/index.js";
 
 test("empty evidence is explicit unknown", () => {
@@ -906,3 +910,5 @@ test("multimodal retrieval synthesis keeps missing modality unknown", () => { co
 test("adapter context compilation keeps missing fact unknown", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: ADAPTER_CONTEXT_COMPILATION_FEATURE_ID, contract_version: ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION, request_id: "request:context", query_id: "query:mechanism", resolved_fact_ids: ["fact:a"], disposition: "unknown", evidence_receipt_digest: null, checks: ["incomplete decision context remains unknown rather than certified"], omissions: ["required decision fact unavailable: fact:b"], artifact: { content_hash: "b".repeat(64) }, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateAdapterContextCompilationReceipt(receipt)); assert.equal(adapterContextCompilationReceiptDigest(receipt), adapterContextCompilationReceiptDigest(receipt)); });
 
 test("knowledge workflow keeps missing claim unknown", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: KNOWLEDGE_WORKFLOW_FEATURE_ID, contract_version: KNOWLEDGE_WORKFLOW_CONTRACT_VERSION, request_id: "request:knowledge", workflow_id: "workflow:multimodal", disposition: "unknown", world: { schema_version: "aurora-research-contract/1.0", world_id: "typed-knowledge-world:workflow:multimodal", workflow_id: "workflow:multimodal", study_ids: ["study:a", "study:b"], resolved_claim_ids: ["claim:a"], disposition: "unknown", evidence_receipt_digest: null, omissions: ["required claim unavailable: claim:b"], uncertainty: ["claim derivation receipt is absent"], stages: ["scope_studies", "resolve_claim_identities", "attach_evidence_derivation", "emit_typed_knowledge_world"], boundary: PRECLINICAL_BOUNDARY }, checks: ["incomplete claim closure remains unknown rather than asserted"], omissions: ["required claim unavailable: claim:b"], uncertainty: ["claim derivation receipt is absent"], artifact: { content_hash: "b".repeat(64) }, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateKnowledgeWorkflowReceipt(receipt)); assert.equal(knowledgeWorkflowReceiptDigest(receipt), knowledgeWorkflowReceiptDigest(receipt)); });
+
+test("resource workbench omits protected resource", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: RESOURCE_WORKBENCH_FEATURE_ID, contract_version: RESOURCE_WORKBENCH_CONTRACT_VERSION, request_id: "request:resources", need_id: "need:imaging", disposition: "unknown", qualified_resources: [], omissions: [{ resource_id: "resource:protected", reason: "resource is protected by institution policy" }], checks: ["no resource could be qualified; unknown is preserved"], artifact: { content_hash: "b".repeat(64) }, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateResourceWorkbenchReceipt(receipt)); assert.equal(resourceWorkbenchReceiptDigest(receipt), resourceWorkbenchReceiptDigest(receipt)); });

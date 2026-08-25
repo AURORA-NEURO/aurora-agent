@@ -16,6 +16,10 @@ use bioprism_adapter::{
     RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
 use bioprism_adapter::{
+    discover_resources as discover_adapter_resources, ResourceCandidate, ResourceNeed,
+    ResourceWorkbenchReceipt, RESOURCE_WORKBENCH_FEATURE_ID,
+};
+use bioprism_adapter::{
     evaluate_quality_drift, harmonize_multimodal, HarmonizedResearchObject,
     MultimodalHarmonizationRequest, QualityDriftReceipt, QualityDriftRequest,
     MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
@@ -154,6 +158,7 @@ pub const EVIDENCE_SURVEILLANCE_TOOL: &str = "evidence_surveillance_copilot";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
+pub const ADAPTER_RESOURCE_WORKBENCH_TOOL: &str = "adapter_resource_workbench";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -851,6 +856,39 @@ pub fn validate_knowledge_workflow_json(value: &Value) -> Result<KnowledgeWorkfl
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != KNOWLEDGE_WORKFLOW_FEATURE_ID {
         return Err("knowledge workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn discover_adapter_resources_json(value: &Value) -> Result<Value, String> {
+    let request_id = value
+        .get("request_id")
+        .and_then(Value::as_str)
+        .ok_or("request_id is required")?;
+    let need: ResourceNeed =
+        serde_json::from_value(value.get("need").cloned().ok_or("need is required")?)
+            .map_err(|error| format!("invalid adapter resource need: {error}"))?;
+    let candidates: Vec<ResourceCandidate> = serde_json::from_value(
+        value
+            .get("candidates")
+            .cloned()
+            .ok_or("candidates are required")?,
+    )
+    .map_err(|error| format!("invalid adapter resource candidates: {error}"))?;
+    let receipt = discover_adapter_resources(request_id, &need, &candidates)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize adapter resource receipt: {error}"))
+}
+
+pub fn validate_adapter_resource_workbench_json(
+    value: &Value,
+) -> Result<ResourceWorkbenchReceipt, String> {
+    let receipt: ResourceWorkbenchReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter resource receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RESOURCE_WORKBENCH_FEATURE_ID {
+        return Err("adapter resource workbench feature id mismatch".into());
     }
     Ok(receipt)
 }
