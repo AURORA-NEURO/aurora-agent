@@ -807,5 +807,12 @@ report = agent.domain_audit(
 validate_autonomous_domain_audit_report(report)
 ```
 
+`AutonomousBrainControlPlaneMonitor` and `AsyncAutonomousBrainControlPlaneMonitor` provide the
+operator-side lifecycle for jobs returned by `BrainControlClient`. They fan out bounded status
+reads across the twelve domains, validate hash-chained event cursors, issue explicit approval
+requests/decisions, and wait with bounded polling and restart cursors. Remote projections are
+validated as metadata-only before being returned; task text, prompts, credentials, provider
+responses, tool arguments, and effect values are refused at the monitor boundary.
+
 See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

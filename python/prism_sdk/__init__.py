@@ -263,6 +263,15 @@ from .brain_api import (
     BrainJobSubmission,
     BrainReplayRequest,
 )
+from .autonomous_brain_control_plane import (
+    AUTONOMOUS_BRAIN_CONTROL_PLANE_MONITOR_SCHEMA,
+    MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_POLL_MS,
+    MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_TIMEOUT_MS,
+    MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_POLLS,
+    MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_EVENTS,
+    AutonomousBrainControlPlaneMonitor,
+    AsyncAutonomousBrainControlPlaneMonitor,
+)
 from .remote_brain_worker import (
     AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA,
     AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA,
@@ -4016,6 +4025,13 @@ __all__ = [
     "BrainJobRenewCommand",
     "BrainJobSubmission",
     "BrainReplayRequest",
+    "AUTONOMOUS_BRAIN_CONTROL_PLANE_MONITOR_SCHEMA",
+    "MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_POLL_MS",
+    "MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_TIMEOUT_MS",
+    "MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_POLLS",
+    "MAX_AUTONOMOUS_BRAIN_CONTROL_PLANE_EVENTS",
+    "AutonomousBrainControlPlaneMonitor",
+    "AsyncAutonomousBrainControlPlaneMonitor",
     "BRAIN_EVALUATOR_REPLAY_SCHEMA",
     "BRAIN_CONTEXT_LEARNING_STATE_SCHEMA",
     "BRAIN_LEARNING_EPISODE_SCHEMA",

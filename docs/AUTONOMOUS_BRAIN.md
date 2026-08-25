@@ -2015,6 +2015,16 @@ The report is row- and aggregate-digest-bound, metadata-only, and audit-only. `u
 `partial`, and `blocked` are review states rather than authorization; no credentials, providers,
 sources, tools, queues, or learners are touched.
 
+Python now also exposes the operator-side `AutonomousBrainControlPlaneMonitor` and async
+counterpart. They build on the existing `BrainControlClient` rather than inventing a second
+transport: status fan-out is bounded to the twelve autonomous domains, event pages preserve and
+verify the global hash-chain cursor, approvals require the existing caller authorization digest,
+and waits return explicit reached/timed-out states with restart cursors. Every returned job and
+event is checked for supported domain, digest, attempt, boundary, and retention invariants. Any
+task, prompt, request, response, credential, token, message, header, or raw effect-shaped field
+is rejected before it reaches the monitor projection. Monitoring and approval routing observe or
+request control-plane state; they do not execute providers, tools, sources, or effects.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

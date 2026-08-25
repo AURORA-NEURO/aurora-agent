@@ -1600,3 +1600,10 @@ and aggregate-digest-bound and perform no provider/source/tool/credential/queue/
 The seven Python profiles whose default capability was previously absent from their declared
 catalogue are now closed over that capability. Runtime availability, source truth, authorization,
 and deployment observability remain explicit external gates.
+
+Python now closes the cross-SDK control-plane supervision gap. `AutonomousBrainControlPlaneMonitor`
+and its async counterpart build on `BrainControlClient` to provide bounded status fan-out across
+all twelve domains, hash-chain event cursor validation, explicit approval routing, and bounded
+reached/timed-out polling. Unsafe projection fields are refused before return, and task text,
+prompts, credentials, provider responses, tool arguments, and effect values remain outside the
+monitor. This is operator lifecycle infrastructure, not a provider worker or authorization oracle.
