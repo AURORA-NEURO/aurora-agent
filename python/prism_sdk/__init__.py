@@ -296,6 +296,11 @@ from .biolang_publication import (
     BIOLANG_PUBLICATION_COPILOT_CONTRACT_VERSION,
     BiolangPublicationCopilotReceipt,
 )
+from .api_release import (
+    API_RELEASE_ASSURANCE_FEATURE_ID,
+    API_RELEASE_ASSURANCE_CONTRACT_VERSION,
+    ApiReleaseAssuranceReceipt,
+)
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

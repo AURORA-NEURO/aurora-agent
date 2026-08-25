@@ -185,6 +185,8 @@ export const HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-hubapi-P14-F26" a
 export const HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "hubapi-multimodal-interpretation-assurance/1.0" as const;
 export const BIOLANG_PUBLICATION_COPILOT_FEATURE_ID = "AFA-biolang-P16-F11" as const;
 export const BIOLANG_PUBLICATION_COPILOT_CONTRACT_VERSION = "biolang-publication-copilot/1.0" as const;
+export const API_RELEASE_ASSURANCE_FEATURE_ID = "AFA-api-P16-F27" as const;
+export const API_RELEASE_ASSURANCE_CONTRACT_VERSION = "api-publication-release-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3296,6 +3298,53 @@ export function validateBiolangPublicationCopilotReceipt(receipt: BiolangPublica
 }
 
 export function biolangPublicationCopilotReceiptDigest(receipt: BiolangPublicationCopilotReceipt): string { validateBiolangPublicationCopilotReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ApiReleaseAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  candidate_order: string[];
+  admitted_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  release_order: string[];
+  artifact_order: string[];
+  evidence_order: string[];
+  provenance_order: string[];
+  replay_order: string[];
+  benchmark_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  benchmark_digest: string | null;
+  effect_receipts: string[];
+  objects: Record<string, unknown>[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateApiReleaseAssuranceReceipt(receipt: ApiReleaseAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== API_RELEASE_ASSURANCE_FEATURE_ID || receipt.contract_version !== API_RELEASE_ASSURANCE_CONTRACT_VERSION) throw new Error("API release assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.scope.trim() || !receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("API release identity, candidates, locality, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("API release disposition is unknown");
+  if ([...receipt.admitted_order, ...receipt.blocked_order, ...receipt.unknown_order].some((value) => !receipt.candidate_order.includes(value))) throw new Error("API release candidate state is not covered by candidate order");
+  for (const values of [receipt.candidate_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order, receipt.release_order, receipt.artifact_order, receipt.evidence_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("API release ordering is invalid");
+  for (const values of [receipt.provenance_order, receipt.replay_order, receipt.benchmark_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("API release digest ordering is invalid");
+  const digests = [...receipt.provenance_order, ...receipt.replay_order, ...receipt.benchmark_order, receipt.replay_identity, receipt.artifact.content_hash];
+  if (receipt.benchmark_digest !== null) digests.push(receipt.benchmark_digest);
+  for (const value of digests) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("API release digest is invalid");
+  for (const object of receipt.objects) if (object.raw_data_local !== true || object.boundary !== PRECLINICAL_BOUNDARY || typeof object.run_id !== "string" || !object.run_id.trim() || typeof object.release_id !== "string" || !object.release_id.trim() || !Array.isArray(object.artifact_ids) || !object.artifact_ids.length || !Array.isArray(object.evidence_receipt_ids) || !object.evidence_receipt_ids.length) throw new Error("API release object is incomplete or non-local");
+  if (receipt.admitted_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("evaluate:release-assurance:"))) throw new Error("admitted releases require an evaluation receipt");
+  if (!receipt.admitted_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("empty release result must be explicitly blocked");
+}
+
+export function apiReleaseAssuranceReceiptDigest(receipt: ApiReleaseAssuranceReceipt): string { validateApiReleaseAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

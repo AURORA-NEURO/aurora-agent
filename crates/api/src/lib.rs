@@ -21,6 +21,7 @@
 pub mod analysis_assurance;
 pub mod events;
 pub mod http;
+pub mod release_assurance;
 pub mod router;
 
 pub use analysis_assurance::{
@@ -28,6 +29,12 @@ pub use analysis_assurance::{
     AnalysisAssuranceRequest, AnalysisCandidate, AnalysisDisposition, AnalysisEvidenceState,
     QualifiedAnalysisResult, ANALYSIS_ASSURANCE_CONTRACT_VERSION, ANALYSIS_ASSURANCE_FEATURE_ID,
     ANALYSIS_ASSURANCE_PRECLINICAL_BOUNDARY, ANALYSIS_ASSURANCE_SCHEMA_VERSION,
+};
+pub use release_assurance::{
+    assure_release, release_assurance_manifest, ReleaseAssuranceError, ReleaseAssuranceReceipt,
+    ReleaseAssuranceRequest, ReleaseDisposition, ReleaseState, SignedResearchObject,
+    ValidatedResearchRun, CONTRACT_VERSION as RELEASE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RELEASE_ASSURANCE_FEATURE_ID,
 };
 
 pub use events::{
