@@ -12,6 +12,10 @@ use bioprism_adapter::{
     EXECUTION_CONTROL_FEATURE_ID,
 };
 use bioprism_adapter::{
+    admit_federated_commons, FederatedCommonsError, FederatedCommonsReceipt,
+    FederatedCommonsRequest, FEDERATED_COMMONS_FEATURE_ID,
+};
+use bioprism_adapter::{
     admit_policy_action, ActionAndAuthority, PolicyGatewayReceipt, POLICY_GATEWAY_FEATURE_ID,
 };
 use bioprism_adapter::{
@@ -282,6 +286,7 @@ pub const DEPENDENCY_COMPOSITION_TOOL: &str = "adapter_dependency_composition";
 pub const ADAPTER_SEMANTIC_PARITY_TOOL: &str = "adapter_semantic_parity";
 pub const ADAPTER_SCALE_FRONTIER_TOOL: &str = "adapter_scale_frontier";
 pub const ADVERSARIAL_RECOVERY_TOOL: &str = "adapter_adversarial_recovery";
+pub const FEDERATED_COMMONS_TOOL: &str = "adapter_federated_commons";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1504,6 +1509,26 @@ pub fn validate_adversarial_recovery_json(
         .map_err(|error: AdversarialRecoveryError| error.to_string())?;
     if receipt.feature_id != ADVERSARIAL_RECOVERY_FEATURE_ID {
         return Err("adversarial recovery feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn admit_federated_commons_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedCommonsRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated commons request: {error}"))?;
+    let receipt = admit_federated_commons(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federated commons receipt: {error}"))
+}
+
+pub fn validate_federated_commons_json(value: &Value) -> Result<FederatedCommonsReceipt, String> {
+    let receipt: FederatedCommonsReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated commons receipt: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: FederatedCommonsError| error.to_string())?;
+    if receipt.feature_id != FEDERATED_COMMONS_FEATURE_ID {
+        return Err("federated commons feature id mismatch".into());
     }
     Ok(receipt)
 }

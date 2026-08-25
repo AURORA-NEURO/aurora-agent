@@ -122,6 +122,8 @@ export const ADAPTER_SCALE_FRONTIER_FEATURE_ID = "AFA-adapter-P29-F15" as const;
 export const ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION = "adapter-scale-frontier/1.0" as const;
 export const ADVERSARIAL_RECOVERY_FEATURE_ID = "AFA-adapter-P30-F24" as const;
 export const ADVERSARIAL_RECOVERY_CONTRACT_VERSION = "adapter-adversarial-recovery/1.0" as const;
+export const FEDERATED_COMMONS_FEATURE_ID = "AFA-adapter-P31-F22" as const;
+export const FEDERATED_COMMONS_CONTRACT_VERSION = "adapter-federated-commons/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2057,6 +2059,41 @@ export function validateAdversarialRecoveryReceipt(receipt: AdversarialRecoveryR
 }
 
 export function adversarialRecoveryReceiptDigest(receipt: AdversarialRecoveryReceipt): string { validateAdversarialRecoveryReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface FederatedCommonsReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  federation_id: string;
+  objective_id: string;
+  required_purpose: string;
+  disposition: "shared" | "partial" | "unknown" | "blocked";
+  institution_order: string[];
+  admitted_order: string[];
+  denied_order: string[];
+  semantic_profile_order: string[];
+  artifact_order: string[];
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateFederatedCommonsReceipt(receipt: FederatedCommonsReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATED_COMMONS_FEATURE_ID || receipt.contract_version !== FEDERATED_COMMONS_CONTRACT_VERSION) throw new Error("federated commons schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.objective_id.trim() || !receipt.required_purpose.trim() || !receipt.institution_order.length || !receipt.checks.length || !receipt.effect_receipts.length) throw new Error("federated commons identity, institutions, purpose, checks, effects, locality, or boundary are incomplete");
+  if (!new Set(["shared", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("federated commons disposition is unknown");
+  for (const values of [receipt.institution_order, receipt.admitted_order, receipt.denied_order, receipt.semantic_profile_order, receipt.artifact_order, receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("federated commons ordering is invalid");
+  if (receipt.artifact_order.some((value) => !/^[0-9a-f]{64}$/.test(value))) throw new Error("federated commons artifact digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("federated commons receipt digest is invalid");
+}
+
+export function federatedCommonsReceiptDigest(receipt: FederatedCommonsReceipt): string { validateFederatedCommonsReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

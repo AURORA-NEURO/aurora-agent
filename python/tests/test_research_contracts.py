@@ -35,6 +35,7 @@ from prism_sdk.research_contracts import DEPENDENCY_COMPOSITION_FEATURE_ID, DEPE
 from prism_sdk.research_contracts import ADAPTER_SEMANTIC_PARITY_FEATURE_ID, ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION, AdapterSemanticParityReceipt
 from prism_sdk.research_contracts import ADAPTER_SCALE_FRONTIER_FEATURE_ID, ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION, ScaleFrontierReceipt
 from prism_sdk.research_contracts import ADVERSARIAL_RECOVERY_FEATURE_ID, ADVERSARIAL_RECOVERY_CONTRACT_VERSION, AdversarialRecoveryReceipt
+from prism_sdk.research_contracts import FEDERATED_COMMONS_FEATURE_ID, FEDERATED_COMMONS_CONTRACT_VERSION, FederatedCommonsReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1402,4 +1403,29 @@ def test_adversarial_recovery_preserves_blocked_events_and_checkpoints():
     receipt.validate()
     assert receipt.feature_id == ADVERSARIAL_RECOVERY_FEATURE_ID
     assert receipt.contract_version == ADVERSARIAL_RECOVERY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_federated_commons_preserves_partial_purpose_bound_exchange():
+    receipt = FederatedCommonsReceipt(
+        request_id="commons:adapter",
+        federation_id="federation:preclinical",
+        objective_id="objective:benchmark",
+        required_purpose="benchmark",
+        disposition="partial",
+        institution_order=("site:a", "site:b"),
+        admitted_order=("site:a",),
+        denied_order=("site:b",),
+        semantic_profile_order=("ome-ngff+anndata:v1",),
+        artifact_order=("a" * 64,),
+        checks=("purpose, aggregate-only, policy, locality, and semantic-profile gates are explicit",),
+        omissions=("institution:site:b:raw-or-nonaggregate-exchange-denied",),
+        uncertainty=(),
+        negative_evidence=("institution:site:b:purpose-not-authorized",),
+        effect_receipts=("exchange:permitted-purpose-bound-aggregate-digests-only",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == FEDERATED_COMMONS_FEATURE_ID
+    assert receipt.contract_version == FEDERATED_COMMONS_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

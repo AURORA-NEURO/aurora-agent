@@ -129,6 +129,8 @@ ADAPTER_SCALE_FRONTIER_FEATURE_ID = "AFA-adapter-P29-F15"
 ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION = "adapter-scale-frontier/1.0"
 ADVERSARIAL_RECOVERY_FEATURE_ID = "AFA-adapter-P30-F24"
 ADVERSARIAL_RECOVERY_CONTRACT_VERSION = "adapter-adversarial-recovery/1.0"
+FEDERATED_COMMONS_FEATURE_ID = "AFA-adapter-P31-F22"
+FEDERATED_COMMONS_CONTRACT_VERSION = "adapter-federated-commons/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3179,3 +3181,46 @@ class AdversarialRecoveryReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "event_order": list(self.event_order), "recovered_order": list(self.recovered_order), "blocked_order": list(self.blocked_order), "replay_order": list(self.replay_order), "checkpoint_order": list(self.checkpoint_order), "recovery_digest": self.recovery_digest, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class FederatedCommonsReceipt:
+    request_id: str
+    federation_id: str
+    objective_id: str
+    required_purpose: str
+    disposition: str
+    institution_order: tuple[str, ...]
+    admitted_order: tuple[str, ...]
+    denied_order: tuple[str, ...]
+    semantic_profile_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = FEDERATED_COMMONS_FEATURE_ID
+    contract_version: str = FEDERATED_COMMONS_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != FEDERATED_COMMONS_FEATURE_ID or self.contract_version != FEDERATED_COMMONS_CONTRACT_VERSION:
+            raise ResearchContractError("federated commons schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.federation_id.strip() or not self.objective_id.strip() or not self.required_purpose.strip() or not self.institution_order or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("federated commons identity, institutions, purpose, checks, effects, locality, or boundary are incomplete")
+        if self.disposition not in {"shared", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("federated commons disposition is unknown")
+        for values in (self.institution_order, self.admitted_order, self.denied_order, self.semantic_profile_order, self.artifact_order, self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("federated commons ordering is invalid")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in self.artifact_order):
+            raise ResearchContractError("federated commons artifact digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("federated commons receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "federation_id": self.federation_id, "objective_id": self.objective_id, "required_purpose": self.required_purpose, "disposition": self.disposition, "institution_order": list(self.institution_order), "admitted_order": list(self.admitted_order), "denied_order": list(self.denied_order), "semantic_profile_order": list(self.semantic_profile_order), "artifact_order": list(self.artifact_order), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

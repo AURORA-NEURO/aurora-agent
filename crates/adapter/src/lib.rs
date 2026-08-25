@@ -93,6 +93,7 @@ pub mod evidence_surveillance;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
+pub mod federated_commons;
 pub mod federation_workflow;
 pub mod ingestion;
 pub mod ingestion_gateway;
@@ -194,6 +195,12 @@ pub use experiment_design_control::{
     FEATURE_ID as EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
 };
 pub use fact::{FactDraft, ValueQualifiers};
+pub use federated_commons::{
+    admit_federated_commons, CommonsContribution, CommonsDisposition, FederatedCommonsError,
+    FederatedCommonsReceipt, FederatedCommonsRequest,
+    CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID,
+};
 pub use federation_workflow::{
     schedule_federation_workflow, FederationRequest, FederationTask, FederationWorkflowDecision,
     FederationWorkflowError, FederationWorkflowReceipt,
