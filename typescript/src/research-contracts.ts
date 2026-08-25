@@ -157,6 +157,8 @@ export const RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID = "AFA-biolang-P02-F26" as c
 export const RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION = "biolang-multimodal-retrieval-synthesis-assurance/1.0" as const;
 export const CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID = "AFA-cli-P04-F23" as const;
 export const CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION = "cli-prospective-knowledge-representation-interoperability/1.0" as const;
+export const LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-lab-P01-F11" as const;
+export const LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2674,6 +2676,40 @@ export function validateCliKnowledgeInteroperabilityReceipt(receipt: CliKnowledg
 }
 
 export function cliKnowledgeInteroperabilityReceiptDigest(receipt: CliKnowledgeInteroperabilityReceipt): string { validateCliKnowledgeInteroperabilityReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface LabEvidenceSurveillanceReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  feed_id: string;
+  workflow_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  qualified_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  source_order: string[];
+  provenance_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateLabEvidenceSurveillanceReceipt(receipt: LabEvidenceSurveillanceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID || receipt.contract_version !== LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION) throw new Error("lab evidence surveillance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.feed_id.trim() || !receipt.workflow_id.trim() || !receipt.effect_receipts.length) throw new Error("lab evidence surveillance identity, locality, effects, or boundary is incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("lab evidence surveillance disposition is unknown");
+  if (!receipt.qualified_order.length && !receipt.blocked_order.length && !receipt.unknown_order.length) throw new Error("lab evidence surveillance must retain a qualified, blocked, or unknown item");
+  for (const values of [receipt.qualified_order, receipt.blocked_order, receipt.unknown_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("lab evidence surveillance ordering is invalid");
+  for (const value of [receipt.replay_identity, ...receipt.source_order, ...receipt.provenance_order, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("lab evidence surveillance digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("invoke:declared-tools:") && effect !== "block:evidence-surveillance-release")) throw new Error("lab evidence surveillance effect is outside bounded tool invocation");
+}
+
+export function labEvidenceSurveillanceReceiptDigest(receipt: LabEvidenceSurveillanceReceipt): string { validateLabEvidenceSurveillanceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

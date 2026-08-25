@@ -175,6 +175,8 @@ RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID = "AFA-biolang-P02-F26"
 RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION = "biolang-multimodal-retrieval-synthesis-assurance/1.0"
 CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID = "AFA-cli-P04-F23"
 CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION = "cli-prospective-knowledge-representation-interoperability/1.0"
+LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-lab-P01-F11"
+LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4014,3 +4016,49 @@ class CliKnowledgeInteroperabilityReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "world": dict(self.world), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class LabEvidenceSurveillanceReceipt:
+    """Cross-language validator for the bounded prospective evidence copilot."""
+
+    feed_id: str
+    workflow_id: str
+    disposition: str
+    qualified_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    unknown_order: tuple[str, ...]
+    source_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    replay_identity: str
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID
+    contract_version: str = LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID or self.contract_version != LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION:
+            raise ResearchContractError("lab evidence surveillance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.feed_id.strip() or not self.workflow_id.strip() or not self.effect_receipts:
+            raise ResearchContractError("lab evidence surveillance identity, locality, effects, or boundary is incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("lab evidence surveillance disposition is unknown")
+        if not self.qualified_order and not self.blocked_order and not self.unknown_order:
+            raise ResearchContractError("lab evidence surveillance must retain a qualified, blocked, or unknown item")
+        for values in (self.qualified_order, self.blocked_order, self.unknown_order, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("lab evidence surveillance ordering is invalid")
+        for value in (self.replay_identity, *self.source_order, *self.provenance_order, self.artifact.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("lab evidence surveillance digest is invalid")
+        if any(not effect.startswith("invoke:declared-tools:") and effect != "block:evidence-surveillance-release" for effect in self.effect_receipts):
+            raise ResearchContractError("lab evidence surveillance effect is outside bounded tool invocation")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "feed_id": self.feed_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "qualified_order": list(self.qualified_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "source_order": list(self.source_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

@@ -132,6 +132,7 @@
 pub mod context_value;
 pub mod design_frontier;
 pub mod error;
+pub mod evidence_surveillance;
 pub mod evolution;
 pub mod experiment_design;
 pub mod holdout;
@@ -157,6 +158,13 @@ pub use design_frontier::{
 };
 pub use error::{
     EvolutionError, HoldoutError, LabError, ParetoError, RollbackError, SeparationError, SpaceError,
+};
+pub use evidence_surveillance::{
+    capability_manifest as evidence_surveillance_manifest, run as run_evidence_surveillance,
+    CopilotDisposition, EvidenceFeed, EvidenceFeedItem, EvidenceSurveillanceError,
+    FeedEvidenceState, QualifiedEvidenceSet,
+    FEATURE_CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
 };
 pub use evolution::{
     ChangeProposal, ContaminationRecord, EvolutionArchive, EvolutionCard, ImprovementClaim,

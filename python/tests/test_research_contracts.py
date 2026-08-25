@@ -52,6 +52,7 @@ from prism_sdk.research_contracts import EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_
 from prism_sdk.research_contracts import QUALITY_WORKBENCH_BIOLANG_FEATURE_ID, QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION, BiolangQualityWorkbenchReceipt
 from prism_sdk.research_contracts import RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID, RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION, BiolangRetrievalAssuranceReceipt
 from prism_sdk.research_contracts import CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID, CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION, CliKnowledgeInteroperabilityReceipt
+from prism_sdk.research_contracts import LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID, LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, LabEvidenceSurveillanceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1763,4 +1764,12 @@ def test_cli_knowledge_interoperability_preserves_unknown_claim_and_exchange_gat
     receipt.validate()
     assert receipt.feature_id == CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID
     assert receipt.contract_version == CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_lab_evidence_surveillance_preserves_unknown_and_bounded_tool_gate():
+    receipt = LabEvidenceSurveillanceReceipt(feed_id="feed:surveillance", workflow_id="workflow:evidence", disposition="partial", qualified_order=("evidence:a",), blocked_order=(), unknown_order=("evidence:b",), source_order=("a" * 64,), provenance_order=("b" * 64,), omissions=("evidence:evidence:b:required-but-not-qualified",), uncertainty=("evidence:evidence:b:state-unknown-not-qualified",), negative_evidence=("evidence:evidence:a:negative-result-retained",), replay_identity="c" * 64, effect_receipts=("block:evidence-surveillance-release", "invoke:declared-tools:tool:local-index"), artifact={"content_hash": "d" * 64})
+    receipt.validate()
+    assert receipt.feature_id == LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID
+    assert receipt.contract_version == LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
