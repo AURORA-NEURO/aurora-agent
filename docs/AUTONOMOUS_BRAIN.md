@@ -1767,6 +1767,42 @@ rows never enter the prompt. The digest is also bound into the selection context
 prompt request identity, so changing the recalled lesson set cannot silently reuse a prior run
 boundary.
 
+For deployments that need tenancy, capability, or risk authorization, the digest-only callback can
+be replaced with the context-aware resolver bridge. `createAutonomousMemoryConsolidationLessonResolver`
+connects a caller-owned bounded text store to the consolidation index and supplies an authorization
+callback with the lesson identity, scope, eligible domains, capabilities, risk classes, confidence,
+and the currently requested domain/capability. Returning anything other than `true` denies the text
+lookup and leaves the lesson out of the prompt:
+
+```typescript
+const lessonTextStore = new JsonAutonomousMemoryConsolidationLessonTextStore(protectedTextStore);
+const resolveLesson = createAutonomousMemoryConsolidationLessonResolver(lessonTextStore, {
+  authorize: (context) => tenantAllowsLesson({
+    tenantId,
+    requestedDomain: context.requested_domain,
+    capabilities: context.capabilities,
+    riskClasses: context.risk_classes,
+  }),
+});
+
+const result = await agent.run("review the next bounded implementation step", {
+  domain: "coding",
+  memoryLessonContextResolver: resolveLesson,
+  consolidatedMemoryRequired: true,
+  approveProviderCall: false,
+});
+```
+
+Python exposes the same contract with `JsonAutonomousMemoryConsolidationLessonTextStore`,
+`create_autonomous_memory_consolidation_lesson_resolver`, and
+`memory_lesson_context_resolver`. The JSON adapter is canonical, digest-bound, and bounded to
+4 KiB per lesson; it rejects NUL bytes and recognizable credential-shaped material. It is a
+separate caller-owned store whose raw lesson text is intentionally outside the consolidation
+report/snapshot. Deployments must still provide encryption, tenant isolation, access control,
+backup/retention policy, and protected rehydration. The SDK supplies the authorization seam but
+does not claim to be the deployment's identity or secret authority. Both SDKs exercise this path
+across all twelve built-in domains, including portable and domain-local scope behavior.
+
 ### Metadata-only run traces
 
 For operator dashboards, offline evaluation, and cross-process handoff, Python now exposes the

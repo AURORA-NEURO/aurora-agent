@@ -7,8 +7,10 @@ import {
   AutonomousMemoryConsolidationError,
   AutonomousMemoryConsolidationPersistenceCoordinator,
   AutonomousMemoryConsolidator,
+  JsonAutonomousMemoryConsolidationLessonTextStore,
   LLMRuntime,
   TransactionalJsonAutonomousMemoryConsolidationPersistence,
+  createAutonomousMemoryConsolidationLessonResolver,
   validateAutonomousMemoryConsolidationReport,
   validateAutonomousMemoryConsolidationSnapshot,
 } from "../dist/index.js";
@@ -135,6 +137,36 @@ test("the high-level agent exposes the same consolidation boundary", () => {
   assert.equal(references[0].lesson_id, "lesson-bounded-review");
 });
 
+test("the lesson text adapter is bounded, canonical, and separate from the consolidation snapshot", () => {
+  const lessonDigest = digest("lesson-bounded-review-bounded-v1");
+  const rawStore = new CasStore();
+  const textStore = new JsonAutonomousMemoryConsolidationLessonTextStore(rawStore);
+  const lessonText = "Keep evaluator-backed lesson text outside the digest-only consolidation snapshot.";
+  textStore.write(lessonDigest, lessonText);
+  assert.equal(textStore.read(lessonDigest), lessonText);
+
+  const consolidator = new AutonomousMemoryConsolidator({ minObservations: 1, minSupportLowerBound: 0, clock: () => 100 });
+  const report = consolidator.consolidate([observation({ episodeId: "text-store-1", domain: "coding" })]);
+  assert.equal(JSON.stringify(report).includes(lessonText), false);
+  const contexts = [];
+  const resolver = createAutonomousMemoryConsolidationLessonResolver(textStore, {
+    authorize: (context) => {
+      contexts.push(context);
+      return context.domains.includes(context.requested_domain);
+    },
+  });
+  const references = consolidator.promptReferences({ domain: "coding", capability: "evidence_review", lessonContextResolver: resolver });
+  assert.equal(references[0].text, lessonText);
+  assert.equal(contexts[0].lesson_digest, lessonDigest);
+  assert.equal(contexts[0].requested_domain, "coding");
+
+  const tampered = JSON.parse(rawStore.value);
+  tampered.entries[0].text = "tampered";
+  rawStore.value = JSON.stringify(tampered);
+  assert.throws(() => textStore.read(lessonDigest), AutonomousMemoryConsolidationError);
+  assert.throws(() => textStore.write(lessonDigest, `gsk_${"a".repeat(32)}`), AutonomousMemoryConsolidationError);
+});
+
 test("local lessons do not transfer and stale status is explicit", () => {
   const local = new AutonomousMemoryConsolidator({ minObservations: 1, minSupportLowerBound: 0, clock: () => 100 });
   const report = local.consolidate([
@@ -153,11 +185,21 @@ test("high-level approval plans recall stable lessons across every domain withou
   const consolidator = new AutonomousMemoryConsolidator({ minObservations: 1, minSupportLowerBound: 0, clock: () => 100 });
   consolidator.consolidate(AUTONOMOUS_DOMAIN_NAMES.map((domain, index) => observation({ episodeId: `integrated-${index}`, domain })));
   const lessonText = "Use current evaluator-backed evidence and state uncertainty before acting.";
+  const lessonDigest = digest("lesson-bounded-review-bounded-v1");
+  const lessonStore = new JsonAutonomousMemoryConsolidationLessonTextStore(new CasStore());
+  lessonStore.write(lessonDigest, lessonText);
+  const contexts = [];
+  const lessonContextResolver = createAutonomousMemoryConsolidationLessonResolver(lessonStore, {
+    authorize: (context) => {
+      contexts.push(context);
+      return context.domains.includes(context.requested_domain);
+    },
+  });
   const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }), { memoryConsolidator: consolidator });
   for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
     const result = await agent.run(`prepare a bounded ${domain} review`, {
       domain,
-      memoryLessonResolver: () => lessonText,
+      memoryLessonContextResolver: lessonContextResolver,
       consolidatedMemoryRequired: true,
       approveProviderCall: false,
     });
@@ -169,6 +211,8 @@ test("high-level approval plans recall stable lessons across every domain withou
     assert.ok(result.memory.consolidated_retrieval_digest, domain);
     assert.ok(result.blueprint.selection_context.consolidated_memory_retrieval_digest, domain);
     assert.equal(JSON.stringify(result.memory).includes(lessonText), false, domain);
+    assert.equal(contexts.at(-1).requested_domain, domain);
+    assert.equal(contexts.at(-1).lesson_digest, lessonDigest);
   }
 });
 
@@ -178,6 +222,6 @@ test("required consolidated recall fails closed when the resolver is unavailable
   const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }), { memoryConsolidator: consolidator });
   await assert.rejects(
     agent.run("prepare a bounded coding review", { domain: "coding", consolidatedMemoryRequired: true }),
-    /memoryLessonResolver/,
+    /one lesson resolver/,
   );
 });

@@ -15,15 +15,19 @@ import { canonicalJson, digestJsonSync } from "./tooling.js";
 export const AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation/0.1" as const;
 export const AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-lesson/0.1" as const;
 export const AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-snapshot/0.1" as const;
+export const AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-lesson-text-store/0.1" as const;
 export const MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_OBSERVATIONS = 16_384;
 export const MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSONS = 4_096;
 export const MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS = 32;
 export const MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_BYTES = 8_000_000;
+export const MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_BYTES = 4_096;
 
 const RETENTION = "metadata_only_lesson_evidence_and_episode_digests_no_text_or_payloads" as const;
 const SECRET_MATERIAL = "never_returned" as const;
+const LESSON_TEXT_RETENTION = "caller_owned_lesson_text_outside_consolidation_snapshot" as const;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
 const DOMAINS = [...AUTONOMOUS_DOMAIN_NAMES] as AutonomousDomainName[];
+const CREDENTIAL_SHAPES = /\b(?:gsk_|sk-proj-|sk-[A-Za-z0-9]{16,})/i;
 
 export class AutonomousMemoryConsolidationError extends ArgumentError {}
 
@@ -173,6 +177,11 @@ export interface AutonomousMemoryConsolidationTextStore {
   write(value: string): void;
 }
 
+export interface AutonomousMemoryConsolidationLessonTextStore {
+  read(lessonDigest: string): string | null;
+  write(lessonDigest: string, text: string): void;
+}
+
 export interface AutonomousMemoryConsolidationTransactionalTextStore extends AutonomousMemoryConsolidationTextStore {
   writeIfUnchanged(expectedSnapshotDigest: string | null, value: string): boolean;
 }
@@ -186,6 +195,21 @@ export interface AutonomousMemoryConsolidationPromptReference {
   confidence: number;
   source: "evaluator_gated_memory_consolidation";
 }
+
+export interface AutonomousMemoryLessonResolutionContext {
+  lesson_id: string;
+  concept_id: string;
+  lesson_digest: string;
+  scope: "domain" | "cross_domain";
+  domains: AutonomousDomainName[];
+  capabilities: string[];
+  risk_classes: string[];
+  confidence: number;
+  requested_domain: AutonomousDomainName;
+  requested_capability: string | null;
+}
+
+export type AutonomousMemoryLessonContextResolver = (context: AutonomousMemoryLessonResolutionContext) => string | null;
 
 function normalizeObservation(value: AutonomousMemoryConsolidationObservation): AutonomousMemoryConsolidationObservation {
   if (!isObject(value)) fail("observation must be an object");
@@ -262,6 +286,110 @@ function validateReport(value: unknown): AutonomousMemoryConsolidationReport {
   const body = { schema: value.schema, generation, previous_report_digest: digest("report previous_report_digest", value.previous_report_digest, true), policy, observation_count: observationCount, deduplicated_observation_count: deduplicatedObservationCount, lessons, conflicts, domains, retention: RETENTION, secret_material: SECRET_MATERIAL };
   if (digestJsonSync(body) !== reportDigest) fail("report digest does not match its canonical projection");
   return { ...body, report_digest: reportDigest };
+}
+
+function lessonText(name: string, value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || /\u0000/.test(value) || new TextEncoder().encode(value).byteLength > MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_BYTES) fail(`${name} is outside its bounded text contract`);
+  if (CREDENTIAL_SHAPES.test(value)) fail(`${name} contains credential-shaped material`);
+  return value;
+}
+
+export class InMemoryAutonomousMemoryConsolidationLessonTextStore implements AutonomousMemoryConsolidationLessonTextStore {
+  private readonly values = new Map<string, string>();
+
+  constructor(values: Readonly<Record<string, string>> = {}) {
+    if (!isObject(values)) fail("in-memory lesson text values must be an object");
+    for (const [lessonDigest, text] of Object.entries(values)) this.write(lessonDigest, text);
+  }
+
+  read(lessonDigest: string): string | null {
+    const normalized = digest("lesson text lookup digest", lessonDigest)!;
+    return this.values.get(normalized) ?? null;
+  }
+
+  write(lessonDigest: string, text: string): void {
+    const normalized = digest("lesson text digest", lessonDigest)!;
+    this.values.set(normalized, lessonText("lesson text", text));
+  }
+}
+
+function validateLessonTextStore(value: unknown): { schema: typeof AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA; entries: Array<{ lesson_digest: string; text: string }>; retention: typeof LESSON_TEXT_RETENTION; secret_material: typeof SECRET_MATERIAL; store_digest: string } {
+  if (!isObject(value) || value.schema !== AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA || value.retention !== LESSON_TEXT_RETENTION || value.secret_material !== SECRET_MATERIAL) fail("lesson text store snapshot is malformed");
+  if (Object.keys(value).some((key) => !["schema", "entries", "retention", "secret_material", "store_digest"].includes(key))) fail("lesson text store snapshot contains unsupported fields");
+  if (!Array.isArray(value.entries) || value.entries.length > MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSONS) fail("lesson text store entries are outside their bounds");
+  const seen = new Set<string>();
+  const entries = value.entries.map((raw) => {
+    if (!isObject(raw) || Object.keys(raw).some((key) => !["lesson_digest", "text"].includes(key)) || !Object.prototype.hasOwnProperty.call(raw, "lesson_digest") || !Object.prototype.hasOwnProperty.call(raw, "text")) fail("lesson text store entry is malformed");
+    const lessonDigest = digest("lesson text store entry digest", raw.lesson_digest)!;
+    if (seen.has(lessonDigest)) fail("lesson text store contains duplicate digests");
+    seen.add(lessonDigest);
+    return { lesson_digest: lessonDigest, text: lessonText("lesson text store entry text", raw.text) };
+  }).sort((left, right) => left.lesson_digest.localeCompare(right.lesson_digest));
+  const storeDigest = digest("lesson text store digest", value.store_digest)!;
+  const body = { schema: AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA, entries, retention: LESSON_TEXT_RETENTION, secret_material: SECRET_MATERIAL };
+  if (digestJsonSync(body) !== storeDigest) fail("lesson text store digest does not match its canonical projection");
+  return { ...body, store_digest: storeDigest };
+}
+
+export class JsonAutonomousMemoryConsolidationLessonTextStore implements AutonomousMemoryConsolidationLessonTextStore {
+  readonly textStore: AutonomousMemoryConsolidationTextStore;
+  readonly maxBytes: number;
+
+  constructor(textStore: AutonomousMemoryConsolidationTextStore, maxBytes = MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_BYTES) {
+    if (!textStore || typeof textStore.read !== "function" || typeof textStore.write !== "function") fail("JSON lesson text store adapter is malformed");
+    this.textStore = textStore;
+    this.maxBytes = integerBound("lesson text store maxBytes", maxBytes, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_BYTES);
+  }
+
+  private load(): ReturnType<typeof validateLessonTextStore> {
+    const encoded = this.textStore.read();
+    if (encoded === null) {
+      const body = { schema: AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA, entries: [], retention: LESSON_TEXT_RETENTION, secret_material: SECRET_MATERIAL };
+      return { ...body, store_digest: digestJsonSync(body) };
+    }
+    if (typeof encoded !== "string" || new TextEncoder().encode(encoded).byteLength > this.maxBytes) fail("lesson text store snapshot exceeds its byte bound");
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { fail("lesson text store snapshot is invalid JSON"); }
+    if (canonicalJson(parsed) !== encoded) fail("lesson text store snapshot is not canonical");
+    return validateLessonTextStore(parsed);
+  }
+
+  read(lessonDigest: string): string | null {
+    const normalized = digest("lesson text lookup digest", lessonDigest)!;
+    return this.load().entries.find((entry) => entry.lesson_digest === normalized)?.text ?? null;
+  }
+
+  write(lessonDigest: string, text: string): void {
+    const normalized = digest("lesson text digest", lessonDigest)!;
+    const normalizedText = lessonText("lesson text", text);
+    const current = this.load();
+    const entries = new Map(current.entries.map((entry) => [entry.lesson_digest, entry.text]));
+    entries.set(normalized, normalizedText);
+    const body = {
+      schema: AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA,
+      entries: [...entries.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([lesson_digest, value]) => ({ lesson_digest, text: value })),
+      retention: LESSON_TEXT_RETENTION,
+      secret_material: SECRET_MATERIAL,
+    };
+    const snapshot = { ...body, store_digest: digestJsonSync(body) };
+    const encoded = canonicalJson(snapshot);
+    if (new TextEncoder().encode(encoded).byteLength > this.maxBytes) fail("lesson text store snapshot exceeds its byte bound");
+    this.textStore.write(encoded);
+  }
+}
+
+export function createAutonomousMemoryConsolidationLessonResolver(
+  textStore: AutonomousMemoryConsolidationLessonTextStore,
+  options: { authorize?: (context: AutonomousMemoryLessonResolutionContext) => boolean } = {},
+): AutonomousMemoryLessonContextResolver {
+  if (!textStore || typeof textStore.read !== "function") fail("lesson resolver text store is malformed");
+  if (options.authorize !== undefined && typeof options.authorize !== "function") fail("lesson resolver authorize callback must be callable");
+  return (context) => {
+    if (!isObject(context)) fail("lesson resolver context must be an object");
+    if (options.authorize !== undefined && options.authorize(structuredClone(context)) !== true) return null;
+    const lessonDigest = digest("lesson resolver context digest", context.lesson_digest)!;
+    return textStore.read(lessonDigest);
+  };
 }
 
 export function validateAutonomousMemoryConsolidationReport(value: unknown): AutonomousMemoryConsolidationReport {
@@ -372,13 +500,26 @@ export class AutonomousMemoryConsolidator {
     return structuredClone(rows.slice(0, limit));
   }
 
-  promptReferences(options: { domain: AutonomousDomainName; capability?: string; lessonResolver: (lessonDigest: string) => string | null; limit?: number }): AutonomousMemoryConsolidationPromptReference[] {
-    if (typeof options.lessonResolver !== "function") fail("lessonResolver must be callable");
+  promptReferences(options: { domain: AutonomousDomainName; capability?: string; lessonResolver?: (lessonDigest: string) => string | null; lessonContextResolver?: AutonomousMemoryLessonContextResolver; limit?: number }): AutonomousMemoryConsolidationPromptReference[] {
+    if (options.lessonResolver !== undefined && typeof options.lessonResolver !== "function") fail("lessonResolver must be callable");
+    if (options.lessonContextResolver !== undefined && typeof options.lessonContextResolver !== "function") fail("lessonContextResolver must be callable");
+    if ((options.lessonResolver === undefined) === (options.lessonContextResolver === undefined)) fail("exactly one lesson resolver must be supplied");
     return this.recall(options).flatMap((row) => {
-      const text = options.lessonResolver(row.lesson_digest);
+      const context: AutonomousMemoryLessonResolutionContext = {
+        lesson_id: row.lesson_id,
+        concept_id: row.concept_id,
+        lesson_digest: row.lesson_digest,
+        scope: row.scope,
+        domains: [...row.domains],
+        capabilities: [...row.capabilities],
+        risk_classes: [...row.risk_classes],
+        confidence: row.confidence,
+        requested_domain: options.domain,
+        requested_capability: options.capability ?? null,
+      };
+      const text = options.lessonContextResolver !== undefined ? options.lessonContextResolver(context) : options.lessonResolver!(row.lesson_digest);
       if (text === null) return [];
-      if (typeof text !== "string" || !text.trim() || new TextEncoder().encode(text).byteLength > 4_096 || /\u0000/.test(text)) fail("lessonResolver returned malformed lesson text");
-      return [{ lesson_id: row.lesson_id, concept_id: row.concept_id, lesson_digest: row.lesson_digest, text, status: "stable" as const, confidence: row.confidence, source: "evaluator_gated_memory_consolidation" as const }];
+      return [{ lesson_id: row.lesson_id, concept_id: row.concept_id, lesson_digest: row.lesson_digest, text: lessonText("lessonResolver returned lesson text", text), status: "stable" as const, confidence: row.confidence, source: "evaluator_gated_memory_consolidation" as const }];
     });
   }
 

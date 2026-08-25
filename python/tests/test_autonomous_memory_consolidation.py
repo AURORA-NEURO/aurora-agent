@@ -10,7 +10,9 @@ from prism_sdk import (
     AutonomousMemoryConsolidationError,
     AutonomousMemoryConsolidationPersistenceCoordinator,
     AutonomousMemoryConsolidator,
+    JsonAutonomousMemoryConsolidationLessonTextStore,
     TransactionalJsonAutonomousMemoryConsolidationPersistence,
+    create_autonomous_memory_consolidation_lesson_resolver,
     LLMRuntime,
     validate_autonomous_memory_consolidation_report,
     validate_autonomous_memory_consolidation_snapshot,
@@ -180,6 +182,41 @@ class AutonomousMemoryConsolidationTests(unittest.TestCase):
         self.assertEqual(report["domains"][3]["domain"], "science")
         self.assertEqual(references[0]["lesson_id"], "lesson-bounded-review")
 
+    def test_lesson_text_store_is_canonical_bounded_and_separate_from_the_snapshot(self) -> None:
+        lesson_digest = _digest("lesson-bounded-review-bounded-v1")
+        raw_store = _CasStore()
+        text_store = JsonAutonomousMemoryConsolidationLessonTextStore(raw_store)
+        lesson_text = "Keep evaluator-backed lesson text outside the digest-only consolidation snapshot."
+        text_store.write(lesson_digest, lesson_text)
+        self.assertEqual(text_store.read(lesson_digest), lesson_text)
+
+        consolidator = AutonomousMemoryConsolidator(min_observations=1, min_support_lower_bound=0.0, clock=lambda: 100.0)
+        report = consolidator.consolidate([_observation(episode_id="text-store-1", domain="coding")])
+        self.assertNotIn(lesson_text, json.dumps(report, sort_keys=True))
+        resolver_contexts: list[dict[str, object]] = []
+
+        def authorize(context: dict[str, object]) -> bool:
+            resolver_contexts.append(dict(context))
+            return context["requested_domain"] in context["domains"]
+
+        resolver = create_autonomous_memory_consolidation_lesson_resolver(text_store, authorize=authorize)
+        references = consolidator.prompt_references(
+            domain="coding",
+            capability="evidence_review",
+            lesson_context_resolver=resolver,
+        )
+        self.assertEqual(references[0]["text"], lesson_text)
+        self.assertEqual(resolver_contexts[0]["lesson_digest"], lesson_digest)
+        self.assertEqual(resolver_contexts[0]["requested_domain"], "coding")
+
+        tampered = json.loads(raw_store.value or "null")
+        tampered["entries"][0]["text"] = "tampered"
+        raw_store.value = json.dumps(tampered, separators=(",", ":"), ensure_ascii=False)
+        with self.assertRaises(AutonomousMemoryConsolidationError):
+            text_store.read(lesson_digest)
+        with self.assertRaises(AutonomousMemoryConsolidationError):
+            text_store.write(lesson_digest, "gsk_" + "a" * 32)
+
     def test_local_lessons_do_not_transfer_and_age_status_is_explicit(self) -> None:
         local = AutonomousMemoryConsolidator(min_observations=1, min_support_lower_bound=0.0, clock=lambda: 100.0)
         report = local.consolidate([
@@ -200,6 +237,15 @@ class AutonomousMemoryConsolidationTests(unittest.TestCase):
             for index, domain in enumerate(AUTONOMOUS_DOMAINS)
         ])
         lesson_text = "Use current evaluator-backed evidence and state uncertainty before acting."
+        lesson_digest = _digest("lesson-bounded-review-bounded-v1")
+        lesson_store = JsonAutonomousMemoryConsolidationLessonTextStore(_CasStore())
+        lesson_store.write(lesson_digest, lesson_text)
+        resolver_contexts: list[dict[str, object]] = []
+
+        def resolve_lesson(context: dict[str, object]) -> str | None:
+            resolver_contexts.append(dict(context))
+            return lesson_store.read(str(context["lesson_digest"])) if context["requested_domain"] in context["domains"] else None
+
         runtime = LLMRuntime()
         runtime.register_in_memory_provider("offline", lambda _request: {"output_text": "unused"})
         class Workspace:
@@ -259,7 +305,7 @@ class AutonomousMemoryConsolidationTests(unittest.TestCase):
                 model_candidates=[candidate],
                 credentials={},
                 memory_consolidator=consolidator,
-                memory_lesson_resolver=lambda _digest: lesson_text,
+                memory_lesson_context_resolver=resolve_lesson,
                 consolidated_memory_required=True,
                 approve_provider_call=False,
             )
@@ -267,7 +313,8 @@ class AutonomousMemoryConsolidationTests(unittest.TestCase):
             prompt = json.dumps(workspace.prompt_contexts[-1], sort_keys=True)
             self.assertIn(lesson_text, prompt, domain)
             self.assertNotIn(lesson_text, json.dumps(result.selection, sort_keys=True))
-            self.assertIn(_digest("lesson-bounded-review-bounded-v1"), prompt)
+            self.assertIn(lesson_digest, prompt)
+            self.assertEqual(resolver_contexts[-1]["requested_domain"], domain)
 
     def test_required_consolidated_recall_fails_closed_when_the_resolver_is_unavailable(self) -> None:
         consolidator = AutonomousMemoryConsolidator(min_observations=1, min_support_lower_bound=0.0, clock=lambda: 100.0)

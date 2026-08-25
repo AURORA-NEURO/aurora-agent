@@ -10007,6 +10007,7 @@ class AutonomousTaskOrchestrator:
     def _consolidated_memory(
         consolidator: AutonomousMemoryConsolidator | None,
         lesson_resolver: Callable[[str], str | None] | None,
+        lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None,
         *,
         domains: Sequence[str],
         capability: str | None,
@@ -10024,10 +10025,14 @@ class AutonomousTaskOrchestrator:
             )
         if lesson_resolver is not None and not callable(lesson_resolver):
             raise BrainRunError("memory_lesson_resolver must be callable or None")
-        requested = retrieve and consolidator is not None and lesson_resolver is not None
+        if lesson_context_resolver is not None and not callable(lesson_context_resolver):
+            raise BrainRunError("memory_lesson_context_resolver must be callable or None")
+        if lesson_resolver is not None and lesson_context_resolver is not None:
+            raise BrainRunError("memory_lesson_resolver and memory_lesson_context_resolver are mutually exclusive")
+        requested = retrieve and consolidator is not None and (lesson_resolver is not None or lesson_context_resolver is not None)
         if required and not requested:
             raise BrainRunError(
-                "consolidated_memory_required needs a consolidator and memory_lesson_resolver"
+                "consolidated_memory_required needs a consolidator and one lesson resolver"
             )
         if not requested:
             return ()
@@ -10038,6 +10043,7 @@ class AutonomousTaskOrchestrator:
                     domain=domain,
                     capability=capability,
                     lesson_resolver=lesson_resolver,
+                    lesson_context_resolver=lesson_context_resolver,
                     limit=limit,
                 ):
                     key = (str(reference["lesson_id"]), str(reference["lesson_digest"]))
@@ -11068,6 +11074,7 @@ class AutonomousTaskOrchestrator:
         memory_limit: int = 8,
         memory_consolidator: AutonomousMemoryConsolidator | None = None,
         memory_lesson_resolver: Callable[[str], str | None] | None = None,
+        memory_lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None = None,
         consolidated_memory_limit: int = 8,
         retrieve_consolidated_memory: bool = True,
         consolidated_memory_required: bool = False,
@@ -11130,6 +11137,7 @@ class AutonomousTaskOrchestrator:
         consolidated_references = self._consolidated_memory(
             memory_consolidator,
             memory_lesson_resolver,
+            memory_lesson_context_resolver,
             domains=(domain,),
             capability=capability,
             limit=consolidated_memory_limit,
@@ -12839,6 +12847,7 @@ class AutonomousTaskOrchestrator:
         memory_limit: int = 8,
         memory_consolidator: AutonomousMemoryConsolidator | None = None,
         memory_lesson_resolver: Callable[[str], str | None] | None = None,
+        memory_lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None = None,
         consolidated_memory_limit: int = 8,
         retrieve_consolidated_memory: bool = True,
         consolidated_memory_required: bool = False,
@@ -12976,6 +12985,7 @@ class AutonomousTaskOrchestrator:
                 memory_limit=memory_limit,
                 memory_consolidator=memory_consolidator,
                 memory_lesson_resolver=memory_lesson_resolver,
+                memory_lesson_context_resolver=memory_lesson_context_resolver,
                 consolidated_memory_limit=consolidated_memory_limit,
                 retrieve_consolidated_memory=retrieve_consolidated_memory,
                 consolidated_memory_required=consolidated_memory_required,
@@ -13093,6 +13103,7 @@ class AutonomousTaskOrchestrator:
             memory_limit=memory_limit,
             memory_consolidator=memory_consolidator,
             memory_lesson_resolver=memory_lesson_resolver,
+            memory_lesson_context_resolver=memory_lesson_context_resolver,
             consolidated_memory_limit=consolidated_memory_limit,
             retrieve_consolidated_memory=retrieve_consolidated_memory,
             consolidated_memory_required=consolidated_memory_required,
@@ -18731,10 +18742,15 @@ class AutonomousAgent:
         *,
         domain: str,
         capability: str | None = None,
-        lesson_resolver: Callable[[str], str | None],
+        lesson_resolver: Callable[[str], str | None] | None = None,
+        lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """Return stable digest-backed lesson references with transient caller-owned text."""
+        """Return stable lesson references with transient caller-owned text.
+
+        The context-aware resolver receives the requested domain, capability, scope, and
+        evaluator confidence so a deployment can authorize text lookup before prompt assembly.
+        """
 
         if self.memory_consolidator is None:
             raise BrainRunError("memory_consolidator is not configured")
@@ -18742,6 +18758,7 @@ class AutonomousAgent:
             domain=domain,
             capability=capability,
             lesson_resolver=lesson_resolver,
+            lesson_context_resolver=lesson_context_resolver,
             limit=limit,
         )
 

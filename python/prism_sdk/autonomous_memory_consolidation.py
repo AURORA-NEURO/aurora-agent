@@ -29,12 +29,14 @@ from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEMA = "bioprism-python-autonomous-memory-consolidation/0.1"
 AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_SCHEMA = "bioprism-python-autonomous-memory-consolidation-lesson/0.1"
 AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-memory-consolidation-snapshot/0.1"
+AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA = "bioprism-python-autonomous-memory-consolidation-lesson-text-store/0.1"
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_OBSERVATIONS = 16_384
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSONS = 4_096
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_DOMAINS = len(AUTONOMOUS_DOMAIN_NAMES)
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_ID_BYTES = 256
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_BYTES = 8_000_000
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS = 32
+MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_BYTES = 4_096
 
 _DOMAINS = tuple(AUTONOMOUS_DOMAIN_NAMES)
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
@@ -42,6 +44,8 @@ _STATUSES = ("candidate", "stable", "conflicted", "stale")
 _SCOPES = ("domain", "cross_domain")
 _RETENTION = "metadata_only_lesson_evidence_and_episode_digests_no_text_or_payloads"
 _SECRET_MATERIAL = "never_returned"
+_LESSON_TEXT_RETENTION = "caller_owned_lesson_text_outside_consolidation_snapshot"
+_CREDENTIAL_SHAPES = re.compile(r"\b(?:gsk_|sk-proj-|sk-[A-Za-z0-9]{16,})", re.IGNORECASE)
 
 
 class AutonomousMemoryConsolidationError(ValueError):
@@ -259,6 +263,152 @@ class AutonomousMemoryConsolidationTransactionalTextStore(AutonomousMemoryConsol
     def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
 
 
+class AutonomousMemoryConsolidationLessonTextStore(Protocol):
+    """Caller-owned lookup for transient lesson text, separate from the digest-only index."""
+
+    def read(self, lesson_digest: str) -> str | None: ...
+    def write(self, lesson_digest: str, text: str) -> None: ...
+
+
+def _lesson_text(name: str, value: Any) -> str:
+    if not isinstance(value, str) or not value.strip() or "\x00" in value or len(value.encode("utf-8")) > MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_BYTES:
+        _fail(f"{name} is outside its bounded text contract")
+    if _CREDENTIAL_SHAPES.search(value):
+        _fail(f"{name} contains credential-shaped material")
+    return value
+
+
+class InMemoryAutonomousMemoryConsolidationLessonTextStore:
+    """Bounded local lesson-text adapter for offline runs and caller-owned test fixtures."""
+
+    def __init__(self, values: Mapping[str, str] | None = None) -> None:
+        self._values: dict[str, str] = {}
+        if values is not None:
+            if not isinstance(values, Mapping):
+                _fail("in-memory lesson text values must be a mapping")
+            for lesson_digest, text in values.items():
+                self.write(lesson_digest, text)
+
+    def read(self, lesson_digest: str) -> str | None:
+        normalized = _digest("lesson text lookup digest", lesson_digest)
+        return self._values.get(normalized)
+
+    def write(self, lesson_digest: str, text: str) -> None:
+        normalized = _digest("lesson text digest", lesson_digest)
+        self._values[normalized] = _lesson_text("lesson text", text)
+
+
+def _validate_lesson_text_store(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or value.get("schema") != AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA:
+        _fail("lesson text store snapshot is malformed")
+    if set(value) != {"schema", "entries", "retention", "secret_material", "store_digest"}:
+        _fail("lesson text store snapshot contains unsupported fields")
+    if value.get("retention") != _LESSON_TEXT_RETENTION or value.get("secret_material") != _SECRET_MATERIAL:
+        _fail("lesson text store retention markers are invalid")
+    entries = value.get("entries")
+    if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes, bytearray)) or len(entries) > MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSONS:
+        _fail("lesson text store entries are outside their bounds")
+    normalized_entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, Mapping) or set(entry) != {"lesson_digest", "text"}:
+            _fail("lesson text store entry is malformed")
+        lesson_digest = _digest("lesson text store entry digest", entry.get("lesson_digest"))
+        if lesson_digest in seen:
+            _fail("lesson text store contains duplicate digests")
+        seen.add(lesson_digest)
+        normalized_entries.append({"lesson_digest": lesson_digest, "text": _lesson_text("lesson text store entry text", entry.get("text"))})
+    normalized_entries.sort(key=lambda row: row["lesson_digest"])
+    store_digest = _digest("lesson text store digest", value.get("store_digest"))
+    body = {
+        "schema": AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA,
+        "entries": normalized_entries,
+        "retention": _LESSON_TEXT_RETENTION,
+        "secret_material": _SECRET_MATERIAL,
+    }
+    if content_digest(body) != store_digest:
+        _fail("lesson text store digest does not match its canonical projection")
+    return {**body, "store_digest": store_digest}
+
+
+class JsonAutonomousMemoryConsolidationLessonTextStore:
+    """Canonical JSON lesson-text adapter; its raw text is explicitly outside consolidation snapshots."""
+
+    def __init__(self, text_store: AutonomousMemoryConsolidationTextStore, *, max_bytes: int = MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_BYTES) -> None:
+        if not callable(getattr(text_store, "read", None)) or not callable(getattr(text_store, "write", None)):
+            _fail("JSON lesson text store adapter is malformed")
+        self.text_store = text_store
+        self.max_bytes = _bounded_integer("lesson text store max_bytes", max_bytes, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_BYTES)
+
+    def _load(self) -> dict[str, Any]:
+        encoded = self.text_store.read()
+        if encoded is None:
+            body = {
+                "schema": AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA,
+                "entries": [],
+                "retention": _LESSON_TEXT_RETENTION,
+                "secret_material": _SECRET_MATERIAL,
+            }
+            return {**body, "store_digest": content_digest(body)}
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            _fail("lesson text store snapshot exceeds its byte bound")
+        try:
+            parsed = json.loads(encoded)
+        except (TypeError, ValueError) as error:
+            raise AutonomousMemoryConsolidationError("memory consolidation lesson text store snapshot is invalid JSON") from error
+        if canonical_json(parsed) != encoded:
+            _fail("lesson text store snapshot is not canonical")
+        return _validate_lesson_text_store(parsed)
+
+    def read(self, lesson_digest: str) -> str | None:
+        normalized = _digest("lesson text lookup digest", lesson_digest)
+        for entry in self._load()["entries"]:
+            if entry["lesson_digest"] == normalized:
+                return entry["text"]
+        return None
+
+    def write(self, lesson_digest: str, text: str) -> None:
+        normalized = _digest("lesson text digest", lesson_digest)
+        normalized_text = _lesson_text("lesson text", text)
+        current = self._load()
+        entries = {entry["lesson_digest"]: entry["text"] for entry in current["entries"]}
+        entries[normalized] = normalized_text
+        body = {
+            "schema": AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA,
+            "entries": [{"lesson_digest": key, "text": entries[key]} for key in sorted(entries)],
+            "retention": _LESSON_TEXT_RETENTION,
+            "secret_material": _SECRET_MATERIAL,
+        }
+        snapshot = {**body, "store_digest": content_digest(body)}
+        encoded = canonical_json(snapshot)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            _fail("lesson text store snapshot exceeds its byte bound")
+        self.text_store.write(encoded)
+
+
+def create_autonomous_memory_consolidation_lesson_resolver(
+    text_store: AutonomousMemoryConsolidationLessonTextStore,
+    *,
+    authorize: Callable[[Mapping[str, Any]], bool] | None = None,
+) -> Callable[[Mapping[str, Any]], str | None]:
+    """Create a context-aware resolver with an optional caller-owned authorization policy."""
+
+    if not callable(getattr(text_store, "read", None)):
+        _fail("lesson resolver text store is malformed")
+    if authorize is not None and not callable(authorize):
+        _fail("lesson resolver authorize callback must be callable")
+
+    def resolve(context: Mapping[str, Any]) -> str | None:
+        if not isinstance(context, Mapping):
+            _fail("lesson resolver context must be a mapping")
+        if authorize is not None and authorize(dict(context)) is not True:
+            return None
+        lesson_digest = _digest("lesson resolver context digest", context.get("lesson_digest"))
+        return text_store.read(lesson_digest)
+
+    return resolve
+
+
 class AutonomousMemoryConsolidator:
     """Build and retain a bounded, evaluator-backed lesson index."""
 
@@ -384,20 +534,36 @@ class AutonomousMemoryConsolidator:
         *,
         domain: str,
         capability: str | None = None,
-        lesson_resolver: Callable[[str], str | None],
+        lesson_resolver: Callable[[str], str | None] | None = None,
+        lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """Resolve stable digest references transiently for a caller-owned prompt."""
+        """Resolve stable references transiently, optionally with domain-aware authorization."""
 
-        if not callable(lesson_resolver):
+        if lesson_resolver is not None and not callable(lesson_resolver):
             _fail("lesson_resolver must be callable")
+        if lesson_context_resolver is not None and not callable(lesson_context_resolver):
+            _fail("lesson_context_resolver must be callable")
+        if (lesson_resolver is None) == (lesson_context_resolver is None):
+            _fail("exactly one lesson resolver must be supplied")
         references = []
         for row in self.recall(domain=domain, capability=capability, limit=limit):
-            text = lesson_resolver(row["lesson_digest"])
+            context = {
+                "lesson_id": row["lesson_id"],
+                "concept_id": row["concept_id"],
+                "lesson_digest": row["lesson_digest"],
+                "scope": row["scope"],
+                "domains": list(row["domains"]),
+                "capabilities": list(row["capabilities"]),
+                "risk_classes": list(row["risk_classes"]),
+                "confidence": row["confidence"],
+                "requested_domain": domain,
+                "requested_capability": capability,
+            }
+            text = lesson_context_resolver(context) if lesson_context_resolver is not None else lesson_resolver(row["lesson_digest"])
             if text is None:
                 continue
-            if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > 4_096 or "\x00" in text:
-                _fail("lesson_resolver returned malformed lesson text")
+            text = _lesson_text("lesson_resolver returned lesson text", text)
             references.append({"lesson_id": row["lesson_id"], "concept_id": row["concept_id"], "lesson_digest": row["lesson_digest"], "text": text, "status": row["status"], "confidence": row["confidence"], "source": "evaluator_gated_memory_consolidation"})
         return references
 
@@ -568,12 +734,14 @@ class AutonomousMemoryConsolidationPersistenceCoordinator:
 
 __all__ = [
     "AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEMA", "AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_SCHEMA",
-    "AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_SCHEMA", "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_OBSERVATIONS",
+    "AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_SCHEMA", "AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_STORE_SCHEMA", "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_OBSERVATIONS",
     "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSONS", "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_DOMAINS",
     "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_ID_BYTES", "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_BYTES",
-    "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS", "AutonomousMemoryConsolidationError",
+    "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS", "MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_TEXT_BYTES", "AutonomousMemoryConsolidationError",
     "AutonomousMemoryConsolidationObservation", "AutonomousMemoryConsolidatedLesson",
-    "AutonomousMemoryConsolidator", "AutonomousMemoryConsolidationTextStore",
+    "AutonomousMemoryConsolidator", "AutonomousMemoryConsolidationTextStore", "AutonomousMemoryConsolidationLessonTextStore",
+    "InMemoryAutonomousMemoryConsolidationLessonTextStore", "JsonAutonomousMemoryConsolidationLessonTextStore",
+    "create_autonomous_memory_consolidation_lesson_resolver",
     "AutonomousMemoryConsolidationTransactionalTextStore", "JsonAutonomousMemoryConsolidationPersistence",
     "TransactionalJsonAutonomousMemoryConsolidationPersistence", "AutonomousMemoryConsolidationPersistenceCoordinator",
     "validate_autonomous_memory_consolidation_report", "validate_autonomous_memory_consolidation_snapshot",

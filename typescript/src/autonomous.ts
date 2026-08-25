@@ -116,6 +116,7 @@ import type {
 import type {
   AutonomousMemoryConsolidationObservation,
   AutonomousMemoryConsolidationPromptReference,
+  AutonomousMemoryLessonContextResolver,
   AutonomousMemoryConsolidationReport,
   AutonomousMemoryConsolidator,
 } from "./autonomous-memory-consolidation.js";
@@ -1535,6 +1536,8 @@ export interface AutonomousRunOptions {
   memoryConsolidator?: AutonomousMemoryConsolidator;
   /** Resolve a stable lesson digest to transient prompt text. The resolver remains caller-owned. */
   memoryLessonResolver?: (lessonDigest: string) => string | null;
+  /** Resolve a stable lesson with domain/capability/scope metadata for caller-owned authorization. */
+  memoryLessonContextResolver?: AutonomousMemoryLessonContextResolver;
   /** Maximum number of evaluator-gated lesson references recalled per routed domain. */
   consolidatedMemoryLimit?: number;
   /** Disable evaluator-gated lesson recall without disabling ordinary episodic memory. */
@@ -4917,7 +4920,8 @@ export class AutonomousAgent {
   memoryReferences(options: {
     domain: AutonomousDomainName;
     capability?: string;
-    lessonResolver: (lessonDigest: string) => string | null;
+    lessonResolver?: (lessonDigest: string) => string | null;
+    lessonContextResolver?: AutonomousMemoryLessonContextResolver;
     limit?: number;
   }): AutonomousMemoryConsolidationPromptReference[] {
     if (this.memoryConsolidator === undefined) throw new ArgumentError("AutonomousAgent memoryConsolidator is not configured");
@@ -7843,16 +7847,18 @@ export class AutonomousAgent {
   private async prepareMemory(
     taskText: string,
     route: AutonomousRouteProposal,
-    options: Pick<AutonomousRunOptions, "memoryStore" | "memoryQuery" | "memoryRecall" | "memoryLimit" | "capability" | "retrieveMemory" | "memoryConsolidator" | "memoryLessonResolver" | "consolidatedMemoryLimit" | "retrieveConsolidatedMemory" | "consolidatedMemoryRequired">,
+    options: Pick<AutonomousRunOptions, "memoryStore" | "memoryQuery" | "memoryRecall" | "memoryLimit" | "capability" | "retrieveMemory" | "memoryConsolidator" | "memoryLessonResolver" | "memoryLessonContextResolver" | "consolidatedMemoryLimit" | "retrieveConsolidatedMemory" | "consolidatedMemoryRequired">,
     domains: readonly AutonomousDomainName[],
   ): Promise<AutonomousMemoryPreparation> {
     const store = this.memoryStoreForRun(options);
     const consolidator = options.memoryConsolidator ?? this.memoryConsolidator;
     if (options.memoryLessonResolver !== undefined && typeof options.memoryLessonResolver !== "function") throw new ArgumentError("autonomous memoryLessonResolver must be callable");
+    if (options.memoryLessonContextResolver !== undefined && typeof options.memoryLessonContextResolver !== "function") throw new ArgumentError("autonomous memoryLessonContextResolver must be callable");
+    if (options.memoryLessonResolver !== undefined && options.memoryLessonContextResolver !== undefined) throw new ArgumentError("autonomous memoryLessonResolver and memoryLessonContextResolver are mutually exclusive");
     if (options.retrieveConsolidatedMemory !== undefined && typeof options.retrieveConsolidatedMemory !== "boolean") throw new ArgumentError("autonomous retrieveConsolidatedMemory must be boolean");
     if (options.consolidatedMemoryRequired !== undefined && typeof options.consolidatedMemoryRequired !== "boolean") throw new ArgumentError("autonomous consolidatedMemoryRequired must be boolean");
-    const consolidationRequested = options.retrieveConsolidatedMemory !== false && consolidator !== undefined && options.memoryLessonResolver !== undefined;
-    if (options.consolidatedMemoryRequired === true && !consolidationRequested) throw new ArgumentError("autonomous consolidatedMemoryRequired needs a consolidator and memoryLessonResolver");
+    const consolidationRequested = options.retrieveConsolidatedMemory !== false && consolidator !== undefined && (options.memoryLessonResolver !== undefined || options.memoryLessonContextResolver !== undefined);
+    if (options.consolidatedMemoryRequired === true && !consolidationRequested) throw new ArgumentError("autonomous consolidatedMemoryRequired needs a consolidator and one lesson resolver");
     const consolidatedReferences = new Map<string, AutonomousMemoryConsolidationPromptReference>();
     let consolidatedErrorClass: string | null = null;
     if (consolidationRequested) {
@@ -7860,7 +7866,7 @@ export class AutonomousAgent {
       if (!Number.isSafeInteger(consolidatedLimit) || consolidatedLimit < 1 || consolidatedLimit > 32) throw new ArgumentError("autonomous consolidatedMemoryLimit must be between 1 and 32");
       try {
         for (const domain of [...new Set(domains)]) {
-          const references = consolidator!.promptReferences({ domain, capability: options.capability, lessonResolver: options.memoryLessonResolver!, limit: consolidatedLimit });
+          const references = consolidator!.promptReferences({ domain, capability: options.capability, lessonResolver: options.memoryLessonResolver, lessonContextResolver: options.memoryLessonContextResolver, limit: consolidatedLimit });
           for (const reference of references) {
             const key = `${reference.lesson_digest}:${reference.lesson_id}`;
             if (!consolidatedReferences.has(key)) consolidatedReferences.set(key, reference);
