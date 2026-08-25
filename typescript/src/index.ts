@@ -753,6 +753,14 @@ export {
   MULTIMODAL_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
   brainMultimodalRetrievalAssuranceReceiptDigest,
   validateBrainMultimodalRetrievalAssuranceReceipt,
+  THROUGHPUT_RETRIEVAL_ASSURANCE_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  brainThroughputRetrievalAssuranceReceiptDigest,
+  validateBrainThroughputRetrievalAssuranceReceipt,
+  FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
+  FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  brainFederatedRetrievalAssuranceReceiptDigest,
+  validateBrainFederatedRetrievalAssuranceReceipt,
 } from "./research-contracts.js";
 export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ProtocolSimulationReceipt, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, FederatedMultimodalAssuranceReceipt, FederatedKnowledgeGatewayReceipt, FederatedLensAssuranceReceipt, LabSemanticParityReceipt, FederatedRetrievalAssuranceReceipt, FederatedContinualRetrievalReceipt, RetrievalSourceUpdate, ContextCompilationAssuranceReceipt, KnowledgeRepresentationAssuranceReceipt, ResourceControlPlaneReceipt, WeaveLangReleaseAssuranceReceipt, MechanismControlPlaneReceipt, MechanismGatewayReceipt, EvidenceSurveillanceReceipt, RetrievalSynthesisReceipt, AdapterContextCompilationReceipt, KnowledgeWorkflowReceipt, ResourceWorkbenchReceipt, IngestionGatewayReceipt, QualityEnvelopeReceipt, ExperimentDesignReceipt, InstrumentMeshReceipt, ComputationalExecutionReceipt, AnalysisPortfolioReceipt, InterpretationAssuranceReceipt, ReplicationAssuranceReceipt, ReleaseAssuranceReceipt, DeterminismGatewayReceipt, ProvenanceAssuranceReceipt, PolicyGatewayReceipt, FederationWorkflowReceipt, ReliabilityCopilotReceipt, InteroperabilityGatewayReceipt, EvaluationAssuranceReceipt, ResearchWorkbenchReceipt, ContractFrontierReceipt, LimitationClosureReceipt, AdapterCompositionReceipt, AdapterSemanticParityReceipt, ScaleFrontierReceipt, AdversarialRecoveryReceipt, FederatedCommonsReceipt, BoundedEvolutionReceipt, EvolutionIdentityReceipt, EvolutionAssuranceReceipt, InterpretationPlaneReceipt, KnowledgeGatewayReceipt, OracleCapabilityManifestReceipt, FederatedMultimodalIngestionReceipt, QualityAssuranceReceipt, MechanismControlReceipt, EvidenceWorkbenchReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
 export type { AnalysisControlReceipt } from "./research-contracts.js";
@@ -813,6 +821,8 @@ export type { BrainThroughputRetrievalProtocolReceipt } from "./research-contrac
 export type { BrainFederatedRetrievalProtocolReceipt } from "./research-contracts.js";
 export type { BrainRetrievalAssuranceReceipt } from "./research-contracts.js";
 export type { BrainMultimodalRetrievalAssuranceReceipt } from "./research-contracts.js";
+export type { BrainThroughputRetrievalAssuranceReceipt } from "./research-contracts.js";
+export type { BrainFederatedRetrievalAssuranceReceipt } from "./research-contracts.js";
 export type { ContextAssuranceReceipt } from "./research-contracts.js";
 export type { BioworldsEvaluationAssuranceReceipt } from "./research-contracts.js";
 export type { BiolangQualityWorkbenchReceipt } from "./research-contracts.js";
