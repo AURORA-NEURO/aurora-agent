@@ -2946,6 +2946,7 @@ async function buildTaskBlueprint(
   });
   const plan = await compileAutonomousPlan(profile, taskText, {
     taskDigest,
+    capability: effectiveCapability,
     activeToolNames,
     selectedToolNames,
     selectedToolOrder: selectedToolNames,
@@ -3737,18 +3738,19 @@ function compareCapabilityScores(left: readonly number[], right: readonly number
 export async function compileAutonomousPlan(
   profile: AutonomousDomainProfile,
   task: string,
-  options: { taskDigest?: string; activeToolNames?: readonly string[]; selectedToolNames?: readonly string[]; selectedToolOrder?: readonly string[]; responseContractDigest?: string } = {},
+  options: { taskDigest?: string; capability?: string; activeToolNames?: readonly string[]; selectedToolNames?: readonly string[]; selectedToolOrder?: readonly string[]; responseContractDigest?: string } = {},
 ): Promise<AutonomousPlan> {
   const taskText = boundedText("autonomous plan objective", task, 32_000);
   const taskDigest = options.taskDigest ?? await digestJson({ task: taskText });
   const intentTaskDigest = await digestJson({ task: taskText });
   const taskLens = autonomousDomainTaskLens(profile.domain);
   const taskPolicy = autonomousDomainPolicy(profile.domain);
+  const effectiveCapability = options.capability ?? profile.default_capability;
   const taskIntent = inferAutonomousTaskIntent({
     task: taskText,
     taskDigest: intentTaskDigest,
     domain: profile.domain,
-    capability: profile.default_capability,
+    capability: effectiveCapability,
     riskClass: profile.risk_class,
     workflowId: profile.workflow.workflow_id,
     lens: taskLens,
@@ -3777,7 +3779,7 @@ export async function compileAutonomousPlan(
       id: stage.id,
       objective: stage.objective,
       tool: binding?.name ?? "provider.invoke",
-      arguments: { domain: profile.domain, capability: profile.default_capability, stage_id: stage.id, task_digest: taskDigest, task_lens_id: taskLens.lens_id, task_lens_digest: taskLens.lens_digest, task_intent_id: taskIntent.intent_id, task_intent_digest: taskIntent.intent_digest, task_intent_action_mode: taskIntent.action_mode, task_intent_requested_effect: taskIntent.requested_effect, task_intent_evidence_mode: taskIntent.evidence_mode, task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags], task_decision_id: taskDecision.decision_id, task_decision_digest: taskDecision.decision_digest, task_decision_posture: taskDecision.posture, task_decision_recommended_path: taskDecision.recommended_path, task_decision_approval_requirements: [...taskDecision.approval_requirements], task_decision_review_reasons: [...taskDecision.review_reasons] },
+      arguments: { domain: profile.domain, capability: effectiveCapability, stage_id: stage.id, task_digest: taskDigest, task_lens_id: taskLens.lens_id, task_lens_digest: taskLens.lens_digest, task_intent_id: taskIntent.intent_id, task_intent_digest: taskIntent.intent_digest, task_intent_action_mode: taskIntent.action_mode, task_intent_requested_effect: taskIntent.requested_effect, task_intent_evidence_mode: taskIntent.evidence_mode, task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags], task_decision_id: taskDecision.decision_id, task_decision_digest: taskDecision.decision_digest, task_decision_posture: taskDecision.posture, task_decision_recommended_path: taskDecision.recommended_path, task_decision_approval_requirements: [...taskDecision.approval_requirements], task_decision_review_reasons: [...taskDecision.review_reasons] },
       depends_on: [...stage.depends_on],
       effect,
       estimated_cost: index + 1,
@@ -6497,14 +6499,21 @@ export class AutonomousAgent {
       childIds.add(id);
       const childTask = boundedText(`cross-domain child ${id} task`, subtask.task, 32_000);
       const profile = await profileFor(subtask.domain);
+      const capabilityRoute = routeAutonomousCapability(
+        childTask,
+        profile.domain,
+        subtask.capability === undefined ? {} : { explicitCapability: subtask.capability },
+      );
+      const effectiveCapability = subtask.capability ?? capabilityRoute.selected_capability ?? profile.default_capability;
       const childContext: AutonomousPromptChunk[] = [
         ...(options.context ?? []),
         { id: "cross-domain-parent", content: `Parent route digest: ${parentDigest}; child id: ${id}`, required: true, priority: 100 },
         ...(subtask.context ?? []),
       ];
-      const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], subtask.capability, options.toolSelectionState, options.toolSelectionExploration);
+      const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], effectiveCapability, options.toolSelectionState, options.toolSelectionExploration);
       const child = await buildTaskBlueprint(profile, childTask, {
-        capability: subtask.capability,
+        capability: effectiveCapability,
+        capabilityRoute,
         routeDigest: route.route_digest,
         context: childContext,
         maxInputTokens: options.maxInputTokens,

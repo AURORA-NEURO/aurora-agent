@@ -10422,3 +10422,12 @@ turn lexical matches into semantic truth. The task text and provider payloads re
 only the capability labels, scores, matched catalogue terms, and digests cross the blueprint
 boundary. Focused parity coverage exercises all twelve domains, explicit overrides, abstention,
 tamper rejection, and automatic blueprint propagation.
+
+Cross-domain fan-out now preserves that capability identity per child. TypeScript resolves and
+validates a child capability before selecting its live tool portfolio, passes the same value into
+the child blueprint, and compiles it into every workflow-step contract. A child can therefore be
+automatically routed to debugging while another is routed to human review, without either child
+silently inheriting the parent or domain default capability. Python already used this ordering;
+cross-SDK tests now assert the route, selection context, task intent, and step contract remain
+aligned. This remains a planning and selection boundary: capability routing never authorizes a
+tool, provider, credential, evidence source, or external effect.

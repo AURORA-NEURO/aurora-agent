@@ -1735,3 +1735,10 @@ metadata-only; task text, prompts, credentials, provider payloads, tool argument
 remain caller-owned. The remaining production responsibility is still to connect those reviewed
 capabilities to deployment-specific adapters and evidence sources rather than treating a lexical
 classification as execution or domain truth.
+
+Cross-domain capability propagation is now aligned across SDKs: each specialist child resolves
+its own capability before tool-portfolio ranking, and the selected/default value is bound into its
+task intent, model-selection context, learning identity, and compiled workflow-step arguments.
+The open deployment work is to bind these reviewed child contracts to caller-owned tool/source
+catalogues, evaluator evidence, and approval records; the deterministic route remains neither
+provider authority nor effect authority.

@@ -88,6 +88,25 @@ def test_automatic_python_blueprints_use_selected_capability() -> None:
     assert blueprint.task_intent.capability == "debugging"
 
 
+def test_automatic_python_cross_domain_children_keep_capability_identity() -> None:
+    orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(object(), LLMRuntime()))
+    automatic = orchestrator.prepare_auto(
+        task="coordinate coding and biomedical evidence across disciplines",
+        hints=("coding", "biomedical"),
+        max_domains=2,
+    )
+    assert automatic.cross_domain_blueprint is not None
+    children = automatic.cross_domain_blueprint.child_blueprints
+    assert {child.profile.domain for child in children} == {"coding", "biomedical"}
+    for child in children:
+        assert child.capability_route is not None
+        expected = child.capability_route.selected_capability or child.profile.default_capability
+        assert child.spec.capability == expected
+        assert child.selection_context["capability"] == expected
+        assert child.task_intent is not None
+        assert child.task_intent.capability == expected
+
+
 def test_memory_projection_keeps_route_identity_inside_its_bounded_envelope() -> None:
     blueprint = AutonomousTaskOrchestrator(AutonomousBrain(object(), LLMRuntime())).prepare(
         task="debug a failing stack trace",

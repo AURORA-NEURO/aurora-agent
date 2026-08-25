@@ -72,3 +72,27 @@ test("automatic TypeScript blueprints carry the selected capability into plannin
   assert.equal(envelope.blueprint.selection_context.capability, "debugging");
   assert.equal(envelope.blueprint.task_intent.capability, "debugging");
 });
+
+test("cross-domain children route capability before compiling tools and workflow steps", async () => {
+  const agent = new AutonomousAgent(new LLMRuntime());
+  const task = "coordinate coding and biomedical evidence across disciplines";
+  const route = await agent.route(task);
+  assert.equal(route.cross_domain, true);
+  const envelope = await agent.blueprint(task, {
+    routeOverride: route,
+    subtasks: [
+      { id: "coding-child", domain: "coding", task: "debug a failing stack trace" },
+      { id: "biomedical-child", domain: "biomedical", task: "require human review by a clinician" },
+    ],
+  });
+  assert.ok(envelope.cross_domain_blueprint);
+  assert.deepEqual(envelope.cross_domain_blueprint.child_ids, ["coding-child", "biomedical-child"]);
+  for (const child of envelope.cross_domain_blueprint.child_blueprints) {
+    const expected = child.capability_route.selected_capability ?? child.domain_profile.default_capability;
+    assert.equal(child.selection_context.capability, expected, child.domain_profile.domain);
+    assert.equal(child.task_intent.capability, expected, child.domain_profile.domain);
+    assert.equal(child.plan.steps.every((step) => step.arguments.capability === expected), true, child.domain_profile.domain);
+  }
+  assert.equal(envelope.cross_domain_blueprint.child_blueprints[0].capability_route.selected_capability, "debugging");
+  assert.equal(envelope.cross_domain_blueprint.child_blueprints[1].capability_route.selected_capability, "human_review");
+});
