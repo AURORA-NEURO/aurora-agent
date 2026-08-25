@@ -53,6 +53,7 @@ from prism_sdk.research_contracts import QUALITY_WORKBENCH_BIOLANG_FEATURE_ID, Q
 from prism_sdk.research_contracts import RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID, RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION, BiolangRetrievalAssuranceReceipt
 from prism_sdk.research_contracts import CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID, CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION, CliKnowledgeInteroperabilityReceipt
 from prism_sdk.research_contracts import LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID, LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, LabEvidenceSurveillanceReceipt
+from prism_sdk.research_contracts import FIBER_MECHANISM_ASSURANCE_FEATURE_ID, FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION, FiberMechanismAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1772,4 +1773,12 @@ def test_lab_evidence_surveillance_preserves_unknown_and_bounded_tool_gate():
     receipt.validate()
     assert receipt.feature_id == LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID
     assert receipt.contract_version == LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_fiber_mechanism_assurance_preserves_unknown_and_unsafe_release_gate():
+    receipt = FiberMechanismAssuranceReceipt(question_id="question:mechanism", workflow_id="workflow:mechanism", target_schema="mechanism-portfolio/7", disposition="conditional", ranked_order=("candidate:a", "candidate:b"), admitted_order=("candidate:a",), blocked_order=(), unknown_order=("candidate:b",), mechanism_order=("mechanism:a",), study_order=("study:imaging", "study:omics"), modality_order=("imaging", "omics"), artifact_order=("a" * 64,), evidence_order=("b" * 64,), provenance_order=("c" * 64,), omissions=("candidate:candidate:b:required-but-not-admitted",), uncertainty=("candidate:candidate:b:state-unknown-not-admitted",), negative_evidence=(), replay_identity="d" * 64, effect_receipts=("block:unsafe-release",), artifact={"content_hash": "e" * 64})
+    receipt.validate()
+    assert receipt.feature_id == FIBER_MECHANISM_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

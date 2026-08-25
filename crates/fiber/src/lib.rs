@@ -46,6 +46,7 @@ pub mod closure;
 pub mod compile;
 pub mod error;
 pub mod influence;
+pub mod mechanism_assurance;
 pub mod mechanism_gateway;
 pub mod oracle;
 pub mod plan;
@@ -63,6 +64,13 @@ pub use compile::{
 };
 pub use error::FiberError;
 pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
+pub use mechanism_assurance::{
+    assure as assure_mechanisms, capability_manifest as mechanism_assurance_manifest,
+    AssuranceDisposition, CandidateState, MechanismAssuranceError, MechanismCandidate,
+    MechanismPortfolio, MechanismQuestion,
+    CONTRACT_VERSION as MECHANISM_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_ASSURANCE_FEATURE_ID,
+};
 pub use mechanism_gateway::{
     admit_mechanism_gateway, MechanismGatewayDisposition, MechanismGatewayError,
     MechanismGatewayReceipt, MechanismGatewayRequest,

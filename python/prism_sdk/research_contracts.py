@@ -177,6 +177,8 @@ CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID = "AFA-cli-P04-F23"
 CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION = "cli-prospective-knowledge-representation-interoperability/1.0"
 LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-lab-P01-F11"
 LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0"
+FIBER_MECHANISM_ASSURANCE_FEATURE_ID = "AFA-fiber-P08-F26"
+FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION = "fiber-mechanism-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4062,3 +4064,57 @@ class LabEvidenceSurveillanceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "feed_id": self.feed_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "qualified_order": list(self.qualified_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "source_order": list(self.source_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class FiberMechanismAssuranceReceipt:
+    """Cross-language validator for the FIBER mechanism safety harness."""
+
+    question_id: str
+    workflow_id: str
+    target_schema: str
+    disposition: str
+    ranked_order: tuple[str, ...]
+    admitted_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    unknown_order: tuple[str, ...]
+    mechanism_order: tuple[str, ...]
+    study_order: tuple[str, ...]
+    modality_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    replay_identity: str
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = FIBER_MECHANISM_ASSURANCE_FEATURE_ID
+    contract_version: str = FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != FIBER_MECHANISM_ASSURANCE_FEATURE_ID or self.contract_version != FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("fiber mechanism assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.question_id.strip() or not self.workflow_id.strip() or not self.target_schema.strip() or not self.ranked_order:
+            raise ResearchContractError("fiber mechanism assurance identity, ranking, locality, or boundary is incomplete")
+        if self.disposition not in {"qualified", "conditional", "unknown", "blocked"}:
+            raise ResearchContractError("fiber mechanism assurance disposition is unknown")
+        if self.disposition != "qualified" and self.effect_receipts != ("block:unsafe-release",):
+            raise ResearchContractError("fiber mechanism assurance must block unsafe release")
+        if self.disposition == "qualified" and self.effect_receipts:
+            raise ResearchContractError("qualified fiber mechanism assurance cannot carry a release block")
+        for values in (self.admitted_order, self.blocked_order, self.unknown_order, self.mechanism_order, self.study_order, self.modality_order, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("fiber mechanism assurance ordering is invalid")
+        for value in (*self.artifact_order, *self.evidence_order, *self.provenance_order, self.replay_identity, self.artifact.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("fiber mechanism assurance digest is invalid")
+        if any(effect != "block:unsafe-release" for effect in self.effect_receipts):
+            raise ResearchContractError("fiber mechanism assurance effect is outside unsafe-release gate")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "question_id": self.question_id, "workflow_id": self.workflow_id, "target_schema": self.target_schema, "disposition": self.disposition, "ranked_order": list(self.ranked_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "mechanism_order": list(self.mechanism_order), "study_order": list(self.study_order), "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
