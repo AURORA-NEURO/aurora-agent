@@ -64,6 +64,7 @@ pub mod context_freshness_drift;
 pub mod context_uncertainty_envelope;
 pub mod context_contradiction_resolution;
 pub mod context_dependency_closure;
+pub mod context_decision_projection;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -342,6 +343,13 @@ pub use context_dependency_closure::{
     ContextDependencyClosureRequest, ContextDependencyEdge,
     CONTRACT_VERSION as CONTEXT_DEPENDENCY_CLOSURE_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_DEPENDENCY_CLOSURE_FEATURE_ID,
+};
+pub use context_decision_projection::{
+    context_decision_projection_manifest, project_context_to_decision_section,
+    ContextDecisionProjectionError, ContextDecisionProjectionReceipt,
+    ContextDecisionProjectionRequest,
+    CONTRACT_VERSION as CONTEXT_DECISION_PROJECTION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_DECISION_PROJECTION_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
