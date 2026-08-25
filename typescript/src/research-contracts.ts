@@ -106,6 +106,8 @@ export const RELIABILITY_COPILOT_FEATURE_ID = "AFA-adapter-P21-F12" as const;
 export const RELIABILITY_COPILOT_CONTRACT_VERSION = "federated-reliability-copilot/1.0" as const;
 export const INTEROPERABILITY_GATEWAY_FEATURE_ID = "AFA-adapter-P22-F24" as const;
 export const INTEROPERABILITY_GATEWAY_CONTRACT_VERSION = "federated-interoperability-gateway/1.0" as const;
+export const EVALUATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P23-F25" as const;
+export const EVALUATION_ASSURANCE_CONTRACT_VERSION = "evaluation-assurance-harness/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1772,6 +1774,41 @@ export function validateInteroperabilityGatewayReceipt(receipt: Interoperability
 }
 
 export function interoperabilityGatewayReceiptDigest(receipt: InteroperabilityGatewayReceipt): string { validateInteroperabilityGatewayReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface EvaluationAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  run_id: string;
+  capability_id: string;
+  benchmark_id: string;
+  baseline_id: string;
+  verdict: "passed" | "conditional" | "unknown" | "blocked";
+  metric_order: string[];
+  gate_order: string[];
+  witness_order: string[];
+  counterexample_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  reasons: string[];
+  effect_receipts: string[];
+  replay_identity: string;
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateEvaluationAssuranceReceipt(receipt: EvaluationAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVALUATION_ASSURANCE_FEATURE_ID || receipt.contract_version !== EVALUATION_ASSURANCE_CONTRACT_VERSION) throw new Error("evaluation assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.run_id.trim() || !receipt.capability_id.trim() || !receipt.benchmark_id.trim() || !receipt.baseline_id.trim() || !receipt.metric_order.length || !receipt.gate_order.length || !receipt.reasons.length || !receipt.effect_receipts.length) throw new Error("evaluation assurance identity, metrics, gates, reasons, effects, locality, or boundary are incomplete");
+  if (!new Set(["passed", "conditional", "unknown", "blocked"]).has(receipt.verdict)) throw new Error("evaluation assurance verdict is unknown");
+  for (const values of [receipt.metric_order, receipt.gate_order, receipt.witness_order, receipt.counterexample_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("evaluation assurance ordering is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.replay_identity)) throw new Error("evaluation assurance replay identity is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("evaluation assurance artifact digest is invalid");
+}
+
+export function evaluationAssuranceReceiptDigest(receipt: EvaluationAssuranceReceipt): string { validateEvaluationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

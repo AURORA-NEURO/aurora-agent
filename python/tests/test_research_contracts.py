@@ -27,6 +27,7 @@ from prism_sdk.research_contracts import POLICY_GATEWAY_FEATURE_ID, POLICY_GATEW
 from prism_sdk.research_contracts import FEDERATION_WORKFLOW_FEATURE_ID, FEDERATION_WORKFLOW_CONTRACT_VERSION, FederationWorkflowReceipt
 from prism_sdk.research_contracts import RELIABILITY_COPILOT_FEATURE_ID, RELIABILITY_COPILOT_CONTRACT_VERSION, ReliabilityCopilotReceipt
 from prism_sdk.research_contracts import INTEROPERABILITY_GATEWAY_FEATURE_ID, INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, InteroperabilityGatewayReceipt
+from prism_sdk.research_contracts import EVALUATION_ASSURANCE_FEATURE_ID, EVALUATION_ASSURANCE_CONTRACT_VERSION, EvaluationAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1207,4 +1208,29 @@ def test_interoperability_gateway_preserves_migration_loss_and_digest_only_effec
     receipt.validate()
     assert receipt.feature_id == INTEROPERABILITY_GATEWAY_FEATURE_ID
     assert receipt.contract_version == INTEROPERABILITY_GATEWAY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_evaluation_assurance_preserves_witnesses_counterexamples_and_negative_evidence():
+    receipt = EvaluationAssuranceReceipt(
+        run_id="run:qc",
+        capability_id="capability:qc",
+        benchmark_id="benchmark:heldout",
+        baseline_id="baseline:v1",
+        verdict="blocked",
+        metric_order=("adr",),
+        gate_order=("baseline_delta", "policy_allow"),
+        witness_order=("w:adr",),
+        counterexample_order=("metric-under-baseline:adr",),
+        omissions=(),
+        uncertainty=(),
+        negative_evidence=("null secondary metric",),
+        reasons=("one or more baseline, witness, or measurement gates failed",),
+        effect_receipts=("block:unsafe-release:blocked",),
+        replay_identity="a" * 64,
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == EVALUATION_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == EVALUATION_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -19,6 +19,10 @@ use bioprism_adapter::{
     ContextCompilationRequest, CONTEXT_COMPILATION_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_evaluation_run, CapabilityRun, EvaluationAssuranceError, EvaluationAssuranceReceipt,
+    EVALUATION_ASSURANCE_FEATURE_ID,
+};
+use bioprism_adapter::{
     assure_interpretation, EvidenceBackedResult, InterpretationAssuranceReceipt,
     INTERPRETATION_ASSURANCE_FEATURE_ID,
 };
@@ -242,6 +246,7 @@ pub const POLICY_GATEWAY_TOOL: &str = "adapter_policy_gateway";
 pub const FEDERATION_WORKFLOW_TOOL: &str = "adapter_federation_workflow";
 pub const RELIABILITY_COPILOT_TOOL: &str = "adapter_reliability_copilot";
 pub const INTEROPERABILITY_GATEWAY_TOOL: &str = "adapter_interoperability_gateway";
+pub const EVALUATION_ASSURANCE_TOOL: &str = "adapter_evaluation_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1291,6 +1296,28 @@ pub fn validate_interoperability_gateway_json(
         .map_err(|error: InteroperabilityGatewayError| error.to_string())?;
     if receipt.feature_id != INTEROPERABILITY_GATEWAY_FEATURE_ID {
         return Err("interoperability gateway feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_evaluation_run_json(value: &Value) -> Result<Value, String> {
+    let request: CapabilityRun = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid evaluation assurance run: {error}"))?;
+    let receipt = assure_evaluation_run(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize evaluation assurance receipt: {error}"))
+}
+
+pub fn validate_evaluation_assurance_json(
+    value: &Value,
+) -> Result<EvaluationAssuranceReceipt, String> {
+    let receipt: EvaluationAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid evaluation assurance receipt: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: EvaluationAssuranceError| error.to_string())?;
+    if receipt.feature_id != EVALUATION_ASSURANCE_FEATURE_ID {
+        return Err("evaluation assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

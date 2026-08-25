@@ -85,6 +85,7 @@ pub mod context_assurance;
 pub mod csv;
 pub mod determinism_gateway;
 pub mod error;
+pub mod evaluation_assurance;
 pub mod evidence_surveillance;
 pub mod execution_control;
 pub mod experiment_design_control;
@@ -140,6 +141,12 @@ pub use determinism_gateway::{
     FEATURE_ID as DETERMINISM_GATEWAY_FEATURE_ID,
 };
 pub use error::{AdapterError, CsvError};
+pub use evaluation_assurance::{
+    assure_evaluation_run, AssuranceVerdict, AssuranceWitness, CapabilityRun,
+    EvaluationAssuranceError, EvaluationAssuranceReceipt, MetricObservation,
+    CONTRACT_VERSION as EVALUATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVALUATION_ASSURANCE_FEATURE_ID,
+};
 pub use evidence_surveillance::{
     run_evidence_surveillance, EffectReceipt, EvidenceFeedItem, EvidenceFeedRequest,
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceReceipt,

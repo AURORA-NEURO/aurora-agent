@@ -113,6 +113,8 @@ RELIABILITY_COPILOT_FEATURE_ID = "AFA-adapter-P21-F12"
 RELIABILITY_COPILOT_CONTRACT_VERSION = "federated-reliability-copilot/1.0"
 INTEROPERABILITY_GATEWAY_FEATURE_ID = "AFA-adapter-P22-F24"
 INTEROPERABILITY_GATEWAY_CONTRACT_VERSION = "federated-interoperability-gateway/1.0"
+EVALUATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P23-F25"
+EVALUATION_ASSURANCE_CONTRACT_VERSION = "evaluation-assurance-harness/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2830,3 +2832,46 @@ class InteroperabilityGatewayReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "endpoint_id": self.endpoint_id, "negotiated_version": self.negotiated_version, "disposition": self.disposition, "capability_order": list(self.capability_order), "artifact_digest_order": list(self.artifact_digest_order), "replay_token": self.replay_token, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "checks": list(self.checks), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class EvaluationAssuranceReceipt:
+    run_id: str
+    capability_id: str
+    benchmark_id: str
+    baseline_id: str
+    verdict: str
+    metric_order: tuple[str, ...]
+    gate_order: tuple[str, ...]
+    witness_order: tuple[str, ...]
+    counterexample_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    reasons: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    replay_identity: str
+    artifact: Mapping[str, Any]
+    feature_id: str = EVALUATION_ASSURANCE_FEATURE_ID
+    contract_version: str = EVALUATION_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != EVALUATION_ASSURANCE_FEATURE_ID or self.contract_version != EVALUATION_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("evaluation assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.run_id.strip() or not self.capability_id.strip() or not self.benchmark_id.strip() or not self.baseline_id.strip() or not self.metric_order or not self.gate_order or not self.reasons or not self.effect_receipts:
+            raise ResearchContractError("evaluation assurance identity, metrics, gates, reasons, effects, locality, or boundary are incomplete")
+        if self.verdict not in {"passed", "conditional", "unknown", "blocked"}:
+            raise ResearchContractError("evaluation assurance verdict is unknown")
+        for values in (self.metric_order, self.gate_order, self.witness_order, self.counterexample_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("evaluation assurance ordering is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.replay_identity):
+            raise ResearchContractError("evaluation assurance replay identity is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("evaluation assurance artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "run_id": self.run_id, "capability_id": self.capability_id, "benchmark_id": self.benchmark_id, "baseline_id": self.baseline_id, "verdict": self.verdict, "metric_order": list(self.metric_order), "gate_order": list(self.gate_order), "witness_order": list(self.witness_order), "counterexample_order": list(self.counterexample_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "reasons": list(self.reasons), "effect_receipts": list(self.effect_receipts), "replay_identity": self.replay_identity, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
