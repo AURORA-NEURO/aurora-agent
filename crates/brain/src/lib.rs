@@ -72,6 +72,7 @@ pub mod throughput_research_workbench;
 pub mod throughput_retrieval_contract_model;
 pub mod throughput_retrieval_copilot;
 pub mod throughput_retrieval_synthesis;
+pub mod throughput_retrieval_workflow_fabric;
 pub mod throughput_safety_assurance;
 
 pub use evidence_contract_model::{
@@ -354,6 +355,13 @@ pub use throughput_retrieval_synthesis::{
     ThroughputEvidenceSynthesis, ThroughputRetrievalError, ThroughputRetrievalQuery,
     CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use throughput_retrieval_workflow_fabric::{
+    compile_throughput_retrieval_workflow, throughput_retrieval_workflow_fabric_manifest,
+    ThroughputRetrievalWorkflowError, ThroughputRetrievalWorkflowReceipt,
+    ThroughputRetrievalWorkflowRequest,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use throughput_safety_assurance::{
     throughput_safety_assurance_manifest, verify_throughput_safety, ThroughputAssuranceError,
