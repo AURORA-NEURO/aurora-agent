@@ -17566,6 +17566,28 @@ class AutonomousAgent:
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("evaluator calibration admission was rejected") from error
 
+    def learning_controller(
+        self,
+        *,
+        calibration_report: Mapping[str, Any] | None = None,
+        require_calibrated_learning: bool = False,
+        ledger: BrainLearningLedger | None = None,
+    ) -> Any:
+        """Build the calibration-gated settlement controller for delayed learning updates.
+
+        The import is intentionally lazy so the existing agent construction path does not pay
+        for SQLite/persistence dependencies unless a caller enables the delayed-feedback path.
+        """
+
+        from .autonomous_learning_controller import AutonomousLearningController
+
+        return AutonomousLearningController(
+            self.brain,
+            ledger=self.ledger if ledger is None else ledger,
+            calibration_report=calibration_report,
+            require_calibrated_learning=require_calibrated_learning,
+        )
+
     def domain_evaluator(
         self,
         domain: str,

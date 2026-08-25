@@ -125,6 +125,18 @@ observed bandit pulls for calibrated evaluator quality. Canonical JSON, CAS JSON
 and restore/flush seams are included; labels, evidence, prompts, credentials, and provider values
 remain caller-owned and are never persisted by the calibration subsystem.
 
+Python delayed learning now has a single operational controller in
+`autonomous_learning_controller.py`. `AutonomousLearningController` enforces calibration
+admission before immediate episode/trajectory settlement, and again at queued-command dispatch,
+so direct low-level calls cannot bypass the all-domain gate. Its value-only feedback outbox has
+idempotent command digests, worker leases, stale-lease reconciliation, bounded retry/terminal
+failure states, and explicit applied result digests. `AutonomousLearningFeedbackWorker` settles
+precomputed evaluator decisions without provider replay; prompt/response/credential/tool/evidence
+payloads are rejected before enqueue. In-memory, canonical JSON, CAS JSON, SQLite, and restore/
+flush coordinator seams are exported and tested, including stale-writer fencing and lease
+recovery. Durable encryption, distributed consensus/scheduling, evaluator truth, and external
+authorization remain deployment responsibilities.
+
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
 the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson

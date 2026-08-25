@@ -2311,6 +2311,44 @@ await learning.settleRun(episodeId, evaluatorReward, {
 });
 ```
 
+Python exposes the same boundary as `AutonomousLearningController`. It can settle a prepared
+`BrainLearningEpisode` or discounted `BrainLearningTrajectory` immediately, or enqueue a
+value-only command for `AutonomousLearningFeedbackWorker` after a human, benchmark, or reviewed
+evaluator has produced a `BrainEvaluatorDecision`. The controller checks the episode's domain
+against the calibration admission immediately before every bandit mutation and again when a
+queued command is dispatched:
+
+```python
+from prism_sdk import (
+    AutonomousLearningFeedbackWorker,
+    InMemoryAutonomousLearningFeedbackOutbox,
+)
+
+learning = agent.learning_controller(
+    calibration_report=calibration_report,
+    require_calibrated_learning=True,
+)
+episode = learning.prepare_episode(run_result)
+outbox = InMemoryAutonomousLearningFeedbackOutbox()
+learning.enqueue_episode_settlement(
+    outbox,
+    episode,
+    decision=decision,
+    bandit_state=agent.learning_state(),
+)
+worker = AutonomousLearningFeedbackWorker(outbox, learning, evaluator)
+worker.run(worker_id="learning-worker")
+```
+
+Commands contain only the bounded episode/trajectory projection, evaluator decision, bandit
+state, and SHA-256 identities. Prompt text, provider responses, credentials, tool arguments, and
+evidence bodies are rejected at enqueue time; the worker never re-invokes a provider. Leases are
+owner-fenced, retries are bounded, applied commands are idempotent, expired leases enter explicit
+reconciliation, and canonical JSON/CAS/SQLite persistence can restore the queue after a process
+restart. `AutonomousLearningFeedbackPersistenceCoordinator` provides the local restore/flush
+seam, while production deployments still own encryption, distributed scheduling, evaluator
+authority, and external authorization.
+
 ### Reviewed capability packs for every domain
 
 The domain profile and workflow are joined by an `AutonomousDomainPack` for every built-in domain:
