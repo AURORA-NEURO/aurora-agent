@@ -28,6 +28,7 @@ from prism_sdk.research_contracts import FEDERATION_WORKFLOW_FEATURE_ID, FEDERAT
 from prism_sdk.research_contracts import RELIABILITY_COPILOT_FEATURE_ID, RELIABILITY_COPILOT_CONTRACT_VERSION, ReliabilityCopilotReceipt
 from prism_sdk.research_contracts import INTEROPERABILITY_GATEWAY_FEATURE_ID, INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, InteroperabilityGatewayReceipt
 from prism_sdk.research_contracts import EVALUATION_ASSURANCE_FEATURE_ID, EVALUATION_ASSURANCE_CONTRACT_VERSION, EvaluationAssuranceReceipt
+from prism_sdk.research_contracts import RESEARCH_WORKBENCH_FEATURE_ID, RESEARCH_WORKBENCH_CONTRACT_VERSION, ResearchWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1233,4 +1234,25 @@ def test_evaluation_assurance_preserves_witnesses_counterexamples_and_negative_e
     receipt.validate()
     assert receipt.feature_id == EVALUATION_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == EVALUATION_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_research_workbench_preserves_multimodal_views_and_locality():
+    receipt = ResearchWorkbenchReceipt(
+        workspace_id="workspace:atlas",
+        disposition="partial",
+        study_order=("study:imaging", "study:omics"),
+        modality_order=("imaging", "omics"),
+        view_order=("view:comparison",),
+        panel_order=("panel:view:comparison",),
+        artifact_order=("a" * 64, "b" * 64),
+        omissions=("view:comparison:missing-modality:spatial-transcriptomics",),
+        uncertainty=("study:omics:comparability-or-provenance-unknown",),
+        negative_evidence=("study:imaging:null secondary endpoint",),
+        action_receipts=("view:view:comparison:conditional-comparability",),
+        artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == RESEARCH_WORKBENCH_FEATURE_ID
+    assert receipt.contract_version == RESEARCH_WORKBENCH_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

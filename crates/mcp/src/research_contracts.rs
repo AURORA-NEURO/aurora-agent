@@ -47,6 +47,10 @@ use bioprism_adapter::{
     EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
 };
 use bioprism_adapter::{
+    compile_research_workbench, InteractiveResearchWorkspace, ResearchWorkbenchError,
+    ResearchWorkspaceState, RESEARCH_WORKBENCH_FEATURE_ID,
+};
+use bioprism_adapter::{
     discover_resources as discover_adapter_resources,
     ResourceCandidate as AdapterResourceCandidate, ResourceNeed as AdapterResourceNeed,
     ResourceWorkbenchReceipt,
@@ -247,6 +251,7 @@ pub const FEDERATION_WORKFLOW_TOOL: &str = "adapter_federation_workflow";
 pub const RELIABILITY_COPILOT_TOOL: &str = "adapter_reliability_copilot";
 pub const INTEROPERABILITY_GATEWAY_TOOL: &str = "adapter_interoperability_gateway";
 pub const EVALUATION_ASSURANCE_TOOL: &str = "adapter_evaluation_assurance";
+pub const RESEARCH_WORKBENCH_TOOL: &str = "adapter_research_workbench";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1318,6 +1323,28 @@ pub fn validate_evaluation_assurance_json(
         .map_err(|error: EvaluationAssuranceError| error.to_string())?;
     if receipt.feature_id != EVALUATION_ASSURANCE_FEATURE_ID {
         return Err("evaluation assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn compile_research_workbench_json(value: &Value) -> Result<Value, String> {
+    let request: ResearchWorkspaceState = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid research workbench state: {error}"))?;
+    let receipt = compile_research_workbench(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize interactive research workspace: {error}"))
+}
+
+pub fn validate_research_workbench_json(
+    value: &Value,
+) -> Result<InteractiveResearchWorkspace, String> {
+    let receipt: InteractiveResearchWorkspace = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid interactive research workspace: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: ResearchWorkbenchError| error.to_string())?;
+    if receipt.feature_id != RESEARCH_WORKBENCH_FEATURE_ID {
+        return Err("research workbench feature id mismatch".into());
     }
     Ok(receipt)
 }

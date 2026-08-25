@@ -114,6 +114,7 @@ pub mod release_assurance;
 pub mod reliability_copilot;
 pub mod replication_assurance;
 pub mod research_ingest;
+pub mod research_workbench;
 pub mod resource_workbench;
 pub mod retrieval_synthesis;
 pub mod source;
@@ -280,6 +281,12 @@ pub use replication_assurance::{
 };
 pub use research_ingest::{
     certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
+};
+pub use research_workbench::{
+    compile_research_workbench, ComparabilityStatus, InteractiveResearchWorkspace,
+    ResearchWorkbenchError, ResearchWorkspaceState, StudyWorkspaceEntry, WorkspaceDisposition,
+    WorkspaceViewRequest, CONTRACT_VERSION as RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use resource_workbench::{
     discover_resources, QualifiedResource, ResourceCandidate, ResourceNeed, ResourceOmission,

@@ -115,6 +115,8 @@ INTEROPERABILITY_GATEWAY_FEATURE_ID = "AFA-adapter-P22-F24"
 INTEROPERABILITY_GATEWAY_CONTRACT_VERSION = "federated-interoperability-gateway/1.0"
 EVALUATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P23-F25"
 EVALUATION_ASSURANCE_CONTRACT_VERSION = "evaluation-assurance-harness/1.0"
+RESEARCH_WORKBENCH_FEATURE_ID = "AFA-adapter-P24-F18"
+RESEARCH_WORKBENCH_CONTRACT_VERSION = "multimodal-research-workbench/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2875,3 +2877,42 @@ class EvaluationAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "run_id": self.run_id, "capability_id": self.capability_id, "benchmark_id": self.benchmark_id, "baseline_id": self.baseline_id, "verdict": self.verdict, "metric_order": list(self.metric_order), "gate_order": list(self.gate_order), "witness_order": list(self.witness_order), "counterexample_order": list(self.counterexample_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "reasons": list(self.reasons), "effect_receipts": list(self.effect_receipts), "replay_identity": self.replay_identity, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ResearchWorkbenchReceipt:
+    workspace_id: str
+    disposition: str
+    study_order: tuple[str, ...]
+    modality_order: tuple[str, ...]
+    view_order: tuple[str, ...]
+    panel_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    action_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = RESEARCH_WORKBENCH_FEATURE_ID
+    contract_version: str = RESEARCH_WORKBENCH_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RESEARCH_WORKBENCH_FEATURE_ID or self.contract_version != RESEARCH_WORKBENCH_CONTRACT_VERSION:
+            raise ResearchContractError("research workbench schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.workspace_id.strip() or not self.study_order or not self.view_order or not self.panel_order or not self.action_receipts:
+            raise ResearchContractError("research workbench identity, studies, views, panels, actions, locality, or boundary are incomplete")
+        if self.disposition not in {"ready", "partial", "blocked", "local_only"}:
+            raise ResearchContractError("research workbench disposition is unknown")
+        for values in (self.study_order, self.modality_order, self.view_order, self.panel_order, self.artifact_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("research workbench ordering is invalid")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in self.artifact_order):
+            raise ResearchContractError("research workbench artifact digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("research workbench receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "workspace_id": self.workspace_id, "disposition": self.disposition, "study_order": list(self.study_order), "modality_order": list(self.modality_order), "view_order": list(self.view_order), "panel_order": list(self.panel_order), "artifact_order": list(self.artifact_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "action_receipts": list(self.action_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
