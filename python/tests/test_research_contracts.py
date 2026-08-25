@@ -83,6 +83,7 @@ from prism_sdk.brain_evidence_copilot import BrainEvidenceResearchCopilotReceipt
 from prism_sdk.brain_multimodal_copilot import BrainMultimodalEvidenceResearchCopilotReceipt
 from prism_sdk.brain_high_throughput_copilot import BrainHighThroughputEvidenceResearchCopilotReceipt
 from prism_sdk.brain_federated_copilot import BrainFederatedEvidenceResearchCopilotReceipt
+from prism_sdk.brain_evidence_workflow import BrainEvidenceWorkflowFabricReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2659,6 +2660,20 @@ def test_brain_federated_copilot_keeps_signer_block_explicit():
         negative_evidence=("request:signer-invalid",),
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "1" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_evidence_workflow_keeps_compensation_explicit():
+    receipt = BrainEvidenceWorkflowFabricReceipt(
+        request_id="request:workflow", workflow_id="workflow:evidence", study_id="study:organoid", scope="organoid:neural", disposition="unknown",
+        stage_order=("stage:checkpoint", "stage:surveil-evidence", "stage:validate-input"),
+        plan_order=("plan:retain-unknown-evidence", "plan:stage:checkpoint", "plan:stage:surveil-evidence", "plan:stage:validate-input"),
+        completed_order=("stage:checkpoint", "stage:surveil-evidence", "stage:validate-input"), blocked_order=("evidence:a",),
+        compensation_order=("compensate:research-work:retain-unresolved-evidence",), candidate_order=("evidence:a",), qualified_order=(), unknown_order=("evidence:a",),
+        evidence_receipt_digest="a" * 64, checkpoint_digest="b" * 64, workflow_digest="c" * 64, replay_identity="d" * 64, budget_units=8,
+        omissions=("workflow:no-qualified-evidence-to-schedule",), uncertainty=(), negative_evidence=(), effect_receipts=("compensate:research-work:workflow:evidence",), artifact={"content_hash": "e" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

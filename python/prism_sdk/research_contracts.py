@@ -237,6 +237,8 @@ HIGH_THROUGHPUT_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F11"
 HIGH_THROUGHPUT_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-high-throughput-evidence-research-copilot/1.0"
 FEDERATED_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F12"
 FEDERATED_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-federated-evidence-research-copilot/1.0"
+EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F13"
+EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-evidence-surveillance-workflow-fabric/1.0"
 
 
 class ResearchContractError(ValueError):

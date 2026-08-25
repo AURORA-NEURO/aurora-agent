@@ -30,6 +30,7 @@ use thiserror::Error;
 pub mod evidence_contract_model;
 pub mod evidence_research_copilot;
 pub mod evidence_surveillance;
+pub mod evidence_workflow_fabric;
 pub mod federated_contract_model;
 pub mod federated_evidence_copilot;
 pub mod federated_evidence_surveillance;
@@ -57,6 +58,12 @@ pub use evidence_surveillance::{
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, QualifiedEvidenceSet,
     CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use evidence_workflow_fabric::{
+    compile_evidence_workflow, evidence_workflow_fabric_manifest, EvidenceWorkflowError,
+    EvidenceWorkflowReceipt, EvidenceWorkflowRequest,
+    CONTRACT_VERSION as EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use federated_contract_model::{
     federated_contract_model_manifest, model_federated_contract, FederatedContractDisposition,
