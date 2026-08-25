@@ -45,6 +45,7 @@ from prism_sdk.research_contracts import ORACLE_ASSURANCE_FEATURE_ID, ORACLE_ASS
 from prism_sdk.research_contracts import FEDERATED_INGESTION_FEATURE_ID, FEDERATED_INGESTION_CONTRACT_VERSION, FederatedMultimodalIngestionReceipt
 from prism_sdk.research_contracts import QUALITY_ASSURANCE_FEATURE_ID, QUALITY_ASSURANCE_CONTRACT_VERSION, QualityAssuranceReceipt
 from prism_sdk.research_contracts import MECHANISM_CONTROL_FEATURE_ID, MECHANISM_CONTROL_CONTRACT_VERSION, MechanismControlReceipt
+from prism_sdk.research_contracts import EVIDENCE_WORKBENCH_FEATURE_ID, EVIDENCE_WORKBENCH_CONTRACT_VERSION, EvidenceWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1632,4 +1633,23 @@ def test_mechanism_control_preserves_ranked_competing_portfolio():
     receipt.validate()
     assert receipt.feature_id == MECHANISM_CONTROL_FEATURE_ID
     assert receipt.contract_version == MECHANISM_CONTROL_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_evidence_workbench_preserves_stale_alert_and_view_only_effects():
+    receipt = EvidenceWorkbenchReceipt(
+        request_id="evidence:workbench",
+        workflow_id="workflow:surveillance",
+        study_id="study:organoid",
+        disposition="partial",
+        evidence={"set_id": "qualified-evidence:evidence:workbench", "source_order": ("source:a", "source:b"), "qualified_order": ("source:a",), "alert_order": ("source:b:freshness-stale",), "blocked_order": ("source:b",), "evidence_order": ("a" * 64,), "provenance_order": ("b" * 64,), "omissions": ("source:b:freshness-not-current",), "uncertainty": (), "negative_evidence": (), "replay_identity": "c" * 64, "set_digest": "d" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        checks=("stale and incomplete evidence remains researcher-visible",),
+        omissions=("source:b:freshness-not-current",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("view:authorized-research-state:source:a", "view:authorized-research-state:source:b"),
+    )
+    receipt.validate()
+    assert receipt.feature_id == EVIDENCE_WORKBENCH_FEATURE_ID
+    assert receipt.contract_version == EVIDENCE_WORKBENCH_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

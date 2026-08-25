@@ -161,6 +161,8 @@ QUALITY_ASSURANCE_FEATURE_ID = "AFA-bioevalx-P07-F26"
 QUALITY_ASSURANCE_CONTRACT_VERSION = "bioevalx-multimodal-quality-assurance/1.0"
 MECHANISM_CONTROL_FEATURE_ID = "AFA-benchcompiler-P08-F30"
 MECHANISM_CONTROL_CONTRACT_VERSION = "benchcompiler-federated-mechanism-control/1.0"
+EVIDENCE_WORKBENCH_FEATURE_ID = "AFA-bioworlds-P01-F17"
+EVIDENCE_WORKBENCH_CONTRACT_VERSION = "bioworlds-local-evidence-workbench/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3651,3 +3653,52 @@ class MechanismControlReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "objective_id": self.objective_id, "disposition": self.disposition, "portfolio": dict(self.portfolio), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class EvidenceWorkbenchReceipt:
+    """Cross-language validator for the local single-study evidence workbench."""
+
+    request_id: str
+    workflow_id: str
+    study_id: str
+    disposition: str
+    evidence: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = EVIDENCE_WORKBENCH_FEATURE_ID
+    contract_version: str = EVIDENCE_WORKBENCH_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != EVIDENCE_WORKBENCH_FEATURE_ID or self.contract_version != EVIDENCE_WORKBENCH_CONTRACT_VERSION:
+            raise ResearchContractError("evidence workbench schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.study_id.strip() or not self.checks or not self.effect_receipts or self.evidence.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("evidence workbench identity, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("evidence workbench disposition is unknown")
+        source_order = tuple(self.evidence.get("source_order", ()))
+        qualified = tuple(self.evidence.get("qualified_order", ()))
+        alerts = tuple(self.evidence.get("alert_order", ()))
+        blocked = tuple(self.evidence.get("blocked_order", ()))
+        unresolved = tuple(self.evidence.get("omissions", ())) + tuple(self.evidence.get("uncertainty", ())) + tuple(self.evidence.get("negative_evidence", ()))
+        if not source_order or not (qualified or alerts or blocked or unresolved):
+            raise ResearchContractError("evidence workbench must retain sources and a qualified or unresolved state")
+        for values in (source_order, qualified, alerts, blocked, tuple(self.evidence.get("omissions", ())), tuple(self.evidence.get("uncertainty", ())), tuple(self.evidence.get("negative_evidence", ())), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("evidence workbench ordering is invalid")
+        for value in tuple(self.evidence.get("evidence_order", ())) + tuple(self.evidence.get("provenance_order", ())) + (self.evidence.get("replay_identity"), self.evidence.get("set_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("evidence workbench digest is invalid")
+        if not isinstance(self.evidence.get("set_id"), str) or not self.evidence["set_id"].strip():
+            raise ResearchContractError("evidence workbench set identity is incomplete")
+        if any(not effect.startswith("view:") for effect in self.effect_receipts):
+            raise ResearchContractError("evidence workbench effect is not read-only")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "study_id": self.study_id, "disposition": self.disposition, "evidence": dict(self.evidence), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

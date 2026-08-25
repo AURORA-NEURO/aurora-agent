@@ -90,6 +90,7 @@ pub mod catalog;
 pub mod error;
 pub mod fixtures;
 pub mod federated_ingestion;
+pub mod evidence_workbench;
 pub mod knobs;
 pub mod query;
 pub mod slice;
@@ -106,6 +107,15 @@ pub use federated_ingestion::{
     FEATURE_ID as FEDERATED_INGESTION_FEATURE_ID,
     PRECLINICAL_BOUNDARY as FEDERATED_INGESTION_PRECLINICAL_BOUNDARY,
     SCHEMA_VERSION as FEDERATED_INGESTION_SCHEMA_VERSION,
+};
+pub use evidence_workbench::{
+    operate_evidence_workbench, EvidenceDisposition, EvidenceFeed, EvidenceSource,
+    EvidenceState as WorkbenchEvidenceState, EvidenceWorkbenchError,
+    EvidenceWorkbenchReceipt, Freshness, QualifiedEvidenceSet,
+    CONTRACT_VERSION as EVIDENCE_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_WORKBENCH_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as EVIDENCE_WORKBENCH_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as EVIDENCE_WORKBENCH_SCHEMA_VERSION,
 };
 pub use catalog::{CatalogReport, SliceCatalog};
 pub use error::BioWorldError;

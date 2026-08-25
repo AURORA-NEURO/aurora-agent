@@ -143,6 +143,8 @@ export const QUALITY_ASSURANCE_FEATURE_ID = "AFA-bioevalx-P07-F26" as const;
 export const QUALITY_ASSURANCE_CONTRACT_VERSION = "bioevalx-multimodal-quality-assurance/1.0" as const;
 export const MECHANISM_CONTROL_FEATURE_ID = "AFA-benchcompiler-P08-F30" as const;
 export const MECHANISM_CONTROL_CONTRACT_VERSION = "benchcompiler-federated-mechanism-control/1.0" as const;
+export const EVIDENCE_WORKBENCH_FEATURE_ID = "AFA-bioworlds-P01-F17" as const;
+export const EVIDENCE_WORKBENCH_CONTRACT_VERSION = "bioworlds-local-evidence-workbench/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2413,6 +2415,42 @@ export function validateMechanismControlReceipt(receipt: MechanismControlReceipt
 }
 
 export function mechanismControlReceiptDigest(receipt: MechanismControlReceipt): string { validateMechanismControlReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface EvidenceWorkbenchReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  study_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  evidence: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateEvidenceWorkbenchReceipt(receipt: EvidenceWorkbenchReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVIDENCE_WORKBENCH_FEATURE_ID || receipt.contract_version !== EVIDENCE_WORKBENCH_CONTRACT_VERSION) throw new Error("evidence workbench schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.study_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.evidence.boundary !== PRECLINICAL_BOUNDARY) throw new Error("evidence workbench identity, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("evidence workbench disposition is unknown");
+  const sourceOrder = Array.isArray(receipt.evidence.source_order) ? receipt.evidence.source_order as string[] : [];
+  const qualified = Array.isArray(receipt.evidence.qualified_order) ? receipt.evidence.qualified_order as string[] : [];
+  const alerts = Array.isArray(receipt.evidence.alert_order) ? receipt.evidence.alert_order as string[] : [];
+  const blocked = Array.isArray(receipt.evidence.blocked_order) ? receipt.evidence.blocked_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.evidence.omissions) ? receipt.evidence.omissions as string[] : []), ...(Array.isArray(receipt.evidence.uncertainty) ? receipt.evidence.uncertainty as string[] : []), ...(Array.isArray(receipt.evidence.negative_evidence) ? receipt.evidence.negative_evidence as string[] : [])];
+  if (!sourceOrder.length || (!qualified.length && !alerts.length && !blocked.length && !unresolved.length)) throw new Error("evidence workbench must retain sources and a qualified or unresolved state");
+  for (const values of [sourceOrder, qualified, alerts, blocked, Array.isArray(receipt.evidence.omissions) ? receipt.evidence.omissions as string[] : [], Array.isArray(receipt.evidence.uncertainty) ? receipt.evidence.uncertainty as string[] : [], Array.isArray(receipt.evidence.negative_evidence) ? receipt.evidence.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("evidence workbench ordering is invalid");
+  for (const value of [...(Array.isArray(receipt.evidence.evidence_order) ? receipt.evidence.evidence_order : []), ...(Array.isArray(receipt.evidence.provenance_order) ? receipt.evidence.provenance_order : []), receipt.evidence.replay_identity, receipt.evidence.set_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("evidence workbench digest is invalid");
+  if (typeof receipt.evidence.set_id !== "string" || !receipt.evidence.set_id.trim()) throw new Error("evidence workbench set identity is incomplete");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("view:"))) throw new Error("evidence workbench effect is not read-only");
+}
+
+export function evidenceWorkbenchReceiptDigest(receipt: EvidenceWorkbenchReceipt): string { validateEvidenceWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
