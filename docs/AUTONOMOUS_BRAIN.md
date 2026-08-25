@@ -4419,8 +4419,9 @@ the tool is declared effectful and approval-required, the execution policy expli
 positive effect budget, and the caller approval callback returns true. A model-generated tool call
 never satisfies any of those conditions.
 
-The TypeScript façade adds a second, stricter boundary for the moment a caller's effect executor
-crosses into an external system. `AutonomousEffectBoundary` derives a deterministic effect
+Both SDKs now add a second, stricter boundary for the moment a caller's effect executor crosses
+into an external system. Python's synchronous `AutonomousEffectBoundary` and TypeScript's
+`AutonomousEffectBoundary` derive a deterministic effect
 identity and idempotency key from the execution id, tool, call id, and argument digest. It
 hash-chains `prepared`, `dispatching`, and `dispatched` metadata before entering the external
 executor, then records `completed` or conservatively `uncertain`. A crash, timeout, or thrown
@@ -4449,6 +4450,38 @@ const agent = new AutonomousAgent(llm, {
 });
 ```
 
+The Python adapter exposes the same lifecycle through the shared domain-tool runtime:
+
+```python
+from prism_sdk import (
+    AutonomousDomainToolRuntime,
+    AutonomousEffectBoundary,
+    InMemoryAutonomousEffectJournal,
+)
+
+effects = InMemoryAutonomousEffectJournal()
+boundary = AutonomousEffectBoundary(
+    journal=effects,
+    resolver=effect_store,  # caller-owned object with resolve(record)
+)
+runtime = AutonomousDomainToolRuntime(
+    registry,
+    executor=workspace_tool,
+    approve=approve_effect,
+    effect_boundary=boundary,
+    effect_executor=lambda tool, arguments, context: effect_store.execute(
+        tool.name, arguments, context.idempotency_key
+    ),
+)
+```
+
+`effect_executor` is optional for compatibility with existing two-argument adapters; when it is
+provided, it receives the metadata-only execution context and the external idempotency key. The
+boundary is applied only to approved non-read-only tools, while read-only tools keep the ordinary
+receipt path. The Python and TypeScript contracts use the same statuses, resolver outcomes,
+restart behavior, and all-domain coverage, so a worker can move between SDKs without weakening
+uncertainty handling.
+
 `AutonomousEffectPersistenceCoordinator` flushes/restores the hash-checked snapshot through a
 caller-owned database or object store. `AutonomousExecutionController` mirrors the effect state
 as metadata-only `effect_reconciliation` events and moves the enclosing run to
@@ -4458,8 +4491,9 @@ available for every built-in domain profile, including cross-domain specialist a
 but a durable job must still persist the effect ledger and result resolver in the embedding
 application.
 
-TypeScript applications can use `TransactionalJsonAutonomousEffectSnapshotPersistence` for the
-same boundary. It validates every event and chain digest before a restore or write, serializes
+Python applications can use `TransactionalJsonAutonomousEffectSnapshotPersistence` and
+TypeScript applications can use the same-named adapter for the boundary. Both validate every event
+and chain digest before a restore or write, serialize
 overlapping persistence operations, and fences stale workers with the verified snapshot digest.
 An uncertain effect therefore cannot be replaced by a newer or empty local journal during restart;
 the caller must restore and reconcile explicitly before another dispatch is admitted.

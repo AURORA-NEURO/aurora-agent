@@ -1759,3 +1759,14 @@ the SDK result-observability gap without treating transport success as task corr
 deployment work is to connect these receipts to caller-owned evaluator settlement, durable trace
 stores, provider cost ledgers, and operator policy surfaces; credentials, raw payloads, reward, and
 effect authority remain explicitly outside the SDK receipt boundary.
+
+The Python SDK now closes the corresponding effect-safety gap. `AutonomousEffectBoundary` gives
+approved non-read-only domain tools a deterministic effect identity, caller-visible idempotency
+key, hash-chained `prepared`/`dispatching`/`dispatched` markers, conservative uncertain-failure
+handling, resolver-gated replay, and canonical compare-and-set snapshots. `AutonomousAgent` and
+`AutonomousDomainToolRuntime` accept the boundary, while an optional three-argument
+`effect_executor` receives the transient idempotency context. The boundary is metadata-only and
+never stores arguments, outputs, prompts, tasks, provider payloads, credentials, or raw errors;
+all twelve built-in domains are covered by integration tests. The remaining deployment work is
+still caller-owned effect-store/resolver wiring, external idempotency enforcement, durable ledger
+placement, and operator reconciliation policy; exactly-once execution is not claimed by the SDK.

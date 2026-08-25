@@ -39,6 +39,7 @@ AUTONOMY_EVENT_KINDS = (
     "provider_call",
     "tool_intent",
     "tool_outcome",
+    "effect_reconciliation",
     "checkpoint",
     "approval_required",
     "evaluation",
@@ -472,7 +473,7 @@ class AutonomousExecutionJournal:
                 raise AutonomyPersistenceError("execution id already exists; resume must be explicit")
             if previous.policy_digest != policy.digest:
                 raise AutonomyPersistenceError("resume policy digest does not match the persisted execution")
-            if previous.status in AUTONOMY_TERMINAL_STATUSES:
+            if previous.status in AUTONOMY_TERMINAL_STATUSES and previous.status != "reconciliation_required":
                 raise AutonomyPersistenceError("terminal execution cannot be resumed")
             resumed = replace(previous, status="resumed", last_event_kind="resumed")
             self.append({"execution_id": execution_id, "kind": "resumed", "domain": domain, "capability": capability, "risk_class": risk_class, "status": "resumed", "policy_digest": policy.digest, "state": resumed.to_dict()})
@@ -618,7 +619,8 @@ class AutonomousExecutionJournal:
             "reward", "passed", "failure_class", "reason", "metadata", "provider", "model",
             "invocation_kind", "attempt", "turn", "selection_digest", "provider_outcome",
             "latency_ms", "input_tokens", "output_tokens", "estimated_cost_units", "actual_cost_units",
-            "request_id_digest", "status_code",
+            "request_id_digest", "status_code", "effect_id", "effect_status", "dispatch_attempt",
+            "reconciliation_digest",
         }
         if set(event).difference(allowed):
             raise AutonomyPersistenceError("execution event contains unsupported fields")
@@ -655,10 +657,17 @@ class AutonomousExecutionJournal:
         for name in ("selection_digest", "request_id_digest"):
             if name in event and event[name] is not None:
                 normalized[name] = _digest(f"event {name}", event[name])
+        for name in ("effect_id", "effect_status"):
+            if name in event and event[name] is not None:
+                normalized[name] = _identifier(f"event {name}", event[name], maximum=512)
+        if "reconciliation_digest" in event and event["reconciliation_digest"] is not None:
+            normalized["reconciliation_digest"] = _digest(
+                "event reconciliation_digest", event["reconciliation_digest"]
+            )
         for name in ("provider", "model", "invocation_kind", "provider_outcome"):
             if name in event and event[name] is not None:
                 normalized[name] = _text(f"event {name}", event[name], maximum=512)
-        for name, maximum in (("attempt", 8), ("turn", 32), ("input_tokens", 100_000_000), ("output_tokens", 100_000_000), ("status_code", 999)):
+        for name, maximum in (("attempt", 8), ("turn", 32), ("input_tokens", 100_000_000), ("output_tokens", 100_000_000), ("status_code", 999), ("dispatch_attempt", 64)):
             if name in event and event[name] is not None:
                 value = event[name]
                 if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
@@ -1048,6 +1057,84 @@ class AutonomousExecutionController:
         self._ensure_active()
         self.state = replace(self.state, last_tool=_identifier("tool", tool), last_call_id=_identifier("call_id", call_id, maximum=512), last_outcome_digest=None if outcome_digest is None else _digest("outcome_digest", outcome_digest), last_event_kind="tool_outcome", status=_identifier("tool outcome status", status))
         return self._persist("tool_outcome", self.state.status, tool=tool, call_id=call_id, outcome_digest=outcome_digest, reason=reason)
+
+    def record_effect_reconciliation(
+        self,
+        *,
+        effect_id: str,
+        tool: str,
+        call_id: str,
+        status: str,
+        dispatch_attempt: int,
+        result_digest: str | None = None,
+        failure_class: str | None = None,
+        reason: str | None = None,
+    ) -> AutonomousExecutionState:
+        """Persist effect uncertainty without retaining arguments or external results.
+
+        ``uncertain`` is a recoverable execution boundary, not ordinary tool failure.  The
+        controller therefore moves to ``reconciliation_required`` and remains resumable until a
+        caller-owned resolver records ``reconciled`` or a definite ``failed`` outcome.
+        """
+
+        if (
+            (self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES)
+            and self.state.status != "reconciliation_required"
+        ):
+            raise AutonomyPolicyError("execution cannot record an effect after terminal completion")
+        effect_id = _identifier("effect_id", effect_id, maximum=128)
+        tool = _identifier("effect tool", tool)
+        call_id = _identifier("effect call_id", call_id, maximum=512)
+        if status not in {"prepared", "dispatching", "dispatched", "completed", "uncertain", "reconciled", "failed"}:
+            raise AutonomyPersistenceError("effect reconciliation status is unsupported")
+        if not isinstance(dispatch_attempt, int) or isinstance(dispatch_attempt, bool) or not 0 <= dispatch_attempt <= 64:
+            raise AutonomyPersistenceError("effect dispatch_attempt is outside its bound")
+        if result_digest is not None:
+            result_digest = _digest("effect result_digest", result_digest)
+        if failure_class is not None:
+            failure_class = _identifier("effect failure_class", failure_class, maximum=256)
+        if reason is not None:
+            reason = _identifier("effect reason", reason, maximum=2_048)
+        lifecycle_status = (
+            "reconciliation_required"
+            if status == "uncertain"
+            else "error"
+            if status == "failed" and self.policy.stop_on_error
+            else "running"
+        )
+        reconciliation_digest = content_digest(
+            {
+                "effect_id": effect_id,
+                "status": status,
+                "dispatch_attempt": dispatch_attempt,
+                "result_digest": result_digest,
+                "failure_class": failure_class,
+                "reason": reason,
+            }
+        )
+        self.state = replace(
+            self.state,
+            last_tool=tool,
+            last_call_id=call_id,
+            last_outcome_digest=result_digest,
+            last_event_kind="effect_reconciliation",
+            status=lifecycle_status,
+        )
+        if status in {"reconciled", "completed", "failed"}:
+            self._terminal = False
+        return self._persist(
+            "effect_reconciliation",
+            status,
+            effect_id=effect_id,
+            effect_status=status,
+            tool=tool,
+            call_id=call_id,
+            dispatch_attempt=dispatch_attempt,
+            reconciliation_digest=reconciliation_digest,
+            outcome_digest=result_digest,
+            failure_class=failure_class,
+            reason=reason,
+        )
 
     def record_evaluation(
         self,

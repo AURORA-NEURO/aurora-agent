@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from prism_sdk import (
+    AUTONOMOUS_DOMAIN_NAMES,
+    AutonomousDomainTool,
+    AutonomousDomainToolRegistry,
+    AutonomousDomainToolRuntime,
+    AutonomousEffectBoundary,
+    AutonomousEffectReconciliationRequiredError,
+    AutonomousExecutionController,
+    AutonomousExecutionJournal,
+    AutonomousExecutionPolicy,
+    InMemoryAutonomousEffectJournal,
+    InMemoryAutonomousEffectSnapshotTextStore,
+    ProviderToolCall,
+    TransactionalJsonAutonomousEffectSnapshotPersistence,
+    AutonomousEffectPersistenceCoordinator,
+)
+
+
+def _request(execution_id: str | None = None) -> dict[str, object]:
+    return {
+        "execution_id": execution_id,
+        "tool": "external_write",
+        "call_id": "effect-call-1",
+        "risk_class": "external_effect",
+        "arguments": {"note": "private-value"},
+    }
+
+
+def test_effect_boundary_is_idempotent_and_metadata_only() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 10)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    calls = 0
+
+    def execute(context: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        assert context.idempotency_key.startswith("aurora-effect-")  # type: ignore[attr-defined]
+        return {"accepted": True, "private_output": "not retained"}
+
+    first = boundary.execute(_request(), execute)
+    second = boundary.execute(_request(), lambda _context: {"accepted": False})
+
+    assert second == first
+    assert calls == 1
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "completed"]
+    snapshot = journal.snapshot().to_dict()
+    encoded = json.dumps(snapshot, sort_keys=True)
+    assert "private-value" not in encoded
+    assert "private_output" not in encoded
+    restored = InMemoryAutonomousEffectJournal()
+    restored.restore(snapshot)
+    assert restored.get(boundary.effect_id(_request())).status == "completed"  # type: ignore[union-attr]
+    assert restored.verify_integrity()["verified"] is True
+
+
+def test_uncertain_effect_requires_resolution_before_retry(tmp_path) -> None:
+    effect_journal = InMemoryAutonomousEffectJournal(clock=lambda: 20)
+    execution_journal = AutonomousExecutionJournal(tmp_path / "execution.jsonl")
+    policy = AutonomousExecutionPolicy(allow_side_effects=True, max_effectful_calls=2, max_tool_calls=4, max_steps=16)
+    first_execution = AutonomousExecutionController(
+        execution_id="effect-execution-1",
+        domain="operations",
+        capability="incident_response",
+        risk_class="external_effect",
+        policy=policy,
+        journal=execution_journal,
+    )
+    first_execution.admit_tool_call(tool="external_write", call_id="effect-call-1", read_only=False, approval_required=True)
+    request = _request(first_execution.state.execution_id)
+    boundary = AutonomousEffectBoundary(journal=effect_journal, execution=first_execution)
+
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        boundary.execute(request, lambda _context: (_ for _ in ()).throw(RuntimeError("transport lost")))
+    assert first_execution.state.status == "reconciliation_required"
+
+    class Resolver:
+        def resolve(self, record: object) -> dict[str, object]:
+            assert record.effect_id == boundary.effect_id(request)  # type: ignore[attr-defined]
+            return {"status": "completed", "result": {"confirmed": True}}
+
+    resumed = AutonomousExecutionController(
+        execution_id="effect-execution-1",
+        domain="operations",
+        capability="incident_response",
+        risk_class="external_effect",
+        policy=policy,
+        journal=execution_journal,
+        resume=True,
+    )
+    recovered = AutonomousEffectBoundary(journal=effect_journal, resolver=Resolver(), execution=resumed)
+    result = recovered.execute(request, lambda _context: (_ for _ in ()).throw(RuntimeError("duplicate dispatch")))
+
+    assert result == {"confirmed": True}
+    assert resumed.state.status == "running"
+    assert effect_journal.get(boundary.effect_id(request)).status == "reconciled"  # type: ignore[union-attr]
+
+
+def test_effect_snapshot_persistence_is_canonical_and_cas_fenced() -> None:
+    source = InMemoryAutonomousEffectJournal(clock=lambda: 1)
+    boundary = AutonomousEffectBoundary(journal=source)
+    boundary.execute({"tool": "external_write", "call_id": "persist-1", "risk_class": "external_effect", "arguments": {}}, lambda _context: {"ok": True})
+    text = InMemoryAutonomousEffectSnapshotTextStore()
+    persistence = TransactionalJsonAutonomousEffectSnapshotPersistence(text)
+    coordinator = AutonomousEffectPersistenceCoordinator(source, persistence)
+    first = coordinator.flush()
+    assert json.loads(text.read() or "{}")["snapshot_digest"] == first.snapshot_digest
+    assert coordinator.restore().snapshot_digest == first.snapshot_digest  # type: ignore[union-attr]
+    assert text.read() is not None
+
+    stale = AutonomousEffectPersistenceCoordinator(InMemoryAutonomousEffectJournal(), persistence)
+    with pytest.raises(Exception, match="compare-and-set"):
+        stale.flush()
+    text.value = "{not-json"
+    with pytest.raises(Exception, match="invalid"):
+        persistence.read()
+
+
+def test_effect_boundary_is_shared_by_every_builtin_domain() -> None:
+    executions: list[str] = []
+    for domain in AUTONOMOUS_DOMAIN_NAMES:
+        tool = AutonomousDomainTool(
+            name=f"{domain}_external_write",
+            domains=(domain,),
+            capability="external_change",
+            description=f"Apply a reviewed {domain} change.",
+            parameters={"type": "object", "additionalProperties": False},
+            risk_class="external_effect",
+            read_only=False,
+            approval_required=True,
+        )
+        registry = AutonomousDomainToolRegistry([tool])
+        boundary = AutonomousEffectBoundary(journal=InMemoryAutonomousEffectJournal())
+        runtime = AutonomousDomainToolRuntime(
+            registry,
+            executor=lambda _tool, _arguments: {"legacy": True},
+            approve=lambda _tool, _call: True,
+            effect_boundary=boundary,
+            effect_executor=lambda resolved, _arguments, context: executions.append(resolved.name) or {"domain": domain, "committed": True},
+        )
+        result = runtime((ProviderToolCall(f"call-{domain}", tool.name, {}),))
+        assert result[0].approved is True, domain
+        assert result[0].is_error is False, domain
+        assert runtime.receipts[-1].status == "executed", domain
+        assert boundary.journal.events()[-1].event.status == "completed", domain
+        assert "committed" not in json.dumps(boundary.journal.snapshot().to_dict())
+    assert len(executions) == len(AUTONOMOUS_DOMAIN_NAMES)
+

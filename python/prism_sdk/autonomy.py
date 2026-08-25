@@ -126,6 +126,7 @@ from .domain_tools import (
     builtin_autonomous_domain_tool_profiles,
     plan_mcp_catalogue_bindings,
 )
+from .autonomous_effects import AutonomousEffectBoundary
 from .autonomous_connectors import (
     AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
     AutonomousConnectorDispatchRequest,
@@ -14261,6 +14262,7 @@ class AutonomousAgent:
         health_ledger: ProviderHealthLedger | None = None,
         tool_registry: AutonomousDomainToolRegistry | None = None,
         tool_runtime: AutonomousDomainToolRuntime | None = None,
+        effect_boundary: AutonomousEffectBoundary | None = None,
         capability_journal: AutonomousCapabilityJournalStore | None = None,
         activation: AutonomousCapabilityActivation | None = None,
         execution_journal: AutonomousExecutionJournal | None = None,
@@ -14289,6 +14291,10 @@ class AutonomousAgent:
             raise BrainRunError("tool_registry must be an AutonomousDomainToolRegistry or None")
         if tool_runtime is not None and not isinstance(tool_runtime, AutonomousDomainToolRuntime):
             raise BrainRunError("tool_runtime must be an AutonomousDomainToolRuntime or None")
+        if effect_boundary is not None and not isinstance(effect_boundary, AutonomousEffectBoundary):
+            raise BrainRunError("effect_boundary must be an AutonomousEffectBoundary or None")
+        if tool_runtime is not None and effect_boundary is not None and tool_runtime.effect_boundary is not effect_boundary:
+            raise BrainRunError("effect_boundary must match the supplied tool_runtime effect boundary")
         if tool_runtime is not None and tool_registry is not None and tool_runtime.registry is not tool_registry:
             raise BrainRunError("tool_runtime registry must be the same registry supplied to the agent")
         if capability_journal is not None and not all(
@@ -14365,9 +14371,13 @@ class AutonomousAgent:
             self.tool_runtime = AutonomousDomainToolRuntime(
                 tool_registry,
                 executor=lambda tool, arguments: workspace.tool(tool.name, dict(arguments)),
+                effect_boundary=effect_boundary,
             )
         else:
             self.tool_runtime = None
+        self.effect_boundary = effect_boundary if effect_boundary is not None else (
+            self.tool_runtime.effect_boundary if self.tool_runtime is not None else None
+        )
         self.capability_journal = capability_journal
         self.capability_runtime = (
             AutonomousCapabilityRuntime(self.tool_runtime, journal=capability_journal)

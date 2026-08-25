@@ -25,6 +25,11 @@ from typing import Any, Callable, Mapping, Sequence
 from .authoring import content_digest
 from .errors import ArgumentError
 from .llm_runtime import ProviderTool, ProviderToolCall, ProviderToolResult
+from .autonomous_effects import (
+    AutonomousEffectBoundary,
+    AutonomousEffectExecutionError,
+    AutonomousEffectReconciliationRequiredError,
+)
 from .autonomy_persistence import (
     AutonomousExecutionController,
     AutonomousExecutionJournal,
@@ -66,6 +71,7 @@ DOMAIN_TOOL_EXECUTION_STATUSES = (
     "unknown_tool",
     "schema_refused",
     "execution_failed",
+    "reconciliation_required",
 )
 MAX_DOMAIN_TOOLS = 512
 MAX_DOMAIN_TOOL_DOMAINS = 32
@@ -1074,6 +1080,8 @@ class AutonomousDomainToolRuntime:
         auto_execute_read_only: bool = True,
         controller: AutonomousExecutionController | None = None,
         receipt_sink: Callable[[AutonomousDomainToolReceipt], Any] | None = None,
+        effect_boundary: AutonomousEffectBoundary | None = None,
+        effect_executor: Callable[[AutonomousDomainTool, Mapping[str, Any], Any], Any] | None = None,
         _receipt_store: list[AutonomousDomainToolReceipt] | None = None,
         _scope: tuple[str, str] | None = None,
     ) -> None:
@@ -1089,6 +1097,10 @@ class AutonomousDomainToolRuntime:
             raise ArgumentError("domain tool runtime controller must be an AutonomousExecutionController or None")
         if receipt_sink is not None and not callable(receipt_sink):
             raise ArgumentError("domain tool runtime receipt sink must be callable")
+        if effect_boundary is not None and not isinstance(effect_boundary, AutonomousEffectBoundary):
+            raise ArgumentError("domain tool runtime effect boundary must be an AutonomousEffectBoundary or None")
+        if effect_executor is not None and not callable(effect_executor):
+            raise ArgumentError("domain tool runtime effect executor must be callable")
         if _receipt_store is not None and not isinstance(_receipt_store, list):
             raise ArgumentError("domain tool runtime receipt store must be a list or None")
         if _scope is not None:
@@ -1106,6 +1118,8 @@ class AutonomousDomainToolRuntime:
         self.auto_execute_read_only = auto_execute_read_only
         self.controller = controller
         self.receipt_sink = receipt_sink
+        self.effect_boundary = effect_boundary
+        self.effect_executor = effect_executor
         self._receipts = _receipt_store if _receipt_store is not None else []
         self._scope = _scope
 
@@ -1124,6 +1138,8 @@ class AutonomousDomainToolRuntime:
             auto_execute_read_only=self.auto_execute_read_only,
             controller=self.controller,
             receipt_sink=self.receipt_sink,
+            effect_boundary=self.effect_boundary,
+            effect_executor=self.effect_executor,
             _receipt_store=self._receipts,
             _scope=(
                 resolved_execution_id,
@@ -1160,6 +1176,8 @@ class AutonomousDomainToolRuntime:
             auto_execute_read_only=self.auto_execute_read_only,
             controller=controller,
             receipt_sink=self.receipt_sink,
+            effect_boundary=self.effect_boundary,
+            effect_executor=self.effect_executor,
             _receipt_store=self._receipts,
         )
 
@@ -1349,7 +1367,24 @@ class AutonomousDomainToolRuntime:
         results: list[ProviderToolResult] = []
         for call, tool, arguments, arguments_digest in prepared:
             try:
-                output = self.executor(tool, arguments)
+                if self.effect_boundary is not None and not tool.read_only:
+                    output = self.effect_boundary.execute(
+                        {
+                            "execution_id": execution_id,
+                            "tool": tool.name,
+                            "call_id": call.call_id,
+                            "risk_class": tool.risk_class,
+                            "arguments": arguments,
+                        },
+                        (
+                            lambda context: self.effect_executor(tool, arguments, context)
+                            if self.effect_executor is not None
+                            else self.executor(tool, arguments)
+                        ),
+                        execution=self.controller,
+                    )
+                else:
+                    output = self.executor(tool, arguments)
                 _json_safe("domain tool result", output, maximum=MAX_DOMAIN_TOOL_RESULT_BYTES)
                 _reject_secret_fields(output)
                 results.append(
@@ -1382,6 +1417,53 @@ class AutonomousDomainToolRuntime:
                     )
             except _ReceiptSinkError:
                 raise
+            except AutonomousEffectReconciliationRequiredError as error:
+                results.append(
+                    self._result(
+                        call,
+                        status="reconciliation_required",
+                        content={
+                            "status": "reconciliation_required",
+                            "tool": tool.name,
+                            "effect_id": error.effect_id,
+                            "idempotency_key": error.idempotency_key,
+                            "authorization": "caller_approved",
+                            "secret_material": "never_returned",
+                        },
+                        approved=False,
+                        receipt=AutonomousDomainToolReceipt(
+                            call.call_id,
+                            tool.name,
+                            "reconciliation_required",
+                            schema_digest=tool.schema_digest,
+                            arguments_digest=arguments_digest,
+                            execution_id=execution_id,
+                            domain=domain,
+                            capability=tool.capability,
+                            risk_class=tool.risk_class,
+                        ),
+                    )
+                )
+            except AutonomousEffectExecutionError:
+                results.append(
+                    self._result(
+                        call,
+                        status="execution_failed",
+                        content={"status": "execution_failed", "tool": tool.name, "authorization": "caller_approved"},
+                        approved=True,
+                        receipt=AutonomousDomainToolReceipt(
+                            call.call_id,
+                            tool.name,
+                            "execution_failed",
+                            schema_digest=tool.schema_digest,
+                            arguments_digest=arguments_digest,
+                            execution_id=execution_id,
+                            domain=domain,
+                            capability=tool.capability,
+                            risk_class=tool.risk_class,
+                        ),
+                    )
+                )
             except Exception:
                 results.append(
                     self._result(
