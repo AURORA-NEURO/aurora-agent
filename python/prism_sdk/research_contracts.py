@@ -179,6 +179,8 @@ LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-lab-P01-F11"
 LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0"
 FIBER_MECHANISM_ASSURANCE_FEATURE_ID = "AFA-fiber-P08-F26"
 FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION = "fiber-mechanism-assurance/1.0"
+HUBAPI_QUALITY_ASSURANCE_FEATURE_ID = "AFA-hubapi-P07-F27"
+HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION = "hubapi-quality-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4118,3 +4120,59 @@ class FiberMechanismAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "question_id": self.question_id, "workflow_id": self.workflow_id, "target_schema": self.target_schema, "disposition": self.disposition, "ranked_order": list(self.ranked_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "mechanism_order": list(self.mechanism_order), "study_order": list(self.study_order), "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class HubapiQualityAssuranceReceipt:
+    """Cross-language validator for the witness-bearing quality-control harness."""
+
+    object_id: str
+    study_id: str
+    scope: str
+    target_schema: str
+    disposition: str
+    ranked_metric_order: tuple[str, ...]
+    passed_order: tuple[str, ...]
+    failed_order: tuple[str, ...]
+    unknown_order: tuple[str, ...]
+    witness_order: tuple[str, ...]
+    modality_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    replay_identity: str
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = HUBAPI_QUALITY_ASSURANCE_FEATURE_ID
+    contract_version: str = HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != HUBAPI_QUALITY_ASSURANCE_FEATURE_ID or self.contract_version != HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("hubapi quality assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.object_id.strip() or not self.study_id.strip() or not self.scope.strip() or not self.target_schema.strip() or not self.ranked_metric_order:
+            raise ResearchContractError("hubapi quality assurance identity, ranking, locality, or boundary is incomplete")
+        if self.disposition not in {"qualified", "conditional", "unknown", "blocked"}:
+            raise ResearchContractError("hubapi quality assurance disposition is unknown")
+        if self.disposition != "qualified" and self.effect_receipts != ("block:unsafe-release",):
+            raise ResearchContractError("hubapi quality assurance must block unsafe release")
+        if self.disposition == "qualified" and self.effect_receipts:
+            raise ResearchContractError("qualified hubapi quality assurance cannot carry a release block")
+        if len(set(self.ranked_metric_order)) != len(self.ranked_metric_order):
+            raise ResearchContractError("hubapi quality assurance ranking contains duplicates")
+        for values in (self.passed_order, self.failed_order, self.unknown_order, self.witness_order, self.modality_order, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("hubapi quality assurance ordering is invalid")
+        for value in (*self.artifact_order, *self.evidence_order, *self.provenance_order, self.replay_identity, self.artifact.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("hubapi quality assurance digest is invalid")
+        if any(effect != "block:unsafe-release" for effect in self.effect_receipts):
+            raise ResearchContractError("hubapi quality assurance effect is outside unsafe-release gate")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "object_id": self.object_id, "study_id": self.study_id, "scope": self.scope, "target_schema": self.target_schema, "disposition": self.disposition, "ranked_metric_order": list(self.ranked_metric_order), "passed_order": list(self.passed_order), "failed_order": list(self.failed_order), "unknown_order": list(self.unknown_order), "witness_order": list(self.witness_order), "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

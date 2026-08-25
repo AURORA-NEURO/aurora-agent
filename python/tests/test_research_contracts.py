@@ -54,6 +54,7 @@ from prism_sdk.research_contracts import RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID,
 from prism_sdk.research_contracts import CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID, CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION, CliKnowledgeInteroperabilityReceipt
 from prism_sdk.research_contracts import LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID, LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, LabEvidenceSurveillanceReceipt
 from prism_sdk.research_contracts import FIBER_MECHANISM_ASSURANCE_FEATURE_ID, FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION, FiberMechanismAssuranceReceipt
+from prism_sdk.research_contracts import HUBAPI_QUALITY_ASSURANCE_FEATURE_ID, HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION, HubapiQualityAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1781,4 +1782,12 @@ def test_fiber_mechanism_assurance_preserves_unknown_and_unsafe_release_gate():
     receipt.validate()
     assert receipt.feature_id == FIBER_MECHANISM_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_hubapi_quality_assurance_preserves_witness_and_release_gate():
+    receipt = HubapiQualityAssuranceReceipt(object_id="object:quality", study_id="study:organoid", scope="organoid:neural", target_schema="quality-verdict/7", disposition="conditional", ranked_metric_order=("metric:a", "metric:b"), passed_order=("metric:a",), failed_order=("metric:b",), unknown_order=(), witness_order=("metric:metric:a:value=900:threshold=700:pass",), modality_order=("imaging", "omics"), artifact_order=("a" * 64,), evidence_order=("b" * 64,), provenance_order=("c" * 64,), omissions=(), uncertainty=(), negative_evidence=("metric:metric:b:below-threshold-negative-result",), replay_identity="d" * 64, effect_receipts=("block:unsafe-release",), artifact={"content_hash": "e" * 64})
+    receipt.validate()
+    assert receipt.feature_id == HUBAPI_QUALITY_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -161,6 +161,8 @@ export const LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-lab-P01-F11" as const;
 export const LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0" as const;
 export const FIBER_MECHANISM_ASSURANCE_FEATURE_ID = "AFA-fiber-P08-F26" as const;
 export const FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION = "fiber-mechanism-assurance/1.0" as const;
+export const HUBAPI_QUALITY_ASSURANCE_FEATURE_ID = "AFA-hubapi-P07-F27" as const;
+export const HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION = "hubapi-quality-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2753,6 +2755,48 @@ export function validateFiberMechanismAssuranceReceipt(receipt: FiberMechanismAs
 }
 
 export function fiberMechanismAssuranceReceiptDigest(receipt: FiberMechanismAssuranceReceipt): string { validateFiberMechanismAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface HubapiQualityAssuranceReceipt {
+  schema_version: string;
+  feature_id: string;
+  contract_version: string;
+  object_id: string;
+  study_id: string;
+  scope: string;
+  target_schema: string;
+  disposition: "qualified" | "conditional" | "unknown" | "blocked";
+  ranked_metric_order: string[];
+  passed_order: string[];
+  failed_order: string[];
+  unknown_order: string[];
+  witness_order: string[];
+  modality_order: string[];
+  artifact_order: string[];
+  evidence_order: string[];
+  provenance_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateHubapiQualityAssuranceReceipt(receipt: HubapiQualityAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== HUBAPI_QUALITY_ASSURANCE_FEATURE_ID || receipt.contract_version !== HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION) throw new Error("hubapi quality assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.object_id.trim() || !receipt.study_id.trim() || !receipt.scope.trim() || !receipt.target_schema.trim() || !receipt.ranked_metric_order.length) throw new Error("hubapi quality assurance identity, ranking, locality, or boundary is incomplete");
+  if (!new Set(["qualified", "conditional", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("hubapi quality assurance disposition is unknown");
+  if (receipt.disposition !== "qualified" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("hubapi quality assurance must block unsafe release");
+  if (receipt.disposition === "qualified" && receipt.effect_receipts.length) throw new Error("qualified hubapi quality assurance cannot carry a release block");
+  if (new Set(receipt.ranked_metric_order).size !== receipt.ranked_metric_order.length) throw new Error("hubapi quality assurance ranking contains duplicates");
+  for (const values of [receipt.passed_order, receipt.failed_order, receipt.unknown_order, receipt.witness_order, receipt.modality_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("hubapi quality assurance ordering is invalid");
+  for (const value of [...receipt.artifact_order, ...receipt.evidence_order, ...receipt.provenance_order, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("hubapi quality assurance digest is invalid");
+  if (receipt.effect_receipts.some((effect) => effect !== "block:unsafe-release")) throw new Error("hubapi quality assurance effect is outside unsafe-release gate");
+}
+
+export function hubapiQualityAssuranceReceiptDigest(receipt: HubapiQualityAssuranceReceipt): string { validateHubapiQualityAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

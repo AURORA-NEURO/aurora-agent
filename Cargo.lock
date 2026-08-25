@@ -476,6 +476,7 @@ dependencies = [
 name = "bioprism-hubapi"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-governance",
  "bioprism-hub",
  "bioprism-ids",

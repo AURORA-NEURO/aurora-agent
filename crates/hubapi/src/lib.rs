@@ -117,6 +117,7 @@ pub mod federation;
 pub mod lifecycle;
 pub mod mirror;
 pub mod name;
+pub mod quality_assurance;
 pub mod registry;
 pub mod resolve;
 pub mod search;
@@ -131,6 +132,12 @@ pub use federation::{
 pub use lifecycle::{Admission, Availability, Intent, LifecycleError, Note, PackLifecycle};
 pub use mirror::{Freshness, FreshnessPolicy, MirrorError, Replication, StalenessBound};
 pub use name::{Bounds, NameError, Namespace, PackName, Version, VersionReq};
+pub use quality_assurance::{
+    assure as assure_quality, capability_manifest as quality_assurance_manifest, MetricState,
+    QualityAssuranceError, QualityDisposition, QualityMetric, QualityVerdict, ResearchObject,
+    CONTRACT_VERSION as QUALITY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_ASSURANCE_FEATURE_ID,
+};
 pub use registry::{Authority, AuthorityError, Federation, NameAuthority, RegistryId};
 pub use resolve::{resolve, resolve_in, Provenance, Request, Resolution, ResolveError, Resolved};
 pub use search::{search, Excluded, Facet, Match, Query, Results, SearchError, Why};
