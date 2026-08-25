@@ -858,6 +858,41 @@ def _mission_domains_for_launch_admission(mission: Any) -> tuple[str, ...]:
     return tuple(domains)
 
 
+def _connector_plan_domains_for_launch_admission(plan: Any) -> tuple[str, ...]:
+    raw_domains = plan.get("domains") if isinstance(plan, Mapping) else getattr(plan, "domains", None)
+    if not isinstance(raw_domains, Sequence) or isinstance(raw_domains, (str, bytes, bytearray)):
+        raise BrainRunError("connector launch admission plan requires a sequence of domains")
+    domains = tuple(raw_domains)
+    if not domains or any(not isinstance(domain, str) for domain in domains):
+        raise BrainRunError("connector launch admission plan contains invalid domains")
+    return domains
+
+
+def _portfolio_plan_domains_for_launch_admission(plan: Any) -> tuple[str, ...]:
+    raw_items = plan.get("items") if isinstance(plan, Mapping) else getattr(plan, "items", None)
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
+        raise BrainRunError("workflow portfolio launch admission requires a sequence of items")
+    domains: list[str] = []
+    for index, item in enumerate(raw_items):
+        domain = item.get("domain") if isinstance(item, Mapping) else getattr(item, "domain", None)
+        if not isinstance(domain, str):
+            raise BrainRunError(f"workflow portfolio launch admission item {index} has no valid domain")
+        domains.append(domain)
+    return tuple(domains)
+
+
+def _portfolio_items_domains_for_launch_admission(items: Sequence[Any]) -> tuple[str, ...]:
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes, bytearray)):
+        raise BrainRunError("workflow portfolio evidence launch admission requires a sequence of items")
+    domains: list[str] = []
+    for index, item in enumerate(items):
+        domain = item.get("domain") if isinstance(item, Mapping) else getattr(item, "domain", None)
+        if not isinstance(domain, str):
+            raise BrainRunError(f"workflow portfolio evidence launch admission item {index} has no valid domain")
+        domains.append(domain)
+    return tuple(domains)
+
+
 def _safe_json(name: str, value: Any, *, maximum: int = MAX_AUTONOMY_CONTEXT_BYTES) -> Any:
     try:
         BrainLearningLedger._assert_safe(value)
@@ -14749,6 +14784,46 @@ class AutonomousAgent:
             ),
         )
 
+    def run_with_provisioned_credentials_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        launch_admission: Mapping[str, Any],
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousProvisionedRun:
+        """Admit an explicit domain before provisioning any deployment-managed credential."""
+
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_with_provisioned_credentials(
+            task=task,
+            domain=domain,
+            model_candidates=model_candidates,
+            **kwargs,
+        )
+
+    def run_auto_with_provisioned_credentials_with_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousProvisionedRun:
+        """Preview and admit automatic routing before provisioning deployment-managed credentials."""
+
+        self.authorize_auto_launch_admission(
+            task=task,
+            launch_admission=launch_admission,
+            **kwargs,
+        )
+        return self.run_auto_with_provisioned_credentials(
+            task=task,
+            model_candidates=model_candidates,
+            **kwargs,
+        )
+
     def unregister_credential_source(self, provider: str, source_id: str) -> bool:
         """Remove deployment wiring; active sessions remain caller-owned and independently revocable."""
 
@@ -15785,6 +15860,26 @@ class AutonomousAgent:
         except Exception as error:
             raise BrainRunError("connector dispatch failed") from error
 
+    def dispatch_connector_with_launch_admission(
+        self,
+        plan: AutonomousConnectorSelectionPlan | Mapping[str, Any],
+        request: AutonomousConnectorDispatchRequest,
+        *,
+        launch_admission: Mapping[str, Any],
+        trace_event_callback: Callable[..., Any] | None = None,
+    ) -> AutonomousConnectorDispatchResult:
+        """Dispatch a reviewed connector plan only after every plan domain is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _connector_plan_domains_for_launch_admission(plan),
+        )
+        return self.dispatch_connector(
+            plan,
+            request,
+            trace_event_callback=trace_event_callback,
+        )
+
     def capability_portfolio(
         self,
         task: str,
@@ -16623,6 +16718,55 @@ class AutonomousAgent:
             credentials=credentials,
             model_candidates=selected_candidates,
             **run_options,
+        )
+
+    def run_approved_model_selection_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        selection_preview: Mapping[str, Any],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        required_model_capabilities: Sequence[str] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        min_selection_confidence: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Invoke an approved model arm only after its domain passes launch admission."""
+
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_approved_model_selection(
+            task=task,
+            domain=domain,
+            selection_preview=selection_preview,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            capability=capability,
+            risk_class=risk_class,
+            context=context,
+            bandit_state=bandit_state,
+            contextual_observations=contextual_observations,
+            required_model_capabilities=required_model_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            min_selection_confidence=min_selection_confidence,
+            selection_overrides=selection_overrides,
+            **kwargs,
         )
 
     def run_capability(
@@ -17792,6 +17936,22 @@ class AutonomousAgent:
             workflow_options_factory=workflow_options_factory,
         )
 
+    def execute_workflow_portfolio_with_launch_admission(
+        self,
+        plan: Mapping[str, Any] | Any,
+        requests: Sequence[Any],
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Execute a workflow portfolio only after every planned item domain is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _portfolio_plan_domains_for_launch_admission(plan),
+        )
+        return self.execute_workflow_portfolio(plan, requests, **kwargs)
+
     def execute_workflow_portfolio_evidence(
         self,
         execution: Any,
@@ -17828,6 +17988,26 @@ class AutonomousAgent:
             max_parallelism=max_parallelism,
             stop_on_failure=stop_on_failure,
             progress_sink=progress_sink,
+        )
+
+    def execute_workflow_portfolio_evidence_with_launch_admission(
+        self,
+        execution: Any,
+        *,
+        items: Sequence[Any],
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Supervise portfolio evidence only after every evidence item domain is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _portfolio_items_domains_for_launch_admission(items),
+        )
+        return self.execute_workflow_portfolio_evidence(
+            execution,
+            items=items,
+            **kwargs,
         )
 
     def execute_workflow_portfolio_evidence_resumable(
@@ -17870,6 +18050,32 @@ class AutonomousAgent:
             max_parallelism=max_parallelism,
             stop_on_failure=stop_on_failure,
             progress_sink=progress_sink,
+        )
+
+    def execute_workflow_portfolio_evidence_resumable_with_launch_admission(
+        self,
+        execution: Any,
+        *,
+        job_id: str,
+        items: Sequence[Any],
+        runtime: Any,
+        checkpoint_sink: Any,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Resume portfolio evidence only after every checkpointed item domain is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _portfolio_items_domains_for_launch_admission(items),
+        )
+        return self.execute_workflow_portfolio_evidence_resumable(
+            execution,
+            job_id=job_id,
+            items=items,
+            runtime=runtime,
+            checkpoint_sink=checkpoint_sink,
+            **kwargs,
         )
 
     def admit_workflow_portfolio_evidence_work(

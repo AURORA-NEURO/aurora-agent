@@ -864,6 +864,15 @@ resumable evidence execution, connector workflows/missions, and reviewed capabil
 `execute_capability_with_launch_admission(...)`/`execute_capability_batch_with_launch_admission(...)`.
 They authorize before trace, evidence, connector, tool, learner, credential, or provider setup;
 omitted evidence domains are conservatively treated as the complete twelve-domain scope.
+Provisioned credential execution, approved model-arm invocation, direct connector dispatch, and
+workflow portfolio/evidence execution have corresponding gates:
+`run_with_provisioned_credentials_with_launch_admission(...)`,
+`run_auto_with_provisioned_credentials_with_launch_admission(...)`,
+`run_approved_model_selection_with_launch_admission(...)`,
+`dispatch_connector_with_launch_admission(...)`, and the
+`execute_workflow_portfolio*_with_launch_admission(...)` variants. They check the reviewed
+domain set before opening credentials or entering the provider, connector, tool, or evidence
+runtime.
 `run_auto_with_launch_admission(...)` provides the same gate for automatic single/cross-domain
 routing and refuses provider-assisted semantic routing until that classifier boundary is separately
 reviewed.

@@ -1232,6 +1232,42 @@ export class AutonomousBrainFacade {
     };
   }
 
+  /**
+   * Revalidate and execute an approved model arm only after its explicit domain passes launch
+   * admission. Planning remains provider-free; the admission check is the final facade gate
+   * before the exact provider invocation.
+   */
+  async executeApprovedSelectionWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainApprovedSelectionOptions = {},
+  ): Promise<AutonomousBrainExecution> {
+    const request = validateRequest(input);
+    if (request.domain === undefined) throw new ArgumentError("approved model selection requires an explicit domain");
+    if (request.connector !== undefined) throw new ArgumentError("approved model selection does not accept connector dispatch inputs");
+    const prepared = await this.prepare(request);
+    if (prepared.plan.status !== "ready" || prepared.route.cross_domain) throw new ProviderRuntimeError("approved model selection requires a ready single-domain plan");
+    authorizeAutonomousLaunchDomains(admission, [request.domain]);
+    const runOptions = {
+      ...(options.run ?? {}),
+      domain: request.domain,
+      capability: options.run?.capability ?? request.capability,
+      context: options.run?.context ?? request.context,
+    } as AutonomousApprovedModelSelectionOptions;
+    const run = await this.agent.runApprovedModelSelection(request.task, preview, runOptions);
+    return {
+      schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
+      status: run.status,
+      plan: prepared.plan.toJSON(),
+      run,
+      connector: null,
+      error: null,
+      retention: "plan_metadata_only;run_and_connector_values_transient_to_caller",
+      secret_material: "never_returned",
+    };
+  }
+
   /** Recompute keyless readiness and activation metadata without dispatching a provider or tool. */
   async refreshActivation(options: AutonomousBrainReadinessOptions = {}): Promise<AutonomousBrainActivationState> {
     return this.agent.refreshActivation(options);

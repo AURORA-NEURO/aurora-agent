@@ -342,6 +342,19 @@ evidence-adapter, connector-runtime, capability-runtime, learner, or credential 
 omitted evidence scope is conservatively treated as all twelve domains, while missions and
 capability batches must explicitly expose every domain they intend to execute.
 
+Deployment-managed credential flows use the same ordering: Python's
+`run_with_provisioned_credentials_with_launch_admission(...)` checks an explicit domain before
+opening a short-lived session, while
+`run_auto_with_provisioned_credentials_with_launch_admission(...)` performs provider-free route
+preview and admission before provisioning. Approved model-selection invocation is covered by
+`run_approved_model_selection_with_launch_admission(...)`; direct connector plans by
+`dispatch_connector_with_launch_admission(...)`; and portfolio execution/evidence supervision by
+`execute_workflow_portfolio_with_launch_admission(...)`,
+`execute_workflow_portfolio_evidence_with_launch_admission(...)`, and
+`execute_workflow_portfolio_evidence_resumable_with_launch_admission(...)`. The TypeScript facade
+provides the matching `executeApprovedSelectionWithLaunchAdmission(...)` boundary. These methods
+prevent an approved plan, connector, or model arm from becoming an authorization bypass.
+
 Model inventory can also be discovered from a registered provider. Discovery is bounded and
 approval-gated because it is a provider call; the runtime immediately projects each row into a
 `ProviderModelDescriptor` and discards the provider response. The CLI returns only model ids,

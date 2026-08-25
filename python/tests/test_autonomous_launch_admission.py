@@ -362,6 +362,64 @@ def test_launch_admission_covers_trace_evidence_connector_and_capability_dispatc
         )
 
 
+def test_launch_admission_covers_provisioned_selection_connector_and_portfolio_dispatch() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    held = agent.launch_admission(preflight, decision="hold")
+
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_with_provisioned_credentials_with_launch_admission(
+            task="review the implementation",
+            domain="coding",
+            launch_admission=held,
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_auto_with_provisioned_credentials_with_launch_admission(
+            task="route the multidisciplinary review",
+            launch_admission=held,
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_approved_model_selection_with_launch_admission(
+            task="invoke the reviewed model",
+            domain="coding",
+            selection_preview={},
+            launch_admission=held,
+            credentials={},
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.dispatch_connector_with_launch_admission(
+            {"domains": ("coding",)},
+            object(),
+            launch_admission=held,
+        )
+
+    portfolio_plan = {"items": ({"domain": "coding"},)}
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.execute_workflow_portfolio_with_launch_admission(
+            portfolio_plan,
+            (),
+            launch_admission=held,
+            credentials={},
+            job_id="held-portfolio",
+        )
+    portfolio_items = ({"domain": "coding"}, {"domain": "data"})
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.execute_workflow_portfolio_evidence_with_launch_admission(
+            object(),
+            items=portfolio_items,
+            launch_admission=held,
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.execute_workflow_portfolio_evidence_resumable_with_launch_admission(
+            object(),
+            job_id="held-portfolio-evidence",
+            items=portfolio_items,
+            runtime=object(),
+            checkpoint_sink=object(),
+            launch_admission=held,
+        )
+
+
 def test_launch_admission_rejects_semantic_routing_in_automatic_batches_before_dispatch() -> None:
     agent = _agent()
     preflight = _complete_preflight(agent)

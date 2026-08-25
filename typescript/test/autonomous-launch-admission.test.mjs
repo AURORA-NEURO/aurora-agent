@@ -111,6 +111,11 @@ test("launch admission gates facade execution before dispatch and checks route c
       () => fixture.brain.executeWithLaunchAdmission({ task: "write a small function", domain: "coding" }, held, { approveProviderCall: false }),
       /not approved/,
     );
+    const preview = await fixture.brain.modelSelectionPreview({ task: "write a small function", domain: "coding" });
+    await assert.rejects(
+      () => fixture.brain.executeApprovedSelectionWithLaunchAdmission({ task: "write a small function", domain: "coding" }, preview, held),
+      /not approved/,
+    );
     await assert.rejects(
       () => fixture.brain.executeWithLaunchAdmission({ task: "write a small function", domain: "coding" }, coding, { semanticRouting: { enabled: true, approveProviderCall: true }, approveProviderCall: false }),
       /requires provider-free routing/,
