@@ -87,6 +87,7 @@ pub mod counterfactual;
 pub mod dedup;
 pub mod error;
 pub mod minimize;
+pub mod mechanism_control;
 pub mod oracle;
 pub mod pipeline;
 
@@ -122,6 +123,15 @@ pub use error::{
 pub use minimize::{
     minimize, minimize_preserving, ContextItem, Guard, InterestProbe, InterestSignature,
     MinimalityWitness, MinimizeBudget, Minimization, Tier,
+};
+pub use mechanism_control::{
+    operate_mechanism_control, MechanismCandidate, MechanismControlError,
+    MechanismControlReceipt, MechanismDisposition, MechanismPortfolio, MechanismQuestion,
+    MechanismState, StudyContext,
+    CONTRACT_VERSION as MECHANISM_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_CONTROL_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as MECHANISM_CONTROL_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as MECHANISM_CONTROL_SCHEMA_VERSION,
 };
 pub use oracle::{
     synthesise, ExploitAttempt, OracleStrength, ProposedOracle, ReviewedOracle, SYNTHESIS_ORDER,

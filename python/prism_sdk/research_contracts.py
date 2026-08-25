@@ -159,6 +159,8 @@ FEDERATED_INGESTION_FEATURE_ID = "AFA-bioworlds-P06-F08"
 FEDERATED_INGESTION_CONTRACT_VERSION = "bioworlds-federated-multimodal-ingestion/1.0"
 QUALITY_ASSURANCE_FEATURE_ID = "AFA-bioevalx-P07-F26"
 QUALITY_ASSURANCE_CONTRACT_VERSION = "bioevalx-multimodal-quality-assurance/1.0"
+MECHANISM_CONTROL_FEATURE_ID = "AFA-benchcompiler-P08-F30"
+MECHANISM_CONTROL_CONTRACT_VERSION = "benchcompiler-federated-mechanism-control/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3601,3 +3603,51 @@ class QualityAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "verdict": dict(self.verdict), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class MechanismControlReceipt:
+    """Cross-language validator for ranked competing mechanism portfolios."""
+
+    request_id: str
+    workflow_id: str
+    objective_id: str
+    disposition: str
+    portfolio: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = MECHANISM_CONTROL_FEATURE_ID
+    contract_version: str = MECHANISM_CONTROL_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != MECHANISM_CONTROL_FEATURE_ID or self.contract_version != MECHANISM_CONTROL_CONTRACT_VERSION:
+            raise ResearchContractError("mechanism control schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.objective_id.strip() or not self.checks or not self.effect_receipts or self.portfolio.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("mechanism control identity, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"ranked", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("mechanism control disposition is unknown")
+        ranked = tuple(self.portfolio.get("ranked_order", ()))
+        blocked = tuple(self.portfolio.get("blocked_order", ()))
+        unresolved = tuple(self.portfolio.get("omissions", ())) + tuple(self.portfolio.get("uncertainty", ())) + tuple(self.portfolio.get("negative_evidence", ()))
+        if not ranked and not blocked and not unresolved:
+            raise ResearchContractError("mechanism control must retain a ranked or unresolved portfolio")
+        for values in (tuple(self.portfolio.get("study_order", ())), tuple(self.portfolio.get("competing_order", ())), blocked, tuple(self.portfolio.get("omissions", ())), tuple(self.portfolio.get("uncertainty", ())), tuple(self.portfolio.get("negative_evidence", ())), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("mechanism control ordering is invalid")
+        scores = tuple(self.portfolio.get("rank_score_order", ()))
+        if len(ranked) != len(scores) or any(left < right for left, right in zip(scores, scores[1:])) or len(set(ranked)) != len(ranked):
+            raise ResearchContractError("mechanism control ranking is invalid")
+        for value in tuple(self.portfolio.get("evidence_order", ())) + tuple(self.portfolio.get("provenance_order", ())) + (self.portfolio.get("replay_identity"), self.portfolio.get("portfolio_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("mechanism control digest is invalid")
+        if not isinstance(self.portfolio.get("portfolio_id"), str) or not self.portfolio["portfolio_id"].strip():
+            raise ResearchContractError("mechanism control portfolio identity is incomplete")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "objective_id": self.objective_id, "disposition": self.disposition, "portfolio": dict(self.portfolio), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

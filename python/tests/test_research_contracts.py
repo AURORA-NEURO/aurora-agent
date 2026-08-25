@@ -44,6 +44,7 @@ from prism_sdk.research_contracts import KNOWLEDGE_GATEWAY_FEATURE_ID, KNOWLEDGE
 from prism_sdk.research_contracts import ORACLE_ASSURANCE_FEATURE_ID, ORACLE_ASSURANCE_CONTRACT_VERSION, OracleCapabilityManifestReceipt
 from prism_sdk.research_contracts import FEDERATED_INGESTION_FEATURE_ID, FEDERATED_INGESTION_CONTRACT_VERSION, FederatedMultimodalIngestionReceipt
 from prism_sdk.research_contracts import QUALITY_ASSURANCE_FEATURE_ID, QUALITY_ASSURANCE_CONTRACT_VERSION, QualityAssuranceReceipt
+from prism_sdk.research_contracts import MECHANISM_CONTROL_FEATURE_ID, MECHANISM_CONTROL_CONTRACT_VERSION, MechanismControlReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1612,4 +1613,23 @@ def test_quality_assurance_preserves_cross_study_witness_and_negative_evidence()
     receipt.validate()
     assert receipt.feature_id == QUALITY_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == QUALITY_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_mechanism_control_preserves_ranked_competing_portfolio():
+    receipt = MechanismControlReceipt(
+        request_id="mechanism:control",
+        workflow_id="workflow:mechanism-exploration",
+        objective_id="objective:organoid",
+        disposition="partial",
+        portfolio={"portfolio_id": "mechanism-portfolio:mechanism:control", "disposition": "partial", "study_order": ("study:a", "study:b"), "ranked_order": ("mechanism:b",), "rank_score_order": (90,), "competing_order": ("mechanism:b",), "blocked_order": ("mechanism:a",), "comparability_digest": "a" * 64, "evidence_order": ("b" * 64,), "provenance_order": ("c" * 64,), "omissions": ("mechanism:mechanism:a:cross-study-comparability-mismatch",), "uncertainty": (), "negative_evidence": ("mechanism:mechanism:a:comparability-not-admitted",), "replay_identity": "d" * 64, "portfolio_digest": "e" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        checks=("deterministic support-score ranking with mechanism-id tie break",),
+        omissions=("mechanism:mechanism:a:cross-study-comparability-mismatch",),
+        uncertainty=(),
+        negative_evidence=("mechanism:mechanism:a:comparability-not-admitted",),
+        effect_receipts=("exchange:permitted-mechanism-summary:mechanism:b",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == MECHANISM_CONTROL_FEATURE_ID
+    assert receipt.contract_version == MECHANISM_CONTROL_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

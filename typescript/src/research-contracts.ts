@@ -141,6 +141,8 @@ export const FEDERATED_INGESTION_FEATURE_ID = "AFA-bioworlds-P06-F08" as const;
 export const FEDERATED_INGESTION_CONTRACT_VERSION = "bioworlds-federated-multimodal-ingestion/1.0" as const;
 export const QUALITY_ASSURANCE_FEATURE_ID = "AFA-bioevalx-P07-F26" as const;
 export const QUALITY_ASSURANCE_CONTRACT_VERSION = "bioevalx-multimodal-quality-assurance/1.0" as const;
+export const MECHANISM_CONTROL_FEATURE_ID = "AFA-benchcompiler-P08-F30" as const;
+export const MECHANISM_CONTROL_CONTRACT_VERSION = "benchcompiler-federated-mechanism-control/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2376,6 +2378,41 @@ export function validateQualityAssuranceReceipt(receipt: QualityAssuranceReceipt
 }
 
 export function qualityAssuranceReceiptDigest(receipt: QualityAssuranceReceipt): string { validateQualityAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface MechanismControlReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  objective_id: string;
+  disposition: "ranked" | "partial" | "unknown" | "blocked";
+  portfolio: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateMechanismControlReceipt(receipt: MechanismControlReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== MECHANISM_CONTROL_FEATURE_ID || receipt.contract_version !== MECHANISM_CONTROL_CONTRACT_VERSION) throw new Error("mechanism control schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.objective_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.portfolio.boundary !== PRECLINICAL_BOUNDARY) throw new Error("mechanism control identity, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["ranked", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("mechanism control disposition is unknown");
+  const ranked = Array.isArray(receipt.portfolio.ranked_order) ? receipt.portfolio.ranked_order as string[] : [];
+  const blocked = Array.isArray(receipt.portfolio.blocked_order) ? receipt.portfolio.blocked_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.portfolio.omissions) ? receipt.portfolio.omissions as string[] : []), ...(Array.isArray(receipt.portfolio.uncertainty) ? receipt.portfolio.uncertainty as string[] : []), ...(Array.isArray(receipt.portfolio.negative_evidence) ? receipt.portfolio.negative_evidence as string[] : [])];
+  if (!ranked.length && !blocked.length && !unresolved.length) throw new Error("mechanism control must retain a ranked or unresolved portfolio");
+  for (const values of [Array.isArray(receipt.portfolio.study_order) ? receipt.portfolio.study_order as string[] : [], Array.isArray(receipt.portfolio.competing_order) ? receipt.portfolio.competing_order as string[] : [], blocked, Array.isArray(receipt.portfolio.omissions) ? receipt.portfolio.omissions as string[] : [], Array.isArray(receipt.portfolio.uncertainty) ? receipt.portfolio.uncertainty as string[] : [], Array.isArray(receipt.portfolio.negative_evidence) ? receipt.portfolio.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("mechanism control ordering is invalid");
+  const scores = Array.isArray(receipt.portfolio.rank_score_order) ? receipt.portfolio.rank_score_order as number[] : [];
+  if (ranked.length !== scores.length || scores.some((value, index) => index > 0 && scores[index - 1] < value) || new Set(ranked).size !== ranked.length) throw new Error("mechanism control ranking is invalid");
+  for (const value of [...(Array.isArray(receipt.portfolio.evidence_order) ? receipt.portfolio.evidence_order : []), ...(Array.isArray(receipt.portfolio.provenance_order) ? receipt.portfolio.provenance_order : []), receipt.portfolio.replay_identity, receipt.portfolio.portfolio_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("mechanism control digest is invalid");
+  if (typeof receipt.portfolio.portfolio_id !== "string" || !receipt.portfolio.portfolio_id.trim()) throw new Error("mechanism control portfolio identity is incomplete");
+}
+
+export function mechanismControlReceiptDigest(receipt: MechanismControlReceipt): string { validateMechanismControlReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
