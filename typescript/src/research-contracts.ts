@@ -207,6 +207,8 @@ export const EVIDENCE_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F05" as const;
 export const EVIDENCE_CONTRACT_MODEL_CONTRACT_VERSION = "brain-evidence-contract-model/1.0" as const;
 export const MULTIMODAL_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F06" as const;
 export const MULTIMODAL_CONTRACT_MODEL_CONTRACT_VERSION = "brain-multimodal-evidence-contract/1.0" as const;
+export const THROUGHPUT_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F07" as const;
+export const THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION = "brain-throughput-evidence-contract/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3707,6 +3709,27 @@ export function validateBrainMultimodalContractModelReceipt(receipt: BrainMultim
 }
 
 export function brainMultimodalContractModelReceiptDigest(receipt: BrainMultimodalContractModelReceipt): string { validateBrainMultimodalContractModelReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainThroughputContractModelReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; batch_id: string; partition: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; compatibility: "additive" | "migration_required" | "breaking" | "unknown";
+  input_schema: string; output_schema: string; required_order: string[]; provided_order: string[]; missing_order: string[]; semantic_loss_order: string[];
+  max_items: number; observed_items: number; admitted_items: number; checkpoint_seq: number; queue_digest: string; contract_digest: string; replay_identity: string;
+  omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainThroughputContractModelReceipt(receipt: BrainThroughputContractModelReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== THROUGHPUT_CONTRACT_MODEL_FEATURE_ID || receipt.contract_version !== THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION) throw new Error("throughput contract schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.batch_id.trim() || !receipt.partition.trim() || receipt.input_schema !== "EvidenceFeed3@1" || receipt.output_schema !== "QualifiedEvidenceSet2@1" || !receipt.required_order.length || !receipt.provided_order.length || receipt.max_items < 1 || receipt.checkpoint_seq < 1 || !receipt.effect_receipts.length) throw new Error("throughput identity, schemas, fields, capacity, checkpoint, locality, or effects are incomplete");
+  if (receipt.admitted_items > receipt.max_items || receipt.admitted_items > receipt.observed_items) throw new Error("admitted item count exceeds declared capacity or observations");
+  if (receipt.missing_order.some((value) => !receipt.required_order.includes(value)) || receipt.semantic_loss_order.some((value) => !receipt.provided_order.includes(value))) throw new Error("throughput loss state is outside declared fields");
+  for (const values of [receipt.required_order, receipt.provided_order, receipt.missing_order, receipt.semantic_loss_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("throughput contract ordering is invalid");
+  for (const value of [receipt.queue_digest, receipt.contract_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("throughput contract digest is invalid");
+  if (receipt.disposition === "qualified" && receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-research-artifacts:"))) throw new Error("qualified throughput contract requires a local-read receipt");
+  if (receipt.disposition !== "qualified" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("non-qualified throughput contract must be explicitly blocked");
+}
+
+export function brainThroughputContractModelReceiptDigest(receipt: BrainThroughputContractModelReceipt): string { validateBrainThroughputContractModelReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

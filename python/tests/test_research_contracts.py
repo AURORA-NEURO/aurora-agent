@@ -77,6 +77,7 @@ from prism_sdk.brain_throughput_surveillance import BrainHighThroughputEvidenceR
 from prism_sdk.brain_federated_surveillance import BrainFederatedEvidenceReceipt
 from prism_sdk.brain_evidence_contract import BrainEvidenceContractModelReceipt
 from prism_sdk.brain_multimodal_contract import BrainMultimodalContractModelReceipt
+from prism_sdk.brain_throughput_contract import BrainThroughputContractModelReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2468,6 +2469,36 @@ def test_brain_multimodal_contract_keeps_semantic_disagreement_explicit():
         negative_evidence=("modality:imaging:semantic-digest-disagreement",),
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "2" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_throughput_contract_keeps_capacity_overflow_explicit():
+    receipt = BrainThroughputContractModelReceipt(
+        request_id="request:throughput-contract",
+        batch_id="batch:001",
+        partition="partition:imaging",
+        disposition="partial",
+        compatibility="additive",
+        input_schema="EvidenceFeed3@1",
+        output_schema="QualifiedEvidenceSet2@1",
+        required_order=("checkpoint", "queue_digest", "replay_identity"),
+        provided_order=("checkpoint", "queue_digest", "replay_identity"),
+        missing_order=(),
+        semantic_loss_order=(),
+        max_items=100,
+        observed_items=120,
+        admitted_items=100,
+        checkpoint_seq=3,
+        queue_digest="a" * 64,
+        contract_digest="b" * 64,
+        replay_identity="c" * 64,
+        omissions=("batch:batch:001:capacity-exceeded",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "d" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

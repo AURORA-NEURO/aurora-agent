@@ -33,6 +33,7 @@ pub mod federated_evidence_surveillance;
 pub mod high_throughput_evidence_surveillance;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_surveillance;
+pub mod throughput_contract_model;
 
 pub use evidence_contract_model::{
     evidence_contract_model_manifest, model_evidence_contract, ContractCompatibility,
@@ -70,6 +71,12 @@ pub use multimodal_evidence_surveillance::{
     MultimodalEvidenceDisposition, MultimodalEvidenceError, MultimodalEvidenceFeedRequest,
     QualifiedMultimodalEvidenceSet, CONTRACT_VERSION as MULTIMODAL_EVIDENCE_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_EVIDENCE_FEATURE_ID,
+};
+pub use throughput_contract_model::{
+    model_throughput_contract, throughput_contract_model_manifest, ThroughputContractDisposition,
+    ThroughputContractModelError, ThroughputContractModelReceipt, ThroughputContractModelRequest,
+    CONTRACT_VERSION as THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTRACT_MODEL_FEATURE_ID,
 };
 
 pub const BRAIN_SCHEMA_VERSION: &str = "bioprism-autonomous-brain/0.1";
