@@ -56,6 +56,7 @@ pub mod high_throughput_evidence_copilot;
 pub mod high_throughput_evidence_surveillance;
 pub mod high_throughput_evidence_workflow_fabric;
 pub mod multimodal_context_compilation;
+pub mod throughput_context_compilation;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -277,6 +278,13 @@ pub use multimodal_context_compilation::{
     MultimodalContextCompilationRequest, MultimodalContextFact,
     CONTRACT_VERSION as MULTIMODAL_CONTEXT_COMPILATION_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_CONTEXT_COMPILATION_FEATURE_ID,
+};
+pub use throughput_context_compilation::{
+    compile_throughput_context, throughput_context_compilation_manifest,
+    ThroughputContextCompilationError, ThroughputContextCompilationReceipt,
+    ThroughputContextCompilationRequest, ThroughputContextItem,
+    CONTRACT_VERSION as THROUGHPUT_CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTEXT_COMPILATION_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
