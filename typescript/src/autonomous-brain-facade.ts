@@ -1315,6 +1315,21 @@ export class AutonomousBrainFacade {
   }
 
   /**
+   * Execute a batch only after a provider-free preview proves that one launch admission covers
+   * every selected route.  The preview happens before the ordinary batch engine can touch a
+   * credential, connector, provider, or resumable result.
+   */
+  async executeBatchWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: { maxParallelism?: number; stopOnError?: boolean; execution?: AutonomousBrainExecuteOptions } = {},
+  ): Promise<AutonomousBrainBatchResult> {
+    this.rejectLaunchAdmittedSemanticRouting(options.execution?.semanticRouting, "launch-admitted batch execution requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeBatchLaunchAdmission(inputs, admission);
+    return this.executeBatch(inputs, options);
+  }
+
+  /**
    * Execute the ordinary batch with metadata-only restart checkpoints.
    *
    * Completed items are never trusted merely because they appear in a checkpoint: the caller's
@@ -1419,6 +1434,17 @@ export class AutonomousBrainFacade {
     return result;
   }
 
+  /** Resume a batch only after re-reviewing the complete current route set. */
+  async executeBatchResumableWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainResumableBatchOptions,
+  ): Promise<AutonomousBrainBatchResult> {
+    this.rejectLaunchAdmittedSemanticRouting(options?.execution?.semanticRouting, "launch-admitted resumable batch execution requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeBatchLaunchAdmission(inputs, admission);
+    return this.executeBatchResumable(inputs, options);
+  }
+
   /** Execute ordinary closed-loop cycles with bounded concurrency and deterministic result order. */
   async executeCycleBatch(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainCycleBatchOptions = {}): Promise<AutonomousBrainCycleBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain cycle batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
@@ -1466,6 +1492,22 @@ export class AutonomousBrainFacade {
       retention: "metadata_only_tasks_and_cycle_connector_values_transient",
       secret_material: "never_returned",
     };
+  }
+
+  /** Execute a cycle batch only when every reviewed route is covered by launch admission. */
+  async executeCycleBatchWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainCycleBatchOptions = {},
+  ): Promise<AutonomousBrainCycleBatchResult> {
+    this.rejectLaunchAdmittedSemanticRouting((options as unknown as { semanticRouting?: unknown }).semanticRouting, "launch-admitted cycle batch requires provider-free routing; admit semantic routing separately before enabling it");
+    const policies = inputs.map((input, index) => {
+      const policy = batchOption(options.cycle, input, index) ?? {};
+      this.rejectLaunchAdmittedSemanticRouting((policy as unknown as { semanticRouting?: unknown }).semanticRouting, "launch-admitted cycle batch requires provider-free routing; admit semantic routing separately before enabling it");
+      return policy;
+    });
+    await this.authorizeBatchLaunchAdmission(inputs, admission);
+    return this.executeCycleBatch(inputs, { ...options, cycle: (_input, index) => policies[index]! });
   }
 
   /** Execute evaluator-guided replanning loops with bounded concurrency and deterministic result order. */
@@ -1518,6 +1560,41 @@ export class AutonomousBrainFacade {
       retention: "metadata_only_tasks_and_adaptive_connector_values_transient",
       secret_material: "never_returned",
     };
+  }
+
+  /** Execute adaptive/replan batches only when every reviewed route is covered by admission. */
+  async executeAdaptiveCycleBatchWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAdaptiveBatchOptions,
+  ): Promise<AutonomousBrainAdaptiveBatchResult> {
+    if (!options || options.adaptive === undefined) throw new ArgumentError("autonomous brain adaptive batch requires an adaptive evaluator policy");
+    this.rejectLaunchAdmittedSemanticRouting((options as unknown as { semanticRouting?: unknown }).semanticRouting, "launch-admitted adaptive batch requires provider-free routing; admit semantic routing separately before enabling it");
+    const policies = inputs.map((input, index) => {
+      const policy = batchOption(options.adaptive, input, index);
+      if (policy === undefined) throw new ArgumentError("adaptive batch policy factory returned no policy");
+      this.rejectLaunchAdmittedSemanticRouting((policy as unknown as { semanticRouting?: unknown }).semanticRouting, "launch-admitted adaptive batch requires provider-free routing; admit semantic routing separately before enabling it");
+      return policy;
+    });
+    await this.authorizeBatchLaunchAdmission(inputs, admission);
+    return this.executeAdaptiveCycleBatch(inputs, { ...options, adaptive: (_input, index) => policies[index]! });
+  }
+
+  private rejectLaunchAdmittedSemanticRouting(value: unknown, message: string): void {
+    if (value === true || (isObject(value) && value.enabled === true)) throw new ArgumentError(message);
+  }
+
+  private async authorizeBatchLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+  ): Promise<void> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain admitted batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const selected = new Set<AutonomousDomainName>();
+    for (const input of inputs) {
+      const prepared = await this.prepare(validateRequest(input));
+      for (const domainName of prepared.route.selected_domains) selected.add(domainName);
+    }
+    authorizeAutonomousLaunchDomains(admission, [...selected]);
   }
 
   private async prepare(

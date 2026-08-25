@@ -119,3 +119,29 @@ test("launch admission gates facade execution before dispatch and checks route c
     fixture.session.close();
   }
 });
+
+test("launch admission gates ordinary, resumable, and cycle batches before dispatch", async () => {
+  const fixture = await readyBrain();
+  try {
+    const coding = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "approve", approvedDomains: ["coding"], authorizationDigest: "e".repeat(64) });
+    await assert.rejects(
+      () => fixture.brain.executeBatchWithLaunchAdmission([{ task: "review the biomedical evidence", domain: "biomedical" }], coding, { execution: { approveProviderCall: false } }),
+      /does not approve requested domains/,
+    );
+    await assert.rejects(
+      () => fixture.brain.executeBatchWithLaunchAdmission([{ task: "route this multidisciplinary review" }], coding, { execution: { semanticRouting: { enabled: true, approveProviderCall: true }, approveProviderCall: false } }),
+      /requires provider-free routing/,
+    );
+    const held = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "hold" });
+    await assert.rejects(
+      () => fixture.brain.executeBatchResumableWithLaunchAdmission([{ task: "review the implementation", domain: "coding" }], held, { jobId: "held-batch" }),
+      /not approved/,
+    );
+    await assert.rejects(
+      () => fixture.brain.executeCycleBatchWithLaunchAdmission([{ task: "review the biomedical evidence", domain: "biomedical" }], coding),
+      /does not approve requested domains/,
+    );
+  } finally {
+    fixture.session.close();
+  }
+});

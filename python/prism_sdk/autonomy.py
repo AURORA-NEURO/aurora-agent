@@ -19466,6 +19466,179 @@ class AutonomousAgent:
             raise BrainRunError("autonomous batch stop_on_error must be a boolean")
         return max_parallelism, stop_on_error
 
+    def _authorize_batch_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        mode: str,
+        launch_admission: Mapping[str, Any],
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None,
+    ) -> Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None:
+        """Authorize every route in a batch before credentials or dispatch are touched.
+
+        Batch preparation normally resolves the shared credential mapping before it builds item
+        descriptors.  A launch admission must sit outside that path: callers should be able to
+        reject a held or under-scoped batch even when the credential argument is deliberately
+        absent or malformed.  The options-factory replay cache also makes the provider-free route
+        preview and the later executor consume exactly one caller-produced option mapping per item.
+        """
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        if mode not in AUTONOMOUS_BATCH_MODES:
+            raise BrainRunError("autonomous batch mode must be one of: domain, auto, cross_domain")
+        if not isinstance(requests, Sequence) or isinstance(requests, (str, bytes)):
+            raise BrainRunError("autonomous batch requests must be a sequence")
+        if not 1 <= len(requests) <= MAX_AUTONOMOUS_AGENT_BATCH:
+            raise BrainRunError(
+                "autonomous batch requests must contain between 1 and "
+                f"{MAX_AUTONOMOUS_AGENT_BATCH} entries"
+            )
+        if options_factory is not None and not callable(options_factory):
+            raise BrainRunError("autonomous batch options_factory must be callable or None")
+
+        cached_factory_options: dict[int, Mapping[str, Any]] = {}
+
+        def merged_options(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
+            raw_options = raw.get("options", {})
+            if raw_options is None:
+                raw_options = {}
+            if not isinstance(raw_options, Mapping):
+                raise BrainRunError(f"autonomous batch request {index} options must be a mapping")
+            options = dict(raw_options)
+            if options_factory is not None:
+                generated = cached_factory_options.get(index)
+                if generated is None:
+                    try:
+                        generated_value = options_factory(raw, index)
+                    except Exception as error:
+                        raise BrainRunError(
+                            f"autonomous batch options_factory failed for request {index}"
+                        ) from error
+                    if not isinstance(generated_value, Mapping):
+                        raise BrainRunError(
+                            f"autonomous batch options_factory result {index} must be a mapping"
+                        )
+                    generated = dict(generated_value)
+                    cached_factory_options[index] = generated
+                options.update(generated)
+            reserved = {
+                "credentials",
+                "task",
+                "domain",
+                "subtasks",
+                "model_candidates",
+                "execution_id",
+            }
+            overridden = sorted(reserved.intersection(options))
+            if overridden:
+                raise BrainRunError(
+                    f"autonomous batch request {index} options cannot override: {', '.join(overridden)}"
+                )
+            return options
+
+        requested_domains: list[str] = []
+        for index, raw in enumerate(requests):
+            if not isinstance(raw, Mapping):
+                raise BrainRunError(f"autonomous batch request {index} must be a mapping")
+            if "credentials" in raw:
+                raise BrainRunError(
+                    "autonomous batch requests cannot carry credentials; pass one shared opaque "
+                    "credential mapping or session"
+                )
+            task = _text(
+                f"autonomous batch request {index} task",
+                raw.get("task"),
+                maximum=MAX_AUTONOMY_TEXT_BYTES,
+            )
+            options = merged_options(raw, index)
+            if mode == "domain":
+                domain = raw.get("domain")
+                _identifier(f"autonomous batch request {index} domain", domain)
+                if domain not in AUTONOMOUS_DOMAINS:
+                    raise BrainRunError(
+                        f"autonomous batch request {index} domain is unsupported: {domain!r}"
+                    )
+                requested_domains.append(domain)
+            elif mode == "cross_domain":
+                subtasks = raw.get("subtasks")
+                if not isinstance(subtasks, Sequence) or isinstance(subtasks, (str, bytes)):
+                    raise BrainRunError(
+                        f"autonomous cross-domain batch request {index} subtasks must be a sequence"
+                    )
+                if not 1 <= len(subtasks) <= MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN:
+                    raise BrainRunError(
+                        f"autonomous cross-domain batch request {index} subtasks are outside their bound"
+                    )
+                for subtask_index, subtask in enumerate(subtasks):
+                    if not isinstance(subtask, Mapping) or not isinstance(subtask.get("domain"), str):
+                        raise BrainRunError(
+                            f"autonomous cross-domain batch request {index} subtask {subtask_index} has no valid domain"
+                        )
+                    domain = subtask["domain"]
+                    _identifier(
+                        f"autonomous cross-domain batch request {index} subtask {subtask_index} domain",
+                        domain,
+                    )
+                    if domain not in AUTONOMOUS_DOMAINS:
+                        raise BrainRunError(
+                            f"autonomous cross-domain batch request {index} domain is unsupported: {domain!r}"
+                        )
+                    requested_domains.append(domain)
+            else:
+                semantic_routing = options.get("semantic_routing", False)
+                if not isinstance(semantic_routing, bool):
+                    raise BrainRunError("autonomous batch semantic_routing must be boolean")
+                if semantic_routing:
+                    raise BrainRunError(
+                        "launch-admitted automatic batch execution requires provider-free routing; "
+                        "admit semantic routing separately before enabling it"
+                    )
+                route_options = {
+                    key: options[key]
+                    for key in (
+                        "hints",
+                        "min_confidence",
+                        "min_margin",
+                        "max_domains",
+                        "allow_cross_domain",
+                        "context",
+                        "constraints",
+                        "desired_outputs",
+                        "capability",
+                        "risk_class",
+                        "max_steps",
+                        "require_json",
+                        "structured_domain_response",
+                        "response_schema",
+                        "execution_mode",
+                        "max_input_tokens",
+                        "required_model_capabilities",
+                        "memory_episodes",
+                    )
+                    if key in options
+                }
+                blueprint = self.prepare_auto(task=task, **route_options)
+                requested_domains.extend(blueprint.route.selected_domains)
+
+        authorize_autonomous_launch_domains(
+            launch_admission,
+            tuple(dict.fromkeys(requested_domains)),
+        )
+        if options_factory is None:
+            return None
+
+        def replay_factory(_raw: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+            # The outer batch preparer merges this generated mapping with the raw request options.
+            # Returning the cached copy prevents a non-deterministic factory from changing the
+            # route after the admission was reviewed.
+            try:
+                return cached_factory_options[index]
+            except KeyError as error:  # pragma: no cover - the preparer always visits each item
+                raise BrainRunError(f"autonomous batch options cache is missing request {index}") from error
+
+        return replay_factory
+
     def _prepare_batch_invocations(
         self,
         requests: Sequence[Mapping[str, Any]],
@@ -20071,6 +20244,132 @@ class AutonomousAgent:
             invoke=invoke,
             max_parallelism=max_parallelism,
             stop_on_error=stop_on_error,
+        )
+
+    def run_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Run an explicit-domain batch only after one admission covers every item domain."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="domain",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_batch(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
+    def run_auto_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Route a batch provider-free, then require admission for the union of selected domains."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="auto",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_auto_batch(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
+    def run_cross_domain_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Run fan-out/fan-in batch work only when every specialist domain is admitted."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="cross_domain",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_cross_domain_batch(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
+    def run_resumable_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        mode: str = "domain",
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any] | None = None,
+        checkpoint_sink: Callable[[AutonomousBatchCheckpoint], Any] | None = None,
+        rehydrate_result: Callable[[AutonomousBatchRehydrationContext], Any] | None = None,
+    ) -> AutonomousBatchResult:
+        """Resume a batch only after re-reviewing its complete current route set.
+
+        Admission is checked before checkpoint rehydration and credential resolution.  A restored
+        successful item therefore cannot be used to skip a changed or newly under-scoped route.
+        """
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode=mode,
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_resumable_batch(
+            requests,
+            job_id=job_id,
+            mode=mode,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+            checkpoint=checkpoint,
+            checkpoint_sink=checkpoint_sink,
+            rehydrate_result=rehydrate_result,
         )
 
     def settle_cross_domain_trajectory_learning(

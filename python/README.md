@@ -829,6 +829,12 @@ tool, learner, and effect approvals.
 `run_auto_with_launch_admission(...)` provides the same gate for automatic single/cross-domain
 routing and refuses provider-assisted semantic routing until that classifier boundary is separately
 reviewed.
+The batch counterparts (`run_batch_with_launch_admission(...)`,
+`run_auto_batch_with_launch_admission(...)`, `run_cross_domain_batch_with_launch_admission(...)`,
+and `run_resumable_batch_with_launch_admission(...)`) preview every item route first and bind one
+admission to the complete selected-domain union before credential resolution, checkpoint
+rehydration, or provider dispatch. Per-item option factories are evaluated once and replayed after
+admission; automatic batches reject semantic routing unless it is separately reviewed.
 
 `AutonomousBrainControlPlaneMonitor` and `AsyncAutonomousBrainControlPlaneMonitor` provide the
 operator-side lifecycle for jobs returned by `BrainControlClient`. They fan out bounded status

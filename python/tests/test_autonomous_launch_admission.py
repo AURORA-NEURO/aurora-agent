@@ -178,3 +178,85 @@ def test_launch_admission_gate_blocks_before_execution_and_checks_route_coverage
             credentials={},
             semantic_routing=True,
         )
+
+
+def test_launch_admission_covers_explicit_cross_domain_and_resumable_batches_before_credentials() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    coding = agent.launch_admission(
+        preflight,
+        decision="approve",
+        approved_domains=("coding",),
+        authorization_digest="e" * 64,
+    )
+    with pytest.raises(ArgumentError, match="does not approve requested domains"):
+        agent.run_batch_with_launch_admission(
+            [{"task": "review the biomedical evidence", "domain": "biomedical"}],
+            launch_admission=coding,
+            credentials={},
+        )
+    with pytest.raises(ArgumentError, match="does not approve requested domains"):
+        agent.run_cross_domain_batch_with_launch_admission(
+            [{
+                "task": "synthesize the reviewed findings",
+                "subtasks": [
+                    {"id": "coding", "task": "inspect the implementation", "domain": "coding"},
+                    {"id": "biomedical", "task": "inspect the study", "domain": "biomedical"},
+                ],
+            }],
+            launch_admission=coding,
+            credentials={},
+        )
+    held = agent.launch_admission(preflight, decision="hold")
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_resumable_batch_with_launch_admission(
+            [{"task": "review the implementation", "domain": "coding"}],
+            job_id="held-batch",
+            launch_admission=held,
+            credentials={},
+        )
+
+
+def test_launch_admission_rejects_semantic_routing_in_automatic_batches_before_dispatch() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    admission = agent.launch_admission(
+        preflight,
+        decision="approve",
+        approved_domains=tuple(AUTONOMOUS_DOMAIN_NAMES),
+        authorization_digest="f" * 64,
+    )
+    with pytest.raises(BrainRunError, match="requires provider-free routing"):
+        agent.run_auto_batch_with_launch_admission(
+            [{
+                "task": "route this multidisciplinary review",
+                "options": {"semantic_routing": True},
+            }],
+            launch_admission=admission,
+            credentials={},
+        )
+
+
+def test_launch_admitted_batch_replays_an_options_factory_without_reinvoking_it() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    coding = agent.launch_admission(
+        preflight,
+        decision="approve",
+        approved_domains=("coding",),
+        authorization_digest="7" * 64,
+    )
+    calls: list[int] = []
+    with agent.start_credential_session(session_id="launch-admitted-batch") as session:
+        session.register_value("openai", "unit-test-only-not-a-provider-key")
+        result = agent.run_batch_with_launch_admission(
+            [{"task": "review the implementation", "domain": "coding"}],
+            launch_admission=coding,
+            credentials=session,
+            options_factory=lambda _request, index: (
+                calls.append(index) or {"approve_provider_call": False}
+            ),
+        )
+    assert calls == [0]
+    assert len(result.items) == 1
+    assert result.items[0].status in {"failed", "refused"}

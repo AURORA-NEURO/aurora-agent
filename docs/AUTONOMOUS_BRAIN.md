@@ -1744,6 +1744,17 @@ only `task` descriptors and delegates deterministic routing, abstention, optiona
 planning, learning-mode selection, and the existing approval gates per item. Route abstentions and
 planning reviews become visible `refused` items rather than silently selecting a domain.
 
+For a deployment that has completed the twelve-domain launch review, the admission-aware variants
+(`run_batch_with_launch_admission()`, `run_auto_batch_with_launch_admission()`,
+`run_cross_domain_batch_with_launch_admission()`, and
+`run_resumable_batch_with_launch_admission()`) perform a provider-free route preview for the whole
+batch and authorize the union of selected domains before resolving credentials or rehydrating a
+checkpoint. Automatic admission-aware batches reject provider-assisted semantic routing unless that
+classifier boundary is reviewed separately. The options factory is evaluated once during the
+preview and replayed unchanged by execution, preventing a nondeterministic factory from changing
+the admitted route. The admission remains additive: provider, tool, source, learner, and effect
+approvals are still required per item.
+
 For a worker queue that must survive a process restart, `agent.run_resumable_batch()` adds an
 explicit metadata-only job checkpoint. The caller supplies a bounded `job_id`, a checkpoint
 sink, and—when resuming—a `rehydrate_result(context)` callback. The callback receives only the
@@ -7851,6 +7862,15 @@ for (const item of batch.items) {
   console.log(item.index, item.status, item.task_digest, item.execution?.status);
 }
 ```
+
+`executeBatchWithLaunchAdmission()` and
+`executeBatchResumableWithLaunchAdmission()` first compile every route without dispatching a
+connector or provider, then require one approved admission to cover the complete selected-domain
+union before entering the ordinary or restart path. `executeCycleBatchWithLaunchAdmission()` and
+`executeAdaptiveCycleBatchWithLaunchAdmission()` apply the same protection to evaluator/replan
+batches. All four variants refuse provider-assisted semantic routing at this boundary; classifier
+approval must be reviewed separately. A cycle policy factory is evaluated once during admission
+preview and replayed unchanged during execution.
 
 `executeBatchResumable()` provides the same restart barrier for the ordinary TypeScript brain
 batch. Its `checkpointSink` receives a digest-bound `AutonomousBrainBatchCheckpointJSON`, and its

@@ -587,6 +587,12 @@ For `executeBatchResumable()`, the checkpoint adds a non-secret digest of the se
 thresholds, inherited selection gates, and candidate metadata. A changed policy—or adding
 semantic routing to a legacy deterministic checkpoint—is rejected before rehydration or a new
 provider dispatch.
+The admission-aware `executeBatchWithLaunchAdmission()` and
+`executeBatchResumableWithLaunchAdmission()` variants preview every route and require one approved
+launch record to cover the selected-domain union before connector/provider dispatch or checkpoint
+rehydration. `executeCycleBatchWithLaunchAdmission()` and
+`executeAdaptiveCycleBatchWithLaunchAdmission()` extend the same gate to feedback batches;
+provider-assisted semantic routing is refused until its classifier boundary is reviewed separately.
 
 Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
 `minQuality`, and the optional `minSelectionConfidence` rank-separation floor. The same gates are
