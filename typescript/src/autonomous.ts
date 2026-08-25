@@ -76,6 +76,10 @@ import type {
   AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions,
 } from "./autonomous-workflow-portfolio-evidence-resumable.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
+import {
+  AutonomousPromptLearningPersistenceCoordinator,
+  extractAutonomousPromptLearningSelections,
+} from "./autonomous-prompt-learning-persistence.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import {
   AutonomousEvidenceRuntime,
@@ -212,8 +216,10 @@ import type {
   ToolDefinition,
 } from "./types.js";
 import {
+  AutonomousPromptAdaptiveSelection,
   AutonomousPromptRegistry,
   AutonomousPromptTemplate,
+  type AutonomousPromptAdaptiveSelectionJSON,
   type AutonomousPromptLearningState,
   type AutonomousPromptLearningStateJSON,
   selectAdaptiveAutonomousPrompts,
@@ -942,6 +948,8 @@ export interface AutonomousRunPromptProjection extends JsonObject {
   adaptive_selection_digest?: string | null;
   adaptive_arm_id?: string | null;
   adaptive_generation?: number | null;
+  /** Exact registry-bound adaptive selection receipt for explicit evaluator settlement. */
+  adaptive_selection?: AutonomousPromptAdaptiveSelectionJSON;
   selection_policy?: string | null;
   retention: "prompt_messages_transient;digest_only_projection";
   secret_material: "never_returned";
@@ -1203,6 +1211,8 @@ export interface AutonomousAgentOptions {
   selectionPromotion?: AutonomousSelectionPromotionLifecycle;
   /** Optional caller-owned episodic memory used for bounded retrieval and value-only run recording. */
   memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Optional registry-bound, CAS-fenced prompt learner used by every high-level run. */
+  promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
   /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
   activation?: AutonomousCapabilityActivation;
   /** Optional caller-owned external connector catalogue; registration never authorizes dispatch. */
@@ -2471,6 +2481,7 @@ async function renderVersionedAutonomousPrompt(
       adaptive_arm_id: adaptive.armIds[0] ?? null,
       adaptive_generation: adaptive.generation,
       selection_policy: "ucb1_explicit_evaluator_v1",
+      adaptive_selection: adaptive.toJSON(),
     };
   return { messages: rendered.messages, metadata, mode: "registry_selection" };
 }
@@ -4488,6 +4499,7 @@ export class AutonomousAgent {
   readonly connectorRuntime?: AutonomousConnectorRuntime;
   /** Caller-owned episodic memory; exposed so the learning controller can close evaluation feedback. */
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
+  readonly promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
   private capabilityRuntime?: AutonomousCapabilityRuntime;
@@ -4500,6 +4512,7 @@ export class AutonomousAgent {
     if (options.effectBoundary !== undefined && !(options.effectBoundary instanceof AutonomousEffectBoundary)) throw new ArgumentError("AutonomousAgent effectBoundary must be an AutonomousEffectBoundary");
     if (options.activation !== undefined && !(options.activation instanceof AutonomousCapabilityActivation)) throw new ArgumentError("AutonomousAgent activation must be an AutonomousCapabilityActivation");
     if (options.selectionPromotion !== undefined && !(options.selectionPromotion instanceof AutonomousSelectionPromotionLifecycle)) throw new ArgumentError("AutonomousAgent selectionPromotion must be an AutonomousSelectionPromotionLifecycle");
+    if (options.promptLearningCoordinator !== undefined && !(options.promptLearningCoordinator instanceof AutonomousPromptLearningPersistenceCoordinator)) throw new ArgumentError("AutonomousAgent promptLearningCoordinator must be an AutonomousPromptLearningPersistenceCoordinator");
     if (options.connectorRegistry !== undefined && !(options.connectorRegistry instanceof AutonomousConnectorRegistry)) throw new ArgumentError("AutonomousAgent connectorRegistry must be an AutonomousConnectorRegistry");
     if (options.connectorRuntime !== undefined && !(options.connectorRuntime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("AutonomousAgent connectorRuntime must be an AutonomousConnectorRuntime");
     if (options.connectorRegistry !== undefined && options.connectorRuntime !== undefined && options.connectorRuntime.registry !== options.connectorRegistry) throw new ArgumentError("AutonomousAgent connectorRegistry and connectorRuntime must reference the same catalogue");
@@ -4513,6 +4526,7 @@ export class AutonomousAgent {
       || typeof options.memoryStore.get !== "function"
     )) throw new ArgumentError("AutonomousAgent memoryStore is malformed");
     this.memoryStore = options.memoryStore;
+    this.promptLearningCoordinator = options.promptLearningCoordinator;
     this.activation = options.activation ?? new AutonomousCapabilityActivation();
     this.modelHealthController = options.modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(options.modelHealthStore);
     if (options.modelHealthBridge !== undefined && !(options.modelHealthBridge instanceof AutonomousBrainControlPlaneBridge)) throw new ArgumentError("AutonomousAgent modelHealthBridge must be an AutonomousBrainControlPlaneBridge");
@@ -6753,7 +6767,42 @@ export class AutonomousAgent {
     }
   }
 
+  private withPromptLearningOptions<T extends { promptRegistry?: AutonomousPromptRegistry; promptLearningState?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON }>(options: T): T {
+    const coordinator = this.promptLearningCoordinator;
+    if (coordinator === undefined) return options;
+    if (options.promptLearningState !== undefined && options.promptLearningState !== coordinator.state) throw new ArgumentError("promptLearningState cannot override the agent's persistent prompt learner");
+    if (options.promptRegistry !== undefined && options.promptRegistry !== coordinator.registry) throw new ArgumentError("promptRegistry must be the same registry as the agent's prompt learner");
+    return { ...options, promptRegistry: coordinator.registry, promptLearningState: coordinator.state } as T;
+  }
+
+  /** Recover exact registry-bound prompt choices from a direct, cross-domain, or workflow result. */
+  promptLearningSelections(result: unknown): readonly AutonomousPromptAdaptiveSelection[] {
+    const coordinator = this.promptLearningCoordinator;
+    if (coordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
+    return extractAutonomousPromptLearningSelections(result, coordinator.registry);
+  }
+
+  /** Apply explicit evaluator credit to one high-level prompt choice; provider output is never reward. */
+  async settlePromptLearning(
+    selection: AutonomousPromptAdaptiveSelection,
+    options: { armId: string; evaluatorId: string; evaluatorVersion: string; reward: number; passed: boolean; outcomeDigest?: string; settlementKey?: string },
+  ): Promise<unknown> {
+    if (this.promptLearningCoordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
+    return this.promptLearningCoordinator.settle(selection, options);
+  }
+
+  async restorePromptLearning(): Promise<unknown> {
+    if (this.promptLearningCoordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
+    return this.promptLearningCoordinator.restore();
+  }
+
+  async flushPromptLearning(): Promise<unknown> {
+    if (this.promptLearningCoordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
+    return this.promptLearningCoordinator.flush();
+  }
+
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
+    options = this.withPromptLearningOptions(options);
     const taskText = boundedText("autonomous task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
     const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
@@ -6884,6 +6933,7 @@ export class AutonomousAgent {
         ...(renderedPrompt.metadata.adaptive_arm_id !== undefined ? { adaptive_arm_id: renderedPrompt.metadata.adaptive_arm_id } : {}),
         ...(renderedPrompt.metadata.adaptive_generation !== undefined ? { adaptive_generation: renderedPrompt.metadata.adaptive_generation } : {}),
         ...(renderedPrompt.metadata.selection_policy !== undefined ? { selection_policy: renderedPrompt.metadata.selection_policy } : {}),
+        ...(renderedPrompt.metadata.adaptive_selection !== undefined ? { adaptive_selection: renderedPrompt.metadata.adaptive_selection } : {}),
         retention: "prompt_messages_transient;digest_only_projection",
         secret_material: "never_returned",
       };
@@ -6942,6 +6992,7 @@ export class AutonomousAgent {
 
   /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */
   async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
+    options = this.withPromptLearningOptions(options);
     const taskText = boundedText("cross-domain task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
     const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);

@@ -9847,3 +9847,16 @@ and secret material are rejected or excluded. A restored coordinator therefore e
 exact learner generation or fails closed on tampering, registry replacement, malformed JSON,
 oversized state, or stale persistence identity. Applications still decide when an evaluator has
 enough evidence to settle a choice; persistence never converts provider output into reward.
+
+The persistent learner is now wired into the application-facing agent facades, not only exposed
+as a low-level state helper. Python `AutonomousAgent(prompt_learning_coordinator=...)` and
+TypeScript `AutonomousAgent({ promptLearningCoordinator })` automatically bind that coordinator's
+registry and current state to direct and cross-domain runs. Every adaptive invocation carries a
+bounded, registry-verified `adaptive_selection` receipt containing the plan rows, arm identities,
+generation, policy, and digests—but no prompt text, task text, provider output, credentials, or
+evaluator payload. `prompt_learning_selections()` / `promptLearningSelections()` rehydrate those
+receipts after a worker handoff; `settle_prompt_learning()` / `settlePromptLearning()` then require
+an explicit arm, evaluator identity, bounded reward, pass signal, and outcome digest before the
+CAS-fenced coordinator advances state. The same path walks direct attempts, specialist children,
+synthesis, workflow, and replan envelopes, so selection credit cannot be silently lost when the
+agent changes execution shape.

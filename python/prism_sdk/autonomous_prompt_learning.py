@@ -312,6 +312,153 @@ class AutonomousPromptAdaptiveSelection:
             "secret_material": "never_returned",
         }
 
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AutonomousPromptAdaptiveSelection":
+        """Rehydrate one metadata-only selection receipt for explicit evaluator settlement."""
+
+        if not isinstance(value, Mapping):
+            raise ArgumentError("adaptive prompt selection must be a mapping")
+        expected = {
+            "schema",
+            "registry_digest",
+            "generation",
+            "plan_digest",
+            "arm_ids",
+            "exploration",
+            "selection_policy",
+            "selection_digest",
+            "plan",
+            "retention",
+            "secret_material",
+        }
+        if set(value) != expected or value.get("schema") != AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA:
+            raise ArgumentError("adaptive prompt selection fields are invalid")
+        if value.get("selection_policy") != AUTONOMOUS_PROMPT_LEARNING_POLICY:
+            raise ArgumentError("adaptive prompt selection policy is invalid")
+        if value.get("retention") != "selection_metadata_only;rendered_messages_transient" or value.get("secret_material") != "never_returned":
+            raise ArgumentError("adaptive prompt selection retention markers are invalid")
+        raw_plan = value.get("plan")
+        if not isinstance(raw_plan, Mapping):
+            raise ArgumentError("adaptive prompt selection plan is malformed")
+        plan = AutonomousPromptSelectionPlan.from_dict(raw_plan)
+        if value.get("plan_digest") != plan.plan_digest:
+            raise ArgumentError("adaptive prompt selection plan digest does not match its contents")
+        arm_ids = value.get("arm_ids")
+        if not isinstance(arm_ids, Sequence) or isinstance(arm_ids, (str, bytes, bytearray)):
+            raise ArgumentError("adaptive prompt selection arm ids are malformed")
+        selection = cls(
+            registry_digest=value.get("registry_digest"),
+            generation=value.get("generation"),
+            plan=plan,
+            arm_ids=tuple(arm_ids),
+            exploration=value.get("exploration"),
+        )
+        if value.get("selection_digest") != selection.selection_digest:
+            raise ArgumentError("adaptive prompt selection digest does not match its contents")
+        return selection
+
+
+def extract_autonomous_prompt_learning_selections(
+    result: Any,
+    registry: AutonomousPromptRegistry,
+) -> tuple[AutonomousPromptAdaptiveSelection, ...]:
+    """Extract exact adaptive selections from a run envelope without traversing provider values.
+
+    High-level direct, cross-domain, workflow, and replan envelopes have different shapes. This
+    bounded structural walker follows only reviewed result fields and the metadata-only prompt
+    projection. It never calls ``to_dict`` on an arbitrary provider result and never inspects
+    response, task, message, credential, or connector payloads.
+    """
+
+    if not isinstance(registry, AutonomousPromptRegistry):
+        raise ArgumentError("prompt learning selection extraction requires an AutonomousPromptRegistry")
+    found: list[AutonomousPromptAdaptiveSelection] = []
+    seen: set[str] = set()
+    visited: set[int] = set()
+    max_nodes = 512
+
+    def add(raw: Any) -> None:
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("run adaptive prompt selection receipt is malformed")
+        selection = AutonomousPromptAdaptiveSelection.from_dict(raw)
+        registry.verify_selection(selection.plan)
+        if selection.selection_digest not in seen:
+            seen.add(selection.selection_digest)
+            found.append(selection)
+        if len(found) > 128:
+            raise ArgumentError("run adaptive prompt selection receipts exceed their bound")
+
+    def inspect_prompt(prompt: Mapping[str, Any]) -> None:
+        adaptive = prompt.get("adaptive_selection")
+        if isinstance(adaptive, Mapping):
+            add(adaptive)
+        autonomous_prompt = prompt.get("autonomous_prompt")
+        if isinstance(autonomous_prompt, Mapping):
+            adaptive = autonomous_prompt.get("adaptive_selection")
+            if isinstance(adaptive, Mapping):
+                add(adaptive)
+
+    def visit(value: Any) -> None:
+        if len(visited) >= max_nodes:
+            raise ArgumentError("run adaptive prompt selection envelope is too deep")
+        if isinstance(value, AutonomousPromptAdaptiveSelection):
+            add(value.to_dict())
+            return
+        if isinstance(value, Mapping):
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            prompt = value.get("prompt")
+            if isinstance(prompt, Mapping):
+                inspect_prompt(prompt)
+            for key in (
+                "child_runs",
+                "child_results",
+                "synthesis",
+                "synthesis_result",
+                "cross_domain",
+                "attempts",
+                "final_result",
+                "result",
+                "stage_results",
+            ):
+                child = value.get(key)
+                if isinstance(child, (Mapping, Sequence)) and not isinstance(child, (str, bytes, bytearray)):
+                    visit(child)
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+                for child in value:
+                    visit(child)
+            return
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            for child in value:
+                visit(child)
+            return
+        prompt = getattr(value, "prompt", None)
+        if isinstance(prompt, Mapping):
+            inspect_prompt(prompt)
+        for attribute in (
+            "child_runs",
+            "child_results",
+            "synthesis",
+            "synthesis_result",
+            "cross_domain",
+            "attempts",
+            "final_result",
+            "result",
+            "stage_results",
+        ):
+            child = getattr(value, attribute, None)
+            if isinstance(child, (Mapping, Sequence)) or hasattr(child, "prompt"):
+                visit(child)
+
+    visit(result)
+    return tuple(found)
+
 
 def _state(value: AutonomousPromptLearningState | Mapping[str, Any] | None, registry: AutonomousPromptRegistry) -> AutonomousPromptLearningState:
     state = AutonomousPromptLearningState.empty(registry.registry_digest) if value is None else value if isinstance(value, AutonomousPromptLearningState) else AutonomousPromptLearningState.from_dict(value)
@@ -743,6 +890,7 @@ __all__ = [
     "AutonomousPromptLearningSettlement",
     "AutonomousPromptLearningSnapshot",
     "snapshot_autonomous_prompt_learning",
+    "extract_autonomous_prompt_learning_selections",
     "AutonomousPromptLearningSnapshotPersistence",
     "AutonomousPromptLearningTextStore",
     "AutonomousPromptLearningTransactionalTextStore",

@@ -40,10 +40,13 @@ import {
   builtinAutonomousDomainProfiles,
   builtinAutonomousPromptRegistry,
   AutonomousPromptLearningState,
+  AutonomousPromptLearningPersistenceCoordinator,
+  TransactionalJsonAutonomousPromptLearningSnapshotPersistence,
   builtinAutonomousValueEvaluatorProfiles,
   assembleAutonomousPrompt,
   compileAutonomousPlan,
   digestCanonicalJsonTextSync,
+  digestJsonSync,
   digestJson,
   createAutonomousApiToolExecutor,
   openaiCompatibleProvider,
@@ -82,6 +85,18 @@ const learningContextDigest = (context) => digestCanonicalJsonTextSync(JSON.stri
   risk_class: context.risk_class,
   task_family: context.task_family ?? null,
 }));
+
+class PromptLearningCasTextStore {
+  value = null;
+  read() { return this.value; }
+  write(value) { this.value = value; }
+  writeIfUnchanged(expectedSnapshotDigest, value) {
+    const observed = this.value === null ? null : JSON.parse(this.value).snapshot_digest;
+    if (observed !== expectedSnapshotDigest) return false;
+    this.value = value;
+    return true;
+  }
+}
 
 function readinessCalibrationReport({ weak = false } = {}) {
   const profiles = builtinAutonomousValueEvaluatorProfiles();
@@ -2150,6 +2165,68 @@ test("high-level runs use verified prompt registry messages and prompt-bound req
   assert.ok(cross.child_runs.every((child) => child.result.prompt?.mode === "registry_selection"));
   assert.equal(cross.synthesis.prompt.mode, "registry_selection");
   assert.equal(calls, 4);
+});
+
+test("persistent prompt learning binds every high-level domain and exposes settleable receipts", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  let calls = 0;
+  llm.registerInMemoryProvider("prompt-persistent", () => ({ text: `persistent-answer-${++calls}` }));
+  const model = candidate("prompt-persistent", "persistent-model", ["reasoning", "code", "science", "biomedical", "neuroscience", "coordination", "data", "web", "operations", "enterprise", "multimodal", "evaluation"]);
+  const registry = builtinAutonomousPromptRegistry();
+  const store = new PromptLearningCasTextStore();
+  const persistence = new TransactionalJsonAutonomousPromptLearningSnapshotPersistence(store);
+  const coordinator = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  const agent = new AutonomousAgent(llm, { promptLearningCoordinator: coordinator });
+  agent.registerModel(model);
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await agent.run(`Review a bounded ${domain} task for evaluator settlement.`, { domain, approveProviderCall: true });
+    const selections = agent.promptLearningSelections(result);
+    assert.equal(selections.length, 1, domain);
+    const selection = selections[0];
+    assert.equal(selection.plan.rows[0].domain, domain);
+    assert.equal(result.prompt?.adaptive_selection?.selection_digest, selection.selectionDigest);
+    const settlement = await agent.settlePromptLearning(selection, {
+      armId: selection.armIds[0],
+      evaluatorId: `${domain}-rubric`,
+      evaluatorVersion: "1",
+      reward: 0.8,
+      passed: true,
+      outcomeDigest: digestJsonSync({ domain, run: result.prompt?.final_prompt_digest }),
+    });
+    assert.equal(settlement.status, "settled");
+  }
+
+  const cross = await agent.runCrossDomain("Review a bounded biomedical neuroscience task.", {
+    approveProviderCall: true,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review safety evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review signal limitations." },
+    ],
+  });
+  const crossSelections = agent.promptLearningSelections(cross);
+  assert.deepEqual(new Set(crossSelections.map((selection) => selection.plan.rows[0].domain)), new Set(["biomedical", "neuroscience", "cross_domain"]));
+  for (const selection of crossSelections) {
+    await agent.settlePromptLearning(selection, {
+      armId: selection.armIds[0],
+      evaluatorId: "cross-domain-rubric",
+      evaluatorVersion: "1",
+      reward: 0.7,
+      passed: true,
+      outcomeDigest: digestJsonSync({ selection: selection.selectionDigest }),
+    });
+  }
+  assert.equal(coordinator.state.generation, AUTONOMOUS_DOMAIN_NAMES.length + crossSelections.length);
+  assert.ok(store.value);
+  assert.doesNotMatch(store.value, /Review a bounded|persistent-prompt-learning/);
+
+  const recovered = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  assert.ok(await recovered.restore());
+  assert.equal(recovered.state.stateDigest, coordinator.state.stateDigest);
+  await assert.rejects(
+    () => agent.run("Reject an external prompt state.", { domain: "coding", promptLearningState: new AutonomousPromptLearningState(registry.registryDigest) }),
+    /cannot override/,
+  );
 });
 
 test("keyless readiness composes all-domain evidence routing posture without source dispatch", async () => {

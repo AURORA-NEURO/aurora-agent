@@ -96,6 +96,8 @@ export interface AutonomousPromptRenderResult extends JsonObject {
   adaptive_selection_digest?: string | null;
   adaptive_arm_id?: string | null;
   adaptive_generation?: number | null;
+  /** Rehydratable selection metadata; prompt messages remain transient. */
+  adaptive_selection?: AutonomousPromptAdaptiveSelectionJSON;
   selection_policy?: string | null;
   message_count: number;
   retention: "rendered_messages_transient;digest_only_projection";

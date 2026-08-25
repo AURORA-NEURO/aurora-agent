@@ -1260,6 +1260,7 @@ export {
   JsonAutonomousPromptLearningSnapshotPersistence,
   TransactionalJsonAutonomousPromptLearningSnapshotPersistence,
   WebStorageAutonomousPromptLearningSnapshotTextStore,
+  extractAutonomousPromptLearningSelections,
 } from "./autonomous-prompt-learning-persistence.js";
 export type {
   AutonomousPromptLearningSnapshotJSON,

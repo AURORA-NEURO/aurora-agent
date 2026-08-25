@@ -112,6 +112,62 @@ export async function validateAutonomousPromptLearningSnapshot(raw: unknown): Pr
   return snapshot;
 }
 
+/**
+ * Extract exact adaptive selections from high-level result envelopes.
+ *
+ * Only reviewed metadata fields are traversed. Provider responses, task text, rendered
+ * messages, credentials, and connector payloads are never inspected or serialized.
+ */
+export function extractAutonomousPromptLearningSelections(
+  result: unknown,
+  registry: AutonomousPromptRegistry,
+): readonly AutonomousPromptAdaptiveSelection[] {
+  if (!(registry instanceof AutonomousPromptRegistry)) throw new ArgumentError("prompt learning selection extraction requires an AutonomousPromptRegistry");
+  const found: AutonomousPromptAdaptiveSelection[] = [];
+  const seen = new Set<string>();
+  const visited = new Set<object>();
+  let nodes = 0;
+  const add = (raw: unknown): void => {
+    if (!isObject(raw)) throw new ArgumentError("run adaptive prompt selection receipt is malformed");
+    const selection = AutonomousPromptAdaptiveSelection.fromJSON(raw as JsonObject);
+    registry.verifySelection(selection.plan);
+    if (!seen.has(selection.selectionDigest)) {
+      seen.add(selection.selectionDigest);
+      found.push(selection);
+    }
+    if (found.length > 128) throw new ArgumentError("run adaptive prompt selection receipts exceed their bound");
+  };
+  const visit = (value: unknown): void => {
+    nodes += 1;
+    if (nodes > 512) throw new ArgumentError("run adaptive prompt selection envelope is too deep");
+    if (value instanceof AutonomousPromptAdaptiveSelection) {
+      add(value.toJSON());
+      return;
+    }
+    if (Array.isArray(value)) {
+      if (visited.has(value)) return;
+      visited.add(value);
+      value.forEach(visit);
+      return;
+    }
+    if (!isObject(value)) return;
+    if (visited.has(value)) return;
+    visited.add(value);
+    const prompt = value.prompt;
+    if (isObject(prompt)) {
+      if (prompt.adaptive_selection !== undefined) add(prompt.adaptive_selection);
+      const autonomousPrompt = prompt.autonomous_prompt;
+      if (isObject(autonomousPrompt) && autonomousPrompt.adaptive_selection !== undefined) add(autonomousPrompt.adaptive_selection);
+    }
+    for (const key of ["child_runs", "child_results", "synthesis", "synthesis_result", "cross_domain", "attempts", "final_result", "result", "stage_results"] as const) {
+      const child = value[key];
+      if (child !== undefined) visit(child);
+    }
+  };
+  visit(result);
+  return Object.freeze(found);
+}
+
 export interface AutonomousPromptLearningSnapshotPersistence {
   read(): Promise<AutonomousPromptLearningSnapshotJSON | null> | AutonomousPromptLearningSnapshotJSON | null;
   write(snapshot: AutonomousPromptLearningSnapshotJSON): Promise<void> | void;

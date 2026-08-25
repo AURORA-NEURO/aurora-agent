@@ -106,7 +106,9 @@ from .autonomous_prompt_registry import (
 from .autonomous_prompt_learning import (
     AUTONOMOUS_PROMPT_LEARNING_POLICY,
     AutonomousPromptAdaptiveSelection,
+    AutonomousPromptLearningPersistenceCoordinator,
     AutonomousPromptLearningState,
+    extract_autonomous_prompt_learning_selections,
     select_adaptive_autonomous_prompts,
 )
 from .domain_tools import (
@@ -7930,6 +7932,10 @@ def _apply_versioned_prompt(
                     "adaptive_selection_digest": adaptive_selection.selection_digest,
                     "adaptive_arm_id": adaptive_selection.arm_ids[0],
                     "adaptive_generation": adaptive_selection.generation,
+                    # This is a registry-bound selection receipt, not rendered prompt content.
+                    # It lets an application settle the exact arm after evaluator feedback,
+                    # including after the provider result has crossed a process boundary.
+                    "adaptive_selection": adaptive_selection.to_dict(),
                 }
                 if adaptive_selection is not None
                 else {}
@@ -14070,6 +14076,7 @@ class AutonomousAgent:
         connector_registry: AutonomousConnectorRegistry | None = None,
         connector_runtime: AutonomousConnectorRuntime | None = None,
         selection_promotion: AutonomousSelectionPromotionLifecycle | None = None,
+        prompt_learning_coordinator: AutonomousPromptLearningPersistenceCoordinator | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -14110,6 +14117,13 @@ class AutonomousAgent:
             raise BrainRunError("connector_runtime must be an AutonomousConnectorRuntime or None")
         if selection_promotion is not None and not isinstance(selection_promotion, AutonomousSelectionPromotionLifecycle):
             raise BrainRunError("selection_promotion must be an AutonomousSelectionPromotionLifecycle or None")
+        if prompt_learning_coordinator is not None and not isinstance(
+            prompt_learning_coordinator,
+            AutonomousPromptLearningPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "prompt_learning_coordinator must be an AutonomousPromptLearningPersistenceCoordinator or None"
+            )
         if (
             connector_registry is not None
             and connector_runtime is not None
@@ -14145,6 +14159,7 @@ class AutonomousAgent:
         self.tool_registry = tool_registry
         self.activation = activation or AutonomousCapabilityActivation()
         self.selection_promotion = selection_promotion
+        self.prompt_learning_coordinator = prompt_learning_coordinator
         self.execution_journal = execution_journal
         self.execution_policy = resolved_execution_policy
         self.connector_registry = connector_registry or (
@@ -18879,6 +18894,67 @@ class AutonomousAgent:
             except Exception:
                 continue
 
+    def _prompt_learning_options(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        """Bind configured prompt learning persistence to one high-level run."""
+
+        if not isinstance(options, Mapping):
+            raise BrainRunError("autonomous prompt learning options must be a mapping")
+        resolved = dict(options)
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            return resolved
+        supplied_state = resolved.get("prompt_learning_state")
+        if supplied_state is not None and supplied_state is not coordinator.state:
+            raise BrainRunError(
+                "prompt_learning_state cannot override the agent's persistent prompt learner"
+            )
+        supplied_registry = resolved.get("prompt_registry")
+        if supplied_registry is not None and supplied_registry is not coordinator.registry:
+            raise BrainRunError(
+                "prompt_registry must be the same registry as the agent's prompt learner"
+            )
+        resolved["prompt_registry"] = coordinator.registry
+        resolved["prompt_learning_state"] = coordinator.state
+        return resolved
+
+    def prompt_learning_selections(self, result: Any) -> tuple[AutonomousPromptAdaptiveSelection, ...]:
+        """Recover exact metadata-only prompt choices from a completed or paused run."""
+
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            raise BrainRunError("prompt learning coordinator is not configured")
+        try:
+            return extract_autonomous_prompt_learning_selections(result, coordinator.registry)
+        except ArgumentError as error:
+            raise BrainRunError("autonomous prompt learning result is not settleable") from error
+
+    def settle_prompt_learning(self, selection: AutonomousPromptAdaptiveSelection, **kwargs: Any) -> Any:
+        """Apply explicit evaluator credit to one selection and persist it with CAS fencing."""
+
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            raise BrainRunError("prompt learning coordinator is not configured")
+        try:
+            return coordinator.settle(selection, **kwargs)
+        except ArgumentError as error:
+            raise BrainRunError("autonomous prompt learning settlement failed") from error
+
+    def restore_prompt_learning(self) -> Any:
+        """Restore the configured prompt learner before accepting new high-level work."""
+
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            raise BrainRunError("prompt learning coordinator is not configured")
+        return coordinator.restore()
+
+    def flush_prompt_learning(self) -> Any:
+        """Flush the current prompt learner without inventing evaluator credit."""
+
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            raise BrainRunError("prompt learning coordinator is not configured")
+        return coordinator.flush()
+
     def run(
         self,
         *,
@@ -18897,10 +18973,11 @@ class AutonomousAgent:
         provider/mission approval.  No option here widens those authorization boundaries.
         """
 
+        run_options = self._prompt_learning_options(kwargs)
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
-            options=kwargs,
+            options=run_options,
             tool_domains=(domain,),
             task=task,
             resume_learning=bool(kwargs.get("learn")),
@@ -20655,7 +20732,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainLearningResult:
         """Run fan-out and synthesis while adapting routing between completed episodes."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -20704,7 +20781,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainTrajectoryLearningResult:
         """Run fan-out and synthesis with one delayed, discounted trajectory update."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -20754,7 +20831,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainReplanResult:
         """Run bounded evaluator-guided cross-domain replans with delayed credit per attempt."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -20802,10 +20879,11 @@ class AutonomousAgent:
     ) -> AutonomousWorkflowRun:
         """Run a staged workflow with the agent's catalogue, health, and durable state."""
 
+        run_options = self._prompt_learning_options(kwargs)
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
-            options=kwargs,
+            options=run_options,
             tool_domains=(blueprint.spec.domain,),
             task=blueprint.spec.task,
             resume_learning=True,
@@ -20889,7 +20967,7 @@ class AutonomousAgent:
     ) -> AutonomousWorkflowLearningResult:
         """Run staged workflow learning, resuming the latest value-only bandit state by default."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -20933,7 +21011,7 @@ class AutonomousAgent:
         same execution controller used by ordinary workflow calls.
         """
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -20972,7 +21050,7 @@ class AutonomousAgent:
     ) -> AutonomousWorkflowTrajectoryLearningResult:
         """Run a staged workflow and apply one delayed, discounted trajectory update."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -21011,10 +21089,11 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainResult:
         """Run specialist fan-out and synthesis through the shared safety/learning envelope."""
 
+        run_options = self._prompt_learning_options(kwargs)
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
-            options=kwargs,
+            options=run_options,
             tool_domains=tuple(
                 dict.fromkeys(
                     ["cross_domain"]

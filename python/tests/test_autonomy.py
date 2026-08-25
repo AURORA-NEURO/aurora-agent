@@ -42,6 +42,8 @@ from prism_sdk import (
     AutonomousWorkflowStageResult,
     AutonomousWorkflowCycleCheckpoint,
     AutonomousPromptLearningState,
+    AutonomousPromptLearningPersistenceCoordinator,
+    TransactionalJsonAutonomousPromptLearningSnapshotPersistence,
     validate_autonomous_workflow_execution_receipt,
     AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_KEY,
     CompositeDomainEvaluator,
@@ -3699,6 +3701,89 @@ def test_run_workflow_propagates_adaptive_prompt_selection_through_every_builtin
             assert len(prompt_projection["adaptive_selection_digest"]) == 64
             assert len(prompt_projection["adaptive_arm_id"]) == 64
             assert prompt_projection["adaptive_generation"] == 0
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_agent_persistent_prompt_learner_rehydrates_high_level_direct_and_cross_domain_runs():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "persistent-prompt-learning-secret")
+    prompt_registry = builtin_autonomous_prompt_registry()
+    persistence = TransactionalJsonAutonomousPromptLearningSnapshotPersistence(_CasTextStore())
+    coordinator = AutonomousPromptLearningPersistenceCoordinator(prompt_registry, persistence=persistence)
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+        prompt_learning_coordinator=coordinator,
+    )
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            result = agent.run(
+                task=f"Review a bounded {domain} task with explicit evaluator feedback.",
+                domain=domain,
+                credentials={"openai": handle},
+                approve_provider_call=True,
+            )
+            selections = agent.prompt_learning_selections(result)
+            assert len(selections) == 1, domain
+            selection = selections[0]
+            assert selection.plan.rows[0].domain == domain
+            assert result.prompt["autonomous_prompt"]["adaptive_selection"]["selection_digest"] == selection.selection_digest  # type: ignore[index]
+            settled = agent.settle_prompt_learning(
+                selection,
+                arm_id=selection.arm_ids[0],
+                evaluator_id=f"{domain}-rubric",
+                evaluator_version="1",
+                reward=0.8,
+                passed=True,
+                outcome_digest=content_digest({"domain": domain, "run": result.run_id}),
+            )
+            assert settled.status == "settled"
+
+        cross = agent.run_cross_domain(
+            task="Review a bounded biomedical neuroscience task.",
+            subtasks=(
+                {"id": "bio", "domain": "biomedical", "task": "Review safety evidence."},
+                {"id": "neuro", "domain": "neuroscience", "task": "Review signal limitations."},
+            ),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+        )
+        cross_selections = agent.prompt_learning_selections(cross)
+        assert {selection.plan.rows[0].domain for selection in cross_selections} == {
+            "biomedical",
+            "neuroscience",
+            "cross_domain",
+        }
+        for selection in cross_selections:
+            agent.settle_prompt_learning(
+                selection,
+                arm_id=selection.arm_ids[0],
+                evaluator_id="cross-domain-rubric",
+                evaluator_version="1",
+                reward=0.7,
+                passed=True,
+                outcome_digest=content_digest({"selection": selection.selection_digest}),
+            )
+        assert coordinator.state.generation == len(AUTONOMOUS_DOMAINS) + len(cross_selections)
+        persisted = persistence.read()
+        assert persisted is not None
+        assert persisted.state.generation == coordinator.state.generation
+        assert "persistent-prompt-learning-secret" not in json.dumps(persisted.to_dict())
+        assert "Review a bounded" not in json.dumps(persisted.to_dict())
+
+        restored = AutonomousPromptLearningPersistenceCoordinator(prompt_registry, persistence=persistence)
+        assert restored.restore() is not None
+        assert restored.state.state_digest == coordinator.state.state_digest
+        with pytest.raises(BrainRunError, match="cannot override"):
+            agent.run(
+                task="Reject an externally supplied prompt state.",
+                domain="coding",
+                credentials={"openai": handle},
+                prompt_learning_state=AutonomousPromptLearningState.empty(prompt_registry.registry_digest),
+            )
     finally:
         server.shutdown()
         thread.join(timeout=2)

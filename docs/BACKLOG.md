@@ -1530,3 +1530,11 @@ rejecting prompt text, tasks, provider payloads, evaluator content, credentials,
 registry drift, malformed state, and oversized images. Focused Python and TypeScript coverage now
 exercises all-domain recovery, idempotent replay, stale-writer fencing, registry replacement, and
 tamper rejection.
+
+High-level application runs now consume the persistent prompt learner directly. Agent facades bind
+the coordinator's registry/state to direct and cross-domain execution, expose a bounded
+registry-verified `adaptive_selection` receipt in each result, and provide explicit selection
+extraction plus evaluator settlement helpers. Python and TypeScript coverage exercises all twelve
+domains, specialist fan-out, synthesis, generation persistence, restart recovery, secret/task
+redaction, and refusal of external state overrides. Provider success still cannot credit a prompt
+arm: only the caller's evaluator settlement advances the CAS-fenced learner.
