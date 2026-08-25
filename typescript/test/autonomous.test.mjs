@@ -2293,6 +2293,86 @@ test("adaptive prompt receipts survive direct, ordered-step, and automatic provi
   assert.doesNotMatch(store.value, /Review this coding workflow|Context planning-contract|provider execution/);
 });
 
+test("runAuto routes every domain and preserves the single/cross-domain approval boundary", async () => {
+  let providerCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      providerCalls += 1;
+      throw new Error("runAuto approval gate must stop before provider dispatch");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("auto-local", "https://auto-local.test", { requiresCredential: false }));
+  const allCapabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"];
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("auto-local", "auto-model", allCapabilities));
+  const tasks = {
+    coding: "debug this Rust repository",
+    browser: "navigate the browser and compare sources",
+    data: "validate this parquet dataset lineage",
+    science: "design a hypothesis experiment",
+    biomedical: "review this patient treatment evidence",
+    neuroscience: "analyze EEG preprocessing",
+    operations: "plan a rollback after an outage",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this subtask to a specialist agent",
+    multimodal: "inspect this image and transcript",
+    cross_domain: "perform an interdisciplinary synthesis",
+    evaluation: "run a benchmark holdout replay",
+  };
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await agent.runAuto(tasks[domain], { domain, approveProviderCall: false });
+    assert.equal(result.route.primary_domain, domain, domain);
+    assert.equal(result.route.cross_domain, false, domain);
+    assert.ok(result.blueprint?.blueprint, domain);
+    assert.equal(result.blueprint.blueprint.domain_profile.domain, domain, domain);
+    assert.equal(result.status, "approval_required", domain);
+    assert.equal(result.next_action, "review_provider_or_effect_approval", domain);
+    assert.equal(result.result?.status, "approval_required", domain);
+    assert.equal(result.planning, null, domain);
+  }
+  const cross = await agent.runAuto("research a biomedical neuroscience experiment with EEG patient evidence", { approveProviderCall: false });
+  assert.equal(cross.route.cross_domain, true);
+  assert.ok(cross.blueprint?.cross_domain_blueprint);
+  assert.equal(cross.blueprint.cross_domain_blueprint.child_blueprints.length, cross.route.selected_domains.length);
+  assert.equal(cross.planning, null);
+  assert.equal(cross.next_action, "review_provider_or_effect_approval");
+  assert.ok(cross.result);
+  assert.equal(providerCalls, 0);
+
+  const planningCalls = [];
+  const planningLlm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      planningCalls.push(body);
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (!planningMessage) return jsonResponse({ choices: [{ message: { role: "assistant", content: "automatic provider execution" }, finish_reason: "stop" }] });
+      const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+      const ids = contract.stage_catalogue.map((row) => row.id);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, focus_stage_ids: ids.slice(0, 1), review_required: false, confidence: 0.95, abstain: false }) }, finish_reason: "stop" }] });
+    },
+  });
+  planningLlm.registerProvider(openaiCompatibleProvider("auto-planner", "https://auto-planner.test", { requiresCredential: false, structuredOutputMode: "json_schema" }));
+  const planningAgent = new AutonomousAgent(planningLlm);
+  planningAgent.registerModel(candidate("auto-planner", "auto-planner-model", allCapabilities));
+  const planningBudget = new AutonomousCostBudget(5);
+  const planned = await planningAgent.runAuto("debug this Rust repository", {
+    domain: "coding",
+    planningMode: "provider",
+    planning: { approveProviderCall: true, costBudget: planningBudget },
+    acceptPlan: true,
+    approveProviderCall: true,
+    costBudget: planningBudget,
+  });
+  assert.equal(planned.planning_mode, "provider");
+  assert.equal(planned.status, "completed");
+  assert.equal(planned.planning?.status, "completed");
+  assert.equal(planned.result?.status, "completed");
+  assert.equal(planned.next_action, "complete");
+  assert.equal(planningCalls.length, 2);
+});
+
 test("keyless readiness composes all-domain evidence routing posture without source dispatch", async () => {
   let fetchCalls = 0;
   let sourceCalls = 0;

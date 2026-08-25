@@ -1546,3 +1546,11 @@ persistent coordinator, including planning-specific option aliases, and reject r
 replacement attempts. This closes the planning-to-learning handoff without persisting prompts,
 tasks, credentials, provider transcripts, or evaluator payloads; the remaining production work is
 caller integration of explicit evaluator signals and durable storage policy for each deployment.
+
+The TypeScript facade now has the same high-level automatic entrypoint as Python. `runAuto()` can
+route and execute any built-in domain or a bounded cross-domain fan-out, while preserving the
+provider-free blueprint boundary and returning a typed next action for route, plan, provider, or
+effect review. Its provider mode reuses the shared aggregate budget and existing plan-acceptance
+bridge, so callers do not get a second implicit planning or invocation path. The remaining
+deployment responsibility is still explicit credential, evaluator, effect, and durable-store
+integration rather than hidden SDK authority.

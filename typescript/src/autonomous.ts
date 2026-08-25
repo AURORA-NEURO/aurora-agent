@@ -239,6 +239,7 @@ export const AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-pla
 export const AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" as const;
 export const AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA = "bioprism-typescript-autonomous-ordered-step-plan-refinement/0.1" as const;
 export const AUTONOMOUS_PLAN_AND_RUN_SCHEMA = "bioprism-typescript-autonomous-plan-and-run/0.1" as const;
+export const AUTONOMOUS_AUTO_RUN_SCHEMA = "bioprism-typescript-autonomous-auto-run/0.1" as const;
 export const AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA = "bioprism-typescript-autonomous-evidence-backed-run/0.1" as const;
 export const MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_CHUNKS = 32;
 export const MAX_AUTONOMOUS_EVIDENCE_BACKED_CONTEXT_BYTES = 48_000;
@@ -1552,6 +1553,8 @@ export type AutonomousPlanAndRunStatus =
 export interface AutonomousPlanAndRunOptions extends AutonomousRunOptions {
   /** Provider planning is disabled unless supplied; its own approval is separate from execution approval. */
   planning?: AutonomousProviderPlanningOptions;
+  /** Optional caller-reviewed specialist tasks for a routed cross-domain plan. */
+  subtasks?: readonly AutonomousCrossDomainSubtask[];
   /** Prompt stage used when the outer run supplies prompt controls to nested provider planning. */
   planningPromptStage?: string;
   /** Optional independent value-only prompt state for the nested planning proposal. */
@@ -1574,6 +1577,36 @@ export interface AutonomousPlanAndRunResult {
   result: AutonomousRunResult | AutonomousCrossDomainRunResult | null;
   retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned";
   authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval";
+}
+
+export type AutonomousAutoPlanningMode = "deterministic" | "provider";
+
+/** One high-level automatic route that can execute deterministically or through reviewed planning. */
+export interface AutonomousAutoRunOptions extends AutonomousPlanAndRunOptions {
+  /** Deterministic execution is the default; provider planning is an explicit opt-in. */
+  planningMode?: AutonomousAutoPlanningMode;
+}
+
+export type AutonomousAutoRunNextAction =
+  | "review_route"
+  | "review_plan"
+  | "review_provider_or_effect_approval"
+  | "inspect_result"
+  | "complete";
+
+/** Value-only envelope for the route -> plan -> execute automatic brain boundary. */
+export interface AutonomousAutoRunResult {
+  schema: typeof AUTONOMOUS_AUTO_RUN_SCHEMA;
+  status: AutonomousPlanAndRunStatus;
+  route: AutonomousRouteProposal;
+  semantic_route: AutonomousSemanticRouteResult | null;
+  blueprint: AutonomousAutoBlueprint | null;
+  planning: AutonomousPlanAndRunResult | null;
+  result: AutonomousRunResult | AutonomousCrossDomainRunResult | null;
+  planning_mode: AutonomousAutoPlanningMode;
+  next_action: AutonomousAutoRunNextAction;
+  retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned";
+  authorization: "route_review_and_provider_or_effect_approval_remain_explicit";
 }
 
 const AUTONOMOUS_RUN_SEMANTIC_ROUTING_FIELDS = new Set([
@@ -5869,6 +5902,130 @@ export class AutonomousAgent {
   }
 
   /**
+   * Route and execute one task through the same high-level boundary regardless of domain.
+   * Deterministic mode performs a provider-free route/blueprint pass and then delegates to the
+   * ordinary single- or cross-domain executor. Provider mode delegates to `planAndRun`, preserving
+   * its separate planning acceptance and execution-approval gates. The route is resolved once and
+   * then passed back as a digest-verified override, so semantic routing or model selection cannot
+   * silently change between the preview and the actual invocation.
+   */
+  async runAuto(task: string, options: AutonomousAutoRunOptions = {}): Promise<AutonomousAutoRunResult> {
+    const taskText = boundedText("autonomous runAuto task", task, 32_000);
+    const planningMode = options.planningMode ?? "deterministic";
+    if (planningMode !== "deterministic" && planningMode !== "provider") throw new ArgumentError("runAuto planningMode must be deterministic or provider");
+    if (options.acceptedSingleDomainPlanRefinement !== undefined || options.acceptedCrossDomainPlanRefinement !== undefined) {
+      throw new ArgumentError("runAuto creates its own route and plan boundary; apply an accepted refinement through run or runCrossDomain");
+    }
+
+    const nextAction = (status: AutonomousPlanAndRunStatus, result: AutonomousRunResult | AutonomousCrossDomainRunResult | null): AutonomousAutoRunNextAction => {
+      if (status === "route_review_required" || status === "abstained") return "review_route";
+      if (status === "plan_review_required" || status === "provider_invalid" || status === "provider_disagreement") return "review_plan";
+      if (status === "approval_required" || status === "policy_review_required" || status === "policy_blocked" || status === "reconciliation_required") return "review_provider_or_effect_approval";
+      if (result === null) return "inspect_result";
+      return status === "completed" ? "complete" : "inspect_result";
+    };
+
+    if (planningMode === "provider") {
+      const { planningMode: _planningMode, ...planningOptions } = options;
+      const planned = await this.planAndRun(taskText, planningOptions);
+      return {
+        schema: AUTONOMOUS_AUTO_RUN_SCHEMA,
+        status: planned.status,
+        route: planned.route,
+        semantic_route: planned.semantic_route ?? null,
+        blueprint: planned.blueprint,
+        planning: planned,
+        result: planned.result,
+        planning_mode: planningMode,
+        next_action: nextAction(planned.status, planned.result),
+        retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
+        authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
+      };
+    }
+
+    const {
+      planningMode: _planningMode,
+      planning: _planning,
+      planningPromptStage: _planningPromptStage,
+      planningPromptLearningState: _planningPromptLearningState,
+      planningPromptLearningExploration: _planningPromptLearningExploration,
+      acceptPlan: _acceptPlan,
+      ...runOptions
+    } = options;
+    const costBudget = resolveAutonomousCostBudget(runOptions);
+    const routeResolution = await this.resolveExecutionRoute(taskText, runOptions, costBudget);
+    const route = routeResolution.route;
+    const semanticRoute = routeResolution.semanticRoute;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      const status = semanticRouteRunStatus(semanticRoute.status);
+      return {
+        schema: AUTONOMOUS_AUTO_RUN_SCHEMA,
+        status,
+        route,
+        semantic_route: semanticRoute,
+        blueprint: null,
+        planning: null,
+        result: null,
+        planning_mode: planningMode,
+        next_action: "review_route",
+        retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
+        authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
+      };
+    }
+    const envelope = await this.blueprint(taskText, {
+      domain: route.primary_domain ?? undefined,
+      routeOverride: route,
+      capability: runOptions.capability,
+      context: runOptions.context,
+      maxInputTokens: runOptions.maxInputTokens,
+      tools: runOptions.tools?.map((tool) => tool.name),
+      hints: runOptions.hints,
+      subtasks: runOptions.subtasks,
+      structuredDomainResponse: runOptions.structuredDomainResponse,
+      toolSelectionState: runOptions.toolSelectionState,
+      toolSelectionExploration: runOptions.toolSelectionExploration,
+    });
+    if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
+      return {
+        schema: AUTONOMOUS_AUTO_RUN_SCHEMA,
+        status: "route_review_required",
+        route,
+        semantic_route: semanticRoute,
+        blueprint: envelope,
+        planning: null,
+        result: null,
+        planning_mode: planningMode,
+        next_action: "review_route",
+        retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
+        authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
+      };
+    }
+    const executionOptions: AutonomousRunOptions = {
+      ...runOptions,
+      routeOverride: route,
+      costBudget,
+      maxTotalCostUnits: undefined,
+    };
+    const rawResult = envelope.cross_domain_blueprint
+      ? await this.runCrossDomain(taskText, executionOptions)
+      : await this.run(taskText, { ...executionOptions, domain: route.primary_domain });
+    const result = semanticRoute === null ? rawResult : { ...rawResult, semantic_route: semanticRoute };
+    return {
+      schema: AUTONOMOUS_AUTO_RUN_SCHEMA,
+      status: result.status,
+      route,
+      semantic_route: semanticRoute,
+      blueprint: envelope,
+      planning: null,
+      result,
+      planning_mode: planningMode,
+      next_action: nextAction(result.status, result),
+      retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
+      authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
+    };
+  }
+
+  /**
    * Ask an approved provider to order an existing dependency-closed step graph.
    *
    * This is the shared planning primitive for mission execution and other schedulers that do
@@ -6209,6 +6366,7 @@ export class AutonomousAgent {
       maxInputTokens: options.maxInputTokens,
       tools: options.tools?.map((tool) => tool.name),
       hints: options.hints,
+      subtasks: options.subtasks,
       structuredDomainResponse: options.structuredDomainResponse,
     });
     if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
@@ -6251,7 +6409,7 @@ export class AutonomousAgent {
         return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
       }
       if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
-      const result = await this.runCrossDomain(taskText, { ...executionOptions, acceptedCrossDomainPlanRefinement: proposal });
+      const result = await this.runCrossDomain(taskText, { ...executionOptions, subtasks: options.subtasks, acceptedCrossDomainPlanRefinement: proposal });
       return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
     const blueprint = envelope.blueprint;

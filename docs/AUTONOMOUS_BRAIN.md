@@ -9871,3 +9871,12 @@ registry and plan digests, arm identities, generation, exploration policy, and p
 rendered planner messages, task text, credentials, provider responses, and evaluator payloads stay
 transient. Focused coverage settles direct, ordered-step, and automatic planning choices and checks
 that persisted snapshots contain no raw planning contract or provider transcript.
+
+TypeScript now also exposes `AutonomousAgent.runAuto()` as the application-facing automatic brain
+entrypoint. It resolves a route once, builds the matching single- or cross-domain blueprint, and
+passes the verified route back into execution so model selection and semantic routing cannot drift
+between preview and dispatch. Deterministic mode delegates to the ordinary execution gates;
+`planningMode: "provider"` delegates to the explicit plan-acceptance bridge and returns both the
+planning envelope and execution result. The typed result exposes the next review action, semantic
+route, blueprint, status, and retention posture without creating provider or effect authority.
+All twelve TypeScript domains plus the cross-domain route are covered by approval-gated tests.
