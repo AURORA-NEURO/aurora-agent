@@ -125,6 +125,7 @@ pub mod molecule;
 pub mod mutation;
 pub mod oracle;
 pub mod projection;
+pub mod publication_copilot;
 pub mod quality_workbench;
 pub mod retrieval_assurance;
 pub mod span;
@@ -136,6 +137,13 @@ pub mod worldline;
 pub use canonical::{round_trips, Canonical};
 pub use clock::{Clock, Stamped};
 pub use projection::{Projection, ProjectionGap};
+pub use publication_copilot::{
+    prepare_publication_queue, publication_copilot_manifest, PublicationCopilotError,
+    PublicationCopilotReceipt, PublicationCopilotRequest, PublicationDisposition, RunState,
+    SignedResearchObject, ValidatedResearchRun,
+    CONTRACT_VERSION as PUBLICATION_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as PUBLICATION_COPILOT_FEATURE_ID,
+};
 pub use span::Span;
 
 pub use act::{

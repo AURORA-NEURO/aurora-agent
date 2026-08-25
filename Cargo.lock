@@ -185,6 +185,7 @@ version = "0.1.0"
 dependencies = [
  "bioprism-bioir",
  "bioprism-bundle",
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-mutation",
  "bioprism-oracle",

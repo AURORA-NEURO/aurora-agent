@@ -291,6 +291,11 @@ from .hubapi_interpretation import (
     HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
     HubapiMultimodalInterpretationAssuranceReceipt,
 )
+from .biolang_publication import (
+    BIOLANG_PUBLICATION_COPILOT_FEATURE_ID,
+    BIOLANG_PUBLICATION_COPILOT_CONTRACT_VERSION,
+    BiolangPublicationCopilotReceipt,
+)
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

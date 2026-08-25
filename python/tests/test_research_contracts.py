@@ -65,6 +65,7 @@ from prism_sdk.research_contracts import STORE_EVIDENCE_OPERATIONS_FEATURE_ID, S
 from prism_sdk.research_contracts import POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID, POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION, PolicyInteroperabilityControlReceipt
 from prism_sdk.research_contracts import SAFETY_MECHANISM_WORKFLOW_FEATURE_ID, SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION, SafetyMechanismWorkflowReceipt
 from prism_sdk.hubapi_interpretation import HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID, HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION, HubapiMultimodalInterpretationAssuranceReceipt
+from prism_sdk.biolang_publication import BIOLANG_PUBLICATION_COPILOT_FEATURE_ID, BIOLANG_PUBLICATION_COPILOT_CONTRACT_VERSION, BiolangPublicationCopilotReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2106,4 +2107,36 @@ def test_hubapi_multimodal_interpretation_preserves_comparability_and_locality()
     receipt.validate()
     assert receipt.feature_id == HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_biolang_publication_copilot_preserves_tool_and_replay_gates():
+    receipt = BiolangPublicationCopilotReceipt(
+        request_id="request:publication",
+        workflow_id="workflow:release",
+        scope="organoid:neural",
+        disposition="partial",
+        ranked_order=("release:a", "release:b"),
+        admitted_order=("release:a",),
+        blocked_order=("release:b",),
+        unknown_order=("release:b",),
+        release_order=("release:a",),
+        artifact_order=("artifact:a",),
+        evidence_order=("evidence:a",),
+        tool_invocation_order=("tool:ro-crate-pack",),
+        provenance_order=("a" * 64,),
+        replay_order=("b" * 64,),
+        benchmark_order=("c" * 64,),
+        omissions=("release:release:b:benchmark-missing",),
+        uncertainty=("release:release:b:replay-mismatch",),
+        negative_evidence=(),
+        replay_identity="d" * 64,
+        benchmark_digest="e" * 64,
+        effect_receipts=("invoke:declared-tools:request:publication",),
+        objects=({"run_id": "run:a", "release_id": "release:a", "artifact_ids": ["artifact:a"], "evidence_receipt_ids": ["evidence:a"], "raw_data_local": True, "boundary": PRECLINICAL_BOUNDARY},),
+        publication_artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == BIOLANG_PUBLICATION_COPILOT_FEATURE_ID
+    assert receipt.contract_version == BIOLANG_PUBLICATION_COPILOT_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
