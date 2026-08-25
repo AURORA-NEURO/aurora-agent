@@ -331,6 +331,7 @@ from .brain_throughput_contract import BrainThroughputContractModelReceipt
 from .brain_federated_contract import BrainFederatedContractModelReceipt
 from .brain_evidence_copilot import BrainEvidenceResearchCopilotReceipt
 from .brain_multimodal_copilot import BrainMultimodalEvidenceResearchCopilotReceipt
+from .brain_high_throughput_copilot import BrainHighThroughputEvidenceResearchCopilotReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

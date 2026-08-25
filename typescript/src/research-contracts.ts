@@ -215,6 +215,8 @@ export const EVIDENCE_RESEARCH_COPILOT_FEATURE_ID = "AFA-brain-P01-F09" as const
 export const EVIDENCE_RESEARCH_COPILOT_CONTRACT_VERSION = "brain-evidence-research-copilot/1.0" as const;
 export const MULTIMODAL_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F10" as const;
 export const MULTIMODAL_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-multimodal-evidence-research-copilot/1.0" as const;
+export const HIGH_THROUGHPUT_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F11" as const;
+export const HIGH_THROUGHPUT_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-high-throughput-evidence-research-copilot/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3797,6 +3799,27 @@ export function validateBrainMultimodalEvidenceResearchCopilotReceipt(receipt: B
 }
 
 export function brainMultimodalEvidenceResearchCopilotReceiptDigest(receipt: BrainMultimodalEvidenceResearchCopilotReceipt): string { validateBrainMultimodalEvidenceResearchCopilotReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainHighThroughputEvidenceResearchCopilotReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; operator_id: string; batch_id: string; partition: string; checkpoint_seq: number;
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; plan_order: string[]; action_order: string[]; tool_order: string[]; candidate_order: string[];
+  admitted_order: string[]; blocked_order: string[]; unknown_order: string[]; queue_digest: string; evidence_receipt_digest: string; plan_digest: string;
+  approval_reference: string; replay_identity: string; budget_units: number; omissions: string[]; uncertainty: string[]; negative_evidence: string[];
+  effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainHighThroughputEvidenceResearchCopilotReceipt(receipt: BrainHighThroughputEvidenceResearchCopilotReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== HIGH_THROUGHPUT_EVIDENCE_COPILOT_FEATURE_ID || receipt.contract_version !== HIGH_THROUGHPUT_EVIDENCE_COPILOT_CONTRACT_VERSION) throw new Error("throughput copilot schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.operator_id.trim() || !receipt.batch_id.trim() || !receipt.partition.trim() || !receipt.candidate_order.length || !receipt.plan_order.length || !receipt.action_order.length || receipt.plan_order.length !== receipt.action_order.length || !receipt.tool_order.length || !receipt.effect_receipts.length || !Number.isInteger(receipt.budget_units) || receipt.budget_units <= 0) throw new Error("throughput copilot identity, batch, bounded plan, tool, locality, budget, or effects are incomplete");
+  if (receipt.admitted_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.blocked_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.unknown_order.some((value) => !receipt.candidate_order.includes(value))) throw new Error("throughput copilot state is not covered by candidate order");
+  for (const values of [receipt.plan_order, receipt.action_order, receipt.tool_order, receipt.candidate_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("throughput copilot ordering is invalid");
+  for (const value of [receipt.queue_digest, receipt.evidence_receipt_digest, receipt.plan_digest, receipt.approval_reference, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("throughput copilot digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("invoke:declared-tool:") && effect !== "block:unsafe-release")) throw new Error("throughput copilot effect is outside declared-tool gate");
+  if (receipt.disposition !== "blocked" && receipt.admitted_order.length && !receipt.effect_receipts.some((effect) => effect.startsWith("invoke:declared-tool:"))) throw new Error("admitted throughput batch requires a declared-tool receipt");
+  if (receipt.disposition !== "qualified" && receipt.disposition !== "partial" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("non-admitted throughput batch must be explicitly blocked");
+}
+
+export function brainHighThroughputEvidenceResearchCopilotReceiptDigest(receipt: BrainHighThroughputEvidenceResearchCopilotReceipt): string { validateBrainHighThroughputEvidenceResearchCopilotReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

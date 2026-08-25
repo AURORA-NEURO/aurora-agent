@@ -81,6 +81,7 @@ from prism_sdk.brain_throughput_contract import BrainThroughputContractModelRece
 from prism_sdk.brain_federated_contract import BrainFederatedContractModelReceipt
 from prism_sdk.brain_evidence_copilot import BrainEvidenceResearchCopilotReceipt
 from prism_sdk.brain_multimodal_copilot import BrainMultimodalEvidenceResearchCopilotReceipt
+from prism_sdk.brain_high_throughput_copilot import BrainHighThroughputEvidenceResearchCopilotReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2592,6 +2593,37 @@ def test_brain_multimodal_copilot_keeps_tool_denial_explicit():
         negative_evidence=("copilot:inspect-local-multimodal-evidence-not-allowed",),
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_high_throughput_copilot_keeps_capacity_block_explicit():
+    receipt = BrainHighThroughputEvidenceResearchCopilotReceipt(
+        request_id="request:throughput-copilot",
+        operator_id="operator:researcher",
+        batch_id="batch:001",
+        partition="partition:imaging",
+        checkpoint_seq=2,
+        disposition="blocked",
+        plan_order=("plan:checkpoint:2",),
+        action_order=("action:checkpoint:2",),
+        tool_order=("tool:throughput-evidence",),
+        candidate_order=("evidence:a",),
+        admitted_order=("evidence:a",),
+        blocked_order=(),
+        unknown_order=(),
+        queue_digest="a" * 64,
+        evidence_receipt_digest="b" * 64,
+        plan_digest="c" * 64,
+        approval_reference="d" * 64,
+        replay_identity="e" * 64,
+        budget_units=1,
+        omissions=("copilot:action-budget-exhausted",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "f" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
