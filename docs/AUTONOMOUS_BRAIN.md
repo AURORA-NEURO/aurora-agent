@@ -10846,3 +10846,11 @@ after the dispatch checkpoint still require caller reconciliation; protected reh
 solves restart-safe pre-dispatch identity recovery. Tests cover approval-gated restart behavior,
 async receipt lookup, explicit precedence, receipt tampering, metadata-only persistence, and all
 twelve built-in domains in both SDKs.
+
+The TypeScript remote control-plane worker now uses the same protected rehydrator as the local
+worker. `AutonomousDurableBrainJobWorker` accepts `protectedRehydration=` when a process restart
+or deployment topology cannot retain a bespoke private-spec callback. Its receipt identity is
+checked against the leased remote job before the shared adapter resolves the caller-owned value,
+so approval release, retry attempt, domain, capability, and spec drift remain part of the same
+fence. This closes parity across local, remote, synchronous, and asynchronous worker paths;
+explicit `resolve` callbacks remain authoritative and remote job projections remain metadata-only.

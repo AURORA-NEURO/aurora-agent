@@ -1,10 +1,11 @@
 import { ArgumentError, ProviderRuntimeError } from "./errors.js";
 import { AutonomousBrainFacade, AutonomousBrainPlan, type AutonomousBrainAdaptiveCycleExecution, type AutonomousBrainAdaptiveCycleOptions, type AutonomousBrainCycleExecution, type AutonomousBrainCycleOptions, type AutonomousBrainExecution, type AutonomousBrainExecuteOptions, type AutonomousBrainRequest } from "./autonomous-brain-facade.js";
-import { autonomousBrainJobSpecDigest, type AutonomousBrainJobExecutionMode, type AutonomousBrainJobResolution } from "./autonomous-brain-worker.js";
+import { AutonomousBrainJobProtectedRehydrator, autonomousBrainJobSpecDigest, type AutonomousBrainJobExecutionMode, type AutonomousBrainJobResolution } from "./autonomous-brain-worker.js";
 import type { ApiClient } from "./client.js";
 import { digestJsonSync } from "./tooling.js";
 import type { AutonomousRunTraceStore, AutonomousRunTraceSummary } from "./autonomous-run-trace.js";
 import type { AutonomousCredentialBinding, AutonomousCredentialScope } from "./autonomous-credential-scope.js";
+import type { AutonomousDomainName } from "./autonomous-domains.js";
 import type {
   BrainControlEvent,
   BrainJobApprovalAction,
@@ -68,7 +69,10 @@ export interface AutonomousDurableBrainJobWorkerOptions {
   brain: AutonomousBrainFacade;
   apiClient: AutonomousDurableBrainJobApi;
   workerId: string;
-  resolve: AutonomousDurableBrainJobResolver;
+  /** Explicit resolver remains authoritative when both resolution paths are configured. */
+  resolve?: AutonomousDurableBrainJobResolver;
+  /** Optional protected receipt fallback for restart-safe caller-owned private specs. */
+  protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   traceStore?: AutonomousRunTraceStore;
   leaseMs?: number;
   heartbeatMs?: number;
@@ -235,7 +239,8 @@ export class AutonomousDurableBrainJobWorker {
   readonly brain: AutonomousBrainFacade;
   readonly apiClient: AutonomousDurableBrainJobApi;
   readonly workerId: string;
-  readonly resolve: AutonomousDurableBrainJobResolver;
+  readonly resolve?: AutonomousDurableBrainJobResolver;
+  readonly protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   readonly traceStore?: AutonomousRunTraceStore;
   readonly leaseMs: number;
   readonly heartbeatMs: number;
@@ -245,11 +250,14 @@ export class AutonomousDurableBrainJobWorker {
   constructor(options: AutonomousDurableBrainJobWorkerOptions) {
     if (!options || !(options.brain instanceof AutonomousBrainFacade)) throw new ArgumentError("durable brain worker requires an AutonomousBrainFacade");
     if (!options.apiClient || ["brainJobSubmit", "brainJobStatus", "brainJobEvents", "brainJobApproval", "brainJobClaim", "brainJobClaimNext", "brainJobRenew", "brainJobCheckpoint", "brainJobComplete", "brainJobFail", "brainJobReconcile", "brainJobCancel"].some((name) => typeof (options.apiClient as unknown as Record<string, unknown>)[name] !== "function")) throw new ArgumentError("durable brain worker requires the complete brain job ApiClient surface");
-    if (typeof options.resolve !== "function") throw new ArgumentError("durable brain worker resolver must be callable");
+    if (options.resolve !== undefined && typeof options.resolve !== "function") throw new ArgumentError("durable brain worker resolver must be callable");
+    if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousBrainJobProtectedRehydrator)) throw new ArgumentError("durable brain worker protectedRehydration is malformed");
+    if (options.resolve === undefined && options.protectedRehydration === undefined) throw new ArgumentError("durable brain worker requires resolve or protectedRehydration");
     this.brain = options.brain;
     this.apiClient = options.apiClient;
     this.workerId = boundedIdentifier("durable brain workerId", options.workerId);
     this.resolve = options.resolve;
+    this.protectedRehydration = options.protectedRehydration;
     if (options.traceStore !== undefined && (typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function")) throw new ArgumentError("durable brain worker traceStore is malformed");
     this.traceStore = options.traceStore;
     this.leaseMs = boundedInteger("durable brain worker leaseMs", options.leaseMs ?? 300_000, 100, MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_LEASE_MS);
@@ -331,7 +339,16 @@ export class AutonomousDurableBrainJobWorker {
     try {
       const approvalReleased = await this.approvalReleased(job.job_id);
       await this.checkpoint(job.job_id, { phase: "resolving_private_spec", checkpointDigest: digestJsonSync({ schema: AUTONOMOUS_DURABLE_BRAIN_JOB_WORKER_SCHEMA, job_id: job.job_id, spec_digest: job.spec_digest, attempt: job.attempts }), sideEffectBoundary: "not_started" });
-      resolution = await this.resolve({ job, approvalReleased, attempt: job.attempts });
+      resolution = this.resolve !== undefined
+        ? await this.resolve({ job, approvalReleased, attempt: job.attempts })
+        : await this.protectedRehydration!.resolve({
+          jobId: job.job_id,
+          specDigest: job.spec_digest,
+          domain: job.domain as AutonomousDomainName,
+          capability: job.capability,
+          attempt: job.attempts,
+          approvalReleased,
+        });
       this.validateResolution(job, resolution);
       const plan = await this.brain.plan(resolution.request);
       if (!requestDomainCovered(plan, job.domain)) throw new ArgumentError("rehydrated brain request is outside the durable job domain");

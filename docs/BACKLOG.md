@@ -1837,3 +1837,10 @@ caller-owned receipts bound to job/spec/domain/capability/attempt/approval ident
 resolver precedence and async lookup support. Focused tests cover all domains, tampering, approval
 gates, and metadata-only persistence. Deployment work remains the caller-owned receipt/vault,
 authorization, rotation, and external-effect reconciliation integration.
+
+The TypeScript remote control-plane worker now shares this path with the local worker: callers may
+provide `protectedRehydration` without implementing a bespoke `resolve` callback. Remote tests
+rehydrate every built-in domain through the queue, verify approval-gated restart behavior, reject
+tampered spec identity before dispatch, and prove explicit resolver precedence. The remaining
+deployment work is still intentionally external: receipt storage, encryption, identity and
+authorization issuance, retention/rotation, and reconciliation of uncertain effects.

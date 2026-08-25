@@ -5,11 +5,16 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousBrainFacade,
+  AutonomousBrainJobProtectedRehydrator,
   AutonomousDurableBrainJobWorker,
+  AutonomousProtectedRehydrationAdapter,
+  AutonomousProtectedRehydrationBoundary,
+  AutonomousProtectedRehydrationContext,
   LLMRuntime,
   ProviderSetup,
   ProviderRuntimeError,
   autonomousBrainJobSpecDigest,
+  protectedValueDigest,
 } from "../dist/index.js";
 
 const model = {
@@ -246,6 +251,115 @@ test("remote brain worker submits, approval-gates, and executes every built-in s
   assert.equal(runtime.providerCalls, submitted.length);
   assert.ok(api.seen.some((row) => row.operation === "claim_next" || row.operation === "claim"));
   assert.ok(api.seen.some((row) => row.operation === "checkpoint" && row.args.side_effect_boundary === "unknown"));
+  assert.ok(api.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "task")));
+  assert.ok(api.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "prompt")));
+});
+
+test("remote brain worker rehydrates protected receipts across every domain and preserves explicit resolver precedence", async () => {
+  const runtime = makeBrain();
+  const { brain } = runtime;
+  const api = remoteBrainApi();
+  const values = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "tenant-remote-worker", actorId: "remote-worker", sessionId: "protected", authorizationDigest: "c".repeat(64) }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 400 },
+  );
+  const protectedRehydration = new AutonomousBrainJobProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => ({
+      job_id: context.jobId,
+      spec_digest: context.specDigest,
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+      value_digest: values.get(context.jobId).valueDigest,
+    }),
+  });
+  const worker = new AutonomousDurableBrainJobWorker({
+    brain,
+    apiClient: api,
+    workerId: "remote-protected-worker",
+    protectedRehydration,
+  });
+  const submitted = [];
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const request = domain === "cross_domain"
+      ? { task: "research a biomedical neuroscience experiment with patient EEG evidence", allow_cross_domain: true }
+      : { task: tasks[domain], domain, capability: "bounded_task" };
+    const selectedPolicy = policy("abcdef"[index % 6]);
+    const result = await worker.submit({ idempotencyKey: `protected-remote-${domain}-${index}`, request, mode: "execute", policyDigest: selectedPolicy });
+    assert.equal(result.status, "submitted", domain);
+    const resolution = {
+      specDigest: result.job.spec_digest,
+      policyDigest: selectedPolicy,
+      request,
+      mode: "execute",
+      execute: { run: { candidates: [model] } },
+    };
+    const valueDigest = protectedValueDigest(resolution);
+    values.set(valueDigest, resolution);
+    values.set(result.job.job_id, { valueDigest });
+    submitted.push(result.job);
+  }
+  for (const job of submitted) {
+    const waiting = await worker.runOnce(job.job_id);
+    assert.equal(waiting.status, "waiting_approval", job.domain);
+    await worker.approval(job.job_id, "approve", { authorizationDigest: "d".repeat(64) });
+    const completed = await worker.runOnce(job.job_id);
+    assert.equal(completed.status, "succeeded", job.domain);
+    assert.equal(completed.execution.status, "completed", job.domain);
+  }
+  // Cross-domain execution has one bounded provider call per specialist plus synthesis.
+  const protectedProviderCalls = runtime.providerCalls;
+  assert.equal(protectedProviderCalls, submitted.length + 2);
+
+  const tamperedWorker = new AutonomousDurableBrainJobWorker({
+    brain,
+    apiClient: api,
+    workerId: "remote-tampered-worker",
+    protectedRehydration: new AutonomousBrainJobProtectedRehydrator({
+      adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+      receiptResolver: (context) => ({
+        job_id: context.jobId,
+        spec_digest: "0".repeat(64),
+        domain: context.domain,
+        capability: context.capability,
+        attempt: context.attempt,
+        approval_released: context.approvalReleased,
+        value_digest: values.get(submitted[0].job_id).valueDigest,
+      }),
+    }),
+  });
+  const tamperedSubmission = await tamperedWorker.submit({ idempotencyKey: "protected-remote-tampered", request: { task: tasks.coding, domain: "coding", capability: "bounded_task" }, mode: "execute", policyDigest: policy("f") });
+  const tamperedRun = await tamperedWorker.runOnce(tamperedSubmission.job.job_id);
+  assert.equal(tamperedRun.status, "failed");
+  assert.equal(tamperedRun.failure_code, "protocol");
+  assert.equal(runtime.providerCalls, protectedProviderCalls);
+
+  const explicitSubmission = await worker.submit({ idempotencyKey: "protected-remote-explicit", request: { task: tasks.coding, domain: "coding", capability: "bounded_task" }, mode: "execute", policyDigest: policy("e") });
+  let explicitCalls = 0;
+  let fallbackCalls = 0;
+  const explicitWorker = new AutonomousDurableBrainJobWorker({
+    brain,
+    apiClient: api,
+    workerId: "remote-explicit-worker",
+    protectedRehydration: new AutonomousBrainJobProtectedRehydrator({
+      adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+      receiptResolver: () => { fallbackCalls += 1; throw new Error("protected fallback must remain dormant"); },
+    }),
+    resolve: ({ job }) => {
+      explicitCalls += 1;
+      return { specDigest: job.spec_digest, policyDigest: policy("e"), request: { task: tasks.coding, domain: "coding", capability: "bounded_task" }, mode: "execute", execute: { run: { candidates: [model] } } };
+    },
+  });
+  assert.equal((await explicitWorker.runOnce(explicitSubmission.job.job_id)).status, "waiting_approval");
+  await explicitWorker.approval(explicitSubmission.job.job_id, "approve", { authorizationDigest: "e".repeat(64) });
+  assert.equal((await explicitWorker.runOnce(explicitSubmission.job.job_id)).status, "succeeded");
+  assert.equal(explicitCalls, 2);
+  assert.equal(fallbackCalls, 0);
+  assert.equal(runtime.providerCalls, protectedProviderCalls + 1);
   assert.ok(api.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "task")));
   assert.ok(api.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "prompt")));
 });
