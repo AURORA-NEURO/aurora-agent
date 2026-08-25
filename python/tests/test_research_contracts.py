@@ -47,6 +47,7 @@ from prism_sdk.research_contracts import QUALITY_ASSURANCE_FEATURE_ID, QUALITY_A
 from prism_sdk.research_contracts import MECHANISM_CONTROL_FEATURE_ID, MECHANISM_CONTROL_CONTRACT_VERSION, MechanismControlReceipt
 from prism_sdk.research_contracts import EVIDENCE_WORKBENCH_FEATURE_ID, EVIDENCE_WORKBENCH_CONTRACT_VERSION, EvidenceWorkbenchReceipt
 from prism_sdk.research_contracts import ANALYSIS_CONTROL_FEATURE_ID, ANALYSIS_CONTROL_CONTRACT_VERSION, AnalysisControlReceipt
+from prism_sdk.research_contracts import CONTEXT_ASSURANCE_FEATURE_ID, CONTEXT_ASSURANCE_CONTRACT_VERSION, ContextAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1672,4 +1673,23 @@ def test_analysis_control_preserves_ranked_digest_only_portfolio():
     receipt.validate()
     assert receipt.feature_id == ANALYSIS_CONTROL_FEATURE_ID
     assert receipt.contract_version == ANALYSIS_CONTROL_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_context_assurance_preserves_stale_fact_and_signed_digest_exchange():
+    receipt = ContextAssuranceReceipt(
+        request_id="context:assurance",
+        workflow_id="workflow:context",
+        question_id="question:organoid",
+        disposition="partial",
+        context={"context_id": "compiled-context:context:assurance", "disposition": "partial", "fact_order": ("fact:a", "fact:b"), "selected_order": ("fact:a",), "blocked_order": ("fact:b",), "class_order": ("mechanism",), "semantic_order": ("a" * 64,), "evidence_order": ("b" * 64,), "provenance_order": ("c" * 64,), "omissions": (), "uncertainty": ("fact:fact:b:stale-context",), "negative_evidence": (), "replay_identity": "d" * 64, "context_digest": "e" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        checks=("freshness, comparability, policy, federation, approval, locality, and budget gates are explicit",),
+        omissions=(),
+        uncertainty=("fact:fact:b:stale-context",),
+        negative_evidence=(),
+        effect_receipts=("exchange:signed-context-digest:fact:a", "exchange:signed-context-digest:fact:b"),
+    )
+    receipt.validate()
+    assert receipt.feature_id == CONTEXT_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == CONTEXT_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

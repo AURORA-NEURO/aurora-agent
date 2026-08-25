@@ -165,6 +165,8 @@ EVIDENCE_WORKBENCH_FEATURE_ID = "AFA-bioworlds-P01-F17"
 EVIDENCE_WORKBENCH_CONTRACT_VERSION = "bioworlds-local-evidence-workbench/1.0"
 ANALYSIS_CONTROL_FEATURE_ID = "AFA-devx-P13-F31"
 ANALYSIS_CONTROL_CONTRACT_VERSION = "devx-federated-analysis-control-plane/1.0"
+CONTEXT_ASSURANCE_FEATURE_ID = "AFA-registry-P03-F28"
+CONTEXT_ASSURANCE_CONTRACT_VERSION = "registry-federated-context-compilation-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3754,3 +3756,50 @@ class AnalysisControlReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "objective_id": self.objective_id, "disposition": self.disposition, "portfolio": dict(self.portfolio), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ContextAssuranceReceipt:
+    """Cross-language validator for federated continual context compilation."""
+
+    request_id: str
+    workflow_id: str
+    question_id: str
+    disposition: str
+    context: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = CONTEXT_ASSURANCE_FEATURE_ID
+    contract_version: str = CONTEXT_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != CONTEXT_ASSURANCE_FEATURE_ID or self.contract_version != CONTEXT_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("context assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.question_id.strip() or not self.checks or not self.effect_receipts or self.context.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("context assurance identity, context, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"compiled", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("context assurance disposition is unknown")
+        selected = tuple(self.context.get("selected_order", ()))
+        blocked = tuple(self.context.get("blocked_order", ()))
+        unresolved = tuple(self.context.get("omissions", ())) + tuple(self.context.get("uncertainty", ())) + tuple(self.context.get("negative_evidence", ()))
+        if not selected and not blocked and not unresolved:
+            raise ResearchContractError("context assurance must retain selected or unresolved context")
+        for values in (tuple(self.context.get("fact_order", ())), selected, blocked, tuple(self.context.get("class_order", ())), tuple(self.context.get("omissions", ())), tuple(self.context.get("uncertainty", ())), tuple(self.context.get("negative_evidence", ())), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("context assurance ordering is invalid")
+        for value in tuple(self.context.get("semantic_order", ())) + tuple(self.context.get("evidence_order", ())) + tuple(self.context.get("provenance_order", ())) + (self.context.get("replay_identity"), self.context.get("context_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("context assurance digest is invalid")
+        if not isinstance(self.context.get("context_id"), str) or not self.context["context_id"].strip():
+            raise ResearchContractError("context assurance context identity is incomplete")
+        if any(not effect.startswith("exchange:signed-context-digest:") for effect in self.effect_receipts):
+            raise ResearchContractError("context assurance effect is not signed digest-only exchange")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "question_id": self.question_id, "disposition": self.disposition, "context": dict(self.context), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

@@ -50,12 +50,21 @@
 //! tier it claims. It has not been shown to be scientifically good.
 
 pub mod gate;
+pub mod context_assurance;
 pub mod index;
 pub mod pack;
 pub mod promote;
 pub mod tier;
 
 pub use gate::{gate, gate_document, GateFinding, GateOutcome, Policy};
+pub use context_assurance::{
+    assure_context_compilation, CompiledContext, ContextAssuranceError,
+    ContextAssuranceReceipt, ContextCompilationRequest, ContextDisposition, ContextFact, FactState,
+    CONTRACT_VERSION as CONTEXT_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_ASSURANCE_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as CONTEXT_ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as CONTEXT_ASSURANCE_SCHEMA_VERSION,
+};
 pub use index::{PackStatus, PublicationEvent, RegistryError, RegistryIndex};
 pub use pack::{
     BenchmarkPack, OracleDisagreement, PackBuilder, PackError, PackInstance, ParentRef,

@@ -147,6 +147,8 @@ export const EVIDENCE_WORKBENCH_FEATURE_ID = "AFA-bioworlds-P01-F17" as const;
 export const EVIDENCE_WORKBENCH_CONTRACT_VERSION = "bioworlds-local-evidence-workbench/1.0" as const;
 export const ANALYSIS_CONTROL_FEATURE_ID = "AFA-devx-P13-F31" as const;
 export const ANALYSIS_CONTROL_CONTRACT_VERSION = "devx-federated-analysis-control-plane/1.0" as const;
+export const CONTEXT_ASSURANCE_FEATURE_ID = "AFA-registry-P03-F28" as const;
+export const CONTEXT_ASSURANCE_CONTRACT_VERSION = "registry-federated-context-compilation-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2489,6 +2491,40 @@ export function validateAnalysisControlReceipt(receipt: AnalysisControlReceipt):
 }
 
 export function analysisControlReceiptDigest(receipt: AnalysisControlReceipt): string { validateAnalysisControlReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ContextAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  question_id: string;
+  disposition: "compiled" | "partial" | "unknown" | "blocked";
+  context: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateContextAssuranceReceipt(receipt: ContextAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== CONTEXT_ASSURANCE_FEATURE_ID || receipt.contract_version !== CONTEXT_ASSURANCE_CONTRACT_VERSION) throw new Error("context assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.question_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.context.boundary !== PRECLINICAL_BOUNDARY) throw new Error("context assurance identity, context, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["compiled", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("context assurance disposition is unknown");
+  const selected = Array.isArray(receipt.context.selected_order) ? receipt.context.selected_order as string[] : [];
+  const blocked = Array.isArray(receipt.context.blocked_order) ? receipt.context.blocked_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.context.omissions) ? receipt.context.omissions as string[] : []), ...(Array.isArray(receipt.context.uncertainty) ? receipt.context.uncertainty as string[] : []), ...(Array.isArray(receipt.context.negative_evidence) ? receipt.context.negative_evidence as string[] : [])];
+  if (!selected.length && !blocked.length && !unresolved.length) throw new Error("context assurance must retain selected or unresolved context");
+  for (const values of [Array.isArray(receipt.context.fact_order) ? receipt.context.fact_order as string[] : [], selected, blocked, Array.isArray(receipt.context.class_order) ? receipt.context.class_order as string[] : [], Array.isArray(receipt.context.omissions) ? receipt.context.omissions as string[] : [], Array.isArray(receipt.context.uncertainty) ? receipt.context.uncertainty as string[] : [], Array.isArray(receipt.context.negative_evidence) ? receipt.context.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("context assurance ordering is invalid");
+  for (const value of [...(Array.isArray(receipt.context.semantic_order) ? receipt.context.semantic_order : []), ...(Array.isArray(receipt.context.evidence_order) ? receipt.context.evidence_order : []), ...(Array.isArray(receipt.context.provenance_order) ? receipt.context.provenance_order : []), receipt.context.replay_identity, receipt.context.context_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("context assurance digest is invalid");
+  if (typeof receipt.context.context_id !== "string" || !receipt.context.context_id.trim()) throw new Error("context assurance context identity is incomplete");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:signed-context-digest:"))) throw new Error("context assurance effect is not signed digest-only exchange");
+}
+
+export function contextAssuranceReceiptDigest(receipt: ContextAssuranceReceipt): string { validateContextAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
