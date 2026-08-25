@@ -1250,6 +1250,25 @@ export type {
   AutonomousPromptAdaptiveSelectionJSON,
 } from "./autonomous-prompt-registry.js";
 export {
+  AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_RETENTION,
+  MAX_AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_BYTES,
+  AutonomousPromptLearningSnapshot,
+  snapshotAutonomousPromptLearning,
+  validateAutonomousPromptLearningSnapshot,
+  AutonomousPromptLearningPersistenceCoordinator,
+  JsonAutonomousPromptLearningSnapshotPersistence,
+  TransactionalJsonAutonomousPromptLearningSnapshotPersistence,
+  WebStorageAutonomousPromptLearningSnapshotTextStore,
+} from "./autonomous-prompt-learning-persistence.js";
+export type {
+  AutonomousPromptLearningSnapshotJSON,
+  AutonomousPromptLearningSnapshotPersistence,
+  AutonomousPromptLearningSnapshotTextStore,
+  AutonomousPromptLearningTransactionalSnapshotTextStore,
+  AutonomousPromptLearningSettlementOptions,
+} from "./autonomous-prompt-learning-persistence.js";
+export {
   AUTONOMOUS_EVIDENCE_RETRY_POLICY_SCHEMA,
   AUTONOMOUS_EVIDENCE_RETRY_ATTEMPT_SCHEMA,
   MAX_AUTONOMOUS_EVIDENCE_RETRY_ATTEMPTS,

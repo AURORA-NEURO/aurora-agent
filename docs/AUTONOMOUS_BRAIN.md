@@ -9833,3 +9833,17 @@ trace, cross-domain child, and synthesis paths because those layers delegate to 
 stage invocation boundary. Adaptive settlement remains explicit and caller-owned: a completed
 stage is not treated as reward until an evaluator supplies its bounded outcome and settlement
 identity.
+
+Prompt-learning state can now survive process restarts without weakening that boundary. Python
+and TypeScript expose canonical, digest-bound snapshot images plus JSON persistence adapters:
+`JsonAutonomousPromptLearningSnapshotPersistence` is suitable for a caller-owned durable store,
+while the transactional variants require a compare-and-set text store and fence competing
+workers. `AutonomousPromptLearningPersistenceCoordinator` owns the registry-bound in-memory state,
+serializes select/settle/restore/flush operations, advances generations only after a successful
+write, and rolls back a local settlement when a stale writer loses the CAS race. Snapshots retain
+only prompt-arm statistics, settlement keys, generation lineage, registry identity, and explicit
+retention markers; rendered prompts, tasks, provider responses, evaluator payloads, credentials,
+and secret material are rejected or excluded. A restored coordinator therefore either resumes the
+exact learner generation or fails closed on tampering, registry replacement, malformed JSON,
+oversized state, or stale persistence identity. Applications still decide when an evaluator has
+enough evidence to settle a choice; persistence never converts provider output into reward.

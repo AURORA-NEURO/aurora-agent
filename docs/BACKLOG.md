@@ -1518,3 +1518,15 @@ exploration drift, stale state, stage drift, and malformed adaptive state still 
 before provider dispatch. All-domain workflow coverage asserts adaptive selection metadata at
 the stage boundary, with no prompt text, task text, credentials, or provider payloads entering
 checkpoints or learning state.
+
+The prompt learner is now restart-safe at the SDK boundary. Python and TypeScript provide
+canonical, digest-bound JSON snapshots and registry-bound persistence coordinators. A plain
+adapter supports caller-owned durable storage; a transactional adapter requires compare-and-set
+semantics so concurrent workers cannot overwrite a newer learner generation. Restore, flush, and
+settlement are serialized, settlement generation advances happen only after persistence succeeds,
+and failed stale writes roll back the local state. Snapshots are value-only and bounded: they keep
+arm statistics, replay keys, registry identity, generation lineage, and retention markers, while
+rejecting prompt text, tasks, provider payloads, evaluator content, credentials, secrets, tampering,
+registry drift, malformed state, and oversized images. Focused Python and TypeScript coverage now
+exercises all-domain recovery, idempotent replay, stale-writer fencing, registry replacement, and
+tamper rejection.

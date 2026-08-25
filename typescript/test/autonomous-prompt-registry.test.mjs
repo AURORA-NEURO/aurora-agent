@@ -11,6 +11,9 @@ import {
   LLMRuntime,
   builtinAutonomousPromptRegistry,
   builtinAutonomousPromptTemplates,
+  JsonAutonomousPromptLearningSnapshotPersistence,
+  TransactionalJsonAutonomousPromptLearningSnapshotPersistence,
+  AutonomousPromptLearningPersistenceCoordinator,
   createAutonomousLLMEvidenceAdapterRegistration,
   digestJsonSync,
 } from "../dist/index.js";
@@ -33,6 +36,18 @@ function context(domain) {
     requirement: { domain, stage_id: "answer", requirement_id: `${domain}:answer:answer` },
     request: { source_id: "prompt-fixture", request_id: `request-${domain}`, metadata: { fixture: "offline" } },
   };
+}
+
+class CasTextStore {
+  value = null;
+  read() { return this.value; }
+  write(value) { this.value = value; }
+  writeIfUnchanged(expectedSnapshotDigest, value) {
+    const observed = this.value === null ? null : JSON.parse(this.value).snapshot_digest;
+    if (observed !== expectedSnapshotDigest) return false;
+    this.value = value;
+    return true;
+  }
 }
 
 test("prompt registry selects and renders every autonomous domain without projecting messages", async () => {
@@ -116,6 +131,54 @@ test("prompt learning rejects stale registries and untrusted ledger fields", () 
     armId: selection.armIds[0], evaluatorId: "science-rubric", evaluatorVersion: "1", reward: 0.5, passed: true,
   }), /stale/);
   assert.throws(() => AutonomousPromptLearningState.fromJSON({ ...state.toJSON(), settlements: [{ secret: "must-not-cross" }] }), /fields/);
+});
+
+test("prompt learning persistence recovers every domain and settles through CAS", async () => {
+  const registry = builtinAutonomousPromptRegistry();
+  const store = new CasTextStore();
+  const persistence = new TransactionalJsonAutonomousPromptLearningSnapshotPersistence(store);
+  const requests = AUTONOMOUS_DOMAIN_NAMES.map((domain) => ({ domain, stage: "answer", requiredCapabilities: [] }));
+  const controller = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  const selection = controller.select(requests);
+  assert.equal(selection.armIds.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  const settlement = await controller.settle(selection, {
+    armId: selection.armIds[0], evaluatorId: "all-domain-rubric", evaluatorVersion: "1", reward: 0.8, passed: true, outcomeDigest: "b".repeat(64),
+  });
+  assert.equal(settlement.status, "settled");
+  assert.equal(controller.state.generation, 1);
+  assert.equal(typeof store.value, "string");
+  assert.doesNotMatch(store.value, /transient prompt|provider response/);
+
+  const recovered = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  const snapshot = await recovered.restore();
+  assert.equal(snapshot.snapshotGeneration, 1);
+  assert.equal(recovered.state.stateDigest, controller.state.stateDigest);
+  const replay = await recovered.settle(selection, {
+    armId: selection.armIds[0], evaluatorId: "all-domain-rubric", evaluatorVersion: "1", reward: 0.8, passed: true, outcomeDigest: "b".repeat(64),
+  });
+  assert.equal(replay.status, "replayed");
+  assert.equal(recovered.state.generation, 1);
+});
+
+test("prompt learning persistence rejects stale writers, registry drift, and tampering", async () => {
+  const registry = builtinAutonomousPromptRegistry();
+  const store = new CasTextStore();
+  const persistence = new TransactionalJsonAutonomousPromptLearningSnapshotPersistence(store);
+  const first = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  await first.flush();
+  const stale = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  await stale.restore();
+  const selection = first.select([{ domain: "science", stage: "answer", requiredCapabilities: [] }]);
+  await first.settle(selection, { armId: selection.armIds[0], evaluatorId: "rubric", evaluatorVersion: "1", reward: 0.2, passed: true, outcomeDigest: "c".repeat(64) });
+  const staleSelection = stale.select([{ domain: "science", stage: "answer", requiredCapabilities: [] }]);
+  await assert.rejects(() => stale.settle(staleSelection, { armId: staleSelection.armIds[0], evaluatorId: "rubric", evaluatorVersion: "1", reward: 0.2, passed: true, outcomeDigest: "d".repeat(64) }), /compare-and-swap/);
+
+  const replacement = new AutonomousPromptLearningPersistenceCoordinator(builtinAutonomousPromptRegistry(["coding"]), { persistence: new JsonAutonomousPromptLearningSnapshotPersistence(store) });
+  await assert.rejects(() => replacement.restore(), /stale/);
+  const payload = JSON.parse(store.value);
+  payload.snapshot_digest = "f".repeat(64);
+  store.value = JSON.stringify(payload);
+  await assert.rejects(() => persistence.read(), /digest|canonical/);
 });
 
 test("prompt registry rejects stale plans and credential-shaped prompt fields", async () => {

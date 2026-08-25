@@ -11,10 +11,12 @@ feedback remain outside the durable projection.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import math
-from typing import Any, Mapping, Sequence
+import threading
+from typing import Any, Mapping, Protocol, Sequence
 
-from .authoring import content_digest
+from .authoring import canonical_json, content_digest
 from .autonomous_prompt_registry import (
     AutonomousPromptRegistry,
     AutonomousPromptSelectionPlan,
@@ -29,9 +31,12 @@ AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA = "bioprism-python-autonomous-prompt
 AUTONOMOUS_PROMPT_LEARNING_SETTLEMENT_SCHEMA = "bioprism-python-autonomous-prompt-learning-settlement/0.1"
 AUTONOMOUS_PROMPT_LEARNING_POLICY = "ucb1_explicit_evaluator_v1"
 AUTONOMOUS_PROMPT_LEARNING_RETENTION = "value_only_prompt_manifest_arms_and_settlement_digests"
+AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-prompt-learning-snapshot/0.1"
+AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_RETENTION = "value_only_prompt_learning_state_snapshot"
 MAX_AUTONOMOUS_PROMPT_LEARNING_ARMS = 4_096
 MAX_AUTONOMOUS_PROMPT_LEARNING_SETTLEMENTS = 4_096
 MAX_AUTONOMOUS_PROMPT_LEARNING_EXPLORATION = 2.0
+MAX_AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_BYTES = 1_000_000
 
 
 def _text(name: str, value: Any, maximum: int = 256) -> str:
@@ -483,16 +488,267 @@ def settle_autonomous_prompt_selection(
     return AutonomousPromptLearningSettlement("settled", next_state, selection.selection_digest, arm_id, evaluator_id, evaluator_version, reward, passed, outcome_digest, False)
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousPromptLearningSnapshot:
+    """Restart image for prompt learning; only registry-bound value metadata is retained."""
+
+    state: AutonomousPromptLearningState
+    snapshot_generation: int = 1
+    previous_snapshot_digest: str | None = None
+    retention: str = AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_RETENTION
+    secret_material: str = "never_returned"
+    snapshot_digest: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.state, AutonomousPromptLearningState):
+            raise ArgumentError("prompt learning snapshot state is malformed")
+        _integer("prompt learning snapshot_generation", self.snapshot_generation, 1, 2_147_483_647)
+        previous = None if self.previous_snapshot_digest is None else _digest(
+            "prompt learning previous_snapshot_digest", self.previous_snapshot_digest
+        )
+        object.__setattr__(self, "previous_snapshot_digest", previous)
+        if self.retention != AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_RETENTION or self.secret_material != "never_returned":
+            raise ArgumentError("prompt learning snapshot retention markers are invalid")
+        if (self.snapshot_generation == 1) != (previous is None):
+            raise ArgumentError("prompt learning snapshot generation chain is malformed")
+        descriptor = self._descriptor()
+        expected = content_digest(descriptor)
+        if self.snapshot_digest:
+            if _digest("prompt learning snapshot_digest", self.snapshot_digest) != expected:
+                raise ArgumentError("prompt learning snapshot digest does not match its contents")
+        else:
+            object.__setattr__(self, "snapshot_digest", expected)
+
+    @property
+    def registry_digest(self) -> str:
+        return self.state.registry_digest
+
+    def _descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_SCHEMA,
+            "snapshot_generation": self.snapshot_generation,
+            "previous_snapshot_digest": self.previous_snapshot_digest,
+            "state": self.state.to_dict(),
+            "retention": self.retention,
+            "secret_material": self.secret_material,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self._descriptor(), "snapshot_digest": self.snapshot_digest}
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AutonomousPromptLearningSnapshot":
+        if not isinstance(value, Mapping):
+            raise ArgumentError("prompt learning snapshot must be a mapping")
+        expected = {
+            "schema", "snapshot_generation", "previous_snapshot_digest", "state",
+            "retention", "secret_material", "snapshot_digest",
+        }
+        if set(value) != expected or value.get("schema") != AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_SCHEMA:
+            raise ArgumentError("prompt learning snapshot fields are invalid")
+        raw_state = value.get("state")
+        if not isinstance(raw_state, Mapping):
+            raise ArgumentError("prompt learning snapshot state is malformed")
+        return cls(
+            state=AutonomousPromptLearningState.from_dict(raw_state),
+            snapshot_generation=value.get("snapshot_generation"),
+            previous_snapshot_digest=value.get("previous_snapshot_digest"),
+            retention=value.get("retention"),
+            secret_material=value.get("secret_material"),
+            snapshot_digest=value.get("snapshot_digest"),
+        )
+
+
+def snapshot_autonomous_prompt_learning(
+    state: AutonomousPromptLearningState,
+    *,
+    snapshot_generation: int = 1,
+    previous_snapshot_digest: str | None = None,
+) -> AutonomousPromptLearningSnapshot:
+    if not isinstance(state, AutonomousPromptLearningState):
+        raise ArgumentError("prompt learning snapshot requires a typed state")
+    return AutonomousPromptLearningSnapshot(
+        state=state,
+        snapshot_generation=snapshot_generation,
+        previous_snapshot_digest=previous_snapshot_digest,
+    )
+
+
+class AutonomousPromptLearningSnapshotPersistence(Protocol):
+    def read(self) -> AutonomousPromptLearningSnapshot | Mapping[str, Any] | None: ...
+    def write(self, snapshot: AutonomousPromptLearningSnapshot | Mapping[str, Any]) -> None: ...
+
+
+class AutonomousPromptLearningTextStore(Protocol):
+    def read(self) -> str | None: ...
+    def write(self, value: str) -> None: ...
+
+
+class AutonomousPromptLearningTransactionalTextStore(AutonomousPromptLearningTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonAutonomousPromptLearningSnapshotPersistence:
+    """Canonical JSON persistence over a caller-owned text store."""
+
+    def __init__(self, store: AutonomousPromptLearningTextStore, *, max_bytes: int = MAX_AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ArgumentError("prompt learning JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_BYTES:
+            raise ArgumentError("prompt learning JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> AutonomousPromptLearningSnapshot | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("prompt learning JSON exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except json.JSONDecodeError as error:
+            raise ArgumentError("prompt learning JSON is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ArgumentError("prompt learning JSON must be an object")
+        snapshot = AutonomousPromptLearningSnapshot.from_dict(raw)
+        if encoded != canonical_json(snapshot.to_dict()):
+            raise ArgumentError("prompt learning JSON is not canonical")
+        return snapshot
+
+    def write(self, snapshot: AutonomousPromptLearningSnapshot | Mapping[str, Any]) -> None:
+        normalized = snapshot if isinstance(snapshot, AutonomousPromptLearningSnapshot) else AutonomousPromptLearningSnapshot.from_dict(snapshot)
+        encoded = canonical_json(normalized.to_dict())
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("prompt learning JSON exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonAutonomousPromptLearningSnapshotPersistence(JsonAutonomousPromptLearningSnapshotPersistence):
+    """Canonical JSON persistence with compare-and-swap writer fencing."""
+
+    def __init__(self, store: AutonomousPromptLearningTransactionalTextStore, *, max_bytes: int = MAX_AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ArgumentError("prompt learning transactional persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: AutonomousPromptLearningSnapshot | Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest("prompt learning expected_snapshot_digest", expected_snapshot_digest)
+        normalized = snapshot if isinstance(snapshot, AutonomousPromptLearningSnapshot) else AutonomousPromptLearningSnapshot.from_dict(snapshot)
+        encoded = canonical_json(normalized.to_dict())
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ArgumentError("prompt learning JSON exceeds its byte bound")
+        return bool(self.store.write_if_unchanged(expected_snapshot_digest, encoded))
+
+
+class AutonomousPromptLearningPersistenceCoordinator:
+    """Serialize selection settlement and restart persistence for one prompt learner."""
+
+    def __init__(
+        self,
+        registry: AutonomousPromptRegistry,
+        *,
+        state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        persistence: AutonomousPromptLearningSnapshotPersistence | None = None,
+    ) -> None:
+        if not isinstance(registry, AutonomousPromptRegistry):
+            raise ArgumentError("prompt learning persistence requires an AutonomousPromptRegistry")
+        self.registry = registry
+        self._state = _state(state, registry)
+        if persistence is not None and not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ArgumentError("prompt learning persistence adapter is malformed")
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+        self._snapshot_generation = 0
+        self._lock = threading.RLock()
+
+    @property
+    def state(self) -> AutonomousPromptLearningState:
+        with self._lock:
+            return self._state
+
+    def select(self, requests: Sequence[Mapping[str, Any]], *, exploration: float = 0.35) -> AutonomousPromptAdaptiveSelection:
+        with self._lock:
+            return select_adaptive_autonomous_prompts(self.registry, requests, state=self._state, exploration=exploration)
+
+    def restore(self) -> AutonomousPromptLearningSnapshot | None:
+        if self.persistence is None:
+            raise ArgumentError("prompt learning restore requires persistence")
+        with self._lock:
+            raw = self.persistence.read()
+            if raw is None:
+                self._expected_snapshot_digest = None
+                self._snapshot_generation = 0
+                return None
+            snapshot = raw if isinstance(raw, AutonomousPromptLearningSnapshot) else AutonomousPromptLearningSnapshot.from_dict(raw)
+            if snapshot.registry_digest != self.registry.registry_digest:
+                raise ArgumentError("prompt learning snapshot is stale for the current registry")
+            self._state = _state(snapshot.state, self.registry)
+            self._expected_snapshot_digest = snapshot.snapshot_digest
+            self._snapshot_generation = snapshot.snapshot_generation
+            return snapshot
+
+    def flush(self) -> AutonomousPromptLearningSnapshot:
+        if self.persistence is None:
+            raise ArgumentError("prompt learning flush requires persistence")
+        with self._lock:
+            snapshot = snapshot_autonomous_prompt_learning(
+                self._state,
+                snapshot_generation=self._snapshot_generation + 1,
+                previous_snapshot_digest=None if self._snapshot_generation == 0 else self._expected_snapshot_digest,
+            )
+            write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+            if callable(write_if_unchanged):
+                if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                    raise ArgumentError("prompt learning persistence compare-and-swap conflict")
+            else:
+                self.persistence.write(snapshot)
+            self._expected_snapshot_digest = snapshot.snapshot_digest
+            self._snapshot_generation = snapshot.snapshot_generation
+            return snapshot
+
+    def settle(self, selection: AutonomousPromptAdaptiveSelection, **kwargs: Any) -> AutonomousPromptLearningSettlement:
+        with self._lock:
+            settlement = settle_autonomous_prompt_selection(self.registry, self._state, selection, **kwargs)
+            if settlement.status == "replayed":
+                return settlement
+            next_state = settlement.next_state
+            if self.persistence is not None:
+                prior_state = self._state
+                self._state = next_state
+                try:
+                    self.flush()
+                except Exception:
+                    self._state = prior_state
+                    raise
+            else:
+                self._state = next_state
+            return settlement
+
+
 __all__ = [
     "AUTONOMOUS_PROMPT_LEARNING_SCHEMA",
     "AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA",
     "AUTONOMOUS_PROMPT_LEARNING_SETTLEMENT_SCHEMA",
+    "AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_SCHEMA",
     "AUTONOMOUS_PROMPT_LEARNING_POLICY",
     "AUTONOMOUS_PROMPT_LEARNING_RETENTION",
+    "AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_RETENTION",
+    "MAX_AUTONOMOUS_PROMPT_LEARNING_SNAPSHOT_BYTES",
     "AutonomousPromptLearningArm",
     "AutonomousPromptLearningState",
     "AutonomousPromptAdaptiveSelection",
     "AutonomousPromptLearningSettlement",
+    "AutonomousPromptLearningSnapshot",
+    "snapshot_autonomous_prompt_learning",
+    "AutonomousPromptLearningSnapshotPersistence",
+    "AutonomousPromptLearningTextStore",
+    "AutonomousPromptLearningTransactionalTextStore",
+    "JsonAutonomousPromptLearningSnapshotPersistence",
+    "TransactionalJsonAutonomousPromptLearningSnapshotPersistence",
+    "AutonomousPromptLearningPersistenceCoordinator",
     "prompt_learning_arm_id",
     "select_adaptive_autonomous_prompts",
     "settle_autonomous_prompt_selection",
