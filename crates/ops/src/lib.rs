@@ -295,6 +295,7 @@ pub mod error;
 pub mod flags;
 pub mod hardening;
 pub mod knowledge_representation_assurance;
+pub mod retrieval_assurance;
 pub mod telemetry;
 
 pub use alpha::{AlphaSummary, Basis, Criterion, Finding, Verdict};
@@ -321,6 +322,12 @@ pub use knowledge_representation_assurance::{
     KnowledgeRepresentationAssuranceReceipt, KnowledgeRepresentationAssuranceRequest,
     CONTRACT_VERSION as KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+};
+pub use retrieval_assurance::{
+    assure_retrieval, retrieval_assurance_manifest, EvidenceSynthesisReceipt,
+    RetrievalAssuranceError, RetrievalCandidate, RetrievalDisposition, ScopedRetrievalQuery,
+    CONTRACT_VERSION as RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_ASSURANCE_FEATURE_ID,
 };
 pub use telemetry::{
     audit_statement, Derivation, DomainEvent, ExportBatch, Field, LabelBudget, MetricDefinition,

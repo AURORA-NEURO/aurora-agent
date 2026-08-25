@@ -69,6 +69,7 @@ from prism_sdk.biolang_publication import BIOLANG_PUBLICATION_COPILOT_FEATURE_ID
 from prism_sdk.api_release import API_RELEASE_ASSURANCE_FEATURE_ID, API_RELEASE_ASSURANCE_CONTRACT_VERSION, ApiReleaseAssuranceReceipt
 from prism_sdk.bioevalx_federation import BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID, BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION, BioevalxFederationGatewayReceipt
 from prism_sdk.section_interpretation import SectionInterpretationAssuranceReceipt
+from prism_sdk.ops_retrieval import OpsRetrievalAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2237,6 +2238,34 @@ def test_section_interpretation_assurance_keeps_federation_denial_explicit():
         benchmark_digest=None,
         effect_receipts=("block:unsafe-release",),
         interpretations=(),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_ops_retrieval_assurance_keeps_unknown_evidence_blocked():
+    receipt = OpsRetrievalAssuranceReceipt(
+        request_id="request:retrieval",
+        study_id="study:organoid",
+        scope="organoid:neural",
+        disposition="unknown",
+        candidate_order=("evidence:a",),
+        admitted_order=(),
+        blocked_order=("evidence:a",),
+        unknown_order=("evidence:a",),
+        source_order=(),
+        modality_order=(),
+        support_order=(900,),
+        semantic_order=(),
+        artifact_order=(),
+        provenance_order=(),
+        omissions=("evidence:evidence:a:benchmark-missing",),
+        uncertainty=("evidence:evidence:a:state-unknown-not-admitted",),
+        negative_evidence=(),
+        replay_identity="a" * 64,
+        benchmark_digest=None,
+        effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "b" * 64},
     )
     receipt.validate()

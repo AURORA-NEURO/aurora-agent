@@ -307,6 +307,11 @@ from .bioevalx_federation import (
     BioevalxFederationGatewayReceipt,
 )
 from .section_interpretation import SectionInterpretationAssuranceReceipt
+from .ops_retrieval import (
+    OPS_RETRIEVAL_ASSURANCE_FEATURE_ID,
+    OPS_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    OpsRetrievalAssuranceReceipt,
+)
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
