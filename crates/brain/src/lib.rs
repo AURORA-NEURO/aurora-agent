@@ -31,6 +31,7 @@ pub mod evidence_contract_model;
 pub mod evidence_protocol_adapter;
 pub mod evidence_research_copilot;
 pub mod evidence_research_workbench;
+pub mod evidence_safety_assurance;
 pub mod evidence_surveillance;
 pub mod evidence_workflow_fabric;
 pub mod federated_contract_model;
@@ -75,6 +76,12 @@ pub use evidence_research_workbench::{
     EvidenceWorkbenchError, EvidenceWorkbenchReceipt, EvidenceWorkbenchRequest,
     CONTRACT_VERSION as EVIDENCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use evidence_safety_assurance::{
+    evidence_safety_assurance_manifest, verify_evidence_safety, AssuranceVerdict,
+    EvidenceAssuranceError, EvidenceAssuranceReceipt,
+    CONTRACT_VERSION as EVIDENCE_SAFETY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SAFETY_ASSURANCE_FEATURE_ID,
 };
 pub use evidence_surveillance::{
     evidence_surveillance_manifest, surveil_evidence, EvidenceFeedRequest, EvidenceObservation,
