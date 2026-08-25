@@ -157,6 +157,8 @@ ORACLE_ASSURANCE_FEATURE_ID = "AFA-oracle-P25-F27"
 ORACLE_ASSURANCE_CONTRACT_VERSION = "oracle-contract-frontier-assurance/1.0"
 FEDERATED_INGESTION_FEATURE_ID = "AFA-bioworlds-P06-F08"
 FEDERATED_INGESTION_CONTRACT_VERSION = "bioworlds-federated-multimodal-ingestion/1.0"
+QUALITY_ASSURANCE_FEATURE_ID = "AFA-bioevalx-P07-F26"
+QUALITY_ASSURANCE_CONTRACT_VERSION = "bioevalx-multimodal-quality-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3558,3 +3560,44 @@ class FederatedMultimodalIngestionReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "institution_id": self.institution_id, "disposition": self.disposition, "object": dict(self.object), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class QualityAssuranceReceipt:
+    """Cross-language validator for witness-bearing multimodal quality assurance."""
+
+    request_id: str
+    workflow_id: str
+    disposition: str
+    verdict: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = QUALITY_ASSURANCE_FEATURE_ID
+    contract_version: str = QUALITY_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != QUALITY_ASSURANCE_FEATURE_ID or self.contract_version != QUALITY_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("quality assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.checks or not self.effect_receipts or self.verdict.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("quality assurance identity, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("quality assurance disposition is unknown")
+        if not (self.verdict.get("qualified_order") or self.verdict.get("blocked_order") or self.verdict.get("omissions") or self.verdict.get("uncertainty") or self.verdict.get("negative_evidence")):
+            raise ResearchContractError("quality assurance must retain a qualified or unresolved verdict")
+        for values in (self.verdict.get("study_order", ()), self.verdict.get("qualified_order", ()), self.verdict.get("blocked_order", ()), self.verdict.get("witness_order", ()), self.verdict.get("omissions", ()), self.verdict.get("uncertainty", ()), self.verdict.get("negative_evidence", ()), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != tuple(values):
+                raise ResearchContractError("quality assurance ordering is invalid")
+        for value in tuple(self.verdict.get("artifact_order", ())) + tuple(self.verdict.get("provenance_order", ())) + (self.verdict.get("replay_identity"), self.verdict.get("verdict_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("quality assurance digest is invalid")
+        if not isinstance(self.verdict.get("verdict_id"), str) or not self.verdict["verdict_id"].strip() or not isinstance(self.verdict.get("study_order"), (tuple, list)):
+            raise ResearchContractError("quality assurance verdict identity is incomplete")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "verdict": dict(self.verdict), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

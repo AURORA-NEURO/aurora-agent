@@ -183,6 +183,7 @@ pub mod grounding;
 pub mod mesh;
 pub mod metamorphic;
 pub mod plane;
+pub mod quality_assurance;
 pub mod repro;
 pub mod reveal;
 pub mod trajectory;
@@ -212,6 +213,14 @@ pub use metamorphic::{
 pub use plane::{
     CapabilityTier, Cell, Dimension, ExcludedDimension, Fold, FoldPolicy, Score, ScorePlane,
     UnscoredReason,
+};
+pub use quality_assurance::{
+    assure_quality, QualityAssuranceError, QualityAssuranceReceipt, QualityAssuranceRequest,
+    QualityDisposition, QualityMetric, QualityState, QualityVerdict, ResearchObject,
+    CONTRACT_VERSION as QUALITY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_ASSURANCE_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as QUALITY_ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as QUALITY_ASSURANCE_SCHEMA_VERSION,
 };
 pub use repro::{Certificate, Observed, OutputKind, OutputSpec, OutputVerdict, Reexecution};
 pub use reveal::{Commitment, Outcome, Registration, Revealed, Scoring, Sealed};

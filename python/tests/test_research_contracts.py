@@ -43,6 +43,7 @@ from prism_sdk.research_contracts import INTERPRETATION_PLANE_FEATURE_ID, INTERP
 from prism_sdk.research_contracts import KNOWLEDGE_GATEWAY_FEATURE_ID, KNOWLEDGE_GATEWAY_CONTRACT_VERSION, KnowledgeGatewayReceipt
 from prism_sdk.research_contracts import ORACLE_ASSURANCE_FEATURE_ID, ORACLE_ASSURANCE_CONTRACT_VERSION, OracleCapabilityManifestReceipt
 from prism_sdk.research_contracts import FEDERATED_INGESTION_FEATURE_ID, FEDERATED_INGESTION_CONTRACT_VERSION, FederatedMultimodalIngestionReceipt
+from prism_sdk.research_contracts import QUALITY_ASSURANCE_FEATURE_ID, QUALITY_ASSURANCE_CONTRACT_VERSION, QualityAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1593,4 +1594,22 @@ def test_federated_ingestion_preserves_partial_multimodal_object_and_locality():
     receipt.validate()
     assert receipt.feature_id == FEDERATED_INGESTION_FEATURE_ID
     assert receipt.contract_version == FEDERATED_INGESTION_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_quality_assurance_preserves_cross_study_witness_and_negative_evidence():
+    receipt = QualityAssuranceReceipt(
+        request_id="quality:assurance",
+        workflow_id="workflow:multi-study-qc",
+        disposition="partial",
+        verdict={"verdict_id": "quality-verdict:quality:assurance", "disposition": "partial", "study_order": ("study:a", "study:b"), "qualified_order": ("study:a",), "blocked_order": ("study:b",), "comparability_digest": "a" * 64, "artifact_order": ("b" * 64,), "provenance_order": ("c" * 64,), "witness_order": ("study:study:b:quality-metric-not-pass",), "omissions": (), "uncertainty": (), "negative_evidence": ("study:study:b:failed-or-unmeasured-quality",), "replay_identity": "d" * 64, "verdict_digest": "e" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        checks=("cross-study comparability and modality quality metrics are explicit gates",),
+        omissions=(),
+        uncertainty=(),
+        negative_evidence=("study:study:b:failed-or-unmeasured-quality",),
+        effect_receipts=("exchange:permitted-quality-manifest:study:a",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == QUALITY_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == QUALITY_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

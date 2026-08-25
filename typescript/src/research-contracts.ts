@@ -139,6 +139,8 @@ export const ORACLE_ASSURANCE_FEATURE_ID = "AFA-oracle-P25-F27" as const;
 export const ORACLE_ASSURANCE_CONTRACT_VERSION = "oracle-contract-frontier-assurance/1.0" as const;
 export const FEDERATED_INGESTION_FEATURE_ID = "AFA-bioworlds-P06-F08" as const;
 export const FEDERATED_INGESTION_CONTRACT_VERSION = "bioworlds-federated-multimodal-ingestion/1.0" as const;
+export const QUALITY_ASSURANCE_FEATURE_ID = "AFA-bioevalx-P07-F26" as const;
+export const QUALITY_ASSURANCE_CONTRACT_VERSION = "bioevalx-multimodal-quality-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2342,6 +2344,38 @@ export function validateFederatedMultimodalIngestionReceipt(receipt: FederatedMu
 }
 
 export function federatedMultimodalIngestionReceiptDigest(receipt: FederatedMultimodalIngestionReceipt): string { validateFederatedMultimodalIngestionReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface QualityAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  verdict: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateQualityAssuranceReceipt(receipt: QualityAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== QUALITY_ASSURANCE_FEATURE_ID || receipt.contract_version !== QUALITY_ASSURANCE_CONTRACT_VERSION) throw new Error("quality assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.verdict.boundary !== PRECLINICAL_BOUNDARY) throw new Error("quality assurance identity, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("quality assurance disposition is unknown");
+  const qualified = Array.isArray(receipt.verdict.qualified_order) ? receipt.verdict.qualified_order as string[] : [];
+  const blocked = Array.isArray(receipt.verdict.blocked_order) ? receipt.verdict.blocked_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.verdict.omissions) ? receipt.verdict.omissions as string[] : []), ...(Array.isArray(receipt.verdict.uncertainty) ? receipt.verdict.uncertainty as string[] : []), ...(Array.isArray(receipt.verdict.negative_evidence) ? receipt.verdict.negative_evidence as string[] : [])];
+  if (!qualified.length && !blocked.length && !unresolved.length) throw new Error("quality assurance must retain a qualified or unresolved verdict");
+  for (const values of [Array.isArray(receipt.verdict.study_order) ? receipt.verdict.study_order as string[] : [], qualified, blocked, Array.isArray(receipt.verdict.witness_order) ? receipt.verdict.witness_order as string[] : [], Array.isArray(receipt.verdict.omissions) ? receipt.verdict.omissions as string[] : [], Array.isArray(receipt.verdict.uncertainty) ? receipt.verdict.uncertainty as string[] : [], Array.isArray(receipt.verdict.negative_evidence) ? receipt.verdict.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("quality assurance ordering is invalid");
+  for (const value of [...(Array.isArray(receipt.verdict.artifact_order) ? receipt.verdict.artifact_order : []), ...(Array.isArray(receipt.verdict.provenance_order) ? receipt.verdict.provenance_order : []), receipt.verdict.replay_identity, receipt.verdict.verdict_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("quality assurance digest is invalid");
+  if (typeof receipt.verdict.verdict_id !== "string" || !receipt.verdict.verdict_id.trim() || !Array.isArray(receipt.verdict.study_order)) throw new Error("quality assurance verdict identity is incomplete");
+}
+
+export function qualityAssuranceReceiptDigest(receipt: QualityAssuranceReceipt): string { validateQualityAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
