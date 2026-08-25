@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousAgent,
     AutonomousBatchCheckpoint,
     AutonomousBatchItem,
     AutonomousBatchResult,
@@ -20,6 +21,7 @@ from prism_sdk import (
     ModelCatalogue,
     ProviderModelDescriptor,
     SQLiteBrainLearningLedger,
+    LLMRuntime,
 )
 from prism_sdk.authoring import content_digest
 from prism_sdk.autonomy import _batch_digest
@@ -544,6 +546,94 @@ def test_batch_request_file_rejects_credential_shaped_fields_before_provider_acc
     assert code == 2
     assert payload is None
     assert "command failed" in errors
+
+
+def _write_held_launch_admission(tmp_path: Path) -> Path:
+    admission = AutonomousAgent(None, LLMRuntime()).launch_admission(
+        decision="hold",
+        reason="operator review is still pending",
+    )
+    path = tmp_path / "held-launch-admission.json"
+    path.write_text(json.dumps(admission), encoding="utf-8")
+    return path
+
+
+def test_run_launch_admission_rejects_before_prompt_or_mcp_start(tmp_path) -> None:
+    admission_path = _write_held_launch_admission(tmp_path)
+    prompted = False
+    client_started = False
+
+    def reader(_prompt: str) -> str:
+        nonlocal prompted
+        prompted = True
+        return "must-not-be-collected"
+
+    def client_factory(*_args: object, **_kwargs: object):
+        nonlocal client_started
+        client_started = True
+        raise AssertionError("MCP must not start for a held launch admission")
+
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", "python server.py",
+        "--task", "review the coding workspace",
+        "--domain", "coding",
+        "--provider", "local",
+        "--model", "local-model",
+        "--launch-admission-file", str(admission_path),
+        reader=reader,
+        client_factory=client_factory,
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+    assert prompted is False
+    assert client_started is False
+
+
+def test_batch_launch_admission_rejects_before_prompt_or_mcp_start(tmp_path) -> None:
+    admission_path = _write_held_launch_admission(tmp_path)
+    requests_path = tmp_path / "requests.json"
+    requests_path.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-autonomous-batch-requests/0.1",
+                "mode": "domain",
+                "job_id": "held-batch-001",
+                "requests": [{"task": "review the coding workspace", "domain": "coding"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompted = False
+    client_started = False
+
+    def reader(_prompt: str) -> str:
+        nonlocal prompted
+        prompted = True
+        return "must-not-be-collected"
+
+    def client_factory(*_args: object, **_kwargs: object):
+        nonlocal client_started
+        client_started = True
+        raise AssertionError("MCP must not start for a held launch admission")
+
+    code, payload, errors = _invoke(
+        "batch-run",
+        "--mcp-command", "python server.py",
+        "--requests-file", str(requests_path),
+        "--job-id", "held-batch-001",
+        "--provider", "local",
+        "--model", "local-model",
+        "--launch-admission-file", str(admission_path),
+        reader=reader,
+        client_factory=client_factory,
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+    assert prompted is False
+    assert client_started is False
     assert "must-never-enter-the-request" not in errors
 
 

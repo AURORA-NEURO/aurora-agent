@@ -19192,6 +19192,29 @@ class AutonomousAgent:
         separate boundary explicitly through the semantic-routing APIs.
         """
 
+        self.authorize_auto_launch_admission(
+            task=task,
+            launch_admission=launch_admission,
+            **kwargs,
+        )
+        return self.run_auto(task=task, credentials=credentials, **kwargs)
+
+    def authorize_auto_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Compile one automatic route offline and return its verified admission metadata.
+
+        This is the provider-free process-boundary counterpart to
+        :meth:`run_auto_with_launch_admission`.  Hosts can call it before collecting a
+        short-lived credential, opening MCP, or constructing a provider client.  The same route
+        controls are accepted by the execution wrapper so a caller can use one exact policy at
+        both the preview and dispatch boundaries.
+        """
+
         from .autonomous_launch_admission import authorize_autonomous_launch_domains
 
         semantic_routing = kwargs.get("semantic_routing", False)
@@ -19227,8 +19250,7 @@ class AutonomousAgent:
             if key in kwargs
         }
         blueprint = self.prepare_auto(task=task, **route_options)
-        authorize_autonomous_launch_domains(launch_admission, blueprint.route.selected_domains)
-        return self.run_auto(task=task, credentials=credentials, **kwargs)
+        return authorize_autonomous_launch_domains(launch_admission, blueprint.route.selected_domains)
 
     def run_learning(
         self,
@@ -21829,6 +21851,7 @@ class AutonomousBrainBatchJobController:
         job_id: str,
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
         mode: str = "domain",
+        launch_admission: Mapping[str, Any] | None = None,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
         options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
         max_parallelism: int = 4,
@@ -21842,19 +21865,26 @@ class AutonomousBrainBatchJobController:
                 raise BrainRunError("autonomous brain batch controller already has a run in progress")
             self._running = True
         try:
-            result = self.agent.run_resumable_batch(
-                requests,
-                job_id=job_id,
-                mode=mode,
-                credentials=credentials,
-                model_candidates=model_candidates,
-                options_factory=options_factory,
-                max_parallelism=max_parallelism,
-                stop_on_error=stop_on_error,
-                checkpoint=None if self._checkpoint is None else self._checkpoint.to_dict(),
-                checkpoint_sink=self._persist,
-                rehydrate_result=rehydrate_result,
-            )
+            run_kwargs = {
+                "job_id": job_id,
+                "mode": mode,
+                "credentials": credentials,
+                "model_candidates": model_candidates,
+                "options_factory": options_factory,
+                "max_parallelism": max_parallelism,
+                "stop_on_error": stop_on_error,
+                "checkpoint": None if self._checkpoint is None else self._checkpoint.to_dict(),
+                "checkpoint_sink": self._persist,
+                "rehydrate_result": rehydrate_result,
+            }
+            if launch_admission is None:
+                result = self.agent.run_resumable_batch(requests, **run_kwargs)
+            else:
+                result = self.agent.run_resumable_batch_with_launch_admission(
+                    requests,
+                    launch_admission=launch_admission,
+                    **run_kwargs,
+                )
             return {"controller": self._projection(result.status, total_items=len(requests), job_id=job_id), "batch": result}
         finally:
             with self._lock:

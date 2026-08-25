@@ -49,6 +49,11 @@ from .autonomy import (
     AutonomousWorkflowCheckpoint,
     InMemoryAutonomousBatchCheckpointStore,
 )
+from .autonomous_launch_admission import (
+    MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES,
+    authorize_autonomous_launch_domains,
+    validate_autonomous_launch_admission,
+)
 from .autonomous_model_inventory import AutonomousModelInventoryStore
 from .autonomy_onboarding import (
     AutonomousCapabilityActivation,
@@ -1806,6 +1811,162 @@ def _load_evidence_file(path_value: str | None) -> dict[str, Any] | None:
     return dict(raw)
 
 
+def _load_launch_admission_file(path_value: str | None) -> dict[str, Any] | None:
+    """Load one bounded, digest-verified admission record without exposing its contents."""
+
+    if path_value is None:
+        return None
+    path = Path(path_value)
+    try:
+        if not path.exists() or not path.is_file():
+            raise ValueError("launch admission file is missing")
+        if path.stat().st_size > MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES:
+            raise ValueError("launch admission file is outside its bounded size")
+        encoded = path.read_bytes()
+        if len(encoded) > MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES:
+            raise ValueError("launch admission file is outside its bounded size")
+        value = json.loads(encoded.decode("utf-8"))
+        if not isinstance(value, Mapping):
+            raise ValueError("launch admission file must contain a JSON object")
+        return validate_autonomous_launch_admission(value)
+    except ValueError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("launch admission file is unreadable or invalid") from error
+
+
+def _launch_admission_projection(
+    admission: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project admission status while excluding its reason and all transient values."""
+
+    if admission is None:
+        return {
+            "configured": False,
+            "status": None,
+            "admission_id": None,
+            "admission_digest": None,
+            "approved_domains": [],
+            "retention": "metadata_only_admission_identity_and_scope",
+        }
+    approved_domains = sorted(
+        row["domain"]
+        for row in admission["domains"]
+        if row.get("admission_state") == "approved"
+    )
+    return {
+        "configured": True,
+        "status": admission["status"],
+        "decision": admission["decision"],
+        "admission_id": admission["admission_id"],
+        "admission_digest": admission["admission_digest"],
+        "preflight_report_digest": admission["preflight_report_digest"],
+        "approved_domains": approved_domains,
+        "summary": dict(admission["summary"]),
+        "retention": "metadata_only_admission_identity_and_scope",
+        "secret_material": "never_returned",
+    }
+
+
+def _route_options_for_admission(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep automatic admission previews aligned with the provider-free router contract."""
+
+    return {
+        key: options[key]
+        for key in (
+            "hints",
+            "min_confidence",
+            "min_margin",
+            "max_domains",
+            "allow_cross_domain",
+            "context",
+            "constraints",
+            "desired_outputs",
+            "capability",
+            "risk_class",
+            "max_steps",
+            "require_json",
+            "structured_domain_response",
+            "response_schema",
+            "execution_mode",
+            "max_input_tokens",
+            "required_model_capabilities",
+            "memory_episodes",
+        )
+        if key in options
+    }
+
+
+def _preflight_cli_launch_admission(
+    admission: Mapping[str, Any] | None,
+    runtime: LLMRuntime,
+    *,
+    task: str | None = None,
+    domain: str | None = None,
+    automatic: bool = False,
+    hints: Sequence[str] = (),
+    max_domains: int = 3,
+    allow_cross_domain: bool = True,
+    semantic_routing: bool = False,
+    requests: Sequence[Mapping[str, Any]] = (),
+    mode: str | None = None,
+    single_domain: bool = False,
+    workflow_execution: bool = False,
+) -> None:
+    """Reject an under-scoped CLI launch before credential collection or MCP startup."""
+
+    if admission is None:
+        return
+    offline_agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(),
+    )
+    if automatic:
+        if task is None:
+            raise ValueError("automatic launch admission requires a task")
+        offline_agent.authorize_auto_launch_admission(
+            task=task,
+            launch_admission=admission,
+            hints=tuple(hints),
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+            semantic_routing=semantic_routing,
+        )
+        return
+    if domain is not None:
+        authorize_autonomous_launch_domains(admission, (domain,))
+        return
+    if mode is None:
+        raise ValueError("launch admission scope is missing a mode")
+    requested_domains: list[str] = []
+    for index, request in enumerate(requests):
+        if mode == "domain":
+            requested = request.get("domain")
+            if not isinstance(requested, str):
+                raise ValueError(f"batch request {index} is missing a domain")
+            requested_domains.append(requested)
+        elif mode == "cross_domain":
+            subtasks = request.get("subtasks", ())
+            for subtask in subtasks:
+                if isinstance(subtask, Mapping) and isinstance(subtask.get("domain"), str):
+                    requested_domains.append(subtask["domain"])
+        elif mode == "auto":
+            options = dict(request.get("options", {}))
+            if single_domain or workflow_execution:
+                options["allow_cross_domain"] = False
+            offline_agent.authorize_auto_launch_admission(
+                task=request["task"],
+                launch_admission=admission,
+                semantic_routing=options.get("semantic_routing", False),
+                **_route_options_for_admission(options),
+            )
+        else:
+            raise ValueError("launch admission mode is unsupported")
+    if mode != "auto":
+        authorize_autonomous_launch_domains(admission, tuple(dict.fromkeys(requested_domains)))
+
+
 def _load_batch_requests(args: argparse.Namespace) -> tuple[str, str, list[dict[str, Any]]]:
     path = Path(args.requests_file)
     if not path.exists() or not path.is_file() or path.stat().st_size > _MAX_BATCH_REQUEST_FILE_BYTES:
@@ -1976,6 +2137,7 @@ def _batch_run(
     evidence = _load_evidence_file(args.evidence_file)
     if evidence is not None and mode == "cross_domain":
         raise ValueError("--evidence-file requires domain or automatic batch mode; use per-request evidence for cross-domain work")
+    launch_admission = _load_launch_admission_file(args.launch_admission_file)
     request_learning = any(
         isinstance(request.get("options"), Mapping)
         and request.get("options", {}).get("learn") is True
@@ -1983,6 +2145,14 @@ def _batch_run(
     )
     persisted_candidates = _persisted_candidate_args(args) if args.use_inventory else ()
     runtime, onboarding = _runtime_with_provider(args)
+    _preflight_cli_launch_admission(
+        launch_admission,
+        runtime,
+        requests=requests,
+        mode=mode,
+        single_domain=args.single_domain,
+        workflow_execution=args.workflow_execution,
+    )
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
     health_ledger = None
     learning_ledger = None
@@ -2183,6 +2353,7 @@ def _batch_run(
                 requests,
                 job_id=job_id,
                 mode=mode,
+                launch_admission=launch_admission,
                 credentials=session,
                 model_candidates=candidates,
                 options_factory=options_factory,
@@ -2208,6 +2379,7 @@ def _batch_run(
             "command": "batch-run",
             "mode": mode,
             "job_id": job_id,
+            "launch_admission": _launch_admission_projection(launch_admission),
             "model_inventory": {
                 "mode": "provider_discovery" if args.discover_models else "persisted_catalogue" if args.use_inventory else "caller_declared",
                 "models": [descriptor.to_dict() for descriptor in descriptors],
@@ -2406,8 +2578,20 @@ def _run(
         else None
     )
     evidence = _load_evidence_file(args.evidence_file)
+    launch_admission = _load_launch_admission_file(args.launch_admission_file)
     persisted_candidates = _persisted_candidate_args(args) if args.use_inventory else ()
     runtime, onboarding = _runtime_with_provider(args)
+    _preflight_cli_launch_admission(
+        launch_admission,
+        runtime,
+        task=args.task,
+        domain=args.domain,
+        automatic=args.automatic,
+        hints=tuple(args.hint or ()),
+        max_domains=args.max_domains,
+        allow_cross_domain=not args.single_domain,
+        semantic_routing=args.semantic_routing,
+    )
     session = onboarding.start_session(ttl_seconds=args.ttl_seconds)
     health_ledger = None
     learning_ledger = None
@@ -2576,21 +2760,28 @@ def _run(
                     ),
                 }
             if args.automatic:
-                result = agent.run_auto(
+                automatic_options = {
                     **common,
-                    learning_mode=args.learning_mode,
-                    hints=tuple(args.hint or ()),
-                    max_domains=args.max_domains,
-                    allow_cross_domain=not args.single_domain,
-                    semantic_routing=args.semantic_routing,
-                    planning_mode=args.planning_mode,
-                    planning_run_id=args.planning_run_id,
-                    planning_max_output_tokens=args.planning_max_output_tokens,
-                    workflow_execution=args.workflow_execution,
-                    workflow_checkpoint=workflow_checkpoint,
-                    workflow_retry_blocked=args.workflow_retry_blocked,
-                    workflow_max_stage_calls=args.workflow_max_stage_calls,
-                )
+                    "learning_mode": args.learning_mode,
+                    "hints": tuple(args.hint or ()),
+                    "max_domains": args.max_domains,
+                    "allow_cross_domain": not args.single_domain,
+                    "semantic_routing": args.semantic_routing,
+                    "planning_mode": args.planning_mode,
+                    "planning_run_id": args.planning_run_id,
+                    "planning_max_output_tokens": args.planning_max_output_tokens,
+                    "workflow_execution": args.workflow_execution,
+                    "workflow_checkpoint": workflow_checkpoint,
+                    "workflow_retry_blocked": args.workflow_retry_blocked,
+                    "workflow_max_stage_calls": args.workflow_max_stage_calls,
+                }
+                if launch_admission is None:
+                    result = agent.run_auto(**automatic_options)
+                else:
+                    result = agent.run_auto_with_launch_admission(
+                        launch_admission=launch_admission,
+                        **automatic_options,
+                    )
             else:
                 if args.learning_mode == "online":
                     common["learn"] = True
@@ -2609,7 +2800,14 @@ def _run(
                         approve_capability=args.approve_capability,
                     )
                 else:
-                    result = agent.run(**common, domain=args.domain)
+                    if launch_admission is None:
+                        result = agent.run(**common, domain=args.domain)
+                    else:
+                        result = agent.run_with_launch_admission(
+                            **common,
+                            domain=args.domain,
+                            launch_admission=launch_admission,
+                        )
             if activation_store is not None:
                 agent.save_activation(activation_store)
                 activation_state_after = agent.activation_state()
@@ -2654,6 +2852,7 @@ def _run(
             "schema": CLI_SCHEMA,
             "command": "run",
             "routing_mode": "automatic" if args.automatic else "explicit_domain",
+            "launch_admission": _launch_admission_projection(launch_admission),
             "model_inventory": {
                 "mode": (
                     "provider_discovery"
@@ -2991,6 +3190,11 @@ def _parser() -> argparse.ArgumentParser:
         help="strict JSON file declaring caller-owned domains, capabilities, and risk posture for live MCP tools",
     )
     run.add_argument("--run-id", default=None)
+    run.add_argument(
+        "--launch-admission-file",
+        default=None,
+        help="digest-verified caller approval JSON; checked before credential collection and dispatch",
+    )
     run.add_argument("--approve-provider-call", action="store_true", help="authorize provider invocation")
     run.add_argument("--approve-mission-dispatch", action="store_true", help="authorize mission effects")
     _add_credential_arguments(run)
@@ -3012,6 +3216,11 @@ def _parser() -> argparse.ArgumentParser:
     batch_run.add_argument("--batch-checkpoint-store", default=None, help="atomic metadata-only batch checkpoint path")
     batch_run.add_argument("--batch-result-manifest", default=None, help="status-only manifest used to rehydrate completed independent items")
     batch_run.add_argument("--resume-batch", action="store_true", help="explicitly resume the existing batch checkpoint")
+    batch_run.add_argument(
+        "--launch-admission-file",
+        default=None,
+        help="digest-verified caller approval JSON; checked before credential collection and dispatch",
+    )
     batch_run.add_argument("--model", action="append", default=[], help="shared candidate model; repeatable")
     batch_run.add_argument("--discover-models", action="store_true", help="discover selectable models through the approved provider inventory endpoint")
     batch_run.add_argument("--use-inventory", action="store_true", help="rehydrate selectable candidates from --inventory-store")

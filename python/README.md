@@ -836,6 +836,15 @@ admission to the complete selected-domain union before credential resolution, ch
 rehydration, or provider dispatch. Per-item option factories are evaluated once and replayed after
 admission; automatic batches reject semantic routing unless it is separately reviewed.
 
+The CLI exposes the same handoff with `--launch-admission-file` on `run` and `batch-run`. The file
+must be a bounded, digest-verified `agent.launch_admission(...)` record. The CLI checks its status
+and route coverage with an offline agent before collecting a user credential or opening MCP, then
+passes the same record into the SDK execution gate. Batch mode previews each request and verifies
+the union of explicit, automatic, or cross-domain domains; tampering, held/blocked status, and
+under-scoped approval fail closed. The returned CLI projection contains only admission identity,
+status, digest, and approved-domain metadata. It never exposes the approval reason, task text,
+prompt, credential, or provider value.
+
 `AutonomousBrainControlPlaneMonitor` and `AsyncAutonomousBrainControlPlaneMonitor` provide the
 operator-side lifecycle for jobs returned by `BrainControlClient`. They fan out bounded status
 reads across the twelve domains, validate hash-chained event cursors, issue explicit approval

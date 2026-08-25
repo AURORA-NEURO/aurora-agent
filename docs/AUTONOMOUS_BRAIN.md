@@ -274,6 +274,42 @@ for a bounded routing proposal, while `--planning-mode provider` asks it to prio
 already-reviewed workflow stages; both remain separate provider approval boundaries and neither
 can create a new domain, capability, connector, credential, or effect.
 
+#### Binding a reviewed launch admission at the CLI
+
+Deployments that require an operator or queue decision before credential intake can persist the
+metadata-only result of `agent.launch_admission(...)` and pass it to either execution command:
+
+```bash
+python -m prism_sdk run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider openai \
+  --domain science \
+  --task "prepare a bounded research plan" \
+  --model gpt-5 \
+  --launch-admission-file .aurora/science-launch-admission.json \
+  --approve-provider-call
+
+python -m prism_sdk batch-run \
+  --mcp-command "python path/to/mcp_server.py" \
+  --provider openai \
+  --requests-file .aurora/review-batch.json \
+  --job-id all-domain-review-001 \
+  --launch-admission-file .aurora/all-domain-launch-admission.json \
+  --approve-provider-call
+```
+
+The file is bounded, canonical-JSON validated, and SHA-256 digest-verified. `run` compiles an
+automatic route with an offline agent when `--automatic` is used; `batch-run` previews every
+explicit, automatic, or cross-domain item and checks the complete selected-domain union. These
+checks happen before the CLI prompts for a user key or starts MCP. The controller then passes the
+same admission into the SDK's resumable batch gate immediately before checkpoint preparation and
+dispatch, so a changed request option or route cannot widen a previously reviewed scope. A held,
+blocked, tampered, or under-scoped file fails closed; no provider, MCP, credential, learner, or
+effect boundary is implicitly granted. The JSON result contains only admission identity, status,
+digest, and approved-domain metadata, never the approval reason, task text, key, prompt, or
+provider value. Automatic admission intentionally rejects `--semantic-routing` because a provider
+classifier must be reviewed as its own boundary before its route can be admitted.
+
 Model inventory can also be discovered from a registered provider. Discovery is bounded and
 approval-gated because it is a provider call; the runtime immediately projects each row into a
 `ProviderModelDescriptor` and discards the provider response. The CLI returns only model ids,
