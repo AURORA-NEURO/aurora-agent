@@ -39,6 +39,10 @@ use bioprism_adapter::{
     REPLICATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    close_adapter_limitations, AdapterClosureReceipt, LimitationClosureError,
+    LimitationClosureRequest, LIMITATION_CLOSURE_FEATURE_ID,
+};
+use bioprism_adapter::{
     compile_adapter_capability_manifest, AdapterCapabilityManifest, AdapterContractInput,
     ContractFrontierError, CONTRACT_FRONTIER_FEATURE_ID,
 };
@@ -257,6 +261,7 @@ pub const INTEROPERABILITY_GATEWAY_TOOL: &str = "adapter_interoperability_gatewa
 pub const EVALUATION_ASSURANCE_TOOL: &str = "adapter_evaluation_assurance";
 pub const RESEARCH_WORKBENCH_TOOL: &str = "adapter_research_workbench";
 pub const CONTRACT_FRONTIER_TOOL: &str = "adapter_contract_frontier";
+pub const LIMITATION_CLOSURE_TOOL: &str = "adapter_limitation_closure";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1371,6 +1376,26 @@ pub fn validate_contract_frontier_json(value: &Value) -> Result<AdapterCapabilit
         .map_err(|error: ContractFrontierError| error.to_string())?;
     if receipt.feature_id != CONTRACT_FRONTIER_FEATURE_ID {
         return Err("adapter contract frontier feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn close_adapter_limitations_json(value: &Value) -> Result<Value, String> {
+    let request: LimitationClosureRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid limitation closure request: {error}"))?;
+    let receipt = close_adapter_limitations(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize limitation closure receipt: {error}"))
+}
+
+pub fn validate_limitation_closure_json(value: &Value) -> Result<AdapterClosureReceipt, String> {
+    let receipt: AdapterClosureReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid limitation closure receipt: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: LimitationClosureError| error.to_string())?;
+    if receipt.feature_id != LIMITATION_CLOSURE_FEATURE_ID {
+        return Err("limitation closure feature id mismatch".into());
     }
     Ok(receipt)
 }

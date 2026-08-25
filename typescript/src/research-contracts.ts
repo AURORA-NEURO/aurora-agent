@@ -112,6 +112,8 @@ export const RESEARCH_WORKBENCH_FEATURE_ID = "AFA-adapter-P24-F18" as const;
 export const RESEARCH_WORKBENCH_CONTRACT_VERSION = "multimodal-research-workbench/1.0" as const;
 export const CONTRACT_FRONTIER_FEATURE_ID = "AFA-adapter-P25-F22" as const;
 export const CONTRACT_FRONTIER_CONTRACT_VERSION = "adapter-contract-frontier/1.0" as const;
+export const LIMITATION_CLOSURE_FEATURE_ID = "AFA-adapter-P26-F24" as const;
+export const LIMITATION_CLOSURE_CONTRACT_VERSION = "adapter-limitation-closure/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1879,6 +1881,37 @@ export function validateContractFrontierReceipt(receipt: ContractFrontierReceipt
 }
 
 export function contractFrontierReceiptDigest(receipt: ContractFrontierReceipt): string { validateContractFrontierReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface LimitationClosureReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  disposition: "closed" | "partial" | "unknown" | "blocked";
+  case_order: string[];
+  resolved_order: string[];
+  unresolved_order: string[];
+  evidence_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  reasons: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateLimitationClosureReceipt(receipt: LimitationClosureReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== LIMITATION_CLOSURE_FEATURE_ID || receipt.contract_version !== LIMITATION_CLOSURE_CONTRACT_VERSION) throw new Error("limitation closure schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.case_order.length || !receipt.reasons.length || !receipt.effect_receipts.length) throw new Error("limitation closure identity, cases, reasons, effects, locality, or boundary are incomplete");
+  if (!new Set(["closed", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("limitation closure disposition is unknown");
+  for (const values of [receipt.case_order, receipt.resolved_order, receipt.unresolved_order, receipt.evidence_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.reasons, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("limitation closure ordering is invalid");
+  if (receipt.evidence_order.some((value) => !/^[0-9a-f]{64}$/.test(value))) throw new Error("limitation closure evidence digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("limitation closure receipt digest is invalid");
+}
+
+export function limitationClosureReceiptDigest(receipt: LimitationClosureReceipt): string { validateLimitationClosureReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

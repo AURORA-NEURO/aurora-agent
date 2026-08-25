@@ -119,6 +119,8 @@ RESEARCH_WORKBENCH_FEATURE_ID = "AFA-adapter-P24-F18"
 RESEARCH_WORKBENCH_CONTRACT_VERSION = "multimodal-research-workbench/1.0"
 CONTRACT_FRONTIER_FEATURE_ID = "AFA-adapter-P25-F22"
 CONTRACT_FRONTIER_CONTRACT_VERSION = "adapter-contract-frontier/1.0"
+LIMITATION_CLOSURE_FEATURE_ID = "AFA-adapter-P26-F24"
+LIMITATION_CLOSURE_CONTRACT_VERSION = "adapter-limitation-closure/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2961,3 +2963,42 @@ class ContractFrontierReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "adapter_id": self.adapter_id, "capability_id": self.capability_id, "negotiated_version": self.negotiated_version, "disposition": self.disposition, "input_schema": self.input_schema, "output_schema": self.output_schema, "modality_order": list(self.modality_order), "effect_order": list(self.effect_order), "permission_order": list(self.permission_order), "artifact_digest_order": list(self.artifact_digest_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": list(self.semantic_loss), "checks": list(self.checks), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class LimitationClosureReceipt:
+    request_id: str
+    disposition: str
+    case_order: tuple[str, ...]
+    resolved_order: tuple[str, ...]
+    unresolved_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    reasons: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = LIMITATION_CLOSURE_FEATURE_ID
+    contract_version: str = LIMITATION_CLOSURE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != LIMITATION_CLOSURE_FEATURE_ID or self.contract_version != LIMITATION_CLOSURE_CONTRACT_VERSION:
+            raise ResearchContractError("limitation closure schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.case_order or not self.reasons or not self.effect_receipts:
+            raise ResearchContractError("limitation closure identity, cases, reasons, effects, locality, or boundary are incomplete")
+        if self.disposition not in {"closed", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("limitation closure disposition is unknown")
+        for values in (self.case_order, self.resolved_order, self.unresolved_order, self.evidence_order, self.omissions, self.uncertainty, self.negative_evidence, self.reasons, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("limitation closure ordering is invalid")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in self.evidence_order):
+            raise ResearchContractError("limitation closure evidence digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("limitation closure receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "disposition": self.disposition, "case_order": list(self.case_order), "resolved_order": list(self.resolved_order), "unresolved_order": list(self.unresolved_order), "evidence_order": list(self.evidence_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "reasons": list(self.reasons), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

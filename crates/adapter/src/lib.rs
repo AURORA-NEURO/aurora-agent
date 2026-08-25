@@ -99,6 +99,7 @@ pub mod interoperability_gateway;
 pub mod interpretation_assurance;
 pub mod inventory;
 pub mod knowledge_workflow;
+pub mod limitation_closure;
 pub mod location;
 pub mod loss;
 pub mod mechanism_control_plane;
@@ -215,6 +216,12 @@ pub use knowledge_workflow::{
     KnowledgeWorkflowError, KnowledgeWorkflowReceipt, TypedKnowledgeWorld,
     CONTRACT_VERSION as KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
     FEATURE_ID as KNOWLEDGE_WORKFLOW_FEATURE_ID,
+};
+pub use limitation_closure::{
+    close_adapter_limitations, AdapterClosureReceipt, AdapterLimitationCase, ClosureDisposition,
+    LimitationClosureError, LimitationClosureRequest, LimitationStatus,
+    CONTRACT_VERSION as LIMITATION_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as LIMITATION_CLOSURE_FEATURE_ID,
 };
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};

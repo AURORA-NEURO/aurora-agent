@@ -30,6 +30,7 @@ from prism_sdk.research_contracts import INTEROPERABILITY_GATEWAY_FEATURE_ID, IN
 from prism_sdk.research_contracts import EVALUATION_ASSURANCE_FEATURE_ID, EVALUATION_ASSURANCE_CONTRACT_VERSION, EvaluationAssuranceReceipt
 from prism_sdk.research_contracts import RESEARCH_WORKBENCH_FEATURE_ID, RESEARCH_WORKBENCH_CONTRACT_VERSION, ResearchWorkbenchReceipt
 from prism_sdk.research_contracts import CONTRACT_FRONTIER_FEATURE_ID, CONTRACT_FRONTIER_CONTRACT_VERSION, ContractFrontierReceipt
+from prism_sdk.research_contracts import LIMITATION_CLOSURE_FEATURE_ID, LIMITATION_CLOSURE_CONTRACT_VERSION, LimitationClosureReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1281,4 +1282,25 @@ def test_contract_frontier_preserves_versioned_manifest_and_migration_loss():
     receipt.validate()
     assert receipt.feature_id == CONTRACT_FRONTIER_FEATURE_ID
     assert receipt.contract_version == CONTRACT_FRONTIER_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_limitation_closure_preserves_unresolved_cases_and_digest_only_effects():
+    receipt = LimitationClosureReceipt(
+        request_id="closure:adapter-1",
+        disposition="partial",
+        case_order=("case:missing-calibration",),
+        resolved_order=(),
+        unresolved_order=("case:missing-calibration",),
+        evidence_order=("a" * 64,),
+        omissions=("case:missing-calibration:closure-criteria-unmet",),
+        uncertainty=("case:missing-calibration:measurement-not-available",),
+        negative_evidence=("case:missing-calibration:null-recovery",),
+        reasons=("unresolved limitation remains visible",),
+        effect_receipts=("exchange:permitted-limitation-digests-only",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == LIMITATION_CLOSURE_FEATURE_ID
+    assert receipt.contract_version == LIMITATION_CLOSURE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
