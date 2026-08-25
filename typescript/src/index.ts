@@ -1645,6 +1645,7 @@ export {
   AutonomousBrainPlan,
   AutonomousBrainFacade,
   AutonomousBrainBatchJobController,
+  AutonomousBrainBatchProtectedRehydrator,
   InMemoryAutonomousBrainBatchCheckpointStore,
   createAutonomousBrainFacade,
 } from "./autonomous-brain-facade.js";

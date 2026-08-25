@@ -1819,3 +1819,14 @@ schemes and binds the selected scheme into the opaque reference. This closes the
 rehydration seam without putting task text, private runtime handles, credentials, or provider
 payloads into the ledger, journal, snapshot, or result. Production deployment still owns the
 resolver store, authorization context, rotation, and uncertain external-effect reconciliation.
+
+The restart-safe high-level brain batch controller now consumes the same protected receipt
+boundary. `AutonomousBatchProtectedRehydration` / `AutonomousBrainBatchProtectedRehydrator`
+receives only batch identity digests, resolves a caller-owned protected result, optionally decodes
+it into a typed runtime value, and lets the batch engine perform its final successful-status and
+metadata-only item-digest checks. Explicit batch rehydrators remain authoritative. Receipt identity
+drift, tenant/authorization mismatch, expiry, replay, digest mismatch, and invalid decoded results
+fail closed before new provider work. Python and TypeScript tests cover partial restart, explicit
+callback precedence, protected result lookup, tampering, and all twelve built-in domains. The
+remaining deployment responsibility is still the encrypted result store, identity/authorization
+authority, retention/rotation policy, and reconciliation of genuinely uncertain external effects.

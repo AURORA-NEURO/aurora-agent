@@ -1,4 +1,5 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
+import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   validateAutonomousRouteOverride,
@@ -472,6 +473,84 @@ export interface AutonomousBrainBatchRehydrationContext {
   request_digest: string;
   task_digest: string;
   expected_result_digest: string;
+}
+
+/**
+ * Adapt the protected receipt boundary to restart-safe brain batches.
+ *
+ * Checkpoints contain only digests. The receipt resolver sees the same bounded identity fields
+ * that the batch engine verifies, while the adapter owns tenant/authorization/replay fencing.
+ * A decoder is available for callers whose protected store returns a canonical JSON projection
+ * that must be rebuilt into a richer in-memory execution object.
+ */
+export class AutonomousBrainBatchProtectedRehydrator {
+  readonly adapter: AutonomousProtectedRehydrationAdapter;
+  readonly receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
+  readonly valueDecoder?: (value: unknown) => AutonomousBrainExecution | unknown;
+  readonly domain?: AutonomousDomainName;
+  readonly purpose: string;
+  readonly valueKind: string;
+  readonly oneTime: boolean;
+  readonly digestScheme: string;
+
+  constructor(options: {
+    adapter: AutonomousProtectedRehydrationAdapter;
+    receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
+    valueDecoder?: (value: unknown) => AutonomousBrainExecution | unknown;
+    domain?: AutonomousDomainName;
+    purpose?: string;
+    valueKind?: string;
+    oneTime?: boolean;
+    digestScheme?: string;
+  }) {
+    if (!(options?.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("autonomous brain batch protected rehydrator requires a protected rehydration adapter");
+    if (typeof options.receiptResolver !== "function") throw new ArgumentError("autonomous brain batch protected rehydrator receiptResolver must be callable");
+    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new ArgumentError("autonomous brain batch protected rehydrator valueDecoder must be callable");
+    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new ArgumentError("autonomous brain batch protected rehydrator oneTime must be boolean");
+    this.adapter = options.adapter;
+    this.receiptResolver = options.receiptResolver;
+    this.valueDecoder = options.valueDecoder;
+    this.domain = options.domain;
+    this.purpose = options.purpose ?? "autonomous_batch_result";
+    this.valueKind = options.valueKind ?? "autonomous_batch_result";
+    this.oneTime = options.oneTime ?? false;
+    this.digestScheme = options.digestScheme ?? "canonical_json";
+  }
+
+  async resolve(context: AutonomousBrainBatchRehydrationContext): Promise<AutonomousBrainExecution> {
+    let receipt: unknown;
+    try {
+      receipt = await this.receiptResolver(context);
+    } catch (error) {
+      throw new ArgumentError(`autonomous brain batch protected receipt lookup failed for item ${context.index}`, { cause: error });
+    }
+    if (!isObject(receipt)) throw new ArgumentError("autonomous brain batch protected receiptResolver must return an object");
+    for (const [key, expected] of [
+      ["job_id", context.job_id],
+      ["index", context.index],
+      ["mode", context.mode],
+      ["request_digest", context.request_digest],
+      ["task_digest", context.task_digest],
+      ["expected_result_digest", context.expected_result_digest],
+    ] as const) {
+      if (receipt[key] !== expected) throw new ArgumentError(`autonomous brain batch protected receipt ${key} does not match item ${context.index}`);
+    }
+    try {
+      const value = this.adapter.resolveReceipt(receipt, {
+        domain: this.domain,
+        purpose: this.purpose,
+        valueKind: this.valueKind,
+        oneTime: this.oneTime,
+        digestScheme: this.digestScheme,
+      });
+      const decoded = this.valueDecoder === undefined ? value : await this.valueDecoder(value);
+      if (!isObject(decoded)) throw new ArgumentError(`autonomous brain batch protected result for item ${context.index} is not an execution object`);
+      return decoded as unknown as AutonomousBrainExecution;
+    } catch (error) {
+      if (error instanceof ArgumentError) throw error;
+      throw new ArgumentError(`autonomous brain batch protected result resolution failed for item ${context.index}`, { cause: error });
+    }
+  }
 }
 
 export interface AutonomousBrainBatchCheckpointJSON {
@@ -2102,9 +2181,14 @@ export class AutonomousBrainBatchJobController {
   private restored = false;
   private running = false;
 
-  constructor(readonly brain: AutonomousBrainFacade, readonly persistence: AutonomousBrainBatchCheckpointStore) {
+  constructor(
+    readonly brain: AutonomousBrainFacade,
+    readonly persistence: AutonomousBrainBatchCheckpointStore,
+    readonly options: { protectedRehydration?: AutonomousBrainBatchProtectedRehydrator } = {},
+  ) {
     if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain batch controller requires an AutonomousBrainFacade");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("autonomous brain batch checkpoint store is malformed");
+    if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousBrainBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller protectedRehydration is malformed");
   }
 
   private requireRestored(): void {
@@ -2156,10 +2240,12 @@ export class AutonomousBrainBatchJobController {
     if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain batch controller run requires jobId");
     const runtimeOptions = options as AutonomousBrainResumableBatchOptions & Record<string, unknown>;
     if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain batch controller owns checkpoint and checkpointSink");
+    const rehydrateExecution = options.rehydrateExecution ?? (this.options.protectedRehydration === undefined ? undefined : this.options.protectedRehydration.resolve.bind(this.options.protectedRehydration));
     this.running = true;
     try {
       const batch = await this.brain.executeBatchResumable(inputs, {
         ...options,
+        ...(rehydrateExecution === undefined ? {} : { rehydrateExecution }),
         checkpoint: this.checkpoint ?? undefined,
         checkpointSink: async (checkpoint) => {
           const verified = validateBrainBatchCheckpoint(checkpoint);

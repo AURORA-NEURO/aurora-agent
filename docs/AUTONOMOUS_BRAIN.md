@@ -10797,3 +10797,32 @@ the selected scheme in the opaque binding. This preserves both the long-horizon 
 the shared protected boundary's replay, tenant, authorization, expiry, and mismatch fences across
 all twelve domains. The task text and any private runtime options remain transient and are absent
 from goal results, journals, snapshots, and recovery projections.
+
+### Protected receipt rehydration for restart-safe brain batches
+
+The high-level batch controller now has the same protected fallback. Python applications can
+construct `AutonomousBatchProtectedRehydration` and pass it as
+`AutonomousBrainBatchJobController(..., protected_rehydration=...)`; TypeScript applications can
+construct `AutonomousBrainBatchProtectedRehydrator` and pass it as the controller's
+`protectedRehydration` option. The controller still owns restore ordering, checkpoint validation,
+compare-and-set persistence, and single-run locking. The protected adapter remains caller-owned:
+the application provides the receipt lookup, protected value store, authorization context, and
+optional decoder for rebuilding a typed runtime result.
+
+The receipt resolver receives only `job_id`, `index`, `mode`, `request_digest`, `task_digest`, and
+`expected_result_digest`. The receipt must repeat those fields exactly and add a domain plus a
+`value_digest`/`payload_digest`. The adapter then enforces tenant, actor, session, authorization,
+expiry, replay, and protected-value digest checks. Only after that does the batch engine classify
+the transient result and compare its metadata-only item digest with the checkpoint. A decoder may
+turn a canonical JSON result into a richer in-memory object; the decoder's output is never stored
+by the controller. This keeps provider results in an application-owned protected store while the
+SDK checkpoint remains free of task text, prompts, provider responses, credentials, connector
+payloads, and raw errors.
+
+An explicit `rehydrate_result`/`rehydrateExecution` callback remains authoritative. If it is
+absent, the controller uses the protected receipt adapter; if both are absent, a checkpoint with
+completed items fails closed before any new provider call. Receipt identity drift, a mismatched
+protected digest, a wrong tenant or authorization context, expiry, quarantine, and a non-successful
+or plan-mismatched decoded result all stop the restart. Tests exercise partial-failure restart,
+callback precedence, canonical result decoding, tampered identity, and the entire twelve-domain
+catalog in Python and TypeScript.

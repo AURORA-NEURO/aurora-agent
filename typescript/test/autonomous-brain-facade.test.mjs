@@ -6,6 +6,7 @@ import {
   AutonomousAgent,
   AutonomousBrainFacade,
   AutonomousBrainBatchJobController,
+  AutonomousBrainBatchProtectedRehydrator,
   InMemoryAutonomousBrainBatchCheckpointStore,
   AutonomousBrainPlan,
   AutonomousCapabilityActivation,
@@ -19,6 +20,10 @@ import {
   InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   createBuiltinAutonomousConnectorRuntime,
+  AutonomousProtectedRehydrationAdapter,
+  AutonomousProtectedRehydrationBoundary,
+  AutonomousProtectedRehydrationContext,
+  protectedValueDigest,
 } from "../dist/index.js";
 
 const tasks = {
@@ -625,6 +630,125 @@ test("brain batch controller owns restore, persistence, restart rehydration, and
     write: () => {},
   });
   await assert.rejects(invalid.restore(), /checkpoint/i);
+});
+
+test("brain batch controller resolves protected receipts after restart and preserves explicit callback precedence", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const connector = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false });
+  const resumedBrain = new AutonomousBrainFacade({ agent, connectorOperations: connector.operationFacade });
+  const requests = [
+    { task: "rehydrate a protected coding result", domain: "coding" },
+    {
+      task: "force a restartable protected batch failure",
+      domain: "science",
+      connector: {
+        domain: "science",
+        capability: "literature",
+        operation_id: "science.reproducible_evidence_acquisition",
+        subject_digest: "a".repeat(64),
+        request: { hypothesis: "protected-batch", evidence_digests: ["b".repeat(64)], analysis_digest: "c".repeat(64) },
+        approved: true,
+      },
+    },
+  ];
+  const values = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "tenant-batch", actorId: "worker-batch", sessionId: "session-batch", authorizationDigest: "a".repeat(64) }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 100 },
+  );
+  let protectedCalls = 0;
+  let protectedReceiptCalls = 0;
+  const protectedRehydrator = new AutonomousBrainBatchProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => {
+      protectedReceiptCalls += 1;
+      return {
+        job_id: context.job_id,
+        index: context.index,
+        mode: context.mode,
+        request_digest: context.request_digest,
+        task_digest: context.task_digest,
+        expected_result_digest: context.expected_result_digest,
+        domain: "coding",
+        value_digest: [...values.keys()][0],
+      };
+    },
+  });
+  const store = new InMemoryAutonomousBrainBatchCheckpointStore();
+  const firstController = new AutonomousBrainBatchJobController(brain, store, { protectedRehydration: protectedRehydrator });
+  assert.equal((await firstController.restore()).status, "empty");
+  const first = await firstController.run(requests, {
+    jobId: "protected-typescript-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+  });
+  // The first item is the only one that executes successfully in this deliberate restart fixture.
+  assert.equal(first.batch.status, "partial");
+  const value = first.batch.items[0].execution;
+  values.set(protectedValueDigest(value), value);
+  const firstCheckpoint = store.read();
+  assert.ok(firstCheckpoint);
+  assert.doesNotMatch(JSON.stringify(store.read()), /rehydrate a protected coding result|offline:offline-model/);
+
+  const restarted = new AutonomousBrainBatchJobController(resumedBrain, store, { protectedRehydration: protectedRehydrator });
+  assert.equal((await restarted.restore()).status, "restored");
+  const completed = await restarted.run(requests, {
+    jobId: "protected-typescript-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+  });
+  assert.equal(completed.batch.status, "completed");
+  assert.equal(completed.batch.items[0].execution.status, "completed");
+
+  const explicitStore = new InMemoryAutonomousBrainBatchCheckpointStore(firstCheckpoint);
+  const explicit = new AutonomousBrainBatchJobController(resumedBrain, explicitStore, { protectedRehydration: protectedRehydrator });
+  assert.equal((await explicit.restore()).status, "restored");
+  const protectedCallsBeforeExplicit = protectedReceiptCalls;
+  const explicitCompleted = await explicit.run(requests, {
+    jobId: "protected-typescript-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+    rehydrateExecution: (context) => { protectedCalls += 1; return first.batch.items[context.index].execution; },
+  });
+  assert.equal(explicitCompleted.batch.status, "completed");
+  assert.equal(protectedCalls, 1);
+  assert.equal(protectedReceiptCalls, protectedCallsBeforeExplicit);
+});
+
+test("brain batch protected receipts cover every built-in domain and fail closed on identity drift", async () => {
+  const values = new Map();
+  const receipts = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "tenant-all", actorId: "worker-all", sessionId: "session-all", authorizationDigest: "b".repeat(64) }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 200 },
+  );
+  const contexts = AUTONOMOUS_DOMAIN_NAMES.map((domain, index) => {
+    const requestDigest = `${(index + 3) % 10}`.repeat(64);
+    const taskDigest = `${(index + 1) % 10}`.repeat(64);
+    const resultDigest = `${(index + 2) % 10}`.repeat(64);
+    const value = { status: "completed", domain };
+    const valueDigest = protectedValueDigest(value);
+    values.set(valueDigest, value);
+    const context = { job_id: "all-domain-protected-typescript", index, mode: "brain", request_digest: requestDigest, task_digest: taskDigest, expected_result_digest: resultDigest };
+    receipts.set(index, { ...context, domain, value_digest: valueDigest });
+    return context;
+  });
+  const rehydrator = new AutonomousBrainBatchProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => receipts.get(context.index),
+  });
+  const resolved = await Promise.all(contexts.map((context) => rehydrator.resolve(context)));
+  assert.deepEqual(resolved.map((value) => value.domain), [...AUTONOMOUS_DOMAIN_NAMES]);
+  receipts.set(0, { ...receipts.get(0), request_digest: "0".repeat(64) });
+  await assert.rejects(rehydrator.resolve(contexts[0]), /request_digest/);
 });
 
 test("brain facade exposes a keyless readiness and activation lifecycle for onboarding", async () => {

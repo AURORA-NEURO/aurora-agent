@@ -32,6 +32,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 from .autonomous_evidence import (
     AutonomousEvidencePlan,
     build_autonomous_evidence_plan,
@@ -4031,6 +4032,72 @@ class AutonomousBatchRehydrationContext:
         _route_digest(self.request_digest, "batch rehydration request_digest")
         _route_digest(self.task_digest, "batch rehydration task_digest")
         _route_digest(self.expected_result_digest, "batch rehydration expected_result_digest")
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousBatchProtectedRehydration:
+    """Resolve completed batch results through the caller's protected-value boundary.
+
+    The batch checkpoint remains digest-only. On restart, receipt_resolver receives only
+    the opaque batch identity and returns a caller-owned receipt; the protected adapter resolves
+    the transient value, verifies its digest, and value_decoder can turn a canonical mapping
+    back into the SDK's typed result. No receipt or resolved value is retained by this object.
+    """
+
+    adapter: AutonomousProtectedRehydrationAdapter
+    receipt_resolver: Callable[[AutonomousBatchRehydrationContext], Mapping[str, Any]]
+    value_decoder: Callable[[Any], Any] | None = None
+    domain: str | None = None
+    purpose: str = "autonomous_batch_result"
+    value_kind: str = "autonomous_batch_result"
+    one_time: bool = False
+    digest_scheme: str = "canonical_json"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.adapter, AutonomousProtectedRehydrationAdapter):
+            raise BrainRunError("autonomous batch protected rehydration requires a protected rehydration adapter")
+        if not callable(self.receipt_resolver):
+            raise BrainRunError("autonomous batch protected rehydration receipt_resolver must be callable")
+        if self.value_decoder is not None and not callable(self.value_decoder):
+            raise BrainRunError("autonomous batch protected rehydration value_decoder must be callable")
+        if self.domain is not None and self.domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError("autonomous batch protected rehydration domain is unsupported")
+        if not isinstance(self.one_time, bool):
+            raise BrainRunError("autonomous batch protected rehydration one_time must be boolean")
+
+    def resolve(self, context: AutonomousBatchRehydrationContext) -> Any:
+        if not isinstance(context, AutonomousBatchRehydrationContext):
+            raise BrainRunError("autonomous batch protected rehydration context is malformed")
+        try:
+            receipt = self.receipt_resolver(context)
+        except Exception as error:
+            raise BrainRunError(f"autonomous batch protected receipt lookup failed for item {context.index}") from error
+        if not isinstance(receipt, Mapping):
+            raise BrainRunError("autonomous batch protected receipt resolver must return a mapping")
+        for key, expected in (
+            ("job_id", context.job_id),
+            ("index", context.index),
+            ("mode", context.mode),
+            ("request_digest", context.request_digest),
+            ("task_digest", context.task_digest),
+            ("expected_result_digest", context.expected_result_digest),
+        ):
+            if receipt.get(key) != expected:
+                raise BrainRunError(f"autonomous batch protected receipt {key} does not match item {context.index}")
+        try:
+            value = self.adapter.resolve_receipt(
+                receipt,
+                domain=self.domain,
+                purpose=self.purpose,
+                value_kind=self.value_kind,
+                one_time=self.one_time,
+                digest_scheme=self.digest_scheme,
+            )
+            return self.value_decoder(value) if self.value_decoder is not None else value
+        except BrainRunError:
+            raise
+        except Exception as error:
+            raise BrainRunError(f"autonomous batch protected result resolution failed for item {context.index}") from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -23088,13 +23155,22 @@ class AutonomousBrainBatchJobController:
     It supports the domain, route-first, and cross-domain batch modes through one API.
     """
 
-    def __init__(self, agent: "AutonomousAgent", persistence: Any) -> None:
+    def __init__(
+        self,
+        agent: "AutonomousAgent",
+        persistence: Any,
+        *,
+        protected_rehydration: AutonomousBatchProtectedRehydration | None = None,
+    ) -> None:
         if not isinstance(agent, AutonomousAgent):
             raise BrainRunError("autonomous brain batch controller requires an AutonomousAgent")
         if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
             raise BrainRunError("autonomous brain batch checkpoint store is malformed")
         self.agent = agent
         self.persistence = persistence
+        if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousBatchProtectedRehydration):
+            raise BrainRunError("autonomous brain batch controller protected_rehydration is malformed")
+        self.protected_rehydration = protected_rehydration
         self._checkpoint: AutonomousBatchCheckpoint | None = None
         self._expected_checkpoint_digest: str | None = None
         self._restored = False
@@ -23190,6 +23266,9 @@ class AutonomousBrainBatchJobController:
                 raise BrainRunError("autonomous brain batch controller already has a run in progress")
             self._running = True
         try:
+            effective_rehydrator = rehydrate_result
+            if effective_rehydrator is None and self.protected_rehydration is not None:
+                effective_rehydrator = self.protected_rehydration.resolve
             run_kwargs = {
                 "job_id": job_id,
                 "mode": mode,
@@ -23200,7 +23279,7 @@ class AutonomousBrainBatchJobController:
                 "stop_on_error": stop_on_error,
                 "checkpoint": None if self._checkpoint is None else self._checkpoint.to_dict(),
                 "checkpoint_sink": self._persist,
-                "rehydrate_result": rehydrate_result,
+                "rehydrate_result": effective_rehydrator,
             }
             if launch_admission is None:
                 result = self.agent.run_resumable_batch(requests, **run_kwargs)
@@ -23317,6 +23396,7 @@ __all__ = [
     "AutonomousBatchItem",
     "AutonomousBatchResult",
     "AutonomousBatchRehydrationContext",
+    "AutonomousBatchProtectedRehydration",
     "AutonomousBatchCheckpoint",
     "AutonomousBatchCheckpointTextStore",
     "InMemoryAutonomousBatchCheckpointStore",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
@@ -12,7 +13,12 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousBatchResult,
     AutonomousBatchCheckpoint,
+    AutonomousBatchRehydrationContext,
+    AutonomousBatchProtectedRehydration,
     AutonomousBrainBatchJobController,
+    AutonomousProtectedRehydrationAdapter,
+    AutonomousProtectedRehydrationBoundary,
+    AutonomousProtectedRehydrationContext,
     InMemoryAutonomousBatchCheckpointStore,
     TransactionalJsonAutonomousBatchCheckpointPersistence,
     BrainRunError,
@@ -27,6 +33,7 @@ from prism_sdk import (
     ProviderStreamEvent,
     ProviderTool,
     ProviderToolResult,
+    protected_value_digest,
 )
 
 
@@ -880,6 +887,156 @@ def test_batch_checkpoint_json_cas_is_bounded_and_tamper_evident_across_all_doma
     backend.value = json.dumps(tampered)
     with pytest.raises(BrainRunError, match="checkpoint|digest"):
         persistence.read()
+
+
+def test_batch_controller_rehydrates_completed_results_through_protected_receipts_and_preserves_callback_precedence() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("offline", lambda _request: {"output_text": "offline protected batch answer"})
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue([{
+            "provider": "offline",
+            "model": "offline-model",
+            "capabilities": sorted(required),
+            "context_window_tokens": 32_000,
+            "max_output_tokens": 2_048,
+            "quality": 0.9,
+            "latency_ms": 1,
+            "cost_per_million_tokens": 0,
+            "reliability": 0.99,
+        }]),
+    )
+    requests = (
+        {"task": "rehydrate a protected coding result", "domain": "coding"},
+        {"task": "force a restartable protected batch failure", "domain": "data"},
+    )
+    fail_second = True
+    protected_values: dict[str, Mapping[str, Any]] = {}
+    protected_calls: list[int] = []
+    protected_receipt_calls: list[int] = []
+    boundary = AutonomousProtectedRehydrationBoundary(
+        AutonomousProtectedRehydrationContext("tenant-batch", "worker-batch", "session-batch", "a" * 64),
+        lambda reference, _context: protected_values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 100,
+    )
+
+    def options_factory(_request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+        return {"approve_provider_call": True, "max_steps": 0 if fail_second and index == 1 else 32}
+
+    def receipt_for(context: AutonomousBatchRehydrationContext) -> Mapping[str, Any]:
+        protected_receipt_calls.append(context.index)
+        return {
+            "job_id": context.job_id,
+            "index": context.index,
+            "mode": context.mode,
+            "request_digest": context.request_digest,
+            "task_digest": context.task_digest,
+            "expected_result_digest": context.expected_result_digest,
+            "domain": "coding",
+            "value_digest": next(iter(protected_values)),
+        }
+
+    protected = AutonomousBatchProtectedRehydration(
+        AutonomousProtectedRehydrationAdapter(boundary),
+        receipt_for,
+        value_decoder=lambda value: SimpleNamespace(status=value["status"]),
+    )
+    store = InMemoryAutonomousBatchCheckpointStore()
+    first_controller = AutonomousBrainBatchJobController(agent, store, protected_rehydration=protected)
+    assert first_controller.restore()["status"] == "empty"
+    first = first_controller.run(
+        requests,
+        job_id="protected-batch-job",
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=options_factory,
+    )
+    assert first["batch"].status == "partial"
+    assert first["batch"].items[0].result is not None
+    raw_value = first["batch"].items[0].result.to_dict()
+    protected_values[protected_value_digest(raw_value)] = raw_value
+    first_checkpoint = store.read()
+    assert first_checkpoint is not None
+    assert "rehydrate a protected coding result" not in json.dumps(store.read(), sort_keys=True)
+
+    fail_second = False
+    restarted = AutonomousBrainBatchJobController(agent, store, protected_rehydration=protected)
+    assert restarted.restore()["status"] == "restored"
+    completed = restarted.run(
+        requests,
+        job_id="protected-batch-job",
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=options_factory,
+    )
+    assert completed["batch"].status == "completed"
+    assert completed["batch"].items[0].result.status.startswith("completed")
+
+    explicit_store = InMemoryAutonomousBatchCheckpointStore(first_checkpoint)
+    explicit = AutonomousBrainBatchJobController(agent, explicit_store, protected_rehydration=protected)
+    assert explicit.restore()["status"] == "restored"
+    protected_calls_before_explicit = len(protected_receipt_calls)
+    completed_again = explicit.run(
+        requests,
+        job_id="protected-batch-job",
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=options_factory,
+        rehydrate_result=lambda context: (protected_calls.append(context.index) or first["batch"].items[context.index].result),
+    )
+    assert completed_again["batch"].status == "completed"
+    assert protected_calls == [0]
+    assert len(protected_receipt_calls) == protected_calls_before_explicit
+
+
+def test_batch_protected_rehydration_receipts_are_identity_bound_across_all_domains() -> None:
+    values: dict[str, Mapping[str, Any]] = {}
+    receipts: dict[int, Mapping[str, Any]] = {}
+    boundary = AutonomousProtectedRehydrationBoundary(
+        AutonomousProtectedRehydrationContext("tenant-all", "worker-all", "session-all", "b" * 64),
+        lambda reference, _context: values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 200,
+    )
+    contexts: list[AutonomousBatchRehydrationContext] = []
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+        request_digest = hashlib.sha256(f"request-{domain}".encode()).hexdigest()
+        task_digest = hashlib.sha256(f"task-{domain}".encode()).hexdigest()
+        expected_result_digest = hashlib.sha256(f"result-{domain}".encode()).hexdigest()
+        context = AutonomousBatchRehydrationContext("all-domain-protected-job", index, "domain", request_digest, task_digest, expected_result_digest)
+        value = {"status": "completed", "domain": domain}
+        value_digest = protected_value_digest(value)
+        values[value_digest] = value
+        receipts[index] = {
+            "job_id": context.job_id,
+            "index": context.index,
+            "mode": context.mode,
+            "request_digest": context.request_digest,
+            "task_digest": context.task_digest,
+            "expected_result_digest": context.expected_result_digest,
+            "domain": domain,
+            "value_digest": value_digest,
+        }
+        contexts.append(context)
+    rehydrator = AutonomousBatchProtectedRehydration(
+        AutonomousProtectedRehydrationAdapter(boundary),
+        lambda context: receipts[context.index],
+    )
+    assert [rehydrator.resolve(context)["domain"] for context in contexts] == list(AUTONOMOUS_DOMAINS)
+    receipts[0] = {**receipts[0], "request_digest": "0" * 64}
+    with pytest.raises(BrainRunError, match="request_digest"):
+        rehydrator.resolve(contexts[0])
 
 
 def test_agent_run_resumable_batch_supports_route_first_and_cross_domain_modes() -> None:
