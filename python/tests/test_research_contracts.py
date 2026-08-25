@@ -70,6 +70,7 @@ from prism_sdk.api_release import API_RELEASE_ASSURANCE_FEATURE_ID, API_RELEASE_
 from prism_sdk.bioevalx_federation import BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID, BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION, BioevalxFederationGatewayReceipt
 from prism_sdk.section_interpretation import SectionInterpretationAssuranceReceipt
 from prism_sdk.ops_retrieval import OpsRetrievalAssuranceReceipt
+from prism_sdk.conformance_knowledge import ConformanceKnowledgeWorldAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2267,6 +2268,37 @@ def test_ops_retrieval_assurance_keeps_unknown_evidence_blocked():
         benchmark_digest=None,
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_conformance_knowledge_world_assurance_keeps_comparability_omission_unknown():
+    receipt = ConformanceKnowledgeWorldAssuranceReceipt(
+        request_id="request:world",
+        workflow_id="workflow:knowledge",
+        scope="organoid:neural",
+        disposition="unknown",
+        candidate_order=("claim:a",),
+        admitted_order=(),
+        blocked_order=("claim:a",),
+        unknown_order=(),
+        predicate_order=(),
+        study_order=(),
+        modality_order=(),
+        support_order=(900,),
+        semantic_order=(),
+        artifact_order=(),
+        evidence_order=(),
+        provenance_order=(),
+        comparability_order=(),
+        omissions=("claim:claim:a:comparability-missing",),
+        uncertainty=(),
+        negative_evidence=(),
+        replay_identity="a" * 64,
+        benchmark_digest="b" * 64,
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "c" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

@@ -312,6 +312,11 @@ from .ops_retrieval import (
     OPS_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
     OpsRetrievalAssuranceReceipt,
 )
+from .conformance_knowledge import (
+    CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_FEATURE_ID,
+    CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_CONTRACT_VERSION,
+    ConformanceKnowledgeWorldAssuranceReceipt,
+)
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

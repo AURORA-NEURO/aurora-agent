@@ -85,6 +85,7 @@ pub mod fiber_suite;
 pub mod fixture;
 pub mod gate;
 pub mod implementation;
+pub mod knowledge_world_assurance;
 pub mod pyramid;
 pub mod suite;
 
@@ -103,6 +104,12 @@ pub use gate::{assess, BaselineReference, ReleaseDecision, ReleaseGate, UnmetGat
 pub use implementation::{
     artifact, CompileArtifacts, CompileFailure, EnvironmentManifest, Implementation,
     ImplementationIdentity,
+};
+pub use knowledge_world_assurance::{
+    assure_knowledge_world, knowledge_world_assurance_manifest, KnowledgeWorldAssuranceError,
+    KnowledgeWorldDisposition, ScopedResearchClaim, ScopedResearchClaimsRequest,
+    TypedKnowledgeWorldReceipt, CONTRACT_VERSION as KNOWLEDGE_WORLD_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_WORLD_ASSURANCE_FEATURE_ID,
 };
 pub use pyramid::{ImbalanceFinding, PyramidBalance, PyramidShape};
 pub use suite::{
