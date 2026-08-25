@@ -59,6 +59,7 @@ pub mod multimodal_research_workbench;
 pub mod multimodal_retrieval_contract_model;
 pub mod multimodal_retrieval_copilot;
 pub mod multimodal_retrieval_synthesis;
+pub mod multimodal_retrieval_workflow_fabric;
 pub mod multimodal_safety_assurance;
 pub mod retrieval_contract_model;
 pub mod retrieval_research_copilot;
@@ -271,6 +272,13 @@ pub use multimodal_retrieval_synthesis::{
     MultimodalEvidenceSynthesis, MultimodalRetrievalError, MultimodalRetrievalQuery,
     CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use multimodal_retrieval_workflow_fabric::{
+    compile_multimodal_retrieval_workflow, multimodal_retrieval_workflow_fabric_manifest,
+    MultimodalRetrievalWorkflowError, MultimodalRetrievalWorkflowReceipt,
+    MultimodalRetrievalWorkflowRequest,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use multimodal_safety_assurance::{
     multimodal_safety_assurance_manifest, verify_multimodal_safety, MultimodalAssuranceError,
