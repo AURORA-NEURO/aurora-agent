@@ -114,8 +114,11 @@ import type {
   AutonomousMemoryReceipt,
 } from "./autonomous-memory.js";
 import {
+  runAutonomousAutoDecisionCycle,
   runAutonomousCrossDomainReplanCycle,
   runAutonomousReplanCycle,
+  type AutonomousAutoDecisionCycleOptions,
+  type AutonomousAutoDecisionCycleResult,
   type AutonomousCrossDomainReplanCycleOptions,
   type AutonomousCrossDomainReplanCycleResult,
   type AutonomousReplanCycleOptions,
@@ -6023,6 +6026,17 @@ export class AutonomousAgent {
       retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
       authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
     };
+  }
+
+  /**
+   * Route once and execute the evaluator-backed single- or cross-domain decision cycle.
+   *
+   * This is the closed-loop counterpart to `runAuto()`: callers can supply an explicit
+   * evaluator and learning controller, while the cycle retains the existing approval,
+   * provider-planning, persistence, and rehydration boundaries.
+   */
+  async runAutoCycle(task: string, options: AutonomousAutoDecisionCycleOptions = {}): Promise<AutonomousAutoDecisionCycleResult> {
+    return runAutonomousAutoDecisionCycle(this, task, options);
   }
 
   /**

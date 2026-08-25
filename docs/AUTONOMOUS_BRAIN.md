@@ -9880,3 +9880,20 @@ between preview and dispatch. Deterministic mode delegates to the ordinary execu
 planning envelope and execution result. The typed result exposes the next review action, semantic
 route, blueprint, status, and retention posture without creating provider or effect authority.
 All twelve TypeScript domains plus the cross-domain route are covered by approval-gated tests.
+
+The TypeScript facade now also exposes `runAutoCycle()` and the functional
+`runAutonomousAutoDecisionCycle()` entrypoint. This is the closed-loop automatic brain boundary:
+it resolves deterministic or explicitly approved semantic routing once, selects the matching
+single-domain or cross-domain decision-cycle kernel, and passes the route back as a digest-verified
+override. A caller can therefore combine route review, provider planning, model selection,
+provider invocation, explicit evaluator settlement, online bandit updates, memory, and
+restart-safe cycle persistence without duplicating route-selection logic. The result identifies
+the selected mode, preserves the nested cycle projection, and returns a bounded next action.
+
+The automatic cycle never infers reward from transport success, provider confidence, or a model's
+self-report. Semantic-routing approval remains separate from execution approval; plan acceptance,
+effects, credentials, evaluator evidence, and durable stores remain caller-owned. One
+`AutonomousCostBudget` is shared across semantic classification, planning, specialist fan-out,
+synthesis, and execution. All built-in single-domain profiles and the cross-domain route are
+covered by offline tests, including learner settlement, cross-domain fan-out, and semantic
+approval refusal.

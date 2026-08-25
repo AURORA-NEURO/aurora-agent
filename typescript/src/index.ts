@@ -2388,6 +2388,7 @@ export type {
   AutonomousSemanticRouteResult,
 } from "./autonomous-routing.js";
 export {
+  AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_REPLAN_CYCLE_SCHEMA,
@@ -2395,6 +2396,7 @@ export {
   AUTONOMOUS_REPLAN_CONTEXT_SCHEMA,
   AUTONOMOUS_REPLAN_CYCLE_SCHEMA,
   AUTONOMOUS_REPLAN_MAX_REPLANS,
+  runAutonomousAutoDecisionCycle,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousCrossDomainReplanCycle,
   runAutonomousDecisionCycle,
@@ -2455,6 +2457,10 @@ export type {
   AutonomousDecisionCycleStateStore,
 } from "./autonomous-decision-persistence.js";
 export type {
+  AutonomousAutoDecisionCycleMode,
+  AutonomousAutoDecisionCycleOptions,
+  AutonomousAutoDecisionCycleResult,
+  AutonomousAutoDecisionCycleStatus,
   AutonomousCrossDomainDecisionCycleEvaluator,
   AutonomousCrossDomainDecisionCycleLearningOptions,
   AutonomousCrossDomainDecisionCycleOptions,

@@ -1554,3 +1554,14 @@ effect review. Its provider mode reuses the shared aggregate budget and existing
 bridge, so callers do not get a second implicit planning or invocation path. The remaining
 deployment responsibility is still explicit credential, evaluator, effect, and durable-store
 integration rather than hidden SDK authority.
+
+The next TypeScript brain increment closes the remaining high-level automatic-cycle parity gap.
+`runAutoCycle()` and `runAutonomousAutoDecisionCycle()` resolve one deterministic or explicitly
+approved semantic route, choose the matching single-domain or cross-domain decision-cycle kernel,
+and pass the route back as a digest-verified override. The result retains the nested cycle,
+evaluator settlement, online learner/bandit updates, provider-planning review, and restart cursor
+without duplicating route logic or making provider success into reward. A shared cost budget spans
+semantic routing, planning, fan-out, synthesis, and execution. All built-in single-domain profiles,
+cross-domain execution, and semantic approval refusal are covered by offline TypeScript tests;
+credentials, evaluator evidence, effects, and durable stores remain explicit application
+responsibilities.

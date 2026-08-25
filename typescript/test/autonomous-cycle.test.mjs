@@ -21,6 +21,7 @@ import {
   openaiCompatibleProvider,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousCrossDomainReplanCycle,
+  runAutonomousAutoDecisionCycle,
   runAutonomousDecisionCycle,
   runAutonomousReplanCycle,
   validateAutonomousDecisionCycleSnapshot,
@@ -199,6 +200,66 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(outbox.rows().filter((command) => command.status === "applied").length, 1);
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
+});
+
+test("automatic decision cycle selects and settles every single-domain profile through one facade", async () => {
+  const { agent } = cycleAgent();
+  const learning = new AutonomousLearningController(agent);
+  const tasks = {
+    coding: "debug this repository and verify the tests",
+    browser: "research sources and compare citations",
+    data: "validate dataset schema lineage and quality",
+    science: "design a reproducible hypothesis experiment",
+    biomedical: "review biomedical evidence with safety boundaries",
+    neuroscience: "analyze EEG preprocessing and signal confounds",
+    operations: "prepare an outage rollback runbook",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this specialist subtask and synthesize findings",
+    multimodal: "inspect this image transcript and evidence gaps",
+    evaluation: "run a benchmark holdout replay and report uncertainty",
+  };
+  for (const [domain, task] of Object.entries(tasks)) {
+    const result = await runAutonomousAutoDecisionCycle(agent, task, {
+      domain,
+      approveProviderCall: true,
+      learning: {
+        controller: learning,
+        episodeId: `automatic-cycle-${domain}`,
+        evaluate: () => ({ evaluator_id: "automatic-cycle-reviewer", evaluator_version: "1", reward: 0.81, passed: true }),
+      },
+    });
+    assert.equal(result.schema, "bioprism-typescript-autonomous-auto-decision-cycle/0.1", domain);
+    assert.equal(result.mode, "single_domain", domain);
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.next_action, "complete", domain);
+    assert.equal(result.cycle.route.primary_domain, domain, domain);
+    assert.equal(result.cycle.settlement.episode.status, "settled", domain);
+  }
+  assert.equal(learning.episodes.snapshotRows().length, Object.keys(tasks).length);
+});
+
+test("automatic decision cycle chooses bounded cross-domain fan-out and keeps semantic routing review-only", async () => {
+  const { agent, calls } = cycleAgent();
+  const cross = await runAutonomousAutoDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence.", {
+    allowCrossDomain: true,
+    approveProviderCall: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(cross.mode, "cross_domain");
+  assert.equal(cross.status, "completed");
+  assert.equal(cross.next_action, "complete");
+  assert.equal(cross.cycle.run.child_runs.length, 2);
+  assert.equal(calls(), 3, "two specialists plus one synthesis call");
+
+  const reviewed = await runAutonomousAutoDecisionCycle(agent, "debug this coding repository", {
+    semanticRouting: { enabled: true, approveProviderCall: false },
+    approveProviderCall: true,
+  });
+  assert.equal(reviewed.status, "approval_required");
+  assert.equal(reviewed.next_action, "review_provider_or_effect_approval");
+  assert.equal(reviewed.semantic_route.status, "approval_required");
+  assert.equal(reviewed.cycle, null);
+  assert.equal(calls(), 3, "semantic routing approval must not dispatch a provider");
 });
 
 test("decision-cycle provider planning pauses, persists a digest, and resumes only with the accepted proposal", async () => {

@@ -767,6 +767,37 @@ legacy proposals without the metadata use the caller-supplied settlement context
 single-domain, cross-domain, workflow, portfolio, and mission wrappers from silently moving
 planner feedback to a different contextual bandit arm.
 
+`runAutoCycle()` is the closed-loop automatic counterpart when the caller wants one entrypoint
+that chooses between the single-domain and fan-out/fan-in decision-cycle kernels. It resolves the
+route once, optionally through an explicitly approved semantic classifier, and hands that exact
+route to the matching cycle as a digest-verified override. The cycle can therefore settle an
+evaluator reward, update the online learner, persist a restart cursor, and preserve provider
+planning review without making callers guess the route shape:
+
+```typescript
+const cycle = await agent.runAutoCycle("review biomedical evidence and EEG confounds", {
+  approveProviderCall: true,
+  learning: {
+    controller: learning,
+    episodeId: "review-001",
+    evaluate: (run) => ({
+      evaluator_id: "application-reviewer",
+      evaluator_version: "1",
+      reward: scoreWithCallerOwnedEvidence(run),
+      passed: true,
+    }),
+  },
+});
+```
+
+The typed result reports `mode: "single_domain"` or `"cross_domain"`, the exact route, the
+nested decision-cycle projection, and a bounded `next_action`. A semantic classifier that lacks
+approval, disagrees with deterministic routing, or fails policy returns before the cycle and never
+dispatches the execution provider. The same shared `AutonomousCostBudget` covers semantic routing,
+planning, specialist calls, synthesis, and evaluator settlement; provider success still cannot
+become reward without the evaluator callback. `runAutoCycle()` is exported alongside
+`runAutonomousAutoDecisionCycle()` for applications that prefer a functional entrypoint.
+
 `runAutonomousReplanCycle()` adds the bounded adaptive control loop for callers that want the
 evaluator to decide whether one answer deserves another attempt. Each completed attempt is sent
 to a caller-owned evaluator that returns reward/pass/failure metadata plus `replan_requested` and,
