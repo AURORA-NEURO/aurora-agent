@@ -72,6 +72,11 @@ import {
   type AutonomousLaunchPreflightOptions,
   type AutonomousLaunchPreflightReport,
 } from "./autonomous-launch-preflight.js";
+import {
+  createAutonomousLaunchAdmission,
+  type AutonomousLaunchAdmissionOptions,
+  type AutonomousLaunchAdmissionReport,
+} from "./autonomous-launch-admission.js";
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -1116,6 +1121,11 @@ export class AutonomousBrainFacade {
    */
   async launchPreflight(options: AutonomousLaunchPreflightOptions = {}): Promise<AutonomousLaunchPreflightReport> {
     return auditAutonomousBrainLaunchPreflight(this, options);
+  }
+
+  /** Bind an explicit caller decision to one exact preflight without granting execution authority. */
+  admitLaunchPreflight(preflight: AutonomousLaunchPreflightReport, options: AutonomousLaunchAdmissionOptions): AutonomousLaunchAdmissionReport {
+    return createAutonomousLaunchAdmission(preflight, options);
   }
 
   /** Project a portfolio-wide admission image before provider/tool/source dispatch. */

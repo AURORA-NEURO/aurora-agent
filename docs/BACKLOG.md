@@ -1620,3 +1620,10 @@ TypeScript now closes the corresponding facade gap with `AutonomousBrainFacade.l
 It composes the existing domain audit, keyless readiness projection, and deployment audit for all
 twelve domains, validates the aggregate digest and zero-dispatch posture, and refuses secret-shaped
 capability metadata before any provider/source/tool boundary.
+
+The next handoff now records explicit review decisions as well. Python's
+`agent.launch_admission()` and TypeScript's `brain.admitLaunchPreflight()` bind `approve`/`hold`
+to the exact preflight digest, retain all twelve domain admission states, require an external
+authorization digest for approval, and never turn the record into provider, source, tool, learner,
+credential, queue, or effect authority. Deployment-owned schedulers still decide whether and how
+to bind that review record to execution.

@@ -2041,6 +2041,13 @@ source digests, redacted next actions, and zero-dispatch ledger. It is validated
 `validateAutonomousLaunchPreflightReport()` and does not initialize a provider, resolve a key, or
 authorize a tool, source, learner, queue, or effect.
 
+The follow-on `launch_admission`/`admitLaunchPreflight` operation records an explicit caller
+`approve` or `hold` decision against the preflight's aggregate digest. It projects all twelve
+domains as `approved`, `held`, `blocked`, or `not_selected`, requires an external authorization
+digest for approval, and hashes any review reason instead of retaining it. Partial or blocked rows
+cannot be promoted by the SDK. This is a restart-safe review handoff, not a replacement for the
+deployment's authorization service or execution boundary.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

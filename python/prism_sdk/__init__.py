@@ -280,6 +280,14 @@ from .autonomous_launch_preflight import (
     audit_autonomous_agent_launch_preflight,
     validate_autonomous_launch_preflight_report,
 )
+from .autonomous_launch_admission import (
+    AUTONOMOUS_LAUNCH_ADMISSION_SCHEMA,
+    AUTONOMOUS_LAUNCH_ADMISSION_DOMAIN_SCHEMA,
+    MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES,
+    MAX_AUTONOMOUS_LAUNCH_ADMISSION_ACTIONS,
+    create_autonomous_launch_admission,
+    validate_autonomous_launch_admission,
+)
 from .remote_brain_worker import (
     AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA,
     AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA,
@@ -4046,6 +4054,12 @@ __all__ = [
     "MAX_AUTONOMOUS_LAUNCH_PREFLIGHT_ACTIONS",
     "audit_autonomous_agent_launch_preflight",
     "validate_autonomous_launch_preflight_report",
+    "AUTONOMOUS_LAUNCH_ADMISSION_SCHEMA",
+    "AUTONOMOUS_LAUNCH_ADMISSION_DOMAIN_SCHEMA",
+    "MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES",
+    "MAX_AUTONOMOUS_LAUNCH_ADMISSION_ACTIONS",
+    "create_autonomous_launch_admission",
+    "validate_autonomous_launch_admission",
     "BRAIN_EVALUATOR_REPLAY_SCHEMA",
     "BRAIN_CONTEXT_LEARNING_STATE_SCHEMA",
     "BRAIN_LEARNING_EPISODE_SCHEMA",

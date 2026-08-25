@@ -286,6 +286,13 @@ provider or source, executes a tool, mutates learning, or creates effect authori
 means only that the represented local gates are complete; live evidence truth, approval, scheduling,
 and execution remain separate caller-owned boundaries.
 
+After review, `brain.admitLaunchPreflight(preflight, { decision: "approve", authorizationDigest })`
+creates the matching value-only admission handoff. It carries one row for every domain, supports
+explicit subsets and holds, stores only authorization/reason digests, and refuses approval when a
+selected domain is still blocked or partial. Validate it with `validateAutonomousLaunchAdmission()`
+before binding it to a deployment-owned scheduler; the record remains separate from provider,
+source, tool, credential, learner, queue, and effect authority.
+
 ### Keyless capability activation and restart-safe tool admission
 
 Readiness is descriptive; activation is the explicit lifecycle that turns a reviewed catalogue

@@ -814,6 +814,14 @@ report also includes source-report digests and an explicit zero-dispatch ledger.
 startup dashboards and approval UX, but it never authorizes a provider, source, tool, effect, or
 learning update.
 
+`agent.launch_admission(preflight, decision="approve", authorization_digest=...)` records the
+next explicit caller review boundary against that exact preflight digest. It projects an admission
+state for every domain (`approved`, `held`, `blocked`, or `not_selected`) and stores only the
+authorization/reason digests, bounded actions, and gate identities. A blocked or partial preflight
+cannot become approved through this method, and the admission record still does not grant provider,
+source, tool, queue, learner, credential, or effect authority; the deployment-owned executor must
+bind it to its own authorization and dispatch policy.
+
 `AutonomousBrainControlPlaneMonitor` and `AsyncAutonomousBrainControlPlaneMonitor` provide the
 operator-side lifecycle for jobs returned by `BrainControlClient`. They fan out bounded status
 reads across the twelve domains, validate hash-chained event cursors, issue explicit approval

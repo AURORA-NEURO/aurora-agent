@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import copy
+
+import pytest
+
+from prism_sdk import (
+    AUTONOMOUS_DOMAIN_NAMES,
+    AutonomousAgent,
+    CredentialStore,
+    LLMRuntime,
+    ModelCatalogue,
+    create_autonomous_launch_admission,
+    openai_provider,
+    validate_autonomous_launch_admission,
+)
+from prism_sdk.autonomy import builtin_autonomous_workflow_strategies
+from prism_sdk.domain_tools import builtin_autonomous_domain_tool_profiles
+from prism_sdk.errors import ArgumentError
+
+
+def _candidate() -> dict[str, object]:
+    return {
+        "provider": "openai",
+        "model": "admission-model",
+        "capabilities": ["reasoning", "code", "web", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "coordination", "multimodal", "evaluation"],
+        "context_window_tokens": 32_000,
+        "max_output_tokens": 2_000,
+        "quality": 0.9,
+        "latency_ms": 100,
+        "cost_per_million_tokens": 10,
+        "reliability": 0.95,
+    }
+
+
+def _agent() -> AutonomousAgent:
+    runtime = LLMRuntime(CredentialStore())
+    runtime.register_provider(openai_provider(base_url="https://launch-admission.invalid"))
+    return AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue([_candidate()]))
+
+
+def _complete_preflight(agent: AutonomousAgent) -> dict[str, object]:
+    profiles = builtin_autonomous_workflow_strategies()
+    tools = sorted({binding.name for profile in builtin_autonomous_domain_tool_profiles() for binding in profile.bindings})
+    evidence = [
+        f"{profile.domain}:{stage.id}:{output}"
+        for profile in profiles
+        for stage in profile.stages
+        for output in stage.evidence_outputs
+    ]
+    capabilities = {
+        name: {"configured": True, "operational": True, "restart_safe": True, "integrity_fenced": True, "caller_owned": True}
+        for name in ("persistence", "queue", "approval_authority", "external_auth", "telemetry")
+    }
+    with agent.start_credential_session(session_id="launch-admission-ready") as session:
+        session.register_value("openai", "unit-test-only-not-a-provider-key")
+        return agent.launch_preflight(
+            available_tool_names=tools,
+            available_evidence=evidence,
+            deployment_capabilities=capabilities,
+        )
+
+
+def test_launch_admission_holds_blocked_preflight_across_all_domains() -> None:
+    agent = AutonomousAgent(None, LLMRuntime())
+    preflight = agent.launch_preflight()
+    admission = agent.launch_admission(
+        preflight,
+        decision="approve",
+        authorization_digest="a" * 64,
+    )
+
+    assert admission["schema"] == "bioprism-python-autonomous-launch-admission/0.1"
+    assert admission["status"] == "held"
+    assert admission["summary"]["domain_count"] == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert admission["summary"]["blocked_domain_count"] == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert all(row["admission_state"] == "blocked" for row in admission["domains"])
+    assert validate_autonomous_launch_admission(admission) == admission
+
+
+def test_launch_admission_approves_every_ready_domain_with_one_review_digest() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    admission = create_autonomous_launch_admission(
+        preflight,
+        decision="approve",
+        authorization_digest="b" * 64,
+        reason="reviewed launch gates",
+    )
+
+    assert admission["status"] == "approved"
+    assert admission["summary"] == {
+        "domain_count": 12,
+        "selected_domain_count": 12,
+        "approved_domain_count": 12,
+        "held_domain_count": 0,
+        "blocked_domain_count": 0,
+        "not_selected_domain_count": 0,
+    }
+    assert all(row["admission_state"] == "approved" for row in admission["domains"])
+    assert "reviewed launch gates" not in str(admission)
+    assert "unit-test-only-not-a-provider-key" not in str(admission)
+    assert validate_autonomous_launch_admission(admission) == admission
+
+
+def test_launch_admission_supports_subset_and_hold_without_widening_authority() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    subset = agent.launch_admission(
+        preflight,
+        decision="approve",
+        approved_domains=("coding",),
+        authorization_digest="c" * 64,
+    )
+    assert subset["status"] == "approved"
+    assert subset["summary"]["approved_domain_count"] == 1
+    assert subset["summary"]["not_selected_domain_count"] == 11
+    assert subset["domains"][0]["admission_state"] == "approved"
+    assert all(row["admission_state"] == "not_selected" for row in subset["domains"][1:])
+
+    held = create_autonomous_launch_admission(preflight, decision="hold", reason="wait for operator")
+    assert held["status"] == "held"
+    assert held["summary"]["held_domain_count"] == 12
+    assert held["authorization_digest"] is None
+    assert "wait for operator" not in str(held)
+
+
+def test_launch_admission_rejects_missing_authority_and_tampering() -> None:
+    agent = AutonomousAgent(None, LLMRuntime())
+    preflight = agent.launch_preflight()
+    with pytest.raises(ArgumentError, match="authorization_digest"):
+        create_autonomous_launch_admission(preflight, decision="approve")
+    tampered = copy.deepcopy(create_autonomous_launch_admission(preflight, decision="hold"))
+    tampered["domains"][0]["admission_state"] = "approved"
+    with pytest.raises(ArgumentError, match="admission_digest"):
+        validate_autonomous_launch_admission(tampered)
+    tampered["api_key"] = "must-not-cross"
+    with pytest.raises(ArgumentError, match="secret-shaped"):
+        validate_autonomous_launch_admission(tampered)

@@ -17987,6 +17987,36 @@ class AutonomousAgent:
             deployment_capabilities=deployment_capabilities,
         )
 
+    def launch_admission(
+        self,
+        preflight_report: Mapping[str, Any] | None = None,
+        *,
+        decision: str,
+        approved_domains: Sequence[str] | None = None,
+        authorization_digest: str | None = None,
+        reason: str | None = None,
+        admission_id: str = "autonomous-launch-admission",
+    ) -> dict[str, Any]:
+        """Bind an explicit caller review decision to one launch-preflight digest.
+
+        The resulting value-only admission record is useful to a deployment-owned scheduler or
+        approval service, but it does not grant provider, source, tool, credential, learner, queue,
+        or effect authority.  When ``preflight_report`` is omitted, a fresh provider-free preflight
+        is generated before the decision is recorded.
+        """
+
+        from .autonomous_launch_admission import create_autonomous_launch_admission
+
+        report = self.launch_preflight() if preflight_report is None else preflight_report
+        return create_autonomous_launch_admission(
+            report,
+            decision=decision,
+            approved_domains=approved_domains,
+            authorization_digest=authorization_digest,
+            reason=reason,
+            admission_id=admission_id,
+        )
+
     def domain_evaluator(
         self,
         domain: str,

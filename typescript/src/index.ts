@@ -1710,6 +1710,22 @@ export type {
   AutonomousLaunchPreflightReport,
 } from "./autonomous-launch-preflight.js";
 export {
+  AUTONOMOUS_LAUNCH_ADMISSION_SCHEMA,
+  AUTONOMOUS_LAUNCH_ADMISSION_DOMAIN_SCHEMA,
+  MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES,
+  MAX_AUTONOMOUS_LAUNCH_ADMISSION_ACTIONS,
+  createAutonomousLaunchAdmission,
+  validateAutonomousLaunchAdmission,
+} from "./autonomous-launch-admission.js";
+export type {
+  AutonomousLaunchAdmissionDecision,
+  AutonomousLaunchAdmissionStatus,
+  AutonomousLaunchAdmissionDomainState,
+  AutonomousLaunchAdmissionOptions,
+  AutonomousLaunchAdmissionDomain,
+  AutonomousLaunchAdmissionReport,
+} from "./autonomous-launch-admission.js";
+export {
   AUTONOMOUS_BRAIN_JOB_SCHEMA,
   AUTONOMOUS_BRAIN_JOB_EVENT_SCHEMA,
   AUTONOMOUS_BRAIN_JOB_SNAPSHOT_SCHEMA,
