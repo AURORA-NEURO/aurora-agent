@@ -89,6 +89,8 @@ EXPERIMENT_DESIGN_CONTROL_FEATURE_ID = "AFA-adapter-P09-F30"
 EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION = "federated-experiment-design-control-plane/1.0"
 PROTOCOL_SIMULATION_FEATURE_ID = "AFA-adapter-P10-F03"
 PROTOCOL_SIMULATION_CONTRACT_VERSION = "prospective-protocol-simulation/1.0"
+INSTRUMENT_MESH_FEATURE_ID = "AFA-adapter-P11-F04"
+INSTRUMENT_MESH_CONTRACT_VERSION = "federated-laboratory-integration/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2308,3 +2310,53 @@ class ProtocolSimulationReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "protocol_id": self.protocol_id, "design_digest": self.design_digest, "results": [dict(item) for item in self.results], "passed": self.passed, "failed_closed": self.failed_closed, "approval_required": self.approval_required, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class InstrumentMeshReceipt:
+    request_id: str
+    federation_id: str
+    action_id: str
+    decision: str
+    candidate_order: tuple[str, ...]
+    selected_instrument_id: str | None
+    selected_site_id: str | None
+    selected_protocol_profile: str | None
+    satisfied_capabilities: tuple[str, ...]
+    missing_capabilities: tuple[str, ...]
+    missing_interlocks: tuple[str, ...]
+    effect: Mapping[str, Any] | None
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = INSTRUMENT_MESH_FEATURE_ID
+    contract_version: str = INSTRUMENT_MESH_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != INSTRUMENT_MESH_FEATURE_ID or self.contract_version != INSTRUMENT_MESH_CONTRACT_VERSION:
+            raise ResearchContractError("instrument mesh schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.federation_id.strip() or not self.action_id.strip() or not self.reasons:
+            raise ResearchContractError("instrument mesh identity, locality, boundary, or reasons are incomplete")
+        if self.decision not in {"admitted", "approval_required", "blocked", "unknown"}:
+            raise ResearchContractError("instrument mesh decision is unknown")
+        if tuple(sorted(set(self.candidate_order))) != self.candidate_order:
+            raise ResearchContractError("instrument mesh candidate order is not canonical")
+        if any(not str(item).strip() for item in self.missing_capabilities + self.missing_interlocks):
+            raise ResearchContractError("instrument mesh missing capability or interlock is empty")
+        if self.decision == "admitted":
+            if not self.selected_instrument_id or not self.selected_site_id or not self.effect:
+                raise ResearchContractError("admitted instrument mesh receipt needs selection and effect receipt")
+            if self.effect.get("authorized") is not True or self.effect.get("executed") is not False or self.effect.get("raw_data_local") is not True:
+                raise ResearchContractError("instrument mesh effect must be authorized, not executed, and local")
+        elif self.effect is not None:
+            raise ResearchContractError("non-admitted instrument mesh receipt cannot contain an effect")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("instrument mesh artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "federation_id": self.federation_id, "action_id": self.action_id, "decision": self.decision, "candidate_order": list(self.candidate_order), "selected_instrument_id": self.selected_instrument_id, "selected_site_id": self.selected_site_id, "selected_protocol_profile": self.selected_protocol_profile, "satisfied_capabilities": list(self.satisfied_capabilities), "missing_capabilities": list(self.missing_capabilities), "missing_interlocks": list(self.missing_interlocks), "effect": dict(self.effect) if self.effect else None, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

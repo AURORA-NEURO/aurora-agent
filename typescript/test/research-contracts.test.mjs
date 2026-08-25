@@ -90,6 +90,10 @@ import {
   PROTOCOL_SIMULATION_CONTRACT_VERSION,
   protocolSimulationReceiptDigest,
   validateProtocolSimulationReceipt,
+  INSTRUMENT_MESH_FEATURE_ID,
+  INSTRUMENT_MESH_CONTRACT_VERSION,
+  instrumentMeshReceiptDigest,
+  validateInstrumentMeshReceipt,
   RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
   RESOURCE_DISCOVERY_CONTRACT_VERSION,
   resourceDiscoveryContractReceiptDigest,
@@ -936,3 +940,5 @@ test("quality envelope keeps multi-study comparability conflicts blocked", () =>
 test("experiment design blocks incomplete authorization without assignments", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: EXPERIMENT_DESIGN_CONTROL_FEATURE_ID, contract_version: EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION, request_id: "design:typescript", objective_id: "objective:organoid", decision: "blocked", site_order: ["site:a", "site:b"], assignments: [], modality_coverage: { imaging: 1, transcriptomics: 1 }, omitted_modalities: [], comparability_conflicts: [], semantic_loss: [{ field: "authorization", reason: "missing", severity: "decision_relevant" }], reasons: ["policy or independent authorization is incomplete"], artifact: { content_hash: "b".repeat(64) }, raw_data_local: true, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateExperimentDesignReceipt(receipt)); assert.equal(experimentDesignReceiptDigest(receipt), experimentDesignReceiptDigest(receipt)); });
 
 test("protocol simulation preserves approval-required scenarios", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: PROTOCOL_SIMULATION_FEATURE_ID, contract_version: PROTOCOL_SIMULATION_CONTRACT_VERSION, protocol_id: "protocol:typescript", design_digest: "a".repeat(64), results: [{ scenario_id: "scenario:approval", state: "approval_required", reasons: ["effect approval required"] }, { scenario_id: "scenario:nominal", state: "passed", reasons: ["completed"] }], passed: 1, failed_closed: 0, approval_required: 1, omissions: ["scenario scenario:approval did not complete as passed"], uncertainty: [], semantic_loss: [], artifact: { content_hash: "b".repeat(64) }, raw_data_local: true, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateProtocolSimulationReceipt(receipt)); assert.equal(protocolSimulationReceiptDigest(receipt), protocolSimulationReceiptDigest(receipt)); });
+
+test("instrument mesh preserves approval without physical effect", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: INSTRUMENT_MESH_FEATURE_ID, contract_version: INSTRUMENT_MESH_CONTRACT_VERSION, request_id: "request:mesh", federation_id: "federation:typescript", action_id: "action:image", decision: "approval_required", candidate_order: ["scope-a@site-1"], selected_instrument_id: "scope-a", selected_site_id: "site-1", selected_protocol_profile: "ome-ngff-v0.5", satisfied_capabilities: ["image.acquire"], missing_capabilities: [], missing_interlocks: [], effect: null, omissions: [], uncertainty: [], semantic_loss: [], reasons: ["independent authorization reference is required before any external effect"], artifact: { content_hash: "b".repeat(64) }, raw_data_local: true, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateInstrumentMeshReceipt(receipt)); assert.equal(instrumentMeshReceiptDigest(receipt), instrumentMeshReceiptDigest(receipt)); });

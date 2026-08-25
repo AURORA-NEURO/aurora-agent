@@ -82,6 +82,8 @@ export const EXPERIMENT_DESIGN_CONTROL_FEATURE_ID = "AFA-adapter-P09-F30" as con
 export const EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION = "federated-experiment-design-control-plane/1.0" as const;
 export const PROTOCOL_SIMULATION_FEATURE_ID = "AFA-adapter-P10-F03" as const;
 export const PROTOCOL_SIMULATION_CONTRACT_VERSION = "prospective-protocol-simulation/1.0" as const;
+export const INSTRUMENT_MESH_FEATURE_ID = "AFA-adapter-P11-F04" as const;
+export const INSTRUMENT_MESH_CONTRACT_VERSION = "federated-laboratory-integration/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1349,6 +1351,46 @@ export function validateProtocolSimulationReceipt(receipt: ProtocolSimulationRec
 }
 
 export function protocolSimulationReceiptDigest(receipt: ProtocolSimulationReceipt): string { validateProtocolSimulationReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface InstrumentMeshReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  federation_id: string;
+  action_id: string;
+  decision: "admitted" | "approval_required" | "blocked" | "unknown";
+  candidate_order: string[];
+  selected_instrument_id: string | null;
+  selected_site_id: string | null;
+  selected_protocol_profile: string | null;
+  satisfied_capabilities: string[];
+  missing_capabilities: string[];
+  missing_interlocks: string[];
+  effect: Record<string, unknown> | null;
+  omissions: string[];
+  uncertainty: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateInstrumentMeshReceipt(receipt: InstrumentMeshReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== INSTRUMENT_MESH_FEATURE_ID || receipt.contract_version !== INSTRUMENT_MESH_CONTRACT_VERSION) throw new Error("instrument mesh schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.action_id.trim() || !receipt.reasons.length) throw new Error("instrument mesh identity, locality, boundary, or reasons are incomplete");
+  if (!new Set(["admitted", "approval_required", "blocked", "unknown"]).has(receipt.decision)) throw new Error("instrument mesh decision is unknown");
+  if (JSON.stringify([...new Set(receipt.candidate_order)].sort()) !== JSON.stringify(receipt.candidate_order)) throw new Error("instrument mesh candidate ordering is invalid");
+  if (receipt.missing_capabilities.some((item) => !item.trim()) || receipt.missing_interlocks.some((item) => !item.trim())) throw new Error("instrument mesh missing capability or interlock is empty");
+  if (receipt.decision === "admitted") {
+    if (!receipt.selected_instrument_id || !receipt.selected_site_id || !receipt.effect) throw new Error("admitted instrument mesh receipt needs selection and effect receipt");
+    if (receipt.effect.authorized !== true || receipt.effect.executed !== false || receipt.effect.raw_data_local !== true) throw new Error("instrument mesh effect must be authorized, not executed, and local");
+  } else if (receipt.effect !== null) throw new Error("non-admitted instrument mesh receipt cannot contain an effect");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("instrument mesh artifact digest is invalid");
+}
+
+export function instrumentMeshReceiptDigest(receipt: InstrumentMeshReceipt): string { validateInstrumentMeshReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

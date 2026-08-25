@@ -15,6 +15,7 @@ from prism_sdk.research_contracts import INGESTION_GATEWAY_FEATURE_ID, INGESTION
 from prism_sdk.research_contracts import QUALITY_ENVELOPE_FEATURE_ID, QUALITY_ENVELOPE_CONTRACT_VERSION, QualityEnvelopeReceipt
 from prism_sdk.research_contracts import EXPERIMENT_DESIGN_CONTROL_FEATURE_ID, EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION, ExperimentDesignReceipt
 from prism_sdk.research_contracts import PROTOCOL_SIMULATION_FEATURE_ID, PROTOCOL_SIMULATION_CONTRACT_VERSION, ProtocolSimulationReceipt
+from prism_sdk.research_contracts import INSTRUMENT_MESH_FEATURE_ID, INSTRUMENT_MESH_CONTRACT_VERSION, InstrumentMeshReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -924,4 +925,30 @@ def test_protocol_simulation_preserves_failed_closed_and_approval_states():
     receipt.validate()
     assert receipt.feature_id == PROTOCOL_SIMULATION_FEATURE_ID
     assert receipt.contract_version == PROTOCOL_SIMULATION_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_instrument_mesh_preserves_approval_without_physical_effect():
+    receipt = InstrumentMeshReceipt(
+        request_id="request:mesh",
+        federation_id="federation:python",
+        action_id="action:image",
+        decision="approval_required",
+        candidate_order=("scope-a@site-1",),
+        selected_instrument_id="scope-a",
+        selected_site_id="site-1",
+        selected_protocol_profile="ome-ngff-v0.5",
+        satisfied_capabilities=("image.acquire",),
+        missing_capabilities=(),
+        missing_interlocks=(),
+        effect=None,
+        omissions=(),
+        uncertainty=(),
+        semantic_loss=(),
+        reasons=("independent authorization reference is required before any external effect",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == INSTRUMENT_MESH_FEATURE_ID
+    assert receipt.contract_version == INSTRUMENT_MESH_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

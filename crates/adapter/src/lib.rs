@@ -88,6 +88,7 @@ pub mod experiment_design_control;
 pub mod fact;
 pub mod ingestion;
 pub mod ingestion_gateway;
+pub mod instrument_mesh;
 pub mod inventory;
 pub mod knowledge_workflow;
 pub mod location;
@@ -136,6 +137,11 @@ pub use ingestion_gateway::{
     IngestionGatewayReceipt, IngestionGatewayRequest, RawModalityBundle,
     CONTRACT_VERSION as INGESTION_GATEWAY_CONTRACT_VERSION,
     FEATURE_ID as INGESTION_GATEWAY_FEATURE_ID,
+};
+pub use instrument_mesh::{
+    integrate_instrument_mesh, InstrumentActionRequest, InstrumentCapability,
+    InstrumentEffectReceipt, InstrumentMeshDecision, InstrumentMeshError, InstrumentMeshReceipt,
+    CONTRACT_VERSION as INSTRUMENT_MESH_CONTRACT_VERSION, FEATURE_ID as INSTRUMENT_MESH_FEATURE_ID,
 };
 pub use inventory::{InventoryAdapter, InventoryProfile};
 pub use knowledge_workflow::{

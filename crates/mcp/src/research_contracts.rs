@@ -35,6 +35,10 @@ use bioprism_adapter::{
     QUALITY_ENVELOPE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    integrate_instrument_mesh, InstrumentActionRequest, InstrumentCapability,
+    InstrumentMeshReceipt, INSTRUMENT_MESH_FEATURE_ID,
+};
+use bioprism_adapter::{
     operate_mechanism_control_plane, MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
     MECHANISM_CONTROL_PLANE_FEATURE_ID,
 };
@@ -183,6 +187,7 @@ pub const INGESTION_GATEWAY_TOOL: &str = "adapter_ingestion_gateway";
 pub const QUALITY_ENVELOPE_TOOL: &str = "adapter_quality_envelope";
 pub const EXPERIMENT_DESIGN_CONTROL_TOOL: &str = "adapter_experiment_design_control";
 pub const PROTOCOL_SIMULATION_TOOL: &str = "adapter_protocol_simulation";
+pub const INSTRUMENT_MESH_TOOL: &str = "adapter_instrument_mesh";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -987,6 +992,35 @@ pub fn validate_protocol_simulation_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != PROTOCOL_SIMULATION_FEATURE_ID {
         return Err("protocol simulation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn integrate_instrument_mesh_json(value: &Value) -> Result<Value, String> {
+    let request = value
+        .get("request")
+        .ok_or("request is required and must be an InstrumentActionRequest")?;
+    let request: InstrumentActionRequest = serde_json::from_value(request.clone())
+        .map_err(|error| format!("invalid instrument mesh request: {error}"))?;
+    let capabilities: Vec<InstrumentCapability> = value
+        .get("capabilities")
+        .ok_or_else(|| "capabilities is required and must be an array".to_string())
+        .and_then(|items| {
+            serde_json::from_value(items.clone())
+                .map_err(|error| format!("invalid instrument capabilities: {error}"))
+        })?;
+    let receipt =
+        integrate_instrument_mesh(&request, &capabilities).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize instrument mesh receipt: {error}"))
+}
+
+pub fn validate_instrument_mesh_json(value: &Value) -> Result<InstrumentMeshReceipt, String> {
+    let receipt: InstrumentMeshReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid instrument mesh receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != INSTRUMENT_MESH_FEATURE_ID {
+        return Err("instrument mesh feature id mismatch".into());
     }
     Ok(receipt)
 }
