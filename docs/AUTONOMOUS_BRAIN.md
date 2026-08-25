@@ -10727,3 +10727,42 @@ silently inheriting the parent or domain default capability. Python already used
 cross-SDK tests now assert the route, selection context, task intent, and step contract remain
 aligned. This remains a planning and selection boundary: capability routing never authorizes a
 tool, provider, credential, evidence source, or external effect.
+
+## Protected rehydration and tenant-bound durable workers
+
+Restart-safe autonomous work often needs a caller-owned value that must not cross the durable
+boundary: a user-supplied provider credential, a delegated connector session, a private evidence
+payload, or a protected institutional record. The SDK now exposes one common contract for that
+case in Python (`AutonomousProtectedRehydrationBoundary`) and TypeScript
+(`AutonomousProtectedRehydrationBoundary`). The boundary is intentionally a bridge rather than
+a vault: the application supplies a resolver and may supply an authorizer, while the SDK owns
+only bounded metadata, digest verification, expiry, and replay state.
+
+`AutonomousProtectedRehydrationContext` binds `tenant_id`, `actor_id`, `session_id`, an external
+`authorization_digest`, and an ordered scope of the twelve built-in autonomous domains into one
+`context_digest`. A reference adds its purpose, value kind, expected value digest, issue/expiry
+window, one-time posture, and the context digest. A resolver sees the exact reference metadata
+and context only after the active context matches, authorization succeeds, the reference is not
+consumed or quarantined, and the reference has not expired. The returned value is immediately
+hashed and rejected on mismatch. It is available to the current call as a transient value but is
+never included in reference projections, receipts, JSON persistence, CAS snapshots, error
+projections, or scheduler state.
+
+The boundary has explicit `available`, `consumed`, `expired`, and `quarantined` states. Resolver,
+authorization, and digest failures retain only a bounded error class and attempt count; repeated
+failures quarantine the reference. One-time references transition to `consumed` only after a
+successful digest match, which prevents a failed resolver attempt from burning a caller's value
+while still fencing replay after success. `issue_for_value()` / `issueForValue()` is a convenience
+for computing a digest from a value that is already transient in application memory; it does not
+retain that value. Production deployments still need a real encrypted secret store, tenant
+identity provider, authorization service, rotation policy, and audit retention policy.
+
+The evaluator consolidation scheduler can now accept the same execution context. Its durable
+policy records the context digest, and claims/worker results expose that digest for handoff
+continuity. Restore rejects a snapshot whose context or policy belongs to another tenant, actor,
+session, or authorization decision. The scheduler continues to cover coding, browser, data,
+science, biomedical, neuroscience, operations, enterprise, multi-agent, multimodal,
+cross-domain, and evaluation; all twelve domains are covered by protected-rehydration and
+metadata-only snapshot tests in both SDKs. This is an integrity fence, not a claim that the SDK
+can prove external identity, encrypt a provider key, authorize an effect, or provide exactly-once
+delivery by itself.

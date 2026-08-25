@@ -25,12 +25,13 @@ from .autonomous_memory_consolidation import (
     AutonomousMemoryConsolidationObservation,
     AutonomousMemoryConsolidator,
 )
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationContext
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 
 
-AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SCHEMA = "bioprism-python-autonomous-memory-consolidation-scheduler/0.1"
-AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOB_SCHEMA = "bioprism-python-autonomous-memory-consolidation-scheduler-job/0.1"
-AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-memory-consolidation-scheduler-snapshot/0.1"
+AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SCHEMA = "bioprism-python-autonomous-memory-consolidation-scheduler/0.2"
+AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOB_SCHEMA = "bioprism-python-autonomous-memory-consolidation-scheduler-job/0.2"
+AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-memory-consolidation-scheduler-snapshot/0.2"
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOBS = 4_096
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB = 1_024
 MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_ATTEMPTS = 8
@@ -221,12 +222,14 @@ class AutonomousMemoryConsolidationClaim:
     attempt: int
     lease_expires_at: float
     lease_digest: str
+    context_digest: str | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id, "job_digest": self.job_digest, "worker_id": self.worker_id,
             "attempt": self.attempt, "lease_expires_at": self.lease_expires_at,
-            "lease_digest": self.lease_digest, "retention": _RETENTION, "secret_material": _SECRET_MATERIAL,
+            "lease_digest": self.lease_digest, "context_digest": self.context_digest,
+            "retention": _RETENTION, "secret_material": _SECRET_MATERIAL,
         }
 
 
@@ -280,12 +283,13 @@ def validate_autonomous_memory_consolidation_scheduler_snapshot(value: Mapping[s
     _bounded_integer("snapshot generation", value.get("generation"), 1, 2_147_483_647)
     _digest("snapshot previous_snapshot_digest", value.get("previous_snapshot_digest"), optional=True)
     policy = value.get("policy")
-    if not isinstance(policy, Mapping) or set(policy) != {"max_jobs", "max_observations_per_job", "default_max_attempts", "lease_seconds"}:
+    if not isinstance(policy, Mapping) or set(policy) != {"max_jobs", "max_observations_per_job", "default_max_attempts", "lease_seconds", "rehydration_context_digest"}:
         _fail("snapshot policy is malformed")
     max_jobs = _bounded_integer("snapshot policy max_jobs", policy.get("max_jobs"), 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOBS)
     max_observations = _bounded_integer("snapshot policy max_observations_per_job", policy.get("max_observations_per_job"), 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB)
     _bounded_integer("snapshot policy default_max_attempts", policy.get("default_max_attempts"), 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_ATTEMPTS)
     _bounded_number("snapshot policy lease_seconds", policy.get("lease_seconds"), 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_LEASE_SECONDS)
+    _digest("snapshot policy rehydration_context_digest", policy.get("rehydration_context_digest"), optional=True)
     raw_jobs = value.get("jobs")
     if not isinstance(raw_jobs, Sequence) or isinstance(raw_jobs, (str, bytes, bytearray)) or len(raw_jobs) > max_jobs:
         _fail("snapshot jobs are malformed")
@@ -313,10 +317,14 @@ class AutonomousMemoryConsolidationScheduler:
         max_observations_per_job: int = MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB,
         default_max_attempts: int = 3,
         lease_seconds: float = 300.0,
+        execution_context: AutonomousProtectedRehydrationContext | None = None,
     ) -> None:
         if not isinstance(consolidator, AutonomousMemoryConsolidator):
             _fail("consolidator is malformed")
+        if execution_context is not None and not isinstance(execution_context, AutonomousProtectedRehydrationContext):
+            _fail("execution_context is malformed")
         self.consolidator = consolidator
+        self.execution_context = execution_context
         self.max_jobs = _bounded_integer("max_jobs", max_jobs, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOBS)
         self.max_observations_per_job = _bounded_integer("max_observations_per_job", max_observations_per_job, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB)
         self.default_max_attempts = _bounded_integer("default_max_attempts", default_max_attempts, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_ATTEMPTS)
@@ -327,7 +335,7 @@ class AutonomousMemoryConsolidationScheduler:
 
     @property
     def policy(self) -> dict[str, Any]:
-        return {"max_jobs": self.max_jobs, "max_observations_per_job": self.max_observations_per_job, "default_max_attempts": self.default_max_attempts, "lease_seconds": _canonical_number(self.lease_seconds)}
+        return {"max_jobs": self.max_jobs, "max_observations_per_job": self.max_observations_per_job, "default_max_attempts": self.default_max_attempts, "lease_seconds": _canonical_number(self.lease_seconds), "rehydration_context_digest": None if self.execution_context is None else self.execution_context.context_digest}
 
     def _replace(self, job: AutonomousMemoryConsolidationScheduledJob, **changes: Any) -> AutonomousMemoryConsolidationScheduledJob:
         values = {field: getattr(job, field) for field in job.__dataclass_fields__}
@@ -384,7 +392,7 @@ class AutonomousMemoryConsolidationScheduler:
         expires_at = current + duration
         lease = _lease_digest(job.job_digest, job.job_id, worker_id, attempt, expires_at)
         self._jobs[job.job_id] = self._replace(job, attempts=attempt, status="leased", lease_owner=worker_id, lease_expires_at=expires_at, lease_digest=lease, last_error_class=None)
-        return AutonomousMemoryConsolidationClaim(job.job_id, job.job_digest, worker_id, attempt, expires_at, lease)
+        return AutonomousMemoryConsolidationClaim(job.job_id, job.job_digest, worker_id, attempt, expires_at, lease, None if self.execution_context is None else self.execution_context.context_digest)
 
     def _leased(self, job_id: str, worker_id: str, lease_digest: str, now: float) -> AutonomousMemoryConsolidationScheduledJob:
         job_id = _identifier("job_id", job_id)
@@ -422,9 +430,9 @@ class AutonomousMemoryConsolidationScheduler:
             report = self.consolidator.consolidate(list(job.observations))
         except Exception:
             row = self.fail(claim.job_id, claim.worker_id, claim.lease_digest, "memory_consolidation_failure", now=current)
-            return {"job_id": claim.job_id, "status": row["status"], "attempt": claim.attempt, "error_class": "memory_consolidation_failure", "retention": _RETENTION, "secret_material": _SECRET_MATERIAL}
+            return {"job_id": claim.job_id, "status": row["status"], "attempt": claim.attempt, "error_class": "memory_consolidation_failure", "context_digest": claim.context_digest, "retention": _RETENTION, "secret_material": _SECRET_MATERIAL}
         row = self.complete(claim.job_id, claim.worker_id, claim.lease_digest, report["report_digest"], now=current)
-        return {"job_id": claim.job_id, "status": row["status"], "attempt": claim.attempt, "report_digest": report["report_digest"], "observation_count": row["observation_count"], "domains": row["domains"], "retention": _RETENTION, "secret_material": _SECRET_MATERIAL}
+        return {"job_id": claim.job_id, "status": row["status"], "attempt": claim.attempt, "report_digest": report["report_digest"], "observation_count": row["observation_count"], "domains": row["domains"], "context_digest": claim.context_digest, "retention": _RETENTION, "secret_material": _SECRET_MATERIAL}
 
     def run_until_idle(self, worker_id: str, *, max_cycles: int = 64, now: float | None = None) -> dict[str, Any]:
         max_cycles = _bounded_integer("max_cycles", max_cycles, 1, 1_024)

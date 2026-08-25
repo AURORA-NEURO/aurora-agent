@@ -3057,3 +3057,31 @@ export type {
   AutonomousMemoryConsolidationSchedulerTextStore,
   AutonomousMemoryConsolidationSchedulerTransactionalTextStore,
 } from "./autonomous-memory-consolidation-scheduler.js";
+export {
+  AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA,
+  AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA,
+  AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA,
+  AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA,
+  MAX_AUTONOMOUS_PROTECTED_REHYDRATION_ATTEMPTS,
+  MAX_AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCES,
+  MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES,
+  MAX_AUTONOMOUS_PROTECTED_REHYDRATION_TTL_SECONDS,
+  AutonomousProtectedRehydrationBoundary,
+  AutonomousProtectedRehydrationContext,
+  AutonomousProtectedRehydrationError,
+  AutonomousProtectedRehydrationPersistenceCoordinator,
+  JsonAutonomousProtectedRehydrationPersistence,
+  TransactionalJsonAutonomousProtectedRehydrationPersistence,
+  protectedValueDigest,
+  validateAutonomousProtectedRehydrationSnapshot,
+} from "./autonomous-protected-rehydration.js";
+export type {
+  AutonomousProtectedRehydrationAuthorizer,
+  AutonomousProtectedRehydrationCoverage,
+  AutonomousProtectedRehydrationReference,
+  AutonomousProtectedRehydrationResolver,
+  AutonomousProtectedRehydrationResult,
+  AutonomousProtectedRehydrationSnapshot,
+  AutonomousProtectedRehydrationTextStore,
+  AutonomousProtectedRehydrationTransactionalTextStore,
+} from "./autonomous-protected-rehydration.js";

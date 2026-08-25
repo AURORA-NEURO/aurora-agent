@@ -1789,3 +1789,14 @@ priority/age deterministic, retry-bounded, quarantined after exhaustion, and pro
 twelve domains. Remaining deployment work is to supply encryption, tenant identity/access control,
 protected rehydration, and external exactly-once effect reconciliation; the SDK does not invent
 those authorities.
+
+Protected rehydration is now implemented as a shared SDK boundary in both runtimes. A caller can
+bind an opaque reference to tenant, actor, session, authorization, purpose, domain, expiry, and
+the digest of a value held in caller-owned storage. Resolvers and optional authorizers are invoked
+only after context and replay checks; one-time references are consumed only after the returned
+value matches its expected digest, failures are bounded and quarantineable, and snapshots contain
+no protected value. The memory-consolidation scheduler now optionally binds its durable policy,
+claims, and worker results to the same execution-context digest, so a restored queue cannot be
+loaded under another tenant or authorization context. This closes the SDK contract gap while
+leaving vault encryption, identity issuance, authorization decisions, and external effect
+reconciliation explicitly deployment-owned.

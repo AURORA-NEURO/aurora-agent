@@ -13,11 +13,12 @@ import {
   AutonomousMemoryConsolidator,
 } from "./autonomous-memory-consolidation.js";
 import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous.js";
+import { AutonomousProtectedRehydrationContext } from "./autonomous-protected-rehydration.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 
-export const AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-scheduler/0.1" as const;
-export const AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOB_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-scheduler-job/0.1" as const;
-export const AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-scheduler-snapshot/0.1" as const;
+export const AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-scheduler/0.2" as const;
+export const AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOB_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-scheduler-job/0.2" as const;
+export const AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-memory-consolidation-scheduler-snapshot/0.2" as const;
 export const MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOBS = 4_096;
 export const MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB = 1_024;
 export const MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_ATTEMPTS = 8;
@@ -121,6 +122,7 @@ export interface AutonomousMemoryConsolidationClaim {
   attempt: number;
   lease_expires_at: number;
   lease_digest: string;
+  context_digest: string | null;
   retention: typeof RETENTION;
   secret_material: typeof SECRET_MATERIAL;
 }
@@ -129,7 +131,7 @@ export interface AutonomousMemoryConsolidationSchedulerSnapshot {
   schema: typeof AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SNAPSHOT_SCHEMA;
   generation: number;
   previous_snapshot_digest: string | null;
-  policy: { max_jobs: number; max_observations_per_job: number; default_max_attempts: number; lease_seconds: number };
+  policy: { max_jobs: number; max_observations_per_job: number; default_max_attempts: number; lease_seconds: number; rehydration_context_digest: string | null };
   jobs: AutonomousMemoryConsolidationScheduledJob[];
   coverage: AutonomousMemoryConsolidationSchedulerCoverage[];
   retention: typeof RETENTION;
@@ -209,12 +211,13 @@ export function validateAutonomousMemoryConsolidationSchedulerSnapshot(value: un
   if (!isObject(value) || Object.keys(value).sort().join(",") !== expectedSnapshotKeys.join(",") || value.schema !== AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SNAPSHOT_SCHEMA || value.retention !== RETENTION || value.secret_material !== SECRET_MATERIAL) fail("snapshot is malformed");
   const generation = integerBound("snapshot generation", value.generation, 1, 2_147_483_647);
   const previous = digest("snapshot previous_snapshot_digest", value.previous_snapshot_digest ?? null, true);
-  if (!isObject(value.policy) || Object.keys(value.policy).sort().join(",") !== "default_max_attempts,lease_seconds,max_jobs,max_observations_per_job") fail("snapshot policy is malformed");
+  if (!isObject(value.policy) || Object.keys(value.policy).sort().join(",") !== "default_max_attempts,lease_seconds,max_jobs,max_observations_per_job,rehydration_context_digest") fail("snapshot policy is malformed");
   const policy = {
     max_jobs: integerBound("snapshot policy max_jobs", value.policy.max_jobs, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOBS),
     max_observations_per_job: integerBound("snapshot policy max_observations_per_job", value.policy.max_observations_per_job, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB),
     default_max_attempts: integerBound("snapshot policy default_max_attempts", value.policy.default_max_attempts, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_ATTEMPTS),
     lease_seconds: numberBound("snapshot policy lease_seconds", value.policy.lease_seconds, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_LEASE_SECONDS),
+    rehydration_context_digest: digest("snapshot policy rehydration_context_digest", value.policy.rehydration_context_digest ?? null, true),
   };
   if (!Array.isArray(value.jobs) || value.jobs.length > policy.max_jobs) fail("snapshot jobs are malformed");
   const jobs = value.jobs.map((item) => validateJob(item, policy.max_observations_per_job));
@@ -232,13 +235,16 @@ export class AutonomousMemoryConsolidationScheduler {
   readonly maxObservationsPerJob: number;
   readonly defaultMaxAttempts: number;
   readonly leaseSeconds: number;
+  readonly executionContext: AutonomousProtectedRehydrationContext | null;
   private readonly jobs = new Map<string, AutonomousMemoryConsolidationScheduledJob>();
   private generation = 0;
   private previousSnapshotDigest: string | null = null;
 
-  constructor(consolidator: AutonomousMemoryConsolidator, options: { maxJobs?: number; maxObservationsPerJob?: number; defaultMaxAttempts?: number; leaseSeconds?: number } = {}) {
+  constructor(consolidator: AutonomousMemoryConsolidator, options: { maxJobs?: number; maxObservationsPerJob?: number; defaultMaxAttempts?: number; leaseSeconds?: number; executionContext?: AutonomousProtectedRehydrationContext } = {}) {
     if (!(consolidator instanceof AutonomousMemoryConsolidator)) fail("consolidator is malformed");
+    if (options.executionContext !== undefined && !(options.executionContext instanceof AutonomousProtectedRehydrationContext)) fail("executionContext is malformed");
     this.consolidator = consolidator;
+    this.executionContext = options.executionContext ?? null;
     this.maxJobs = integerBound("maxJobs", options.maxJobs ?? MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOBS, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOBS);
     this.maxObservationsPerJob = integerBound("maxObservationsPerJob", options.maxObservationsPerJob ?? MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB);
     this.defaultMaxAttempts = integerBound("defaultMaxAttempts", options.defaultMaxAttempts ?? 3, 1, MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_ATTEMPTS);
@@ -246,7 +252,7 @@ export class AutonomousMemoryConsolidationScheduler {
   }
 
   get policy(): AutonomousMemoryConsolidationSchedulerSnapshot["policy"] {
-    return { max_jobs: this.maxJobs, max_observations_per_job: this.maxObservationsPerJob, default_max_attempts: this.defaultMaxAttempts, lease_seconds: this.leaseSeconds };
+    return { max_jobs: this.maxJobs, max_observations_per_job: this.maxObservationsPerJob, default_max_attempts: this.defaultMaxAttempts, lease_seconds: this.leaseSeconds, rehydration_context_digest: this.executionContext?.contextDigest ?? null };
   }
 
   private replace(job: AutonomousMemoryConsolidationScheduledJob, changes: Partial<AutonomousMemoryConsolidationScheduledJob>): AutonomousMemoryConsolidationScheduledJob {
@@ -306,7 +312,7 @@ export class AutonomousMemoryConsolidationScheduler {
     const expiresAt = now + duration;
     const lease = leaseDigest(job.job_digest, job.job_id, normalizedWorkerId, attempt, expiresAt);
     this.jobs.set(job.job_id, this.replace(job, { attempts: attempt, status: "leased", lease_owner: normalizedWorkerId, lease_expires_at: expiresAt, lease_digest: lease, last_error_class: null }));
-    return { job_id: job.job_id, job_digest: job.job_digest, worker_id: normalizedWorkerId, attempt, lease_expires_at: expiresAt, lease_digest: lease, retention: RETENTION, secret_material: SECRET_MATERIAL };
+    return { job_id: job.job_id, job_digest: job.job_digest, worker_id: normalizedWorkerId, attempt, lease_expires_at: expiresAt, lease_digest: lease, context_digest: this.executionContext?.contextDigest ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
   }
 
   private leased(jobId: string, workerId: string, lease: string, now: number): AutonomousMemoryConsolidationScheduledJob {
@@ -344,10 +350,10 @@ export class AutonomousMemoryConsolidationScheduler {
     try {
       const report = this.consolidator.consolidate(job.observations);
       this.complete(claim.job_id, claim.worker_id, claim.lease_digest, report.report_digest, { now });
-      return { job_id: claim.job_id, status: "completed", attempt: claim.attempt, report_digest: report.report_digest, observation_count: job.observation_count, domains: [...job.domains], retention: RETENTION, secret_material: SECRET_MATERIAL };
+      return { job_id: claim.job_id, status: "completed", attempt: claim.attempt, report_digest: report.report_digest, observation_count: job.observation_count, domains: [...job.domains], context_digest: claim.context_digest, retention: RETENTION, secret_material: SECRET_MATERIAL };
     } catch (_error) {
       const row = this.fail(claim.job_id, claim.worker_id, claim.lease_digest, "memory_consolidation_failure", { now });
-      return { job_id: claim.job_id, status: row?.status, attempt: claim.attempt, error_class: "memory_consolidation_failure", retention: RETENTION, secret_material: SECRET_MATERIAL };
+      return { job_id: claim.job_id, status: row?.status, attempt: claim.attempt, error_class: "memory_consolidation_failure", context_digest: claim.context_digest, retention: RETENTION, secret_material: SECRET_MATERIAL };
     }
   }
 
