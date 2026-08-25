@@ -840,7 +840,13 @@ fn validate_mission_tool_arguments(
     tool: &str,
     arguments: &Value,
 ) -> Result<Option<MissionSchemaReport>, String> {
-    let Some(definition) = tool_definitions()
+    // The catalogue is intentionally large and is assembled from every domain's authoritative
+    // schema. Keep its materialisation on the same bounded stack used by transport dispatch;
+    // mission validation is also called directly by the API's background-submission boundary and
+    // must not make correctness depend on the caller's default thread stack size.
+    let definitions = on_dispatch_stack("bioprism-mcp-schema-validation", tool_definitions)
+        .map_err(|error| format!("authoritative tool catalogue could not be built: {error}"))?;
+    let Some(definition) = definitions
         .into_iter()
         .find(|definition| definition.get("name").and_then(Value::as_str) == Some(tool))
     else {

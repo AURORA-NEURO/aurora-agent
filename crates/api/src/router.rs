@@ -42,6 +42,20 @@ pub const DEFAULT_MAX_HEADER_BYTES: usize = 32 * 1024;
 pub const DEFAULT_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub const DEFAULT_EVENT_CAPACITY: usize = 4096;
 pub const MAX_MISSION_JOBS: usize = 4096;
+const MISSION_REQUEST_STACK_BYTES: usize = 16 * 1024 * 1024;
+
+fn bounded_tool_definitions() -> Vec<Value> {
+    std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .name("bioprism-api-tool-catalogue".into())
+            .stack_size(MISSION_REQUEST_STACK_BYTES)
+            .spawn_scoped(scope, bioprism_mcp::tool_definitions)
+            .expect("the bounded API tool catalogue thread must start");
+        handle
+            .join()
+            .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+    })
+}
 pub const MAX_MISSION_LIST_LIMIT: usize = 256;
 pub const MAX_MISSION_TRACE_EVENTS: usize = 4096;
 pub const MAX_OPERATIONS_SNAPSHOT_LIMIT: usize = 256;
@@ -1541,7 +1555,37 @@ impl ApiRouter {
         self.ci_provider_evidence_persistence.persist()
     }
 
+    /// Handle one HTTP request.
+    ///
+    /// Mission submission and preflight validate the complete cross-domain tool catalogue and
+    /// reviewed route evidence. Those frames are intentionally bounded, but are larger than the
+    /// default Windows test/listener stack. Keep the API transport boundary on an explicit stack
+    /// so correctness does not depend on which embedding thread called any deep domain route.
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
+        let request_id = self.request_id(&request);
+        std::thread::scope(|scope| {
+            match std::thread::Builder::new()
+                .name("bioprism-api-request".into())
+                .stack_size(MISSION_REQUEST_STACK_BYTES)
+                .spawn_scoped(scope, || self.handle_inner(request))
+            {
+                Ok(handle) => handle
+                    .join()
+                    .unwrap_or_else(|payload| std::panic::resume_unwind(payload)),
+                Err(error) => self.finish(
+                    self.error(
+                        503,
+                        "api_request_unavailable",
+                        &format!("cannot start the API request thread: {error}"),
+                        &request_id,
+                    ),
+                    &request_id,
+                ),
+            }
+        })
+    }
+
+    fn handle_inner(&self, request: HttpRequest) -> HttpResponse {
         let request_id = self.request_id(&request);
         if request.body.len() > self.config.max_body_bytes {
             return self.finish(
@@ -9107,7 +9151,7 @@ fn operations_required_gates() -> &'static [&'static str] {
 }
 
 fn operations_domain_coverage() -> Value {
-    let advertised_tools = bioprism_mcp::tool_definitions()
+    let advertised_tools = bounded_tool_definitions()
         .into_iter()
         .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
         .collect::<BTreeSet<_>>();
