@@ -56,6 +56,7 @@ from prism_sdk.research_contracts import LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID, L
 from prism_sdk.research_contracts import FIBER_MECHANISM_ASSURANCE_FEATURE_ID, FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION, FiberMechanismAssuranceReceipt
 from prism_sdk.research_contracts import HUBAPI_QUALITY_ASSURANCE_FEATURE_ID, HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION, HubapiQualityAssuranceReceipt
 from prism_sdk.research_contracts import REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID, REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION, RegistryResourceDiscoveryAssuranceReceipt
+from prism_sdk.research_contracts import SERVICES_MECHANISM_WORKBENCH_FEATURE_ID, SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION, ServicesMechanismWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1818,4 +1819,36 @@ def test_registry_resource_discovery_preserves_stale_omission_and_manifest_excha
     receipt.validate()
     assert receipt.feature_id == REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_services_mechanism_workbench_preserves_unknown_and_negative_candidates():
+    receipt = ServicesMechanismWorkbenchReceipt(
+        request_id="request:mechanisms",
+        workflow_id="workflow:mechanism-batch",
+        objective_id="objective:organoid",
+        target_schema="mechanism-workbench/1",
+        scope="organoid:neural",
+        disposition="partial",
+        ranked_order=("candidate:a", "candidate:b"),
+        admitted_order=("candidate:a",),
+        blocked_order=("candidate:b",),
+        unknown_order=("candidate:b",),
+        mechanism_order=("mechanism:candidate:a",),
+        study_order=("study:imaging", "study:omics"),
+        modality_order=("imaging", "omics"),
+        score_order=(900, 700),
+        artifact_order=("a" * 64,),
+        evidence_order=("b" * 64,),
+        provenance_order=("c" * 64,),
+        omissions=("candidate:candidate:b:budget-exhausted",),
+        uncertainty=("candidate:candidate:b:state-unknown-not-admitted",),
+        negative_evidence=(),
+        replay_identity="d" * 64,
+        effect_receipts=("write:local-mechanism-workbench:request:mechanisms",),
+        artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == SERVICES_MECHANISM_WORKBENCH_FEATURE_ID
+    assert receipt.contract_version == SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -165,6 +165,8 @@ export const HUBAPI_QUALITY_ASSURANCE_FEATURE_ID = "AFA-hubapi-P07-F27" as const
 export const HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION = "hubapi-quality-assurance/1.0" as const;
 export const REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID = "AFA-registry-P05-F28" as const;
 export const REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION = "registry-federated-resource-discovery-assurance/1.0" as const;
+export const SERVICES_MECHANISM_WORKBENCH_FEATURE_ID = "AFA-services-P08-F19" as const;
+export const SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION = "services-prospective-mechanism-workbench/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2841,6 +2843,51 @@ export function validateRegistryResourceDiscoveryAssuranceReceipt(receipt: Regis
 }
 
 export function registryResourceDiscoveryAssuranceReceiptDigest(receipt: RegistryResourceDiscoveryAssuranceReceipt): string { validateRegistryResourceDiscoveryAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ServicesMechanismWorkbenchReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  objective_id: string;
+  target_schema: string;
+  scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  ranked_order: string[];
+  admitted_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  mechanism_order: string[];
+  study_order: string[];
+  modality_order: string[];
+  score_order: number[];
+  artifact_order: string[];
+  evidence_order: string[];
+  provenance_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateServicesMechanismWorkbenchReceipt(receipt: ServicesMechanismWorkbenchReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== SERVICES_MECHANISM_WORKBENCH_FEATURE_ID || receipt.contract_version !== SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION) throw new Error("services mechanism workbench schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.objective_id.trim() || !receipt.target_schema.trim() || !receipt.scope.trim() || !receipt.ranked_order.length) throw new Error("services mechanism workbench identity, ranking, locality, or boundary is incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("services mechanism workbench disposition is unknown");
+  for (const values of [receipt.ranked_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order]) if (new Set(values).size !== values.length) throw new Error("services mechanism workbench ranking contains duplicates");
+  if (receipt.score_order.length !== receipt.ranked_order.length || [...receipt.admitted_order, ...receipt.blocked_order, ...receipt.unknown_order].some((value) => !receipt.ranked_order.includes(value))) throw new Error("services mechanism workbench score or disposition linkage is incomplete");
+  for (const values of [receipt.mechanism_order, receipt.study_order, receipt.modality_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts, receipt.artifact_order, receipt.evidence_order, receipt.provenance_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("services mechanism workbench ordering is invalid");
+  for (const value of [...receipt.artifact_order, ...receipt.evidence_order, ...receipt.provenance_order, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("services mechanism workbench digest is invalid");
+  if (receipt.admitted_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("write:local-mechanism-workbench:"))) throw new Error("admitted mechanism workbench requires a local artifact effect");
+  if (!receipt.admitted_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:mechanism-workbench-release"])) throw new Error("empty mechanism workbench result must be explicitly blocked");
+}
+
+export function servicesMechanismWorkbenchReceiptDigest(receipt: ServicesMechanismWorkbenchReceipt): string { validateServicesMechanismWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

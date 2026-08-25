@@ -118,6 +118,7 @@ pub mod error;
 pub mod federation;
 pub mod graph;
 pub mod implementations;
+pub mod mechanism_workbench;
 pub mod research;
 pub mod research_release;
 pub mod research_release_batch;
@@ -137,6 +138,12 @@ pub use graph::{
     Call, Concern, Disclaimer, Domain, EdgeKind, GraphError, Ownership, ServiceGraph, ServiceId,
     ServiceNode,
 };
+pub use mechanism_workbench::{
+    mechanism_workbench_manifest, run_mechanism_workbench, CandidateState, MechanismCandidate,
+    MechanismWorkbenchDisposition, MechanismWorkbenchError, MechanismWorkbenchReport,
+    MechanismWorkbenchRequest, CONTRACT_VERSION as MECHANISM_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_WORKBENCH_FEATURE_ID,
+};
 pub use research::{EvidenceWorkflowResult, ResearchServiceError, ResearchWorkflowService};
 pub use research_release::{
     build_research_release, research_release_manifest, verify_research_release,
@@ -145,10 +152,9 @@ pub use research_release::{
     FEATURE_ID as RESEARCH_RELEASE_FEATURE_ID,
 };
 pub use research_release_batch::{
-    build_research_release_batch, research_release_batch_manifest,
-    ResearchReleaseBatchDisposition, ResearchReleaseBatchEntry, ResearchReleaseBatchError,
-    ResearchReleaseBatchReceipt, ResearchReleaseBatchRequest,
-    FEATURE_ID as RESEARCH_RELEASE_BATCH_FEATURE_ID,
+    build_research_release_batch, research_release_batch_manifest, ResearchReleaseBatchDisposition,
+    ResearchReleaseBatchEntry, ResearchReleaseBatchError, ResearchReleaseBatchReceipt,
+    ResearchReleaseBatchRequest, FEATURE_ID as RESEARCH_RELEASE_BATCH_FEATURE_ID,
     FEATURE_VERSION as RESEARCH_RELEASE_BATCH_FEATURE_VERSION,
 };
 pub use topology::{Deployment, Placement, Topology, TopologyError};

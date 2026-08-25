@@ -183,6 +183,8 @@ HUBAPI_QUALITY_ASSURANCE_FEATURE_ID = "AFA-hubapi-P07-F27"
 HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION = "hubapi-quality-assurance/1.0"
 REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID = "AFA-registry-P05-F28"
 REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION = "registry-federated-resource-discovery-assurance/1.0"
+SERVICES_MECHANISM_WORKBENCH_FEATURE_ID = "AFA-services-P08-F19"
+SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION = "services-prospective-mechanism-workbench/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4235,3 +4237,65 @@ class RegistryResourceDiscoveryAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "federation_id": self.federation_id, "requester": self.requester, "scope": self.scope, "disposition": self.disposition, "candidate_order": list(self.candidate_order), "selected_order": list(self.selected_order), "omitted_order": list(self.omitted_order), "semantic_order": list(self.semantic_order), "artifact_order": list(self.artifact_order), "provenance_order": list(self.provenance_order), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "federation_manifest": dict(self.federation_manifest), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ServicesMechanismWorkbenchReceipt:
+    """Cross-language validator for the prospective high-throughput mechanism workbench."""
+
+    request_id: str
+    workflow_id: str
+    objective_id: str
+    target_schema: str
+    scope: str
+    disposition: str
+    ranked_order: tuple[str, ...]
+    admitted_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    unknown_order: tuple[str, ...]
+    mechanism_order: tuple[str, ...]
+    study_order: tuple[str, ...]
+    modality_order: tuple[str, ...]
+    score_order: tuple[int, ...]
+    artifact_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    replay_identity: str
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = SERVICES_MECHANISM_WORKBENCH_FEATURE_ID
+    contract_version: str = SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != SERVICES_MECHANISM_WORKBENCH_FEATURE_ID or self.contract_version != SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION:
+            raise ResearchContractError("services mechanism workbench schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.objective_id.strip() or not self.target_schema.strip() or not self.scope.strip() or not self.ranked_order:
+            raise ResearchContractError("services mechanism workbench identity, ranking, locality, or boundary is incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("services mechanism workbench disposition is unknown")
+        if len(set(self.ranked_order)) != len(self.ranked_order) or len(set(self.admitted_order)) != len(self.admitted_order) or len(set(self.blocked_order)) != len(self.blocked_order) or len(set(self.unknown_order)) != len(self.unknown_order):
+            raise ResearchContractError("services mechanism workbench ordering contains duplicates")
+        if len(self.score_order) != len(self.ranked_order) or any(value not in self.ranked_order for value in (*self.admitted_order, *self.blocked_order, *self.unknown_order)):
+            raise ResearchContractError("services mechanism workbench score or disposition linkage is incomplete")
+        for values in (self.mechanism_order, self.study_order, self.modality_order, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("services mechanism workbench ordering is invalid")
+        for values in (self.artifact_order, self.evidence_order, self.provenance_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("services mechanism workbench digest ordering is invalid")
+        for value in (*self.artifact_order, *self.evidence_order, *self.provenance_order, self.replay_identity, self.artifact.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("services mechanism workbench digest is invalid")
+        if self.admitted_order and any(not effect.startswith("write:local-mechanism-workbench:") for effect in self.effect_receipts):
+            raise ResearchContractError("admitted mechanism workbench requires a local artifact effect")
+        if not self.admitted_order and self.effect_receipts != ("block:mechanism-workbench-release",):
+            raise ResearchContractError("empty mechanism workbench result must be explicitly blocked")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "objective_id": self.objective_id, "target_schema": self.target_schema, "scope": self.scope, "disposition": self.disposition, "ranked_order": list(self.ranked_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "mechanism_order": list(self.mechanism_order), "study_order": list(self.study_order), "modality_order": list(self.modality_order), "score_order": list(self.score_order), "artifact_order": list(self.artifact_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
