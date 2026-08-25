@@ -99,6 +99,7 @@ pub mod retrieval_workflow_fabric;
 pub mod throughput_context_compilation;
 pub mod throughput_context_workbench;
 pub mod federated_context_workbench;
+pub mod context_protocol_adapter;
 pub mod throughput_context_workflow_fabric;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
@@ -584,6 +585,14 @@ pub use federated_context_workbench::{
     FederatedContextWorkbenchReceipt, FederatedContextWorkbenchRequest,
     CONTRACT_VERSION as FEDERATED_CONTEXT_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_CONTEXT_WORKBENCH_FEATURE_ID,
+};
+pub use context_protocol_adapter::{
+    context_protocol_adapter_manifest, serve_context_protocol, ContextProtocolCandidate,
+    ContextProtocolError, ContextProtocolReceipt, ContextProtocolRequest,
+    CONTRACT_VERSION as CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID, METHOD as CONTEXT_PROTOCOL_METHOD,
+    PROTOCOL_VERSION as CONTEXT_PROTOCOL_VERSION, RESPONSE_SCHEMA as CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+    ROUTE as CONTEXT_PROTOCOL_ROUTE,
 };
 pub use throughput_context_workflow_fabric::{
     compile_throughput_context_workflow, throughput_context_workflow_fabric_manifest,
