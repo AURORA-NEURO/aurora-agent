@@ -17809,6 +17809,63 @@ class AutonomousAgent:
 
         return self.orchestrator.prepare_auto(**kwargs)
 
+    def action_plan(self, *, task: str, domain: str | None = None, **kwargs: Any) -> dict[str, Any]:
+        """Compile the prepared automatic route into one metadata-only next-action handoff.
+
+        The returned plan is provider-free and does not authorize provider, evidence, tool,
+        evaluator, credential, or effect dispatch.  Callers can persist the plan for review,
+        then invoke the existing explicit admission boundary that corresponds to its
+        ``next_action``.
+        """
+
+        from .autonomous_action_plan import plan_autonomous_action
+
+        if domain is None:
+            blueprint = self.orchestrator.prepare_auto(task=task, **kwargs)
+        else:
+            # Explicit domain requests are still represented as a normal route proposal so the
+            # action plan has one stable digest boundary.  The route is caller-selected, while
+            # the domain workflow/policy/decision artifacts remain the same as automatic intake.
+            route = self.orchestrator.route_task(
+                task=task,
+                hints=(domain,),
+                allow_cross_domain=False,
+                min_confidence=0.0,
+                min_margin=0.0,
+            )
+            profile = self.orchestrator.registry.resolve(domain)
+            workflow = self.orchestrator.workflow_registry.resolve(domain)
+            candidate = next((item for item in route.candidates if item.domain == domain), None)
+            if candidate is None:
+                candidate = AutonomousRouteCandidate(
+                    domain=domain,
+                    score=1.0,
+                    matched_terms=("explicit_domain",),
+                    capability=profile.default_capability,
+                    risk_class=profile.risk_class,
+                    workflow_id=workflow.workflow_id,
+                )
+            explicit_route = AutonomousRouteProposal(
+                task_digest=route.task_digest,
+                candidates=(candidate,),
+                selected_domains=(domain,),
+                confidence=max(1.0, candidate.score),
+                abstained=False,
+                reason="routed",
+                cross_domain=False,
+                source=route.source,
+            )
+            prepare_kwargs = dict(kwargs)
+            # These options belong to automatic routing and have no meaning once the caller
+            # has selected an explicit domain.
+            for route_option in ("hints", "min_confidence", "min_margin", "max_domains", "allow_cross_domain"):
+                prepare_kwargs.pop(route_option, None)
+            blueprint = AutonomousAutoBlueprint(
+                route=explicit_route,
+                blueprint=self.orchestrator.prepare(task=task, domain=domain, **prepare_kwargs),
+            )
+        return plan_autonomous_action(blueprint).to_dict()
+
     def plan_workflow_portfolio(
         self,
         requests: Sequence[Any],

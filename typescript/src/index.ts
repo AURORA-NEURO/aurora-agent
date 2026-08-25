@@ -1675,6 +1675,22 @@ export type {
   AutonomousBrainBatchControllerRunOptions,
 } from "./autonomous-brain-facade.js";
 export {
+  AUTONOMOUS_ACTION_PLAN_SCHEMA,
+  AUTONOMOUS_ACTION_PLAN_VERSION,
+  AUTONOMOUS_ACTION_PLAN_STATUSES,
+  AUTONOMOUS_ACTION_PLAN_ROLES,
+  AUTONOMOUS_ACTION_PLAN_NEXT_ACTIONS,
+  AutonomousActionPlan,
+  buildAutonomousActionPlan,
+} from "./autonomous-action-plan.js";
+export type {
+  AutonomousActionPlanStatus,
+  AutonomousActionPlanRole,
+  AutonomousActionPlanNextAction,
+  AutonomousActionCandidate,
+  AutonomousActionPlanJSON,
+} from "./autonomous-action-plan.js";
+export {
   AUTONOMOUS_DOMAIN_AUDIT_SCHEMA,
   AUTONOMOUS_DOMAIN_AUDIT_ROW_SCHEMA,
   MAX_AUTONOMOUS_DOMAIN_AUDIT_BYTES,

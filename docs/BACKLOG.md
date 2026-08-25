@@ -1636,3 +1636,12 @@ automatic paths reject provider-assisted semantic routing until that classifier 
 separately reviewed, preventing a provider call from occurring before a domain-scoped launch
 decision. Provider, source, tool, learner, queue, credential, and effect authority remain
 independent deployment controls.
+
+The next-action handoff is now executable as metadata as well. Python `agent.action_plan(...)` and
+TypeScript `brain.actionPlan(...)` project the existing route, evidence plan, domain policy, task
+intent, and task decision into one digest-bound single-domain or cross-domain action plan. The
+plan deterministically prioritizes route review, policy resolution, evidence acquisition, plan
+acceptance, effect review, provider approval, and evaluator settlement, and round-trips with
+candidate-level tamper checks across all twelve domains. It remains provider/source/tool/effect
+free; production deployments still own the caller-controlled admission, credential, evaluator,
+queue, observability, and reconciliation integrations.

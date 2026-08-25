@@ -2739,6 +2739,42 @@ their evidence mode, effect posture, specialist boundaries, capability hints, an
 requirements remain domain-specific. The projection contains no task text, provider response,
 prompt, credential, source value, tool argument, or external authorization.
 
+### Digest-bound autonomous action-plan handoff
+
+The high-level facades now turn that decision metadata into one deterministic next-action
+contract. Python callers can use `agent.action_plan(task=..., domain=...)` for an explicit domain
+or omit `domain` for provider-free automatic routing. TypeScript callers can use
+`await brain.actionPlan({ task, domain })`. Both return an
+`autonomous-action-plan/0.1` projection with the route digest, selected domains, route confidence,
+recommended path, one candidate for a single-domain route or bounded child/synthesis candidates
+for a cross-domain route, required approval gates, and one `next_action`.
+
+The action precedence is deterministic and visible: route abstention requires `review_route`; a
+policy block requires `resolve_policy_block`; required evidence, plan acceptance, and effect
+approval become `acquire_evidence`, `review_plan`, and `review_effect`; otherwise the next
+pre-dispatch step is `approve_provider_call`, with `settle_evaluator` retained as a post-run
+follow-up when the domain policy requires evaluator credit. A connector review remains an
+independent connector action and is never silently satisfied by this task plan. The plan is
+round-trip and tamper checked through its plan/candidate digests, so a UI or scheduler can persist
+it, show exactly why a route is paused, and rehydrate it without retaining task text.
+
+```python
+action = agent.action_plan(
+    task="coordinate a reproducible data and neuroscience review",
+    hints=("data", "neuroscience"),
+    allow_cross_domain=True,
+)
+if action["next_action"] == "acquire_evidence":
+    request_reviewed_evidence(action["candidates"], action["plan_digest"])
+```
+
+The action plan is a handoff, not a permission. It performs no provider, connector, source,
+tool, evaluator, credential, queue, or effect operation; the caller must satisfy the exact
+corresponding admission boundary before dispatch. All twelve built-in domains use this same
+contract, including domain-specific evidence and policy decisions, while cross-domain plans
+retain independent specialist and synthesis decisions rather than flattening them into one
+unreviewable instruction.
+
 ### Provider-assisted mission ordering with replay-safe acceptance
 
 Mission execution now has the same planner boundary as workflow and portfolio execution. The

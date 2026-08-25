@@ -78,6 +78,10 @@ import {
   type AutonomousLaunchAdmissionOptions,
   type AutonomousLaunchAdmissionReport,
 } from "./autonomous-launch-admission.js";
+import {
+  AutonomousActionPlan,
+  buildAutonomousActionPlan,
+} from "./autonomous-action-plan.js";
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -130,6 +134,19 @@ export interface AutonomousBrainDomainPlanSummary extends JsonObject {
   prompt_digest: string;
   plan_digest: string;
   learning_context_digest: string;
+  evidence_plan_digest: string;
+  domain_policy_digest: string;
+  task_intent_digest: string;
+  task_decision_digest: string;
+  task_decision_posture: "admitted" | "review_required" | "blocked";
+  task_decision_recommended_path: "provider" | "evidence_first" | "workflow" | "planning" | "cross_domain";
+  task_decision_requested_effect: string;
+  task_decision_evidence_posture: string;
+  task_decision_preferred_model_capabilities: string[];
+  task_decision_approval_requirements: string[];
+  task_decision_review_reasons: string[];
+  task_decision_blocking_reasons: string[];
+  task_decision_next_actions: string[];
   required_capabilities: string[];
   allowed_tools: string[];
   stages: Array<{
@@ -696,6 +713,19 @@ function projectTaskBlueprint(blueprint: AutonomousTaskBlueprint, routeDigest: s
     prompt_digest: blueprint.prompt.prompt_digest,
     plan_digest: blueprint.plan.plan_digest,
     learning_context_digest: blueprint.learning_context_digest,
+    evidence_plan_digest: blueprint.evidence_plan.plan_digest,
+    domain_policy_digest: blueprint.domain_policy.policy_digest,
+    task_intent_digest: blueprint.task_intent.intent_digest,
+    task_decision_digest: blueprint.task_decision.decision_digest,
+    task_decision_posture: blueprint.task_decision.posture,
+    task_decision_recommended_path: blueprint.task_decision.recommended_path,
+    task_decision_requested_effect: blueprint.task_decision.requested_effect,
+    task_decision_evidence_posture: blueprint.task_decision.evidence_posture,
+    task_decision_preferred_model_capabilities: [...blueprint.task_decision.preferred_model_capabilities],
+    task_decision_approval_requirements: [...blueprint.task_decision.approval_requirements],
+    task_decision_review_reasons: [...blueprint.task_decision.review_reasons],
+    task_decision_blocking_reasons: [...blueprint.task_decision.blocking_reasons],
+    task_decision_next_actions: [...blueprint.task_decision.next_actions],
     required_capabilities: [...blueprint.required_capabilities],
     allowed_tools: [...blueprint.plan.allowed_tools],
     stages: blueprint.workflow.stages.map((stage) => ({
@@ -955,6 +985,16 @@ export class AutonomousBrainFacade {
     const request = validateRequest(input);
     const route = await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true });
     return this.buildPlanForRoute(request, route, null);
+  }
+
+  /**
+   * Compile one deterministic next-action handoff from the request-free plan.  This adds no
+   * authority: provider, connector, evidence, tool, evaluator, credential, and effect gates
+   * remain independently owned by their explicit APIs.
+   */
+  async actionPlan(input: AutonomousBrainRequest): Promise<AutonomousActionPlan> {
+    const plan = await this.plan(input);
+    return buildAutonomousActionPlan(plan.toJSON());
   }
 
   private async buildPlanForRoute(

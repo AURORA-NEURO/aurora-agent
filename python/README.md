@@ -376,6 +376,30 @@ validated by the existing domain adapters; provider completion is never treated 
 learning/replan settlement. Inline evidence is rejected by the bridge so callers cannot
 accidentally bypass the independent evidence boundary.
 
+### Digest-bound next-action handoff
+
+When a caller needs an approval screen or scheduler input without executing the task, use
+`agent.action_plan(...)`. It composes the provider-free route, evidence plan, domain policy,
+task intent, and task decision into a metadata-only projection with candidate workflows,
+approval requirements, policy/review reasons, and one deterministic `next_action`:
+
+```python
+action = agent.action_plan(
+    task="coordinate a reproducible data and neuroscience review",
+    hints=("data", "neuroscience"),
+    allow_cross_domain=True,
+)
+print(action["status"], action["next_action"], action["plan_digest"])
+```
+
+Pass `domain="data"` when the caller has already selected a domain; this still creates an
+explicit route digest and uses the same domain policy, evidence plan, workflow, and task-decision
+contract. `AutonomousActionPlan.from_dict()` verifies the plan and every candidate digest for
+restart replay. The projection never contains task text, prompts, provider values, credential
+handles, source observations, tool arguments, or authorization. It is a review handoff, not a
+replacement for the explicit provider, evidence, connector, tool, evaluator, launch-admission,
+queue, or effect boundary.
+
 ### One-call deployment-managed execution
 
 When an application has already registered an environment source or secret-manager resolver,
