@@ -74,6 +74,8 @@ export const KNOWLEDGE_WORKFLOW_FEATURE_ID = "AFA-adapter-P04-F14" as const;
 export const KNOWLEDGE_WORKFLOW_CONTRACT_VERSION = "multimodal-knowledge-workflow-fabric/1.0" as const;
 export const RESOURCE_WORKBENCH_FEATURE_ID = "AFA-adapter-P05-F18" as const;
 export const RESOURCE_WORKBENCH_CONTRACT_VERSION = "multimodal-resource-workbench/1.0" as const;
+export const INGESTION_GATEWAY_FEATURE_ID = "AFA-adapter-P06-F23" as const;
+export const INGESTION_GATEWAY_CONTRACT_VERSION = "1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1215,6 +1217,38 @@ export function knowledgeWorkflowReceiptDigest(receipt: KnowledgeWorkflowReceipt
 export interface ResourceWorkbenchReceipt { schema_version: string; feature_id: string; contract_version: string; request_id: string; need_id: string; disposition: "qualified" | "partial" | "blocked" | "unknown"; qualified_resources: readonly Record<string, unknown>[]; omissions: readonly Record<string, unknown>[]; checks: string[]; artifact: Record<string, unknown>; boundary: string; }
 export function validateResourceWorkbenchReceipt(receipt: ResourceWorkbenchReceipt): void { if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RESOURCE_WORKBENCH_FEATURE_ID || receipt.contract_version !== RESOURCE_WORKBENCH_CONTRACT_VERSION) throw new Error("resource workbench schema, feature, or version mismatch"); if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.need_id.trim() || !receipt.checks.length) throw new Error("resource workbench identity or checks are incomplete"); if (!new Set(["qualified", "partial", "blocked", "unknown"]).has(receipt.disposition)) throw new Error("resource workbench disposition is unknown"); receipt.qualified_resources.forEach((item, index) => { if (item.rank !== index + 1 || typeof item.resource_id !== "string" || !item.resource_id.trim() || typeof item.origin !== "string" || !item.origin.trim() || !Array.isArray(item.reasons) || !item.reasons.length || typeof item.artifact_digest !== "string" || !/^[0-9a-f]{64}$/.test(item.artifact_digest)) throw new Error("qualified resource ranking, reasons, or digest is invalid"); }); receipt.omissions.forEach((item) => { if (typeof item.resource_id !== "string" || !item.resource_id.trim() || typeof item.reason !== "string" || !item.reason.trim()) throw new Error("resource omission is incomplete"); }); if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("resource workbench artifact digest is invalid"); }
 export function resourceWorkbenchReceiptDigest(receipt: ResourceWorkbenchReceipt): string { validateResourceWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface IngestionGatewayReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  study_id: string;
+  disposition: "admitted" | "partial" | "blocked";
+  harmonized: Record<string, unknown>;
+  admitted_bundles: string[];
+  omitted_bundles: string[];
+  effect_receipts: readonly Record<string, unknown>[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateIngestionGatewayReceipt(receipt: IngestionGatewayReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== INGESTION_GATEWAY_FEATURE_ID || receipt.contract_version !== INGESTION_GATEWAY_CONTRACT_VERSION) throw new Error("ingestion gateway schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.study_id.trim() || !receipt.reasons.length) throw new Error("ingestion gateway identity, locality, or reasons are incomplete");
+  if (!new Set(["admitted", "partial", "blocked"]).has(receipt.disposition)) throw new Error("ingestion gateway disposition is unknown");
+  if (receipt.harmonized.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.harmonized.study_id !== receipt.study_id || receipt.harmonized.boundary !== PRECLINICAL_BOUNDARY) throw new Error("harmonized research object linkage is invalid");
+  if (new Set(receipt.admitted_bundles).size !== receipt.admitted_bundles.length || new Set(receipt.omitted_bundles).size !== receipt.omitted_bundles.length) throw new Error("ingestion gateway bundle identities are not unique");
+  if (receipt.disposition === "blocked" && receipt.effect_receipts.length) throw new Error("blocked gateway receipts cannot contain effects");
+  if (receipt.effect_receipts.length !== receipt.admitted_bundles.length) throw new Error("each admitted bundle needs one effect receipt");
+  for (const effect of receipt.effect_receipts) if (effect.action !== "admit-local-harmonization" || effect.authorized !== true || !receipt.admitted_bundles.includes(String(effect.bundle_id)) || typeof effect.source_digest !== "string" || !/^[0-9a-f]{64}$/.test(effect.source_digest)) throw new Error("ingestion gateway effect receipt is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("ingestion gateway artifact digest is invalid");
+}
+
+export function ingestionGatewayReceiptDigest(receipt: IngestionGatewayReceipt): string { validateIngestionGatewayReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

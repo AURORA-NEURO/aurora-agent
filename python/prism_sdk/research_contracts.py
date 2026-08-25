@@ -80,6 +80,8 @@ KNOWLEDGE_WORKFLOW_FEATURE_ID = "AFA-adapter-P04-F14"
 KNOWLEDGE_WORKFLOW_CONTRACT_VERSION = "multimodal-knowledge-workflow-fabric/1.0"
 RESOURCE_WORKBENCH_FEATURE_ID = "AFA-adapter-P05-F18"
 RESOURCE_WORKBENCH_CONTRACT_VERSION = "multimodal-resource-workbench/1.0"
+INGESTION_GATEWAY_FEATURE_ID = "AFA-adapter-P06-F23"
+INGESTION_GATEWAY_CONTRACT_VERSION = "1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2139,3 +2141,45 @@ class ResourceWorkbenchReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "need_id": self.need_id, "disposition": self.disposition, "qualified_resources": [dict(item) for item in self.qualified_resources], "omissions": [dict(item) for item in self.omissions], "checks": list(self.checks), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class IngestionGatewayReceipt:
+    request_id: str
+    study_id: str
+    disposition: str
+    harmonized: Mapping[str, Any]
+    admitted_bundles: tuple[str, ...]
+    omitted_bundles: tuple[str, ...]
+    effect_receipts: tuple[Mapping[str, Any], ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    contract_version: str = INGESTION_GATEWAY_CONTRACT_VERSION
+    feature_id: str = INGESTION_GATEWAY_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != INGESTION_GATEWAY_FEATURE_ID or self.contract_version != INGESTION_GATEWAY_CONTRACT_VERSION:
+            raise ResearchContractError("ingestion gateway schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.study_id.strip() or not self.reasons:
+            raise ResearchContractError("ingestion gateway identity, boundary, or reasons are incomplete")
+        if self.disposition not in {"admitted", "partial", "blocked"}:
+            raise ResearchContractError("ingestion gateway disposition is unknown")
+        if self.harmonized.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION or self.harmonized.get("study_id") != self.study_id or self.harmonized.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("harmonized research object linkage is invalid")
+        if len(set(self.admitted_bundles)) != len(self.admitted_bundles) or len(set(self.omitted_bundles)) != len(self.omitted_bundles):
+            raise ResearchContractError("ingestion gateway bundle identities are not unique")
+        if self.disposition == "blocked" and self.effect_receipts:
+            raise ResearchContractError("blocked gateway receipts cannot contain effects")
+        if len(self.effect_receipts) != len(self.admitted_bundles):
+            raise ResearchContractError("each admitted bundle needs one effect receipt")
+        for effect in self.effect_receipts:
+            if effect.get("action") != "admit-local-harmonization" or effect.get("authorized") is not True or effect.get("bundle_id") not in self.admitted_bundles or not re.fullmatch(r"[0-9a-f]{64}", str(effect.get("source_digest", ""))):
+                raise ResearchContractError("ingestion gateway effect receipt is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("ingestion gateway artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "study_id": self.study_id, "disposition": self.disposition, "harmonized": dict(self.harmonized), "admitted_bundles": list(self.admitted_bundles), "omitted_bundles": list(self.omitted_bundles), "effect_receipts": [dict(item) for item in self.effect_receipts], "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "boundary": self.boundary})

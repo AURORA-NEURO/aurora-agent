@@ -33,6 +33,10 @@ use bioprism_adapter::{
     EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    run_ingestion_gateway, IngestionGatewayReceipt, IngestionGatewayRequest,
+    INGESTION_GATEWAY_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_knowledge_workflow, ClaimsWorkflowRequest, KnowledgeWorkflowReceipt,
     KNOWLEDGE_WORKFLOW_FEATURE_ID,
 };
@@ -159,6 +163,7 @@ pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
 pub const ADAPTER_RESOURCE_WORKBENCH_TOOL: &str = "adapter_resource_workbench";
+pub const INGESTION_GATEWAY_TOOL: &str = "adapter_ingestion_gateway";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -889,6 +894,24 @@ pub fn validate_adapter_resource_workbench_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RESOURCE_WORKBENCH_FEATURE_ID {
         return Err("adapter resource workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_ingestion_gateway_json(value: &Value) -> Result<Value, String> {
+    let request: IngestionGatewayRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ingestion gateway request: {error}"))?;
+    let receipt = run_ingestion_gateway(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ingestion gateway receipt: {error}"))
+}
+
+pub fn validate_ingestion_gateway_json(value: &Value) -> Result<IngestionGatewayReceipt, String> {
+    let receipt: IngestionGatewayReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ingestion gateway receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != INGESTION_GATEWAY_FEATURE_ID {
+        return Err("ingestion gateway feature id mismatch".into());
     }
     Ok(receipt)
 }

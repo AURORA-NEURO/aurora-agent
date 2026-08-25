@@ -1839,6 +1839,7 @@ impl Server {
             }
             "multimodal_knowledge_workflow" => self.multimodal_knowledge_workflow(&arguments),
             "adapter_resource_workbench" => self.adapter_resource_workbench(&arguments),
+            "adapter_ingestion_gateway" => self.adapter_ingestion_gateway(&arguments),
             "research_release_validate" => self.research_release_validate(&arguments),
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
@@ -24948,6 +24949,29 @@ impl Server {
         }))
     }
 
+    fn adapter_ingestion_gateway(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be an IngestionGatewayRequest")?;
+        let receipt = crate::research_contracts::run_ingestion_gateway_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_adapter::INGESTION_GATEWAY_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "raw modality payloads remain institution-local",
+                "prospective admission requires policy allow and an independent authorization reference",
+                "comparability omissions and semantic loss remain explicit",
+                "every admitted bundle has a deterministic effect receipt"
+            ],
+            "limitations": [
+                "the gateway accepts metadata descriptors and does not fetch or execute instruments",
+                "partial and blocked admissions require downstream workflow policy"
+            ]
+        }))
+    }
+
     fn research_release_validate(&self, arguments: &Value) -> Result<Value, String> {
         let receipt = arguments
             .get("receipt")
@@ -36418,7 +36442,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "multimodal_retrieval_synthesis", "adapter_context_compilation_assurance", "multimodal_knowledge_workflow", "adapter_resource_workbench", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "multimodal_retrieval_synthesis", "adapter_context_compilation_assurance", "multimodal_knowledge_workflow", "adapter_resource_workbench", "adapter_ingestion_gateway", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -39096,6 +39120,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "candidates": { "type": "array", "description": "Serialized ResourceCandidate array." }
                 },
                 "required": ["request_id", "need", "candidates"]
+            }
+        }),
+        json!({
+            "name": "adapter_ingestion_gateway",
+            "description": "Admit prospective multimodal modality descriptors through deterministic harmonization, policy authorization, locality, and explicit omission gates without moving raw experimental payloads.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized IngestionGatewayRequest with typed RawModalityBundle descriptors, required modalities, policy_allow, authorization_reference, locality, and preclinical boundary." }
+                },
+                "required": ["request"]
             }
         }),
         json!({

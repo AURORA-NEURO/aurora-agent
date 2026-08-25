@@ -86,6 +86,7 @@ pub mod error;
 pub mod evidence_surveillance;
 pub mod fact;
 pub mod ingestion;
+pub mod ingestion_gateway;
 pub mod inventory;
 pub mod knowledge_workflow;
 pub mod location;
@@ -120,6 +121,12 @@ pub use evidence_surveillance::{
 };
 pub use fact::{FactDraft, ValueQualifiers};
 pub use ingestion::Ingestion;
+pub use ingestion_gateway::{
+    run_ingestion_gateway, IngestionEffectReceipt, IngestionGatewayDecision, IngestionGatewayError,
+    IngestionGatewayReceipt, IngestionGatewayRequest, RawModalityBundle,
+    CONTRACT_VERSION as INGESTION_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as INGESTION_GATEWAY_FEATURE_ID,
+};
 pub use inventory::{InventoryAdapter, InventoryProfile};
 pub use knowledge_workflow::{
     run_knowledge_workflow, ClaimsWorkflowRequest, KnowledgeWorkflowDisposition,

@@ -11,6 +11,7 @@ from prism_sdk.research_contracts import RETRIEVAL_SYNTHESIS_FEATURE_ID, RETRIEV
 from prism_sdk.research_contracts import ADAPTER_CONTEXT_COMPILATION_FEATURE_ID, ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION, AdapterContextCompilationReceipt
 from prism_sdk.research_contracts import KNOWLEDGE_WORKFLOW_FEATURE_ID, KNOWLEDGE_WORKFLOW_CONTRACT_VERSION, KnowledgeWorkflowReceipt
 from prism_sdk.research_contracts import RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE_WORKBENCH_CONTRACT_VERSION, ResourceWorkbenchReceipt
+from prism_sdk.research_contracts import INGESTION_GATEWAY_FEATURE_ID, INGESTION_GATEWAY_CONTRACT_VERSION, IngestionGatewayReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -829,4 +830,29 @@ def test_resource_workbench_omits_protected_resource():
     receipt.validate()
     assert receipt.feature_id == RESOURCE_WORKBENCH_FEATURE_ID
     assert receipt.contract_version == RESOURCE_WORKBENCH_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_ingestion_gateway_blocks_without_authority_and_preserves_locality():
+    receipt = IngestionGatewayReceipt(
+        request_id="gateway:python",
+        study_id="study:organoid",
+        disposition="blocked",
+        harmonized={
+            "schema_version": "aurora-research-contract/1.0",
+            "study_id": "study:organoid",
+            "modality_order": ["image"],
+            "alignment": {"image": ["a", "z"]},
+            "boundary": PRECLINICAL_BOUNDARY,
+        },
+        admitted_bundles=(),
+        omitted_bundles=("bundle:image",),
+        effect_receipts=(),
+        semantic_loss=({"field": "authorization", "reason": "missing", "severity": "decision_relevant"},),
+        reasons=("authorization was incomplete; no external effect was authorized",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == INGESTION_GATEWAY_FEATURE_ID
+    assert receipt.contract_version == INGESTION_GATEWAY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
