@@ -64,6 +64,7 @@ from prism_sdk.research_contracts import API_ANALYSIS_ASSURANCE_FEATURE_ID, API_
 from prism_sdk.research_contracts import STORE_EVIDENCE_OPERATIONS_FEATURE_ID, STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION, StoreEvidenceOperationsReceipt
 from prism_sdk.research_contracts import POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID, POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION, PolicyInteroperabilityControlReceipt
 from prism_sdk.research_contracts import SAFETY_MECHANISM_WORKFLOW_FEATURE_ID, SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION, SafetyMechanismWorkflowReceipt
+from prism_sdk.hubapi_interpretation import HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID, HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION, HubapiMultimodalInterpretationAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2069,4 +2070,40 @@ def test_safety_mechanism_workflow_preserves_unsafe_action_block():
     receipt.validate()
     assert receipt.feature_id == SAFETY_MECHANISM_WORKFLOW_FEATURE_ID
     assert receipt.contract_version == SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_hubapi_multimodal_interpretation_preserves_comparability_and_locality():
+    receipt = HubapiMultimodalInterpretationAssuranceReceipt(
+        request_id="request:interpretation",
+        workflow_id="workflow:multimodal",
+        objective_id="objective:organoid",
+        scope="organoid:neural",
+        disposition="partial",
+        ranked_order=("interpretation:a", "interpretation:b"),
+        admitted_order=("interpretation:a",),
+        blocked_order=("interpretation:b",),
+        unknown_order=("interpretation:b",),
+        result_order=("result:a",),
+        visualization_order=("visualization:a",),
+        study_order=("study:a", "study:b"),
+        modality_order=("imaging", "transcriptomics"),
+        support_order=(900, 700),
+        semantic_order=("a" * 64,),
+        artifact_order=("b" * 64,),
+        evidence_order=("c" * 64,),
+        provenance_order=("d" * 64,),
+        comparability_order=("e" * 64,),
+        baseline_order=("f" * 64,),
+        omissions=("interpretation:interpretation:b:modality-missing",),
+        uncertainty=("interpretation:interpretation:b:state-unknown-not-admitted",),
+        negative_evidence=(),
+        replay_identity="0" * 64,
+        benchmark_digest="1" * 64,
+        effect_receipts=("evaluate:interpretation-assurance:request:interpretation",),
+        artifact={"content_hash": "2" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

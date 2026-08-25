@@ -114,6 +114,7 @@
 pub mod catalog;
 pub mod deps;
 pub mod federation;
+pub mod interpretation_assurance;
 pub mod lifecycle;
 pub mod mirror;
 pub mod name;
@@ -128,6 +129,14 @@ pub use deps::{
 };
 pub use federation::{
     adopt, Adoption, AdoptionPolicy, Attestation, Basis, FederationError, Subject, TrustStanding,
+};
+pub use interpretation_assurance::{
+    assure_multimodal_interpretations, capability_manifest as interpretation_assurance_manifest,
+    InterpretationAssuranceError, InterpretationDisposition, InterpretationState,
+    MultimodalInterpretationAssuranceReceipt, MultimodalInterpretationAssuranceRequest,
+    MultimodalInterpretationCandidate,
+    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
 };
 pub use lifecycle::{Admission, Availability, Intent, LifecycleError, Note, PackLifecycle};
 pub use mirror::{Freshness, FreshnessPolicy, MirrorError, Replication, StalenessBound};

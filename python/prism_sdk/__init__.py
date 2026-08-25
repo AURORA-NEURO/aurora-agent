@@ -286,6 +286,11 @@ from .research_contracts import (
     canonical_json,
     research_artifact_digest,
 )
+from .hubapi_interpretation import (
+    HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID,
+    HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    HubapiMultimodalInterpretationAssuranceReceipt,
+)
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

@@ -181,6 +181,8 @@ export const POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID = "AFA-policy-P22-F32" a
 export const POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION = "policy-federated-interoperability-control-plane/1.0" as const;
 export const SAFETY_MECHANISM_WORKFLOW_FEATURE_ID = "AFA-safety-P08-F16" as const;
 export const SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION = "safety-federated-mechanism-workflow/1.0" as const;
+export const HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-hubapi-P14-F26" as const;
+export const HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "hubapi-multimodal-interpretation-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3193,6 +3195,57 @@ export function validateSafetyMechanismWorkflowReceipt(receipt: SafetyMechanismW
 }
 
 export function safetyMechanismWorkflowReceiptDigest(receipt: SafetyMechanismWorkflowReceipt): string { validateSafetyMechanismWorkflowReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface HubapiMultimodalInterpretationAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  objective_id: string;
+  scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  ranked_order: string[];
+  admitted_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  result_order: string[];
+  visualization_order: string[];
+  study_order: string[];
+  modality_order: string[];
+  support_order: number[];
+  semantic_order: string[];
+  artifact_order: string[];
+  evidence_order: string[];
+  provenance_order: string[];
+  comparability_order: string[];
+  baseline_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  benchmark_digest: string | null;
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateHubapiMultimodalInterpretationAssuranceReceipt(receipt: HubapiMultimodalInterpretationAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID || receipt.contract_version !== HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION) throw new Error("hubapi interpretation assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.objective_id.trim() || !receipt.scope.trim() || !receipt.ranked_order.length || !receipt.study_order.length || !receipt.modality_order.length || !receipt.effect_receipts.length) throw new Error("hubapi interpretation identity, coverage, locality, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("hubapi interpretation disposition is unknown");
+  if (receipt.support_order.length !== receipt.ranked_order.length || [...receipt.admitted_order, ...receipt.blocked_order, ...receipt.unknown_order].some((value) => !receipt.ranked_order.includes(value))) throw new Error("hubapi interpretation support or disposition linkage is incomplete");
+  for (const values of [receipt.ranked_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order, receipt.result_order, receipt.visualization_order, receipt.study_order, receipt.modality_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("hubapi interpretation ordering is invalid");
+  for (const values of [receipt.semantic_order, receipt.artifact_order, receipt.evidence_order, receipt.provenance_order, receipt.comparability_order, receipt.baseline_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("hubapi interpretation digest ordering is invalid");
+  const digests = [...receipt.semantic_order, ...receipt.artifact_order, ...receipt.evidence_order, ...receipt.provenance_order, ...receipt.comparability_order, ...receipt.baseline_order, receipt.replay_identity, receipt.artifact.content_hash];
+  if (receipt.benchmark_digest !== null) digests.push(receipt.benchmark_digest);
+  for (const value of digests) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("hubapi interpretation digest is invalid");
+  if (receipt.admitted_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("evaluate:interpretation-assurance:"))) throw new Error("admitted interpretations require an evaluation receipt");
+  if (!receipt.admitted_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("empty interpretation result must be explicitly blocked");
+}
+
+export function hubapiMultimodalInterpretationAssuranceReceiptDigest(receipt: HubapiMultimodalInterpretationAssuranceReceipt): string { validateHubapiMultimodalInterpretationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
