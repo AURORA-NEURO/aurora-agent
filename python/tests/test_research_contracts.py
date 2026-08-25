@@ -42,6 +42,7 @@ from prism_sdk.research_contracts import EVOLUTION_ASSURANCE_FEATURE_ID, EVOLUTI
 from prism_sdk.research_contracts import INTERPRETATION_PLANE_FEATURE_ID, INTERPRETATION_PLANE_CONTRACT_VERSION, InterpretationPlaneReceipt
 from prism_sdk.research_contracts import KNOWLEDGE_GATEWAY_FEATURE_ID, KNOWLEDGE_GATEWAY_CONTRACT_VERSION, KnowledgeGatewayReceipt
 from prism_sdk.research_contracts import ORACLE_ASSURANCE_FEATURE_ID, ORACLE_ASSURANCE_CONTRACT_VERSION, OracleCapabilityManifestReceipt
+from prism_sdk.research_contracts import FEDERATED_INGESTION_FEATURE_ID, FEDERATED_INGESTION_CONTRACT_VERSION, FederatedMultimodalIngestionReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1573,4 +1574,23 @@ def test_oracle_assurance_preserves_partial_admission_and_provenance():
     receipt.validate()
     assert receipt.feature_id == ORACLE_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == ORACLE_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_federated_ingestion_preserves_partial_multimodal_object_and_locality():
+    receipt = FederatedMultimodalIngestionReceipt(
+        request_id="ingestion:federated",
+        workflow_id="workflow:continual-ingestion",
+        institution_id="site:a",
+        disposition="partial",
+        object={"object_id": "harmonized-object:ingestion:federated", "study_id": "study:organoid", "scope": "organoid:neural", "semantic_profile": "imaging:ome-ngff/0.5", "modality_order": ("imaging",), "accepted_order": ("imaging:a",), "blocked_order": ("omics:a",), "artifact_order": ("a" * 64,), "provenance_order": ("b" * 64,), "omissions": ("modality:omics:required-but-not-admitted",), "uncertainty": (), "negative_evidence": ("modality:omics:a:state-contradicted-not-harmonized",), "replay_identity": "c" * 64, "object_digest": "d" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        checks=("raw modality payloads remain institution-local; only typed digests and manifests cross sites",),
+        omissions=("modality:omics:required-but-not-admitted",),
+        uncertainty=(),
+        negative_evidence=("modality:omics:a:state-contradicted-not-harmonized",),
+        effect_receipts=("exchange:permitted-harmonized-manifest:imaging:a",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == FEDERATED_INGESTION_FEATURE_ID
+    assert receipt.contract_version == FEDERATED_INGESTION_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

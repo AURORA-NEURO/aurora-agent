@@ -89,6 +89,7 @@ pub mod builder;
 pub mod catalog;
 pub mod error;
 pub mod fixtures;
+pub mod federated_ingestion;
 pub mod knobs;
 pub mod query;
 pub mod slice;
@@ -97,6 +98,15 @@ pub mod temporal;
 pub mod underdetermined;
 
 pub use builder::{BioWorld, WorldBuilder, WORLD_SCHEMA_VERSION};
+pub use federated_ingestion::{
+    operate_federated_ingestion, FederatedIngestionError, FederatedIngestionReceipt,
+    HarmonizedResearchObject as FederatedHarmonizedResearchObject, IngestionDisposition,
+    ModalityArtifact, ModalityState, RawModalityBundle as FederatedRawModalityBundle,
+    CONTRACT_VERSION as FEDERATED_INGESTION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_INGESTION_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as FEDERATED_INGESTION_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as FEDERATED_INGESTION_SCHEMA_VERSION,
+};
 pub use catalog::{CatalogReport, SliceCatalog};
 pub use error::BioWorldError;
 pub use knobs::{MissingGeneratorKnob, REUSED_GENERATOR_KNOBS};

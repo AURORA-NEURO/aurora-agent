@@ -155,6 +155,8 @@ KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-docgraph-P04-F24"
 KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "docgraph-knowledge-gateway/1.0"
 ORACLE_ASSURANCE_FEATURE_ID = "AFA-oracle-P25-F27"
 ORACLE_ASSURANCE_CONTRACT_VERSION = "oracle-contract-frontier-assurance/1.0"
+FEDERATED_INGESTION_FEATURE_ID = "AFA-bioworlds-P06-F08"
+FEDERATED_INGESTION_CONTRACT_VERSION = "bioworlds-federated-multimodal-ingestion/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3513,3 +3515,46 @@ class OracleCapabilityManifestReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "manifest_id": self.manifest_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "benchmark_id": self.benchmark_id, "scope": self.scope, "disposition": self.disposition, "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "source_receipt_digest": self.source_receipt_digest, "benchmark_digest": self.benchmark_digest, "replay_identity": self.replay_identity, "budget": self.budget, "budget_remaining": self.budget_remaining, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class FederatedMultimodalIngestionReceipt:
+    """Cross-language validator for typed, digest-only multimodal ingestion."""
+
+    request_id: str
+    workflow_id: str
+    institution_id: str
+    disposition: str
+    object: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = FEDERATED_INGESTION_FEATURE_ID
+    contract_version: str = FEDERATED_INGESTION_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != FEDERATED_INGESTION_FEATURE_ID or self.contract_version != FEDERATED_INGESTION_CONTRACT_VERSION:
+            raise ResearchContractError("federated ingestion schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.institution_id.strip() or not self.checks or not self.effect_receipts or self.object.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("federated ingestion identity, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"harmonized", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("federated ingestion disposition is unknown")
+        if not (self.object.get("accepted_order") or self.object.get("blocked_order") or self.object.get("omissions") or self.object.get("uncertainty") or self.object.get("negative_evidence")):
+            raise ResearchContractError("federated ingestion must retain an admitted or unresolved object state")
+        values = (self.object.get("modality_order", ()), self.object.get("accepted_order", ()), self.object.get("blocked_order", ()), self.object.get("omissions", ()), self.object.get("uncertainty", ()), self.object.get("negative_evidence", ()), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts)
+        for current in values:
+            if tuple(sorted(set(current))) != tuple(current):
+                raise ResearchContractError("federated ingestion ordering is invalid")
+        for value in tuple(self.object.get("artifact_order", ())) + tuple(self.object.get("provenance_order", ())) + (self.object.get("replay_identity"), self.object.get("object_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("federated ingestion digest is invalid")
+        if not isinstance(self.object.get("object_id"), str) or not self.object["object_id"].strip() or not isinstance(self.object.get("study_id"), str) or not self.object["study_id"].strip() or not isinstance(self.object.get("scope"), str) or not self.object["scope"].strip() or not isinstance(self.object.get("semantic_profile"), str):
+            raise ResearchContractError("federated ingestion object identity is incomplete")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "institution_id": self.institution_id, "disposition": self.disposition, "object": dict(self.object), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

@@ -137,6 +137,8 @@ export const KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-docgraph-P04-F24" as const;
 export const KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "docgraph-knowledge-gateway/1.0" as const;
 export const ORACLE_ASSURANCE_FEATURE_ID = "AFA-oracle-P25-F27" as const;
 export const ORACLE_ASSURANCE_CONTRACT_VERSION = "oracle-contract-frontier-assurance/1.0" as const;
+export const FEDERATED_INGESTION_FEATURE_ID = "AFA-bioworlds-P06-F08" as const;
+export const FEDERATED_INGESTION_CONTRACT_VERSION = "bioworlds-federated-multimodal-ingestion/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2307,6 +2309,39 @@ export function validateOracleCapabilityManifestReceipt(receipt: OracleCapabilit
 }
 
 export function oracleCapabilityManifestReceiptDigest(receipt: OracleCapabilityManifestReceipt): string { validateOracleCapabilityManifestReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface FederatedMultimodalIngestionReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  institution_id: string;
+  disposition: "harmonized" | "partial" | "unknown" | "blocked";
+  object: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateFederatedMultimodalIngestionReceipt(receipt: FederatedMultimodalIngestionReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATED_INGESTION_FEATURE_ID || receipt.contract_version !== FEDERATED_INGESTION_CONTRACT_VERSION) throw new Error("federated ingestion schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.institution_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.object.boundary !== PRECLINICAL_BOUNDARY) throw new Error("federated ingestion identity, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["harmonized", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("federated ingestion disposition is unknown");
+  const accepted = Array.isArray(receipt.object.accepted_order) ? receipt.object.accepted_order as string[] : [];
+  const blocked = Array.isArray(receipt.object.blocked_order) ? receipt.object.blocked_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.object.omissions) ? receipt.object.omissions as string[] : []), ...(Array.isArray(receipt.object.uncertainty) ? receipt.object.uncertainty as string[] : []), ...(Array.isArray(receipt.object.negative_evidence) ? receipt.object.negative_evidence as string[] : [])];
+  if (!accepted.length && !blocked.length && !unresolved.length) throw new Error("federated ingestion must retain an admitted or unresolved object state");
+  for (const values of [Array.isArray(receipt.object.modality_order) ? receipt.object.modality_order as string[] : [], accepted, blocked, Array.isArray(receipt.object.omissions) ? receipt.object.omissions as string[] : [], Array.isArray(receipt.object.uncertainty) ? receipt.object.uncertainty as string[] : [], Array.isArray(receipt.object.negative_evidence) ? receipt.object.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("federated ingestion ordering is invalid");
+  for (const value of [...(Array.isArray(receipt.object.artifact_order) ? receipt.object.artifact_order : []), ...(Array.isArray(receipt.object.provenance_order) ? receipt.object.provenance_order : []), receipt.object.replay_identity, receipt.object.object_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("federated ingestion digest is invalid");
+  if (typeof receipt.object.object_id !== "string" || !receipt.object.object_id.trim() || typeof receipt.object.study_id !== "string" || !receipt.object.study_id.trim() || typeof receipt.object.scope !== "string" || !receipt.object.scope.trim() || typeof receipt.object.semantic_profile !== "string") throw new Error("federated ingestion object identity is incomplete");
+}
+
+export function federatedMultimodalIngestionReceiptDigest(receipt: FederatedMultimodalIngestionReceipt): string { validateFederatedMultimodalIngestionReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
