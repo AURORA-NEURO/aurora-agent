@@ -9817,3 +9817,19 @@ selection or provider dispatch, while planner transcripts, task text, credential
 messages remain caller-transient. Built-in wildcard specialist templates cover the `planning`
 stage for all twelve domains; custom templates must explicitly cover `planning` or use a
 stage-specific override.
+
+Adaptive prompt learning now reaches durable workflow execution as well. Python
+`run_workflow()` and TypeScript `AutonomousWorkflowExecutor.start()` / `resume()` accept a
+caller-owned `AutonomousPromptLearningState` alongside the registry. Each ready stage selects
+against its own domain, stage, and capability request, so a `scope` result cannot accidentally
+train or reuse a `verify` arm. Stage projections expose the adaptive selection digest, arm id,
+generation, and explicit UCB1 policy while keeping rendered messages, task text, provider
+payloads, credentials, and evaluator feedback transient. Workflow contract digests bind the
+registry identity and exploration policy but deliberately do not bind mutable reward state;
+callers can settle a completed stage and resume unfinished stages with the next learner
+generation, while registry replacement or exploration-policy drift is rejected before dispatch.
+The same propagation is available through workflow learning, trajectory learning, recovery,
+trace, cross-domain child, and synthesis paths because those layers delegate to the shared
+stage invocation boundary. Adaptive settlement remains explicit and caller-owned: a completed
+stage is not treated as reward until an evaluator supplies its bounded outcome and settlement
+identity.

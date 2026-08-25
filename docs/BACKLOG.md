@@ -1508,3 +1508,13 @@ capability drift, malformed ledger fields, and stale plans fail closed. Direct a
 execution plus provider-assisted planning accept the adaptive state and project only the
 selection digest, arm identity, generation, and policy; tasks, rendered messages, provider
 payloads, evaluator feedback, credentials, and secrets remain outside durable learning state.
+
+Durable workflow stages now consume the same adaptive prompt state. Python and TypeScript
+workflow executors forward state and exploration policy into every stage, child, and synthesis
+invocation, selecting against the actual stage/domain/capability request rather than one global
+answer arm. Workflow contract digests bind the prompt registry and exploration policy while
+allowing caller-settled reward state to advance between resumptions; registry replacement,
+exploration drift, stale state, stage drift, and malformed adaptive state still fail closed
+before provider dispatch. All-domain workflow coverage asserts adaptive selection metadata at
+the stage boundary, with no prompt text, task text, credentials, or provider payloads entering
+checkpoints or learning state.

@@ -18,7 +18,7 @@ import type {
 import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
 import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
 import { AutonomousCostBudget } from "./llm.js";
-import { AutonomousPromptSelectionPlan } from "./autonomous-prompt-registry.js";
+import { AutonomousPromptLearningState, AutonomousPromptSelectionPlan } from "./autonomous-prompt-registry.js";
 import {
   evaluateAutonomousWorkflowStageResponse,
   replayAutonomousWorkflowStageResponseEvaluation,
@@ -1073,6 +1073,12 @@ async function workflowExecutionContractDigest(agent: AutonomousAgent, options: 
     : options.promptSelection instanceof AutonomousPromptSelectionPlan
       ? options.promptSelection.planDigest
       : options.promptSelection.plan_digest ?? null;
+  const promptLearningState = options.promptLearningState;
+  const promptLearningRegistryDigest = promptLearningState === undefined
+    ? null
+    : promptLearningState instanceof AutonomousPromptLearningState
+      ? promptLearningState.registryDigest
+      : promptLearningState.registry_digest ?? null;
   return digestJson({
     schema: AUTONOMOUS_WORKFLOW_EXECUTION_CONTRACT_SCHEMA,
     candidates_digest: await digestJson(candidates.map((candidate) => workflowCandidateContract(candidate))),
@@ -1098,6 +1104,11 @@ async function workflowExecutionContractDigest(agent: AutonomousAgent, options: 
       registry_digest: options.promptRegistry?.registryDigest ?? null,
       selection_plan_digest: promptSelectionDigest,
       stage: options.promptStage ?? null,
+      // The mutable learner state intentionally is not bound here: callers may settle
+      // completed stages before resuming. Registry identity and exploration policy are
+      // bound so a resume cannot silently change the adaptive contract.
+      learning_registry_digest: promptLearningRegistryDigest,
+      learning_exploration: options.promptLearningExploration ?? null,
     },
   });
 }
@@ -1166,6 +1177,8 @@ function runOptions(options: AutonomousWorkflowExecuteOptions, stage: Autonomous
     promptRegistry: options.promptRegistry,
     promptSelection: options.promptSelection,
     promptStage: options.promptStage ?? stage.id,
+    promptLearningState: options.promptLearningState,
+    promptLearningExploration: options.promptLearningExploration,
     hints: [],
     maxInputTokens: options.maxInputTokens,
     maxOutputTokens: options.maxOutputTokens,

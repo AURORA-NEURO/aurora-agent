@@ -41,6 +41,7 @@ from prism_sdk import (
     AutonomousWorkflowRun,
     AutonomousWorkflowStageResult,
     AutonomousWorkflowCycleCheckpoint,
+    AutonomousPromptLearningState,
     validate_autonomous_workflow_execution_receipt,
     AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_KEY,
     CompositeDomainEvaluator,
@@ -3664,6 +3665,40 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
             assert result.execution_receipt.completed_stage_ids == (blueprint.workflow.stages[0].id,)
             assert result.execution_receipt.next_action == "continue_workflow"
             assert result.execution_receipt.progress == 1 / len(blueprint.workflow.stages)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_propagates_adaptive_prompt_selection_through_every_builtin_domain():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "adaptive-workflow-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    prompt_registry = builtin_autonomous_prompt_registry()
+    learning_state = AutonomousPromptLearningState.empty(prompt_registry.registry_digest)
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            blueprint = brain.prepare_autonomous(
+                task=f"Prepare an adaptive bounded {domain} workflow result.",
+                domain=domain,
+            )
+            result = brain.run_workflow(
+                blueprint=blueprint,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                approve_provider_call=True,
+                prompt_registry=prompt_registry,
+                prompt_learning_state=learning_state,
+                run_id=f"adaptive-workflow-{domain}",
+                max_stage_calls=1,
+            )
+            assert result.status == "paused"
+            prompt_projection = result.stage_results[0].result.prompt["autonomous_prompt"]  # type: ignore[union-attr,index]
+            assert prompt_projection["selection_policy"] == "ucb1_explicit_evaluator_v1"
+            assert len(prompt_projection["adaptive_selection_digest"]) == 64
+            assert len(prompt_projection["adaptive_arm_id"]) == 64
+            assert prompt_projection["adaptive_generation"] == 0
     finally:
         server.shutdown()
         thread.join(timeout=2)
