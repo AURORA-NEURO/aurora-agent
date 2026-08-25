@@ -1627,6 +1627,7 @@ export type {
   AutonomousBrainPlanStatus,
   AutonomousBrainExecutionStatus,
   AutonomousActionPlanExecutionOptions,
+  AutonomousActionHandoffExecutionOptions,
   AutonomousActionPlanExecution,
   AutonomousBrainRequest,
   AutonomousBrainDomainPlanSummary,

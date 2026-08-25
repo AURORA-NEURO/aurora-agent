@@ -7,7 +7,9 @@ import {
   AutonomousActionAdmission,
   AutonomousActionPlan,
   AutonomousAgent,
+  AutonomousActionAdmissionController,
   AutonomousBrainFacade,
+  InMemoryAutonomousActionAdmissionLedger,
   LLMRuntime,
   admitAutonomousActionPlan,
 } from "../dist/index.js";
@@ -151,4 +153,46 @@ test("action-plan admission preserves forbidden biomedical effects", async () =>
   const admission = admitAutonomousActionPlan(plan, { approvals: Object.fromEntries(plan.required_approvals.map((gate) => [gate, true])), reviewed: true });
   assert.equal(admission.status, "blocked");
   assert.equal(admission.next_action, "resolve_policy_block");
+});
+
+test("verified action handoff execution replays every domain before the autonomous run boundary", async () => {
+  const facade = brain();
+  const calls = [];
+  facade.agent.runAuto = async (task, options) => {
+    calls.push({ task, options });
+    return { status: "completed", execution_status: "completed" };
+  };
+  const controller = new AutonomousActionAdmissionController(new InMemoryAutonomousActionAdmissionLedger({ maxRecords: AUTONOMOUS_DOMAIN_NAMES.length + 1 }));
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const input = { task: tasks[domain], domain, allow_cross_domain: false };
+    const plan = await facade.actionPlan(input);
+    controller.submit(`handoff-${domain}`, plan, {
+      approvals: Object.fromEntries(plan.required_approvals.map((gate) => [gate, true])),
+      reviewed: true,
+      authorizationDigest: "a".repeat(64),
+    });
+    const handoff = controller.dispatchHandoff(`handoff-${domain}`);
+    const result = await facade.executeActionHandoff(input, handoff);
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.admission.admission_digest, handoff.admission_digest, domain);
+    assert.equal(calls.at(-1).options.approveProviderCall, true, domain);
+    await assert.rejects(
+      () => facade.executeActionHandoff({ ...input, task: `${input.task} changed` }, handoff),
+      /stale|match/,
+      domain,
+    );
+  }
+
+  const crossInput = { task: "coordinate coding and biomedical evidence across disciplines", hints: ["coding", "biomedical"], allow_cross_domain: true };
+  const crossPlan = await facade.actionPlan(crossInput);
+  controller.submit("handoff-cross-domain", crossPlan, {
+    approvals: Object.fromEntries(crossPlan.required_approvals.map((gate) => [gate, true])),
+    reviewed: true,
+    authorizationDigest: "b".repeat(64),
+  });
+  const crossHandoff = controller.dispatchHandoff("handoff-cross-domain");
+  const crossResult = await facade.executeActionHandoff(crossInput, crossHandoff);
+  assert.equal(crossResult.status, "completed");
+  assert.equal(crossResult.admission.admission_digest, crossHandoff.admission_digest);
+  assert.equal(calls.length, AUTONOMOUS_DOMAIN_NAMES.length + 1);
 });

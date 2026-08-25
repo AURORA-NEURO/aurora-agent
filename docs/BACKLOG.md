@@ -1690,3 +1690,10 @@ digest for review, rejects held/blocked records at the dispatch-handoff boundary
 separate downstream credential, provider/source, tool/effect, and evaluator gates. It remains a
 projection and handoff API rather than an execution or authorization oracle; deployment identity
 verification and the actual UI remain caller-owned.
+
+The high-level brain façades now consume that verified handoff directly as well. Python
+`execute_action_handoff()` and TypeScript `executeActionHandoff()` replay the transient request,
+reproduce the admitted gate set, and delegate to the existing route/model/provider boundary for
+all twelve built-in domains plus cross-domain plans. Handoff continuity still does not replace
+credentials, provider/source readiness, evaluator evidence, tool/effect authority, or durable
+deployment authorization.

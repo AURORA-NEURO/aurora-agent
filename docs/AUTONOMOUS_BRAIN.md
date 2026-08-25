@@ -2912,6 +2912,14 @@ if execution.status == "review_required":
     show_next_action(execution.admission.next_action)
 ```
 
+Once the operator controller has produced a verified handoff, the high-level execution seam can
+consume it directly. Python exposes `agent.execute_action_handoff(task=..., handoff=...)`, and
+TypeScript exposes `brain.executeActionHandoff(request, handoff, options)`. Each method verifies
+the outer handoff digest, replays the embedded plan against the transient request, reproduces
+the admitted gate set, and then delegates to the existing autonomous route/model/provider
+boundary. A changed task, domain, plan, admission, or handoff fails before dispatch; credentials,
+provider/source approval, evaluator settlement, tool authority, and effects remain independent.
+
 ### Provider-assisted mission ordering with replay-safe acceptance
 
 Mission execution now has the same planner boundary as workflow and portfolio execution. The

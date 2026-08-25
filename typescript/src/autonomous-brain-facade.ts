@@ -86,6 +86,10 @@ import {
   admitAutonomousActionPlan,
   buildAutonomousActionPlan,
 } from "./autonomous-action-plan.js";
+import {
+  validateAutonomousActionDispatchHandoff,
+  type AutonomousActionDispatchHandoff,
+} from "./autonomous-action-admission-controller.js";
 import type {
   AutonomousActionAdmissionJSON,
   AutonomousActionPlanApproval,
@@ -141,6 +145,9 @@ export interface AutonomousActionPlanExecutionOptions extends AutonomousAutoRunO
   /** Include the connector's transient observation in the provider context. */
   includeConnectorObservation?: boolean;
 }
+
+/** Execution options for a previously reviewed dispatch handoff. */
+export type AutonomousActionHandoffExecutionOptions = Omit<AutonomousActionPlanExecutionOptions, "approvals" | "reviewed">;
 
 export interface AutonomousActionPlanExecution {
   schema: typeof AUTONOMOUS_ACTION_EXECUTION_FACADE_SCHEMA;
@@ -1113,6 +1120,29 @@ export class AutonomousBrainFacade {
     }
     const finished = result.status === "completed";
     return base(finished ? "completed" : result.status === "route_review_required" ? "route_review_required" : result.status === "policy_blocked" ? "blocked" : "review_required", result);
+  }
+
+  /**
+   * Revalidate and execute one operator-produced dispatch handoff.
+   *
+   * The handoff is continuity metadata, not a credential or execution token. This method
+   * replays the embedded plan against the transient request, reproduces the admitted gates,
+   * and then delegates to the existing action-plan execution boundary so model selection,
+   * provider approval, evidence, tools, evaluators, and effects retain their independent gates.
+   */
+  async executeActionHandoff(
+    input: AutonomousBrainRequest,
+    source: AutonomousActionDispatchHandoff | JsonObject,
+    options: AutonomousActionHandoffExecutionOptions = {},
+  ): Promise<AutonomousActionPlanExecution> {
+    const request = validateRequest(input);
+    const handoff = validateAutonomousActionDispatchHandoff(source);
+    if (request.domain !== undefined && !handoff.selected_domains.includes(request.domain) && !(request.domain === "cross_domain" && handoff.cross_domain)) throw new ArgumentError("autonomous action handoff does not cover the transient request domain");
+    const actionPlan = AutonomousActionPlan.fromJSON(handoff.plan);
+    const approvals = Object.fromEntries(handoff.admission.approved_approvals.map((gate) => [gate, true])) as Partial<Record<AutonomousActionPlanApproval, boolean>>;
+    const execution = await this.executeActionPlan(request, actionPlan, { ...options, approvals, reviewed: true });
+    if (execution.plan.plan_digest !== handoff.plan_digest || execution.admission.admission_digest !== handoff.admission_digest) throw new ArgumentError("autonomous action handoff admission drifted during execution replay");
+    return execution;
   }
 
   private async buildPlanForRoute(

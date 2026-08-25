@@ -996,7 +996,7 @@ class RemoteBrainJobWorker:
         if action_handoff is not None:
             selected_domains = action_handoff["selected_domains"]
             request_domain = resolution.request.get("domain") if isinstance(resolution.request, Mapping) else None
-            if job["domain"] == "cross_domain" and action_handoff["cross_domain"] is not True:
+            if job["domain"] == "cross_domain" and action_handoff["cross_domain"] is not True and "cross_domain" not in selected_domains:
                 raise RemoteBrainWorkerError("cross-domain job requires a cross-domain action handoff", code="protocol")
             if job["domain"] != "cross_domain" and job["domain"] not in selected_domains:
                 raise RemoteBrainWorkerError("action handoff does not cover the durable job domain", code="protocol")

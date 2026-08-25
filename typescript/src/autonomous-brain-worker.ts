@@ -601,7 +601,7 @@ export class AutonomousBrainJobWorker {
     if (digest("job resolution specDigest", value.specDigest) !== job.spec_digest) throw new ArgumentError("brain job resolver specDigest does not match the durable job");
     const requestDomain = isObject(value.request) && typeof value.request.domain === "string" ? value.request.domain : null;
     if (actionHandoff !== null) {
-      if (job.domain === "cross_domain" && !actionHandoff.cross_domain) throw new ArgumentError("cross-domain job requires a cross-domain action handoff");
+      if (job.domain === "cross_domain" && !actionHandoff.cross_domain && !actionHandoff.selected_domains.includes("cross_domain")) throw new ArgumentError("cross-domain job requires a cross-domain action handoff");
       if (job.domain !== "cross_domain" && !actionHandoff.selected_domains.includes(job.domain as typeof actionHandoff.selected_domains[number])) throw new ArgumentError("action handoff does not cover the durable job domain");
       if (requestDomain !== null && requestDomain !== "cross_domain" && !actionHandoff.selected_domains.includes(requestDomain as typeof actionHandoff.selected_domains[number])) throw new ArgumentError("action handoff does not cover the request domain");
     }

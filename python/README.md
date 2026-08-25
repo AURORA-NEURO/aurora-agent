@@ -421,6 +421,13 @@ if execution.status != "completed":
     print(execution.admission.next_action)
 ```
 
+When the operator process has emitted a verified dispatch handoff, use
+`agent.execute_action_handoff(...)` instead of manually unpacking its plan and admission. The
+method revalidates the outer digest and embedded identities, replays the transient task/domain
+against the plan, reproduces the approved gate set, and delegates to the same `run_auto()`
+boundary. It does not turn the handoff into a credential or bypass provider, evidence, tool,
+evaluator, or effect controls.
+
 The execution method rejects a changed task or route-options digest and refuses tampered
 admission records before dispatch. Its metadata projections retain only plan/admission identity,
 selected domains, gate state, and bounded next actions; task text, prompts, credentials, source

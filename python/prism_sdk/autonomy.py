@@ -18048,6 +18048,50 @@ class AutonomousAgent:
             result=result,
         )
 
+    def execute_action_handoff(
+        self,
+        *,
+        task: str,
+        handoff: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        domain: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Revalidate and execute one operator-produced action dispatch handoff.
+
+        The handoff proves plan/admission continuity only.  This method replays the embedded
+        plan against transient task input and delegates to :meth:`execute_action_plan`, leaving
+        credentials, provider approval, evidence, tools, evaluator settlement, and effects as
+        separate caller-owned gates.
+        """
+
+        from .autonomous_action_admission_controller import validate_autonomous_action_dispatch_handoff
+
+        reserved = {"approvals", "reviewed", "plan", "handoff"}
+        if reserved.intersection(kwargs):
+            raise BrainRunError("execute_action_handoff does not allow overriding handoff admission fields")
+        normalized = validate_autonomous_action_dispatch_handoff(handoff)
+        selected_domains = normalized["selected_domains"]
+        if domain is not None and domain not in selected_domains and not (domain == "cross_domain" and normalized["cross_domain"]):
+            raise BrainRunError("action handoff does not cover the requested domain")
+        approvals = {gate: True for gate in normalized["admission"]["approved_approvals"]}
+        execution = self.execute_action_plan(
+            task=task,
+            plan=normalized["plan"],
+            credentials=credentials,
+            model_candidates=model_candidates,
+            approvals=approvals,
+            reviewed=True,
+            domain=domain,
+            **kwargs,
+        )
+        execution_plan = getattr(execution, "plan", None)
+        execution_admission = getattr(execution, "admission", None)
+        if execution_plan is None or execution_admission is None or execution_plan.plan_digest != normalized["plan_digest"] or execution_admission.admission_digest != normalized["admission_digest"]:
+            raise BrainRunError("action handoff admission drifted during execution replay")
+        return execution
+
     def plan_workflow_portfolio(
         self,
         requests: Sequence[Any],

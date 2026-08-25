@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,7 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousActionAdmissionPersistenceCoordinator,
     AutonomousActionAdmissionController,
+    BrainRunError,
     validate_autonomous_action_dispatch_handoff,
     InMemoryAutonomousActionAdmissionLedger,
     JsonAutonomousActionAdmissionSnapshotPersistence,
@@ -279,3 +281,50 @@ def test_dispatch_handoff_validation_replays_every_domain_and_rejects_tampering(
         validate_autonomous_action_dispatch_handoff({**cross, "downstream_gates": ["credential_scope"]})
     with pytest.raises(ArgumentError, match="digest|selected"):
         validate_autonomous_action_dispatch_handoff({**cross, "requested_domains": ["evaluation"]})
+
+
+def test_verified_action_handoff_execution_replays_every_domain_before_run_boundary() -> None:
+    agent = _agent()
+    calls: list[dict[str, object]] = []
+
+    def fake_run_auto(**kwargs: object) -> SimpleNamespace:
+        calls.append(dict(kwargs))
+        return SimpleNamespace(execution_status="completed")
+
+    agent.run_auto = fake_run_auto  # type: ignore[method-assign]
+    controller = AutonomousActionAdmissionController(
+        InMemoryAutonomousActionAdmissionLedger(max_records=len(AUTONOMOUS_DOMAIN_NAMES) + 1)
+    )
+    for domain in AUTONOMOUS_DOMAIN_NAMES:
+        task = _TASKS[domain]
+        plan = agent.action_plan(task=task, domain=domain, allow_cross_domain=False)
+        action_id = f"execute-{domain}"
+        controller.submit(
+            action_id,
+            plan,
+            approvals=_all_approvals(plan),
+            reviewed=True,
+            authorization_digest="a" * 64,
+        )
+        handoff = controller.dispatch_handoff(action_id)
+        result = agent.execute_action_handoff(task=task, domain=domain, handoff=handoff, credentials={})
+        assert result.status == "completed"
+        assert result.admission.admission_digest == handoff["admission_digest"]
+        assert calls[-1]["approve_provider_call"] is True
+        with pytest.raises(BrainRunError, match="stale|different|match"):
+            agent.execute_action_handoff(task=f"{task} changed", domain=domain, handoff=handoff, credentials={})
+
+    cross_task = "coordinate coding and biomedical evidence across disciplines"
+    cross_plan = agent.action_plan(task=cross_task, hints=("coding", "biomedical"), allow_cross_domain=True)
+    controller.submit(
+        "execute-cross-domain",
+        cross_plan,
+        approvals=_all_approvals(cross_plan),
+        reviewed=True,
+        authorization_digest="b" * 64,
+    )
+    cross_handoff = controller.dispatch_handoff("execute-cross-domain")
+    cross_result = agent.execute_action_handoff(task=cross_task, handoff=cross_handoff, credentials={})
+    assert cross_result.status == "completed"
+    assert cross_result.admission.admission_digest == cross_handoff["admission_digest"]
+    assert len(calls) == len(AUTONOMOUS_DOMAIN_NAMES) + 1
