@@ -153,6 +153,8 @@ INTERPRETATION_PLANE_FEATURE_ID = "AFA-ids-P14-F31"
 INTERPRETATION_PLANE_CONTRACT_VERSION = "ids-interpretation-federation/1.0"
 KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-docgraph-P04-F24"
 KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "docgraph-knowledge-gateway/1.0"
+ORACLE_ASSURANCE_FEATURE_ID = "AFA-oracle-P25-F27"
+ORACLE_ASSURANCE_CONTRACT_VERSION = "oracle-contract-frontier-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3456,3 +3458,58 @@ class KnowledgeGatewayReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "federation_id": self.federation_id, "disposition": self.disposition, "world": dict(self.world), "replay_identity": self.replay_identity, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class OracleCapabilityManifestReceipt:
+    """Cross-language validator for prospective oracle-contract assurance."""
+
+    manifest_id: str
+    request_id: str
+    workflow_id: str
+    benchmark_id: str
+    scope: str
+    disposition: str
+    admitted_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    source_receipt_digest: str
+    benchmark_digest: str
+    replay_identity: str
+    budget: int
+    budget_remaining: int
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = ORACLE_ASSURANCE_FEATURE_ID
+    contract_version: str = ORACLE_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != ORACLE_ASSURANCE_FEATURE_ID or self.contract_version != ORACLE_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("oracle assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.manifest_id.strip() or not self.request_id.strip() or not self.workflow_id.strip() or not self.benchmark_id.strip() or not self.scope.strip() or not self.checks or not self.effect_receipts or self.budget_remaining > self.budget:
+            raise ResearchContractError("oracle assurance identity, checks, effects, locality, budget, or boundary is incomplete")
+        if self.disposition not in {"admitted", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("oracle assurance disposition is unknown")
+        if not (self.admitted_order or self.blocked_order or self.omissions or self.uncertainty or self.negative_evidence):
+            raise ResearchContractError("oracle assurance must retain an admission or unresolved state")
+        for values in (self.admitted_order, self.blocked_order, self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("oracle assurance ordering is invalid")
+        for value in (self.source_receipt_digest, self.benchmark_digest, self.replay_identity) + self.evidence_order + self.provenance_order:
+            if not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("oracle assurance digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("oracle assurance artifact digest is invalid")
+        if not isinstance(self.artifact.get("media_type"), str) or not self.artifact["media_type"].strip() or not isinstance(self.artifact.get("scope"), str) or not self.artifact["scope"].strip():
+            raise ResearchContractError("oracle assurance artifact metadata is incomplete")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "manifest_id": self.manifest_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "benchmark_id": self.benchmark_id, "scope": self.scope, "disposition": self.disposition, "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "source_receipt_digest": self.source_receipt_digest, "benchmark_digest": self.benchmark_digest, "replay_identity": self.replay_identity, "budget": self.budget, "budget_remaining": self.budget_remaining, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

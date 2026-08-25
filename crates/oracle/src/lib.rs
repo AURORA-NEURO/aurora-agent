@@ -64,6 +64,7 @@ pub mod combine;
 pub mod disagreement;
 pub mod error;
 pub mod evidence;
+pub mod assurance;
 pub mod judgement;
 pub mod ladder;
 pub mod manifest;
@@ -76,6 +77,13 @@ pub mod time;
 pub use combine::{
     CombinedVerdict, MeshPolicy, OracleFailure, OverrideRule, RetryClass, SuppressedOverride,
     VerdictBasis,
+};
+pub use assurance::{
+    operate_oracle_assurance, OracleAssuranceDisposition, OracleAssuranceError,
+    OracleCapabilityManifest, OracleContractEvidence, OracleContractInput,
+    OracleEvidenceState, OracleManifestArtifact, CONTRACT_VERSION as ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as ASSURANCE_FEATURE_ID, PRECLINICAL_BOUNDARY as ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as ASSURANCE_SCHEMA_VERSION,
 };
 pub use disagreement::{
     Appeal, AppealGrounds, Disagreement, DisagreementSource, Resolution, Settlement,

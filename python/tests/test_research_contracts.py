@@ -41,6 +41,7 @@ from prism_sdk.research_contracts import EVOLUTION_IDENTITY_FEATURE_ID, EVOLUTIO
 from prism_sdk.research_contracts import EVOLUTION_ASSURANCE_FEATURE_ID, EVOLUTION_ASSURANCE_CONTRACT_VERSION, EvolutionAssuranceReceipt
 from prism_sdk.research_contracts import INTERPRETATION_PLANE_FEATURE_ID, INTERPRETATION_PLANE_CONTRACT_VERSION, InterpretationPlaneReceipt
 from prism_sdk.research_contracts import KNOWLEDGE_GATEWAY_FEATURE_ID, KNOWLEDGE_GATEWAY_CONTRACT_VERSION, KnowledgeGatewayReceipt
+from prism_sdk.research_contracts import ORACLE_ASSURANCE_FEATURE_ID, ORACLE_ASSURANCE_CONTRACT_VERSION, OracleCapabilityManifestReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1542,4 +1543,34 @@ def test_knowledge_gateway_preserves_unknown_typed_world_state():
     receipt.validate()
     assert receipt.feature_id == KNOWLEDGE_GATEWAY_FEATURE_ID
     assert receipt.contract_version == KNOWLEDGE_GATEWAY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_oracle_assurance_preserves_partial_admission_and_provenance():
+    receipt = OracleCapabilityManifestReceipt(
+        manifest_id="oracle-manifest:assurance",
+        request_id="oracle:assurance",
+        workflow_id="workflow:benchmark",
+        benchmark_id="benchmark:held-out-family",
+        scope="organoid:neural",
+        disposition="partial",
+        admitted_order=("oracle:a",),
+        blocked_order=("oracle:b",),
+        evidence_order=("a" * 64,),
+        provenance_order=("b" * 64,),
+        source_receipt_digest="c" * 64,
+        benchmark_digest="d" * 64,
+        replay_identity="e" * 64,
+        budget=10,
+        budget_remaining=8,
+        checks=("canonical oracle ordering and content-addressed manifest",),
+        omissions=("oracle:oracle:b:protected-closure-or-evidence-incomplete",),
+        uncertainty=(),
+        negative_evidence=("oracle:oracle:b:state-contradicted-not-admitted",),
+        effect_receipts=("verify:oracle:oracle:a",),
+        artifact={"content_hash": "f" * 64, "media_type": "application/vnd.aurora.oracle-capability-manifest+json", "scope": "oracle-assurance:oracle:assurance"},
+    )
+    receipt.validate()
+    assert receipt.feature_id == ORACLE_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == ORACLE_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

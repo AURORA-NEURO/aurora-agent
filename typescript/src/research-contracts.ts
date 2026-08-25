@@ -135,6 +135,8 @@ export const INTERPRETATION_PLANE_FEATURE_ID = "AFA-ids-P14-F31" as const;
 export const INTERPRETATION_PLANE_CONTRACT_VERSION = "ids-interpretation-federation/1.0" as const;
 export const KNOWLEDGE_GATEWAY_FEATURE_ID = "AFA-docgraph-P04-F24" as const;
 export const KNOWLEDGE_GATEWAY_CONTRACT_VERSION = "docgraph-knowledge-gateway/1.0" as const;
+export const ORACLE_ASSURANCE_FEATURE_ID = "AFA-oracle-P25-F27" as const;
+export const ORACLE_ASSURANCE_CONTRACT_VERSION = "oracle-contract-frontier-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2264,6 +2266,47 @@ export function validateKnowledgeGatewayReceipt(receipt: KnowledgeGatewayReceipt
 }
 
 export function knowledgeGatewayReceiptDigest(receipt: KnowledgeGatewayReceipt): string { validateKnowledgeGatewayReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface OracleCapabilityManifestReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  manifest_id: string;
+  request_id: string;
+  workflow_id: string;
+  benchmark_id: string;
+  scope: string;
+  disposition: "admitted" | "partial" | "unknown" | "blocked";
+  admitted_order: string[];
+  blocked_order: string[];
+  evidence_order: string[];
+  provenance_order: string[];
+  source_receipt_digest: string;
+  benchmark_digest: string;
+  replay_identity: string;
+  budget: number;
+  budget_remaining: number;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateOracleCapabilityManifestReceipt(receipt: OracleCapabilityManifestReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ORACLE_ASSURANCE_FEATURE_ID || receipt.contract_version !== ORACLE_ASSURANCE_CONTRACT_VERSION) throw new Error("oracle assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.manifest_id.trim() || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.benchmark_id.trim() || !receipt.scope.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.budget_remaining > receipt.budget) throw new Error("oracle assurance identity, checks, effects, locality, budget, or boundary is incomplete");
+  if (!new Set(["admitted", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("oracle assurance disposition is unknown");
+  if (!(receipt.admitted_order.length || receipt.blocked_order.length || receipt.omissions.length || receipt.uncertainty.length || receipt.negative_evidence.length)) throw new Error("oracle assurance must retain an admission or unresolved state");
+  for (const values of [receipt.admitted_order, receipt.blocked_order, receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("oracle assurance ordering is invalid");
+  for (const digest of [receipt.source_receipt_digest, receipt.benchmark_digest, receipt.replay_identity, ...receipt.evidence_order, ...receipt.provenance_order]) if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error("oracle assurance digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash) || typeof receipt.artifact.media_type !== "string" || !receipt.artifact.media_type.trim() || typeof receipt.artifact.scope !== "string" || !receipt.artifact.scope.trim()) throw new Error("oracle assurance artifact is invalid");
+}
+
+export function oracleCapabilityManifestReceiptDigest(receipt: OracleCapabilityManifestReceipt): string { validateOracleCapabilityManifestReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
