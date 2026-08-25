@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub mod evidence_surveillance;
+pub mod federated_evidence_surveillance;
 pub mod high_throughput_evidence_surveillance;
 pub mod multimodal_evidence_surveillance;
 
@@ -36,6 +37,12 @@ pub use evidence_surveillance::{
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, QualifiedEvidenceSet,
     CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use federated_evidence_surveillance::{
+    admit_federated_evidence, federated_evidence_surveillance_manifest,
+    FederatedEvidenceDisposition, FederatedEvidenceError, FederatedEvidenceFeedRequest,
+    FederatedEvidenceReceipt, CONTRACT_VERSION as FEDERATED_EVIDENCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EVIDENCE_FEATURE_ID,
 };
 pub use high_throughput_evidence_surveillance::{
     admit_high_throughput_evidence, high_throughput_evidence_surveillance_manifest,

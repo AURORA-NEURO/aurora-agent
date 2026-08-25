@@ -201,6 +201,8 @@ export const BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-
 export const BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-multimodal/1.0" as const;
 export const HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F03" as const;
 export const HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-throughput/1.0" as const;
+export const FEDERATED_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F04" as const;
+export const FEDERATED_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-federated/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3639,6 +3641,26 @@ export function validateBrainHighThroughputEvidenceReceipt(receipt: BrainHighThr
 }
 
 export function brainHighThroughputEvidenceReceiptDigest(receipt: BrainHighThroughputEvidenceReceipt): string { validateBrainHighThroughputEvidenceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainFederatedEvidenceReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; federation_id: string; institution_id: string;
+  purpose: string; semantic_profile: string; endpoint: string; disposition: "qualified" | "partial" | "unknown" | "blocked";
+  candidate_order: string[]; admitted_order: string[]; blocked_order: string[]; unknown_order: string[]; aggregate_order: string[];
+  omissions: string[]; uncertainty: string[]; negative_evidence: string[]; replay_identity: string; effect_receipts: string[];
+  artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainFederatedEvidenceReceipt(receipt: BrainFederatedEvidenceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATED_EVIDENCE_SURVEILLANCE_FEATURE_ID || receipt.contract_version !== FEDERATED_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION) throw new Error("federated evidence schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.institution_id.trim() || !receipt.purpose.trim() || !receipt.semantic_profile.trim() || !receipt.endpoint.trim() || !receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("federated identity, envelope, locality, ranking, or effects are incomplete");
+  if ([...receipt.admitted_order, ...receipt.blocked_order, ...receipt.unknown_order].some((value) => !receipt.candidate_order.includes(value))) throw new Error("federated state is not covered by candidate order");
+  for (const values of [receipt.candidate_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order, receipt.aggregate_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("federated ordering is invalid");
+  for (const value of [...receipt.aggregate_order, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("federated digest is invalid");
+  if (receipt.admitted_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:permitted-artifacts:"))) throw new Error("admitted federation requires a permitted-artifact exchange receipt");
+  if (!receipt.admitted_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("empty federation result must be explicitly blocked");
+}
+
+export function brainFederatedEvidenceReceiptDigest(receipt: BrainFederatedEvidenceReceipt): string { validateBrainFederatedEvidenceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

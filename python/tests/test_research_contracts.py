@@ -74,6 +74,7 @@ from prism_sdk.conformance_knowledge import ConformanceKnowledgeWorldAssuranceRe
 from prism_sdk.brain_surveillance import BrainEvidenceSurveillanceReceipt
 from prism_sdk.brain_multimodal_surveillance import BrainMultimodalEvidenceSurveillanceReceipt
 from prism_sdk.brain_throughput_surveillance import BrainHighThroughputEvidenceReceipt
+from prism_sdk.brain_federated_surveillance import BrainFederatedEvidenceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2380,6 +2381,31 @@ def test_brain_throughput_surveillance_keeps_capacity_omission_explicit():
         replay_identity="b" * 64,
         effect_receipts=("read:local-research-artifacts:request:throughput",),
         artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_federated_surveillance_keeps_signer_failure_explicit():
+    receipt = BrainFederatedEvidenceReceipt(
+        request_id="request:federation",
+        federation_id="federation:commons",
+        institution_id="institution:a",
+        purpose="benchmarking",
+        semantic_profile="preclinical-evidence/v1",
+        endpoint="https://hub.example/research",
+        disposition="blocked",
+        candidate_order=("evidence:a",),
+        admitted_order=(),
+        blocked_order=("evidence:a",),
+        unknown_order=(),
+        aggregate_order=(),
+        omissions=(),
+        uncertainty=(),
+        negative_evidence=("request:signer-invalid",),
+        replay_identity="a" * 64,
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "b" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
