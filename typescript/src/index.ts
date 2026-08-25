@@ -2771,6 +2771,22 @@ export {
   validateAutonomousMemorySnapshot,
 } from "./autonomous-memory.js";
 export {
+  AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_SCHEMA,
+  AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEMA,
+  AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_SCHEMA,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_LESSONS,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_OBSERVATIONS,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SNAPSHOT_BYTES,
+  AutonomousMemoryConsolidationError,
+  AutonomousMemoryConsolidationPersistenceCoordinator,
+  AutonomousMemoryConsolidator,
+  JsonAutonomousMemoryConsolidationPersistence,
+  TransactionalJsonAutonomousMemoryConsolidationPersistence,
+  validateAutonomousMemoryConsolidationReport,
+  validateAutonomousMemoryConsolidationSnapshot,
+} from "./autonomous-memory-consolidation.js";
+export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
   AUTONOMOUS_GOAL_MAX_CRITERIA,
@@ -2998,3 +3014,14 @@ export type {
   AutonomousMemorySnapshot,
   AutonomousMemoryStats,
 } from "./autonomous-memory.js";
+export type {
+  AutonomousMemoryConsolidatedLesson,
+  AutonomousMemoryConsolidationDomainProjection,
+  AutonomousMemoryConsolidationObservation,
+  AutonomousMemoryConsolidationPolicy,
+  AutonomousMemoryConsolidationPromptReference,
+  AutonomousMemoryConsolidationReport,
+  AutonomousMemoryConsolidationSnapshot,
+  AutonomousMemoryConsolidationTextStore,
+  AutonomousMemoryConsolidationTransactionalTextStore,
+} from "./autonomous-memory-consolidation.js";

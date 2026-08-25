@@ -1691,6 +1691,54 @@ The projection remains value-only evaluator/bandit/replay metadata, so a stale w
 overwrite a newer reward update and no provider prompt, response, credential, header, tool
 argument, or raw evidence is transported by this boundary.
 
+### Evaluator-gated memory consolidation
+
+Episodic recall and durable learning answer different questions. Recall can show that a similar
+run happened; it must not silently turn one successful run into a reusable instruction. The
+`AutonomousMemoryConsolidator` is the explicit promotion boundary between those states. It accepts
+only caller-produced evaluator observations containing bounded identities, a reward in the shared
+`[-1, 1]` range, a pass/fail signal, and SHA-256 digests for the episode, decision, evidence, and
+lesson. It rejects contradictory replay for the same episode/lesson/evaluator identity and
+deduplicates exact replays without inflating support.
+
+Each consolidated row is grouped by concept, lesson variant, lesson digest, and transfer scope.
+`transferable=false` remains domain-local; portability requires the caller to opt in explicitly.
+The report computes a Wilson lower support bound, confidence, age, independent domain coverage,
+and one of `candidate`, `stable`, `conflicted`, or `stale`. Competing variants are marked
+`conflicted` unless one variant clears the configured dominance ratio. Only stable rows are
+returned by default from `recall()`, and `prompt_references()` resolves their digest through a
+caller-owned function at the last possible moment. Resolved lesson text is transient: it is not
+stored in the report, snapshot, JSON persistence, prompt registry, bandit state, or public receipt.
+
+The same contract is available in Python and TypeScript, including canonical digest-bound
+snapshots and compare-and-swap persistence. The high-level façades expose the opt-in seam without
+making consolidation implicit:
+
+```python
+from prism_sdk import AutonomousAgent, AutonomousMemoryConsolidator
+
+consolidator = AutonomousMemoryConsolidator(
+    min_observations=3,
+    min_support_lower_bound=0.60,
+    conflict_dominance=0.75,
+)
+agent = AutonomousAgent(workspace, runtime, memory_consolidator=consolidator)
+report = agent.consolidate_memory(evaluator_observations)
+references = agent.memory_references(
+    domain="biomedical",
+    capability="evidence_review",
+    lesson_resolver=caller_owned_lesson_text_lookup,
+)
+```
+
+The twelve built-in domains (`coding`, `browser`, `data`, `science`, `biomedical`,
+`neuroscience`, `operations`, `enterprise`, `multi_agent`, `multimodal`, `cross_domain`, and
+`evaluation`) are represented in every report, including domains with zero observations. This
+makes domain drift, missing evaluator coverage, transfer assumptions, and stale lessons visible to
+an operator or replay evaluator rather than hidden in a best-effort prompt heuristic. Persistence
+restore validates the report, policy, canonical ordering, and snapshot digest before the agent can
+use any lesson reference.
+
 ### Metadata-only run traces
 
 For operator dashboards, offline evaluation, and cross-process handoff, Python now exposes the

@@ -211,6 +211,10 @@ from .llm_runtime import (
     normalize_provider_content_parts,
 )
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
+from .autonomous_memory_consolidation import (
+    AutonomousMemoryConsolidationObservation,
+    AutonomousMemoryConsolidator,
+)
 from .goals import (
     GOAL_RETENTION,
     GOAL_STEP_SCHEMA,
@@ -14259,6 +14263,7 @@ class AutonomousAgent:
         pack_registry: AutonomousDomainPackRegistry | None = None,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
+        memory_consolidator: AutonomousMemoryConsolidator | None = None,
         health_ledger: ProviderHealthLedger | None = None,
         tool_registry: AutonomousDomainToolRegistry | None = None,
         tool_runtime: AutonomousDomainToolRuntime | None = None,
@@ -14285,6 +14290,8 @@ class AutonomousAgent:
             raise BrainRunError("ledger must be a BrainLearningLedger or None")
         if memory is not None and not isinstance(memory, BrainEpisodicMemory):
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
+        if memory_consolidator is not None and not isinstance(memory_consolidator, AutonomousMemoryConsolidator):
+            raise BrainRunError("memory_consolidator must be an AutonomousMemoryConsolidator or None")
         if health_ledger is not None and not isinstance(health_ledger, ProviderHealthLedger):
             raise BrainRunError("health_ledger must be a ProviderHealthLedger or None")
         if tool_registry is not None and not isinstance(tool_registry, AutonomousDomainToolRegistry):
@@ -14354,6 +14361,7 @@ class AutonomousAgent:
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
         self.memory = memory
+        self.memory_consolidator = memory_consolidator
         self.health_ledger = health_ledger
         self.tool_registry = tool_registry
         self.activation = activation or AutonomousCapabilityActivation()
@@ -18576,6 +18584,42 @@ class AutonomousAgent:
             "generation": 0,
             "arms": [],
         }
+
+    def consolidate_memory(
+        self,
+        observations: Sequence[Mapping[str, Any] | AutonomousMemoryConsolidationObservation],
+        *,
+        generation: int | None = None,
+    ) -> dict[str, Any]:
+        """Consolidate explicit evaluator observations into the configured lesson index.
+
+        The index is deliberately separate from episodic recall: only value-only evaluator
+        observations may promote a lesson, while a caller-owned resolver controls any transient
+        text returned to a future prompt.
+        """
+
+        if self.memory_consolidator is None:
+            raise BrainRunError("memory_consolidator is not configured")
+        return self.memory_consolidator.consolidate(observations, generation=generation)
+
+    def memory_references(
+        self,
+        *,
+        domain: str,
+        capability: str | None = None,
+        lesson_resolver: Callable[[str], str | None],
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Return stable digest-backed lesson references with transient caller-owned text."""
+
+        if self.memory_consolidator is None:
+            raise BrainRunError("memory_consolidator is not configured")
+        return self.memory_consolidator.prompt_references(
+            domain=domain,
+            capability=capability,
+            lesson_resolver=lesson_resolver,
+            limit=limit,
+        )
 
     def domain_learning_state(
         self,

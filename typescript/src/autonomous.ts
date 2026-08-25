@@ -113,6 +113,12 @@ import type {
   AutonomousMemoryQuery,
   AutonomousMemoryReceipt,
 } from "./autonomous-memory.js";
+import type {
+  AutonomousMemoryConsolidationObservation,
+  AutonomousMemoryConsolidationPromptReference,
+  AutonomousMemoryConsolidationReport,
+  AutonomousMemoryConsolidator,
+} from "./autonomous-memory-consolidation.js";
 import {
   runAutonomousAutoDecisionCycle,
   runAutonomousAutoReplanCycle,
@@ -1293,6 +1299,8 @@ export interface AutonomousAgentOptions {
   selectionPromotion?: AutonomousSelectionPromotionLifecycle;
   /** Optional caller-owned episodic memory used for bounded retrieval and value-only run recording. */
   memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Optional evaluator-gated lesson index; raw lesson text remains caller-resolved and transient. */
+  memoryConsolidator?: AutonomousMemoryConsolidator;
   /** Optional registry-bound, CAS-fenced prompt learner used by every high-level run. */
   promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
   /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
@@ -4759,6 +4767,8 @@ export class AutonomousAgent {
   readonly connectorRuntime?: AutonomousConnectorRuntime;
   /** Caller-owned episodic memory; exposed so the learning controller can close evaluation feedback. */
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Optional evaluator-gated lesson index; it never receives prompts, provider payloads, or keys. */
+  readonly memoryConsolidator?: AutonomousMemoryConsolidator;
   readonly promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
@@ -4786,6 +4796,12 @@ export class AutonomousAgent {
       || typeof options.memoryStore.get !== "function"
     )) throw new ArgumentError("AutonomousAgent memoryStore is malformed");
     this.memoryStore = options.memoryStore;
+    if (options.memoryConsolidator !== undefined && (
+      typeof options.memoryConsolidator.consolidate !== "function"
+      || typeof options.memoryConsolidator.recall !== "function"
+      || typeof options.memoryConsolidator.promptReferences !== "function"
+    )) throw new ArgumentError("AutonomousAgent memoryConsolidator is malformed");
+    this.memoryConsolidator = options.memoryConsolidator;
     this.promptLearningCoordinator = options.promptLearningCoordinator;
     this.activation = options.activation ?? new AutonomousCapabilityActivation();
     this.modelHealthController = options.modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(options.modelHealthStore);
@@ -4851,6 +4867,26 @@ export class AutonomousAgent {
       }
       : baseSelector;
     this.runtime = new AutonomousRuntime(llm, { selector });
+  }
+
+  /** Consolidate explicit evaluator observations through the configured lesson index. */
+  consolidateMemory(
+    observations: readonly AutonomousMemoryConsolidationObservation[],
+    options: { generation?: number } = {},
+  ): AutonomousMemoryConsolidationReport {
+    if (this.memoryConsolidator === undefined) throw new ArgumentError("AutonomousAgent memoryConsolidator is not configured");
+    return this.memoryConsolidator.consolidate(observations, options);
+  }
+
+  /** Resolve stable, scope-checked lesson digests into transient prompt references. */
+  memoryReferences(options: {
+    domain: AutonomousDomainName;
+    capability?: string;
+    lessonResolver: (lessonDigest: string) => string | null;
+    limit?: number;
+  }): AutonomousMemoryConsolidationPromptReference[] {
+    if (this.memoryConsolidator === undefined) throw new ArgumentError("AutonomousAgent memoryConsolidator is not configured");
+    return this.memoryConsolidator.promptReferences(options);
   }
 
   registerModel(candidate: AutonomousModelCandidate, options: { replaceExisting?: boolean } = {}): AutonomousModelCandidate {
