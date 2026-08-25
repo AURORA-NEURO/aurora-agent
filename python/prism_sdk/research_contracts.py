@@ -123,6 +123,8 @@ LIMITATION_CLOSURE_FEATURE_ID = "AFA-adapter-P26-F24"
 LIMITATION_CLOSURE_CONTRACT_VERSION = "adapter-limitation-closure/1.0"
 DEPENDENCY_COMPOSITION_FEATURE_ID = "AFA-adapter-P27-F18"
 DEPENDENCY_COMPOSITION_CONTRACT_VERSION = "adapter-dependency-composition/1.0"
+ADAPTER_SEMANTIC_PARITY_FEATURE_ID = "AFA-adapter-P28-F06"
+ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION = "adapter-semantic-parity/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3046,3 +3048,47 @@ class AdapterCompositionReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "objective_id": self.objective_id, "disposition": self.disposition, "component_order": list(self.component_order), "selected_order": list(self.selected_order), "missing_capability_order": list(self.missing_capability_order), "dependency_order": list(self.dependency_order), "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "reasons": list(self.reasons), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class AdapterSemanticParityReceipt:
+    request_id: str
+    objective_id: str
+    disposition: str
+    adapter_order: tuple[str, ...]
+    study_order: tuple[str, ...]
+    schema_order: tuple[str, ...]
+    semantic_digest: str | None
+    modality_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = ADAPTER_SEMANTIC_PARITY_FEATURE_ID
+    contract_version: str = ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != ADAPTER_SEMANTIC_PARITY_FEATURE_ID or self.contract_version != ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION:
+            raise ResearchContractError("adapter semantic parity schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.objective_id.strip() or len(self.adapter_order) < 2 or len(self.study_order) < 2 or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("adapter semantic parity identity, reports, checks, effects, locality, or boundary are incomplete")
+        if self.disposition not in {"passed", "unknown", "blocked"}:
+            raise ResearchContractError("adapter semantic parity disposition is unknown")
+        for values in (self.adapter_order, self.study_order, self.schema_order, self.modality_order, self.artifact_order, self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("adapter semantic parity ordering is invalid")
+        if self.semantic_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.semantic_digest):
+            raise ResearchContractError("adapter semantic parity digest is invalid")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in self.schema_order + self.artifact_order):
+            raise ResearchContractError("adapter semantic parity artifact digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("adapter semantic parity receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "objective_id": self.objective_id, "disposition": self.disposition, "adapter_order": list(self.adapter_order), "study_order": list(self.study_order), "schema_order": list(self.schema_order), "semantic_digest": self.semantic_digest, "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

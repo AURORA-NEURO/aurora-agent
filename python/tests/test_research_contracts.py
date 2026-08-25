@@ -32,6 +32,7 @@ from prism_sdk.research_contracts import RESEARCH_WORKBENCH_FEATURE_ID, RESEARCH
 from prism_sdk.research_contracts import CONTRACT_FRONTIER_FEATURE_ID, CONTRACT_FRONTIER_CONTRACT_VERSION, ContractFrontierReceipt
 from prism_sdk.research_contracts import LIMITATION_CLOSURE_FEATURE_ID, LIMITATION_CLOSURE_CONTRACT_VERSION, LimitationClosureReceipt
 from prism_sdk.research_contracts import DEPENDENCY_COMPOSITION_FEATURE_ID, DEPENDENCY_COMPOSITION_CONTRACT_VERSION, AdapterCompositionReceipt
+from prism_sdk.research_contracts import ADAPTER_SEMANTIC_PARITY_FEATURE_ID, ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION, AdapterSemanticParityReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1328,4 +1329,28 @@ def test_adapter_dependency_composition_preserves_missing_capability_and_provide
     receipt.validate()
     assert receipt.feature_id == DEPENDENCY_COMPOSITION_FEATURE_ID
     assert receipt.contract_version == DEPENDENCY_COMPOSITION_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_adapter_semantic_parity_preserves_missing_modality_and_digest_comparison():
+    receipt = AdapterSemanticParityReceipt(
+        request_id="parity:adapter",
+        objective_id="objective:qc",
+        disposition="unknown",
+        adapter_order=("adapter:a", "adapter:b"),
+        study_order=("study:a", "study:b"),
+        schema_order=("a" * 64,),
+        semantic_digest="b" * 64,
+        modality_order=("imaging", "omics"),
+        artifact_order=("c" * 64,),
+        checks=("semantic disagreement remains unknown",),
+        omissions=("modality:spatial:missing",),
+        uncertainty=("adapter schema, semantic, or modality digests disagree",),
+        negative_evidence=("modality:spatial:no-admitted-adapter-evidence",),
+        effect_receipts=("block:adapter-semantic-parity:unknown",),
+        artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == ADAPTER_SEMANTIC_PARITY_FEATURE_ID
+    assert receipt.contract_version == ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

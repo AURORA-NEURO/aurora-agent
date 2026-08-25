@@ -120,6 +120,7 @@ pub mod research_ingest;
 pub mod research_workbench;
 pub mod resource_workbench;
 pub mod retrieval_synthesis;
+pub mod semantic_parity;
 pub mod source;
 pub mod tabular;
 
@@ -323,6 +324,12 @@ pub use retrieval_synthesis::{
     RetrievalSynthesisReceipt, ScopedRetrievalQuery, SynthesisEffectReceipt,
     CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use semantic_parity::{
+    evaluate_adapter_semantic_parity, AdapterSemanticParityReceipt, AdapterSemanticParityRequest,
+    AdapterSemanticReport, SemanticParityDisposition, SemanticParityError,
+    CONTRACT_VERSION as ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_SEMANTIC_PARITY_FEATURE_ID,
 };
 pub use source::{Locator, Source, SourceManifest, SourceProvenance};
 pub use tabular::{

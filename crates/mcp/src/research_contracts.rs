@@ -65,6 +65,10 @@ use bioprism_adapter::{
     RESOURCE_WORKBENCH_FEATURE_ID as ADAPTER_RESOURCE_WORKBENCH_FEATURE_ID,
 };
 use bioprism_adapter::{
+    evaluate_adapter_semantic_parity, AdapterSemanticParityReceipt, AdapterSemanticParityRequest,
+    SemanticParityError, ADAPTER_SEMANTIC_PARITY_FEATURE_ID,
+};
+use bioprism_adapter::{
     evaluate_quality_drift, harmonize_multimodal, HarmonizedResearchObject,
     MultimodalHarmonizationRequest, QualityDriftReceipt, QualityDriftRequest,
     MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
@@ -267,6 +271,7 @@ pub const RESEARCH_WORKBENCH_TOOL: &str = "adapter_research_workbench";
 pub const CONTRACT_FRONTIER_TOOL: &str = "adapter_contract_frontier";
 pub const LIMITATION_CLOSURE_TOOL: &str = "adapter_limitation_closure";
 pub const DEPENDENCY_COMPOSITION_TOOL: &str = "adapter_dependency_composition";
+pub const ADAPTER_SEMANTIC_PARITY_TOOL: &str = "adapter_semantic_parity";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1425,6 +1430,28 @@ pub fn validate_dependency_composition_json(
         .map_err(|error: DependencyCompositionError| error.to_string())?;
     if receipt.feature_id != DEPENDENCY_COMPOSITION_FEATURE_ID {
         return Err("adapter dependency composition feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn evaluate_adapter_semantic_parity_json(value: &Value) -> Result<Value, String> {
+    let request: AdapterSemanticParityRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter semantic parity request: {error}"))?;
+    let receipt = evaluate_adapter_semantic_parity(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize adapter semantic parity receipt: {error}"))
+}
+
+pub fn validate_adapter_semantic_parity_json(
+    value: &Value,
+) -> Result<AdapterSemanticParityReceipt, String> {
+    let receipt: AdapterSemanticParityReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter semantic parity receipt: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: SemanticParityError| error.to_string())?;
+    if receipt.feature_id != ADAPTER_SEMANTIC_PARITY_FEATURE_ID {
+        return Err("adapter semantic parity feature id mismatch".into());
     }
     Ok(receipt)
 }

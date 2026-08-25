@@ -116,6 +116,8 @@ export const LIMITATION_CLOSURE_FEATURE_ID = "AFA-adapter-P26-F24" as const;
 export const LIMITATION_CLOSURE_CONTRACT_VERSION = "adapter-limitation-closure/1.0" as const;
 export const DEPENDENCY_COMPOSITION_FEATURE_ID = "AFA-adapter-P27-F18" as const;
 export const DEPENDENCY_COMPOSITION_CONTRACT_VERSION = "adapter-dependency-composition/1.0" as const;
+export const ADAPTER_SEMANTIC_PARITY_FEATURE_ID = "AFA-adapter-P28-F06" as const;
+export const ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION = "adapter-semantic-parity/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1948,6 +1950,41 @@ export function validateAdapterCompositionReceipt(receipt: AdapterCompositionRec
 }
 
 export function adapterCompositionReceiptDigest(receipt: AdapterCompositionReceipt): string { validateAdapterCompositionReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface AdapterSemanticParityReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  objective_id: string;
+  disposition: "passed" | "unknown" | "blocked";
+  adapter_order: string[];
+  study_order: string[];
+  schema_order: string[];
+  semantic_digest: string | null;
+  modality_order: string[];
+  artifact_order: string[];
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateAdapterSemanticParityReceipt(receipt: AdapterSemanticParityReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_SEMANTIC_PARITY_FEATURE_ID || receipt.contract_version !== ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION) throw new Error("adapter semantic parity schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.objective_id.trim() || receipt.adapter_order.length < 2 || receipt.study_order.length < 2 || !receipt.checks.length || !receipt.effect_receipts.length) throw new Error("adapter semantic parity identity, reports, checks, effects, locality, or boundary are incomplete");
+  if (!new Set(["passed", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("adapter semantic parity disposition is unknown");
+  for (const values of [receipt.adapter_order, receipt.study_order, receipt.schema_order, receipt.modality_order, receipt.artifact_order, receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("adapter semantic parity ordering is invalid");
+  if (receipt.semantic_digest !== null && !/^[0-9a-f]{64}$/.test(receipt.semantic_digest)) throw new Error("adapter semantic parity digest is invalid");
+  if ([...receipt.schema_order, ...receipt.artifact_order].some((value) => !/^[0-9a-f]{64}$/.test(value))) throw new Error("adapter semantic parity artifact digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("adapter semantic parity receipt digest is invalid");
+}
+
+export function adapterSemanticParityReceiptDigest(receipt: AdapterSemanticParityReceipt): string { validateAdapterSemanticParityReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
