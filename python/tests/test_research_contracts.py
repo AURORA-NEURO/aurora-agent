@@ -48,6 +48,7 @@ from prism_sdk.research_contracts import MECHANISM_CONTROL_FEATURE_ID, MECHANISM
 from prism_sdk.research_contracts import EVIDENCE_WORKBENCH_FEATURE_ID, EVIDENCE_WORKBENCH_CONTRACT_VERSION, EvidenceWorkbenchReceipt
 from prism_sdk.research_contracts import ANALYSIS_CONTROL_FEATURE_ID, ANALYSIS_CONTROL_CONTRACT_VERSION, AnalysisControlReceipt
 from prism_sdk.research_contracts import CONTEXT_ASSURANCE_FEATURE_ID, CONTEXT_ASSURANCE_CONTRACT_VERSION, ContextAssuranceReceipt
+from prism_sdk.research_contracts import EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID, EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION, BioworldsEvaluationAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1692,4 +1693,24 @@ def test_context_assurance_preserves_stale_fact_and_signed_digest_exchange():
     receipt.validate()
     assert receipt.feature_id == CONTEXT_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == CONTEXT_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_bioworlds_evaluation_assurance_retains_null_negative_outcomes():
+    receipt = BioworldsEvaluationAssuranceReceipt(
+        request_id="evaluation:assurance",
+        workflow_id="workflow:evaluation",
+        capability_id="capability:mechanism",
+        benchmark_id="benchmark:organoid",
+        disposition="conditional",
+        summary={"summary_id": "evaluation-summary:evaluation:assurance", "disposition": "conditional", "observation_order": ("observation:a", "observation:b"), "admitted_order": ("observation:a",), "blocked_order": ("observation:b",), "metric_order": ("metric:effect",), "site_order": ("site:a",), "baseline_order": ("a" * 64,), "artifact_order": ("b" * 64,), "provenance_order": ("c" * 64,), "positive_count": 0, "null_count": 1, "negative_count": 1, "inconclusive_count": 0, "omissions": (), "uncertainty": ("site-floor:1-of-2-independent-sites",), "negative_evidence": ("observation:observation:a:outcome-null-retained",), "replay_identity": "d" * 64, "summary_digest": "e" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        checks=("site floor, comparability, baseline, policy, federation, approval, locality, and budget gates are explicit",),
+        omissions=(),
+        uncertainty=("site-floor:1-of-2-independent-sites",),
+        negative_evidence=("observation:observation:a:outcome-null-retained",),
+        effect_receipts=("exchange:evaluation-manifest-digest-only:observation:a", "exchange:evaluation-manifest-digest-only:observation:b"),
+    )
+    receipt.validate()
+    assert receipt.feature_id == EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID
+    assert receipt.contract_version == EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

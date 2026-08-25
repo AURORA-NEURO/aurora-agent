@@ -167,6 +167,8 @@ ANALYSIS_CONTROL_FEATURE_ID = "AFA-devx-P13-F31"
 ANALYSIS_CONTROL_CONTRACT_VERSION = "devx-federated-analysis-control-plane/1.0"
 CONTEXT_ASSURANCE_FEATURE_ID = "AFA-registry-P03-F28"
 CONTEXT_ASSURANCE_CONTRACT_VERSION = "registry-federated-context-compilation-assurance/1.0"
+EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID = "AFA-bioworlds-P23-F28"
+EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION = "bioworlds-federated-evaluation-observability-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3803,3 +3805,54 @@ class ContextAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "question_id": self.question_id, "disposition": self.disposition, "context": dict(self.context), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class BioworldsEvaluationAssuranceReceipt:
+    """Cross-language validator for federated continual evaluation observability."""
+
+    request_id: str
+    workflow_id: str
+    capability_id: str
+    benchmark_id: str
+    disposition: str
+    summary: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID
+    contract_version: str = EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID or self.contract_version != EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION:
+            raise ResearchContractError("bioworlds evaluation assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.capability_id.strip() or not self.benchmark_id.strip() or not self.checks or not self.effect_receipts or self.summary.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("bioworlds evaluation assurance identity, summary, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"passed", "conditional", "unknown", "blocked"}:
+            raise ResearchContractError("bioworlds evaluation assurance disposition is unknown")
+        admitted = tuple(self.summary.get("admitted_order", ()))
+        blocked = tuple(self.summary.get("blocked_order", ()))
+        unresolved = tuple(self.summary.get("omissions", ())) + tuple(self.summary.get("uncertainty", ())) + tuple(self.summary.get("negative_evidence", ()))
+        if not admitted and not blocked and not unresolved:
+            raise ResearchContractError("bioworlds evaluation assurance must retain an admitted or unresolved summary")
+        for values in (tuple(self.summary.get("observation_order", ())), admitted, blocked, tuple(self.summary.get("metric_order", ())), tuple(self.summary.get("site_order", ())), tuple(self.summary.get("omissions", ())), tuple(self.summary.get("uncertainty", ())), tuple(self.summary.get("negative_evidence", ())), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("bioworlds evaluation assurance ordering is invalid")
+        for value in tuple(self.summary.get("baseline_order", ())) + tuple(self.summary.get("artifact_order", ())) + tuple(self.summary.get("provenance_order", ())) + (self.summary.get("replay_identity"), self.summary.get("summary_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("bioworlds evaluation assurance digest is invalid")
+        if not isinstance(self.summary.get("summary_id"), str) or not self.summary["summary_id"].strip():
+            raise ResearchContractError("bioworlds evaluation assurance summary identity is incomplete")
+        if any(not effect.startswith("exchange:evaluation-manifest-digest-only:") for effect in self.effect_receipts):
+            raise ResearchContractError("bioworlds evaluation assurance effect is not digest-only")
+        for field in ("positive_count", "null_count", "negative_count", "inconclusive_count"):
+            if not isinstance(self.summary.get(field), int) or self.summary[field] < 0:
+                raise ResearchContractError("bioworlds evaluation assurance outcome count is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "capability_id": self.capability_id, "benchmark_id": self.benchmark_id, "disposition": self.disposition, "summary": dict(self.summary), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

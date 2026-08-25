@@ -149,6 +149,8 @@ export const ANALYSIS_CONTROL_FEATURE_ID = "AFA-devx-P13-F31" as const;
 export const ANALYSIS_CONTROL_CONTRACT_VERSION = "devx-federated-analysis-control-plane/1.0" as const;
 export const CONTEXT_ASSURANCE_FEATURE_ID = "AFA-registry-P03-F28" as const;
 export const CONTEXT_ASSURANCE_CONTRACT_VERSION = "registry-federated-context-compilation-assurance/1.0" as const;
+export const EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID = "AFA-bioworlds-P23-F28" as const;
+export const EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION = "bioworlds-federated-evaluation-observability-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2525,6 +2527,42 @@ export function validateContextAssuranceReceipt(receipt: ContextAssuranceReceipt
 }
 
 export function contextAssuranceReceiptDigest(receipt: ContextAssuranceReceipt): string { validateContextAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BioworldsEvaluationAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  capability_id: string;
+  benchmark_id: string;
+  disposition: "passed" | "conditional" | "unknown" | "blocked";
+  summary: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateBioworldsEvaluationAssuranceReceipt(receipt: BioworldsEvaluationAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID || receipt.contract_version !== EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION) throw new Error("bioworlds evaluation assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.capability_id.trim() || !receipt.benchmark_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.summary.boundary !== PRECLINICAL_BOUNDARY) throw new Error("bioworlds evaluation assurance identity, summary, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["passed", "conditional", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("bioworlds evaluation assurance disposition is unknown");
+  const admitted = Array.isArray(receipt.summary.admitted_order) ? receipt.summary.admitted_order as string[] : [];
+  const blocked = Array.isArray(receipt.summary.blocked_order) ? receipt.summary.blocked_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.summary.omissions) ? receipt.summary.omissions as string[] : []), ...(Array.isArray(receipt.summary.uncertainty) ? receipt.summary.uncertainty as string[] : []), ...(Array.isArray(receipt.summary.negative_evidence) ? receipt.summary.negative_evidence as string[] : [])];
+  if (!admitted.length && !blocked.length && !unresolved.length) throw new Error("bioworlds evaluation assurance must retain an admitted or unresolved summary");
+  for (const values of [Array.isArray(receipt.summary.observation_order) ? receipt.summary.observation_order as string[] : [], admitted, blocked, Array.isArray(receipt.summary.metric_order) ? receipt.summary.metric_order as string[] : [], Array.isArray(receipt.summary.site_order) ? receipt.summary.site_order as string[] : [], Array.isArray(receipt.summary.omissions) ? receipt.summary.omissions as string[] : [], Array.isArray(receipt.summary.uncertainty) ? receipt.summary.uncertainty as string[] : [], Array.isArray(receipt.summary.negative_evidence) ? receipt.summary.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("bioworlds evaluation assurance ordering is invalid");
+  for (const value of [...(Array.isArray(receipt.summary.baseline_order) ? receipt.summary.baseline_order : []), ...(Array.isArray(receipt.summary.artifact_order) ? receipt.summary.artifact_order : []), ...(Array.isArray(receipt.summary.provenance_order) ? receipt.summary.provenance_order : []), receipt.summary.replay_identity, receipt.summary.summary_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("bioworlds evaluation assurance digest is invalid");
+  if (typeof receipt.summary.summary_id !== "string" || !receipt.summary.summary_id.trim()) throw new Error("bioworlds evaluation assurance summary identity is incomplete");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:evaluation-manifest-digest-only:"))) throw new Error("bioworlds evaluation assurance effect is not digest-only");
+  for (const field of ["positive_count", "null_count", "negative_count", "inconclusive_count"]) if (typeof receipt.summary[field] !== "number" || !Number.isInteger(receipt.summary[field]) || (receipt.summary[field] as number) < 0) throw new Error("bioworlds evaluation assurance outcome count is invalid");
+}
+
+export function bioworldsEvaluationAssuranceReceiptDigest(receipt: BioworldsEvaluationAssuranceReceipt): string { validateBioworldsEvaluationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

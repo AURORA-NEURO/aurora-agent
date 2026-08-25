@@ -91,6 +91,7 @@ pub mod error;
 pub mod fixtures;
 pub mod federated_ingestion;
 pub mod evidence_workbench;
+pub mod evaluation_assurance;
 pub mod knobs;
 pub mod query;
 pub mod slice;
@@ -116,6 +117,15 @@ pub use evidence_workbench::{
     FEATURE_ID as EVIDENCE_WORKBENCH_FEATURE_ID,
     PRECLINICAL_BOUNDARY as EVIDENCE_WORKBENCH_PRECLINICAL_BOUNDARY,
     SCHEMA_VERSION as EVIDENCE_WORKBENCH_SCHEMA_VERSION,
+};
+pub use evaluation_assurance::{
+    assure_evaluation_observability, EvaluationAssuranceError, EvaluationAssuranceReceipt,
+    EvaluationAssuranceRequest, EvaluationDisposition, EvaluationObservation, EvaluationSummary,
+    MetricOutcome, ObservationState,
+    CONTRACT_VERSION as EVALUATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVALUATION_ASSURANCE_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as EVALUATION_ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as EVALUATION_ASSURANCE_SCHEMA_VERSION,
 };
 pub use catalog::{CatalogReport, SliceCatalog};
 pub use error::BioWorldError;
