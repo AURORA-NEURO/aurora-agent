@@ -1993,6 +1993,28 @@ credential values, handles, prompts, responses, tool payloads, or evidence bodie
 own the final approval, secret manager, queue, persistence, external authentication, telemetry,
 and source/evaluator authority.
 
+Python now also exposes the cross-SDK all-domain contract audit through
+`agent.domain_audit()` and `audit_autonomous_domain_contracts()`. It joins the selected profile
+and workflow registries with reviewed exact-name tool profiles and the evidence-plan compiler,
+checking default-capability closure, workflow identity/digest drift, stage dependency cycles,
+stage evidence/evaluator contracts, effect approval posture, tool-capability aliases, and
+caller-supplied evidence coverage. The seven Python profiles whose default capability was absent
+from their declared catalogue are now closed over that capability, so the built-in static audit
+reports all twelve domains as valid.
+
+```python
+audit = agent.domain_audit(
+    available_tool_names=live_tool_names,
+    available_evidence=caller_owned_evidence_ids,
+    completed_stages={"coding": ("scope",)},
+)
+validate_autonomous_domain_audit_report(audit)
+```
+
+The report is row- and aggregate-digest-bound, metadata-only, and audit-only. `unassessed`,
+`partial`, and `blocked` are review states rather than authorization; no credentials, providers,
+sources, tools, queues, or learners are touched.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

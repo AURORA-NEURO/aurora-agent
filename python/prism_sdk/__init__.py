@@ -573,6 +573,15 @@ from .autonomous_domain_response import (
     validate_autonomous_domain_response_evaluation,
     replay_autonomous_domain_response_evaluation,
 )
+from .autonomous_domain_audit import (
+    AUTONOMOUS_DOMAIN_AUDIT_SCHEMA,
+    AUTONOMOUS_DOMAIN_AUDIT_ROW_SCHEMA,
+    MAX_AUTONOMOUS_DOMAIN_AUDIT_BYTES,
+    MAX_AUTONOMOUS_DOMAIN_AUDIT_ISSUES,
+    audit_autonomous_domain_contracts,
+    audit_autonomous_agent_domain_contracts,
+    validate_autonomous_domain_audit_report,
+)
 from .autonomous_workflow_response import (
     AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_EVALUATION_SCHEMA,
     AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_EVALUATOR_VERSION,
@@ -6235,6 +6244,13 @@ __all__ = [
     "evaluate_autonomous_domain_response",
     "validate_autonomous_domain_response_evaluation",
     "replay_autonomous_domain_response_evaluation",
+    "AUTONOMOUS_DOMAIN_AUDIT_SCHEMA",
+    "AUTONOMOUS_DOMAIN_AUDIT_ROW_SCHEMA",
+    "MAX_AUTONOMOUS_DOMAIN_AUDIT_BYTES",
+    "MAX_AUTONOMOUS_DOMAIN_AUDIT_ISSUES",
+    "audit_autonomous_domain_contracts",
+    "audit_autonomous_agent_domain_contracts",
+    "validate_autonomous_domain_audit_report",
     "AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_EVALUATION_SCHEMA",
     "AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_EVALUATOR_VERSION",
     "AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_STATUSES",

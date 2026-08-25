@@ -2103,7 +2103,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="scientific_inference",
             default_capability="scientific_reasoning",
             required_model_capabilities=("reasoning", "science"),
-            capabilities=("literature", "hypothesis", "experiment", "statistics", "reproducibility"),
+            capabilities=("scientific_reasoning", "literature", "hypothesis", "experiment", "statistics", "reproducibility"),
             guardrails=(*common, "do not present a hypothesis, correlation, or simulation as established causality"),
             system_instructions="Act as a rigorous scientific reasoning assistant. Track claims, evidence, alternatives, limitations, and reproducibility requirements.",
             evaluator_domain="research",
@@ -2133,7 +2133,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="operational_effect",
             default_capability="operations_planning",
             required_model_capabilities=("reasoning", "operations"),
-            capabilities=("runbook", "incident_response", "observability", "risk_review", "rollback", "approval"),
+            capabilities=("operations_planning", "runbook", "incident_response", "observability", "risk_review", "rollback", "approval"),
             guardrails=(*common, "plan reversible checkpoints and require explicit authorization before effects"),
             system_instructions="Act as a reliability and operations planner. Make blast radius, rollback, approvals, and observability concrete.",
             evaluator_domain="operations",
@@ -2143,7 +2143,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="enterprise_governance",
             default_capability="enterprise_workflow",
             required_model_capabilities=("reasoning", "enterprise"),
-            capabilities=("workflow", "governance", "compliance", "analytics", "coordination"),
+            capabilities=("enterprise_workflow", "workflow", "governance", "compliance", "analytics", "coordination"),
             guardrails=(*common, "do not infer authorization from organizational context; identify the accountable approver"),
             system_instructions="Act as an enterprise workflow assistant. Optimize for traceability, ownership, policy alignment, and reversible decisions.",
             evaluator_domain="operations",
@@ -2153,7 +2153,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="coordination",
             default_capability="agent_coordination",
             required_model_capabilities=("reasoning", "coordination"),
-            capabilities=("delegation", "coordination", "consensus", "handoff", "conflict_resolution"),
+            capabilities=("agent_coordination", "delegation", "coordination", "consensus", "handoff", "conflict_resolution"),
             guardrails=(*common, "delegate only bounded subproblems and preserve one accountable effect authority"),
             system_instructions="Act as a coordinator of bounded specialist agents. Define contracts, dependencies, conflict handling, and synthesis criteria.",
             evaluator_domain="engineering",
@@ -2163,7 +2163,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="multimodal_interpretation",
             default_capability="multimodal_analysis",
             required_model_capabilities=("reasoning", "multimodal"),
-            capabilities=("image", "audio", "video", "document", "cross_modal_alignment"),
+            capabilities=("multimodal_analysis", "image", "audio", "video", "document", "cross_modal_alignment"),
             guardrails=(*common, "identify modality blind spots and never imply an absent modality was inspected"),
             system_instructions="Act as a multimodal analysis assistant. Track which modalities were available, what each supports, and where alignment is uncertain.",
             evaluator_domain="research",
@@ -2173,7 +2173,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="cross_domain_integration",
             default_capability="cross_domain_synthesis",
             required_model_capabilities=("reasoning", "coordination"),
-            capabilities=("routing", "synthesis", "evidence_alignment", "workflow_composition"),
+            capabilities=("cross_domain_synthesis", "routing", "synthesis", "evidence_alignment", "workflow_composition"),
             guardrails=(*common, "keep domain-specific claims attached to their source discipline and evaluator"),
             system_instructions="Act as a cross-domain synthesis planner. Route work to the right capability, preserve each domain's evidence standard, and expose conflicts.",
             evaluator_domain="research",
@@ -2183,7 +2183,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="evaluation_integrity",
             default_capability="agent_evaluation",
             required_model_capabilities=("reasoning", "evaluation"),
-            capabilities=("benchmarking", "rubric", "replay", "failure_analysis", "reproducibility"),
+            capabilities=("agent_evaluation", "benchmarking", "rubric", "replay", "failure_analysis", "reproducibility"),
             guardrails=(*common, "do not let the system under evaluation author its own pass signal"),
             system_instructions="Act as an evaluation and reliability analyst. Keep test inputs, evaluator policy, outcomes, and conclusions separate.",
             evaluator_domain="engineering",
@@ -17929,6 +17929,31 @@ class AutonomousAgent:
             policy=policy,
             capabilities=capabilities,
             readiness_options=readiness_options,
+        )
+
+    def domain_audit(
+        self,
+        *,
+        available_tool_names: Sequence[str] | None = None,
+        available_evidence: Sequence[str] | None = None,
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> dict[str, Any]:
+        """Audit this agent's all-domain contracts before any dispatch.
+
+        The audit reads the agent's bound profile/workflow registries and, when present, the
+        registered tool names.  It never resolves credentials, contacts a provider, acquires
+        evidence, executes a tool, mutates learning, or treats registration as authorization.
+        ``available_evidence`` remains caller-owned because the agent cannot infer source truth
+        from a provider response or a tool registration.
+        """
+
+        from .autonomous_domain_audit import audit_autonomous_agent_domain_contracts
+
+        return audit_autonomous_agent_domain_contracts(
+            self,
+            available_tool_names=available_tool_names,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
         )
 
     def domain_evaluator(

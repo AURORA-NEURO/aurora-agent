@@ -790,5 +790,22 @@ notebook-side distribution and paired-contrast ergonomics across agent, biologic
 operations, and coordination domains. They keep unmeasured evidence out of arithmetic and make
 bootstrap seed, confidence, resampling unit, and limitations explicit; they do not perform
 significance testing or causal inference.
+
+`agent.domain_audit()` (or `audit_autonomous_domain_contracts()`) is the provider-free
+pre-dispatch gate for the reviewed autonomous surface. It checks every built-in domain's profile
+schema, default capability, workflow identity and DAG, stage evidence/evaluator contracts, exact
+tool binding posture, and caller-owned evidence coverage. Supplying live tool names and evidence
+identifiers upgrades runtime status from `unassessed` to `ready_for_review` or `partial`; the
+audit never resolves credentials, invokes a model, acquires a source, executes a tool, or mutates
+learning. Rows and the aggregate report are SHA-256 digest-bound metadata only.
+
+```python
+report = agent.domain_audit(
+    available_tool_names=["repository_catalog", "engineering_manifest_audit"],
+    available_evidence=["scope", "acceptance_criteria"],
+)
+validate_autonomous_domain_audit_report(report)
+```
+
 See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

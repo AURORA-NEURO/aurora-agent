@@ -1591,3 +1591,12 @@ preserves exact single-domain evaluator identity, routes cross-domain specialist
 through their exact profiles, exposes catalogue/policy digests, rejects inline evidence, and keeps
 provider completion outside reward. Caller-owned evidence acquisition, truth authority, durable
 evidence storage, and production evaluator operations remain deployment work.
+
+Python now also closes the all-domain pre-dispatch contract-audit parity gap.
+`agent.domain_audit()` and `audit_autonomous_domain_contracts()` verify profile/workflow
+registries, default-capability closure, stage DAG/evidence/evaluator contracts, exact tool
+binding posture, and caller-owned evidence coverage for every built-in domain. Reports are row-
+and aggregate-digest-bound and perform no provider/source/tool/credential/queue/learning activity.
+The seven Python profiles whose default capability was previously absent from their declared
+catalogue are now closed over that capability. Runtime availability, source truth, authorization,
+and deployment observability remain explicit external gates.
