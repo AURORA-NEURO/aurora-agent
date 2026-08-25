@@ -42,6 +42,7 @@ pub mod federated_evidence_workflow_fabric;
 pub mod federated_operations_control_plane;
 pub mod federated_protocol_adapter;
 pub mod federated_research_workbench;
+pub mod federated_retrieval_contract_model;
 pub mod federated_retrieval_synthesis;
 pub mod federated_safety_assurance;
 pub mod high_throughput_evidence_copilot;
@@ -157,6 +158,13 @@ pub use federated_research_workbench::{
     FederatedWorkbenchError, FederatedWorkbenchReceipt, FederatedWorkbenchRequest,
     CONTRACT_VERSION as FEDERATED_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use federated_retrieval_contract_model::{
+    federated_retrieval_contract_model_manifest, model_federated_retrieval_contract,
+    FederatedRetrievalContractError, FederatedRetrievalContractReceipt,
+    FederatedRetrievalContractRequest,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use federated_retrieval_synthesis::{
     federated_retrieval_synthesis_manifest, synthesize_federated_retrieval,
