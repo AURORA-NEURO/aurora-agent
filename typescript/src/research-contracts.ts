@@ -151,6 +151,8 @@ export const CONTEXT_ASSURANCE_FEATURE_ID = "AFA-registry-P03-F28" as const;
 export const CONTEXT_ASSURANCE_CONTRACT_VERSION = "registry-federated-context-compilation-assurance/1.0" as const;
 export const EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID = "AFA-bioworlds-P23-F28" as const;
 export const EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION = "bioworlds-federated-evaluation-observability-assurance/1.0" as const;
+export const QUALITY_WORKBENCH_BIOLANG_FEATURE_ID = "AFA-biolang-P07-F19" as const;
+export const QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION = "biolang-prospective-quality-workbench/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2563,6 +2565,43 @@ export function validateBioworldsEvaluationAssuranceReceipt(receipt: BioworldsEv
 }
 
 export function bioworldsEvaluationAssuranceReceiptDigest(receipt: BioworldsEvaluationAssuranceReceipt): string { validateBioworldsEvaluationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BiolangQualityWorkbenchReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  study_id: string;
+  disposition: "released" | "conditional" | "quarantined" | "unknown" | "blocked";
+  summary: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateBiolangQualityWorkbenchReceipt(receipt: BiolangQualityWorkbenchReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== QUALITY_WORKBENCH_BIOLANG_FEATURE_ID || receipt.contract_version !== QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION) throw new Error("biolang quality workbench schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.study_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.summary.boundary !== PRECLINICAL_BOUNDARY) throw new Error("biolang quality workbench identity, summary, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["released", "conditional", "quarantined", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("biolang quality workbench disposition is unknown");
+  const qualified = Array.isArray(receipt.summary.qualified_order) ? receipt.summary.qualified_order as string[] : [];
+  const warning = Array.isArray(receipt.summary.warning_order) ? receipt.summary.warning_order as string[] : [];
+  const quarantined = Array.isArray(receipt.summary.quarantined_order) ? receipt.summary.quarantined_order as string[] : [];
+  const unknown = Array.isArray(receipt.summary.unknown_order) ? receipt.summary.unknown_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.summary.omissions) ? receipt.summary.omissions as string[] : []), ...(Array.isArray(receipt.summary.uncertainty) ? receipt.summary.uncertainty as string[] : []), ...(Array.isArray(receipt.summary.negative_evidence) ? receipt.summary.negative_evidence as string[] : [])];
+  if (!qualified.length && !warning.length && !quarantined.length && !unknown.length && !unresolved.length) throw new Error("biolang quality workbench must retain a qualified or unresolved summary");
+  for (const values of [Array.isArray(receipt.summary.observation_order) ? receipt.summary.observation_order as string[] : [], qualified, warning, quarantined, unknown, Array.isArray(receipt.summary.batch_order) ? receipt.summary.batch_order as string[] : [], Array.isArray(receipt.summary.sample_order) ? receipt.summary.sample_order as string[] : [], Array.isArray(receipt.summary.metric_order) ? receipt.summary.metric_order as string[] : [], Array.isArray(receipt.summary.omissions) ? receipt.summary.omissions as string[] : [], Array.isArray(receipt.summary.uncertainty) ? receipt.summary.uncertainty as string[] : [], Array.isArray(receipt.summary.negative_evidence) ? receipt.summary.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("biolang quality workbench ordering is invalid");
+  for (const value of [...(Array.isArray(receipt.summary.artifact_order) ? receipt.summary.artifact_order : []), ...(Array.isArray(receipt.summary.provenance_order) ? receipt.summary.provenance_order : []), receipt.summary.replay_identity, receipt.summary.summary_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("biolang quality workbench digest is invalid");
+  if (typeof receipt.summary.summary_id !== "string" || !receipt.summary.summary_id.trim()) throw new Error("biolang quality workbench summary identity is incomplete");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("write:local-quality-manifest:"))) throw new Error("biolang quality workbench effect is not a local quality manifest");
+  for (const field of ["passed_count", "warning_count", "quarantined_count", "unknown_count"]) if (typeof receipt.summary[field] !== "number" || !Number.isInteger(receipt.summary[field]) || (receipt.summary[field] as number) < 0) throw new Error("biolang quality workbench count is invalid");
+}
+
+export function biolangQualityWorkbenchReceiptDigest(receipt: BiolangQualityWorkbenchReceipt): string { validateBiolangQualityWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

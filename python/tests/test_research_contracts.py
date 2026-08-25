@@ -49,6 +49,7 @@ from prism_sdk.research_contracts import EVIDENCE_WORKBENCH_FEATURE_ID, EVIDENCE
 from prism_sdk.research_contracts import ANALYSIS_CONTROL_FEATURE_ID, ANALYSIS_CONTROL_CONTRACT_VERSION, AnalysisControlReceipt
 from prism_sdk.research_contracts import CONTEXT_ASSURANCE_FEATURE_ID, CONTEXT_ASSURANCE_CONTRACT_VERSION, ContextAssuranceReceipt
 from prism_sdk.research_contracts import EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID, EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION, BioworldsEvaluationAssuranceReceipt
+from prism_sdk.research_contracts import QUALITY_WORKBENCH_BIOLANG_FEATURE_ID, QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION, BiolangQualityWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1713,4 +1714,23 @@ def test_bioworlds_evaluation_assurance_retains_null_negative_outcomes():
     receipt.validate()
     assert receipt.feature_id == EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID
     assert receipt.contract_version == EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_biolang_quality_workbench_preserves_quarantine_and_local_manifest_effects():
+    receipt = BiolangQualityWorkbenchReceipt(
+        request_id="quality:workbench",
+        workflow_id="workflow:quality",
+        study_id="study:organoid",
+        disposition="conditional",
+        summary={"summary_id": "quality-summary:quality:workbench", "disposition": "conditional", "observation_order": ("observation:a", "observation:b"), "qualified_order": ("observation:b",), "warning_order": (), "quarantined_order": ("observation:a",), "unknown_order": (), "batch_order": ("batch:a",), "sample_order": ("sample:observation:a", "sample:observation:b"), "metric_order": ("metric:signal",), "artifact_order": ("a" * 64,), "provenance_order": ("b" * 64,), "passed_count": 1, "warning_count": 0, "quarantined_count": 1, "unknown_count": 0, "omissions": ("observation:observation:a:required-threshold-failed",), "uncertainty": (), "negative_evidence": ("observation:observation:a:contradicted-quality-evidence",), "replay_identity": "c" * 64, "summary_digest": "d" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        checks=("threshold, baseline, protected-closure, approval, locality, budget, and release-fraction gates are explicit",),
+        omissions=("observation:observation:a:required-threshold-failed",),
+        uncertainty=(),
+        negative_evidence=("observation:observation:a:contradicted-quality-evidence",),
+        effect_receipts=("write:local-quality-manifest:batch:a",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == QUALITY_WORKBENCH_BIOLANG_FEATURE_ID
+    assert receipt.contract_version == QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

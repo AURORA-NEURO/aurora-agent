@@ -169,6 +169,8 @@ CONTEXT_ASSURANCE_FEATURE_ID = "AFA-registry-P03-F28"
 CONTEXT_ASSURANCE_CONTRACT_VERSION = "registry-federated-context-compilation-assurance/1.0"
 EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID = "AFA-bioworlds-P23-F28"
 EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION = "bioworlds-federated-evaluation-observability-assurance/1.0"
+QUALITY_WORKBENCH_BIOLANG_FEATURE_ID = "AFA-biolang-P07-F19"
+QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION = "biolang-prospective-quality-workbench/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3856,3 +3858,55 @@ class BioworldsEvaluationAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "capability_id": self.capability_id, "benchmark_id": self.benchmark_id, "disposition": self.disposition, "summary": dict(self.summary), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class BiolangQualityWorkbenchReceipt:
+    """Cross-language validator for prospective high-throughput quality workbench receipts."""
+
+    request_id: str
+    workflow_id: str
+    study_id: str
+    disposition: str
+    summary: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = QUALITY_WORKBENCH_BIOLANG_FEATURE_ID
+    contract_version: str = QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != QUALITY_WORKBENCH_BIOLANG_FEATURE_ID or self.contract_version != QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION:
+            raise ResearchContractError("biolang quality workbench schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.study_id.strip() or not self.checks or not self.effect_receipts or self.summary.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("biolang quality workbench identity, summary, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"released", "conditional", "quarantined", "unknown", "blocked"}:
+            raise ResearchContractError("biolang quality workbench disposition is unknown")
+        qualified = tuple(self.summary.get("qualified_order", ()))
+        warning = tuple(self.summary.get("warning_order", ()))
+        quarantined = tuple(self.summary.get("quarantined_order", ()))
+        unknown = tuple(self.summary.get("unknown_order", ()))
+        unresolved = tuple(self.summary.get("omissions", ())) + tuple(self.summary.get("uncertainty", ())) + tuple(self.summary.get("negative_evidence", ()))
+        if not qualified and not warning and not quarantined and not unknown and not unresolved:
+            raise ResearchContractError("biolang quality workbench must retain a qualified or unresolved summary")
+        for values in (tuple(self.summary.get("observation_order", ())), qualified, warning, quarantined, unknown, tuple(self.summary.get("batch_order", ())), tuple(self.summary.get("sample_order", ())), tuple(self.summary.get("metric_order", ())), tuple(self.summary.get("omissions", ())), tuple(self.summary.get("uncertainty", ())), tuple(self.summary.get("negative_evidence", ())), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("biolang quality workbench ordering is invalid")
+        for value in tuple(self.summary.get("artifact_order", ())) + tuple(self.summary.get("provenance_order", ())) + (self.summary.get("replay_identity"), self.summary.get("summary_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("biolang quality workbench digest is invalid")
+        if not isinstance(self.summary.get("summary_id"), str) or not self.summary["summary_id"].strip():
+            raise ResearchContractError("biolang quality workbench summary identity is incomplete")
+        if any(not effect.startswith("write:local-quality-manifest:") for effect in self.effect_receipts):
+            raise ResearchContractError("biolang quality workbench effect is not a local quality manifest")
+        for field in ("passed_count", "warning_count", "quarantined_count", "unknown_count"):
+            if not isinstance(self.summary.get(field), int) or self.summary[field] < 0:
+                raise ResearchContractError("biolang quality workbench count is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "study_id": self.study_id, "disposition": self.disposition, "summary": dict(self.summary), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

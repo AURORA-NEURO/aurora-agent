@@ -125,6 +125,7 @@ pub mod molecule;
 pub mod mutation;
 pub mod oracle;
 pub mod projection;
+pub mod quality_workbench;
 pub mod span;
 pub mod state;
 pub mod system;
@@ -165,6 +166,14 @@ pub use molecule::{
 };
 pub use mutation::{MutationProgram, Risk, SeedDeclaration, SemanticRelation, Transformation};
 pub use oracle::{DisagreementIr, EvidencePlane, EvidenceTier, OracleIr, Verdict};
+pub use quality_workbench::{
+    operate_quality_workbench, MetricDirection, QualityDisposition, QualityObservation,
+    QualityState, QualityWorkbenchError, QualityWorkbenchReceipt, QualityWorkbenchRequest,
+    QualityWorkbenchSummary, CONTRACT_VERSION as QUALITY_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_WORKBENCH_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as QUALITY_WORKBENCH_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as QUALITY_WORKBENCH_SCHEMA_VERSION,
+};
 pub use state::{BioState, Plane, ResourceLedger, Transition, UncertaintySummary};
 pub use system::{Component, ComponentKind, Pin, PromptDisclosure, SystemManifest, Wire};
 pub use world::{
