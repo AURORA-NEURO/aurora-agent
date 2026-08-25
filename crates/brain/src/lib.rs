@@ -65,6 +65,7 @@ pub mod multimodal_retrieval_workbench;
 pub mod multimodal_retrieval_workflow_fabric;
 pub mod multimodal_safety_assurance;
 pub mod retrieval_contract_model;
+pub mod retrieval_protocol_gateway;
 pub mod retrieval_research_copilot;
 pub mod retrieval_research_workbench;
 pub mod retrieval_synthesis;
@@ -318,6 +319,12 @@ pub use retrieval_contract_model::{
     RetrievalContractModelReceipt, RetrievalContractModelRequest,
     CONTRACT_VERSION as RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use retrieval_protocol_gateway::{
+    compile_retrieval_protocol, retrieval_protocol_gateway_manifest, RetrievalProtocolError,
+    RetrievalProtocolReceipt, RetrievalProtocolRequest,
+    CONTRACT_VERSION as RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_PROTOCOL_FEATURE_ID,
 };
 pub use retrieval_research_copilot::{
     compile_retrieval_copilot, retrieval_research_copilot_manifest, RetrievalCopilotError,
