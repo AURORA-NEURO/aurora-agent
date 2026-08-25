@@ -174,6 +174,25 @@ impl QueryRegion {
     /// on selected factors by construction — a factor enters when it produces a needed variable —
     /// and `bioprism-fiber`'s version additionally reports the needed-variable set.
     ///
+    /// ## Two sets, because a factor's outputs are not a slicing frontier
+    ///
+    /// 43.17 admits a variable to the slice only when some factor producing a needed variable
+    /// *consumes* it, so the walk expands a selected factor's inputs and never its outputs. On a
+    /// single-output factor the distinction is invisible — the one output is already needed, which
+    /// is why the factor was selected — and every fixture in the workspace was of that shape, so
+    /// the divergence below could not be observed. Give a factor two outputs and it becomes
+    /// load-bearing: the sibling output is produced by the compiled program rather than required by
+    /// it, and walking backwards from it selects factors that compute a value nothing consumes.
+    /// `compiled_factor_count` on the certificate is `len(selected_factor_ids)` in the CPython
+    /// reference and indexes the factor documents the Decision Section delivers, so a region that
+    /// selected more factors than that would make the certificate's own count wrong.
+    ///
+    /// The sibling output does still belong to the region: it sits in its producer's scope,
+    /// elimination has to size it, and [`QueryRegionBuilder::build`] rejects a factor naming a
+    /// variable the region never declared. So `variables` collects inputs and outputs alike while
+    /// `frontier` — the set that gates the stack, and the exact analogue of `bioprism-fiber`'s
+    /// `Slice::needed_variables` — collects targets and inputs only.
+    ///
     /// The resulting region is structural. `factors` carry signatures and no tables.
     pub fn from_world_slice<S, I>(
         source: &S,
@@ -185,14 +204,16 @@ impl QueryRegion {
         S: WorldSource + ?Sized,
         I: IntoIterator<Item: AsRef<str>>,
     {
-        let mut needed: BTreeSet<String> = BTreeSet::new();
+        let mut variables: BTreeSet<String> = BTreeSet::new();
+        let mut frontier: BTreeSet<String> = BTreeSet::new();
         let mut stack: Vec<String> = Vec::new();
         let mut free: BTreeSet<String> = BTreeSet::new();
 
         for target in targets {
             let target = target.as_ref().to_string();
             free.insert(target.clone());
-            if needed.insert(target.clone()) {
+            variables.insert(target.clone());
+            if frontier.insert(target.clone()) {
                 stack.push(target);
             }
         }
@@ -214,8 +235,12 @@ impl QueryRegion {
                     if !scope.contains(&name) {
                         scope.push(name.clone());
                     }
-                    if needed.insert(name.clone()) {
-                        stack.push(name);
+                    variables.insert(name);
+                }
+                for input in &factor.inputs {
+                    let input = input.as_str().to_string();
+                    if frontier.insert(input.clone()) {
+                        stack.push(input);
                     }
                 }
                 factors.push(RegionFactor::structural(factor_id, scope));
@@ -227,7 +252,7 @@ impl QueryRegion {
         let mut builder = QueryRegion::builder(label);
         let mut assumed = 0usize;
         let mut compiled_facts = 0usize;
-        for variable in &needed {
+        for variable in &variables {
             match source.fact_providing(variable) {
                 Some(fact) => {
                     compiled_facts += 1;
@@ -253,7 +278,7 @@ impl QueryRegion {
             ))
             .assumption(format!(
                 "{assumed} of {} region variables have no providing fact and were assigned the default cardinality {}",
-                needed.len(),
+                variables.len(),
                 policy.default_cardinality
             ))
             .provenance(RegionProvenance {

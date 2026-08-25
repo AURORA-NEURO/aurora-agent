@@ -210,3 +210,80 @@ fn the_plan_receipt_names_the_argmin_and_the_reason_it_is_not_runnable() {
     assert!(receipt.note.contains("argmin faq_inside_out"));
     assert!(receipt.note.contains("no costed plan is runnable"));
 }
+
+/// The sibling output of a multi-output factor is produced, not consumed, so it is not needed.
+///
+/// Every fixture that existed when the two slicers were first claimed to "agree by construction"
+/// gave each factor exactly one output, and on such a world the claim is trivially true: a
+/// factor's outputs are already needed by the time it is selected. `factor.joint_readout` emits
+/// `risk_score` and `calibration_drift` together and only `risk_score` is reached backwards from
+/// the target, so `calibration_drift` has no consumer in the slice and `factor.drift_model`, which
+/// produces it alone, is not part of the compiled program. A region that walked backwards from
+/// `calibration_drift` would select three factors while the certificate reported two, and
+/// `compiled_factor_count` would stop counting the factor documents the section actually carries.
+///
+/// The count is the CPython reference's: `reference/fiber_runtime/fiber_compile.py` writes
+/// `len(selected_factor_ids)` from a slice that pushes a factor's inputs and never its outputs.
+#[test]
+fn a_multi_output_factor_does_not_drag_its_siblings_producers_into_the_compiled_region() {
+    let world = World::from_json(reference_example("multi_output_world.json")).expect("world loads");
+    let query = Query::from_json(reference_example("multi_output_query.json")).expect("query loads");
+    let out = compile(&world, &query).expect("compiles");
+
+    assert_eq!(
+        out.certificate.selected_factors,
+        vec!["factor.claim_support", "factor.joint_readout"],
+        "factor.drift_model produces only the sibling output and no needed variable"
+    );
+    assert_eq!(out.certificate.plan.compiled_factor_count, 2);
+    assert_eq!(
+        out.certificate.plan.compiled_factor_count,
+        out.certificate.selected_factors.len(),
+        "compiled_factor_count counts the factor documents the section delivers"
+    );
+    assert_eq!(
+        out.certificate.plan.compiled_factor_count,
+        out.trace.plan.region.expect("a region was built").factors,
+        "the two slicers must agree about which factors the query reaches"
+    );
+}
+
+/// A variable a selected factor emits still needs a domain size.
+///
+/// Bringing the region's traversal into line with the slice must not strip `calibration_drift`
+/// from the region: it sits in `factor.joint_readout`'s scope, elimination has to size it, and a
+/// region whose factor mentions a variable it never declared is rejected by its own builder. The
+/// variable is in the region and is *not* an entry point for further backward walking, and those
+/// are separate facts about it.
+#[test]
+fn a_sibling_output_stays_a_region_variable_even_though_it_is_not_a_slicing_frontier() {
+    let world = World::from_json(reference_example("multi_output_world.json")).expect("world loads");
+    let region = bioprism_backends::QueryRegion::from_world_slice(
+        &world,
+        "multi-output",
+        ["split_integrity_status"],
+        &bioprism_backends::CardinalityPolicy::default(),
+    )
+    .expect("region builds");
+
+    let variables: Vec<&str> = region.variables().collect();
+    assert_eq!(
+        variables,
+        vec![
+            "assay_batch",
+            "calibration_drift",
+            "cohort_id",
+            "risk_score",
+            "split_integrity_status"
+        ]
+    );
+    assert_eq!(
+        region.cardinality_source("calibration_drift"),
+        Some(bioprism_backends::CardinalitySource::Assumed),
+        "no fact provides the sibling output, so its domain size is the policy default"
+    );
+    assert!(
+        !variables.contains(&"scanner_id"),
+        "scanner_id is reachable only through factor.drift_model, which the slice does not select"
+    );
+}
