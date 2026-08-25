@@ -19,9 +19,11 @@ from .autonomous_goal_control_loop import (
     AutonomousGoalControlLoop,
     AutonomousGoalControlLoopResult,
     GoalLoopEvaluator,
+    GoalLoopCheckpoint,
     GoalLoopLearner,
     GoalLoopOptionsFactory,
 )
+from .autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator
 from .autonomous_goal_scheduler import AutonomousGoalScheduleRow
 from .autonomous_goal_worker import AutonomousGoalExecutionRequest, AutonomousGoalWorker
 from .autonomous_goal_worker_journal import AutonomousGoalWorkerJournal
@@ -131,6 +133,7 @@ class AutonomousGoalAgentRuntime:
         evaluator: GoalLoopEvaluator | None = None,
         learner: GoalLoopLearner | AutonomousGoalBanditLearner | None = None,
         journal: AutonomousGoalWorkerJournal | None = None,
+        recovery: AutonomousGoalRecoveryCoordinator | None = None,
         batch_id_prefix: str = "autonomous-goal-agent",
     ) -> None:
         if not isinstance(orchestrator, AutonomousTaskOrchestrator):
@@ -154,6 +157,12 @@ class AutonomousGoalAgentRuntime:
             _fail("agent must expose execute_action_handoff when action_handoff_resolver is configured")
         if journal is not None and not isinstance(journal, AutonomousGoalWorkerJournal):
             _fail("journal must be an AutonomousGoalWorkerJournal or None")
+        if recovery is not None and not isinstance(recovery, AutonomousGoalRecoveryCoordinator):
+            _fail("recovery must be an AutonomousGoalRecoveryCoordinator or None")
+        if recovery is not None and recovery.ledger is not ledger:
+            _fail("recovery coordinator must own the supplied ledger")
+        if recovery is not None and (journal is None or recovery.journal.journal is not journal):
+            _fail("recovery coordinator must own the supplied worker journal")
         if not isinstance(batch_id_prefix, str) or not batch_id_prefix.strip() or "\x00" in batch_id_prefix or len(batch_id_prefix.encode("utf-8")) > 128:
             _fail("batch_id_prefix is outside its bounded contract")
         self.orchestrator = orchestrator
@@ -162,6 +171,7 @@ class AutonomousGoalAgentRuntime:
         self.task_resolver = task_resolver
         self.run_options_factory = run_options_factory
         self.action_handoff_resolver = action_handoff_resolver
+        self.recovery = recovery
         self.batch_id_prefix = batch_id_prefix.strip()
         self.worker = AutonomousGoalWorker(
             ledger,
@@ -226,6 +236,7 @@ class AutonomousGoalAgentRuntime:
             "domains": list(AUTONOMOUS_DOMAINS),
             "execution_surface": "autonomous_goal_action_handoff_facade" if self.action_handoff_resolver is not None else ("autonomous_agent_facade" if self.agent is not None else "autonomous_task_orchestrator"),
             "action_handoff_execution": "verified_handoff_replay_before_run_boundary" if self.action_handoff_resolver is not None else "not_configured",
+            "recovery_execution": "ordered_journal_then_control_checkpoint" if self.recovery is not None else "caller_composed",
             "retention": GOAL_AGENT_RUNTIME_RETENTION,
             "secret_material": "never_returned",
         }
@@ -237,13 +248,33 @@ class AutonomousGoalAgentRuntime:
         options_factory: GoalLoopOptionsFactory | None = None,
         max_cycles: int = 128,
         max_total_runs: int = 8_192,
+        checkpoint: GoalLoopCheckpoint | None = None,
     ) -> AutonomousGoalControlLoopResult:
+        if self.recovery is not None:
+            if checkpoint is not None:
+                _fail("checkpoint is owned by the recovery coordinator")
+            return self.recovery.resume(
+                self.loop,
+                options={
+                    "schedule_options": schedule_options,
+                    "options_factory": options_factory,
+                    "max_cycles": max_cycles,
+                    "max_total_runs": max_total_runs,
+                    "checkpoint": self.recovery.checkpoint,
+                },
+            )
         return self.loop.run(
             schedule_options=schedule_options,
             options_factory=options_factory,
             max_cycles=max_cycles,
             max_total_runs=max_total_runs,
+            checkpoint=checkpoint,
         )
+
+    def restore(self, *, now_ns: int | None = None) -> dict[str, Any]:
+        if self.recovery is None:
+            _fail("restore requires a recovery coordinator")
+        return self.recovery.restore(now_ns=now_ns)
 
 
 __all__ = [

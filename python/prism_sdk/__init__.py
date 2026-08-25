@@ -183,6 +183,15 @@ from .autonomous_goal_control_persistence import (
     seal_autonomous_goal_control_loop_snapshot,
     validate_autonomous_goal_control_loop_snapshot,
 )
+from .autonomous_goal_recovery import (
+    GOAL_RECOVERY_RETENTION,
+    GOAL_RECOVERY_SCHEMA,
+    MAX_GOAL_RECOVERY_GOALS,
+    MAX_GOAL_RECOVERY_REPORT_BYTES,
+    AutonomousGoalRecoveryCoordinator,
+    RecoveryStatus,
+    validate_autonomous_goal_recovery_report,
+)
 from .autonomous_goal_agent import (
     GOAL_AGENT_RUNTIME_RETENTION,
     GOAL_AGENT_RUNTIME_SCHEMA,
@@ -4079,6 +4088,13 @@ __all__ = [
     "GoalLoopEvaluator",
     "GoalLoopLearner",
     "GoalLoopOptionsFactory",
+    "GOAL_RECOVERY_RETENTION",
+    "GOAL_RECOVERY_SCHEMA",
+    "MAX_GOAL_RECOVERY_GOALS",
+    "MAX_GOAL_RECOVERY_REPORT_BYTES",
+    "AutonomousGoalRecoveryCoordinator",
+    "RecoveryStatus",
+    "validate_autonomous_goal_recovery_report",
     "GOAL_AGENT_RUNTIME_RETENTION",
     "GOAL_AGENT_RUNTIME_SCHEMA",
     "AutonomousGoalAgentRuntime",

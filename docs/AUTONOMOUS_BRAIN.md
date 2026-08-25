@@ -5899,6 +5899,26 @@ non-contiguous cycles, invalid bandit arms, oversized signals, and stale writers
 Python and TypeScript use the same schema, retention posture, canonical JSON, and generation chain
 so a checkpoint can be handed across runtimes without copying private execution state.
 
+Deployments that own both stores should compose them with
+`AutonomousGoalRecoveryCoordinator` (Python and TypeScript). Its restore transaction is ordered:
+it restores the worker journal, enumerates every active `claimed`/`dispatch_started` boundary,
+reconciles those goals through the authoritative ledger, flushes the new `reconciled` events
+through the journal CAS fence, and only then restores the control-loop checkpoint. The returned
+sealed recovery report includes the journal/control snapshot digests, recovered goal identities,
+whether an external post-dispatch reconciliation is still required, and a ready-to-use
+`resume_snapshot`; it never includes task text, parameters, handoffs, prompts, credentials,
+provider values, evaluator payloads, or results. `recovery.resume(loop, ...)` owns the snapshot
+argument and refuses a caller-supplied replacement, preventing a stale checkpoint from bypassing
+startup recovery. A `dispatch_started` goal is safely left `blocked` for explicit external
+reconciliation, while a pre-dispatch `claimed` goal is left `paused` for an explicit retry. This
+is a local ordering and identity contract, not a distributed transaction: the application still
+owns durable storage, ledger snapshot atomicity, tenant identity, protected rehydration, effect
+idempotency, provider credentials, and the authority to resolve an uncertain external outcome.
+Passing the coordinator into `AutonomousGoalAgentRuntime` additionally makes `restore()` mandatory
+before `run()`, wires each loop checkpoint through journal-first persistence, and rejects a second
+checkpoint callback that could bypass the recovery fence. Without a coordinator, the runtime keeps
+the lower-level caller-composed behavior so deployments can choose a different orchestration layer.
+
 `AutonomousGoalAgentRuntime` is the production composition bridge for long-horizon work. Prefer
 `agent.goal_agent_runtime(...)` or `agent.run_goal_control_loop(...)`: Python binds the goal
 worker to the complete `AutonomousAgent` facade, matching the TypeScript runtime. An

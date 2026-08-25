@@ -26,6 +26,11 @@ import {
   type AutonomousGoalControlLoopResult,
 } from "./autonomous-goal-control-loop.js";
 import {
+  AutonomousGoalRecoveryCoordinator,
+  type AutonomousGoalRecoveryReport,
+} from "./autonomous-goal-recovery.js";
+import type { AutonomousGoalControlLoopCheckpoint } from "./autonomous-goal-control-persistence.js";
+import {
   AutonomousGoalWorker,
   type AutonomousGoalExecutionRequest,
 } from "./autonomous-goal-worker.js";
@@ -125,6 +130,7 @@ export class AutonomousGoalAgentRuntime {
   readonly brain: AutonomousBrainFacade | undefined;
   readonly worker: AutonomousGoalWorker;
   readonly loop: AutonomousGoalControlLoop;
+  readonly recovery: AutonomousGoalRecoveryCoordinator | undefined;
   readonly batch_id_prefix: string;
 
   constructor(options: {
@@ -137,6 +143,7 @@ export class AutonomousGoalAgentRuntime {
     evaluator?: AutonomousGoalControlLoopEvaluator;
     learner?: AutonomousGoalControlLoopLearner | AutonomousGoalBanditLearner | null;
     journal?: AutonomousGoalWorkerJournal;
+    recovery?: AutonomousGoalRecoveryCoordinator;
     batch_id_prefix?: string;
   }) {
     if (!(options?.agent instanceof AutonomousAgent)) fail("agent must be an AutonomousAgent");
@@ -155,6 +162,9 @@ export class AutonomousGoalAgentRuntime {
     this.run_options_factory = options.run_options_factory;
     this.action_handoff_resolver = options.action_handoff_resolver;
     this.brain = options.brain;
+    if (options.recovery !== undefined && options.recovery.ledger !== this.ledger) fail("recovery coordinator must own the supplied ledger");
+    if (options.recovery !== undefined && (options.journal === undefined || options.recovery.journal.journal !== options.journal)) fail("recovery coordinator must own the supplied worker journal");
+    this.recovery = options.recovery;
     this.batch_id_prefix = batchIdPrefix.trim();
     this.worker = new AutonomousGoalWorker({
       ledger: this.ledger,
@@ -195,10 +205,20 @@ export class AutonomousGoalAgentRuntime {
   }
 
   metadata(): Record<string, unknown> {
-    return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], execution_surface: this.action_handoff_resolver === undefined ? "autonomous_agent_facade" : "autonomous_goal_action_handoff_facade", action_handoff_execution: this.action_handoff_resolver === undefined ? "not_configured" : "verified_handoff_replay_before_run_boundary", retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], execution_surface: this.action_handoff_resolver === undefined ? "autonomous_agent_facade" : "autonomous_goal_action_handoff_facade", action_handoff_execution: this.action_handoff_resolver === undefined ? "not_configured" : "verified_handoff_replay_before_run_boundary", recovery_execution: this.recovery === undefined ? "caller_composed" : "ordered_journal_then_control_checkpoint", retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
   }
 
-  run(options: { schedule_options?: Record<string, unknown>; options_factory?: AutonomousGoalControlLoopOptionsFactory; max_cycles?: number; max_total_runs?: number } = {}): Promise<AutonomousGoalControlLoopResult> {
-    return this.loop.run(options);
+  async restore(options: { now_ns?: number } = {}): Promise<AutonomousGoalRecoveryReport> {
+    if (this.recovery === undefined) fail("restore requires a recovery coordinator");
+    return this.recovery.restore(options);
+  }
+
+  run(options: { schedule_options?: Record<string, unknown>; options_factory?: AutonomousGoalControlLoopOptionsFactory; max_cycles?: number; max_total_runs?: number; checkpoint?: (snapshot: AutonomousGoalControlLoopCheckpoint) => unknown | Promise<unknown> } = {}): Promise<AutonomousGoalControlLoopResult> {
+    if (this.recovery === undefined) return this.loop.run(options);
+    if (options.checkpoint !== undefined) fail("checkpoint is owned by the recovery coordinator");
+    return this.recovery.resume(this.loop, {
+      ...options,
+      checkpoint: (snapshot: AutonomousGoalControlLoopCheckpoint) => this.recovery!.checkpoint(snapshot),
+    });
   }
 }

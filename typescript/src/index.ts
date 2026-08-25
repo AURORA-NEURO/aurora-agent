@@ -2881,6 +2881,19 @@ export type {
   TransactionalAutonomousGoalControlLoopSnapshotPersistence,
 } from "./autonomous-goal-control-persistence.js";
 export {
+  AUTONOMOUS_GOAL_RECOVERY_MAX_GOALS,
+  AUTONOMOUS_GOAL_RECOVERY_MAX_REPORT_BYTES,
+  AUTONOMOUS_GOAL_RECOVERY_RETENTION,
+  AUTONOMOUS_GOAL_RECOVERY_SCHEMA,
+  AutonomousGoalRecoveryCoordinator,
+  validateAutonomousGoalRecoveryReport,
+} from "./autonomous-goal-recovery.js";
+export type {
+  AutonomousGoalRecoveryEntry,
+  AutonomousGoalRecoveryReport,
+  AutonomousGoalRecoveryStatus,
+} from "./autonomous-goal-recovery.js";
+export {
   AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION,
   AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA,
   AutonomousGoalAgentRuntime,

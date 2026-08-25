@@ -1715,6 +1715,11 @@ events can carry only a task digest plus an `execution_binding_digest` for trans
 results remain excluded. `activeFor`/`active_for` plus `assertNoActive`/`assert_no_active` fence a
 new worker pass until active pre- or post-dispatch events are recovered/reconciled, so a restart
 cannot silently substitute a different task or handoff. Tests cover drift refusal, digest propagation,
-metadata-only persistence, and the all-domain worker path. Remaining production work is application
-wiring: durable protected rehydrators, real identity/approval stores, and deployment-level
-restart/reconciliation orchestration.
+metadata-only persistence, ordered coordinator recovery, tamper rejection, and the all-domain
+worker path. `AutonomousGoalRecoveryCoordinator` now composes journal and control-loop startup in
+both SDKs: it restores the journal first, reconciles active boundaries, flushes that reconciliation
+through the journal CAS fence, and only then exposes the loop checkpoint. Its sealed report and
+guarded resume helper preserve the metadata-only boundary and make post-dispatch uncertainty
+explicit. Remaining production work is application wiring: durable protected rehydrators, real
+identity/approval stores, deployment-level ledger/journal atomicity, and external resolution of
+genuinely uncertain provider/effect outcomes.

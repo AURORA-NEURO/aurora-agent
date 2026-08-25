@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from prism_sdk.autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent, AutonomousTaskOrchestrator
+from prism_sdk.authoring import canonical_json
 from prism_sdk.autonomous_action_admission_controller import AutonomousActionAdmissionController
 from prism_sdk.autonomous_action_admission_persistence import InMemoryAutonomousActionAdmissionLedger
 from prism_sdk.llm_runtime import LLMRuntime
@@ -34,6 +35,7 @@ from prism_sdk.autonomous_goal_control_persistence import (
     seal_autonomous_goal_control_loop_snapshot,
     validate_autonomous_goal_control_loop_snapshot,
 )
+from prism_sdk.autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator, validate_autonomous_goal_recovery_report
 from prism_sdk.autonomous_goal_agent import AutonomousGoalAgentRuntime
 from prism_sdk.autonomous_goal_worker_journal import (
     AutonomousGoalWorkerJournal,
@@ -289,6 +291,193 @@ def test_goal_worker_journal_reconciles_pre_and_post_dispatch_restarts_without_r
     )
     flushed = coordinator.flush()
     assert coordinator.restore()["snapshot_digest"] == flushed["snapshot_digest"]
+
+
+def test_goal_recovery_reconciles_every_domain_before_exposing_a_resumable_loop() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains))
+    for domain in domains:
+        goal_id = f"recovery-{domain}"
+        ledger.create(goal_id=goal_id, task_digest=_digest(f"private recovery task {domain}"), domain=domain, now_ns=0)
+        ledger.transition(goal_id, "running", expected_revision=0, now_ns=1)
+
+    source_journal = AutonomousGoalWorkerJournal(clock=lambda: 2)
+    schedule_digest = _digest("recovery-schedule")
+    for domain in domains:
+        source_journal.record(
+            batch_id="recovery-batch",
+            goal_id=f"recovery-{domain}",
+            phase="dispatch_started" if domain == "coding" else "claimed",
+            attempt=1,
+            revision=1,
+            schedule_digest=schedule_digest,
+            claim_digest=_digest("recovery-claim"),
+            task_digest=_digest(f"private recovery task {domain}"),
+            execution_binding_digest=_digest(f"private binding {domain}"),
+        )
+
+    order: list[str] = []
+
+    class JournalStore:
+        def __init__(self):
+            self.value = canonical_json(source_journal.snapshot())
+
+        def read(self):
+            order.append("journal-read")
+            return self.value
+
+        def write(self, value):
+            order.append("journal-write")
+            self.value = value
+
+        def write_if_unchanged(self, expected_snapshot_digest, value):
+            actual = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+            if actual != expected_snapshot_digest:
+                return False
+            order.append("journal-write")
+            self.value = value
+            return True
+
+    class ControlStore:
+        def read(self):
+            order.append("control-read")
+            return None
+
+        def write(self, _value):
+            order.append("control-write")
+
+    journal_store = JournalStore()
+    journal_coordinator = AutonomousGoalWorkerJournalPersistenceCoordinator(
+        AutonomousGoalWorkerJournal(clock=lambda: 3),
+        JsonAutonomousGoalWorkerJournalPersistence(journal_store),
+    )
+    control_coordinator = AutonomousGoalControlLoopPersistenceCoordinator(ControlStore())
+    recovery = AutonomousGoalRecoveryCoordinator(ledger, journal_coordinator, control_coordinator)
+    report = recovery.restore(now_ns=4)
+    assert order == ["journal-read", "journal-write", "control-read"]
+    assert report["status"] == "recovered"
+    assert report["active_count_before_recovery"] == len(domains)
+    assert len(report["recovered"]) == len(domains)
+    assert report["requires_external_reconciliation"] is True
+    assert report["ready_to_resume"] is True
+    assert report["resume_snapshot"] is None
+    assert validate_autonomous_goal_recovery_report(report)["report_digest"] == report["report_digest"]
+    tampered_report = dict(report)
+    tampered_report["report_digest"] = "0" * 64
+    with pytest.raises(AutonomousGoalError, match="report digest"):
+        validate_autonomous_goal_recovery_report(tampered_report)
+    with pytest.raises(AutonomousGoalError, match="resume_snapshot is owned"):
+        recovery.resume(
+            AutonomousGoalControlLoop(
+                AutonomousGoalWorker(
+                    ledger,
+                    resolver=lambda _goal, _row: {"task": "private recovery task coding"},
+                    executor=lambda _request: {"status": "completed"},
+                )
+            ),
+            options={"resume_snapshot": report["resume_snapshot"]},
+        )
+    public = json.dumps(report)
+    assert "private recovery task" not in public
+    assert "private binding" not in public
+    assert journal_coordinator.journal.active() == ()
+    assert ledger.get("recovery-coding").status == "blocked"
+    assert "reconciled" in journal_store.value
+
+    executed: list[str] = []
+    loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            ledger,
+            journal=journal_coordinator.journal,
+            resolver=lambda goal, _row: {"task": f"private recovery task {goal.domain}"},
+            executor=lambda request: (executed.append(request.goal.goal_id) or {"status": "completed"}),
+        )
+    )
+    result = recovery.resume(
+        loop,
+        options={
+            "schedule_options": {"now_ns": 5, "max_selected": len(domains), "max_concurrent": len(domains), "include_paused": True},
+            "max_cycles": 2,
+            "checkpoint": recovery.checkpoint,
+        },
+    )
+    assert result.stop_reason == "no_admissible_work"
+    assert len(executed) == len(domains) - 1
+    assert ledger.get("recovery-coding").status == "blocked"
+    assert all(ledger.get(f"recovery-{domain}").status == "completed" for domain in domains if domain != "coding")
+
+
+def test_goal_agent_runtime_enforces_recovery_before_invoking_a_rehydrated_task() -> None:
+    ledger = AutonomousGoalLedger(clock=lambda: 900)
+    ledger.create(goal_id="runtime-recovery", task_digest=_digest("private runtime recovery task"), domain="coding", now_ns=0)
+    ledger.transition("runtime-recovery", "running", expected_revision=0, now_ns=1)
+    source_journal = AutonomousGoalWorkerJournal(clock=lambda: 2)
+    source_journal.record(
+        batch_id="runtime-recovery-batch",
+        goal_id="runtime-recovery",
+        phase="claimed",
+        attempt=1,
+        revision=1,
+        schedule_digest=_digest("runtime-recovery-schedule"),
+        claim_digest=_digest("runtime-recovery-claim"),
+        task_digest=_digest("private runtime recovery task"),
+        execution_binding_digest=_digest("private runtime binding"),
+    )
+
+    class JournalStore:
+        def __init__(self):
+            self.value = canonical_json(source_journal.snapshot())
+
+        def read(self):
+            return self.value
+
+        def write(self, value):
+            self.value = value
+
+        def write_if_unchanged(self, expected_snapshot_digest, value):
+            actual = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+            if actual != expected_snapshot_digest:
+                return False
+            self.value = value
+            return True
+
+    class ControlStore:
+        def __init__(self):
+            self.value = None
+
+        def read(self):
+            return self.value
+
+        def write(self, value):
+            self.value = canonical_json(value)
+
+    journal_store = JournalStore()
+    control_store = ControlStore()
+    journal_coordinator = AutonomousGoalWorkerJournalPersistenceCoordinator(
+        AutonomousGoalWorkerJournal(clock=lambda: 3),
+        JsonAutonomousGoalWorkerJournalPersistence(journal_store),
+    )
+    control_coordinator = AutonomousGoalControlLoopPersistenceCoordinator(control_store)
+    recovery = AutonomousGoalRecoveryCoordinator(ledger, journal_coordinator, control_coordinator)
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    orchestrator.run = lambda **_kwargs: SimpleNamespace(status="completed")
+    runtime = AutonomousGoalAgentRuntime(
+        orchestrator,
+        ledger,
+        journal=journal_coordinator.journal,
+        recovery=recovery,
+        task_resolver=lambda _goal, _row: "private runtime recovery task",
+    )
+    with pytest.raises(AutonomousGoalError, match="restore"):
+        runtime.run(schedule_options={"now_ns": 900, "max_selected": 1, "max_concurrent": 1, "include_paused": True})
+    report = runtime.restore(now_ns=4)
+    assert report["status"] == "recovered"
+    result = runtime.run(schedule_options={"now_ns": 901, "max_selected": 1, "max_concurrent": 1, "include_paused": True}, max_cycles=1)
+    assert result.stop_reason == "all_terminal"
+    assert ledger.get("runtime-recovery").status == "completed"
+    assert control_store.value is not None
+    assert runtime.metadata()["recovery_execution"] == "ordered_journal_then_control_checkpoint"
+    assert "private runtime recovery task" not in json.dumps(recovery.report)
 
 
 def test_goal_control_loop_continues_all_domains_and_retries_paused_work_with_fresh_signals() -> None:

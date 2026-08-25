@@ -8,6 +8,7 @@ import {
   AutonomousGoalControlLoop,
   AutonomousGoalBanditLearner,
   AutonomousGoalControlLoopPersistenceCoordinator,
+  AutonomousGoalRecoveryCoordinator,
   TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
   sealAutonomousGoalControlLoopSnapshot,
   validateAutonomousGoalControlLoopSnapshot,
@@ -31,12 +32,14 @@ import {
   builtinAutonomousDomainProfiles,
   AUTONOMOUS_DOMAIN_NAMES,
   claimAutonomousGoals,
+  canonicalJson,
   digestJsonSync,
   goalTaskDigest,
   openaiCompatibleProvider,
   scheduleAutonomousGoals,
   validateAutonomousGoalSchedule,
   validateAutonomousGoalSnapshot,
+  validateAutonomousGoalRecoveryReport,
 } from "../dist/index.js";
 
 test("goal scheduler prioritizes dependency-closed work across every domain", () => {
@@ -233,6 +236,139 @@ test("goal worker journals the dispatch boundary and reconciles restart uncertai
   await new AutonomousGoalWorkerJournalPersistenceCoordinator(roundTripped, persistence).restore();
   assert.equal(roundTripped.head_digest, restored.head_digest);
   assert.equal(JSON.stringify(encoded).includes("private journal task"), false);
+});
+
+test("goal recovery reconciles every domain before exposing a resumable loop", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 100 });
+  for (const domain of domains) {
+    ledger.create({ goal_id: `recovery-${domain}`, task_digest: goalTaskDigest(`private recovery task ${domain}`), domain, now_ns: 0 });
+    ledger.transition(`recovery-${domain}`, "running", { expected_revision: 0, now_ns: 1 });
+  }
+  const sourceJournal = new AutonomousGoalWorkerJournal({ clock: () => 2 });
+  const scheduleDigest = goalTaskDigest("recovery-schedule");
+  for (const domain of domains) {
+    const goalId = `recovery-${domain}`;
+    sourceJournal.record({
+      batch_id: "recovery-batch",
+      goal_id: goalId,
+      phase: domain === "coding" ? "dispatch_started" : "claimed",
+      attempt: 1,
+      revision: 1,
+      schedule_digest: scheduleDigest,
+      claim_digest: goalTaskDigest("recovery-claim"),
+      task_digest: goalTaskDigest(`private recovery task ${domain}`),
+      execution_binding_digest: goalTaskDigest(`private binding ${domain}`),
+    });
+  }
+  const order = [];
+  const journalStore = {
+    value: canonicalJson(sourceJournal.snapshot()),
+    read: () => { order.push("journal-read"); return journalStore.value; },
+    write: (value) => { order.push("journal-write"); journalStore.value = value; },
+    writeIfUnchanged: (expected, value) => {
+      const actual = journalStore.value === null ? null : JSON.parse(journalStore.value).snapshot_digest;
+      if (actual !== expected) return false;
+      order.push("journal-write");
+      journalStore.value = value;
+      return true;
+    },
+  };
+  const controlStore = {
+    value: null,
+    read: () => { order.push("control-read"); return controlStore.value; },
+    write: (value) => { order.push("control-write"); controlStore.value = value; },
+  };
+  const journalCoordinator = new AutonomousGoalWorkerJournalPersistenceCoordinator(
+    new AutonomousGoalWorkerJournal({ clock: () => 3 }),
+    new JsonAutonomousGoalWorkerJournalPersistence(journalStore),
+  );
+  const controlCoordinator = new AutonomousGoalControlLoopPersistenceCoordinator(
+    new (class {
+      read() { return controlStore.read() === null ? null : JSON.parse(controlStore.read()); }
+      write(value) { controlStore.write(canonicalJson(value)); }
+    })(),
+  );
+  const recovery = new AutonomousGoalRecoveryCoordinator(ledger, journalCoordinator, controlCoordinator);
+  const report = await recovery.restore({ now_ns: 4 });
+  assert.deepEqual(order, ["journal-read", "journal-write", "control-read"]);
+  assert.equal(report.status, "recovered");
+  assert.equal(report.active_count_before_recovery, domains.length);
+  assert.equal(report.recovered.length, domains.length);
+  assert.equal(report.requires_external_reconciliation, true);
+  assert.equal(report.ready_to_resume, true);
+  assert.equal(report.resume_snapshot, null);
+  assert.equal(validateAutonomousGoalRecoveryReport(report).report_digest, report.report_digest);
+  const tamperedReport = structuredClone(report);
+  tamperedReport.report_digest = "0".repeat(64);
+  assert.throws(() => validateAutonomousGoalRecoveryReport(tamperedReport), /report digest/);
+  await assert.rejects(() => recovery.resume(new AutonomousGoalControlLoop({ worker: new AutonomousGoalWorker({ ledger, resolver: () => ({ task: "private recovery task coding" }), executor: async () => ({ status: "completed" }) }) }), { resume_snapshot: report.resume_snapshot }), /resume_snapshot is owned/);
+  assert.equal(JSON.stringify(report).includes("private recovery task"), false);
+  assert.equal(JSON.stringify(report).includes("private binding"), false);
+  assert.equal(journalCoordinator.journal.active().length, 0);
+  assert.equal(ledger.get("recovery-coding").status, "blocked");
+  assert.ok(journalStore.value.includes("reconciled"));
+
+  const executed = [];
+  const loop = new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      journal: journalCoordinator.journal,
+      resolver: (goal) => ({ task: `private recovery task ${goal.domain}` }),
+      executor: async (request) => { executed.push(request.goal.goal_id); return { status: "completed" }; },
+    }),
+  });
+  const result = await recovery.resume(loop, {
+    schedule_options: { now_ns: 5, max_selected: domains.length, max_concurrent: domains.length, include_paused: true },
+    max_cycles: 2,
+    checkpoint: (snapshot) => recovery.checkpoint(snapshot),
+  });
+  assert.equal(result.stop_reason, "no_admissible_work");
+  assert.equal(executed.length, domains.length - 1);
+  assert.equal(ledger.get("recovery-coding").status, "blocked");
+  assert.ok(domains.filter((domain) => domain !== "coding").every((domain) => ledger.get(`recovery-${domain}`).status === "completed"));
+});
+
+test("goal agent runtime enforces recovery before invoking a rehydrated task", async () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 900 });
+  ledger.create({ goal_id: "runtime-recovery", task_digest: goalTaskDigest("private runtime recovery task"), domain: "coding", now_ns: 0 });
+  ledger.transition("runtime-recovery", "running", { expected_revision: 0, now_ns: 1 });
+  const sourceJournal = new AutonomousGoalWorkerJournal({ clock: () => 2 });
+  sourceJournal.record({ batch_id: "runtime-recovery-batch", goal_id: "runtime-recovery", phase: "claimed", attempt: 1, revision: 1, schedule_digest: goalTaskDigest("runtime-recovery-schedule"), claim_digest: goalTaskDigest("runtime-recovery-claim"), task_digest: goalTaskDigest("private runtime recovery task"), execution_binding_digest: goalTaskDigest("private runtime binding") });
+  const journalStore = {
+    value: canonicalJson(sourceJournal.snapshot()),
+    read: () => journalStore.value,
+    write: (value) => { journalStore.value = value; },
+    writeIfUnchanged: (expected, value) => {
+      const actual = journalStore.value === null ? null : JSON.parse(journalStore.value).snapshot_digest;
+      if (actual !== expected) return false;
+      journalStore.value = value;
+      return true;
+    },
+  };
+  const controlStore = {
+    value: null,
+    read: () => controlStore.value,
+    write: (value) => { controlStore.value = canonicalJson(value); },
+  };
+  const journalCoordinator = new AutonomousGoalWorkerJournalPersistenceCoordinator(
+    new AutonomousGoalWorkerJournal({ clock: () => 3 }),
+    new JsonAutonomousGoalWorkerJournalPersistence(journalStore),
+  );
+  const controlCoordinator = new AutonomousGoalControlLoopPersistenceCoordinator(controlStore);
+  const recovery = new AutonomousGoalRecoveryCoordinator(ledger, journalCoordinator, controlCoordinator);
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }));
+  agent.run = async () => ({ status: "completed" });
+  const runtime = new AutonomousGoalAgentRuntime({ agent, ledger, journal: journalCoordinator.journal, recovery, task_resolver: () => "private runtime recovery task" });
+  await assert.rejects(() => runtime.run({ schedule_options: { now_ns: 900, max_selected: 1, max_concurrent: 1, include_paused: true } }), /restore/);
+  const report = await runtime.restore({ now_ns: 4 });
+  assert.equal(report.status, "recovered");
+  const result = await runtime.run({ schedule_options: { now_ns: 901, max_selected: 1, max_concurrent: 1, include_paused: true }, max_cycles: 1 });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.equal(ledger.get("runtime-recovery").status, "completed");
+  assert.ok(controlStore.value);
+  assert.equal(runtime.metadata().recovery_execution, "ordered_journal_then_control_checkpoint");
+  assert.equal(JSON.stringify(recovery.report).includes("private runtime recovery task"), false);
 });
 
 test("goal control loop continues all domains and re-admits paused work with fresh signals", async () => {
