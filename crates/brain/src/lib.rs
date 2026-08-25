@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub mod evidence_contract_model;
+pub mod evidence_operations_control_plane;
 pub mod evidence_protocol_adapter;
 pub mod evidence_research_copilot;
 pub mod evidence_research_workbench;
@@ -61,6 +62,12 @@ pub use evidence_contract_model::{
     ContractDisposition, EvidenceContractModelError, EvidenceContractModelReceipt,
     EvidenceContractModelRequest, CONTRACT_VERSION as EVIDENCE_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use evidence_operations_control_plane::{
+    evidence_operations_control_plane_manifest, operate_evidence, EvidenceOperationsError,
+    EvidenceOperationsReceipt, EvidenceOperationsRequest, OperationsDisposition,
+    CONTRACT_VERSION as EVIDENCE_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
 };
 pub use evidence_protocol_adapter::{
     evidence_protocol_adapter_manifest, serve_evidence_protocol, EvidenceProtocolError,
