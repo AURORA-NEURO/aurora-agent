@@ -180,6 +180,7 @@ from .evaluators import (
     DomainEvaluatorRegistry,
     builtin_autonomous_domain_evaluator_profiles,
 )
+from .autonomous_cycle_evaluator_bridge import AutonomousCycleEvaluatorBridge
 from .autonomy_evaluation import (
     AutonomousToolLearningReport,
     AutonomousToolOutcomeEvaluator,
@@ -19975,6 +19976,7 @@ class AutonomousAgent:
         cross_domain_replan_max_replans: int = 1,
         cross_domain_evidence: Mapping[str, Mapping[str, Any]] | None = None,
         cross_domain_evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry | None = None,
+        evaluator_bridge: AutonomousCycleEvaluatorBridge | None = None,
         cross_domain_trajectory_discount: float = 0.90,
         cross_domain_trajectory_terminal_reward: float | None = None,
         accepted_cross_domain_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
@@ -20089,6 +20091,32 @@ class AutonomousAgent:
         ):
             raise BrainRunError(
                 "cross_domain_evaluator must be a BrainOutcomeEvaluator, DomainEvaluatorRegistry, or None"
+            )
+        if evaluator_bridge is not None and not isinstance(
+            evaluator_bridge,
+            AutonomousCycleEvaluatorBridge,
+        ):
+            raise BrainRunError(
+                "evaluator_bridge must be an AutonomousCycleEvaluatorBridge or None"
+            )
+        if evaluator_bridge is not None and not (
+            explicit_learning or learning_mode != "off"
+        ):
+            raise BrainRunError(
+                "evaluator_bridge requires an explicit automatic learning mode"
+            )
+        if evaluator_bridge is not None and any(
+            value is not None
+            for value in (
+                kwargs.get("evaluator"),
+                kwargs.get("evaluator_registry"),
+                kwargs.get("evidence"),
+                cross_domain_evidence,
+                cross_domain_evaluator,
+            )
+        ):
+            raise BrainRunError(
+                "evaluator_bridge cannot be combined with evaluator, evaluator_registry, evidence, or cross-domain evaluator inputs"
             )
         if not isinstance(workflow_retry_blocked, bool):
             raise BrainRunError("workflow_retry_blocked must be a boolean")
@@ -20527,6 +20555,15 @@ class AutonomousAgent:
             execution_kwargs.pop(key, None)
         routed_context = self.orchestrator._route_context(kwargs.get("context"), blueprint.route)
         execution_kwargs["context"] = routed_context
+        if evaluator_bridge is not None:
+            if blueprint.blueprint is not None:
+                execution_kwargs["evaluator"] = evaluator_bridge.evaluator_for_domain(
+                    blueprint.route.selected_domains[0]
+                )
+            else:
+                execution_kwargs["evaluator"] = evaluator_bridge.evaluator_for_cross_domain(
+                    blueprint.route.selected_domains
+                )
         if learning_mode != "off":
             # The ledger is caller-owned and stores value-only state. Supplying it here lets all
             # three execution branches begin from the same state without making the caller repeat
@@ -20670,7 +20707,11 @@ class AutonomousAgent:
                     raise BrainRunError(
                         "cross-domain learning requires caller-owned bandit_state"
                     )
-            if cross_domain_replan_learning and cross_domain_evaluator is None:
+            if (
+                cross_domain_replan_learning
+                and cross_domain_evaluator is None
+                and evaluator_bridge is None
+            ):
                 raise BrainRunError("cross-domain replan learning requires cross_domain_evaluator")
             if cross_domain_evidence is not None:
                 if "evidence" in execution_kwargs:

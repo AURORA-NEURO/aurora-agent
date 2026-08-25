@@ -1584,3 +1584,10 @@ supports every built-in domain, ordinary and adaptive single-domain runs, and sp
 cross-domain credit while exposing only metadata to the caller's evidence factory. The registry,
 evaluator catalogue digest, policy digest, and explicit evidence boundary are covered offline;
 source acquisition, evaluator truth, and durable evidence storage remain caller-owned.
+
+Python now has the same reusable evidence boundary through
+`create_autonomous_cycle_evaluator_bridge()`. The bridge validates all twelve autonomous profiles,
+preserves exact single-domain evaluator identity, routes cross-domain specialist/synthesis steps
+through their exact profiles, exposes catalogue/policy digests, rejects inline evidence, and keeps
+provider completion outside reward. Caller-owned evidence acquisition, truth authority, durable
+evidence storage, and production evaluator operations remain deployment work.

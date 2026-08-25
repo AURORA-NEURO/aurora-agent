@@ -48,6 +48,7 @@ from prism_sdk import (
     AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_KEY,
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
+    create_autonomous_cycle_evaluator_bridge,
     BrainRunError,
     BrainRunResult,
     BrainEpisodicMemory,
@@ -3274,6 +3275,57 @@ def test_run_auto_routes_cross_domain_replan_learning_with_explicit_limits(tmp_p
         assert result.result.replan_count == 0
         assert len(result.result.attempts) == 1
         assert "auto-cross-domain-replan-secret" not in json.dumps(result.to_dict())
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_auto_wires_the_metadata_only_evaluator_bridge_into_cross_domain_replan(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    memory = BrainEpisodicMemory(tmp_path / "auto-bridge-cross-domain.sqlite3")
+    handle = store.register("openai", "auto-bridge-cross-domain-secret")
+    registry = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+    contexts: list[dict[str, object]] = []
+
+    def evidence_for(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(dict(context))
+        domain = str(context["domain"])
+        profile = registry.resolve_for_autonomous_domain(domain).profile
+        return {
+            "domain": domain,
+            "capability": "caller_review",
+            "risk_class": "read_only",
+            "signals": {signal: 1.0 for signal in profile.required_signals},
+        }
+
+    bridge = create_autonomous_cycle_evaluator_bridge(
+        evidence_for,
+        evaluator_registry=registry,
+    )
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, memory=memory)
+        result = agent.run_auto(
+            task="write python code for the dataset pipeline",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            min_confidence=0.20,
+            min_margin=0.10,
+            cross_domain_replan_learning=True,
+            cross_domain_replan_max_replans=0,
+            evaluator_bridge=bridge,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+        )
+        assert result.status == "completed"
+        assert result.result is not None
+        assert result.result.status == "completed"
+        assert len(result.result.attempts) == 1
+        assert {context["role"] for context in contexts} == {"specialist", "synthesis"}
+        assert all(context["mode"] == "cross_domain" for context in contexts)
+        assert all("task" not in context and "evidence" not in context for context in contexts)
+        assert "auto-bridge-cross-domain-secret" not in json.dumps(result.to_dict())
     finally:
         memory.close()
         server.shutdown()

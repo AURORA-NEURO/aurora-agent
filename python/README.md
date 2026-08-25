@@ -327,6 +327,35 @@ can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine
 caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
 bandit updater without replaying provider calls.
 
+`create_autonomous_cycle_evaluator_bridge()` closes the callback-plumbing seam for the automatic
+learning paths. It validates a complete twelve-domain autonomous evaluator registry, exposes
+stable catalogue and policy digests, and returns exact-domain evaluators for single-domain
+learning plus a routed composite for cross-domain specialists and synthesis:
+
+```python
+from prism_sdk import create_autonomous_cycle_evaluator_bridge
+
+bridge = create_autonomous_cycle_evaluator_bridge(
+    lambda context: {
+        "domain": context["domain"],
+        "capability": "caller_review",
+        "risk_class": "read_only",
+        "signals": {signal: 1.0 for signal in context["required_signals"]},
+    }
+)
+single_evaluator = bridge.evaluator_for_domain("coding")
+cross_evaluator = bridge.evaluator_for_cross_domain(("coding", "data"))
+```
+
+The evidence factory receives only bounded run/status/digest metadata, the selected role, and
+the evaluator's required signal contract. Task text, prompts, provider responses, tool values,
+credentials, and evidence bodies never enter that context. Evidence is generated transiently and
+validated by the existing domain adapters; provider completion is never treated as reward. Pass
+`single_evaluator` to `run_learning()` or pass the bridge itself as `evaluator_bridge=` to
+`run_auto()`'s automatic learning path; use `cross_evaluator` for direct cross-domain
+learning/replan settlement. Inline evidence is rejected by the bridge so callers cannot
+accidentally bypass the independent evidence boundary.
+
 ### One-call deployment-managed execution
 
 When an application has already registered an environment source or secret-manager resolver,

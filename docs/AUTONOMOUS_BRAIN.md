@@ -4595,6 +4595,22 @@ rubric controls the aggregate pass/replan decision. The bridge refuses an incomp
 preserves evaluator identity and catalogue/policy digests, and never converts provider transport
 success, model confidence, or response presence into reward.
 
+Python now exposes the parity boundary through `create_autonomous_cycle_evaluator_bridge()`. It
+requires reviewed coverage for all twelve autonomous domains, including the `cross_domain`
+synthesis rubric, and returns exact-domain `BrainOutcomeEvaluator` adapters that obtain evidence
+from a caller-owned factory. The factory receives only bounded run/status/identity digests,
+selected-domain metadata, role (`single`, `specialist`, or `synthesis`), and required signals;
+task text, prompts, provider responses, tool values, credentials, and evidence bodies are absent.
+Single-domain adapters preserve the reviewed evaluator identity. Cross-domain adapters route each
+specialist and synthesis episode through its exact profile while exposing one stable composite
+identity to the trajectory learner. Inline evidence is refused, malformed factories fail closed,
+and provider completion never becomes reward. Catalogue and policy digests make the bridge's
+authority and retention contract visible to readiness and restart code.
+`AutonomousAgent.run_auto(..., evaluator_bridge=bridge)` binds this contract after routing and
+before execution, selecting the exact single-domain evaluator or the routed cross-domain
+composite without requiring the caller to predict the route. It is accepted only for explicit
+learning modes and cannot be combined with inline evidence or a second evaluator source.
+
 The same cycle APIs can run provider planning as an explicit phase before invocation. A caller sets
 `providerPlanning` and receives a `plan_review_required` result containing a caller-owned,
 dependency-closed proposal; no execution provider is dispatched until the caller supplies it as

@@ -306,6 +306,15 @@ from .evaluators import (
     builtin_domain_profiles,
     builtin_autonomous_domain_evaluator_profiles,
 )
+from .autonomous_cycle_evaluator_bridge import (
+    AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_SCHEMA,
+    AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_RETENTION,
+    AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_POLICY,
+    AutonomousCycleEvaluatorEvidenceContext,
+    AutonomousCycleEvaluatorEvidenceFactory,
+    AutonomousCycleEvaluatorBridge,
+    create_autonomous_cycle_evaluator_bridge,
+)
 from .autonomous_evaluator_calibration import (
     AUTONOMOUS_EVALUATOR_CALIBRATION_SCHEMA,
     AUTONOMOUS_EVALUATOR_CALIBRATION_REPLAY_SCHEMA,
@@ -5983,6 +5992,13 @@ __all__ = [
     "DomainEvaluatorRegistry",
     "builtin_domain_profiles",
     "builtin_autonomous_domain_evaluator_profiles",
+    "AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_SCHEMA",
+    "AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_RETENTION",
+    "AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_POLICY",
+    "AutonomousCycleEvaluatorEvidenceContext",
+    "AutonomousCycleEvaluatorEvidenceFactory",
+    "AutonomousCycleEvaluatorBridge",
+    "create_autonomous_cycle_evaluator_bridge",
     "AUTONOMOUS_EVALUATOR_CALIBRATION_SCHEMA",
     "AUTONOMOUS_EVALUATOR_CALIBRATION_REPLAY_SCHEMA",
     "AUTONOMOUS_EVALUATOR_CALIBRATION_ADMISSION_SCHEMA",
