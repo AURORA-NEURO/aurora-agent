@@ -117,6 +117,8 @@ EVALUATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P23-F25"
 EVALUATION_ASSURANCE_CONTRACT_VERSION = "evaluation-assurance-harness/1.0"
 RESEARCH_WORKBENCH_FEATURE_ID = "AFA-adapter-P24-F18"
 RESEARCH_WORKBENCH_CONTRACT_VERSION = "multimodal-research-workbench/1.0"
+CONTRACT_FRONTIER_FEATURE_ID = "AFA-adapter-P25-F22"
+CONTRACT_FRONTIER_CONTRACT_VERSION = "adapter-contract-frontier/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2916,3 +2918,46 @@ class ResearchWorkbenchReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "workspace_id": self.workspace_id, "disposition": self.disposition, "study_order": list(self.study_order), "modality_order": list(self.modality_order), "view_order": list(self.view_order), "panel_order": list(self.panel_order), "artifact_order": list(self.artifact_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "action_receipts": list(self.action_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ContractFrontierReceipt:
+    adapter_id: str
+    capability_id: str
+    negotiated_version: str
+    disposition: str
+    input_schema: str
+    output_schema: str
+    modality_order: tuple[str, ...]
+    effect_order: tuple[str, ...]
+    permission_order: tuple[str, ...]
+    artifact_digest_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    semantic_loss: tuple[str, ...]
+    checks: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = CONTRACT_FRONTIER_FEATURE_ID
+    contract_version: str = CONTRACT_FRONTIER_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != CONTRACT_FRONTIER_FEATURE_ID or self.contract_version != CONTRACT_FRONTIER_CONTRACT_VERSION:
+            raise ResearchContractError("adapter contract frontier schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.adapter_id.strip() or not self.capability_id.strip() or not self.negotiated_version.strip() or not self.input_schema.strip() or not self.output_schema.strip() or not self.modality_order or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("adapter contract frontier identity, schemas, modalities, checks, effects, locality, or boundary are incomplete")
+        if self.disposition not in {"accepted", "migrated", "approval_required", "blocked", "incompatible", "unknown"}:
+            raise ResearchContractError("adapter contract frontier disposition is unknown")
+        for values in (self.modality_order, self.effect_order, self.permission_order, self.artifact_digest_order, self.semantic_loss, self.checks, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("adapter contract frontier ordering is invalid")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in self.artifact_digest_order):
+            raise ResearchContractError("adapter contract frontier artifact digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("adapter contract frontier receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "adapter_id": self.adapter_id, "capability_id": self.capability_id, "negotiated_version": self.negotiated_version, "disposition": self.disposition, "input_schema": self.input_schema, "output_schema": self.output_schema, "modality_order": list(self.modality_order), "effect_order": list(self.effect_order), "permission_order": list(self.permission_order), "artifact_digest_order": list(self.artifact_digest_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": list(self.semantic_loss), "checks": list(self.checks), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

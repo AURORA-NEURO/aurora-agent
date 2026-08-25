@@ -82,6 +82,7 @@ pub mod adapter;
 pub mod analysis_portfolio;
 pub mod conformance;
 pub mod context_assurance;
+pub mod contract_frontier;
 pub mod csv;
 pub mod determinism_gateway;
 pub mod error;
@@ -133,6 +134,14 @@ pub use context_assurance::{
     ContextCompilationReceipt, ContextCompilationRequest, DecisionQuery,
     CONTRACT_VERSION as CONTEXT_COMPILATION_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_COMPILATION_FEATURE_ID,
+};
+pub use contract_frontier::{
+    compile_adapter_capability_manifest, AdapterCapabilityManifest, AdapterContractInput,
+    ContractFrontierError, ManifestDisposition,
+    COMPATIBLE_CONTRACT_VERSION as CONTRACT_FRONTIER_COMPATIBLE_VERSION,
+    CONTRACT_VERSION as CONTRACT_FRONTIER_CONTRACT_VERSION,
+    CURRENT_CONTRACT_VERSION as CONTRACT_FRONTIER_CURRENT_VERSION,
+    FEATURE_ID as CONTRACT_FRONTIER_FEATURE_ID,
 };
 pub use csv::Table;
 pub use determinism_gateway::{

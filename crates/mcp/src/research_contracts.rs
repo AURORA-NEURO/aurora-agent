@@ -39,6 +39,10 @@ use bioprism_adapter::{
     REPLICATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    compile_adapter_capability_manifest, AdapterCapabilityManifest, AdapterContractInput,
+    ContractFrontierError, CONTRACT_FRONTIER_FEATURE_ID,
+};
+use bioprism_adapter::{
     compile_evidence_synthesis, EvidenceSynthesisRequest, RetrievalSynthesisReceipt,
     RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
@@ -252,6 +256,7 @@ pub const RELIABILITY_COPILOT_TOOL: &str = "adapter_reliability_copilot";
 pub const INTEROPERABILITY_GATEWAY_TOOL: &str = "adapter_interoperability_gateway";
 pub const EVALUATION_ASSURANCE_TOOL: &str = "adapter_evaluation_assurance";
 pub const RESEARCH_WORKBENCH_TOOL: &str = "adapter_research_workbench";
+pub const CONTRACT_FRONTIER_TOOL: &str = "adapter_contract_frontier";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1345,6 +1350,27 @@ pub fn validate_research_workbench_json(
         .map_err(|error: ResearchWorkbenchError| error.to_string())?;
     if receipt.feature_id != RESEARCH_WORKBENCH_FEATURE_ID {
         return Err("research workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn compile_adapter_capability_manifest_json(value: &Value) -> Result<Value, String> {
+    let request: AdapterContractInput = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter contract frontier input: {error}"))?;
+    let receipt =
+        compile_adapter_capability_manifest(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize adapter capability manifest: {error}"))
+}
+
+pub fn validate_contract_frontier_json(value: &Value) -> Result<AdapterCapabilityManifest, String> {
+    let receipt: AdapterCapabilityManifest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter capability manifest: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: ContractFrontierError| error.to_string())?;
+    if receipt.feature_id != CONTRACT_FRONTIER_FEATURE_ID {
+        return Err("adapter contract frontier feature id mismatch".into());
     }
     Ok(receipt)
 }

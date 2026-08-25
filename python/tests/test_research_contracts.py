@@ -29,6 +29,7 @@ from prism_sdk.research_contracts import RELIABILITY_COPILOT_FEATURE_ID, RELIABI
 from prism_sdk.research_contracts import INTEROPERABILITY_GATEWAY_FEATURE_ID, INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, InteroperabilityGatewayReceipt
 from prism_sdk.research_contracts import EVALUATION_ASSURANCE_FEATURE_ID, EVALUATION_ASSURANCE_CONTRACT_VERSION, EvaluationAssuranceReceipt
 from prism_sdk.research_contracts import RESEARCH_WORKBENCH_FEATURE_ID, RESEARCH_WORKBENCH_CONTRACT_VERSION, ResearchWorkbenchReceipt
+from prism_sdk.research_contracts import CONTRACT_FRONTIER_FEATURE_ID, CONTRACT_FRONTIER_CONTRACT_VERSION, ContractFrontierReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1255,4 +1256,29 @@ def test_research_workbench_preserves_multimodal_views_and_locality():
     receipt.validate()
     assert receipt.feature_id == RESEARCH_WORKBENCH_FEATURE_ID
     assert receipt.contract_version == RESEARCH_WORKBENCH_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_contract_frontier_preserves_versioned_manifest_and_migration_loss():
+    receipt = ContractFrontierReceipt(
+        adapter_id="adapter:multimodal",
+        capability_id="capability:harmonize",
+        negotiated_version="2.0.0",
+        disposition="migrated",
+        input_schema="AdapterContractInput2",
+        output_schema="AdapterCapabilityManifest6",
+        modality_order=("imaging", "omics"),
+        effect_order=("exchange:permitted-artifacts",),
+        permission_order=("connect:approved-endpoints",),
+        artifact_digest_order=("a" * 64,),
+        omissions=("legacy contract fields remain unknown after additive migration",),
+        uncertainty=("semantic parity for omitted legacy fields is unmeasured",),
+        semantic_loss=("legacy_fields:unknown",),
+        checks=("effect and permission names canonicalized",),
+        effect_receipts=("exchange:permitted-capability-manifest-and-digests",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == CONTRACT_FRONTIER_FEATURE_ID
+    assert receipt.contract_version == CONTRACT_FRONTIER_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -110,6 +110,8 @@ export const EVALUATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P23-F25" as const;
 export const EVALUATION_ASSURANCE_CONTRACT_VERSION = "evaluation-assurance-harness/1.0" as const;
 export const RESEARCH_WORKBENCH_FEATURE_ID = "AFA-adapter-P24-F18" as const;
 export const RESEARCH_WORKBENCH_CONTRACT_VERSION = "multimodal-research-workbench/1.0" as const;
+export const CONTRACT_FRONTIER_FEATURE_ID = "AFA-adapter-P25-F22" as const;
+export const CONTRACT_FRONTIER_CONTRACT_VERSION = "adapter-contract-frontier/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1842,6 +1844,41 @@ export function validateResearchWorkbenchReceipt(receipt: ResearchWorkbenchRecei
 }
 
 export function researchWorkbenchReceiptDigest(receipt: ResearchWorkbenchReceipt): string { validateResearchWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ContractFrontierReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  adapter_id: string;
+  capability_id: string;
+  negotiated_version: string;
+  disposition: "accepted" | "migrated" | "approval_required" | "blocked" | "incompatible" | "unknown";
+  input_schema: string;
+  output_schema: string;
+  modality_order: string[];
+  effect_order: string[];
+  permission_order: string[];
+  artifact_digest_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  semantic_loss: string[];
+  checks: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateContractFrontierReceipt(receipt: ContractFrontierReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== CONTRACT_FRONTIER_FEATURE_ID || receipt.contract_version !== CONTRACT_FRONTIER_CONTRACT_VERSION) throw new Error("adapter contract frontier schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.adapter_id.trim() || !receipt.capability_id.trim() || !receipt.negotiated_version.trim() || !receipt.input_schema.trim() || !receipt.output_schema.trim() || !receipt.modality_order.length || !receipt.checks.length || !receipt.effect_receipts.length) throw new Error("adapter contract frontier identity, schemas, modalities, checks, effects, locality, or boundary are incomplete");
+  if (!new Set(["accepted", "migrated", "approval_required", "blocked", "incompatible", "unknown"]).has(receipt.disposition)) throw new Error("adapter contract frontier disposition is unknown");
+  for (const values of [receipt.modality_order, receipt.effect_order, receipt.permission_order, receipt.artifact_digest_order, receipt.semantic_loss, receipt.checks, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("adapter contract frontier ordering is invalid");
+  if (receipt.artifact_digest_order.some((value) => !/^[0-9a-f]{64}$/.test(value))) throw new Error("adapter contract frontier artifact digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("adapter contract frontier receipt digest is invalid");
+}
+
+export function contractFrontierReceiptDigest(receipt: ContractFrontierReceipt): string { validateContractFrontierReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
