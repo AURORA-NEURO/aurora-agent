@@ -36,6 +36,7 @@ from prism_sdk.research_contracts import ADAPTER_SEMANTIC_PARITY_FEATURE_ID, ADA
 from prism_sdk.research_contracts import ADAPTER_SCALE_FRONTIER_FEATURE_ID, ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION, ScaleFrontierReceipt
 from prism_sdk.research_contracts import ADVERSARIAL_RECOVERY_FEATURE_ID, ADVERSARIAL_RECOVERY_CONTRACT_VERSION, AdversarialRecoveryReceipt
 from prism_sdk.research_contracts import FEDERATED_COMMONS_FEATURE_ID, FEDERATED_COMMONS_CONTRACT_VERSION, FederatedCommonsReceipt
+from prism_sdk.research_contracts import BOUNDED_EVOLUTION_FEATURE_ID, BOUNDED_EVOLUTION_CONTRACT_VERSION, BoundedEvolutionReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1428,4 +1429,31 @@ def test_federated_commons_preserves_partial_purpose_bound_exchange():
     receipt.validate()
     assert receipt.feature_id == FEDERATED_COMMONS_FEATURE_ID
     assert receipt.contract_version == FEDERATED_COMMONS_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_bounded_evolution_preserves_budget_and_replay_gates():
+    receipt = BoundedEvolutionReceipt(
+        request_id="evolution:adapter",
+        workflow_id="workflow:high-throughput",
+        objective_id="objective:bounded-evolution",
+        disposition="partial",
+        candidate_order=("candidate:a", "candidate:b"),
+        admitted_order=("candidate:a",),
+        blocked_order=("candidate:b",),
+        evidence_order=("a" * 64,),
+        replay_order=("b" * 64, "c" * 64),
+        budget=8,
+        budget_remaining=1,
+        max_concurrency=2,
+        checks=("replay, determinism, safety, evidence, policy, budget, and boundary gates are explicit",),
+        omissions=("candidate:candidate:b:budget-ceiling-exceeded",),
+        uncertainty=(),
+        negative_evidence=("candidate:candidate:b:required-evidence-not-present",),
+        effect_receipts=("effect:admission-receipt-only-no-deployment",),
+        artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == BOUNDED_EVOLUTION_FEATURE_ID
+    assert receipt.contract_version == BOUNDED_EVOLUTION_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

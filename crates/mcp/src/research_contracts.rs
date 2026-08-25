@@ -8,6 +8,10 @@ use crate::resource_discovery_contract::{
     ResourceDiscoveryContractResponse, FEATURE_ID as RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
 };
 use bioprism_adapter::{
+    admit_bounded_evolution, BoundedEvolutionError, BoundedEvolutionReceipt,
+    BoundedEvolutionRequest, BOUNDED_EVOLUTION_FEATURE_ID,
+};
+use bioprism_adapter::{
     admit_computational_execution, ComputationalExecutionReceipt, ComputationalExecutionRequest,
     EXECUTION_CONTROL_FEATURE_ID,
 };
@@ -287,6 +291,7 @@ pub const ADAPTER_SEMANTIC_PARITY_TOOL: &str = "adapter_semantic_parity";
 pub const ADAPTER_SCALE_FRONTIER_TOOL: &str = "adapter_scale_frontier";
 pub const ADVERSARIAL_RECOVERY_TOOL: &str = "adapter_adversarial_recovery";
 pub const FEDERATED_COMMONS_TOOL: &str = "adapter_federated_commons";
+pub const BOUNDED_EVOLUTION_TOOL: &str = "adapter_bounded_evolution";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1529,6 +1534,26 @@ pub fn validate_federated_commons_json(value: &Value) -> Result<FederatedCommons
         .map_err(|error: FederatedCommonsError| error.to_string())?;
     if receipt.feature_id != FEDERATED_COMMONS_FEATURE_ID {
         return Err("federated commons feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn admit_bounded_evolution_json(value: &Value) -> Result<Value, String> {
+    let request: BoundedEvolutionRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid bounded evolution request: {error}"))?;
+    let receipt = admit_bounded_evolution(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize bounded evolution receipt: {error}"))
+}
+
+pub fn validate_bounded_evolution_json(value: &Value) -> Result<BoundedEvolutionReceipt, String> {
+    let receipt: BoundedEvolutionReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid bounded evolution receipt: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: BoundedEvolutionError| error.to_string())?;
+    if receipt.feature_id != BOUNDED_EVOLUTION_FEATURE_ID {
+        return Err("bounded evolution feature id mismatch".into());
     }
     Ok(receipt)
 }

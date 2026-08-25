@@ -81,6 +81,7 @@
 pub mod adapter;
 pub mod adversarial_recovery;
 pub mod analysis_portfolio;
+pub mod bounded_evolution;
 pub mod conformance;
 pub mod context_assurance;
 pub mod contract_frontier;
@@ -139,6 +140,12 @@ pub use analysis_portfolio::{
     AnalysisPortfolioReceipt, AnalysisPortfolioRequest, AnalysisPortfolioVerdict, AnalysisQuestion,
     IdentificationStatus, CONTRACT_VERSION as ANALYSIS_PORTFOLIO_CONTRACT_VERSION,
     FEATURE_ID as ANALYSIS_PORTFOLIO_FEATURE_ID,
+};
+pub use bounded_evolution::{
+    admit_bounded_evolution, BoundedEvolutionError, BoundedEvolutionReceipt,
+    BoundedEvolutionRequest, EvolutionCandidate, EvolutionDisposition,
+    CONTRACT_VERSION as BOUNDED_EVOLUTION_CONTRACT_VERSION,
+    FEATURE_ID as BOUNDED_EVOLUTION_FEATURE_ID,
 };
 pub use conformance::{certify, Check, CheckOutcome, ConformanceReport, Status};
 pub use context_assurance::{

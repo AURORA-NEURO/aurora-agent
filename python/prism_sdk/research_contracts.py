@@ -131,6 +131,8 @@ ADVERSARIAL_RECOVERY_FEATURE_ID = "AFA-adapter-P30-F24"
 ADVERSARIAL_RECOVERY_CONTRACT_VERSION = "adapter-adversarial-recovery/1.0"
 FEDERATED_COMMONS_FEATURE_ID = "AFA-adapter-P31-F22"
 FEDERATED_COMMONS_CONTRACT_VERSION = "adapter-federated-commons/1.0"
+BOUNDED_EVOLUTION_FEATURE_ID = "AFA-adapter-P32-F23"
+BOUNDED_EVOLUTION_CONTRACT_VERSION = "adapter-bounded-evolution/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3224,3 +3226,49 @@ class FederatedCommonsReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "federation_id": self.federation_id, "objective_id": self.objective_id, "required_purpose": self.required_purpose, "disposition": self.disposition, "institution_order": list(self.institution_order), "admitted_order": list(self.admitted_order), "denied_order": list(self.denied_order), "semantic_profile_order": list(self.semantic_profile_order), "artifact_order": list(self.artifact_order), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class BoundedEvolutionReceipt:
+    request_id: str
+    workflow_id: str
+    objective_id: str
+    disposition: str
+    candidate_order: tuple[str, ...]
+    admitted_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    replay_order: tuple[str, ...]
+    budget: int
+    budget_remaining: int
+    max_concurrency: int
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = BOUNDED_EVOLUTION_FEATURE_ID
+    contract_version: str = BOUNDED_EVOLUTION_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != BOUNDED_EVOLUTION_FEATURE_ID or self.contract_version != BOUNDED_EVOLUTION_CONTRACT_VERSION:
+            raise ResearchContractError("bounded evolution schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.objective_id.strip() or not self.candidate_order or not self.checks or not self.effect_receipts or self.budget_remaining > self.budget or self.max_concurrency <= 0:
+            raise ResearchContractError("bounded evolution identity, candidates, budget, checks, effects, locality, or boundary are incomplete")
+        if self.disposition not in {"admitted", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("bounded evolution disposition is unknown")
+        for values in (self.candidate_order, self.admitted_order, self.blocked_order, self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("bounded evolution ordering is invalid")
+        for values in (self.evidence_order, self.replay_order):
+            if tuple(sorted(set(values))) != values or any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in values):
+                raise ResearchContractError("bounded evolution digest ordering is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("bounded evolution receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "objective_id": self.objective_id, "disposition": self.disposition, "candidate_order": list(self.candidate_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "evidence_order": list(self.evidence_order), "replay_order": list(self.replay_order), "budget": self.budget, "budget_remaining": self.budget_remaining, "max_concurrency": self.max_concurrency, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
