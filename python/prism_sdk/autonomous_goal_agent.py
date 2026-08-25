@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from .authoring import content_digest
 from .autonomy import AUTONOMOUS_DOMAINS, AutonomousTaskOrchestrator
 from .autonomous_goal_control_loop import (
     AutonomousGoalBanditLearner,
@@ -27,6 +28,7 @@ from .autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator
 from .autonomous_goal_scheduler import AutonomousGoalScheduleRow
 from .autonomous_goal_worker import AutonomousGoalExecutionRequest, AutonomousGoalWorker
 from .autonomous_goal_worker_journal import AutonomousGoalWorkerJournal
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
 
 
@@ -127,7 +129,8 @@ class AutonomousGoalAgentRuntime:
         ledger: AutonomousGoalLedger,
         *,
         agent: Any | None = None,
-        task_resolver: GoalAgentTaskResolver,
+        task_resolver: GoalAgentTaskResolver | None = None,
+        protected_rehydration: AutonomousProtectedRehydrationAdapter | None = None,
         run_options_factory: GoalAgentRunOptionsFactory | None = None,
         action_handoff_resolver: GoalAgentActionHandoffResolver | None = None,
         evaluator: GoalLoopEvaluator | None = None,
@@ -145,8 +148,12 @@ class AutonomousGoalAgentRuntime:
                 _fail("agent must be bound to the supplied orchestrator")
         if not isinstance(ledger, AutonomousGoalLedger):
             _fail("ledger must be an AutonomousGoalLedger")
-        if not callable(task_resolver):
-            _fail("task_resolver must be callable")
+        if task_resolver is not None and not callable(task_resolver):
+            _fail("task_resolver must be callable or None")
+        if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousProtectedRehydrationAdapter):
+            _fail("protected_rehydration must be an AutonomousProtectedRehydrationAdapter or None")
+        if task_resolver is None and protected_rehydration is None:
+            _fail("one of task_resolver or protected_rehydration is required")
         if run_options_factory is not None and not callable(run_options_factory):
             _fail("run_options_factory must be callable or None")
         if action_handoff_resolver is not None and not callable(action_handoff_resolver):
@@ -169,6 +176,7 @@ class AutonomousGoalAgentRuntime:
         self.agent = agent
         self.ledger = ledger
         self.task_resolver = task_resolver
+        self.protected_rehydration = protected_rehydration
         self.run_options_factory = run_options_factory
         self.action_handoff_resolver = action_handoff_resolver
         self.recovery = recovery
@@ -189,9 +197,28 @@ class AutonomousGoalAgentRuntime:
     def _resolve(self, goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) -> Mapping[str, Any]:
         if goal.domain not in AUTONOMOUS_DOMAINS:
             _fail(f"goal {goal.goal_id} has an unsupported autonomous domain")
-        task = self.task_resolver(goal, row)
+        if self.task_resolver is not None:
+            task = self.task_resolver(goal, row)
+        else:
+            receipt = {
+                "goal_id": goal.goal_id,
+                "task_digest": goal.task_digest,
+                "value_digest": goal.task_digest,
+                "domain": goal.domain,
+                "attempt": goal.attempt,
+                "revision": goal.revision,
+                "request_digest": content_digest(row.to_dict()),
+            }
+            task = self.protected_rehydration.resolve_receipt(
+                receipt,
+                domain=goal.domain,
+                purpose="goal_task",
+                value_kind="goal_task",
+                one_time=False,
+                digest_scheme="utf8_sha256",
+            )
         if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
-            _fail(f"task_resolver returned an invalid task for goal {goal.goal_id}")
+            _fail(f"resolved task is invalid for goal {goal.goal_id}")
         resolved_handoff = None if self.action_handoff_resolver is None else self.action_handoff_resolver(goal, row, task)
         binding = _action_handoff(resolved_handoff, goal)
         # Options are intentionally fetched at execution time, not placed in the worker request.
@@ -236,6 +263,7 @@ class AutonomousGoalAgentRuntime:
             "domains": list(AUTONOMOUS_DOMAINS),
             "execution_surface": "autonomous_goal_action_handoff_facade" if self.action_handoff_resolver is not None else ("autonomous_agent_facade" if self.agent is not None else "autonomous_task_orchestrator"),
             "action_handoff_execution": "verified_handoff_replay_before_run_boundary" if self.action_handoff_resolver is not None else "not_configured",
+            "task_rehydration": "protected_receipt_adapter_fallback" if self.task_resolver is None else "caller_task_resolver_precedence",
             "recovery_execution": "ordered_journal_then_control_checkpoint" if self.recovery is not None else "caller_composed",
             "retention": GOAL_AGENT_RUNTIME_RETENTION,
             "secret_material": "never_returned",

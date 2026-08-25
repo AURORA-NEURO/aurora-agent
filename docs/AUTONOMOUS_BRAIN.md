@@ -10786,3 +10786,14 @@ still supplies the resolver, secret storage, authorization decision, encryption,
 external effect reconciliation. The TypeScript domain vocabulary is kept in a dependency-leaf
 module so importing the protected boundary directly or through the public SDK barrel is safe even
 though the autonomous façade itself composes evidence and connector runtimes.
+
+Long-horizon goal execution now uses the same protected adapter when no bespoke task callback is
+provided. The goal ledger keeps only its existing raw UTF-8 task digest; the runtime reconstructs a
+metadata-only `goal_task` receipt and asks the caller-owned adapter to resolve it immediately before
+execution. Explicit `task_resolver` callbacks remain authoritative for applications that already
+own task lookup. Because generic receipts use canonical-JSON digests while goal identities use raw
+UTF-8 SHA-256, the adapter exposes bounded `canonical_json` and `utf8_sha256` schemes and includes
+the selected scheme in the opaque binding. This preserves both the long-horizon goal identity and
+the shared protected boundary's replay, tenant, authorization, expiry, and mismatch fences across
+all twelve domains. The task text and any private runtime options remain transient and are absent
+from goal results, journals, snapshots, and recovery projections.

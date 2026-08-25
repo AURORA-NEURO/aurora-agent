@@ -137,6 +137,24 @@ class AutonomousProtectedRehydrationTests(unittest.TestCase):
         self.assertNotIn("transient-domain-secret", encoded)
         self.assertNotIn('"value":', encoded.lower())
 
+    def test_receipt_adapter_supports_explicit_utf8_task_digest_bindings(self) -> None:
+        value = "raw task digest keeps the goal identity contract"
+        values: dict[str, str] = {_digest(value): value}
+        boundary = AutonomousProtectedRehydrationBoundary(
+            self._context(),
+            lambda reference, _context: values[reference.value_digest],
+            authorizer=lambda _reference, _context: True,
+            clock=lambda: 100.0,
+        )
+        adapter = AutonomousProtectedRehydrationAdapter(boundary)
+        receipt = {"goal_id": "goal-coding", "task_digest": _digest(value), "value_digest": _digest(value), "domain": "coding"}
+        self.assertEqual(
+            adapter.resolve_receipt(receipt, purpose="goal_task", value_kind="goal_task", one_time=False, digest_scheme="utf8_sha256", now=100.0),
+            value,
+        )
+        with self.assertRaises(AutonomousProtectedRehydrationError):
+            adapter.resolve_receipt(receipt, purpose="goal_task", digest_scheme="unsupported", now=100.0)
+
     def test_snapshot_restore_is_tenant_bound_and_cas_safe(self) -> None:
         source = AutonomousProtectedRehydrationBoundary(self._context(), lambda _reference, _context: "token", clock=lambda: 100.0, max_ttl_seconds=60.0)
         source.issue_for_value("persist", "token", domain="science", purpose="provider_credential", issued_at=100.0, expires_at=150.0)

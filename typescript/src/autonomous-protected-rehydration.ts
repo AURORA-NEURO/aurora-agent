@@ -8,7 +8,7 @@
 
 import { ArgumentError, isObject } from "./errors.js";
 import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous-domains.js";
-import { canonicalJson, digestJsonSync } from "./tooling.js";
+import { canonicalJson, digestBytesSync, digestJsonSync } from "./tooling.js";
 
 export const AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA = "bioprism-typescript-autonomous-protected-rehydration/0.1" as const;
 export const AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA = "bioprism-typescript-autonomous-protected-rehydration-context/0.1" as const;
@@ -19,6 +19,7 @@ export const MAX_AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCES = 4_096;
 export const MAX_AUTONOMOUS_PROTECTED_REHYDRATION_ATTEMPTS = 8;
 export const MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES = 1_000_000;
 export const MAX_AUTONOMOUS_PROTECTED_REHYDRATION_TTL_SECONDS = 31 * 86_400;
+export const AUTONOMOUS_PROTECTED_REHYDRATION_DIGEST_SCHEMES = ["canonical_json", "utf8_sha256"] as const;
 
 const DOMAINS = [...AUTONOMOUS_DOMAIN_NAMES] as AutonomousDomainName[];
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
@@ -72,6 +73,19 @@ export function protectedValueDigest(value: unknown): string {
   } catch (error) {
     throw new AutonomousProtectedRehydrationError("protected value must be canonical JSON", { cause: error });
   }
+}
+
+type AutonomousProtectedRehydrationDigestScheme = typeof AUTONOMOUS_PROTECTED_REHYDRATION_DIGEST_SCHEMES[number];
+
+function digestScheme(value: unknown): AutonomousProtectedRehydrationDigestScheme {
+  if (typeof value !== "string" || !AUTONOMOUS_PROTECTED_REHYDRATION_DIGEST_SCHEMES.includes(value as AutonomousProtectedRehydrationDigestScheme)) fail("digest scheme is unsupported");
+  return value as AutonomousProtectedRehydrationDigestScheme;
+}
+
+function digestForScheme(value: unknown, scheme: AutonomousProtectedRehydrationDigestScheme): string {
+  if (scheme === "canonical_json") return protectedValueDigest(value);
+  if (typeof value !== "string") fail("utf8_sha256 protected values must be strings");
+  return digestBytesSync(new TextEncoder().encode(value));
 }
 
 export class AutonomousProtectedRehydrationContext {
@@ -147,31 +161,32 @@ export class AutonomousProtectedRehydrationAdapter {
 
   private metadata(receipt: unknown): Record<string, unknown> {
     if (!isObject(receipt)) fail("receipt must be a metadata object");
-    const allowed = ["receipt_digest", "request_digest", "request_id", "dispatch_id", "work_id", "value_digest", "payload_digest", "domain", "source_id", "connector_id", "plan_digest", "workflow_digest", "stage_id", "attempt"];
+    const allowed = ["receipt_digest", "request_digest", "request_id", "dispatch_id", "work_id", "value_digest", "payload_digest", "domain", "source_id", "connector_id", "plan_digest", "workflow_digest", "stage_id", "attempt", "goal_id", "goal_digest", "task_digest", "schedule_digest", "claim_digest", "revision", "execution_binding_digest"];
     return Object.fromEntries(allowed.filter((key) => receipt[key] !== undefined && receipt[key] !== null).map((key) => [key, receipt[key]]));
   }
 
-  private binding(receipt: unknown, purpose: string): { referenceId: string; valueDigest: string } {
+  private binding(receipt: unknown, purpose: string, digest_scheme: AutonomousProtectedRehydrationDigestScheme): { referenceId: string; valueDigest: string } {
     const metadata = this.metadata(receipt);
     const valueDigest = typeof metadata.value_digest === "string" ? metadata.value_digest : metadata.payload_digest;
     if (typeof valueDigest !== "string") fail("receipt has no protected value or payload digest");
     digest("receipt protected value digest", valueDigest);
     const normalizedPurpose = identifier("receipt purpose", purpose);
-    const bindingDigest = digestJsonSync({ schema: AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA, purpose: normalizedPurpose, receipt: metadata });
+    const bindingDigest = digestJsonSync({ schema: AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA, purpose: normalizedPurpose, digest_scheme, receipt: metadata });
     return { referenceId: `rehydrate-${bindingDigest.slice(0, 48)}`, valueDigest };
   }
 
-  resolveReceipt(receipt: unknown, options: { domain?: AutonomousDomainName; purpose?: string; valueKind?: string; oneTime?: boolean; now?: number } = {}): unknown {
+  resolveReceipt(receipt: unknown, options: { domain?: AutonomousDomainName; purpose?: string; valueKind?: string; oneTime?: boolean; now?: number; digestScheme?: string } = {}): unknown {
     const metadata = this.metadata(receipt);
     const domain = options.domain ?? (typeof metadata.domain === "string" ? metadata.domain as AutonomousDomainName : undefined);
     if (!domain || !this.boundary.context.allowedDomains.includes(domain)) fail("receipt domain is outside the active context scope");
     const purpose = options.purpose ?? "protected_receipt_value";
-    const binding = this.binding(metadata, purpose);
+    const digest_scheme = digestScheme(options.digestScheme ?? "canonical_json");
+    const binding = this.binding(metadata, purpose, digest_scheme);
     this.boundary.issue(binding.referenceId, { domain, purpose, valueDigest: binding.valueDigest, valueKind: options.valueKind ?? "opaque", oneTime: options.oneTime ?? false });
-    return this.boundary.resolve(binding.referenceId, { now: options.now }).value;
+    return this.boundary.resolve(binding.referenceId, { now: options.now, valueDigestor: (value) => digestForScheme(value, digest_scheme) }).value;
   }
 
-  resolver(options: { domain?: AutonomousDomainName; purpose?: string; valueKind?: string; oneTime?: boolean } = {}): (receipt: unknown) => unknown {
+  resolver(options: { domain?: AutonomousDomainName; purpose?: string; valueKind?: string; oneTime?: boolean; digestScheme?: string } = {}): (receipt: unknown) => unknown {
     return (receipt) => this.resolveReceipt(receipt, options);
   }
 }
@@ -362,7 +377,7 @@ export class AutonomousProtectedRehydrationBoundary {
     this.references.set(reference.reference_id, this.replace(reference, { attempts, status: attempts >= this.maxAttempts ? "quarantined" : reference.status, last_error_class: identifier("errorClass", errorClass) }));
   }
 
-  resolve(referenceId: string, options: { now?: number } = {}): AutonomousProtectedRehydrationResult {
+  resolve(referenceId: string, options: { now?: number; valueDigestor?: (value: unknown) => string } = {}): AutonomousProtectedRehydrationResult {
     const now = numberBound("resolve now", options.now ?? this.clock(), 0, 9_223_372_036_854_775);
     const normalizedId = identifier("referenceId", referenceId);
     const reference = this.references.get(normalizedId);
@@ -389,7 +404,7 @@ export class AutonomousProtectedRehydrationBoundary {
     let value: unknown;
     try {
       value = this.resolver(reference, this.context);
-      if (protectedValueDigest(value) !== reference.value_digest) {
+      if ((options.valueDigestor ?? protectedValueDigest)(value) !== reference.value_digest) {
         this.failure(reference, "value_digest_mismatch");
         fail("resolver returned a value with a different digest");
       }

@@ -13,6 +13,9 @@ import {
   sealAutonomousGoalControlLoopSnapshot,
   validateAutonomousGoalControlLoopSnapshot,
   AutonomousGoalAgentRuntime,
+  AutonomousProtectedRehydrationAdapter,
+  AutonomousProtectedRehydrationBoundary,
+  AutonomousProtectedRehydrationContext,
   AutonomousActionAdmissionController,
   AutonomousBrainFacade,
   InMemoryAutonomousActionAdmissionLedger,
@@ -638,6 +641,45 @@ test("goal agent runtime bridges the real facade across every domain without ret
   assert.equal(serialized.includes("private_runtime_handle"), false);
   assert.equal(runtime.metadata().domain_count, domains.length);
   assert.equal(runtime.metadata().execution_surface, "autonomous_agent_facade");
+  assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
+test("goal agent runtime uses protected task rehydration across every domain", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const values = new Map();
+  const protectedContext = new AutonomousProtectedRehydrationContext({ tenantId: "tenant-a", actorId: "actor-a", sessionId: "session-a", authorizationDigest: "a".repeat(64) });
+  const boundary = new AutonomousProtectedRehydrationBoundary(protectedContext, (reference) => values.get(reference.value_digest), { authorizer: () => true, clock: () => 600 });
+  const protectedRehydration = new AutonomousProtectedRehydrationAdapter(boundary);
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 600 });
+  for (const domain of domains) {
+    const task = `protected agent task ${domain}`;
+    values.set(goalTaskDigest(task), task);
+    ledger.create({ goal_id: `protected-agent-${domain}`, task_digest: goalTaskDigest(task), domain, now_ns: 0 });
+  }
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in protected task test"); } }));
+  const calls = [];
+  agent.run = async (task, options) => { calls.push({ kind: "single", task, options }); return { status: "completed" }; };
+  agent.runCrossDomain = async (task, options) => { calls.push({ kind: "cross", task, options }); return { status: "completed" }; };
+  const runtime = new AutonomousGoalAgentRuntime({
+    agent,
+    ledger,
+    protected_rehydration: protectedRehydration,
+    run_options_factory: (goal) => ({
+      private_runtime_handle: { token: `private-${goal.goal_id}` },
+      ...(goal.domain === "cross_domain" ? { subtasks: [{ domain: "coding", task: "protected child task" }] } : {}),
+    }),
+    evaluator: (cycle) => cycle.batch.runs.map((run) => ({ goal_id: run.goal_id, evaluator_id: "protected-agent-evaluator", evaluator_version: "1", reward: 0.75, passed: true })),
+  });
+  const result = await runtime.run({ schedule_options: { now_ns: 600, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains } });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.equal(result.evaluation_count, domains.length);
+  assert.equal(calls.length, domains.length);
+  assert.deepEqual(new Set(calls.map((call) => call.kind)), new Set(["single", "cross"]));
+  assert.equal(runtime.metadata().task_rehydration, "protected_receipt_adapter_fallback");
+  const serialized = JSON.stringify(result.toJSON());
+  assert.equal(serialized.includes("protected agent task"), false);
+  assert.equal(serialized.includes("protected child task"), false);
+  assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.status)), new Set(["completed"]));
   assert.equal(ledger.verifyIntegrity().ok, true);
 });
 

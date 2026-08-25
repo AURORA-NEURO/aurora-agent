@@ -42,6 +42,11 @@ from prism_sdk.autonomous_goal_worker_journal import (
     JsonAutonomousGoalWorkerJournalPersistence,
     AutonomousGoalWorkerJournalPersistenceCoordinator,
 )
+from prism_sdk.autonomous_protected_rehydration import (
+    AutonomousProtectedRehydrationAdapter,
+    AutonomousProtectedRehydrationBoundary,
+    AutonomousProtectedRehydrationContext,
+)
 
 
 def _digest(value: str) -> str:
@@ -816,6 +821,72 @@ def test_goal_agent_runtime_bridges_model_facade_across_every_domain_without_ret
     assert "private child task" not in serialized
     assert "private_runtime_handle" not in serialized
     assert runtime.metadata()["domain_count"] == len(AUTONOMOUS_DOMAINS)
+    assert ledger.verify_integrity()["ok"] is True
+
+
+def test_goal_agent_runtime_uses_protected_task_rehydration_across_every_domain() -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def run_single(**kwargs):
+        calls.append(("single", kwargs))
+        return SimpleNamespace(status="completed")
+
+    def run_cross(**kwargs):
+        calls.append(("cross", kwargs))
+        return SimpleNamespace(status="completed")
+
+    orchestrator.run = run_single
+    orchestrator.run_cross_domain = run_cross
+    values: dict[str, str] = {}
+    context = AutonomousProtectedRehydrationContext("tenant-a", "actor-a", "session-a", "a" * 64)
+    boundary = AutonomousProtectedRehydrationBoundary(
+        context,
+        lambda reference, _context: values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 600.0,
+    )
+    protected_rehydration = AutonomousProtectedRehydrationAdapter(boundary)
+    ledger = AutonomousGoalLedger(clock=lambda: 600, max_goals=len(AUTONOMOUS_DOMAINS))
+    for domain in AUTONOMOUS_DOMAINS:
+        task = f"protected agent task {domain}"
+        values[goal_task_digest(task)] = task
+        ledger.create(goal_id=f"protected-agent-{domain}", task_digest=_digest(task), domain=domain, now_ns=0)
+
+    def run_options(goal, _row):
+        options = {"private_runtime_handle": object()}
+        if goal.domain == "cross_domain":
+            options["subtasks"] = ({"domain": "coding", "task": "protected child task"},)
+        return options
+
+    runtime = AutonomousGoalAgentRuntime(
+        orchestrator,
+        ledger,
+        protected_rehydration=protected_rehydration,
+        run_options_factory=run_options,
+        evaluator=lambda cycle: [
+            {"goal_id": run.goal_id, "evaluator_id": "protected-agent-evaluator", "evaluator_version": "1", "reward": 0.75, "passed": True}
+            for run in cycle.batch.runs
+        ],
+    )
+    result = runtime.run(
+        schedule_options={
+            "now_ns": 600,
+            "max_selected": len(AUTONOMOUS_DOMAINS),
+            "max_concurrent": len(AUTONOMOUS_DOMAINS),
+            "required_domains": list(AUTONOMOUS_DOMAINS),
+        }
+    )
+
+    assert result.stop_reason == "all_terminal"
+    assert result.evaluation_count == len(AUTONOMOUS_DOMAINS)
+    assert len(calls) == len(AUTONOMOUS_DOMAINS)
+    assert {kind for kind, _ in calls} == {"single", "cross"}
+    assert runtime.metadata()["task_rehydration"] == "protected_receipt_adapter_fallback"
+    serialized = json.dumps(result.to_dict(), sort_keys=True)
+    assert "protected agent task" not in serialized
+    assert "protected child task" not in serialized
+    assert all(record.status == "completed" for record in ledger.list(limit=len(AUTONOMOUS_DOMAINS)))
     assert ledger.verify_integrity()["ok"] is True
 
 

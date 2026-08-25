@@ -41,6 +41,8 @@ import {
 } from "./autonomous-goals.js";
 import type { AutonomousGoalScheduleRow } from "./autonomous-goal-scheduler.js";
 import type { JsonObject } from "./types.js";
+import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
+import { digestJsonSync } from "./tooling.js";
 
 export const AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA = "bioprism-autonomous-goal-agent-runtime/0.1" as const;
 export const AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION = "metadata_only_goal_agent_bridge;tasks_prompts_parameters_credentials_and_results_not_retained" as const;
@@ -63,7 +65,7 @@ function fail(message: string): never {
 }
 
 function task(value: unknown, goalId: string): string {
-  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > 32_000) fail(`task_resolver returned an invalid task for goal ${goalId}`);
+  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > 32_000) fail(`resolved task is invalid for goal ${goalId}`);
   return value;
 }
 
@@ -125,6 +127,7 @@ export class AutonomousGoalAgentRuntime {
   readonly agent: AutonomousAgent;
   readonly ledger: InMemoryAutonomousGoalLedger;
   readonly task_resolver: AutonomousGoalAgentTaskResolver;
+  readonly protected_rehydration: AutonomousProtectedRehydrationAdapter | undefined;
   readonly run_options_factory: AutonomousGoalAgentRunOptionsFactory | undefined;
   readonly action_handoff_resolver: AutonomousGoalAgentActionHandoffResolver | undefined;
   readonly brain: AutonomousBrainFacade | undefined;
@@ -136,7 +139,8 @@ export class AutonomousGoalAgentRuntime {
   constructor(options: {
     agent: AutonomousAgent;
     ledger: InMemoryAutonomousGoalLedger;
-    task_resolver: AutonomousGoalAgentTaskResolver;
+    task_resolver?: AutonomousGoalAgentTaskResolver;
+    protected_rehydration?: AutonomousProtectedRehydrationAdapter;
     run_options_factory?: AutonomousGoalAgentRunOptionsFactory;
     action_handoff_resolver?: AutonomousGoalAgentActionHandoffResolver;
     brain?: AutonomousBrainFacade;
@@ -148,7 +152,9 @@ export class AutonomousGoalAgentRuntime {
   }) {
     if (!(options?.agent instanceof AutonomousAgent)) fail("agent must be an AutonomousAgent");
     if (!(options.ledger instanceof InMemoryAutonomousGoalLedger)) fail("ledger must be an InMemoryAutonomousGoalLedger");
-    if (typeof options.task_resolver !== "function") fail("task_resolver must be callable");
+    if (options.task_resolver !== undefined && typeof options.task_resolver !== "function") fail("task_resolver must be callable or undefined");
+    if (options.protected_rehydration !== undefined && !(options.protected_rehydration instanceof AutonomousProtectedRehydrationAdapter)) fail("protected_rehydration must be an AutonomousProtectedRehydrationAdapter or undefined");
+    if (options.task_resolver === undefined && options.protected_rehydration === undefined) fail("one of task_resolver or protected_rehydration is required");
     if (options.run_options_factory !== undefined && typeof options.run_options_factory !== "function") fail("run_options_factory must be callable or undefined");
     if (options.action_handoff_resolver !== undefined && typeof options.action_handoff_resolver !== "function") fail("action_handoff_resolver must be callable or undefined");
     if (options.brain !== undefined && !(options.brain instanceof AutonomousBrainFacade)) fail("brain must be an AutonomousBrainFacade or undefined");
@@ -158,7 +164,8 @@ export class AutonomousGoalAgentRuntime {
     if (typeof batchIdPrefix !== "string" || !batchIdPrefix.trim() || batchIdPrefix.includes("\u0000") || new TextEncoder().encode(batchIdPrefix).byteLength > 128) fail("batch_id_prefix is outside its bounded contract");
     this.agent = options.agent;
     this.ledger = options.ledger;
-    this.task_resolver = options.task_resolver;
+    this.task_resolver = options.task_resolver ?? (async () => { throw new ArgumentError("protected task resolver was not initialized"); });
+    this.protected_rehydration = options.protected_rehydration;
     this.run_options_factory = options.run_options_factory;
     this.action_handoff_resolver = options.action_handoff_resolver;
     this.brain = options.brain;
@@ -169,7 +176,23 @@ export class AutonomousGoalAgentRuntime {
     this.worker = new AutonomousGoalWorker({
       ledger: this.ledger,
       resolver: async (goal, row) => {
-        const resolvedTask = task(await this.task_resolver(goal, row), goal.goal_id);
+        const resolvedTask = task(
+          options.task_resolver === undefined
+            ? this.protected_rehydration!.resolveReceipt(
+                {
+                  goal_id: goal.goal_id,
+                  task_digest: goal.task_digest,
+                  value_digest: goal.task_digest,
+                  domain: goal.domain,
+                  attempt: goal.attempt,
+                  revision: goal.revision,
+                  request_digest: digestJsonSync(row),
+                },
+                { domain: goal.domain as AutonomousDomainName, purpose: "goal_task", valueKind: "goal_task", oneTime: false, digestScheme: "utf8_sha256" },
+              )
+            : await this.task_resolver(goal, row),
+          goal.goal_id,
+        );
         const resolvedHandoff = this.action_handoff_resolver === undefined ? undefined : await this.action_handoff_resolver(goal, row, resolvedTask);
         const binding = actionHandoff(resolvedHandoff, goal);
         return { task: resolvedTask, parameters: binding === undefined ? {} : { action_handoff: binding as unknown as JsonObject } };
@@ -205,7 +228,7 @@ export class AutonomousGoalAgentRuntime {
   }
 
   metadata(): Record<string, unknown> {
-    return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], execution_surface: this.action_handoff_resolver === undefined ? "autonomous_agent_facade" : "autonomous_goal_action_handoff_facade", action_handoff_execution: this.action_handoff_resolver === undefined ? "not_configured" : "verified_handoff_replay_before_run_boundary", recovery_execution: this.recovery === undefined ? "caller_composed" : "ordered_journal_then_control_checkpoint", retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], execution_surface: this.action_handoff_resolver === undefined ? "autonomous_agent_facade" : "autonomous_goal_action_handoff_facade", action_handoff_execution: this.action_handoff_resolver === undefined ? "not_configured" : "verified_handoff_replay_before_run_boundary", task_rehydration: this.protected_rehydration === undefined ? "caller_task_resolver_precedence" : "protected_receipt_adapter_fallback", recovery_execution: this.recovery === undefined ? "caller_composed" : "ordered_journal_then_control_checkpoint", retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
   }
 
   async restore(options: { now_ns?: number } = {}): Promise<AutonomousGoalRecoveryReport> {

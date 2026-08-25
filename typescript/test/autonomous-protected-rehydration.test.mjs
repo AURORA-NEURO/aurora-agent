@@ -13,6 +13,7 @@ import {
   AutonomousMemoryConsolidator,
   JsonAutonomousProtectedRehydrationPersistence,
   TransactionalJsonAutonomousProtectedRehydrationPersistence,
+  digestBytesSync,
   protectedValueDigest,
   validateAutonomousProtectedRehydrationSnapshot,
 } from "../dist/index.js";
@@ -90,6 +91,17 @@ test("receipt adapter rehydrates all domains without retaining payloads", () => 
   assert.deepEqual(snapshot.coverage.map((row) => row.reference_count), AUTONOMOUS_DOMAIN_NAMES.map(() => 1));
   assert.equal(JSON.stringify(snapshot).includes("transient-domain-secret"), false);
   assert.equal(JSON.stringify(snapshot).toLowerCase().includes('"value":'), false);
+});
+
+test("receipt adapter supports explicit UTF-8 task digest bindings", () => {
+  const value = "raw task digest keeps the goal identity contract";
+  const valueDigest = digestBytesSync(new TextEncoder().encode(value));
+  const values = new Map([[valueDigest, value]]);
+  const boundary = new AutonomousProtectedRehydrationBoundary(context(), (reference) => values.get(reference.value_digest), { authorizer: () => true, clock: () => 100 });
+  const adapter = new AutonomousProtectedRehydrationAdapter(boundary);
+  const receipt = { goal_id: "goal-coding", task_digest: valueDigest, value_digest: valueDigest, domain: "coding" };
+  assert.equal(adapter.resolveReceipt(receipt, { purpose: "goal_task", valueKind: "goal_task", oneTime: false, digestScheme: "utf8_sha256", now: 100 }), value);
+  assert.throws(() => adapter.resolveReceipt(receipt, { purpose: "goal_task", digestScheme: "unsupported", now: 100 }), AutonomousProtectedRehydrationError);
 });
 
 test("snapshot restore is tenant-bound and CAS-safe", () => {

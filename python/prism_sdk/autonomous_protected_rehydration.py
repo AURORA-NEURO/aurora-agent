@@ -18,6 +18,7 @@ The resolver is the integration point for one supplied by the application or dep
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import math
 import re
@@ -37,6 +38,7 @@ MAX_AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCES = 4_096
 MAX_AUTONOMOUS_PROTECTED_REHYDRATION_ATTEMPTS = 8
 MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES = 1_000_000
 MAX_AUTONOMOUS_PROTECTED_REHYDRATION_TTL_SECONDS = 31 * 86_400
+AUTONOMOUS_PROTECTED_REHYDRATION_DIGEST_SCHEMES = ("canonical_json", "utf8_sha256")
 
 _DOMAINS = tuple(AUTONOMOUS_DOMAIN_NAMES)
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
@@ -115,6 +117,22 @@ def protected_value_digest(value: Any) -> str:
         return content_digest(value)
     except (TypeError, ValueError, OverflowError) as error:
         raise AutonomousProtectedRehydrationError("protected value must be canonical JSON") from error
+
+
+def _digest_scheme(value: Any) -> str:
+    if value not in AUTONOMOUS_PROTECTED_REHYDRATION_DIGEST_SCHEMES:
+        _fail("digest scheme is unsupported")
+    return value
+
+
+def _digest_for_scheme(value: Any, scheme: str) -> str:
+    if scheme == "canonical_json":
+        return protected_value_digest(value)
+    if scheme == "utf8_sha256":
+        if not isinstance(value, str):
+            _fail("utf8_sha256 protected values must be strings")
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    _fail("digest scheme is unsupported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,17 +280,18 @@ class AutonomousProtectedRehydrationAdapter:
         allowed = (
             "receipt_digest", "request_digest", "request_id", "dispatch_id", "work_id", "value_digest", "payload_digest",
             "domain", "source_id", "connector_id", "plan_digest", "workflow_digest", "stage_id", "attempt",
+            "goal_id", "goal_digest", "task_digest", "schedule_digest", "claim_digest", "revision", "execution_binding_digest",
         )
         return {key: receipt[key] for key in allowed if key in receipt and receipt[key] is not None}
 
-    def _binding(self, receipt: Mapping[str, Any], purpose: str) -> tuple[str, str]:
+    def _binding(self, receipt: Mapping[str, Any], purpose: str, digest_scheme: str) -> tuple[str, str]:
         metadata = self._metadata(receipt)
         value_digest = metadata.get("value_digest") or metadata.get("payload_digest")
         if not isinstance(value_digest, str):
             _fail("receipt has no protected value or payload digest")
         _digest("receipt protected value digest", value_digest)
         purpose = _identifier("receipt purpose", purpose)
-        binding = content_digest({"schema": AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA, "purpose": purpose, "receipt": metadata})
+        binding = content_digest({"schema": AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA, "purpose": purpose, "digest_scheme": digest_scheme, "receipt": metadata})
         return f"rehydrate-{binding[:48]}", value_digest
 
     def resolve_receipt(
@@ -284,12 +303,14 @@ class AutonomousProtectedRehydrationAdapter:
         value_kind: str = "opaque",
         one_time: bool = False,
         now: float | None = None,
+        digest_scheme: str = "canonical_json",
     ) -> Any:
         metadata = self._metadata(receipt)
         resolved_domain = metadata.get("domain") if domain is None else domain
         if resolved_domain not in self.boundary.context.allowed_domains:
             _fail("receipt domain is outside the active context scope")
-        reference_id, value_digest = self._binding(metadata, purpose)
+        digest_scheme = _digest_scheme(digest_scheme)
+        reference_id, value_digest = self._binding(metadata, purpose, digest_scheme)
         self.boundary.issue(
             reference_id,
             domain=resolved_domain,
@@ -298,7 +319,7 @@ class AutonomousProtectedRehydrationAdapter:
             value_kind=value_kind,
             one_time=one_time,
         )
-        return self.boundary.resolve(reference_id, now=now).value
+        return self.boundary.resolve(reference_id, now=now, value_digestor=lambda value: _digest_for_scheme(value, digest_scheme)).value
 
     def resolver(
         self,
@@ -307,8 +328,9 @@ class AutonomousProtectedRehydrationAdapter:
         purpose: str = "protected_receipt_value",
         value_kind: str = "opaque",
         one_time: bool = False,
+        digest_scheme: str = "canonical_json",
     ) -> Callable[[Mapping[str, Any]], Any]:
-        return lambda receipt: self.resolve_receipt(receipt, domain=domain, purpose=purpose, value_kind=value_kind, one_time=one_time)
+        return lambda receipt: self.resolve_receipt(receipt, domain=domain, purpose=purpose, value_kind=value_kind, one_time=one_time, digest_scheme=digest_scheme)
 
 
 Resolver = Callable[[AutonomousProtectedRehydrationReference, AutonomousProtectedRehydrationContext], Any]
@@ -487,7 +509,13 @@ class AutonomousProtectedRehydrationBoundary:
         status = "quarantined" if attempts >= self.max_attempts else reference.status
         self._references[reference.reference_id] = self._replace(reference, attempts=attempts, status=status, last_error_class=_identifier("error_class", error_class))
 
-    def resolve(self, reference_id: str, *, now: float | None = None) -> AutonomousProtectedRehydrationResult:
+    def resolve(
+        self,
+        reference_id: str,
+        *,
+        now: float | None = None,
+        value_digestor: Callable[[Any], str] | None = None,
+    ) -> AutonomousProtectedRehydrationResult:
         current = _number("resolve now", self.clock() if now is None else now, 0.0, 9_223_372_036_854_775.0)
         reference_id = _identifier("reference_id", reference_id)
         reference = self._references.get(reference_id)
@@ -513,7 +541,9 @@ class AutonomousProtectedRehydrationBoundary:
                 _fail("caller authorization was denied")
         try:
             value = self.resolver(reference, self.context)
-            observed_digest = protected_value_digest(value)
+            if value_digestor is not None and not callable(value_digestor):
+                _fail("value digestor is malformed")
+            observed_digest = protected_value_digest(value) if value_digestor is None else value_digestor(value)
         except Exception as error:
             self._failure(reference, "resolver_failure")
             raise AutonomousProtectedRehydrationError("protected value resolver failed") from error
@@ -632,5 +662,5 @@ class AutonomousProtectedRehydrationPersistenceCoordinator:
 __all__ = [
     "AUTONOMOUS_PROTECTED_REHYDRATION_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_CONTEXT_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCE_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_SCHEMA", "AUTONOMOUS_PROTECTED_REHYDRATION_ADAPTER_SCHEMA",
     "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_REFERENCES", "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_ATTEMPTS", "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_SNAPSHOT_BYTES", "MAX_AUTONOMOUS_PROTECTED_REHYDRATION_TTL_SECONDS",
-    "AutonomousProtectedRehydrationError", "AutonomousProtectedRehydrationTextStore", "AutonomousProtectedRehydrationTransactionalTextStore", "AutonomousProtectedRehydrationContext", "AutonomousProtectedRehydrationReference", "AutonomousProtectedRehydrationResult", "AutonomousProtectedRehydrationAdapter", "AutonomousProtectedRehydrationBoundary", "JsonAutonomousProtectedRehydrationPersistence", "TransactionalJsonAutonomousProtectedRehydrationPersistence", "AutonomousProtectedRehydrationPersistenceCoordinator", "protected_value_digest", "validate_autonomous_protected_rehydration_snapshot",
+    "AutonomousProtectedRehydrationError", "AutonomousProtectedRehydrationTextStore", "AutonomousProtectedRehydrationTransactionalTextStore", "AutonomousProtectedRehydrationContext", "AutonomousProtectedRehydrationReference", "AutonomousProtectedRehydrationResult", "AutonomousProtectedRehydrationAdapter", "AutonomousProtectedRehydrationBoundary", "JsonAutonomousProtectedRehydrationPersistence", "TransactionalJsonAutonomousProtectedRehydrationPersistence", "AutonomousProtectedRehydrationPersistenceCoordinator", "AUTONOMOUS_PROTECTED_REHYDRATION_DIGEST_SCHEMES", "protected_value_digest", "validate_autonomous_protected_rehydration_snapshot",
 ]

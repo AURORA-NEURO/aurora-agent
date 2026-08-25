@@ -1810,3 +1810,12 @@ the receipt's value/payload digest. All twelve domains are covered by cross-SDK 
 and the TypeScript domain catalog is isolated into a dependency-leaf module so importing the
 public barrel cannot trigger an autonomous-facade module cycle. The vault, identity provider,
 authorization authority, encryption, and external effect reconciliation remain deployment-owned.
+
+The same fallback now reaches the long-horizon goal agent. When an application omits a bespoke
+task resolver, each goal is reconstructed through a caller-owned protected `goal_task` receipt
+just before dispatch, while an explicit resolver still takes precedence. Goal identities are raw
+UTF-8 task SHA-256 digests, so the adapter now supports bounded `canonical_json` and `utf8_sha256`
+schemes and binds the selected scheme into the opaque reference. This closes the goal-runtime
+rehydration seam without putting task text, private runtime handles, credentials, or provider
+payloads into the ledger, journal, snapshot, or result. Production deployment still owns the
+resolver store, authorization context, rotation, and uncertain external-effect reconciliation.
