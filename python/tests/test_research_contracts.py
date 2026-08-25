@@ -20,6 +20,7 @@ from prism_sdk.research_contracts import EXECUTION_CONTROL_FEATURE_ID, EXECUTION
 from prism_sdk.research_contracts import ANALYSIS_PORTFOLIO_FEATURE_ID, ANALYSIS_PORTFOLIO_CONTRACT_VERSION, AnalysisPortfolioReceipt
 from prism_sdk.research_contracts import INTERPRETATION_ASSURANCE_FEATURE_ID, INTERPRETATION_ASSURANCE_CONTRACT_VERSION, InterpretationAssuranceReceipt
 from prism_sdk.research_contracts import REPLICATION_ASSURANCE_FEATURE_ID, REPLICATION_ASSURANCE_CONTRACT_VERSION, ReplicationAssuranceReceipt
+from prism_sdk.research_contracts import RELEASE_ASSURANCE_FEATURE_ID, RELEASE_ASSURANCE_CONTRACT_VERSION, ReleaseAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1044,4 +1045,28 @@ def test_replication_assurance_preserves_partition_and_negative_evidence():
     receipt.validate()
     assert receipt.feature_id == REPLICATION_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == REPLICATION_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_release_assurance_preserves_multimodal_omissions_and_effect_boundary():
+    receipt = ReleaseAssuranceReceipt(
+        run_id="run:release",
+        release_id="release:2026-q3",
+        verdict="conditional",
+        study_order=("study:imaging", "study:omics"),
+        modality_order=("imaging", "omics"),
+        artifact_order=("artifact:imaging", "artifact:omics"),
+        evidence_receipt_order=("evidence:1",),
+        omissions=("study:replicate missing",),
+        uncertainty=("study:omics: batch interval is bounded",),
+        negative_evidence=("null secondary endpoint",),
+        semantic_loss=({"field": "omissions", "severity": "decision_relevant"},),
+        reasons=("protected omission prevents unconditional release",),
+        policy_decision="allow",
+        effect_receipt="block_unsafe_release_and_retain_local_receipt",
+        artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == RELEASE_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == RELEASE_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

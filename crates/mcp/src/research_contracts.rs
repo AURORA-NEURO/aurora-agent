@@ -20,6 +20,10 @@ use bioprism_adapter::{
     INTERPRETATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_release, ReleaseAssuranceReceipt, ValidatedResearchRun as AdapterValidatedResearchRun,
+    RELEASE_ASSURANCE_FEATURE_ID,
+};
+use bioprism_adapter::{
     assure_replication, ReplicationAssuranceReceipt, ReplicationAssuranceRequest,
     REPLICATION_ASSURANCE_FEATURE_ID,
 };
@@ -208,6 +212,7 @@ pub const EXECUTION_CONTROL_TOOL: &str = "adapter_execution_control";
 pub const ANALYSIS_PORTFOLIO_TOOL: &str = "adapter_analysis_portfolio";
 pub const INTERPRETATION_ASSURANCE_TOOL: &str = "adapter_interpretation_assurance";
 pub const REPLICATION_ASSURANCE_TOOL: &str = "adapter_replication_assurance";
+pub const RELEASE_ASSURANCE_TOOL: &str = "adapter_release_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1119,6 +1124,24 @@ pub fn validate_replication_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != REPLICATION_ASSURANCE_FEATURE_ID {
         return Err("replication assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_release_json(value: &Value) -> Result<Value, String> {
+    let request: AdapterValidatedResearchRun = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid release assurance request: {error}"))?;
+    let receipt = assure_release(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize release assurance receipt: {error}"))
+}
+
+pub fn validate_release_assurance_json(value: &Value) -> Result<ReleaseAssuranceReceipt, String> {
+    let receipt: ReleaseAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid release assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RELEASE_ASSURANCE_FEATURE_ID {
+        return Err("release assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

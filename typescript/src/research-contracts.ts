@@ -92,6 +92,8 @@ export const INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P14-F27" as cons
 export const INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "interpretation-assurance/1.0" as const;
 export const REPLICATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P15-F28" as const;
 export const REPLICATION_ASSURANCE_CONTRACT_VERSION = "federated-replication-assurance/1.0" as const;
+export const RELEASE_ASSURANCE_FEATURE_ID = "AFA-adapter-P16-F26" as const;
+export const RELEASE_ASSURANCE_CONTRACT_VERSION = "multimodal-research-release-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1531,6 +1533,40 @@ export function validateReplicationAssuranceReceipt(receipt: ReplicationAssuranc
 }
 
 export function replicationAssuranceReceiptDigest(receipt: ReplicationAssuranceReceipt): string { validateReplicationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ReleaseAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  run_id: string;
+  release_id: string;
+  verdict: "released" | "conditional" | "incomplete" | "incomparable" | "blocked";
+  study_order: string[];
+  modality_order: string[];
+  artifact_order: string[];
+  evidence_receipt_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  policy_decision: "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
+  effect_receipt: string;
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateReleaseAssuranceReceipt(receipt: ReleaseAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RELEASE_ASSURANCE_FEATURE_ID || receipt.contract_version !== RELEASE_ASSURANCE_CONTRACT_VERSION) throw new Error("release assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.run_id.trim() || !receipt.release_id.trim() || !receipt.study_order.length || !receipt.evidence_receipt_order.length || !receipt.reasons.length || !receipt.effect_receipt.trim()) throw new Error("release assurance identity, studies, evidence, locality, boundary, or effects are incomplete");
+  if (!new Set(["released", "conditional", "incomplete", "incomparable", "blocked"]).has(receipt.verdict)) throw new Error("release assurance verdict is unknown");
+  for (const values of [receipt.study_order, receipt.modality_order, receipt.artifact_order, receipt.evidence_receipt_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("release assurance ordering is invalid");
+  if (!new Set(["allow", "deny", "redact", "local_only", "approval_required", "unresolved"]).has(receipt.policy_decision)) throw new Error("release assurance policy decision is unknown");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("release assurance artifact digest is invalid");
+}
+
+export function releaseAssuranceReceiptDigest(receipt: ReleaseAssuranceReceipt): string { validateReleaseAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

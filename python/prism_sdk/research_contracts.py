@@ -99,6 +99,8 @@ INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P14-F27"
 INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "interpretation-assurance/1.0"
 REPLICATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P15-F28"
 REPLICATION_ASSURANCE_CONTRACT_VERSION = "federated-replication-assurance/1.0"
+RELEASE_ASSURANCE_FEATURE_ID = "AFA-adapter-P16-F26"
+RELEASE_ASSURANCE_CONTRACT_VERSION = "multimodal-research-release-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2534,3 +2536,45 @@ class ReplicationAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "claim_id": self.claim_id, "protocol_digest": self.protocol_digest, "verdict": self.verdict, "observation_order": list(self.observation_order), "independent_site_order": list(self.independent_site_order), "positive_count": self.positive_count, "null_count": self.null_count, "negative_count": self.negative_count, "inconclusive_count": self.inconclusive_count, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ReleaseAssuranceReceipt:
+    run_id: str
+    release_id: str
+    verdict: str
+    study_order: tuple[str, ...]
+    modality_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    evidence_receipt_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    policy_decision: str
+    effect_receipt: str
+    artifact: Mapping[str, Any]
+    feature_id: str = RELEASE_ASSURANCE_FEATURE_ID
+    contract_version: str = RELEASE_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RELEASE_ASSURANCE_FEATURE_ID or self.contract_version != RELEASE_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("release assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.run_id.strip() or not self.release_id.strip() or not self.study_order or not self.evidence_receipt_order or not self.reasons or not self.effect_receipt.strip():
+            raise ResearchContractError("release assurance identity, studies, evidence, locality, boundary, or effects are incomplete")
+        if self.verdict not in {"released", "conditional", "incomplete", "incomparable", "blocked"}:
+            raise ResearchContractError("release assurance verdict is unknown")
+        for values in (self.study_order, self.modality_order, self.artifact_order, self.evidence_receipt_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("release assurance ordering is invalid")
+        if self.policy_decision not in {"allow", "deny", "redact", "local_only", "approval_required", "unresolved"}:
+            raise ResearchContractError("release assurance policy decision is unknown")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("release assurance artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "run_id": self.run_id, "release_id": self.release_id, "verdict": self.verdict, "study_order": list(self.study_order), "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "evidence_receipt_order": list(self.evidence_receipt_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "policy_decision": self.policy_decision, "effect_receipt": self.effect_receipt, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
