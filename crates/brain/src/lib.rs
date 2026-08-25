@@ -64,6 +64,7 @@ pub mod multimodal_retrieval_workflow_fabric;
 pub mod multimodal_safety_assurance;
 pub mod retrieval_contract_model;
 pub mod retrieval_research_copilot;
+pub mod retrieval_research_workbench;
 pub mod retrieval_synthesis;
 pub mod retrieval_workflow_fabric;
 pub mod throughput_contract_model;
@@ -306,6 +307,12 @@ pub use retrieval_research_copilot::{
     RetrievalCopilotReceipt, RetrievalCopilotRequest,
     CONTRACT_VERSION as RETRIEVAL_RESEARCH_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use retrieval_research_workbench::{
+    compile_retrieval_research_workbench, retrieval_research_workbench_manifest,
+    RetrievalWorkbenchError, RetrievalWorkbenchReceipt, RetrievalWorkbenchRequest,
+    CONTRACT_VERSION as RETRIEVAL_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use retrieval_synthesis::{
     retrieval_synthesis_manifest, synthesize_retrieval, EvidenceSynthesis, RetrievalCandidate,
