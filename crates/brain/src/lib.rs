@@ -44,6 +44,7 @@ pub mod federated_protocol_adapter;
 pub mod federated_research_workbench;
 pub mod federated_retrieval_assurance_harness;
 pub mod federated_retrieval_contract_model;
+pub mod federated_retrieval_control_plane;
 pub mod federated_retrieval_copilot;
 pub mod federated_retrieval_protocol_gateway;
 pub mod federated_retrieval_synthesis;
@@ -195,6 +196,14 @@ pub use federated_retrieval_contract_model::{
     FederatedRetrievalContractRequest,
     CONTRACT_VERSION as FEDERATED_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use federated_retrieval_control_plane::{
+    federated_retrieval_control_plane_manifest, operate_federated_retrieval_control_plane,
+    FederatedRetrievalControlPlaneError, FederatedRetrievalControlPlaneReceipt,
+    FederatedRetrievalControlPlaneRequest,
+    ACTION_ORDER as FEDERATED_RETRIEVAL_CONTROL_ACTION_ORDER,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
 };
 pub use federated_retrieval_copilot::{
     compile_federated_retrieval_copilot, federated_retrieval_copilot_manifest,
