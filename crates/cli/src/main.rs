@@ -51,6 +51,10 @@ use bioprism_repair::{
     plan_for_issue, predicate_from_json, verify, AcceptanceReport, DeclaredItem, ItemStatus,
     Outcome as RepairOutcome, PlanOptions, RepairPlan,
 };
+use bioprism_research::{
+    plan_protocol, render_report, run_research, verify_dossier, ProtocolStep, ResearchRequest,
+    ResearchRequestDocument, WorldFamily,
+};
 use bioprism_scope::DimensionRegistry;
 use bioprism_section::{CertificateProfile, ContextCertificate, LeakageWitness, OracleStatus};
 use bioprism_world::{validate, Severity};
@@ -467,6 +471,13 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             dry_run,
         } => autopilot_run(instantiation, grant, report_out.as_deref(), *dry_run),
         Command::AutopilotVerify { report } => autopilot_verify(report),
+        Command::ResearchTemplate => research_template(),
+        Command::ResearchRun {
+            request,
+            out_dir,
+            dry_run,
+        } => research_run(request, out_dir, *dry_run),
+        Command::ResearchVerify { dossier } => research_verify(dossier),
     }
 }
 
@@ -1900,6 +1911,229 @@ fn autopilot_verify(report_path: &Path) -> CliResult<Outcome> {
         verification["limitations_present"].as_bool().unwrap_or(false),
         verification["final_status_known"].as_bool().unwrap_or(false),
         report_path.display(),
+    );
+    Ok(Outcome::ok(verification, human).failing_if(!valid))
+}
+
+/// The template research request, built from the typed document rather than a `json!` literal so
+/// a field renamed in the request schema fails to compile here instead of drifting into a
+/// template the validator would refuse. The seed matches the committed sweep grid's, so a pasted
+/// template measures at the same seed the repository's own benchmark uses.
+fn research_template_document() -> CliResult<Value> {
+    let document = ResearchRequestDocument {
+        research_id: "replace-with-a-research-id".into(),
+        question: "Replace with the question this run should record. It is carried verbatim \
+                   into the dossier and report and never interpreted; the protocol comes from \
+                   the fields below."
+            .into(),
+        family: WorldFamily::Discriminating,
+        distractor_points: vec![50, 250, 750],
+        seed: 20_260_823,
+        run_sweep: false,
+        run_mutation: false,
+        run_minimize: false,
+    };
+    serde_json::to_value(document).map_err(|error| CliError::internal(error.to_string()))
+}
+
+/// The commented rendering of the template for human mode. Comments make it non-JSON on
+/// purpose: the machine-usable object comes from `--json`, and a request an operator pastes
+/// without reading would defeat the point of a question field that is recorded but never
+/// interpreted.
+const RESEARCH_TEMPLATE_COMMENTED: &str = r#"{
+  // Names the run in every artifact: 1..=64 characters from [A-Za-z0-9._-].
+  "research_id": "replace-with-a-research-id",
+
+  // Recorded verbatim in the dossier and report, and NEVER interpreted: the runner executes
+  // the protocol the fields below declare; it does not understand the question.
+  "question": "Replace with the question this run should record.",
+
+  // One committed 43.39 world-family preset:
+  // reference_like | discriminating | external_confirmation | policy_restricted.
+  "family": "discriminating",
+
+  // Distractor counts to measure, in order: 1..=6 points, each <= 2000, no duplicates.
+  // The first point is the base world for the mutation and minimization steps.
+  "distractor_points": [50, 250, 750],
+
+  // Seed for every generated world. The optional sweep is the one exception: it runs the
+  // committed default grid at the grid's own seed, because that grid is the benchmark.
+  "seed": 20260823,
+
+  // Optional steps; each defaults to false when omitted.
+  "run_sweep": false,
+  "run_mutation": false,
+  "run_minimize": false
+}"#;
+
+fn research_template() -> CliResult<Outcome> {
+    let template = research_template_document()?;
+    let mut human = String::from(
+        "research request template\n\
+         The question is recorded verbatim and never interpreted; the protocol is planned from \
+         the other fields alone,\nover synthetic decision worlds (committed fixtures and seeded \
+         generators) only. The commented form below is\nfor reading; `--json` prints the bare \
+         object, directly usable as --request.\n\n",
+    );
+    human.push_str(RESEARCH_TEMPLATE_COMMENTED);
+    human.push_str(
+        "\n\nNext: bioprism --json research template > request.json, edit the fields, then \
+         bioprism research run --request request.json --out-dir research-out --dry-run\n",
+    );
+    Ok(Outcome::ok(template, human))
+}
+
+fn parse_research_request(request_path: &Path) -> CliResult<ResearchRequest> {
+    let raw = io::read_json(request_path)?;
+    let document: ResearchRequestDocument = serde_json::from_value(raw).map_err(|error| {
+        CliError::invalid(format!("invalid research request document: {error}"))
+            .about(request_path.display().to_string())
+    })?;
+    ResearchRequest::try_from(document)
+        .map_err(|error| CliError::from_research(error).about(request_path.display().to_string()))
+}
+
+fn research_run(request_path: &Path, out_dir: &Path, dry_run: bool) -> CliResult<Outcome> {
+    let request = parse_research_request(request_path)?;
+    let request_digest = request.digest().map_err(CliError::from_research)?;
+
+    if dry_run {
+        let protocol = plan_protocol(&request);
+        let step_count = protocol.steps.len();
+        let labels: Vec<String> = protocol.steps.iter().map(ProtocolStep::label).collect();
+        let protocol_value = serde_json::to_value(&protocol)
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        let document = json!({
+            "ok": true,
+            "workflow": "research_run",
+            "dry_run": true,
+            "no_dispatch": true,
+            "execution": "not_started",
+            "writes": "none",
+            "research_id": request.research_id(),
+            "request_digest": request_digest,
+            "planned_protocol": protocol_value,
+            "step_count": step_count,
+            "out_dir": out_dir.display().to_string(),
+        });
+        let mut human = format!(
+            "research dry run (no-dispatch)\n  research id: {}\n  request digest: \
+             {request_digest}\n  planned protocol ({step_count} steps):\n",
+            request.research_id(),
+        );
+        for (index, label) in labels.iter().enumerate() {
+            human.push_str(&format!("    {index}. {label}\n"));
+        }
+        human.push_str("  execution: not started\n  writes: none\n");
+        human.push_str(&format!(
+            "\nNext: bioprism research run --request {} --out-dir {}\n",
+            request_path.display(),
+            out_dir.display(),
+        ));
+        return Ok(Outcome::ok(document, human));
+    }
+
+    let dossier = run_research(&request)
+        .map_err(|error| CliError::from_research(error).about(request_path.display().to_string()))?;
+    let rendered = render_report(&dossier).map_err(CliError::from_research)?;
+
+    let dossier_path = out_dir.join("dossier.json");
+    let report_path = out_dir.join("REPORT.md");
+    let figures_dir = out_dir.join("figures");
+    let mut artifacts = vec![
+        io::write_artifact(&dossier_path, &dossier, false)?,
+        io::write_text_artifact(&report_path, &rendered.report_md, false)?,
+    ];
+    for (filename, svg) in &rendered.figures {
+        artifacts.push(io::write_text_artifact(&figures_dir.join(filename), svg, false)?);
+    }
+
+    let dossier_sha256 = dossier["dossier_sha256"].as_str().unwrap_or("<missing>").to_string();
+    let steps_completed = dossier["steps"].as_array().map(Vec::len).unwrap_or(0);
+    let findings = dossier["findings"].as_array().cloned().unwrap_or_default();
+    let negative_findings = findings
+        .iter()
+        .filter(|finding| finding["negative"].as_bool() == Some(true))
+        .count();
+    let document = json!({
+        "ok": true,
+        "workflow": "research_run",
+        "dry_run": false,
+        "research_id": request.research_id(),
+        "request_digest": request_digest,
+        "dossier_sha256": dossier_sha256,
+        "steps_completed": steps_completed,
+        "findings": findings,
+        "findings_total": findings.len(),
+        "negative_findings": negative_findings,
+        "figures": rendered.figures.len(),
+        "artifacts": artifacts
+            .iter()
+            .map(|artifact| json!({
+                "path": artifact.path.display().to_string(),
+                "bytes": artifact.bytes,
+                "written": artifact.written,
+            }))
+            .collect::<Vec<Value>>(),
+    });
+    let mut human = format!(
+        "research run: completed\n  research id: {}\n  request digest: {request_digest}\n  \
+         dossier sha256: {dossier_sha256}\n  steps completed: {steps_completed}\n  findings: {} \
+         ({negative_findings} negative; a negative finding is a first-class result of a \
+         completed run)\n",
+        request.research_id(),
+        findings.len(),
+    );
+    for artifact in &artifacts {
+        human.push_str(&format!(
+            "  wrote {} ({} bytes)\n",
+            artifact.path.display(),
+            artifact.bytes
+        ));
+    }
+    human.push_str(&format!(
+        "\nNext: bioprism research verify --dossier {}\n",
+        dossier_path.display(),
+    ));
+    Ok(Outcome::ok(document, human))
+}
+
+fn research_verify(dossier_path: &Path) -> CliResult<Outcome> {
+    let dossier = io::read_json(dossier_path)?;
+    let mut verification = verify_dossier(&dossier).map_err(|error| {
+        CliError::from_research(error).about(dossier_path.display().to_string())
+    })?;
+    let valid = verification
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    verification["ok"] = json!(valid);
+    verification["dossier"] = json!(dossier_path.display().to_string());
+    let next = if valid {
+        match dossier_path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => format!(
+                "Next: read {} — REPORT.md and figures/ sit beside the dossier\n",
+                parent.join("REPORT.md").display(),
+            ),
+            _ => "Next: read REPORT.md — it and figures/ sit beside the dossier\n".to_string(),
+        }
+    } else {
+        "Next: bioprism research run --request <request.json> --out-dir <dir> to regenerate the \
+         dossier; re-verifying this one cannot change the verdict\n"
+            .to_string()
+    };
+    let human = format!(
+        "research dossier: {}\n  claimed sha256: {}\n  recomputed sha256: {}\n  digest match: \
+         {}\n  request digest match: {}\n  required limitations present: {}\n  step outcomes \
+         known: {}\n  findings supported by carried artifacts: {}\n\n{next}",
+        if valid { "verified" } else { "FAILED" },
+        verification["claimed_dossier_sha256"].as_str().unwrap_or("<missing>"),
+        verification["recomputed_dossier_sha256"].as_str().unwrap_or("<missing>"),
+        verification["digest_match"].as_bool().unwrap_or(false),
+        verification["request_digest_match"].as_bool().unwrap_or(false),
+        verification["limitations_present"].as_bool().unwrap_or(false),
+        verification["outcomes_known"].as_bool().unwrap_or(false),
+        verification["findings_supported"].as_bool().unwrap_or(false),
     );
     Ok(Outcome::ok(verification, human).failing_if(!valid))
 }

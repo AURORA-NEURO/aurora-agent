@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 540.00" role="img" aria-label="Equal-engineering baseline panel">
+<defs><pattern id="hatch-accent" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#d97036" stroke-width="2.4"/></pattern><pattern id="hatch-muted" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#8a8a8a" stroke-width="2.4"/></pattern></defs>
+<text x="16.00" y="26.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1a1a1a">Equal-engineering baseline panel</text>
+<text x="16.00" y="46.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" fill="#8a8a8a">world research-discriminating-d50 · query research-discriminating-d50-split-integrity · 62 facts · reference verdict</text>
+<text x="16.00" y="60.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" fill="#8a8a8a">(full-context): invalid</text>
+<g transform="translate(0,74)">
+<text x="16.00" y="15.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">full-context</text>
+<rect x="190.00" y="3.00" width="300.00" height="15.00" fill="#d97036"/>
+<text x="498.00" y="15.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">62 facts · 100.0% · closure 100%</text>
+<text x="16.00" y="41.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">graph-4-hop</text>
+<text x="198.00" y="41.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">0 facts · 0.0% · closure 0%</text>
+<text x="16.00" y="67.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">graph-5-hop</text>
+<rect x="190.00" y="55.00" width="241.94" height="15.00" fill="#8a8a8a"/>
+<text x="439.94" y="67.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">50 facts · 80.6% · closure 0%</text>
+<text x="16.00" y="93.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">graph-6-hop</text>
+<rect x="190.00" y="81.00" width="241.94" height="15.00" fill="#8a8a8a"/>
+<text x="439.94" y="93.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">50 facts · 80.6% · closure 0%</text>
+<text x="16.00" y="119.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">graph-7-hop</text>
+<rect x="190.00" y="107.00" width="241.94" height="15.00" fill="#8a8a8a"/>
+<text x="439.94" y="119.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">50 facts · 80.6% · closure 0%</text>
+<text x="16.00" y="145.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">hypergraph-component</text>
+<rect x="190.00" y="133.00" width="295.16" height="15.00" fill="#d97036"/>
+<text x="493.16" y="145.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">61 facts · 98.4% · closure 100%</text>
+<text x="16.00" y="171.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">query-graph</text>
+<text x="198.00" y="171.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">0 facts · 0.0% · closure 0%</text>
+<text x="16.00" y="197.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">lexical-top-11</text>
+<rect x="190.00" y="185.00" width="53.23" height="15.00" fill="#8a8a8a"/>
+<text x="251.23" y="197.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">11 facts · 17.7% · closure 73%</text>
+<text x="16.00" y="223.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">lexical-top-50</text>
+<rect x="190.00" y="211.00" width="241.94" height="15.00" fill="url(#hatch-accent)" stroke="#d97036" stroke-width="1"/>
+<text x="439.94" y="223.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">50 facts · 80.6% · closure 91%</text>
+<text x="16.00" y="249.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">embedding-top-11</text>
+<rect x="190.00" y="237.00" width="53.23" height="15.00" fill="#8a8a8a"/>
+<text x="251.23" y="249.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">11 facts · 17.7% · closure 55%</text>
+<text x="16.00" y="275.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">embedding-top-50</text>
+<rect x="190.00" y="263.00" width="241.94" height="15.00" fill="#d97036"/>
+<text x="439.94" y="275.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">50 facts · 80.6% · closure 100%</text>
+<text x="4.00" y="301.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#d97036">◆</text>
+<text x="16.00" y="301.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">directed-walk-full</text>
+<rect x="190.00" y="289.00" width="53.23" height="15.00" fill="#d97036"/>
+<text x="251.23" y="301.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">11 facts · 17.7% · closure 100%</text>
+<text x="16.00" y="327.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">fiber</text>
+<rect x="190.00" y="315.00" width="53.23" height="15.00" fill="#d97036"/>
+<text x="251.23" y="327.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">11 facts · 17.7% · closure 100%</text>
+<rect x="16.00" y="350.00" width="12.00" height="12.00" fill="#d97036"/>
+<text x="34.00" y="360.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">admissible — right verdict and full protected closure</text>
+<rect x="16.00" y="367.00" width="12.00" height="12.00" fill="url(#hatch-accent)" stroke="#d97036" stroke-width="1"/>
+<text x="34.00" y="377.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">lucky — right verdict from an incomplete protected closure (not a pass)</text>
+<rect x="16.00" y="384.00" width="12.00" height="12.00" fill="#8a8a8a"/>
+<text x="34.00" y="394.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">unsound — judged and did not preserve the reference verdict</text>
+<text x="16.00" y="411.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-style="italic" fill="#8a8a8a">refused (not judged) — the oracle refused the selection; neither sound nor unsound, drawn without a bar</text>
+<text x="16.00" y="428.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a"><tspan fill="#d97036" font-weight="600">◆</tspan> cheapest admissible strategy</text>
+</g>
+<text x="16.00" y="528.00" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="10" fill="#8a8a8a">source sha256: 39a74e35520fcc95965848fd264baa79c382753b0e3b1dac3a142122ce3b72a9</text>
+</svg>

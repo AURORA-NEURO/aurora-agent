@@ -268,6 +268,7 @@ dependencies = [
  "bioprism-prism",
  "bioprism-project",
  "bioprism-repair",
+ "bioprism-research",
  "bioprism-scope",
  "bioprism-section",
  "bioprism-store",
@@ -442,6 +443,16 @@ dependencies = [
  "bioprism-world",
  "serde",
  "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-figures"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "serde_json",
+ "sha2",
  "thiserror",
 ]
 
@@ -880,6 +891,24 @@ dependencies = [
  "bioprism-project",
  "bioprism-section",
  "bioprism-world",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-research"
+version = "0.1.0"
+dependencies = [
+ "bioprism-baseline",
+ "bioprism-fiber",
+ "bioprism-figures",
+ "bioprism-ids",
+ "bioprism-mutation",
+ "bioprism-prism",
+ "bioprism-section",
+ "bioprism-world",
+ "bioprism-worldgen",
+ "serde",
  "serde_json",
  "thiserror",
 ]

@@ -84,6 +84,8 @@ members = [
     "crates/brain",
     "crates/autopilot",
     "crates/cli",
+    "crates/figures",
+    "crates/research",
 ]
 
 [workspace.package]
@@ -182,6 +184,8 @@ bioprism-hub = { path = "crates/hub" }
 bioprism-evalengine = { path = "crates/evalengine" }
 bioprism-brain = { path = "crates/brain" }
 bioprism-autopilot = { path = "crates/autopilot" }
+bioprism-figures = { path = "crates/figures" }
+bioprism-research = { path = "crates/research" }
 
 [profile.release]
 lto = "thin"
