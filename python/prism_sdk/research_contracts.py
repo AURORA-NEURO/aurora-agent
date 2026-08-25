@@ -299,6 +299,8 @@ MULTIMODAL_RETRIEVAL_COPILOT_FEATURE_ID = "AFA-brain-P02-F10"
 MULTIMODAL_RETRIEVAL_COPILOT_CONTRACT_VERSION = "brain-multimodal-retrieval-research-copilot/1.0"
 THROUGHPUT_RETRIEVAL_COPILOT_FEATURE_ID = "AFA-brain-P02-F11"
 THROUGHPUT_RETRIEVAL_COPILOT_CONTRACT_VERSION = "brain-throughput-retrieval-research-copilot/1.0"
+FEDERATED_RETRIEVAL_COPILOT_FEATURE_ID = "AFA-brain-P02-F12"
+FEDERATED_RETRIEVAL_COPILOT_CONTRACT_VERSION = "brain-federated-retrieval-research-copilot/1.0"
 
 
 class ResearchContractError(ValueError):
