@@ -103,6 +103,12 @@ from .autonomous_prompt_registry import (
     AutonomousPromptSelectionPlan,
     AutonomousPromptTemplate,
 )
+from .autonomous_prompt_learning import (
+    AUTONOMOUS_PROMPT_LEARNING_POLICY,
+    AutonomousPromptAdaptiveSelection,
+    AutonomousPromptLearningState,
+    select_adaptive_autonomous_prompts,
+)
 from .domain_tools import (
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousDomainTool,
@@ -7809,6 +7815,8 @@ def _apply_versioned_prompt(
     prompt_registry: AutonomousPromptRegistry | None,
     prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None,
     prompt_stage: str,
+    prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+    prompt_learning_exploration: float = 0.35,
 ) -> AutonomousTaskBlueprint:
     """Replace only transient provider-message assembly with a verified prompt implementation."""
 
@@ -7820,6 +7828,10 @@ def _apply_versioned_prompt(
         raise BrainRunError("prompt_template cannot be combined with prompt_registry or prompt_selection")
     if prompt_selection is not None and prompt_registry is None:
         raise BrainRunError("prompt_selection requires prompt_registry")
+    if prompt_learning_state is not None and prompt_registry is None:
+        raise BrainRunError("prompt_learning_state requires prompt_registry")
+    if prompt_learning_state is not None and prompt_selection is not None:
+        raise BrainRunError("prompt_learning_state cannot be combined with prompt_selection")
     if prompt_template is None and prompt_registry is None:
         return blueprint
     stage = _identifier("prompt_stage", prompt_stage)
@@ -7852,19 +7864,26 @@ def _apply_versioned_prompt(
         mode = "versioned_template"
     else:
         selection = prompt_selection
+        adaptive_selection: AutonomousPromptAdaptiveSelection | None = None
         if selection is None:
-            selection = prompt_registry.select_for(
-                [
-                    {
-                        "domain": domain,
-                        "stage": stage,
-                        # Prompt capabilities are a reviewed namespace separate from model
-                        # capabilities such as reasoning/code; do not conflate the two during
-                        # automatic high-level selection.
-                        "required_capabilities": [],
-                    }
-                ]
-            )
+            request = {
+                "domain": domain,
+                "stage": stage,
+                # Prompt capabilities are a reviewed namespace separate from model
+                # capabilities such as reasoning/code; do not conflate the two during
+                # automatic high-level selection.
+                "required_capabilities": [],
+            }
+            if prompt_learning_state is None:
+                selection = prompt_registry.select_for([request])
+            else:
+                adaptive_selection = select_adaptive_autonomous_prompts(
+                    prompt_registry,
+                    [request],
+                    state=prompt_learning_state,
+                    exploration=prompt_learning_exploration,
+                )
+                selection = adaptive_selection.plan
         rendered = prompt_registry.render(selection, context)
         mode = "registry_selection"
     if any(
@@ -7905,6 +7924,16 @@ def _apply_versioned_prompt(
         "metadata": {
             **rendered.to_dict(),
             "mode": mode,
+            **(
+                {
+                    "selection_policy": AUTONOMOUS_PROMPT_LEARNING_POLICY,
+                    "adaptive_selection_digest": adaptive_selection.selection_digest,
+                    "adaptive_arm_id": adaptive_selection.arm_ids[0],
+                    "adaptive_generation": adaptive_selection.generation,
+                }
+                if adaptive_selection is not None
+                else {}
+            ),
             "retention": "prompt_messages_transient;digest_only_projection",
             "secret_material": "never_returned",
         },
@@ -8433,6 +8462,8 @@ class AutonomousTaskOrchestrator:
         prompt_registry: AutonomousPromptRegistry | None = None,
         prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
         prompt_stage: str = "planning",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         domain_policy_mode: str = "audit",
         domain_policy_evidence_ready: bool | None = None,
         domain_policy_evaluator_configured: bool | None = None,
@@ -8522,6 +8553,8 @@ class AutonomousTaskOrchestrator:
             prompt_registry=prompt_registry,
             prompt_selection=prompt_selection,
             prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
         )
         planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
         planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
@@ -8703,6 +8736,8 @@ class AutonomousTaskOrchestrator:
         prompt_registry: AutonomousPromptRegistry | None = None,
         prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
         prompt_stage: str = "planning",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         domain_policy_mode: str = "audit",
         domain_policy_evidence_ready: bool | None = None,
         domain_policy_evaluator_configured: bool | None = None,
@@ -8808,6 +8843,8 @@ class AutonomousTaskOrchestrator:
             prompt_registry=prompt_registry,
             prompt_selection=prompt_selection,
             prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
         )
         planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
         planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
@@ -10713,6 +10750,8 @@ class AutonomousTaskOrchestrator:
         prompt_registry: AutonomousPromptRegistry | None = None,
         prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
         prompt_stage: str = "answer",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         max_steps: int = 8,
         require_json: bool = False,
         structured_domain_response: bool = False,
@@ -10810,6 +10849,8 @@ class AutonomousTaskOrchestrator:
             prompt_registry=prompt_registry,
             prompt_selection=prompt_selection,
             prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
         )
         _assert_task_decision_allows_provider(
             blueprint.task_decision,
@@ -12461,6 +12502,8 @@ class AutonomousTaskOrchestrator:
         prompt_registry: AutonomousPromptRegistry | None = None,
         prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
         prompt_stage: str = "answer",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         execution_plan_context: Mapping[str, Any] | None = None,
         desired_outputs: Sequence[str] = (
             "domain-attributed findings",
@@ -12593,6 +12636,8 @@ class AutonomousTaskOrchestrator:
                 prompt_registry=prompt_registry,
                 prompt_selection=prompt_selection,
                 prompt_stage=prompt_stage,
+                prompt_learning_state=prompt_learning_state,
+                prompt_learning_exploration=prompt_learning_exploration,
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 structured_domain_response=child.spec.structured_domain_response,
@@ -12708,6 +12753,8 @@ class AutonomousTaskOrchestrator:
             prompt_registry=prompt_registry,
             prompt_selection=prompt_selection,
             prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             structured_domain_response=synthesis.spec.structured_domain_response,
@@ -20236,6 +20283,8 @@ class AutonomousAgent:
                 "prompt_registry": kwargs.get("planning_prompt_registry", kwargs.get("prompt_registry")),
                 "prompt_selection": kwargs.get("planning_prompt_selection", kwargs.get("prompt_selection")),
                 "prompt_stage": kwargs.get("planning_prompt_stage", "planning"),
+                "prompt_learning_state": kwargs.get("planning_prompt_learning_state", kwargs.get("prompt_learning_state")),
+                "prompt_learning_exploration": kwargs.get("planning_prompt_learning_exploration", kwargs.get("prompt_learning_exploration", 0.35)),
                 "domain_policy_mode": domain_policy_mode,
                 "domain_policy_evidence_ready": domain_policy_evidence_ready,
                 "domain_policy_evaluator_configured": domain_policy_evaluator_configured,
@@ -20330,6 +20379,8 @@ class AutonomousAgent:
             "planning_prompt_registry",
             "planning_prompt_selection",
             "planning_prompt_stage",
+            "planning_prompt_learning_state",
+            "planning_prompt_learning_exploration",
         }:
             execution_kwargs.pop(key, None)
         routed_context = self.orchestrator._route_context(kwargs.get("context"), blueprint.route)

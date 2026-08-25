@@ -10,6 +10,9 @@ from prism_sdk import (
     AutonomousPromptRegistry,
     AutonomousPromptSelectionPlan,
     AutonomousPromptTemplate,
+    AutonomousPromptLearningState,
+    select_adaptive_autonomous_prompts,
+    settle_autonomous_prompt_selection,
     AutonomousTaskOrchestrator,
     LLMRuntime,
     builtin_autonomous_prompt_registry,
@@ -157,6 +160,87 @@ def test_builtin_prompt_pack_rejects_partial_duplicates_and_missing_objectives()
         registry.render(plan, _context("science"))
 
 
+def test_prompt_learning_explores_registry_arms_and_settles_idempotently_without_retaining_prompt_text() -> None:
+    registry = AutonomousPromptRegistry(
+        (
+            _template("science", "prompt-science-a", content="variant A transient"),
+            _template("science", "prompt-science-b", content="variant B transient"),
+        )
+    )
+    state = AutonomousPromptLearningState.empty(registry.registry_digest)
+    first = select_adaptive_autonomous_prompts(
+        registry,
+        [{"domain": "science", "stage": "answer", "required_capabilities": ()}],
+        state=state,
+    )
+    assert first.arm_ids[0]
+    settled = settle_autonomous_prompt_selection(
+        registry,
+        state,
+        first,
+        arm_id=first.arm_ids[0],
+        evaluator_id="science-rubric",
+        evaluator_version="1",
+        reward=0.9,
+        passed=True,
+        settlement_key="a" * 64,
+    )
+    assert settled.status == "settled"
+    assert settled.next_state.generation == 1
+    second = select_adaptive_autonomous_prompts(
+        registry,
+        [{"domain": "science", "stage": "answer", "required_capabilities": ()}],
+        state=settled.next_state,
+    )
+    assert second.arm_ids[0] != first.arm_ids[0]
+    replay = settle_autonomous_prompt_selection(
+        registry,
+        settled.next_state,
+        first,
+        arm_id=first.arm_ids[0],
+        evaluator_id="science-rubric",
+        evaluator_version="1",
+        reward=0.9,
+        passed=True,
+        settlement_key="a" * 64,
+    )
+    assert replay.status == "replayed"
+    assert replay.next_state.state_digest == settled.next_state.state_digest
+    projection = json.dumps(settled.next_state.to_dict())
+    assert "variant A transient" not in projection
+    assert "variant B transient" not in projection
+
+
+def test_prompt_learning_rejects_stale_registry_and_credential_shaped_ledger_state() -> None:
+    registry = AutonomousPromptRegistry((_template("science", "prompt-science-a"),))
+    state = AutonomousPromptLearningState.empty(registry.registry_digest)
+    selection = select_adaptive_autonomous_prompts(
+        registry,
+        [{"domain": "science", "stage": "answer", "required_capabilities": ()}],
+        state=state,
+    )
+    registry.register(_template("science", "prompt-science-a", content="replacement"), replace=True)
+    with pytest.raises(ArgumentError, match="stale"):
+        settle_autonomous_prompt_selection(
+            registry,
+            state,
+            selection,
+            arm_id=selection.arm_ids[0],
+            evaluator_id="science-rubric",
+            evaluator_version="1",
+            reward=0.5,
+            passed=True,
+        )
+    with pytest.raises(ArgumentError, match="fields"):
+        AutonomousPromptLearningState.from_dict(
+            {
+                **state.to_dict(),
+                "settlements": [{"secret": "must-not-cross"}],
+                "state_digest": None,
+            }
+        )
+
+
 def test_prompt_registry_rejects_stale_selection_after_template_replacement() -> None:
     registry = AutonomousPromptRegistry((_template("coding"),))
     plan = registry.select_for([{"domain": "coding", "stage": "answer", "required_capabilities": ("analysis",)}])
@@ -258,13 +342,15 @@ def test_high_level_orchestrator_uses_builtin_prompt_registry_for_direct_runs() 
         lambda request: (requests.append(request) or {"text": "bounded prompt answer"}),
     )
     orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(_PromptWorkspace(), runtime))
+    prompt_registry = builtin_autonomous_prompt_registry()
     result = orchestrator.run(
         task="Review a bounded neuroscience experiment.",
         domain="neuroscience",
         model_candidates=[_prompt_model()],
         credentials={},
         approve_provider_call=True,
-        prompt_registry=builtin_autonomous_prompt_registry(),
+        prompt_registry=prompt_registry,
+        prompt_learning_state=AutonomousPromptLearningState.empty(prompt_registry.registry_digest),
     )
     assert result.status == "completed_provider_call"
     assert len(requests) == 1
@@ -272,6 +358,8 @@ def test_high_level_orchestrator_uses_builtin_prompt_registry_for_direct_runs() 
     assert "neuroscience specialist" in requests[0].messages[0]["content"]  # type: ignore[attr-defined]
     prompt_projection = result.prompt["autonomous_prompt"]
     assert prompt_projection["mode"] == "registry_selection"  # type: ignore[index]
+    assert prompt_projection["selection_policy"] == "ucb1_explicit_evaluator_v1"  # type: ignore[index]
+    assert len(prompt_projection["adaptive_selection_digest"]) == 64  # type: ignore[index]
     assert len(requests[0].idempotency_key) == 64  # type: ignore[attr-defined]
     public_prompt = result.to_dict()["prompt"]
     assert "messages" not in public_prompt

@@ -214,6 +214,9 @@ import type {
 import {
   AutonomousPromptRegistry,
   AutonomousPromptTemplate,
+  type AutonomousPromptLearningState,
+  type AutonomousPromptLearningStateJSON,
+  selectAdaptiveAutonomousPrompts,
   type AutonomousPromptRenderResult,
   type AutonomousPromptSelectionPlan,
   type AutonomousPromptSelectionPlanJSON,
@@ -936,6 +939,10 @@ export interface AutonomousRunPromptProjection extends JsonObject {
   rendered_prompt_digest: string;
   final_prompt_digest: string;
   selection_plan_digest: string | null;
+  adaptive_selection_digest?: string | null;
+  adaptive_arm_id?: string | null;
+  adaptive_generation?: number | null;
+  selection_policy?: string | null;
   retention: "prompt_messages_transient;digest_only_projection";
   secret_material: "never_returned";
 }
@@ -1235,6 +1242,10 @@ export interface AutonomousProviderPlanningOptions {
   promptRegistry?: AutonomousPromptRegistry;
   /** Optional digest-bound planner prompt selection; omitted plans are selected at call time. */
   promptSelection?: AutonomousPromptSelectionPlan | AutonomousPromptSelectionPlanJSON;
+  /** Caller-owned value-only prompt-arm state; evaluator settlement remains an explicit follow-up. */
+  promptLearningState?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON;
+  /** UCB exploration weight for adaptive planner prompt selection. */
+  promptLearningExploration?: number;
   /** Versioned planner prompt stage; defaults to `planning`. */
   promptStage?: string;
   maxInputTokens?: number;
@@ -1392,6 +1403,10 @@ export interface AutonomousRunOptions {
   promptRegistry?: AutonomousPromptRegistry;
   /** Optional digest-bound selection plan; omitted plans are selected from promptRegistry at run time. */
   promptSelection?: AutonomousPromptSelectionPlan | AutonomousPromptSelectionPlanJSON;
+  /** Caller-owned value-only prompt-arm state; evaluator settlement remains an explicit follow-up. */
+  promptLearningState?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON;
+  /** UCB exploration weight for adaptive run prompt selection. */
+  promptLearningExploration?: number;
   /** Prompt workflow stage used for versioned prompt selection; defaults to `answer`. */
   promptStage?: string;
   /** Transient multimodal evidence appended to the task message only; never retained in autonomy state. */
@@ -1529,6 +1544,10 @@ export interface AutonomousPlanAndRunOptions extends AutonomousRunOptions {
   planning?: AutonomousProviderPlanningOptions;
   /** Prompt stage used when the outer run supplies prompt controls to nested provider planning. */
   planningPromptStage?: string;
+  /** Optional independent value-only prompt state for the nested planning proposal. */
+  planningPromptLearningState?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON;
+  /** UCB exploration weight for nested planning prompt selection. */
+  planningPromptLearningExploration?: number;
   /** Only true allows a completed, non-review proposal to shape the subsequent invocation. */
   acceptPlan?: boolean;
 }
@@ -2378,7 +2397,7 @@ async function renderAutonomousRunPrompt(
   task: string,
   blueprint: AutonomousTaskBlueprint,
   route: AutonomousRouteProposal | null,
-  options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage">,
+  options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage" | "promptLearningState" | "promptLearningExploration">,
   contextIds: readonly string[] = blueprint.prompt.included_context_ids,
 ): Promise<RenderedAutonomousRunPrompt | null> {
   const domain = blueprint.domain_profile.domain;
@@ -2407,7 +2426,7 @@ async function renderAutonomousRunPrompt(
 
 async function renderVersionedAutonomousPrompt(
   context: Readonly<Record<string, unknown>>,
-  options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage">,
+  options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage" | "promptLearningState" | "promptLearningExploration">,
 ): Promise<RenderedAutonomousRunPrompt | null> {
   const template = options.promptTemplate;
   const registry = options.promptRegistry;
@@ -2416,6 +2435,8 @@ async function renderVersionedAutonomousPrompt(
   if (registry !== undefined && !(registry instanceof AutonomousPromptRegistry)) throw new ArgumentError("autonomous promptRegistry must be an AutonomousPromptRegistry");
   if (template !== undefined && (registry !== undefined || selection !== undefined)) throw new ArgumentError("autonomous promptTemplate cannot be combined with promptRegistry or promptSelection");
   if (selection !== undefined && registry === undefined) throw new ArgumentError("autonomous promptSelection requires promptRegistry");
+  if (options.promptLearningState !== undefined && registry === undefined) throw new ArgumentError("autonomous promptLearningState requires promptRegistry");
+  if (options.promptLearningState !== undefined && selection !== undefined) throw new ArgumentError("autonomous promptLearningState cannot be combined with promptSelection");
   if (registry === undefined && template === undefined) return null;
   const requirement = context.requirement;
   if (!requirement || typeof requirement !== "object") throw new ArgumentError("autonomous prompt context requirement is malformed");
@@ -2429,14 +2450,29 @@ async function renderVersionedAutonomousPrompt(
     const rendered = await template.renderTransient(normalizedContext);
     return { messages: rendered.messages, metadata: rendered.metadata, mode: "versioned_template" };
   }
-  const resolvedSelection = selection ?? registry!.selectFor([
+  const request = {
     // Prompt capabilities are a separate reviewed namespace from model capabilities. A domain
     // blueprint may require "reasoning" or "code" even when a prompt manifest intentionally
     // advertises only its rendering concerns, so selection starts with no implicit model labels.
-    { domain, stage, requiredCapabilities: [] },
-  ]);
+    domain,
+    stage,
+    requiredCapabilities: [],
+  } as const;
+  const adaptive = options.promptLearningState === undefined
+    ? null
+    : selectAdaptiveAutonomousPrompts(registry!, [request], { state: options.promptLearningState, exploration: options.promptLearningExploration });
+  const resolvedSelection = selection ?? adaptive?.plan ?? registry!.selectFor([request]);
   const rendered = await registry!.render(resolvedSelection, normalizedContext);
-  return { messages: rendered.messages, metadata: rendered.metadata, mode: "registry_selection" };
+  const metadata = adaptive === null
+    ? rendered.metadata
+    : {
+      ...rendered.metadata,
+      adaptive_selection_digest: adaptive.selectionDigest,
+      adaptive_arm_id: adaptive.armIds[0] ?? null,
+      adaptive_generation: adaptive.generation,
+      selection_policy: "ucb1_explicit_evaluator_v1",
+    };
+  return { messages: rendered.messages, metadata, mode: "registry_selection" };
 }
 
 function normalizeAutonomousDomainPolicyMode(value: AutonomousDomainPolicyExecutionMode | undefined): AutonomousDomainPolicyExecutionMode {
@@ -2988,6 +3024,8 @@ async function prepareVersionedPlanningMessages(
       promptTemplate: options.promptTemplate,
       promptRegistry: options.promptRegistry,
       promptSelection: options.promptSelection,
+      promptLearningState: options.promptLearningState,
+      promptLearningExploration: options.promptLearningExploration,
     },
   );
   const legacyMessages = prompt.messages.map(({ role, content }) => ({ role, content } satisfies ProviderMessage));
@@ -6158,6 +6196,10 @@ export class AutonomousAgent {
       ...(planning?.promptTemplate === undefined && options.promptTemplate !== undefined ? { promptTemplate: options.promptTemplate } : {}),
       ...(planning?.promptRegistry === undefined && options.promptRegistry !== undefined ? { promptRegistry: options.promptRegistry } : {}),
       ...(planning?.promptSelection === undefined && options.promptSelection !== undefined ? { promptSelection: options.promptSelection } : {}),
+      ...(planning?.promptLearningState === undefined && options.planningPromptLearningState !== undefined ? { promptLearningState: options.planningPromptLearningState } : {}),
+      ...(planning?.promptLearningState === undefined && options.planningPromptLearningState === undefined && options.promptLearningState !== undefined ? { promptLearningState: options.promptLearningState } : {}),
+      ...(planning?.promptLearningExploration === undefined && options.planningPromptLearningExploration !== undefined ? { promptLearningExploration: options.planningPromptLearningExploration } : {}),
+      ...(planning?.promptLearningExploration === undefined && options.planningPromptLearningExploration === undefined && options.promptLearningExploration !== undefined ? { promptLearningExploration: options.promptLearningExploration } : {}),
       ...(planning?.promptStage === undefined ? { promptStage: options.planningPromptStage ?? "planning" } : {}),
       ...(sharedBudget ? { costBudget: sharedBudget, maxTotalCostUnits: undefined } : {}),
       ...(options.domainPolicyMode === undefined ? {} : { domainPolicyMode: options.domainPolicyMode }),
@@ -6176,6 +6218,8 @@ export class AutonomousAgent {
     };
     delete (executionOptions as AutonomousPlanAndRunOptions).planning;
     delete (executionOptions as AutonomousPlanAndRunOptions).planningPromptStage;
+    delete (executionOptions as AutonomousPlanAndRunOptions).planningPromptLearningState;
+    delete (executionOptions as AutonomousPlanAndRunOptions).planningPromptLearningExploration;
     delete (executionOptions as AutonomousPlanAndRunOptions).acceptPlan;
     if (envelope.cross_domain_blueprint) {
       const proposal = await this.planCrossDomainWithProvider(envelope.cross_domain_blueprint, planningOptions);
@@ -6836,6 +6880,10 @@ export class AutonomousAgent {
         rendered_prompt_digest: renderedPrompt.metadata.rendered_prompt_digest,
         final_prompt_digest: await digestJson(messages),
         selection_plan_digest: renderedPrompt.metadata.selection_plan_digest,
+        ...(renderedPrompt.metadata.adaptive_selection_digest !== undefined ? { adaptive_selection_digest: renderedPrompt.metadata.adaptive_selection_digest } : {}),
+        ...(renderedPrompt.metadata.adaptive_arm_id !== undefined ? { adaptive_arm_id: renderedPrompt.metadata.adaptive_arm_id } : {}),
+        ...(renderedPrompt.metadata.adaptive_generation !== undefined ? { adaptive_generation: renderedPrompt.metadata.adaptive_generation } : {}),
+        ...(renderedPrompt.metadata.selection_policy !== undefined ? { selection_policy: renderedPrompt.metadata.selection_policy } : {}),
         retention: "prompt_messages_transient;digest_only_projection",
         secret_material: "never_returned",
       };

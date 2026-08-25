@@ -93,6 +93,10 @@ export interface AutonomousPromptRenderResult extends JsonObject {
   manifest_digest: string;
   rendered_prompt_digest: string;
   selection_plan_digest: string | null;
+  adaptive_selection_digest?: string | null;
+  adaptive_arm_id?: string | null;
+  adaptive_generation?: number | null;
+  selection_policy?: string | null;
   message_count: number;
   retention: "rendered_messages_transient;digest_only_projection";
   secret_material: "never_returned";
@@ -461,6 +465,430 @@ export class AutonomousPromptRegistry {
     if (!selectedRow) throw new ArgumentError("prompt selection plan has no unique row for render context");
     return this.templateFor(selectedRow.selected_prompt_id).renderTransient(context, verified.planDigest);
   }
+}
+
+/** Value-only UCB learning contracts for reviewed prompt implementations. */
+export const AUTONOMOUS_PROMPT_LEARNING_SCHEMA = "bioprism-typescript-autonomous-prompt-learning/0.1" as const;
+export const AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA = "bioprism-typescript-autonomous-prompt-adaptive-selection/0.1" as const;
+export const AUTONOMOUS_PROMPT_LEARNING_SETTLEMENT_SCHEMA = "bioprism-typescript-autonomous-prompt-learning-settlement/0.1" as const;
+export const AUTONOMOUS_PROMPT_LEARNING_POLICY = "ucb1_explicit_evaluator_v1" as const;
+export const AUTONOMOUS_PROMPT_LEARNING_RETENTION = "value_only_prompt_manifest_arms_and_settlement_digests" as const;
+export const MAX_AUTONOMOUS_PROMPT_LEARNING_ARMS = 4_096;
+export const MAX_AUTONOMOUS_PROMPT_LEARNING_SETTLEMENTS = 4_096;
+export const MAX_AUTONOMOUS_PROMPT_LEARNING_EXPLORATION = 2;
+
+export interface AutonomousPromptLearningArmJSON extends JsonObject {
+  arm_id: string;
+  domain: AutonomousDomainName;
+  stage: string;
+  required_capabilities: string[];
+  prompt_id: string;
+  version: string;
+  manifest_digest: string;
+  pulls: number;
+  failures: number;
+  reward_sum: number;
+}
+
+export interface AutonomousPromptLearningSettlementJSON extends JsonObject {
+  settlement_key: string;
+  arm_id: string;
+  selection_digest: string;
+  evaluator_id: string;
+  evaluator_version: string;
+  reward: number;
+  passed: boolean;
+  outcome_digest: string;
+}
+
+export interface AutonomousPromptLearningStateJSON extends JsonObject {
+  schema: typeof AUTONOMOUS_PROMPT_LEARNING_SCHEMA;
+  registry_digest: string;
+  generation: number;
+  arms: AutonomousPromptLearningArmJSON[];
+  settlements: AutonomousPromptLearningSettlementJSON[];
+  retention: typeof AUTONOMOUS_PROMPT_LEARNING_RETENTION;
+  secret_material: "never_returned";
+  state_digest: string;
+}
+
+export interface AutonomousPromptAdaptiveSelectionJSON extends JsonObject {
+  schema: typeof AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA;
+  registry_digest: string;
+  generation: number;
+  plan_digest: string;
+  arm_ids: string[];
+  exploration: number;
+  selection_policy: typeof AUTONOMOUS_PROMPT_LEARNING_POLICY;
+  selection_digest: string;
+  plan: AutonomousPromptSelectionPlanJSON;
+  retention: "selection_metadata_only;rendered_messages_transient";
+  secret_material: "never_returned";
+}
+
+function learningInteger(name: string, value: unknown, maximum: number): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > maximum) throw new ArgumentError(`${name} is outside its integer bounds`);
+  return value as number;
+}
+
+function learningNumber(name: string, value: unknown, minimum: number, maximum: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) throw new ArgumentError(`${name} is outside its numeric bounds`);
+  return value;
+}
+
+function learningArmId(options: {
+  domain: AutonomousDomainName;
+  stage: string;
+  requiredCapabilities: readonly string[];
+  promptId: string;
+  version: string;
+  manifestDigest: string;
+}): string {
+  if (!(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(options.domain)) throw new ArgumentError("prompt learning arm domain is unsupported");
+  return digestJsonSync({
+    domain: options.domain,
+    stage: boundedText("prompt learning arm stage", options.stage, 256),
+    required_capabilities: items("prompt learning arm requiredCapabilities", options.requiredCapabilities, MAX_AUTONOMOUS_PROMPT_CAPABILITIES, false, true),
+    prompt_id: identifier("prompt learning arm promptId", options.promptId),
+    version: boundedText("prompt learning arm version", options.version, 128),
+    manifest_digest: digest("prompt learning arm manifestDigest", options.manifestDigest)!,
+  });
+}
+
+/** One registry-bound prompt arm with bounded, evaluator-supplied value statistics. */
+export class AutonomousPromptLearningArm {
+  readonly domain: AutonomousDomainName;
+  readonly stage: string;
+  readonly requiredCapabilities: readonly string[];
+  readonly promptId: string;
+  readonly version: string;
+  readonly manifestDigest: string;
+  readonly pulls: number;
+  readonly failures: number;
+  readonly rewardSum: number;
+
+  constructor(options: {
+    domain: AutonomousDomainName;
+    stage: string;
+    requiredCapabilities: readonly string[];
+    promptId: string;
+    version: string;
+    manifestDigest: string;
+    pulls?: number;
+    failures?: number;
+    rewardSum?: number;
+  }) {
+    if (!(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(options.domain)) throw new ArgumentError("prompt learning arm domain is unsupported");
+    this.domain = options.domain;
+    this.stage = boundedText("prompt learning arm stage", options.stage, 256);
+    this.requiredCapabilities = Object.freeze(items("prompt learning arm requiredCapabilities", options.requiredCapabilities, MAX_AUTONOMOUS_PROMPT_CAPABILITIES, false, true));
+    this.promptId = identifier("prompt learning arm promptId", options.promptId);
+    this.version = boundedText("prompt learning arm version", options.version, 128);
+    this.manifestDigest = digest("prompt learning arm manifestDigest", options.manifestDigest)!;
+    this.pulls = learningInteger("prompt learning arm pulls", options.pulls ?? 0, 2_147_483_647);
+    this.failures = learningInteger("prompt learning arm failures", options.failures ?? 0, 2_147_483_647);
+    if (this.failures > this.pulls) throw new ArgumentError("prompt learning arm failures exceed pulls");
+    this.rewardSum = learningNumber("prompt learning arm rewardSum", options.rewardSum ?? 0, -this.pulls, this.pulls);
+    Object.freeze(this);
+  }
+
+  get armId(): string {
+    return learningArmId({ domain: this.domain, stage: this.stage, requiredCapabilities: this.requiredCapabilities, promptId: this.promptId, version: this.version, manifestDigest: this.manifestDigest });
+  }
+
+  toJSON(): AutonomousPromptLearningArmJSON {
+    return {
+      arm_id: this.armId,
+      domain: this.domain,
+      stage: this.stage,
+      required_capabilities: [...this.requiredCapabilities],
+      prompt_id: this.promptId,
+      version: this.version,
+      manifest_digest: this.manifestDigest,
+      pulls: this.pulls,
+      failures: this.failures,
+      reward_sum: this.rewardSum,
+    };
+  }
+}
+
+function normalizeLearningSettlement(value: unknown): AutonomousPromptLearningSettlementJSON {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ArgumentError("prompt learning settlement is malformed");
+  const record = value as Record<string, unknown>;
+  const fields = ["settlement_key", "arm_id", "selection_digest", "evaluator_id", "evaluator_version", "reward", "passed", "outcome_digest"];
+  if (Object.keys(record).sort().join("\u0000") !== fields.slice().sort().join("\u0000")) throw new ArgumentError("prompt learning settlement fields are invalid");
+  if (typeof record.passed !== "boolean") throw new ArgumentError("prompt learning settlement passed must be boolean");
+  return {
+    settlement_key: digest("prompt learning settlement_key", record.settlement_key)!,
+    arm_id: digest("prompt learning settlement armId", record.arm_id)!,
+    selection_digest: digest("prompt learning settlement selectionDigest", record.selection_digest)!,
+    evaluator_id: boundedText("prompt learning settlement evaluatorId", record.evaluator_id, 256),
+    evaluator_version: boundedText("prompt learning settlement evaluatorVersion", record.evaluator_version, 128),
+    reward: learningNumber("prompt learning settlement reward", record.reward, -1, 1),
+    passed: record.passed,
+    outcome_digest: digest("prompt learning settlement outcomeDigest", record.outcome_digest)!,
+  };
+}
+
+/** Caller-owned, restart-safe prompt value state. Raw tasks and rendered messages are absent. */
+export class AutonomousPromptLearningState {
+  readonly registryDigest: string;
+  readonly generation: number;
+  readonly arms: readonly AutonomousPromptLearningArm[];
+  readonly settlements: readonly AutonomousPromptLearningSettlementJSON[];
+
+  constructor(registryDigest: string, generation = 0, arms: readonly AutonomousPromptLearningArm[] = [], settlements: readonly JsonObject[] = []) {
+    this.registryDigest = digest("prompt learning registryDigest", registryDigest)!;
+    this.generation = learningInteger("prompt learning generation", generation, 2_147_483_647);
+    if (!Array.isArray(arms) || arms.length > MAX_AUTONOMOUS_PROMPT_LEARNING_ARMS || arms.some((arm) => !(arm instanceof AutonomousPromptLearningArm))) throw new ArgumentError("prompt learning arms are outside their bounds");
+    const armIds = arms.map((arm) => arm.armId);
+    if (new Set(armIds).size !== armIds.length) throw new ArgumentError("prompt learning state contains duplicate arms");
+    if (!Array.isArray(settlements) || settlements.length > MAX_AUTONOMOUS_PROMPT_LEARNING_SETTLEMENTS) throw new ArgumentError("prompt learning settlements are outside their bounds");
+    this.arms = Object.freeze([...arms].sort((left, right) => left.armId.localeCompare(right.armId)));
+    this.settlements = Object.freeze(settlements.map(normalizeLearningSettlement));
+    Object.freeze(this);
+  }
+
+  get stateDigest(): string {
+    return digestJsonSync(this.descriptor());
+  }
+
+  private descriptor(): JsonObject {
+    return {
+      schema: AUTONOMOUS_PROMPT_LEARNING_SCHEMA,
+      registry_digest: this.registryDigest,
+      generation: this.generation,
+      arms: this.arms.map((arm) => arm.toJSON()),
+      settlements: this.settlements.map((settlement) => ({ ...settlement })),
+      retention: AUTONOMOUS_PROMPT_LEARNING_RETENTION,
+      secret_material: "never_returned",
+    };
+  }
+
+  toJSON(): AutonomousPromptLearningStateJSON {
+    return { ...this.descriptor(), state_digest: this.stateDigest } as AutonomousPromptLearningStateJSON;
+  }
+
+  static fromJSON(value: JsonObject): AutonomousPromptLearningState {
+    if (!value || value.schema !== AUTONOMOUS_PROMPT_LEARNING_SCHEMA || !Array.isArray(value.arms) || !Array.isArray(value.settlements)) throw new ArgumentError("prompt learning state JSON is malformed");
+    const arms = value.arms.map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new ArgumentError("prompt learning state arm is malformed");
+      const arm = item as Record<string, unknown>;
+      return new AutonomousPromptLearningArm({
+        domain: arm.domain as AutonomousDomainName,
+        stage: arm.stage as string,
+        requiredCapabilities: arm.required_capabilities as string[],
+        promptId: arm.prompt_id as string,
+        version: arm.version as string,
+        manifestDigest: arm.manifest_digest as string,
+        pulls: arm.pulls as number | undefined,
+        failures: arm.failures as number | undefined,
+        rewardSum: arm.reward_sum as number | undefined,
+      });
+    });
+    const state = new AutonomousPromptLearningState(value.registry_digest as string, value.generation as number | undefined, arms, value.settlements as unknown as JsonObject[]);
+    if (value.state_digest !== undefined && value.state_digest !== state.stateDigest) throw new ArgumentError("prompt learning state digest does not match its contents");
+    return state;
+  }
+}
+
+/** An adaptive selection binds UCB choices to a verified selection plan and registry digest. */
+export class AutonomousPromptAdaptiveSelection {
+  readonly registryDigest: string;
+  readonly generation: number;
+  readonly plan: AutonomousPromptSelectionPlan;
+  readonly armIds: readonly string[];
+  readonly exploration: number;
+
+  constructor(registryDigest: string, generation: number, plan: AutonomousPromptSelectionPlan, armIds: readonly string[], exploration: number) {
+    this.registryDigest = digest("adaptive prompt selection registryDigest", registryDigest)!;
+    this.generation = learningInteger("adaptive prompt selection generation", generation, 2_147_483_647);
+    if (!(plan instanceof AutonomousPromptSelectionPlan) || plan.registryDigest !== this.registryDigest) throw new ArgumentError("adaptive prompt selection plan is not registry-bound");
+    this.plan = plan;
+    if (!Array.isArray(armIds) || armIds.length !== plan.rows.length) throw new ArgumentError("adaptive prompt selection arm ids are malformed");
+    this.armIds = Object.freeze(armIds.map((armId) => digest("adaptive prompt selection armId", armId)!));
+    this.exploration = learningNumber("adaptive prompt selection exploration", exploration, 0, MAX_AUTONOMOUS_PROMPT_LEARNING_EXPLORATION);
+    Object.freeze(this);
+  }
+
+  get selectionDigest(): string {
+    return digestJsonSync({ schema: AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA, registry_digest: this.registryDigest, generation: this.generation, plan_digest: this.plan.planDigest, arm_ids: [...this.armIds], exploration: this.exploration, selection_policy: AUTONOMOUS_PROMPT_LEARNING_POLICY });
+  }
+
+  toJSON(): AutonomousPromptAdaptiveSelectionJSON {
+    return {
+      schema: AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA,
+      registry_digest: this.registryDigest,
+      generation: this.generation,
+      plan_digest: this.plan.planDigest,
+      arm_ids: [...this.armIds],
+      exploration: this.exploration,
+      selection_policy: AUTONOMOUS_PROMPT_LEARNING_POLICY,
+      selection_digest: this.selectionDigest,
+      plan: this.plan.toJSON(),
+      retention: "selection_metadata_only;rendered_messages_transient",
+      secret_material: "never_returned",
+    };
+  }
+
+  static fromJSON(value: JsonObject): AutonomousPromptAdaptiveSelection {
+    if (!value || value.schema !== AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA || !value.plan || typeof value.plan !== "object") throw new ArgumentError("adaptive prompt selection JSON is malformed");
+    const plan = AutonomousPromptSelectionPlan.fromJSON(value.plan as JsonObject);
+    const selection = new AutonomousPromptAdaptiveSelection(value.registry_digest as string, value.generation as number, plan, value.arm_ids as string[], value.exploration as number);
+    if (value.selection_digest !== undefined && value.selection_digest !== selection.selectionDigest) throw new ArgumentError("adaptive prompt selection digest does not match its contents");
+    return selection;
+  }
+}
+
+function normalizePromptLearningState(registry: AutonomousPromptRegistry, value: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON | undefined): AutonomousPromptLearningState {
+  const state = value === undefined ? new AutonomousPromptLearningState(registry.registryDigest) : value instanceof AutonomousPromptLearningState ? value : AutonomousPromptLearningState.fromJSON(value);
+  if (state.registryDigest !== registry.registryDigest) throw new ArgumentError("prompt learning state is stale for the current registry");
+  for (const arm of state.arms) {
+    const manifest = registry.templateFor(arm.promptId).manifest;
+    if (manifest.domain !== arm.domain || manifest.version !== arm.version || digestJsonSync(manifest) !== arm.manifestDigest || (!manifest.stages.includes(arm.stage) && !manifest.stages.includes("*")) || !arm.requiredCapabilities.every((capability) => manifest.capabilities.includes(capability))) throw new ArgumentError("prompt learning arm is stale for the current registry");
+  }
+  return state;
+}
+
+/** Select one prompt implementation per request using deterministic UCB1 exploration. */
+export function selectAdaptiveAutonomousPrompts(
+  registry: AutonomousPromptRegistry,
+  requests: readonly AutonomousPromptSelectionRequest[],
+  options: { state?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON; exploration?: number } = {},
+): AutonomousPromptAdaptiveSelection {
+  if (!(registry instanceof AutonomousPromptRegistry)) throw new ArgumentError("adaptive prompt selection requires an AutonomousPromptRegistry");
+  if (!Array.isArray(requests) || requests.length < 1 || requests.length > MAX_AUTONOMOUS_PROMPT_SELECTIONS) throw new ArgumentError("adaptive prompt selection requests are outside their bounds");
+  const state = normalizePromptLearningState(registry, options.state);
+  const exploration = learningNumber("adaptive prompt selection exploration", options.exploration ?? 0.35, 0, MAX_AUTONOMOUS_PROMPT_LEARNING_EXPLORATION);
+  const byArm = new Map(state.arms.map((arm) => [arm.armId, arm]));
+  const rows: AutonomousPromptSelectionRow[] = [];
+  const armIds: string[] = [];
+  requests.forEach((request, index) => {
+    if (!request || typeof request !== "object") throw new ArgumentError(`adaptive prompt selection request ${index} is malformed`);
+    const candidates = registry.candidates(request.domain, request.stage, request.requiredCapabilities);
+    if (candidates.length === 0) throw new ArgumentError(`no prompt template satisfies ${request.domain}/${request.stage}`);
+    const arms = candidates.map((template) => {
+      const manifest = template.manifest;
+      return { template, arm: new AutonomousPromptLearningArm({ domain: request.domain, stage: request.stage, requiredCapabilities: request.requiredCapabilities, promptId: manifest.prompt_id, version: manifest.version, manifestDigest: digestJsonSync(manifest) }) };
+    });
+    const unpulled = arms.filter(({ arm }) => !byArm.has(arm.armId) || byArm.get(arm.armId)!.pulls === 0);
+    let selected = unpulled[0];
+    if (!selected) {
+      const totalPulls = Math.max(1, arms.reduce((sum, item) => sum + byArm.get(item.arm.armId)!.pulls, 0));
+      let bestScore = Number.NEGATIVE_INFINITY;
+      arms.forEach((candidate, candidateIndex) => {
+        const learned = byArm.get(candidate.arm.armId)!;
+        const score = learned.rewardSum / learned.pulls + exploration * Math.sqrt(Math.log(totalPulls + 1) / learned.pulls);
+        if (score > bestScore) {
+          bestScore = score;
+          selected = candidate;
+        } else if (score === bestScore && selected && candidateIndex < arms.indexOf(selected)) {
+          selected = candidate;
+        }
+      });
+    }
+    if (!selected) throw new ArgumentError("adaptive prompt selection failed to choose a candidate");
+    const manifest = selected.template.manifest;
+    armIds.push(selected.arm.armId);
+    rows.push({
+      schema: AUTONOMOUS_PROMPT_SELECTION_ROW_SCHEMA,
+      domain: request.domain,
+      stage: identifier(`adaptive prompt selection request ${index} stage`, request.stage),
+      required_capabilities: items(`adaptive prompt selection request ${index} requiredCapabilities`, request.requiredCapabilities, MAX_AUTONOMOUS_PROMPT_CAPABILITIES, false, true),
+      selected_prompt_id: manifest.prompt_id,
+      selected_version: manifest.version,
+      selected_manifest_digest: digestJsonSync(manifest),
+      candidate_prompt_ids: candidates.map((candidate) => candidate.promptId),
+      selection_reason: "stage_specificity_then_capability_fit_then_lexical_identity",
+    });
+  });
+  return new AutonomousPromptAdaptiveSelection(registry.registryDigest, state.generation, new AutonomousPromptSelectionPlan(registry.registryDigest, rows), armIds, exploration);
+}
+
+/** Explicitly settle one evaluator reward; repeated settlement keys are replay-safe. */
+export class AutonomousPromptLearningSettlement {
+  readonly status: "settled" | "replayed";
+  readonly nextState: AutonomousPromptLearningState;
+  readonly selectionDigest: string;
+  readonly armId: string;
+  readonly evaluatorId: string;
+  readonly evaluatorVersion: string;
+  readonly reward: number;
+  readonly passed: boolean;
+  readonly outcomeDigest: string;
+  readonly idempotentReplay: boolean;
+
+  constructor(options: { status: "settled" | "replayed"; nextState: AutonomousPromptLearningState; selectionDigest: string; armId: string; evaluatorId: string; evaluatorVersion: string; reward: number; passed: boolean; outcomeDigest: string; idempotentReplay: boolean }) {
+    this.status = options.status;
+    this.nextState = options.nextState;
+    this.selectionDigest = digest("prompt learning settlement selectionDigest", options.selectionDigest)!;
+    this.armId = digest("prompt learning settlement armId", options.armId)!;
+    this.evaluatorId = boundedText("prompt learning settlement evaluatorId", options.evaluatorId, 256);
+    this.evaluatorVersion = boundedText("prompt learning settlement evaluatorVersion", options.evaluatorVersion, 128);
+    this.reward = learningNumber("prompt learning settlement reward", options.reward, -1, 1);
+    if (typeof options.passed !== "boolean") throw new ArgumentError("prompt learning settlement passed must be boolean");
+    this.passed = options.passed;
+    this.outcomeDigest = digest("prompt learning settlement outcomeDigest", options.outcomeDigest)!;
+    this.idempotentReplay = options.idempotentReplay;
+    Object.freeze(this);
+  }
+
+  get settlementDigest(): string {
+    return digestJsonSync(this.toJSON());
+  }
+
+  toJSON(): JsonObject {
+    const body = {
+      schema: AUTONOMOUS_PROMPT_LEARNING_SETTLEMENT_SCHEMA,
+      status: this.status,
+      selection_digest: this.selectionDigest,
+      arm_id: this.armId,
+      evaluator_id: this.evaluatorId,
+      evaluator_version: this.evaluatorVersion,
+      reward: this.reward,
+      passed: this.passed,
+      outcome_digest: this.outcomeDigest,
+      idempotent_replay: this.idempotentReplay,
+      next_state_digest: this.nextState.stateDigest,
+      retention: AUTONOMOUS_PROMPT_LEARNING_RETENTION,
+      secret_material: "never_returned",
+    } satisfies JsonObject;
+    return { ...body, settlement_digest: digestJsonSync(body) };
+  }
+}
+
+export function settleAutonomousPromptSelection(
+  registry: AutonomousPromptRegistry,
+  state: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON,
+  selection: AutonomousPromptAdaptiveSelection | AutonomousPromptAdaptiveSelectionJSON,
+  options: { armId: string; evaluatorId: string; evaluatorVersion: string; reward: number; passed: boolean; outcomeDigest?: string; settlementKey?: string },
+): AutonomousPromptLearningSettlement {
+  const current = normalizePromptLearningState(registry, state);
+  const adaptive = selection instanceof AutonomousPromptAdaptiveSelection ? selection : AutonomousPromptAdaptiveSelection.fromJSON(selection);
+  const verifiedPlan = registry.verifySelection(adaptive.plan);
+  const armId = digest("prompt learning settlement armId", options.armId)!;
+  if (adaptive.registryDigest !== current.registryDigest || !adaptive.armIds.includes(armId)) throw new ArgumentError("prompt learning selection does not match the current state");
+  const armIndex = adaptive.armIds.indexOf(armId);
+  const row = verifiedPlan.rows[armIndex];
+  if (!row || learningArmId({ domain: row.domain, stage: row.stage, requiredCapabilities: row.required_capabilities, promptId: row.selected_prompt_id, version: row.selected_version, manifestDigest: row.selected_manifest_digest }) !== armId) throw new ArgumentError("prompt learning arm identity does not match its selection row");
+  const evaluatorId = boundedText("prompt learning evaluatorId", options.evaluatorId, 256);
+  const evaluatorVersion = boundedText("prompt learning evaluatorVersion", options.evaluatorVersion, 128);
+  const reward = learningNumber("prompt learning reward", options.reward, -1, 1);
+  if (typeof options.passed !== "boolean") throw new ArgumentError("prompt learning passed must be boolean");
+  const outcomeDigest = options.outcomeDigest === undefined ? digestJsonSync({ selection_digest: adaptive.selectionDigest, arm_id: armId, evaluator_id: evaluatorId, evaluator_version: evaluatorVersion, reward, passed: options.passed }) : digest("prompt learning outcomeDigest", options.outcomeDigest)!;
+  const settlementKey = options.settlementKey === undefined ? digestJsonSync({ arm_id: armId, outcome_digest: outcomeDigest, evaluator_id: evaluatorId, evaluator_version: evaluatorVersion }) : digest("prompt learning settlementKey", options.settlementKey)!;
+  const prior = current.settlements.find((item) => item.settlement_key === settlementKey);
+  if (prior) {
+    if (prior.outcome_digest !== outcomeDigest || prior.arm_id !== armId) throw new ArgumentError("prompt learning settlement key conflicts with prior evidence");
+    return new AutonomousPromptLearningSettlement({ status: "replayed", nextState: current, selectionDigest: adaptive.selectionDigest, armId, evaluatorId, evaluatorVersion, reward, passed: options.passed, outcomeDigest, idempotentReplay: true });
+  }
+  if (current.settlements.length >= MAX_AUTONOMOUS_PROMPT_LEARNING_SETTLEMENTS) throw new ArgumentError("prompt learning settlement history is full");
+  const existing = current.arms.find((candidate) => candidate.armId === armId) ?? new AutonomousPromptLearningArm({ domain: row.domain, stage: row.stage, requiredCapabilities: row.required_capabilities, promptId: row.selected_prompt_id, version: row.selected_version, manifestDigest: row.selected_manifest_digest });
+  const updated = new AutonomousPromptLearningArm({ domain: existing.domain, stage: existing.stage, requiredCapabilities: existing.requiredCapabilities, promptId: existing.promptId, version: existing.version, manifestDigest: existing.manifestDigest, pulls: existing.pulls + 1, failures: existing.failures + (options.passed ? 0 : 1), rewardSum: existing.rewardSum + reward });
+  const evidence: AutonomousPromptLearningSettlementJSON = { settlement_key: settlementKey, arm_id: armId, selection_digest: adaptive.selectionDigest, evaluator_id: evaluatorId, evaluator_version: evaluatorVersion, reward, passed: options.passed, outcome_digest: outcomeDigest };
+  const nextArms = [...current.arms.filter((candidate) => candidate.armId !== armId), updated];
+  const nextState = new AutonomousPromptLearningState(current.registryDigest, current.generation + 1, nextArms, [...current.settlements, evidence]);
+  return new AutonomousPromptLearningSettlement({ status: "settled", nextState, selectionDigest: adaptive.selectionDigest, armId, evaluatorId, evaluatorVersion, reward, passed: options.passed, outcomeDigest, idempotentReplay: false });
 }
 
 function builtinPromptSubject(context: AutonomousPromptContext): string {

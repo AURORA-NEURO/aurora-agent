@@ -39,6 +39,7 @@ import {
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
   builtinAutonomousPromptRegistry,
+  AutonomousPromptLearningState,
   builtinAutonomousValueEvaluatorProfiles,
   assembleAutonomousPrompt,
   compileAutonomousPlan,
@@ -2125,10 +2126,13 @@ test("high-level runs use verified prompt registry messages and prompt-bound req
     domain: "neuroscience",
     candidates: [model],
     promptRegistry: registry,
+    promptLearningState: new AutonomousPromptLearningState(registry.registryDigest),
     approveProviderCall: true,
   });
   assert.equal(direct.status, "completed");
   assert.equal(direct.prompt.mode, "registry_selection");
+  assert.match(direct.prompt.adaptive_selection_digest, /^[0-9a-f]{64}$/);
+  assert.equal(direct.prompt.selection_policy, "ucb1_explicit_evaluator_v1");
   assert.match(requests[0].messages[0].content, /neuroscience specialist/);
   assert.match(requests[0].idempotencyKey, /^[0-9a-f]{64}$/);
 

@@ -5,6 +5,9 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousPromptRegistry,
   AutonomousPromptTemplate,
+  AutonomousPromptLearningState,
+  selectAdaptiveAutonomousPrompts,
+  settleAutonomousPromptSelection,
   LLMRuntime,
   builtinAutonomousPromptRegistry,
   builtinAutonomousPromptTemplates,
@@ -68,6 +71,51 @@ test("built-in specialist prompt pack rejects duplicates, unsupported domains, a
   const registry = builtinAutonomousPromptRegistry(["science"]);
   const plan = registry.selectFor([{ domain: "science", stage: "answer", requiredCapabilities: ["analysis"] }]);
   await assert.rejects(() => registry.render(plan, context("science")), /requires a bounded objective/);
+});
+
+test("prompt learning explores registry arms and settles idempotently without retaining prompt text", () => {
+  const registry = new AutonomousPromptRegistry([
+    template("science", "variant A transient", "prompt-science-a"),
+    template("science", "variant B transient", "prompt-science-b"),
+  ]);
+  const state = new AutonomousPromptLearningState(registry.registryDigest);
+  const request = [{ domain: "science", stage: "answer", requiredCapabilities: [] }];
+  const first = selectAdaptiveAutonomousPrompts(registry, request, { state });
+  assert.match(first.armIds[0], /^[0-9a-f]{64}$/);
+  const settled = settleAutonomousPromptSelection(registry, state, first, {
+    armId: first.armIds[0],
+    evaluatorId: "science-rubric",
+    evaluatorVersion: "1",
+    reward: 0.9,
+    passed: true,
+    settlementKey: "a".repeat(64),
+  });
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.nextState.generation, 1);
+  const second = selectAdaptiveAutonomousPrompts(registry, request, { state: settled.nextState });
+  assert.notEqual(second.armIds[0], first.armIds[0]);
+  const replay = settleAutonomousPromptSelection(registry, settled.nextState, first, {
+    armId: first.armIds[0],
+    evaluatorId: "science-rubric",
+    evaluatorVersion: "1",
+    reward: 0.9,
+    passed: true,
+    settlementKey: "a".repeat(64),
+  });
+  assert.equal(replay.status, "replayed");
+  assert.equal(replay.nextState.stateDigest, settled.nextState.stateDigest);
+  assert.doesNotMatch(JSON.stringify(settled.nextState.toJSON()), /variant [AB] transient/);
+});
+
+test("prompt learning rejects stale registries and untrusted ledger fields", () => {
+  const registry = new AutonomousPromptRegistry([template("science", "variant A", "prompt-science-a")]);
+  const state = new AutonomousPromptLearningState(registry.registryDigest);
+  const selection = selectAdaptiveAutonomousPrompts(registry, [{ domain: "science", stage: "answer", requiredCapabilities: [] }], { state });
+  registry.register(template("science", "replacement", "prompt-science-a"), { replace: true });
+  assert.throws(() => settleAutonomousPromptSelection(registry, state, selection, {
+    armId: selection.armIds[0], evaluatorId: "science-rubric", evaluatorVersion: "1", reward: 0.5, passed: true,
+  }), /stale/);
+  assert.throws(() => AutonomousPromptLearningState.fromJSON({ ...state.toJSON(), settlements: [{ secret: "must-not-cross" }] }), /fields/);
 });
 
 test("prompt registry rejects stale plans and credential-shaped prompt fields", async () => {

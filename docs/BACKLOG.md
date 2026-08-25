@@ -1493,3 +1493,18 @@ selection controls at the explicit `planning` stage, verify stale selections bef
 and bind the transient planner prompt digest into the planner outcome identity. Planner messages
 remain transient and all result projections remain digest-only; offline Python and TypeScript
 coverage exercises approval gating, specialist prompt delivery, and all-domain planner parity.
+
+The next autonomous brain increment adds evaluator-driven prompt adaptation without turning
+provider output into self-authority. Python and TypeScript now expose a caller-owned
+`AutonomousPromptLearningState` containing only registry-bound prompt-arm identities, bounded
+pull/failure/reward statistics, and a capped replay ledger. `select_adaptive_autonomous_prompts`
+and `selectAdaptiveAutonomousPrompts` use deterministic UCB1 exploration: unobserved prompt
+variants are tried first, then the highest value-plus-exploration arm is selected with stable
+tie-breaking. `settle_autonomous_prompt_selection` and its TypeScript equivalent require an
+explicit evaluator id/version, bounded reward, pass signal, outcome digest, and optional
+settlement key; repeated keys replay without double credit. State and selection digests bind
+every choice to the current prompt registry and manifest, so replacement, stage drift,
+capability drift, malformed ledger fields, and stale plans fail closed. Direct and cross-domain
+execution plus provider-assisted planning accept the adaptive state and project only the
+selection digest, arm identity, generation, and policy; tasks, rendered messages, provider
+payloads, evaluator feedback, credentials, and secrets remain outside durable learning state.
