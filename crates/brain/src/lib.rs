@@ -58,6 +58,7 @@ pub mod high_throughput_evidence_workflow_fabric;
 pub mod multimodal_context_compilation;
 pub mod throughput_context_compilation;
 pub mod federated_context_compilation;
+pub mod context_omission_adjudication;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -293,6 +294,13 @@ pub use federated_context_compilation::{
     FederatedContextCompilationReceipt, FederatedContextCompilationRequest,
     CONTRACT_VERSION as FEDERATED_CONTEXT_COMPILATION_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_CONTEXT_COMPILATION_FEATURE_ID,
+};
+pub use context_omission_adjudication::{
+    adjudicate_context_omissions, context_omission_adjudication_manifest,
+    ContextAdjudicationEvidence, ContextOmissionAdjudicationError,
+    ContextOmissionAdjudicationReceipt, ContextOmissionAdjudicationRequest,
+    CONTRACT_VERSION as CONTEXT_OMISSION_ADJUDICATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_OMISSION_ADJUDICATION_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
