@@ -373,6 +373,7 @@ pub fn assure_knowledge_world(
         Vec::new(),
     )
     .map_err(|error| KnowledgeWorldAssuranceError::Artifact(error.to_string()))?;
+    let has_admitted = !admitted.is_empty();
     let receipt = TypedKnowledgeWorldReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -399,7 +400,7 @@ pub fn assure_knowledge_world(
         negative_evidence: negative.into_iter().collect(),
         replay_identity: request.replay_identity.clone(),
         benchmark_digest: request.benchmark_digest.clone(),
-        effect_receipts: if disposition == KnowledgeWorldDisposition::Qualified {
+        effect_receipts: if has_admitted {
             vec![format!(
                 "evaluate:knowledge-world-assurance:{}",
                 request.request_id

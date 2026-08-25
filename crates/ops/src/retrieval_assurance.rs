@@ -414,6 +414,7 @@ pub fn assure_retrieval(
         Vec::new(),
     )
     .map_err(|error| RetrievalAssuranceError::Artifact(error.to_string()))?;
+    let has_admitted = !admitted.is_empty();
     let receipt = EvidenceSynthesisReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -437,7 +438,7 @@ pub fn assure_retrieval(
         negative_evidence: negative.into_iter().collect(),
         replay_identity: request.replay_identity.clone(),
         benchmark_digest: request.benchmark_digest.clone(),
-        effect_receipts: if disposition == RetrievalDisposition::Qualified {
+        effect_receipts: if has_admitted {
             vec![format!(
                 "evaluate:retrieval-assurance:{}",
                 request.request_id
