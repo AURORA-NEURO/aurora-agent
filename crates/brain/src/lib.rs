@@ -70,6 +70,7 @@ pub mod multimodal_retrieval_workflow_fabric;
 pub mod multimodal_safety_assurance;
 pub mod retrieval_assurance_harness;
 pub mod retrieval_contract_model;
+pub mod retrieval_federated_control_plane;
 pub mod retrieval_protocol_gateway;
 pub mod retrieval_research_copilot;
 pub mod retrieval_research_workbench;
@@ -360,6 +361,13 @@ pub use retrieval_contract_model::{
     RetrievalContractModelReceipt, RetrievalContractModelRequest,
     CONTRACT_VERSION as RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use retrieval_federated_control_plane::{
+    operate_retrieval_federated_control_plane, retrieval_federated_control_plane_manifest,
+    RetrievalFederatedControlPlaneError, RetrievalFederatedControlPlaneReceipt,
+    RetrievalFederatedControlPlaneRequest, ACTION_ORDER as RETRIEVAL_CONTROL_ACTION_ORDER,
+    CONTRACT_VERSION as RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
 };
 pub use retrieval_protocol_gateway::{
     compile_retrieval_protocol, retrieval_protocol_gateway_manifest, RetrievalProtocolError,
