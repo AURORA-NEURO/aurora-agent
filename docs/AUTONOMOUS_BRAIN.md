@@ -4566,6 +4566,24 @@ bounded replan variants, `runAutonomousReplanCycle()` and
 limit. A replan can add only a screened transient instruction; it cannot widen the reviewed route,
 capability, tool set, budget, model gate, credential scope, effect authority, or domain set.
 
+The automatic adaptive boundary is now symmetrical with that decision-cycle facade. TypeScript
+`AutonomousAgent.runAutoReplanCycle()` and `runAutonomousAutoReplanCycle()` resolve one route,
+choose the single-domain or cross-domain replan kernel, and retain that route through every
+evaluator-requested attempt. The outer result exposes `mode`, `route`, `semantic_route`, the
+nested attempt/settlement projection, and a bounded next action. A semantic classifier refusal
+returns before any execution provider call; a provider approval refusal is still distinct from
+classifier approval. Replan instructions remain transient and digest-bound, and cannot widen
+domain scope, capabilities, tools, credentials, model gates, effect authority, or cost ceilings.
+
+The automatic replan facade forwards provider planning, prompt selection, online learning,
+structured-response learning, memory, execution controllers, cycle persistence, and private
+rehydrators to the selected kernel. A caller-owned `AutonomousCostBudget` is shared across
+semantic routing, planning, specialist fan-out, synthesis, and all retry attempts. If a terminal
+metadata cursor is replayed after restart, the facade validates the same task and route contract
+and returns the stored projection without invoking the provider again. Offline TypeScript tests
+cover every built-in single-domain route, bounded multi-attempt refinement, cross-domain fan-out,
+semantic approval refusal, and terminal replay idempotency.
+
 The same cycle APIs can run provider planning as an explicit phase before invocation. A caller sets
 `providerPlanning` and receives a `plan_review_required` result containing a caller-owned,
 dependency-closed proposal; no execution provider is dispatched until the caller supplies it as

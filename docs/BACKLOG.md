@@ -1565,3 +1565,15 @@ semantic routing, planning, fan-out, synthesis, and execution. All built-in sing
 cross-domain execution, and semantic approval refusal are covered by offline TypeScript tests;
 credentials, evaluator evidence, effects, and durable stores remain explicit application
 responsibilities.
+
+That automatic-cycle parity gap is now closed for evaluator-guided replanning as well. The
+TypeScript `runAutoReplanCycle()` / `runAutonomousAutoReplanCycle()` facade resolves the route
+once, dispatches to the matching replan kernel, preserves evaluator-driven bounded attempts,
+and forwards learning, provider planning, shared budgets, and restart rehydration. Coverage now
+includes all built-in single-domain profiles, a real bounded replan, cross-domain fan-out,
+semantic approval refusal, and terminal replay without a second provider call.
+
+The next depth layer remains deployment integration rather than hidden authority: connect these
+facades to caller-owned evaluator evidence, durable result/rehydration stores, effect
+reconciliation, credential provisioning, and production observability. Those integrations must
+continue to preserve the existing route, approval, secret, and value-only learning boundaries.

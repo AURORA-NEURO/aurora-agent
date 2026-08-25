@@ -115,10 +115,13 @@ import type {
 } from "./autonomous-memory.js";
 import {
   runAutonomousAutoDecisionCycle,
+  runAutonomousAutoReplanCycle,
   runAutonomousCrossDomainReplanCycle,
   runAutonomousReplanCycle,
   type AutonomousAutoDecisionCycleOptions,
   type AutonomousAutoDecisionCycleResult,
+  type AutonomousAutoReplanCycleOptions,
+  type AutonomousAutoReplanCycleResult,
   type AutonomousCrossDomainReplanCycleOptions,
   type AutonomousCrossDomainReplanCycleResult,
   type AutonomousReplanCycleOptions,
@@ -6037,6 +6040,15 @@ export class AutonomousAgent {
    */
   async runAutoCycle(task: string, options: AutonomousAutoDecisionCycleOptions = {}): Promise<AutonomousAutoDecisionCycleResult> {
     return runAutonomousAutoDecisionCycle(this, task, options);
+  }
+
+  /**
+   * Route once and execute the bounded evaluator-guided single- or cross-domain replan cycle.
+   * Replan attempts retain the reviewed route, share the aggregate cost boundary, and preserve
+   * the lower-level persistence and evaluator-settlement contracts.
+   */
+  async runAutoReplanCycle(task: string, options: AutonomousAutoReplanCycleOptions): Promise<AutonomousAutoReplanCycleResult> {
+    return runAutonomousAutoReplanCycle(this, task, options);
   }
 
   /**

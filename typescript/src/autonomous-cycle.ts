@@ -219,6 +219,37 @@ export interface AutonomousAutoDecisionCycleResult {
   authorization: "routing_planning_provider_effects_and_evaluator_settlement_remain_explicit";
 }
 
+/**
+ * One automatic evaluator-guided replan cycle. The facade resolves the route once and then
+ * selects the single-domain or cross-domain replan kernel without asking the caller to encode
+ * the route shape a second time.
+ */
+export const AUTONOMOUS_AUTO_REPLAN_CYCLE_SCHEMA = "bioprism-typescript-autonomous-auto-replan-cycle/0.1" as const;
+
+export type AutonomousAutoReplanCycleOptions = Omit<AutonomousCrossDomainReplanCycleOptions, "evaluate" | "learning" | "semanticRouting"> & {
+  domain?: AutonomousDomainName;
+  semanticRouting?: AutonomousDecisionCycleSemanticOptions;
+  evaluate: AutonomousReplanEvaluator | AutonomousCrossDomainReplanEvaluator;
+  learning?: AutonomousReplanLearningOptions | AutonomousCrossDomainReplanLearningOptions;
+  subtasks?: readonly AutonomousCrossDomainSubtask[];
+};
+
+export type AutonomousAutoReplanCycleStatus = AutonomousReplanCycleStatus | AutonomousCrossDomainReplanCycleStatus;
+
+export type AutonomousAutoReplanCycleMode = "single_domain" | "cross_domain";
+
+export interface AutonomousAutoReplanCycleResult {
+  schema: typeof AUTONOMOUS_AUTO_REPLAN_CYCLE_SCHEMA;
+  status: AutonomousAutoReplanCycleStatus;
+  mode: AutonomousAutoReplanCycleMode | null;
+  route: AutonomousRouteProposal;
+  semantic_route: AutonomousSemanticRouteResult | null;
+  cycle: AutonomousReplanCycleResult | AutonomousCrossDomainReplanCycleResult | null;
+  next_action: "review_route" | "review_plan" | "review_provider_or_effect_approval" | "inspect_result" | "complete";
+  retention: "provider_response_local;route_and_replan_metadata_value_only;execution_result_caller_owned";
+  authorization: "routing_planning_provider_effects_evaluator_settlement_and_replanning_remain_explicit";
+}
+
 const RETENTION = "provider_response_local; value_only_evaluation_and_learning_projection" as const;
 const AUTHORIZATION = "routing_and_provider_invocation_require_separate_explicit_approval" as const;
 
@@ -1819,6 +1850,106 @@ export async function runAutonomousAutoDecisionCycle(
     next_action: autoDecisionCycleNextAction(cycle.status),
     retention: "provider_response_local;route_and_cycle_metadata_value_only;execution_result_caller_owned",
     authorization: "routing_planning_provider_effects_and_evaluator_settlement_remain_explicit",
+  };
+}
+
+function autoReplanCycleNextAction(status: AutonomousAutoReplanCycleStatus): AutonomousAutoReplanCycleResult["next_action"] {
+  if (status === "route_review_required" || status === "provider_abstained" || status === "policy_review_required" || status === "policy_blocked") return "review_route";
+  if (status === "plan_review_required" || status === "provider_invalid" || status === "provider_disagreement") return "review_plan";
+  if (status === "approval_required" || status === "reconciliation_required") return "review_provider_or_effect_approval";
+  if (status === "completed") return "complete";
+  return "inspect_result";
+}
+
+/**
+ * Resolve one route and enter the matching bounded evaluator-guided replan cycle.
+ *
+ * The evaluator is intentionally supplied to the selected kernel rather than used to choose a
+ * new domain. Replans may refine transient context and prompts, but they can never widen or
+ * change the reviewed route. A shared cost budget also covers semantic routing, provider
+ * planning, every provider attempt, and any cross-domain synthesis call.
+ */
+export async function runAutonomousAutoReplanCycle(
+  agent: AutonomousAgent,
+  task: string,
+  options: AutonomousAutoReplanCycleOptions,
+): Promise<AutonomousAutoReplanCycleResult> {
+  if (!options || typeof options.evaluate !== "function") throw new ArgumentError("automatic replan cycle requires an evaluator callback");
+  if (!agent || typeof agent.route !== "function" || typeof agent.run !== "function" || typeof agent.runCrossDomain !== "function") throw new ArgumentError("automatic replan cycle requires an AutonomousAgent");
+  if (options.routeOverride !== undefined && options.semanticRouting?.enabled) throw new ArgumentError("automatic replan cycle cannot combine routeOverride with semanticRouting");
+  const costBudget = cyclePlanningBudget(options);
+  let route: AutonomousRouteProposal;
+  let semanticRoute: AutonomousSemanticRouteResult | null = null;
+  if (options.routeOverride !== undefined) {
+    route = await validateAutonomousRouteOverride(task, options.routeOverride);
+  } else if (options.semanticRouting?.enabled) {
+    semanticRoute = await semanticRouteAutonomousTask(agent, task, {
+      candidates: options.candidates,
+      credential: options.credential,
+      credentialFor: options.credentialFor,
+      hints: options.hints,
+      approveProviderCall: options.semanticRouting.approveProviderCall,
+      minSemanticConfidence: options.semanticRouting.minSemanticConfidence,
+      maxDomains: options.semanticRouting.maxDomains,
+      allowCrossDomain: options.semanticRouting.allowCrossDomain ?? options.allowCrossDomain,
+      maxOutputTokens: options.semanticRouting.maxOutputTokens,
+      maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+      maxLatencyMs: options.maxLatencyMs,
+      minQuality: options.minQuality,
+      costBudget,
+      execution: options.semanticRouting.execution ?? options.execution,
+      executionAttempt: options.semanticRouting.executionAttempt ?? options.executionAttempt,
+      maxProviderFailovers: options.semanticRouting.maxProviderFailovers ?? options.maxProviderFailovers,
+      executionLifecycle: options.semanticRouting.executionLifecycle ?? options.executionLifecycle,
+      signal: options.signal,
+      observer: options.observer,
+      domainPolicyMode: options.semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
+      domainPolicyEvidenceReady: options.semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: options.semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: options.semanticRouting.domainPolicyEffectsRequested ?? options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: options.semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
+    });
+    route = semanticRoute.route;
+    if (semanticRoute.status !== "completed") {
+      const status = semanticRoute.status as AutonomousAutoReplanCycleStatus;
+      return {
+        schema: AUTONOMOUS_AUTO_REPLAN_CYCLE_SCHEMA,
+        status,
+        mode: route.cross_domain && route.selected_domains.length > 1 ? "cross_domain" : route.primary_domain ? "single_domain" : null,
+        route,
+        semantic_route: semanticRoute,
+        cycle: null,
+        next_action: autoReplanCycleNextAction(status),
+        retention: "provider_response_local;route_and_replan_metadata_value_only;execution_result_caller_owned",
+        authorization: "routing_planning_provider_effects_evaluator_settlement_and_replanning_remain_explicit",
+      };
+    }
+  } else {
+    route = await agent.route(task, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+  }
+
+  const crossDomain = route.cross_domain && route.selected_domains.length > 1;
+  const innerOptions = {
+    ...options,
+    routeOverride: route,
+    semanticRouting: undefined,
+    costBudget,
+    maxTotalCostUnits: undefined,
+  };
+  const cycle = crossDomain
+    ? await runAutonomousCrossDomainReplanCycle(agent, task, innerOptions as AutonomousCrossDomainReplanCycleOptions)
+    : await runAutonomousReplanCycle(agent, task, innerOptions as AutonomousReplanCycleOptions);
+  const cycleWithSemanticRoute = semanticRoute === null ? cycle : { ...cycle, semantic_route: semanticRoute };
+  return {
+    schema: AUTONOMOUS_AUTO_REPLAN_CYCLE_SCHEMA,
+    status: cycle.status,
+    mode: crossDomain ? "cross_domain" : "single_domain",
+    route,
+    semantic_route: semanticRoute,
+    cycle: cycleWithSemanticRoute,
+    next_action: autoReplanCycleNextAction(cycle.status),
+    retention: "provider_response_local;route_and_replan_metadata_value_only;execution_result_caller_owned",
+    authorization: "routing_planning_provider_effects_evaluator_settlement_and_replanning_remain_explicit",
   };
 }
 

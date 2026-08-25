@@ -2389,6 +2389,7 @@ export type {
 } from "./autonomous-routing.js";
 export {
   AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA,
+  AUTONOMOUS_AUTO_REPLAN_CYCLE_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_DECISION_CYCLE_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA,
   AUTONOMOUS_CROSS_DOMAIN_REPLAN_CYCLE_SCHEMA,
@@ -2397,6 +2398,7 @@ export {
   AUTONOMOUS_REPLAN_CYCLE_SCHEMA,
   AUTONOMOUS_REPLAN_MAX_REPLANS,
   runAutonomousAutoDecisionCycle,
+  runAutonomousAutoReplanCycle,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousCrossDomainReplanCycle,
   runAutonomousDecisionCycle,
@@ -2461,6 +2463,10 @@ export type {
   AutonomousAutoDecisionCycleOptions,
   AutonomousAutoDecisionCycleResult,
   AutonomousAutoDecisionCycleStatus,
+  AutonomousAutoReplanCycleMode,
+  AutonomousAutoReplanCycleOptions,
+  AutonomousAutoReplanCycleResult,
+  AutonomousAutoReplanCycleStatus,
   AutonomousCrossDomainDecisionCycleEvaluator,
   AutonomousCrossDomainDecisionCycleLearningOptions,
   AutonomousCrossDomainDecisionCycleOptions,

@@ -853,6 +853,30 @@ projection without invoking a provider again. The journal is an orchestration cu
 exactly-once provider or database transaction; production rehydrators and learning/effect stores
 must use stable idempotency keys and reconcile side effects at their own boundary.
 
+`runAutoReplanCycle()` is the one-entrypoint version of the bounded adaptive loop. It resolves a
+deterministic or explicitly approved semantic route once, selects the matching single-domain or
+cross-domain replan kernel, and supplies the route as a digest-verified override to every attempt:
+
+```typescript
+const adaptive = await agent.runAutoReplanCycle("investigate an EEG preprocessing regression", {
+  allowCrossDomain: true,
+  approveProviderCall: true,
+  maxReplans: 2,
+  evaluate: (run) => evaluateWithCallerOwnedEvidence(run),
+  learning: { controller: learning, episodePrefix: "eeg-review" },
+});
+```
+
+`runAutonomousAutoReplanCycle()` is the equivalent functional export. The result identifies the
+selected mode, route, semantic classifier result, nested attempt/settlement projection, and
+bounded next action. Replan feedback can add only a screened transient context chunk; it cannot
+change domains, capabilities, tools, approvals, credentials, or budgets. Semantic routing and
+provider execution approval remain separate, and the same `AutonomousCostBudget` spans
+classification, planning, fan-out, synthesis, and every retry. The facade also passes `cycleId`,
+the metadata-only `AutonomousCycleReplanStateStore`, and all explicit rehydrators through
+unchanged, so a terminal restart replay returns its projection without rerouting or replaying the
+provider.
+
 Use `AutonomousCycleReplanPersistenceCoordinator` with a caller `read()`/`write()` adapter to
 flush and restore bounded, hash-bound snapshots. The in-memory store is intended for tests and
 small workers; production deployments should place it beside the existing execution, learning,
