@@ -10,6 +10,9 @@ import {
   AutonomousCostBudgetError,
   AutonomousRuntime,
   AutonomousExecutionController,
+  AutonomousEffectBoundary,
+  AutonomousEffectReconciliationRequiredError,
+  InMemoryAutonomousEffectJournal,
   InMemoryAutonomousExecutionJournal,
   TransactionalJsonLLMRuntimeHealthSnapshotPersistence,
   LLMRuntime,
@@ -598,6 +601,41 @@ test("stream collection projects SSE deltas and bounded completion", async () =>
   const response = await runtime.collectStream("stream-gateway", request());
   assert.equal(response.text, "hello");
   assert.equal(response.statusCode, 200);
+});
+
+test("provider invocation effect boundary projects transient responses and blocks blind replay", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  let calls = 0;
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("offline-effect", (input) => {
+    calls += 1;
+    return { output_text: `private answer for ${input.model}`, request_id: "provider-request-1" };
+  });
+  const input = request("offline-effect-model", { idempotencyKey: "caller-owned-provider-key" });
+  const response = await runtime.invoke("offline-effect", input);
+  assert.equal(response.text, "private answer for offline-effect-model");
+  assert.equal(calls, 1);
+  const snapshot = await journal.snapshot();
+  const encoded = JSON.stringify(snapshot);
+  assert.equal(encoded.includes("Return a bounded answer."), false);
+  assert.equal(encoded.includes("private answer"), false);
+  assert.equal(encoded.includes("request_id"), false);
+  assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "completed"]);
+  await assert.rejects(() => runtime.invoke("offline-effect", input), AutonomousEffectReconciliationRequiredError);
+  assert.equal(calls, 1);
+});
+
+test("provider effect boundary preserves definite local provider refusals", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("denied-effect", () => {
+    throw new ProviderRuntimeError("denied", { statusCode: 401 });
+  });
+  await assert.rejects(
+    () => runtime.invoke("denied-effect", request("denied-model", { idempotencyKey: "denied-key" })),
+    (error) => error instanceof ProviderRuntimeError && error.statusCode === 401,
+  );
+  assert.equal((await journal.events()).at(-1).event.status, "failed");
 });
 
 test("authorized tool loops append tool results and stop at the final answer", async () => {

@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
-from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -664,13 +663,36 @@ class AutonomousEffectBoundary:
         arguments_digest = content_digest(dict(normalized.arguments))
         return content_digest({"schema": AUTONOMOUS_EFFECT_SCHEMA, "execution_id": normalized.execution_id, "tool": normalized.tool, "call_id": normalized.call_id, "arguments_digest": arguments_digest})
 
-    def execute(self, request: AutonomousEffectRequest | Mapping[str, Any], executor: Callable[[AutonomousEffectExecutionContext], Any], *, execution: Any | None = None) -> Any:
+    def execute(
+        self,
+        request: AutonomousEffectRequest | Mapping[str, Any],
+        executor: Callable[[AutonomousEffectExecutionContext], Any],
+        *,
+        execution: Any | None = None,
+        result_projector: Callable[[Any], Any] | None = None,
+        cache_result: bool = True,
+        definite_failure: Callable[[BaseException], bool] | None = None,
+    ) -> Any:
         if not callable(executor):
             raise AutonomousEffectError("effect executor must be callable")
+        if result_projector is not None and not callable(result_projector):
+            raise AutonomousEffectError("effect result_projector must be callable or None")
+        if not isinstance(cache_result, bool):
+            raise AutonomousEffectError("effect cache_result must be a boolean")
+        if definite_failure is not None and not callable(definite_failure):
+            raise AutonomousEffectError("effect definite_failure must be callable or None")
         normalized = self.normalize_request(request)
         effect_id = self.effect_id(normalized)
         with self._exclusive(effect_id):
-            return self._execute_exclusive(normalized, effect_id, executor, execution or self.execution)
+            return self._execute_exclusive(
+                normalized,
+                effect_id,
+                executor,
+                execution or self.execution,
+                result_projector,
+                cache_result,
+                definite_failure,
+            )
 
     def reconcile(self, effect_id: str, resolver: AutonomousEffectResolver | None = None) -> AutonomousEffectRecord:
         effect_id = _identifier("effect_id", effect_id, 128)
@@ -714,7 +736,16 @@ class AutonomousEffectBoundary:
     def idempotency_key(self, effect_id: str) -> str:
         return f"aurora-effect-{effect_id}"
 
-    def _execute_exclusive(self, request: AutonomousEffectRequest, effect_id: str, executor: Callable[[AutonomousEffectExecutionContext], Any], execution: Any | None) -> Any:
+    def _execute_exclusive(
+        self,
+        request: AutonomousEffectRequest,
+        effect_id: str,
+        executor: Callable[[AutonomousEffectExecutionContext], Any],
+        execution: Any | None,
+        result_projector: Callable[[Any], Any] | None,
+        cache_result: bool,
+        definite_failure: Callable[[BaseException], bool] | None,
+    ) -> Any:
         record = self.journal.get(effect_id)
         arguments_digest = content_digest(dict(request.arguments))
         if record is not None:
@@ -747,12 +778,21 @@ class AutonomousEffectBoundary:
         context = AutonomousEffectExecutionContext(effect_id, request.execution_id, request.tool, request.call_id, request.risk_class, self.idempotency_key(effect_id), attempt)
         try:
             result = executor(context)
-            _assert_metadata(result, name="effect result", maximum=MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES)
-            result_digest = content_digest(result)
-            self._result_cache[effect_id] = _clone(result)
+            projected = result if result_projector is None else result_projector(result)
+            _assert_metadata(projected, name="effect result", maximum=MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES)
+            result_digest = content_digest(projected)
+            if cache_result:
+                self._result_cache[effect_id] = _clone(result)
             self._transition({**base, "status": "completed", "result_digest": result_digest}, execution)
-            return _clone(result)
+            return _clone(result) if cache_result else result
         except BaseException as error:
+            try:
+                is_definite_failure = bool(definite_failure(error)) if definite_failure is not None else False
+            except Exception:
+                is_definite_failure = False
+            if is_definite_failure:
+                self._transition({**base, "status": "failed", "failure_class": _failure_class(error), "reason": _failure_reason(error)}, execution)
+                raise
             self._transition({**base, "status": "uncertain", "failure_class": _failure_class(error), "reason": _failure_reason(error)}, execution)
             if isinstance(error, AutonomousEffectError):
                 raise

@@ -39,6 +39,8 @@ import uuid
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import urlsplit
 
+from .authoring import content_digest
+
 
 MAX_MESSAGES = 512
 MAX_MESSAGE_CHARS = 2_000_000
@@ -2616,6 +2618,38 @@ class ProviderResponse:
         }
 
 
+def _provider_effect_projection(response: ProviderResponse) -> dict[str, Any]:
+    """Reduce a transient provider response to ledger-safe accounting metadata."""
+
+    if not isinstance(response, ProviderResponse):
+        raise ProviderError("provider effect returned a malformed response")
+    usage = response.usage if isinstance(response.usage, Mapping) else {}
+    projection: dict[str, Any] = {
+        "provider": response.provider,
+        "model": response.model,
+        "status_code": response.status_code,
+        "input_tokens": usage.get("input_tokens", 0),
+        "output_tokens": usage.get("output_tokens", 0),
+        "tool_call_count": len(response.tool_calls),
+        "structured_output_present": response.structured is not None,
+        "continuation_item_count": len(response.provider_output_items),
+    }
+    if response.request_id is not None:
+        projection["request_id_digest"] = content_digest(response.request_id)
+    return projection
+
+
+def _provider_effect_failure_is_definite(error: BaseException) -> bool:
+    """Keep explicit provider refusals ordinary while treating transport ambiguity as uncertain."""
+
+    if not isinstance(error, ProviderError):
+        return False
+    if error.circuit_open:
+        return True
+    status = error.status_code
+    return isinstance(status, int) and 400 <= status < 500 and status not in {408, 409, 425, 429}
+
+
 class InMemoryProvider:
     """Credentialless provider transport for deterministic local execution and tests.
 
@@ -3026,6 +3060,7 @@ class LLMRuntime:
         clock: Callable[[], float] = time.time,
         sleeper: Callable[[float], None] = time.sleep,
         observation_callback: Callable[[Mapping[str, Any]], None] | None = None,
+        effect_boundary: Any | None = None,
     ) -> None:
         self.credentials = credentials or CredentialStore()
         self._providers: dict[str, ProviderConfig] = {}
@@ -3036,8 +3071,32 @@ class LLMRuntime:
         self._sleeper = sleeper
         self._observation_lock = threading.RLock()
         self._observation_callbacks: list[Callable[[Mapping[str, Any]], None]] = []
+        self._effect_boundary: Any | None = None
+        if effect_boundary is not None:
+            self.bind_effect_boundary(effect_boundary)
         if observation_callback is not None:
             self.add_observation_callback(observation_callback)
+
+    @property
+    def effect_boundary(self) -> Any | None:
+        """Return the optional caller-owned crash-safe provider effect boundary."""
+
+        return self._effect_boundary
+
+    def bind_effect_boundary(self, effect_boundary: Any | None) -> None:
+        """Bind one effect boundary to provider dispatch without importing the effect module.
+
+        The duck-typed seam avoids a module cycle: ``autonomous_effects`` imports provider
+        request/response types for tool authorization.  A boundary is deliberately opt-in;
+        applications that need durable provider reconciliation must bind the same boundary to
+        their agent and runtime.
+        """
+
+        if effect_boundary is not None and not callable(getattr(effect_boundary, "execute", None)):
+            raise ProviderError("effect_boundary must expose an execute method")
+        if self._effect_boundary is not None and effect_boundary is not self._effect_boundary:
+            raise ProviderError("a different effect_boundary is already bound to this runtime")
+        self._effect_boundary = effect_boundary
 
     def add_observation_callback(self, callback: Callable[[Mapping[str, Any]], None]) -> None:
         """Register a best-effort value-only provider outcome observer.
@@ -3450,6 +3509,26 @@ class LLMRuntime:
         if observer is not None:
             observer.after(metadata, response, error, max(0.0, (time.perf_counter() - started) * 1000.0))
 
+    @staticmethod
+    def _provider_headers(
+        config: ProviderConfig,
+        secret: SecretValue | None,
+        request: ProviderRequest,
+    ) -> dict[str, str]:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if secret is not None:
+            if config.protocol == "anthropic_messages":
+                headers[config.api_key_header or "x-api-key"] = secret.expose()
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
+        if request.idempotency_key is not None:
+            headers["Idempotency-Key"] = request.idempotency_key
+        return headers
+
     def reset_provider(self, provider: str) -> None:
         """Explicitly close a circuit after an operator or health check has reviewed it."""
 
@@ -3465,6 +3544,8 @@ class LLMRuntime:
         credential: CredentialHandle | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "provider_call",
+        effect_boundary: Any | None = None,
+        effect_execution: Any | None = None,
     ) -> ProviderResponse:
         config = self._providers.get(provider)
         if config is None:
@@ -3476,24 +3557,59 @@ class LLMRuntime:
             if credential.provider != provider:
                 raise CredentialError("credential provider does not match invocation provider")
             secret = self.credentials._resolve(credential)
-        body = self._body(config, request)
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        if secret is not None:
-            if config.protocol == "anthropic_messages":
-                headers[config.api_key_header or "x-api-key"] = secret.expose()
-                headers["anthropic-version"] = "2023-06-01"
-            else:
-                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
-        if request.idempotency_key is not None:
-            headers["Idempotency-Key"] = request.idempotency_key
         metadata = self._invocation_metadata(provider, request, invocation_kind)
         self._notify_invocation_before(invocation_observer, metadata)
         started = time.perf_counter()
         try:
-            response = self._post(config, body, headers, request)
+            selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
+            if selected_boundary is None:
+                response = self._post(config, self._body(config, request), self._provider_headers(config, secret, request), request)
+            else:
+                request_digest = content_digest({
+                    "provider": provider,
+                    "model": request.model,
+                    "kind": invocation_kind,
+                    "messages": request.messages,
+                    "max_output_tokens": request.max_output_tokens,
+                    "temperature": request.temperature,
+                    "require_json": request.require_json,
+                    "response_schema": request.response_schema,
+                    "tools": [tool.to_dict() for tool in request.tools],
+                    "tool_choice": request.tool_choice,
+                })
+                generated_key = request.idempotency_key or f"aurora-provider-{uuid.uuid4().hex}"
+                call_id = f"provider-call-{content_digest(generated_key)[:48]}"
+                boundary_execution = effect_execution or getattr(selected_boundary, "execution", None) or getattr(invocation_observer, "controller", None)
+                state = getattr(boundary_execution, "state", None)
+                execution_id = getattr(state, "execution_id", None)
+                effect_request = {
+                    "execution_id": execution_id,
+                    "tool": f"provider.{provider}.invoke",
+                    "call_id": call_id,
+                    "risk_class": "provider_invocation",
+                    "arguments": {
+                        "provider": provider,
+                        "model": request.model,
+                        "kind": invocation_kind,
+                        "request_digest": request_digest,
+                        "requested_output_tokens": request.max_output_tokens,
+                        "tool_count": len(request.tools),
+                        "idempotency_key_present": request.idempotency_key is not None,
+                    },
+                }
+
+                def dispatch(context: Any) -> ProviderResponse:
+                    dispatched_request = request if request.idempotency_key is not None else replace(request, idempotency_key=context.idempotency_key)
+                    return self._post(config, self._body(config, dispatched_request), self._provider_headers(config, secret, dispatched_request), dispatched_request)
+
+                response = selected_boundary.execute(
+                    effect_request,
+                    dispatch,
+                    execution=boundary_execution,
+                    result_projector=_provider_effect_projection,
+                    cache_result=False,
+                    definite_failure=_provider_effect_failure_is_definite,
+                )
         except BaseException as error:
             self._notify_invocation_after(invocation_observer, metadata, None, error, started)
             raise
@@ -3566,22 +3682,25 @@ class LLMRuntime:
         credential: CredentialHandle | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "provider_stream",
+        effect_boundary: Any | None = None,
+        effect_execution: Any | None = None,
     ) -> ProviderResponse:
         """Collect a stream into the same bounded response contract as ``invoke``."""
 
         metadata = self._invocation_metadata(provider, request, invocation_kind)
         self._notify_invocation_before(invocation_observer, metadata)
         started = time.perf_counter()
-        text_parts: list[str] = []
-        text_bytes = 0
-        tool_calls: list[ProviderToolCall] = []
-        usage: Mapping[str, Any] = {}
-        request_id: str | None = None
-        model = request.model
-        event_count = 0
-        terminal_type: str | None = None
-        try:
-            for event in self.invoke_stream(provider, request, credential=credential):
+
+        def collect(dispatched_request: ProviderRequest) -> ProviderResponse:
+            text_parts: list[str] = []
+            text_bytes = 0
+            tool_calls: list[ProviderToolCall] = []
+            usage: Mapping[str, Any] = {}
+            request_id: str | None = None
+            model = dispatched_request.model
+            event_count = 0
+            terminal_type: str | None = None
+            for event in self.invoke_stream(provider, dispatched_request, credential=credential):
                 event_count += 1
                 if event_count > MAX_STREAM_EVENTS:
                     raise ProviderError("provider stream exceeded max event count")
@@ -3601,8 +3720,8 @@ class LLMRuntime:
             if not text_parts and not tool_calls:
                 raise ProviderError("provider stream contained no assistant text or tool call")
             text = "".join(text_parts)
-            structured = None if tool_calls else _validate_structured_response(text, request)
-            response = ProviderResponse(
+            structured = None if tool_calls else _validate_structured_response(text, dispatched_request)
+            return ProviderResponse(
                 provider=provider,
                 model=model,
                 text=text,
@@ -3617,6 +3736,57 @@ class LLMRuntime:
                 structured=structured,
                 tool_calls=tuple(tool_calls),
             )
+
+        try:
+            selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
+            if selected_boundary is None:
+                response = collect(request)
+            else:
+                request_digest = content_digest({
+                    "provider": provider,
+                    "model": request.model,
+                    "kind": invocation_kind,
+                    "messages": request.messages,
+                    "max_output_tokens": request.max_output_tokens,
+                    "temperature": request.temperature,
+                    "require_json": request.require_json,
+                    "response_schema": request.response_schema,
+                    "tools": [tool.to_dict() for tool in request.tools],
+                    "tool_choice": request.tool_choice,
+                })
+                generated_key = request.idempotency_key or f"aurora-provider-stream-{uuid.uuid4().hex}"
+                call_id = f"provider-stream-{content_digest(generated_key)[:48]}"
+                boundary_execution = effect_execution or getattr(selected_boundary, "execution", None) or getattr(invocation_observer, "controller", None)
+                state = getattr(boundary_execution, "state", None)
+                execution_id = getattr(state, "execution_id", None)
+                effect_request = {
+                    "execution_id": execution_id,
+                    "tool": f"provider.{provider}.stream",
+                    "call_id": call_id,
+                    "risk_class": "provider_invocation",
+                    "arguments": {
+                        "provider": provider,
+                        "model": request.model,
+                        "kind": invocation_kind,
+                        "request_digest": request_digest,
+                        "requested_output_tokens": request.max_output_tokens,
+                        "tool_count": len(request.tools),
+                        "idempotency_key_present": request.idempotency_key is not None,
+                    },
+                }
+
+                def dispatch(context: Any) -> ProviderResponse:
+                    dispatched_request = request if request.idempotency_key is not None else replace(request, idempotency_key=context.idempotency_key)
+                    return collect(dispatched_request)
+
+                response = selected_boundary.execute(
+                    effect_request,
+                    dispatch,
+                    execution=boundary_execution,
+                    result_projector=_provider_effect_projection,
+                    cache_result=False,
+                    definite_failure=_provider_effect_failure_is_definite,
+                )
         except BaseException as error:
             self._notify_invocation_after(invocation_observer, metadata, None, error, started)
             raise

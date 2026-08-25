@@ -546,11 +546,23 @@ export class AutonomousEffectBoundary {
     return (await digestJson({ schema: AUTONOMOUS_EFFECT_SCHEMA, execution_id: normalized.execution_id, tool: normalized.tool, call_id: normalized.call_id, arguments_digest: argumentsDigest })).slice(0, 64);
   }
 
-  async execute(request: AutonomousEffectRequest, executor: (context: AutonomousEffectExecutionContext) => JsonValue | Promise<JsonValue>, options: { execution?: AutonomousExecutionController } = {}): Promise<JsonValue> {
+  async execute<T>(
+    request: AutonomousEffectRequest,
+    executor: (context: AutonomousEffectExecutionContext) => T | Promise<T>,
+    options: {
+      execution?: AutonomousExecutionController;
+      resultProjector?: (result: T) => JsonValue | Promise<JsonValue>;
+      cacheResult?: boolean;
+      definiteFailure?: (error: unknown) => boolean | Promise<boolean>;
+    } = {},
+  ): Promise<T> {
     if (typeof executor !== "function") throw new AutonomousEffectError("effect executor must be callable");
+    if (options.resultProjector !== undefined && typeof options.resultProjector !== "function") throw new AutonomousEffectError("effect resultProjector must be callable or undefined");
+    if (options.cacheResult !== undefined && typeof options.cacheResult !== "boolean") throw new AutonomousEffectError("effect cacheResult must be a boolean");
+    if (options.definiteFailure !== undefined && typeof options.definiteFailure !== "function") throw new AutonomousEffectError("effect definiteFailure must be callable or undefined");
     const normalized = this.normalizeRequest(request);
     const effectId = await this.effectId(normalized);
-    return this.exclusive(effectId, async () => this.executeExclusive(normalized, effectId, executor, options.execution ?? this.execution));
+    return this.exclusive(effectId, async () => this.executeExclusive(normalized, effectId, executor, options.execution ?? this.execution, options.resultProjector, options.cacheResult ?? true, options.definiteFailure));
   }
 
   async reconcile(effectId: string, resolver: AutonomousEffectResolver = this.resolver as AutonomousEffectResolver): Promise<AutonomousEffectRecord> {
@@ -602,17 +614,25 @@ export class AutonomousEffectBoundary {
     return { execution_id: executionId, tool, call_id: callId, risk_class: riskClass, arguments: clone(request.arguments) as JsonObject };
   }
 
-  private async executeExclusive(request: AutonomousEffectRequest, effectId: string, executor: (context: AutonomousEffectExecutionContext) => JsonValue | Promise<JsonValue>, execution?: AutonomousExecutionController): Promise<JsonValue> {
+  private async executeExclusive<T>(
+    request: AutonomousEffectRequest,
+    effectId: string,
+    executor: (context: AutonomousEffectExecutionContext) => T | Promise<T>,
+    execution: AutonomousExecutionController | undefined,
+    resultProjector: ((result: T) => JsonValue | Promise<JsonValue>) | undefined,
+    cacheResult: boolean,
+    definiteFailure: ((error: unknown) => boolean | Promise<boolean>) | undefined,
+  ): Promise<T> {
     let record = await this.journal.get(effectId);
     if (record) {
       if (record.status === "completed" || record.status === "reconciled") {
         const cached = this.resultCache.get(effectId);
-        if (cached !== undefined) return clone(cached);
+        if (cached !== undefined) return clone(cached) as T;
         if (!this.resolver) throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), record.status);
         record = await this.reconcileExclusive(record, this.resolver);
         if (record.status === "reconciled" || record.status === "completed") {
           const resolved = this.resultCache.get(effectId);
-          if (resolved !== undefined) return clone(resolved);
+          if (resolved !== undefined) return clone(resolved) as T;
         }
       }
       if (["dispatching", "dispatched", "uncertain"].includes(record.status)) {
@@ -620,7 +640,7 @@ export class AutonomousEffectBoundary {
         record = await this.reconcileExclusive(record, this.resolver);
         if (record.status === "reconciled" || record.status === "completed") {
           const resolved = this.resultCache.get(effectId);
-          if (resolved !== undefined) return clone(resolved);
+          if (resolved !== undefined) return clone(resolved) as T;
         }
         if (record.status !== "prepared") throw new AutonomousEffectReconciliationRequiredError(effectId, this.idempotencyKey(effectId), record.status);
       }
@@ -637,12 +657,21 @@ export class AutonomousEffectBoundary {
     const context: AutonomousEffectExecutionContext = { effect_id: effectId, execution_id: request.execution_id ?? null, tool: request.tool, call_id: request.call_id, risk_class: request.risk_class, idempotency_key: idempotencyKey, dispatch_attempt: attempt };
     try {
       const result = await executor(context);
-      assertMetadataBytes("effect result", result, AUTONOMOUS_EFFECT_MAX_ARGUMENT_BYTES);
-      const resultDigest = await digestJson(result);
-      this.resultCache.set(effectId, clone(result));
+      const projected = resultProjector ? await resultProjector(result) : result;
+      assertMetadataBytes("effect result", projected, AUTONOMOUS_EFFECT_MAX_ARGUMENT_BYTES);
+      const resultDigest = await digestJson(projected);
+      if (cacheResult) this.resultCache.set(effectId, clone(result) as JsonValue);
       await this.transition({ ...request, effect_id: effectId, arguments_digest: argumentsDigest, idempotency_key_digest: await digestJson(idempotencyKey), status: "completed", dispatch_attempt: attempt, result_digest: resultDigest }, execution);
-      return clone(result);
+      return (cacheResult ? clone(result) : result) as T;
     } catch (unknownError) {
+      let isDefiniteFailure = false;
+      if (definiteFailure) {
+        try { isDefiniteFailure = await definiteFailure(unknownError); } catch { isDefiniteFailure = false; }
+      }
+      if (isDefiniteFailure) {
+        await this.transition({ ...request, effect_id: effectId, arguments_digest: argumentsDigest, idempotency_key_digest: await digestJson(idempotencyKey), status: "failed", dispatch_attempt: attempt, failure_class: normalizedFailureClass(unknownError), reason: normalizedReason(unknownError) }, execution);
+        throw unknownError;
+      }
       const failureClass = normalizedFailureClass(unknownError);
       await this.transition({ ...request, effect_id: effectId, arguments_digest: argumentsDigest, idempotency_key_digest: await digestJson(idempotencyKey), status: "uncertain", dispatch_attempt: attempt, failure_class: failureClass, reason: normalizedReason(unknownError) }, execution);
       if (unknownError instanceof AutonomousEffectError) throw unknownError;

@@ -2,6 +2,8 @@ import { ArgumentError, AutonomousCostBudgetError, CredentialError, ProviderRunt
 import type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
 import { AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS } from "./autonomous-execution.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
+import { AutonomousEffectReconciliationRequiredError } from "./autonomous-effects.js";
+import type { AutonomousEffectBoundary } from "./autonomous-effects.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
@@ -708,6 +710,8 @@ export interface ProviderInvocationOptions {
   credential?: CredentialHandle;
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** Optional metadata-only crash-safe boundary for the actual provider dispatch. */
+  effectBoundary?: AutonomousEffectBoundary;
   invocationKind?: string;
   execution?: AutonomousExecutionController;
   executionAttempt?: number;
@@ -1329,6 +1333,34 @@ function requestMetadata(provider: string, request: ProviderRequest, kind: strin
     requestedOutputTokens: request.maxOutputTokens,
     toolCount: request.tools?.length ?? 0,
   };
+}
+
+async function providerEffectProjection(response: ProviderResponse): Promise<JsonObject> {
+  if (!response || typeof response !== "object") throw new ProviderRuntimeError("provider effect returned a malformed response");
+  const usage = response.usage ?? {};
+  return {
+    provider: response.provider,
+    model: response.model,
+    status_code: response.statusCode,
+    input_tokens: usage.input_tokens ?? 0,
+    output_tokens: usage.output_tokens ?? 0,
+    tool_call_count: response.toolCalls.length,
+    structured_output_present: response.structured !== null,
+    request_id_digest: response.requestId ? await digestJson(response.requestId) : null,
+  };
+}
+
+function providerEffectFailureIsDefinite(error: unknown): boolean {
+  if (!(error instanceof ProviderRuntimeError)) return false;
+  if (error.circuitOpen) return true;
+  const status = error.statusCode;
+  return typeof status === "number" && status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status);
+}
+
+function generatedProviderIdempotencyKey(prefix: string): string {
+  const cryptoObject = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  const uuid = typeof cryptoObject?.randomUUID === "function" ? cryptoObject.randomUUID() : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${uuid}`;
 }
 
 function normalizedContentPart(value: unknown): ProviderContentPart {
@@ -2214,14 +2246,27 @@ export class LLMRuntime {
   private cachedHealthSignature: string | null = null;
   private readonly fetchImplementation: FetchImplementation;
   private readonly clock: () => number;
+  private effectBoundaryValue?: AutonomousEffectBoundary;
 
-  constructor(options: { credentials?: CredentialStore; fetch?: FetchImplementation; clock?: () => number } = {}) {
+  constructor(options: { credentials?: CredentialStore; fetch?: FetchImplementation; clock?: () => number; effectBoundary?: AutonomousEffectBoundary } = {}) {
     this.credentials = options.credentials ?? new CredentialStore();
     const implementation = options.fetch ?? globalThis.fetch;
     if (typeof implementation !== "function") throw new ProviderRuntimeError("a fetch implementation is required");
     this.fetchImplementation = implementation;
     this.clock = options.clock ?? (() => Date.now());
+    this.effectBoundaryValue = options.effectBoundary;
+    if (this.effectBoundaryValue !== undefined && typeof this.effectBoundaryValue.execute !== "function") throw new ProviderRuntimeError("effectBoundary must expose an execute method");
     this.onboarding = new ProviderOnboarding(this);
+  }
+
+  get effectBoundary(): AutonomousEffectBoundary | undefined {
+    return this.effectBoundaryValue;
+  }
+
+  bindEffectBoundary(effectBoundary: AutonomousEffectBoundary | undefined): void {
+    if (effectBoundary !== undefined && (!effectBoundary || typeof effectBoundary.execute !== "function")) throw new ProviderRuntimeError("effectBoundary must expose an execute method");
+    if (this.effectBoundaryValue !== undefined && this.effectBoundaryValue !== effectBoundary) throw new ProviderRuntimeError("a different effectBoundary is already bound to this runtime");
+    this.effectBoundaryValue = effectBoundary;
   }
 
   registerProvider(config: ProviderConfig): void {
@@ -2471,12 +2516,57 @@ export class LLMRuntime {
       await recordExecutionProviderOutcome(options.execution, metadata, outcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
     };
     try {
-      const response = await this.request(config, request, options.credential, options.signal, false);
+      const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
+      let response: ProviderResponse;
+      if (!selectedBoundary) {
+        response = await this.request(config, request, options.credential, options.signal, false);
+      } else {
+        const requestDigest = await digestJson({
+          provider,
+          model: request.model,
+          kind: metadata.kind,
+          messages: request.messages,
+          max_output_tokens: request.maxOutputTokens,
+          temperature: request.temperature ?? null,
+          require_json: request.requireJson ?? false,
+          response_schema: request.responseSchema ?? null,
+          tools: request.tools ?? [],
+          tool_choice: request.toolChoice ?? null,
+        });
+        const providerKey = request.idempotencyKey ?? generatedProviderIdempotencyKey("aurora-provider");
+        const callId = `provider-call-${(await digestJson(providerKey)).slice(0, 48)}`;
+        const executionId = options.execution?.state.execution_id ?? null;
+        response = await selectedBoundary.execute(
+          {
+            execution_id: executionId,
+            tool: `provider.${provider}.invoke`,
+            call_id: callId,
+            risk_class: "provider_invocation",
+            arguments: {
+              provider,
+              model: request.model,
+              kind: metadata.kind,
+              request_digest: requestDigest,
+              requested_output_tokens: request.maxOutputTokens,
+              tool_count: request.tools?.length ?? 0,
+              idempotency_key_present: request.idempotencyKey !== undefined,
+            },
+          },
+          async (context) => this.request(config, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, options.credential, options.signal, false),
+          { execution: options.execution, resultProjector: providerEffectProjection, cacheResult: false, definiteFailure: providerEffectFailureIsDefinite },
+        );
+      }
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, true, latencyMs, response.statusCode, response);
       await recordOutcome({ success: true, status: "completed", latencyMs, inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, statusCode: response.statusCode });
       return response;
     } catch (unknownError) {
+      if (unknownError instanceof AutonomousEffectReconciliationRequiredError) {
+        const latencyMs = Math.max(0, nowMs() - started);
+        this.record(provider, request.model, false, latencyMs, null);
+        await recordOutcome({ success: false, status: "provider_refused", latencyMs, inputTokens: metadata.inputTokens, outputTokens: 0, failureClass: "provider_error", failureCode: "provider_error", retryable: false });
+        throw unknownError;
+      }
       const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "invoke");
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, false, latencyMs, error instanceof ProviderRuntimeError ? error.statusCode ?? null : null);
@@ -2625,28 +2715,66 @@ export class LLMRuntime {
   }
 
   async collectStream(provider: string, request: ProviderRequest, options: ProviderInvocationOptions = {}): Promise<ProviderResponse> {
-    const text: string[] = [];
-    const calls: ProviderToolCall[] = [];
-    let usage: ProviderUsage = {};
-    let model = request.model;
-    let requestId: string | null = null;
-    let done = false;
-    for await (const event of this.invokeStream(provider, request, options)) {
-      text.push(event.textDelta);
-      if (event.toolCall) calls.push(event.toolCall);
-      usage = { ...usage, ...event.usage };
-      model = event.model || model;
-      requestId = event.requestId ?? requestId;
-      done = done || event.done;
-    }
-    if (!done && text.join("").length === 0 && calls.length === 0) throw new ProviderRuntimeError("provider stream contained no assistant output");
-    const outputText = text.join("");
-    let structured: JsonValue | null = null;
-    if (!calls.length && request.requireJson) {
-      try { structured = JSON.parse(outputText) as JsonValue; } catch { throw new ProviderRuntimeError("provider stream returned invalid JSON", { code: "invalid_response" }); }
-      validateStructuredResponseOrThrow(structured, request.responseSchema);
-    }
-    return { provider, model, text: outputText, statusCode: 200, requestId, usage, structured, toolCalls: calls, stopReason: null };
+    const collect = async (dispatchedRequest: ProviderRequest): Promise<ProviderResponse> => {
+      const text: string[] = [];
+      const calls: ProviderToolCall[] = [];
+      let usage: ProviderUsage = {};
+      let model = dispatchedRequest.model;
+      let requestId: string | null = null;
+      let done = false;
+      for await (const event of this.invokeStream(provider, dispatchedRequest, { ...options, effectBoundary: undefined })) {
+        text.push(event.textDelta);
+        if (event.toolCall) calls.push(event.toolCall);
+        usage = { ...usage, ...event.usage };
+        model = event.model || model;
+        requestId = event.requestId ?? requestId;
+        done = done || event.done;
+      }
+      if (!done && text.join("").length === 0 && calls.length === 0) throw new ProviderRuntimeError("provider stream contained no assistant output");
+      const outputText = text.join("");
+      let structured: JsonValue | null = null;
+      if (!calls.length && dispatchedRequest.requireJson) {
+        try { structured = JSON.parse(outputText) as JsonValue; } catch { throw new ProviderRuntimeError("provider stream returned invalid JSON", { code: "invalid_response" }); }
+        validateStructuredResponseOrThrow(structured, dispatchedRequest.responseSchema);
+      }
+      return { provider, model, text: outputText, statusCode: 200, requestId, usage, structured, toolCalls: calls, stopReason: null };
+    };
+    const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
+    if (!selectedBoundary) return collect(request);
+    const requestDigest = await digestJson({
+      provider,
+      model: request.model,
+      kind: options.invocationKind ?? "provider_stream",
+      messages: request.messages,
+      max_output_tokens: request.maxOutputTokens,
+      temperature: request.temperature ?? null,
+      require_json: request.requireJson ?? false,
+      response_schema: request.responseSchema ?? null,
+      tools: request.tools ?? [],
+      tool_choice: request.toolChoice ?? null,
+    });
+    const providerKey = request.idempotencyKey ?? generatedProviderIdempotencyKey("aurora-provider-stream");
+    const callId = `provider-stream-${(await digestJson(providerKey)).slice(0, 48)}`;
+    const executionId = options.execution?.state.execution_id ?? null;
+    return selectedBoundary.execute(
+      {
+        execution_id: executionId,
+        tool: `provider.${provider}.stream`,
+        call_id: callId,
+        risk_class: "provider_invocation",
+        arguments: {
+          provider,
+          model: request.model,
+          kind: options.invocationKind ?? "provider_stream",
+          request_digest: requestDigest,
+          requested_output_tokens: request.maxOutputTokens,
+          tool_count: request.tools?.length ?? 0,
+          idempotency_key_present: request.idempotencyKey !== undefined,
+        },
+      },
+      async (context) => collect(request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }),
+      { execution: options.execution, resultProjector: providerEffectProjection, cacheResult: false, definiteFailure: providerEffectFailureIsDefinite },
+    );
   }
 
   async invokeToolLoop(

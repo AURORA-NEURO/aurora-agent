@@ -4507,6 +4507,27 @@ streaming and every continuation turn in a tool loop are accounted separately. A
 therefore becomes durable failover evidence without retaining the prompt, response, tool
 arguments, credential handle, or upstream error body.
 
+The effect boundary now reaches the actual LLM transport as well as caller tool executors. Bind
+one `AutonomousEffectBoundary` to `LLMRuntime` (or pass it through `ProviderInvocationOptions` in
+TypeScript / the explicit `effect_boundary` argument in Python), or pass the same boundary to
+`AutonomousAgent` so the façade binds it automatically. `LLMRuntime.invoke()` and the collected
+`collectStream()` path derive a request digest without persisting the request, write the provider
+dispatch lifecycle before transport execution, and pass the boundary idempotency key to the
+provider. The live `ProviderResponse` is returned to the caller but is never cached in the effect
+ledger: only provider/model/status/token/tool-count/request-id-digest metadata is projected into
+the completed event. Reusing an explicit provider idempotency key after a restart therefore pauses
+for caller-owned reconciliation instead of replaying a billed or otherwise ambiguous request.
+
+The failure policy distinguishes a definite provider refusal (for example a non-retryable HTTP
+4xx or an already-open local circuit) from transport ambiguity. Definite refusals are recorded as
+`failed` and remain typed provider errors; connection loss, timeout, cancellation after dispatch,
+and malformed post-dispatch outcomes remain `uncertain` and surface as
+`AutonomousEffectReconciliationRequiredError`. This preserves normal model-selection/failover
+classification where the runtime knows the provider rejected the request while preventing a
+restart from treating an unknown remote outcome as a fresh model attempt. Direct low-level
+stream iterators remain caller-owned; applications that need the crash-safe provider boundary
+should use `collectStream()` (or the autonomous tool-loop's collected stream mode).
+
 The TypeScript high-level result also exposes this audit seam directly. A completed
 `AutonomousRuntime.invoke()`, `invokeToolLoop()`, or `AutonomousAgent.run()` result carries an
 ordered `provider_invocations` array using

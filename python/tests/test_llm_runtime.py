@@ -8,6 +8,8 @@ from tempfile import TemporaryDirectory
 import threading
 import unittest
 
+import pytest
+
 from prism_sdk.llm_runtime import (
     CredentialError,
     CredentialProvisioner,
@@ -54,6 +56,11 @@ from prism_sdk.brain import (
     build_brain_evaluation_input,
     MissionToolAuthorizer,
 )
+from prism_sdk import (
+    AutonomousEffectBoundary,
+    AutonomousEffectReconciliationRequiredError,
+    InMemoryAutonomousEffectJournal,
+)
 
 
 def _context_digest(context: dict[str, object]) -> str:
@@ -61,6 +68,50 @@ def _context_digest(context: dict[str, object]) -> str:
     return hashlib.sha256(
         json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def test_provider_invocation_effect_boundary_projects_transient_response() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 10)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    calls = 0
+    runtime = LLMRuntime(effect_boundary=boundary)
+
+    def handler(request: ProviderRequest) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"output_text": f"private answer for {request.model}", "request_id": "provider-request-1"}
+
+    runtime.register_in_memory_provider("offline", handler)
+    request = ProviderRequest(
+        model="offline-model",
+        messages=({"role": "user", "content": "private prompt"},),
+        idempotency_key="caller-owned-provider-key",
+    )
+    response = runtime.invoke("offline", request)
+    assert response.text == "private answer for offline-model"
+    assert calls == 1
+    encoded = json.dumps(journal.snapshot().to_dict(), sort_keys=True)
+    assert "private prompt" not in encoded
+    assert "private answer" not in encoded
+    assert "request_id" not in encoded
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "completed"]
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        runtime.invoke("offline", request)
+    assert calls == 1
+
+
+def test_provider_effect_boundary_keeps_definite_http_refusal_as_provider_error() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 11)
+    runtime = LLMRuntime(effect_boundary=AutonomousEffectBoundary(journal=journal))
+    runtime.register_in_memory_provider(
+        "denied",
+        lambda _request: (_ for _ in ()).throw(ProviderError("denied", status_code=401)),
+    )
+    request = ProviderRequest(model="denied-model", messages=({"role": "user", "content": "safe"},), idempotency_key="denied-key")
+    with pytest.raises(ProviderError) as raised:
+        runtime.invoke("denied", request)
+    assert raised.value.status_code == 401
+    assert journal.events()[-1].event.status == "failed"
 
 
 class _ProviderHandler(BaseHTTPRequestHandler):

@@ -14378,6 +14378,11 @@ class AutonomousAgent:
         self.effect_boundary = effect_boundary if effect_boundary is not None else (
             self.tool_runtime.effect_boundary if self.tool_runtime is not None else None
         )
+        if self.effect_boundary is not None:
+            try:
+                runtime.bind_effect_boundary(self.effect_boundary)
+            except ProviderError as error:
+                raise BrainRunError("runtime and agent effect boundaries must be the same instance") from error
         self.capability_journal = capability_journal
         self.capability_runtime = (
             AutonomousCapabilityRuntime(self.tool_runtime, journal=capability_journal)

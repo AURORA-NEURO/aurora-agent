@@ -4797,6 +4797,13 @@ export class AutonomousAgent {
       : undefined);
     this.toolApprover = options.toolApprover;
     this.effectBoundary = options.effectBoundary;
+    if (this.effectBoundary !== undefined) {
+      try {
+        llm.bindEffectBoundary(this.effectBoundary);
+      } catch (error) {
+        throw new ProviderRuntimeError("runtime and agent effect boundaries must be the same instance", { code: "configuration" });
+      }
+    }
     if (options.capabilityJournal !== undefined && (typeof options.capabilityJournal.append !== "function" || typeof options.capabilityJournal.find !== "function" || typeof options.capabilityJournal.records !== "function")) throw new ArgumentError("AutonomousAgent capabilityJournal is malformed");
     this.capabilityJournal = options.capabilityJournal;
     if (options.capabilityLearningSettlementStore !== undefined && (typeof options.capabilityLearningSettlementStore.load !== "function" || typeof options.capabilityLearningSettlementStore.save !== "function")) throw new ArgumentError("AutonomousAgent capabilityLearningSettlementStore is malformed");
