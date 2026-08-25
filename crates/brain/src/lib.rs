@@ -77,6 +77,7 @@ pub mod throughput_protocol_adapter;
 pub mod throughput_research_workbench;
 pub mod throughput_retrieval_contract_model;
 pub mod throughput_retrieval_copilot;
+pub mod throughput_retrieval_protocol_gateway;
 pub mod throughput_retrieval_synthesis;
 pub mod throughput_retrieval_workbench;
 pub mod throughput_retrieval_workflow_fabric;
@@ -396,6 +397,13 @@ pub use throughput_retrieval_copilot::{
     ThroughputRetrievalCopilotRequest,
     CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_RETRIEVAL_COPILOT_FEATURE_ID,
+};
+pub use throughput_retrieval_protocol_gateway::{
+    compile_throughput_retrieval_protocol, throughput_retrieval_protocol_gateway_manifest,
+    ThroughputRetrievalProtocolError, ThroughputRetrievalProtocolReceipt,
+    ThroughputRetrievalProtocolRequest,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_PROTOCOL_FEATURE_ID,
 };
 pub use throughput_retrieval_synthesis::{
     synthesize_throughput_retrieval, throughput_retrieval_synthesis_manifest,
