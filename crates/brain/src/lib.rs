@@ -29,6 +29,7 @@ use thiserror::Error;
 
 pub mod evidence_contract_model;
 pub mod evidence_research_copilot;
+pub mod evidence_research_workbench;
 pub mod evidence_surveillance;
 pub mod evidence_workflow_fabric;
 pub mod federated_contract_model;
@@ -55,6 +56,12 @@ pub use evidence_research_copilot::{
     EvidenceCopilotReceipt, EvidenceCopilotRequest,
     CONTRACT_VERSION as EVIDENCE_RESEARCH_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use evidence_research_workbench::{
+    compile_evidence_research_workbench, evidence_research_workbench_manifest,
+    EvidenceWorkbenchError, EvidenceWorkbenchReceipt, EvidenceWorkbenchRequest,
+    CONTRACT_VERSION as EVIDENCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use evidence_surveillance::{
     evidence_surveillance_manifest, surveil_evidence, EvidenceFeedRequest, EvidenceObservation,

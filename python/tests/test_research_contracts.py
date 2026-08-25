@@ -87,6 +87,7 @@ from prism_sdk.brain_evidence_workflow import BrainEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_multimodal_workflow import BrainMultimodalEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_high_throughput_workflow import BrainHighThroughputEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_federated_workflow import BrainFederatedEvidenceWorkflowFabricReceipt
+from prism_sdk.brain_evidence_workbench import BrainEvidenceResearchWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2729,6 +2730,34 @@ def test_brain_federated_workflow_keeps_partial_exchange_compensation_explicit()
         negative_evidence=(),
         effect_receipts=("compensate:research-work:workflow:federated",),
         artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_evidence_workbench_keeps_read_only_view_explicit():
+    receipt = BrainEvidenceResearchWorkbenchReceipt(
+        request_id="request:workbench",
+        workspace_id="workspace:brain",
+        study_id="study:organoid",
+        scope="organoid:neural",
+        disposition="qualified",
+        view_order=("view:evidence-table", "view:omission-audit", "view:source-lineage"),
+        panel_order=("panel:evidence", "panel:lineage"),
+        action_receipts=("action:render-evidence-table", "action:render-omission-audit", "action:render-source-lineage"),
+        candidate_order=("evidence:a",),
+        qualified_order=("evidence:a",),
+        blocked_order=(),
+        unknown_order=(),
+        evidence_digest="a" * 64,
+        workbench_digest="b" * 64,
+        replay_identity="c" * 64,
+        budget_units=8,
+        omissions=(),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("view:local-research-artifacts:workspace:brain",),
+        artifact={"content_hash": "d" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

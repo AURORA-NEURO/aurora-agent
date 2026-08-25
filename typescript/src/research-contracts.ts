@@ -227,6 +227,8 @@ export const HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P0
 export const HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-high-throughput-evidence-workflow-fabric/1.0" as const;
 export const FEDERATED_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F16" as const;
 export const FEDERATED_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-federated-evidence-workflow-fabric/1.0" as const;
+export const EVIDENCE_RESEARCH_WORKBENCH_FEATURE_ID = "AFA-brain-P01-F17" as const;
+export const EVIDENCE_RESEARCH_WORKBENCH_CONTRACT_VERSION = "brain-evidence-research-workbench/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3924,6 +3926,22 @@ export function validateBrainFederatedEvidenceWorkflowFabricReceipt(receipt: Bra
 }
 
 export function brainFederatedEvidenceWorkflowFabricReceiptDigest(receipt: BrainFederatedEvidenceWorkflowFabricReceipt): string { validateBrainFederatedEvidenceWorkflowFabricReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainEvidenceResearchWorkbenchReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; workspace_id: string; study_id: string; scope: string; disposition: "qualified" | "partial" | "unknown" | "blocked";
+  view_order: string[]; panel_order: string[]; action_receipts: string[]; candidate_order: string[]; qualified_order: string[]; blocked_order: string[]; unknown_order: string[]; evidence_digest: string; workbench_digest: string; replay_identity: string; budget_units: number; omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainEvidenceResearchWorkbenchReceipt(receipt: BrainEvidenceResearchWorkbenchReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVIDENCE_RESEARCH_WORKBENCH_FEATURE_ID || receipt.contract_version !== EVIDENCE_RESEARCH_WORKBENCH_CONTRACT_VERSION) throw new Error("workbench schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workspace_id.trim() || !receipt.study_id.trim() || !receipt.scope.trim() || !receipt.view_order.length || !receipt.panel_order.length || !receipt.action_receipts.length || !receipt.candidate_order.length || !receipt.effect_receipts.length || !Number.isInteger(receipt.budget_units) || receipt.budget_units <= 0) throw new Error("workbench identity, views, panels, evidence, locality, budget, or effects are incomplete");
+  if (receipt.qualified_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.blocked_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.unknown_order.some((value) => !receipt.candidate_order.includes(value))) throw new Error("workbench evidence state is not covered by candidates");
+  for (const values of [receipt.view_order, receipt.panel_order, receipt.action_receipts, receipt.candidate_order, receipt.qualified_order, receipt.blocked_order, receipt.unknown_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("workbench ordering is invalid");
+  for (const value of [receipt.evidence_digest, receipt.workbench_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("workbench digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("view:local-research-artifacts:") && effect !== "block:unsafe-release")) throw new Error("workbench effect is not read-only");
+}
+
+export function brainEvidenceResearchWorkbenchReceiptDigest(receipt: BrainEvidenceResearchWorkbenchReceipt): string { validateBrainEvidenceResearchWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
