@@ -63,6 +63,7 @@ pub mod context_release_admission;
 pub mod context_freshness_drift;
 pub mod context_uncertainty_envelope;
 pub mod context_contradiction_resolution;
+pub mod context_dependency_closure;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -334,6 +335,13 @@ pub use context_contradiction_resolution::{
     ContextContradictionResolutionReceipt, ContextContradictionResolutionRequest,
     CONTRACT_VERSION as CONTEXT_CONTRADICTION_RESOLUTION_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_CONTRADICTION_RESOLUTION_FEATURE_ID,
+};
+pub use context_dependency_closure::{
+    compile_context_dependency_closure, context_dependency_closure_manifest,
+    ContextDependencyClosureError, ContextDependencyClosureReceipt,
+    ContextDependencyClosureRequest, ContextDependencyEdge,
+    CONTRACT_VERSION as CONTEXT_DEPENDENCY_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_DEPENDENCY_CLOSURE_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
