@@ -44,6 +44,7 @@ pub mod federated_protocol_adapter;
 pub mod federated_research_workbench;
 pub mod federated_retrieval_contract_model;
 pub mod federated_retrieval_copilot;
+pub mod federated_retrieval_protocol_gateway;
 pub mod federated_retrieval_synthesis;
 pub mod federated_retrieval_workbench;
 pub mod federated_retrieval_workflow_fabric;
@@ -187,6 +188,13 @@ pub use federated_retrieval_copilot::{
     FederatedRetrievalCopilotRequest,
     CONTRACT_VERSION as FEDERATED_RETRIEVAL_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_RETRIEVAL_COPILOT_FEATURE_ID,
+};
+pub use federated_retrieval_protocol_gateway::{
+    compile_federated_retrieval_protocol, federated_retrieval_protocol_gateway_manifest,
+    FederatedRetrievalProtocolError, FederatedRetrievalProtocolReceipt,
+    FederatedRetrievalProtocolRequest,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_PROTOCOL_FEATURE_ID,
 };
 pub use federated_retrieval_synthesis::{
     federated_retrieval_synthesis_manifest, synthesize_federated_retrieval,
