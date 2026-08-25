@@ -352,6 +352,7 @@ from .brain_federated_safety_assurance import BrainFederatedAssuranceReceipt
 from .brain_evidence_operations import BrainEvidenceOperationsReceipt
 from .brain_multimodal_operations import BrainMultimodalOperationsReceipt
 from .brain_throughput_operations import BrainThroughputOperationsReceipt
+from .brain_federated_operations import BrainFederatedOperationsReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

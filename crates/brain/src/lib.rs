@@ -39,6 +39,7 @@ pub mod federated_contract_model;
 pub mod federated_evidence_copilot;
 pub mod federated_evidence_surveillance;
 pub mod federated_evidence_workflow_fabric;
+pub mod federated_operations_control_plane;
 pub mod federated_protocol_adapter;
 pub mod federated_research_workbench;
 pub mod federated_safety_assurance;
@@ -130,6 +131,13 @@ pub use federated_evidence_workflow_fabric::{
     FederatedWorkflowError, FederatedWorkflowReceipt, FederatedWorkflowRequest,
     CONTRACT_VERSION as FEDERATED_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_operations_control_plane::{
+    federated_operations_control_plane_manifest, operate_federated_evidence,
+    FederatedOperationsDisposition, FederatedOperationsError, FederatedOperationsReceipt,
+    FederatedOperationsRequest,
+    CONTRACT_VERSION as FEDERATED_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
 };
 pub use federated_protocol_adapter::{
     federated_protocol_adapter_manifest, serve_federated_protocol, FederatedProtocolError,
