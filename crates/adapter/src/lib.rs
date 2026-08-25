@@ -84,6 +84,7 @@ pub mod context_assurance;
 pub mod csv;
 pub mod error;
 pub mod evidence_surveillance;
+pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
 pub mod ingestion;
@@ -122,6 +123,12 @@ pub use evidence_surveillance::{
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceReceipt,
     QualifiedEvidenceSet, CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use execution_control::{
+    admit_computational_execution, AuthorizedExecutionEffect, ComputationalExecutionReceipt,
+    ComputationalExecutionRequest, ExecutionAdmissionMode, ExecutionControlDecision,
+    ExecutionControlError, CONTRACT_VERSION as EXECUTION_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as EXECUTION_CONTROL_FEATURE_ID,
 };
 pub use experiment_design_control::{
     compile_experiment_design, DesignDecision, DesignSite, ExperimentAssignment,

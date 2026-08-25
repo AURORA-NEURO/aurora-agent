@@ -91,6 +91,8 @@ PROTOCOL_SIMULATION_FEATURE_ID = "AFA-adapter-P10-F03"
 PROTOCOL_SIMULATION_CONTRACT_VERSION = "prospective-protocol-simulation/1.0"
 INSTRUMENT_MESH_FEATURE_ID = "AFA-adapter-P11-F04"
 INSTRUMENT_MESH_CONTRACT_VERSION = "federated-laboratory-integration/1.0"
+EXECUTION_CONTROL_FEATURE_ID = "AFA-adapter-P12-F31"
+EXECUTION_CONTROL_CONTRACT_VERSION = "computational-execution-control-plane/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2360,3 +2362,53 @@ class InstrumentMeshReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "federation_id": self.federation_id, "action_id": self.action_id, "decision": self.decision, "candidate_order": list(self.candidate_order), "selected_instrument_id": self.selected_instrument_id, "selected_site_id": self.selected_site_id, "selected_protocol_profile": self.selected_protocol_profile, "satisfied_capabilities": list(self.satisfied_capabilities), "missing_capabilities": list(self.missing_capabilities), "missing_interlocks": list(self.missing_interlocks), "effect": dict(self.effect) if self.effect else None, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ComputationalExecutionReceipt:
+    request_id: str
+    workflow_id: str
+    run_id: str
+    decision: str
+    ordered_nodes: tuple[str, ...]
+    admitted_nodes: tuple[str, ...]
+    run: Mapping[str, Any]
+    run_digest: str
+    authorized_effects: tuple[Mapping[str, Any], ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    effects_executed: bool = False
+    raw_data_local: bool = True
+    feature_id: str = EXECUTION_CONTROL_FEATURE_ID
+    contract_version: str = EXECUTION_CONTROL_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != EXECUTION_CONTROL_FEATURE_ID or self.contract_version != EXECUTION_CONTROL_CONTRACT_VERSION:
+            raise ResearchContractError("computational execution schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or self.effects_executed or not self.request_id.strip() or not self.workflow_id.strip() or not self.run_id.strip() or not self.ordered_nodes or not self.reasons:
+            raise ResearchContractError("computational execution identity, locality, non-execution, graph, or reasons are incomplete")
+        if self.decision not in {"dry_run", "admitted", "approval_required", "blocked"}:
+            raise ResearchContractError("computational execution decision is unknown")
+        if len(set(self.ordered_nodes)) != len(self.ordered_nodes) or len(set(self.admitted_nodes)) != len(self.admitted_nodes) or any(node not in self.ordered_nodes for node in self.admitted_nodes):
+            raise ResearchContractError("computational execution node identities are invalid")
+        if self.run.get("workflow_id") != self.workflow_id or self.run.get("status") != "planned":
+            raise ResearchContractError("execution run linkage or planned status is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.run_digest):
+            raise ResearchContractError("computational execution run digest is invalid")
+        if self.decision == "admitted" and len(self.authorized_effects) != len(self.admitted_nodes):
+            raise ResearchContractError("every admitted node needs an authorized effect")
+        if self.decision != "admitted" and self.authorized_effects:
+            raise ResearchContractError("non-admitted execution cannot contain effects")
+        for effect in self.authorized_effects:
+            if effect.get("effect") != "execute_local_computation" or effect.get("authorized") is not True or effect.get("executed") is not False or not re.fullmatch(r"[0-9a-f]{64}", str(effect.get("payload_digest", ""))):
+                raise ResearchContractError("computational execution effect receipt is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("computational execution artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "run_id": self.run_id, "decision": self.decision, "ordered_nodes": list(self.ordered_nodes), "admitted_nodes": list(self.admitted_nodes), "run": dict(self.run), "run_digest": self.run_digest, "authorized_effects": [dict(item) for item in self.authorized_effects], "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "effects_executed": self.effects_executed, "raw_data_local": self.raw_data_local, "boundary": self.boundary})

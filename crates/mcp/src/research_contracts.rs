@@ -8,6 +8,10 @@ use crate::resource_discovery_contract::{
     ResourceDiscoveryContractResponse, FEATURE_ID as RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
 };
 use bioprism_adapter::{
+    admit_computational_execution, ComputationalExecutionReceipt, ComputationalExecutionRequest,
+    EXECUTION_CONTROL_FEATURE_ID,
+};
+use bioprism_adapter::{
     assure_context_compilation as assure_adapter_context_compilation, ContextCompilationReceipt,
     ContextCompilationRequest, CONTEXT_COMPILATION_FEATURE_ID,
 };
@@ -188,6 +192,7 @@ pub const QUALITY_ENVELOPE_TOOL: &str = "adapter_quality_envelope";
 pub const EXPERIMENT_DESIGN_CONTROL_TOOL: &str = "adapter_experiment_design_control";
 pub const PROTOCOL_SIMULATION_TOOL: &str = "adapter_protocol_simulation";
 pub const INSTRUMENT_MESH_TOOL: &str = "adapter_instrument_mesh";
+pub const EXECUTION_CONTROL_TOOL: &str = "adapter_execution_control";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1021,6 +1026,26 @@ pub fn validate_instrument_mesh_json(value: &Value) -> Result<InstrumentMeshRece
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != INSTRUMENT_MESH_FEATURE_ID {
         return Err("instrument mesh feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn admit_computational_execution_json(value: &Value) -> Result<Value, String> {
+    let request: ComputationalExecutionRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid computational execution request: {error}"))?;
+    let receipt = admit_computational_execution(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize computational execution receipt: {error}"))
+}
+
+pub fn validate_computational_execution_json(
+    value: &Value,
+) -> Result<ComputationalExecutionReceipt, String> {
+    let receipt: ComputationalExecutionReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid computational execution receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != EXECUTION_CONTROL_FEATURE_ID {
+        return Err("computational execution feature id mismatch".into());
     }
     Ok(receipt)
 }

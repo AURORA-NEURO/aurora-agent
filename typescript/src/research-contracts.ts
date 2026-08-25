@@ -84,6 +84,8 @@ export const PROTOCOL_SIMULATION_FEATURE_ID = "AFA-adapter-P10-F03" as const;
 export const PROTOCOL_SIMULATION_CONTRACT_VERSION = "prospective-protocol-simulation/1.0" as const;
 export const INSTRUMENT_MESH_FEATURE_ID = "AFA-adapter-P11-F04" as const;
 export const INSTRUMENT_MESH_CONTRACT_VERSION = "federated-laboratory-integration/1.0" as const;
+export const EXECUTION_CONTROL_FEATURE_ID = "AFA-adapter-P12-F31" as const;
+export const EXECUTION_CONTROL_CONTRACT_VERSION = "computational-execution-control-plane/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1391,6 +1393,44 @@ export function validateInstrumentMeshReceipt(receipt: InstrumentMeshReceipt): v
 }
 
 export function instrumentMeshReceiptDigest(receipt: InstrumentMeshReceipt): string { validateInstrumentMeshReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ComputationalExecutionReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  run_id: string;
+  decision: "dry_run" | "admitted" | "approval_required" | "blocked";
+  ordered_nodes: string[];
+  admitted_nodes: string[];
+  run: Record<string, unknown>;
+  run_digest: string;
+  authorized_effects: readonly Record<string, unknown>[];
+  omissions: string[];
+  uncertainty: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  effects_executed: boolean;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateComputationalExecutionReceipt(receipt: ComputationalExecutionReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EXECUTION_CONTROL_FEATURE_ID || receipt.contract_version !== EXECUTION_CONTROL_CONTRACT_VERSION) throw new Error("computational execution schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || receipt.effects_executed || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.run_id.trim() || !receipt.ordered_nodes.length || !receipt.reasons.length) throw new Error("computational execution identity, locality, non-execution, graph, or reasons are incomplete");
+  if (!new Set(["dry_run", "admitted", "approval_required", "blocked"]).has(receipt.decision)) throw new Error("computational execution decision is unknown");
+  if (new Set(receipt.ordered_nodes).size !== receipt.ordered_nodes.length || new Set(receipt.admitted_nodes).size !== receipt.admitted_nodes.length || receipt.admitted_nodes.some((node) => !receipt.ordered_nodes.includes(node))) throw new Error("computational execution node identities are invalid");
+  if (receipt.run.workflow_id !== receipt.workflow_id || receipt.run.status !== "planned") throw new Error("execution run linkage or planned status is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.run_digest)) throw new Error("computational execution run digest is invalid");
+  if (receipt.decision === "admitted" && receipt.authorized_effects.length !== receipt.admitted_nodes.length) throw new Error("every admitted node needs an authorized effect");
+  if (receipt.decision !== "admitted" && receipt.authorized_effects.length) throw new Error("non-admitted execution cannot contain effects");
+  for (const effect of receipt.authorized_effects) if (effect.effect !== "execute_local_computation" || effect.authorized !== true || effect.executed !== false || typeof effect.payload_digest !== "string" || !/^[0-9a-f]{64}$/.test(effect.payload_digest)) throw new Error("computational execution effect receipt is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("computational execution artifact digest is invalid");
+}
+
+export function computationalExecutionReceiptDigest(receipt: ComputationalExecutionReceipt): string { validateComputationalExecutionReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

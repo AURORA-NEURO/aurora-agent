@@ -16,6 +16,7 @@ from prism_sdk.research_contracts import QUALITY_ENVELOPE_FEATURE_ID, QUALITY_EN
 from prism_sdk.research_contracts import EXPERIMENT_DESIGN_CONTROL_FEATURE_ID, EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION, ExperimentDesignReceipt
 from prism_sdk.research_contracts import PROTOCOL_SIMULATION_FEATURE_ID, PROTOCOL_SIMULATION_CONTRACT_VERSION, ProtocolSimulationReceipt
 from prism_sdk.research_contracts import INSTRUMENT_MESH_FEATURE_ID, INSTRUMENT_MESH_CONTRACT_VERSION, InstrumentMeshReceipt
+from prism_sdk.research_contracts import EXECUTION_CONTROL_FEATURE_ID, EXECUTION_CONTROL_CONTRACT_VERSION, ComputationalExecutionReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -951,4 +952,30 @@ def test_instrument_mesh_preserves_approval_without_physical_effect():
     receipt.validate()
     assert receipt.feature_id == INSTRUMENT_MESH_FEATURE_ID
     assert receipt.contract_version == INSTRUMENT_MESH_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_computational_execution_admission_keeps_run_planned():
+    receipt = ComputationalExecutionReceipt(
+        request_id="request:execution",
+        workflow_id="workflow:execution",
+        run_id="run:execution",
+        decision="admitted",
+        ordered_nodes=("a-read", "b-compute"),
+        admitted_nodes=("a-read", "b-compute"),
+        run={"workflow_id": "workflow:execution", "run_id": "run:execution", "status": "planned"},
+        run_digest="a" * 64,
+        authorized_effects=(
+            {"node_id": "a-read", "effect": "execute_local_computation", "authorized": True, "executed": False, "payload_digest": "b" * 64},
+            {"node_id": "b-compute", "effect": "execute_local_computation", "authorized": True, "executed": False, "payload_digest": "c" * 64},
+        ),
+        omissions=(),
+        uncertainty=(),
+        semantic_loss=(),
+        reasons=("workflow graph, locality, policy, authority, and replay gates passed",),
+        artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == EXECUTION_CONTROL_FEATURE_ID
+    assert receipt.contract_version == EXECUTION_CONTROL_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
