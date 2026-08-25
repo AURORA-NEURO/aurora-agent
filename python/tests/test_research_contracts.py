@@ -86,6 +86,7 @@ from prism_sdk.brain_federated_copilot import BrainFederatedEvidenceResearchCopi
 from prism_sdk.brain_evidence_workflow import BrainEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_multimodal_workflow import BrainMultimodalEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_high_throughput_workflow import BrainHighThroughputEvidenceWorkflowFabricReceipt
+from prism_sdk.brain_federated_workflow import BrainFederatedEvidenceWorkflowFabricReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2695,6 +2696,39 @@ def test_brain_high_throughput_workflow_keeps_capacity_compensation_explicit():
     receipt = BrainHighThroughputEvidenceWorkflowFabricReceipt(
         request_id="request:throughput-workflow", workflow_id="workflow:throughput", batch_id="batch:001", partition="partition:imaging", disposition="partial",
         stage_order=("stage:admit-batch", "stage:checkpoint", "stage:persist-queue", "stage:validate-input"), plan_order=("plan:publish-admitted-batch", "plan:stage:admit-batch", "plan:stage:checkpoint", "plan:stage:persist-queue", "plan:stage:validate-input"), completed_order=("stage:admit-batch", "stage:checkpoint", "stage:persist-queue", "stage:validate-input"), blocked_order=("evidence:b",), compensation_order=("compensate:research-work:capacity-overflow",), candidate_order=("evidence:a", "evidence:b"), admitted_order=("evidence:a",), unknown_order=(), checkpoint_seq=2, queue_digest="a" * 64, checkpoint_digest="b" * 64, workflow_digest="c" * 64, approval_reference="d" * 64, replay_identity="e" * 64, budget_units=8, omissions=("workflow:capacity-overflow-requires-compensation",), uncertainty=(), negative_evidence=(), effect_receipts=("compensate:research-work:workflow:throughput",), artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_federated_workflow_keeps_partial_exchange_compensation_explicit():
+    receipt = BrainFederatedEvidenceWorkflowFabricReceipt(
+        request_id="request:federated-workflow",
+        workflow_id="workflow:federated",
+        federation_id="federation:commons",
+        institution_id="institution:a",
+        purpose="benchmarking",
+        endpoint="https://hub.example/research",
+        disposition="partial",
+        stage_order=("stage:admit-federation", "stage:checkpoint", "stage:publish-aggregate", "stage:validate-input"),
+        plan_order=("plan:publish-permitted-aggregate", "plan:stage:admit-federation", "plan:stage:checkpoint", "plan:stage:publish-aggregate", "plan:stage:validate-input"),
+        completed_order=("stage:admit-federation", "stage:checkpoint", "stage:publish-aggregate", "stage:validate-input"),
+        blocked_order=("evidence:b",),
+        compensation_order=("compensate:research-work:federation-partial",),
+        candidate_order=("evidence:a", "evidence:b"),
+        admitted_order=("evidence:a",),
+        unknown_order=(),
+        aggregate_order=("a" * 64,),
+        checkpoint_digest="b" * 64,
+        workflow_digest="c" * 64,
+        approval_reference="d" * 64,
+        replay_identity="e" * 64,
+        budget_units=8,
+        omissions=("workflow:federation-partial-requires-compensation",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("compensate:research-work:workflow:federated",),
+        artifact={"content_hash": "f" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

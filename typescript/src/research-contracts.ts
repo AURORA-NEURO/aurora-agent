@@ -225,6 +225,8 @@ export const MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F14
 export const MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-multimodal-evidence-workflow-fabric/1.0" as const;
 export const HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F15" as const;
 export const HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-high-throughput-evidence-workflow-fabric/1.0" as const;
+export const FEDERATED_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F16" as const;
+export const FEDERATED_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-federated-evidence-workflow-fabric/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3903,6 +3905,25 @@ export function validateBrainHighThroughputEvidenceWorkflowFabricReceipt(receipt
 }
 
 export function brainHighThroughputEvidenceWorkflowFabricReceiptDigest(receipt: BrainHighThroughputEvidenceWorkflowFabricReceipt): string { validateBrainHighThroughputEvidenceWorkflowFabricReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainFederatedEvidenceWorkflowFabricReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; workflow_id: string; federation_id: string; institution_id: string; purpose: string; endpoint: string; disposition: "qualified" | "partial" | "unknown" | "blocked";
+  stage_order: string[]; plan_order: string[]; completed_order: string[]; blocked_order: string[]; compensation_order: string[]; candidate_order: string[]; admitted_order: string[]; unknown_order: string[]; aggregate_order: string[];
+  checkpoint_digest: string; workflow_digest: string; approval_reference: string; replay_identity: string; budget_units: number; omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainFederatedEvidenceWorkflowFabricReceipt(receipt: BrainFederatedEvidenceWorkflowFabricReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATED_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID || receipt.contract_version !== FEDERATED_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION) throw new Error("federated workflow schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.federation_id.trim() || !receipt.institution_id.trim() || !receipt.purpose.trim() || !receipt.endpoint.trim() || !receipt.stage_order.length || !receipt.plan_order.length || !receipt.completed_order.length || !receipt.effect_receipts.length || !Number.isInteger(receipt.budget_units) || receipt.budget_units <= 0) throw new Error("federated workflow identity, stages, plan, locality, budget, or effects are incomplete");
+  if (receipt.admitted_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.blocked_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.unknown_order.some((value) => !receipt.candidate_order.includes(value))) throw new Error("federated workflow state is not covered by candidates");
+  for (const values of [receipt.stage_order, receipt.plan_order, receipt.completed_order, receipt.blocked_order, receipt.compensation_order, receipt.candidate_order, receipt.admitted_order, receipt.unknown_order, receipt.aggregate_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("federated workflow ordering is invalid");
+  for (const value of [receipt.checkpoint_digest, receipt.workflow_digest, receipt.approval_reference, receipt.replay_identity, receipt.artifact.content_hash, ...receipt.aggregate_order]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("federated workflow digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("schedule:research-work:") && !effect.startsWith("compensate:research-work:") && effect !== "block:unsafe-release")) throw new Error("federated workflow effect is outside schedule/compensation gate");
+  if (receipt.disposition === "qualified" && !receipt.effect_receipts.some((effect) => effect.startsWith("schedule:research-work:"))) throw new Error("qualified federated workflow requires schedule receipt");
+  if (receipt.disposition === "blocked" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("blocked federated workflow must be explicitly blocked");
+}
+
+export function brainFederatedEvidenceWorkflowFabricReceiptDigest(receipt: BrainFederatedEvidenceWorkflowFabricReceipt): string { validateBrainFederatedEvidenceWorkflowFabricReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
