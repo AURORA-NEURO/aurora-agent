@@ -6,9 +6,11 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousBrain,
     AutonomousPromptRegistry,
     AutonomousPromptSelectionPlan,
     AutonomousPromptTemplate,
+    AutonomousTaskOrchestrator,
     LLMRuntime,
     builtin_autonomous_prompt_registry,
     builtin_autonomous_prompt_templates,
@@ -16,6 +18,55 @@ from prism_sdk import (
     content_digest,
 )
 from prism_sdk.errors import ArgumentError
+from prism_sdk.brain import _context_identity_digest
+
+
+class _PromptWorkspace:
+    def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        args = {} if arguments is None else dict(arguments)
+        if name == "brain_model_select_contextual":
+            raw_context = args["context"]
+            assert isinstance(raw_context, dict)
+            identity = {field: raw_context.get(field) for field in ("domain", "capability", "risk_class", "task_family")}
+            return {
+                "context_digest": _context_identity_digest(identity),
+                "selection_status": "selected",
+                "selection": {
+                    "selected_model": {"provider": "openai", "model": "prompt-model"},
+                    "decision_digest": "d" * 64,
+                },
+            }
+        if name == "brain_model_select":
+            return {"selected_model": {"provider": "openai", "model": "prompt-model"}, "decision_digest": "d" * 64}
+        if name == "brain_prompt_assemble":
+            raise AssertionError("verified prompt override should bypass workspace prompt assembly")
+        if name == "brain_plan":
+            return {
+                "ok": True,
+                "plan": {
+                    "requires_approval": True,
+                    "steps": [{"effect": "provider_call"}],
+                    "plan_digest": "b" * 64,
+                },
+            }
+        raise AssertionError(f"unexpected workspace tool: {name}")
+
+
+def _prompt_model() -> dict[str, object]:
+    return {
+        "provider": "openai",
+        "model": "prompt-model",
+        "capabilities": [
+            "reasoning", "code", "science", "data", "web", "biomedical", "neuroscience",
+            "operations", "enterprise", "coordination", "multimodal", "evaluation",
+        ],
+        "context_window_tokens": 16_000,
+        "max_output_tokens": 2_048,
+        "quality": 0.9,
+        "latency_ms": 20,
+        "cost_per_million_tokens": 10,
+        "reliability": 0.95,
+    }
 
 
 def _template(domain: str, prompt_id: str | None = None, *, content: str = "transient prompt") -> AutonomousPromptTemplate:
@@ -197,3 +248,84 @@ def test_builtin_specialist_prompt_pack_drives_an_offline_provider_invocation() 
     adapter.acquire(context)
     assert requests[0].messages[0]["role"] == "system"  # type: ignore[attr-defined]
     assert "never diagnose" in requests[0].messages[0]["content"]  # type: ignore[attr-defined]
+
+
+def test_high_level_orchestrator_uses_builtin_prompt_registry_for_direct_runs() -> None:
+    runtime = LLMRuntime()
+    requests: list[object] = []
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda request: (requests.append(request) or {"text": "bounded prompt answer"}),
+    )
+    orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(_PromptWorkspace(), runtime))
+    result = orchestrator.run(
+        task="Review a bounded neuroscience experiment.",
+        domain="neuroscience",
+        model_candidates=[_prompt_model()],
+        credentials={},
+        approve_provider_call=True,
+        prompt_registry=builtin_autonomous_prompt_registry(),
+    )
+    assert result.status == "completed_provider_call"
+    assert len(requests) == 1
+    assert requests[0].messages[0]["role"] == "system"  # type: ignore[attr-defined]
+    assert "neuroscience specialist" in requests[0].messages[0]["content"]  # type: ignore[attr-defined]
+    prompt_projection = result.prompt["autonomous_prompt"]
+    assert prompt_projection["mode"] == "registry_selection"  # type: ignore[index]
+    assert len(requests[0].idempotency_key) == 64  # type: ignore[attr-defined]
+    public_prompt = result.to_dict()["prompt"]
+    assert "messages" not in public_prompt
+    assert public_prompt["message_count"] >= 2
+
+
+def test_high_level_cross_domain_prompt_registry_reaches_children_and_synthesis() -> None:
+    runtime = LLMRuntime()
+    requests: list[object] = []
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda request: (requests.append(request) or {"text": f"answer-{len(requests)}"}),
+    )
+    orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(_PromptWorkspace(), runtime))
+    result = orchestrator.run_cross_domain(
+        task="Compare a biomedical intervention with a neuroscience signal study.",
+        subtasks=(
+            {"id": "bio", "domain": "biomedical", "task": "Review the biomedical safety evidence."},
+            {"id": "neuro", "domain": "neuroscience", "task": "Review the neuroscience signal limits."},
+        ),
+        model_candidates=[_prompt_model()],
+        credentials={},
+        approve_provider_call=True,
+        prompt_registry=builtin_autonomous_prompt_registry(),
+    )
+    assert result.status == "completed"
+    assert len(requests) == 3
+    assert all("autonomous_prompt" in run.prompt for run in result.child_results)
+    assert result.synthesis_result is not None
+    assert result.synthesis_result.prompt["autonomous_prompt"]["domain"] == "cross_domain"  # type: ignore[index]
+
+
+def test_high_level_run_refuses_a_stale_prompt_selection_before_dispatch() -> None:
+    runtime = LLMRuntime()
+    requests: list[object] = []
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda request: (requests.append(request) or {"text": "must not dispatch"}),
+    )
+    registry = builtin_autonomous_prompt_registry(("coding",))
+    selection = registry.select_for([{"domain": "coding", "stage": "answer", "required_capabilities": ()}])
+    registry.register(
+        _template("coding", prompt_id="builtin.coding.specialist", content="replacement"),
+        replace=True,
+    )
+    orchestrator = AutonomousTaskOrchestrator(AutonomousBrain(_PromptWorkspace(), runtime))
+    with pytest.raises(ArgumentError, match="stale"):
+        orchestrator.run(
+            task="Review a bounded implementation.",
+            domain="coding",
+            model_candidates=[_prompt_model()],
+            credentials={},
+            approve_provider_call=True,
+            prompt_registry=registry,
+            prompt_selection=selection,
+        )
+    assert requests == []

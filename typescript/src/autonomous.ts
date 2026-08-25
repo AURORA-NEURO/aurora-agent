@@ -211,6 +211,13 @@ import type {
   RestToolResponse,
   ToolDefinition,
 } from "./types.js";
+import {
+  AutonomousPromptRegistry,
+  AutonomousPromptTemplate,
+  type AutonomousPromptRenderResult,
+  type AutonomousPromptSelectionPlan,
+  type AutonomousPromptSelectionPlanJSON,
+} from "./autonomous-prompt-registry.js";
 
 /** Cross-domain orchestration contracts shared with the Python autonomous façade. */
 export const AUTONOMY_SCHEMA = "bioprism-typescript-autonomous-agent/0.1" as const;
@@ -897,6 +904,8 @@ export interface AutonomousRunResult {
   plan_refinement_digest: string | null;
   selection: AutonomousSelectionDecision | null;
   response: ProviderResponse | null;
+  /** Digest-only identity for an explicitly selected versioned prompt; rendered messages remain transient. */
+  prompt?: AutonomousRunPromptProjection | null;
   /** Deterministic value-only response composition signal; never task truth or effect evidence. */
   response_evaluation?: AutonomousDomainResponseEvaluation | null;
   tool_loop?: AutonomousToolLoopSummary | null;
@@ -915,6 +924,20 @@ export interface AutonomousRunResult {
   domain_policy_admission?: AutonomousDomainPolicyAdmission | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_response_local; value_only_learning_projection";
+}
+
+export interface AutonomousRunPromptProjection extends JsonObject {
+  mode: "versioned_template" | "registry_selection";
+  prompt_id: string;
+  version: string;
+  domain: AutonomousDomainName;
+  stage: string;
+  manifest_digest: string;
+  rendered_prompt_digest: string;
+  final_prompt_digest: string;
+  selection_plan_digest: string | null;
+  retention: "prompt_messages_transient;digest_only_projection";
+  secret_material: "never_returned";
 }
 
 /**
@@ -1355,6 +1378,14 @@ export interface AutonomousRunOptions {
   credential?: CredentialHandle;
   credentialFor?: (provider: string) => CredentialHandle | undefined;
   context?: readonly AutonomousPromptChunk[];
+  /** Explicit versioned prompt implementation; its rendered messages remain transient. */
+  promptTemplate?: AutonomousPromptTemplate;
+  /** Reviewed prompt registry used to select a versioned template for the run's domain/stage. */
+  promptRegistry?: AutonomousPromptRegistry;
+  /** Optional digest-bound selection plan; omitted plans are selected from promptRegistry at run time. */
+  promptSelection?: AutonomousPromptSelectionPlan | AutonomousPromptSelectionPlanJSON;
+  /** Prompt workflow stage used for versioned prompt selection; defaults to `answer`. */
+  promptStage?: string;
   /** Transient multimodal evidence appended to the task message only; never retained in autonomy state. */
   contentParts?: readonly ProviderContentPart[];
   /** Override the agent memory store for this run. */
@@ -2325,6 +2356,60 @@ function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOp
     try { encoded = JSON.stringify(options.responseSchema); } catch { throw new ArgumentError("autonomous responseSchema must be JSON-serializable"); }
     if (!encoded || bytes(encoded) > 1_000_000) throw new ArgumentError("autonomous responseSchema exceeds its bounded size");
   }
+}
+
+type RenderedAutonomousRunPrompt = {
+  messages: readonly ProviderMessage[];
+  metadata: AutonomousPromptRenderResult;
+  mode: "versioned_template" | "registry_selection";
+};
+
+async function renderAutonomousRunPrompt(
+  task: string,
+  blueprint: AutonomousTaskBlueprint,
+  route: AutonomousRouteProposal,
+  options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage">,
+): Promise<RenderedAutonomousRunPrompt | null> {
+  const template = options.promptTemplate;
+  const registry = options.promptRegistry;
+  const selection = options.promptSelection;
+  if (template !== undefined && !(template instanceof AutonomousPromptTemplate)) throw new ArgumentError("autonomous promptTemplate must be an AutonomousPromptTemplate");
+  if (registry !== undefined && !(registry instanceof AutonomousPromptRegistry)) throw new ArgumentError("autonomous promptRegistry must be an AutonomousPromptRegistry");
+  if (template !== undefined && (registry !== undefined || selection !== undefined)) throw new ArgumentError("autonomous promptTemplate cannot be combined with promptRegistry or promptSelection");
+  if (selection !== undefined && registry === undefined) throw new ArgumentError("autonomous promptSelection requires promptRegistry");
+  if (registry === undefined && template === undefined) return null;
+  const stage = boundedIdentifier("autonomous promptStage", options.promptStage ?? "answer");
+  const domain = blueprint.domain_profile.domain;
+  const context = {
+    task,
+    objective: task,
+    requirement: {
+      domain,
+      stage_id: stage,
+      objective: task,
+      workflow_id: blueprint.workflow.workflow_id,
+      required_capabilities: [...blueprint.required_capabilities],
+    },
+    route: {
+      route_digest: route.route_digest,
+      selected_domains: [...route.selected_domains],
+      primary_domain: route.primary_domain,
+      cross_domain: route.cross_domain,
+    },
+    context_ids: [...blueprint.prompt.included_context_ids],
+  } as const;
+  if (template !== undefined) {
+    const rendered = await template.renderTransient(context);
+    return { messages: rendered.messages, metadata: rendered.metadata, mode: "versioned_template" };
+  }
+  const resolvedSelection = selection ?? registry!.selectFor([
+    // Prompt capabilities are a separate reviewed namespace from model capabilities. A domain
+    // blueprint may require "reasoning" or "code" even when a prompt manifest intentionally
+    // advertises only its rendering concerns, so selection starts with no implicit model labels.
+    { domain, stage, requiredCapabilities: [] },
+  ]);
+  const rendered = await registry!.render(resolvedSelection, context);
+  return { messages: rendered.messages, metadata: rendered.metadata, mode: "registry_selection" };
 }
 
 function normalizeAutonomousDomainPolicyMode(value: AutonomousDomainPolicyExecutionMode | undefined): AutonomousDomainPolicyExecutionMode {
@@ -6565,6 +6650,7 @@ export class AutonomousAgent {
         plan_refinement_digest: cross.plan_refinement_digest,
         selection: cross.synthesis?.selection ?? null,
         response: cross.synthesis?.response ?? null,
+        prompt: cross.synthesis?.prompt ?? null,
         response_evaluation: cross.synthesis?.response_evaluation ?? null,
         tool_loop: cross.synthesis?.tool_loop ?? null,
         cross_domain: cross,
@@ -6610,7 +6696,22 @@ export class AutonomousAgent {
     if (options.tools && this.toolCatalogue && this.toolExecutor) await this.ensureToolRegistry();
     const defaultToolNames = blueprint.plan.allowed_tools.filter((name) => name !== "provider.invoke");
     const tools = options.tools === undefined ? await this.liveToolsForNames(selectedDomains, defaultToolNames) : this.filterActivatedTools(options.tools);
-    const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
+    const renderedPrompt = await renderAutonomousRunPrompt(taskText, blueprint, route, options);
+    const messages: ProviderMessage[] = renderedPrompt
+      ? renderedPrompt.messages.map((message) => ({ ...message }))
+      : blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
+    if (renderedPrompt) {
+      // The versioned renderer controls the specialist framing, while the reviewed blueprint
+      // remains the source of bounded caller/memory context. Keep those context messages without
+      // reintroducing the generated domain system/developer prompt or duplicate task message.
+      const supportingMessages = blueprint.prompt.messages
+        .filter((message) => !["domain-system", "domain-developer", "task"].includes(message.source_id))
+        .map((message) => ({ role: message.role, content: message.content } as ProviderMessage));
+      if (supportingMessages.length) {
+        const lastUserIndex = messages.reduce((found, message, index) => message.role === "user" ? index : found, -1);
+        messages.splice(lastUserIndex < 0 ? messages.length : lastUserIndex, 0, ...supportingMessages);
+      }
+    }
     if (contentParts) {
       let taskMessageIndex = -1;
       for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -6625,6 +6726,21 @@ export class AutonomousAgent {
       messages[taskMessageIndex] = { ...taskMessage, content: [providerTextPart(taskMessage.content), ...contentParts] };
     }
     if (acceptedPlan) messages.push({ role: "user", content: `Accepted provider plan refinement (digest ${acceptedPlan.refinement_digest}). Follow this existing workflow order and focus only; do not add tools, effects, permissions, credentials, or claims. Priority stages: ${acceptedPlan.priority_stage_ids.join(", ")}. Focus stages: ${acceptedPlan.focus_stage_ids.join(", ")}.` });
+    const promptProjection: AutonomousRunPromptProjection | null = renderedPrompt === null
+      ? null
+      : {
+        mode: renderedPrompt.mode,
+        prompt_id: renderedPrompt.metadata.prompt_id,
+        version: renderedPrompt.metadata.version,
+        domain: renderedPrompt.metadata.domain,
+        stage: renderedPrompt.metadata.stage,
+        manifest_digest: renderedPrompt.metadata.manifest_digest,
+        rendered_prompt_digest: renderedPrompt.metadata.rendered_prompt_digest,
+        final_prompt_digest: await digestJson(messages),
+        selection_plan_digest: renderedPrompt.metadata.selection_plan_digest,
+        retention: "prompt_messages_transient;digest_only_projection",
+        secret_material: "never_returned",
+      };
     const requiredCapabilities = [...blueprint.required_capabilities];
     const requireJson = options.structuredDomainResponse === true || options.requireJson === true;
     const responseSchema = options.structuredDomainResponse === true
@@ -6637,6 +6753,16 @@ export class AutonomousAgent {
       messages,
       maxOutputTokens: options.maxOutputTokens ?? 1_024,
       temperature: options.temperature,
+      ...(promptProjection ? {
+        idempotencyKey: await digestJson({
+          schema: "bioprism-typescript-autonomous-run-prompt-request/0.1",
+          task_digest: blueprint.task_digest,
+          plan_digest: blueprint.plan.plan_digest,
+          prompt_digest: promptProjection.final_prompt_digest,
+          manifest_digest: promptProjection.manifest_digest,
+          selection_plan_digest: promptProjection.selection_plan_digest,
+        }),
+      } : {}),
       ...(requireJson ? { requireJson: true } : options.requireJson === false ? { requireJson: false } : {}),
       ...(responseSchema !== undefined ? { responseSchema } : {}),
       tools: tools.length ? tools : undefined,
@@ -6659,13 +6785,13 @@ export class AutonomousAgent {
       const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
         ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
         : null;
-      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;
-    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
   }
 
   /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */
@@ -6779,6 +6905,10 @@ export class AutonomousAgent {
           { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
           ...(acceptedPlan ? [{ id: "accepted-cross-domain-plan", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, child_id: childId, priority_rank: acceptedPlan.priority_child_ids.indexOf(childId), focus: acceptedPlan.focus_child_ids.includes(childId) }), required: true, priority: 95 }] : []),
         ],
+        promptTemplate: options.promptTemplate,
+        promptRegistry: options.promptRegistry,
+        promptSelection: options.promptSelection,
+        promptStage: options.promptStage,
         contentParts,
         retrieveMemory: false,
         recordMemory: false,
@@ -6896,6 +7026,10 @@ export class AutonomousAgent {
       credential: options.credential,
       credentialFor: options.credentialFor,
       context: synthesisContext,
+      promptTemplate: options.promptTemplate,
+      promptRegistry: options.promptRegistry,
+      promptSelection: options.promptSelection,
+      promptStage: options.promptStage,
       contentParts,
       retrieveMemory: false,
       recordMemory: false,

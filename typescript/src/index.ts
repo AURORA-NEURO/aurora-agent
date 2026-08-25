@@ -798,6 +798,7 @@ export type {
   AutonomousRouteCandidate,
   AutonomousRouteProposal,
   AutonomousRunOptions,
+  AutonomousRunPromptProjection,
   AutonomousRunWithTraceOptions,
   AutonomousTracedRunResult,
   AutonomousTracedCrossDomainRunResult,

@@ -1430,11 +1430,32 @@ class BrainRunResult:
     response_evaluation: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        custom_prompt = self.prompt.get("autonomous_prompt") is not None
+        prompt_projection = (
+            {
+                key: value
+                for key, value in self.prompt.items()
+                if key not in {"messages", "_provider_messages_override"}
+            }
+            if custom_prompt
+            else dict(self.prompt)
+        )
+        if custom_prompt and "messages" in self.prompt:
+            raw_messages = self.prompt.get("messages")
+            prompt_projection["message_count"] = (
+                len(raw_messages)
+                if isinstance(raw_messages, Sequence) and not isinstance(raw_messages, (str, bytes))
+                else None
+            )
+            prompt_projection.setdefault(
+                "retention",
+                "provider_messages_transient;digest_only_projection",
+            )
         result = {
             "run_id": self.run_id,
             "status": self.status,
             "selection": dict(self.selection),
-            "prompt": dict(self.prompt),
+            "prompt": prompt_projection,
             "plan": dict(self.plan),
             "response": None if self.response is None else self.response.to_dict(),
             "outcome_digest": self.outcome_digest,
@@ -1818,6 +1839,31 @@ def _json_digest(value: Any) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _prompt_bound_idempotency_key(
+    caller_key: str | None,
+    *,
+    prompt_digest: str,
+    metadata: Mapping[str, Any] | None,
+) -> str:
+    """Bind provider request identity to the reviewed prompt implementation.
+
+    A caller key alone is not sufficient once a versioned prompt can change the provider
+    request. The digest keeps retries deterministic while ensuring a prompt rollout cannot
+    accidentally reuse a prior request identity. Only prompt metadata and digests cross this
+    boundary; rendered messages remain process-local.
+    """
+
+    return _json_digest(
+        {
+            "schema": "bioprism-python-autonomous-prompt-request/0.1",
+            "caller_key": caller_key,
+            "prompt_digest": prompt_digest,
+            "manifest_digest": None if metadata is None else metadata.get("manifest_digest"),
+            "selection_plan_digest": None if metadata is None else metadata.get("selection_plan_digest"),
+        }
+    )
 
 
 def _learning_outcome_digest(
@@ -5751,10 +5797,38 @@ class AutonomousBrain:
 
         prompt_args = dict(prompt)
         prompt_args["task"] = task
-        prompt_report = self.workspace.tool("brain_prompt_assemble", prompt_args)
-        messages = prompt_report.get("messages")
-        if not isinstance(messages, list) or not messages:
-            raise BrainRunError("prompt assembly did not produce messages")
+        prompt_override = prompt_args.pop("_provider_messages_override", None)
+        override_metadata: Mapping[str, Any] | None = None
+        if prompt_override is not None:
+            if not isinstance(prompt_override, Mapping):
+                raise BrainRunError("provider prompt override must be a mapping")
+            raw_messages = prompt_override.get("messages")
+            if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)) or not raw_messages:
+                raise BrainRunError("provider prompt override must contain a non-empty message sequence")
+            if any(not isinstance(message, Mapping) for message in raw_messages):
+                raise BrainRunError("provider prompt override messages must contain mappings")
+            override_metadata_value = prompt_override.get("metadata", {})
+            if not isinstance(override_metadata_value, Mapping):
+                raise BrainRunError("provider prompt override metadata must be a mapping")
+            try:
+                messages = [dict(message) for message in raw_messages]
+                prompt_digest = _json_digest(messages)
+            except (TypeError, ValueError) as error:
+                raise BrainRunError("provider prompt override must be JSON-safe") from error
+            override_metadata = dict(override_metadata_value)
+            prompt_report = {
+                "schema": "bioprism-python-autonomous-prompt-override/0.1",
+                "messages": messages,
+                "prompt_digest": prompt_digest,
+                "autonomous_prompt": override_metadata,
+                "retention": "prompt_messages_transient;digest_only_projection",
+                "secret_material": "never_returned",
+            }
+        else:
+            prompt_report = self.workspace.tool("brain_prompt_assemble", prompt_args)
+            messages = prompt_report.get("messages")
+            if not isinstance(messages, list) or not messages:
+                raise BrainRunError("prompt assembly did not produce messages")
 
         plan_args = dict(plan)
         plan_args.setdefault("objective", task)
@@ -5778,6 +5852,17 @@ class AutonomousBrain:
         if handle is not None and handle.provider != provider:
             raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
         provider_messages = _provider_messages_with_content_parts(messages, normalized_content_parts)
+        effective_idempotency_key = idempotency_key
+        if prompt_override is not None:
+            prompt_report = {
+                **prompt_report,
+                "prompt_digest": _json_digest(provider_messages),
+            }
+            effective_idempotency_key = _prompt_bound_idempotency_key(
+                idempotency_key,
+                prompt_digest=prompt_report["prompt_digest"],
+                metadata=override_metadata,
+            )
         request = ProviderRequest(
             model=model,
             messages=provider_messages,
@@ -5785,7 +5870,7 @@ class AutonomousBrain:
             temperature=temperature,
             require_json=require_json,
             response_schema=response_schema,
-            idempotency_key=idempotency_key,
+            idempotency_key=effective_idempotency_key,
             tools=tuple(tools),
             tool_choice=tool_choice,
         )
@@ -6046,6 +6131,14 @@ class AutonomousBrain:
             raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
         if handle is not None and handle.provider != provider:
             raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
+        continuation_idempotency_key = idempotency_key
+        if prompt_request.get("_provider_messages_override") is not None:
+            prompt_metadata = first.prompt.get("autonomous_prompt")
+            continuation_idempotency_key = _prompt_bound_idempotency_key(
+                idempotency_key,
+                prompt_digest=first.prompt.get("prompt_digest"),
+                metadata=prompt_metadata if isinstance(prompt_metadata, Mapping) else None,
+            )
         request = ProviderRequest(
             model=model,
             messages=provider_messages,
@@ -6053,7 +6146,7 @@ class AutonomousBrain:
             temperature=temperature,
             require_json=require_json,
             response_schema=response_schema,
-            idempotency_key=idempotency_key,
+            idempotency_key=continuation_idempotency_key,
             tools=tuple(provider_tools),
             tool_choice=tool_choice,
         )

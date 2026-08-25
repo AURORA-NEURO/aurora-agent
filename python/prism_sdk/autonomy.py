@@ -98,6 +98,11 @@ from .brain import (
     _json_digest,
     build_model_selection_audit,
 )
+from .autonomous_prompt_registry import (
+    AutonomousPromptRegistry,
+    AutonomousPromptSelectionPlan,
+    AutonomousPromptTemplate,
+)
 from .domain_tools import (
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousDomainTool,
@@ -7796,6 +7801,119 @@ def _record_workflow_stage_response_feedback(
     }
 
 
+def _apply_versioned_prompt(
+    blueprint: AutonomousTaskBlueprint,
+    *,
+    route: Mapping[str, Any] | None,
+    prompt_template: AutonomousPromptTemplate | None,
+    prompt_registry: AutonomousPromptRegistry | None,
+    prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None,
+    prompt_stage: str,
+) -> AutonomousTaskBlueprint:
+    """Replace only transient provider-message assembly with a verified prompt implementation."""
+
+    if prompt_template is not None and not isinstance(prompt_template, AutonomousPromptTemplate):
+        raise BrainRunError("prompt_template must be an AutonomousPromptTemplate or None")
+    if prompt_registry is not None and not isinstance(prompt_registry, AutonomousPromptRegistry):
+        raise BrainRunError("prompt_registry must be an AutonomousPromptRegistry or None")
+    if prompt_template is not None and (prompt_registry is not None or prompt_selection is not None):
+        raise BrainRunError("prompt_template cannot be combined with prompt_registry or prompt_selection")
+    if prompt_selection is not None and prompt_registry is None:
+        raise BrainRunError("prompt_selection requires prompt_registry")
+    if prompt_template is None and prompt_registry is None:
+        return blueprint
+    stage = _identifier("prompt_stage", prompt_stage)
+    domain = blueprint.profile.domain
+    route_value = {} if route is None else dict(route)
+    context = {
+        "task": blueprint.spec.task,
+        "objective": blueprint.spec.task,
+        "requirement": {
+            "domain": domain,
+            "stage_id": stage,
+            "objective": blueprint.spec.task,
+            "workflow_id": blueprint.workflow.workflow_id,
+            "required_capabilities": list(blueprint.required_capabilities),
+        },
+        "route": {
+            "route_digest": route_value.get("route_digest"),
+            "selected_domains": list(route_value.get("selected_domains", [domain])),
+            "primary_domain": route_value.get("primary_domain", domain),
+            "cross_domain": bool(route_value.get("cross_domain", False)),
+        },
+        "context_ids": [
+            chunk.get("id")
+            for chunk in blueprint.prompt.get("context", [])
+            if isinstance(chunk, Mapping) and isinstance(chunk.get("id"), str)
+        ],
+    }
+    if prompt_template is not None:
+        rendered = prompt_template.render_transient(context)
+        mode = "versioned_template"
+    else:
+        selection = prompt_selection
+        if selection is None:
+            selection = prompt_registry.select_for(
+                [
+                    {
+                        "domain": domain,
+                        "stage": stage,
+                        # Prompt capabilities are a reviewed namespace separate from model
+                        # capabilities such as reasoning/code; do not conflate the two during
+                        # automatic high-level selection.
+                        "required_capabilities": [],
+                    }
+                ]
+            )
+        rendered = prompt_registry.render(selection, context)
+        mode = "registry_selection"
+    if any(
+        not isinstance(message, Mapping) or not isinstance(message.get("content"), str)
+        for message in rendered.messages
+    ):
+        raise BrainRunError("versioned prompt messages must contain text content for the Python provider runtime")
+
+    # Preserve the existing bounded caller/memory context while replacing only the generated
+    # domain framing and task message. This makes prompt rollout additive rather than silently
+    # dropping evidence contracts, route context, or recalled value-only episodes.
+    supporting_messages: list[dict[str, Any]] = []
+    raw_context = blueprint.prompt.get("context", [])
+    if not isinstance(raw_context, Sequence) or isinstance(raw_context, (str, bytes)):
+        raise BrainRunError("autonomous prompt context must be a sequence")
+    for chunk in raw_context:
+        if not isinstance(chunk, Mapping):
+            raise BrainRunError("autonomous prompt context must contain mappings")
+        chunk_id = chunk.get("id")
+        content = chunk.get("content")
+        if not isinstance(chunk_id, str) or not isinstance(content, str):
+            raise BrainRunError("autonomous prompt context contains malformed content")
+        supporting_messages.append(
+            {
+                "role": chunk.get("role", "developer"),
+                "content": f"Context {chunk_id}:\n{content}",
+            }
+        )
+    rendered_messages = [dict(message) for message in rendered.messages]
+    last_user_index = max(
+        (index for index, message in enumerate(rendered_messages) if message.get("role") == "user"),
+        default=-1,
+    )
+    insertion_index = len(rendered_messages) if last_user_index < 0 else last_user_index
+    rendered_messages[insertion_index:insertion_index] = supporting_messages
+    override = {
+        "messages": rendered_messages,
+        "metadata": {
+            **rendered.to_dict(),
+            "mode": mode,
+            "retention": "prompt_messages_transient;digest_only_projection",
+            "secret_material": "never_returned",
+        },
+    }
+    prompt = dict(blueprint.prompt)
+    prompt["_provider_messages_override"] = override
+    return replace(blueprint, prompt=prompt)
+
+
 class AutonomousTaskOrchestrator:
     """Compose domain intake with adaptive execution and optional online learning."""
 
@@ -10537,6 +10655,10 @@ class AutonomousTaskOrchestrator:
         desired_outputs: Sequence[str] = (),
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "answer",
         max_steps: int = 8,
         require_json: bool = False,
         structured_domain_response: bool = False,
@@ -10625,6 +10747,15 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=required_model_capabilities,
             memory_episodes=recalled,
+        )
+        route_binding = blueprint.selection_context.get("autonomous_route")
+        blueprint = _apply_versioned_prompt(
+            blueprint,
+            route=route_binding if isinstance(route_binding, Mapping) else None,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
         )
         _assert_task_decision_allows_provider(
             blueprint.task_decision,
@@ -12264,6 +12395,10 @@ class AutonomousTaskOrchestrator:
         credentials: Mapping[str, CredentialHandle],
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "answer",
         execution_plan_context: Mapping[str, Any] | None = None,
         desired_outputs: Sequence[str] = (
             "domain-attributed findings",
@@ -12392,6 +12527,10 @@ class AutonomousTaskOrchestrator:
                 desired_outputs=child.spec.desired_outputs,
                 context=child_context,
                 content_parts=normalized_content_parts,
+                prompt_template=prompt_template,
+                prompt_registry=prompt_registry,
+                prompt_selection=prompt_selection,
+                prompt_stage=prompt_stage,
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 structured_domain_response=child.spec.structured_domain_response,
@@ -12503,6 +12642,10 @@ class AutonomousTaskOrchestrator:
             desired_outputs=synthesis.spec.desired_outputs,
             context=synthesis_context,
             content_parts=normalized_content_parts,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             structured_domain_response=synthesis.spec.structured_domain_response,

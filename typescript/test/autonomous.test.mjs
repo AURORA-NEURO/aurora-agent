@@ -38,6 +38,7 @@ import {
   LLMRuntime,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
+  builtinAutonomousPromptRegistry,
   builtinAutonomousValueEvaluatorProfiles,
   assembleAutonomousPrompt,
   compileAutonomousPlan,
@@ -1476,11 +1477,12 @@ test("AutonomousAgent performs a real selected-provider tool loop with domain po
     toolExecutor: async (tool) => ({ tool: tool.name, files: ["README.md"] }),
   });
   agent.registerModel(candidate("local", "local-model"));
-  const result = await agent.run("Debug this Rust repository and report the tests", { domain: "coding", approveProviderCall: true });
+  const result = await agent.run("Debug this Rust repository and report the tests", { domain: "coding", promptRegistry: builtinAutonomousPromptRegistry(), approveProviderCall: true });
   assert.equal(result.status, "completed");
   assert.equal(result.route.primary_domain, "coding");
   assert.equal(result.tool_loop.toolCalls, 1);
   assert.equal(result.response.text, "repository inspected");
+  assert.equal(result.prompt.mode, "registry_selection");
   assert.equal(bodies[1].messages.at(-1).role, "tool");
   assert.equal(bodies[1].messages.at(-1).content, JSON.stringify({ tool: "repository_catalog", files: ["README.md"] }));
 });
@@ -2100,6 +2102,46 @@ test("keyless readiness audits every built-in domain without contacting provider
   assert.match(JSON.stringify(report), /attach AutonomousOnlineLearner/);
   assert.doesNotMatch(JSON.stringify(report), /api_key|Bearer|sk-|test-secret/i);
   assert.equal(fetchCalls, 0);
+});
+
+test("high-level runs use verified prompt registry messages and prompt-bound request identity", async () => {
+  const requests = [];
+  let calls = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("prompt-high-level", (request) => {
+    requests.push(request);
+    calls += 1;
+    return { text: `prompt-answer-${calls}` };
+  });
+  const agent = new AutonomousAgent(llm);
+  const model = candidate("prompt-high-level", "prompt-model", ["reasoning", "science", "biomedical", "neuroscience", "coordination"]);
+  agent.registerModel(model);
+  const registry = builtinAutonomousPromptRegistry();
+  const direct = await agent.run("Review a bounded neuroscience experiment.", {
+    domain: "neuroscience",
+    candidates: [model],
+    promptRegistry: registry,
+    approveProviderCall: true,
+  });
+  assert.equal(direct.status, "completed");
+  assert.equal(direct.prompt.mode, "registry_selection");
+  assert.match(requests[0].messages[0].content, /neuroscience specialist/);
+  assert.match(requests[0].idempotencyKey, /^[0-9a-f]{64}$/);
+
+  const cross = await agent.runCrossDomain("Research a biomedical neuroscience experiment with EEG patient evidence", {
+    candidates: [model],
+    promptRegistry: registry,
+    approveProviderCall: true,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review the biomedical safety evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+    ],
+  });
+  assert.equal(cross.status, "completed");
+  assert.equal(cross.child_runs.length, 2);
+  assert.ok(cross.child_runs.every((child) => child.result.prompt?.mode === "registry_selection"));
+  assert.equal(cross.synthesis.prompt.mode, "registry_selection");
+  assert.equal(calls, 4);
 });
 
 test("keyless readiness composes all-domain evidence routing posture without source dispatch", async () => {

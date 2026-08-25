@@ -9776,3 +9776,16 @@ provider and supplied a credential handle, while preserving caller ownership of 
 provider authorization, external effects, and prompt customization. Applications can select a
 subset for a specialist service, but duplicate, unsupported, missing-objective, stale, and
 credential-shaped inputs fail closed.
+
+The high-level orchestration facades now consume the same prompt control plane. Python
+`AutonomousTaskOrchestrator.run()` / `run_cross_domain()` accept `prompt_template`,
+`prompt_registry`, `prompt_selection`, and `prompt_stage`; TypeScript
+`AutonomousAgent.run()` / `runCrossDomain()` accept the camel-cased equivalents. A registry without
+an explicit selection plan creates a deterministic stage-scoped plan at the execution boundary;
+an explicitly supplied plan is verified against the live registry before any provider call.
+Specialist child calls and cross-domain synthesis inherit the caller's prompt boundary. Existing
+reviewed context, route evidence, approval, tools, memory, and learning gates remain intact, while
+the generated domain framing is replaced only for the transient provider message list. Result
+projections expose prompt mode, manifest identity, rendered/final prompt digests, and selection
+plan digest; rendered messages never enter the value-only projection. Prompt-bound idempotency
+keys also prevent a changed prompt implementation from reusing an earlier request identity.
