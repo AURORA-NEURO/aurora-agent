@@ -132,6 +132,37 @@ fn certificate_digest_covers_the_body_and_detects_tampering() {
 }
 
 #[test]
+fn a_shape_broken_certificate_digest_is_malformed_rather_than_a_mismatch() {
+    let document = certificate().to_json(CertificateProfile::Reference).unwrap();
+    for broken in [
+        "NOT-64-LOWERCASE-HEX-CHARACTERS",
+        &"AB".repeat(32),
+        "abc",
+        "",
+    ] {
+        let mut claimed = document.clone();
+        claimed["certificate_sha256"] = json!(broken);
+        match ContextCertificate::verify(&claimed).unwrap() {
+            CertificateVerification::Malformed(reason) => assert!(
+                reason.contains("certificate_sha256"),
+                "the reason must name the field: {reason}"
+            ),
+            other => panic!(
+                "{broken:?} is a defect in the claimed digest, not evidence that the body moved, \
+                 but verification answered {other:?}"
+            ),
+        }
+    }
+
+    let mut wrong = document;
+    wrong["certificate_sha256"] = json!("0".repeat(64));
+    assert!(matches!(
+        ContextCertificate::verify(&wrong).unwrap(),
+        CertificateVerification::DigestMismatch { .. }
+    ));
+}
+
+#[test]
 fn extended_profile_changes_schema_version_and_therefore_the_digest() {
     let cert = certificate();
     let reference = cert.to_json(CertificateProfile::Reference).unwrap();

@@ -86,6 +86,7 @@ members = [
     "crates/cli",
     "crates/figures",
     "crates/research",
+    "crates/receipts-audit",
 ]
 
 [workspace.package]
@@ -186,6 +187,7 @@ bioprism-brain = { path = "crates/brain" }
 bioprism-autopilot = { path = "crates/autopilot" }
 bioprism-figures = { path = "crates/figures" }
 bioprism-research = { path = "crates/research" }
+bioprism-receipts-audit = { path = "crates/receipts-audit" }
 
 [profile.release]
 lto = "thin"

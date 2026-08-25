@@ -401,7 +401,32 @@ fn compare_value(
     }
 }
 
+/// The fields whose comparison carries its own finding code, because a caller needs to tell those
+/// mismatches apart. Everything else the recomputation produces is compared under
+/// `receipt_projection_mismatch`.
+const SEPARATELY_REPORTED_FIELDS: [&str; 6] = [
+    "delivery_digest",
+    "target_digest",
+    "receipt_digest",
+    "targets",
+    "evidence",
+    "release_candidate",
+];
+
 /// Recompute a receipt from a stored delivery audit and detect tampering in its projection.
+///
+/// Every field the recomputation produces is compared against the stored receipt, not only the
+/// digests and the target and evidence rows. `receipt_digest` is taken over the receipt's
+/// identity, digests, targets, evidence, and readiness flag; it deliberately does not cover the
+/// derived counts, the structural verdict, the findings, or the guarantee and limitation text, so
+/// a digest that matched would say nothing about whether those had been edited. Comparing the
+/// whole projection is what makes an edit to them detectable.
+///
+/// The comparison is one-directional: a stored receipt may carry fields the recomputation does
+/// not, and those are ignored. The shipped MCP surface returns a receipt with transport fields
+/// added to the same object, so treating an unrecognised field as tampering would reject every
+/// receipt the server hands out. An unrecognised field is therefore not checked at all, which is
+/// a bound on what this function proves rather than a judgement that such a field is harmless.
 pub fn verify_delivery_receipt(
     request: &DeliveryReceiptVerificationRequest,
 ) -> Result<DeliveryReceiptVerification, String> {
@@ -438,15 +463,33 @@ pub fn verify_delivery_receipt(
             .get("target_digest")
             .expect("serialized receipt has target digest"),
     );
-    let receipt_digest_match = compare_value(
-        &mut findings,
-        "receipt_digest_mismatch",
-        "receipt_digest",
-        receipt.get("receipt_digest"),
-        expected_value
-            .get("receipt_digest")
-            .expect("serialized receipt has receipt digest"),
-    );
+    let supplied_receipt_digest = receipt
+        .get("receipt_digest")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let receipt_digest_shape_broken = supplied_receipt_digest
+        .as_ref()
+        .is_some_and(|digest| ContentHash::parse(digest.clone()).is_err());
+    let receipt_digest_match = if receipt_digest_shape_broken {
+        finding(
+            &mut findings,
+            "receipt_digest_malformed",
+            "receipt_digest",
+            "the stored receipt digest is not a lowercase 64-character SHA-256 digest, which is a \
+             defect in the claimed digest rather than evidence that the projection moved",
+        );
+        false
+    } else {
+        compare_value(
+            &mut findings,
+            "receipt_digest_mismatch",
+            "receipt_digest",
+            receipt.get("receipt_digest"),
+            expected_value
+                .get("receipt_digest")
+                .expect("serialized receipt has receipt digest"),
+        )
+    };
     let targets_match = compare_value(
         &mut findings,
         "targets_mismatch",
@@ -474,10 +517,21 @@ pub fn verify_delivery_receipt(
             .get("release_candidate")
             .expect("serialized receipt has release candidate"),
     );
-    let supplied_receipt_digest = receipt
-        .get("receipt_digest")
-        .and_then(Value::as_str)
-        .map(str::to_string);
+    for (field, recomputed) in expected_value
+        .as_object()
+        .expect("serialized receipt is an object")
+    {
+        if SEPARATELY_REPORTED_FIELDS.contains(&field.as_str()) {
+            continue;
+        }
+        compare_value(
+            &mut findings,
+            "receipt_projection_mismatch",
+            field,
+            receipt.get(field),
+            recomputed,
+        );
+    }
     let valid = findings.is_empty();
     Ok(DeliveryReceiptVerification {
         schema: DELIVERY_RECEIPT_SCHEMA.into(),
@@ -625,5 +679,118 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.code == "targets_mismatch"));
+    }
+
+    #[test]
+    fn a_field_the_receipt_digest_does_not_cover_is_still_compared_against_the_recomputation() {
+        let delivery = delivery(true);
+        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-projection".into(),
+            delivery: delivery.clone(),
+        })
+        .unwrap();
+        let stored = serde_json::to_value(&receipt).unwrap();
+        for field in [
+            "ready_target_count",
+            "structurally_valid",
+            "verification",
+            "limitations",
+            "guarantees",
+            "findings",
+            "schema",
+        ] {
+            let mut edited = stored.clone();
+            edited[field] = json!(match field {
+                "ready_target_count" => json!(99),
+                "structurally_valid" => json!(false),
+                _ => json!("edited after the receipt was built"),
+            });
+            let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+                receipt: edited,
+                delivery: delivery.clone(),
+            })
+            .unwrap();
+            assert!(
+                !verified.valid,
+                "an edit to {field} survived verification; the receipt digest does not cover it, \
+                 so the projection comparison is the only thing that can catch it"
+            );
+            assert!(verified
+                .findings
+                .iter()
+                .any(|finding| finding.code == "receipt_projection_mismatch"
+                    && finding.subject == field));
+            assert_eq!(
+                verified.recomputed_receipt_digest, receipt.receipt_digest,
+                "the digest still matches, which is exactly why comparing it alone was not enough"
+            );
+        }
+    }
+
+    #[test]
+    fn a_field_the_recomputation_does_not_produce_is_tolerated_rather_than_checked() {
+        let delivery = delivery(true);
+        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-transport".into(),
+            delivery: delivery.clone(),
+        })
+        .unwrap();
+        let mut carried = serde_json::to_value(&receipt).unwrap();
+        carried["receipt_ready"] = json!(true);
+        carried["delivery"] = delivery.clone();
+        let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+            receipt: carried,
+            delivery,
+        })
+        .unwrap();
+        assert!(
+            verified.valid,
+            "a transport that adds fields to the receipt object must not be read as tampering"
+        );
+    }
+
+    #[test]
+    fn a_shape_broken_receipt_digest_is_reported_as_malformed_rather_than_as_a_mismatch() {
+        let delivery = delivery(true);
+        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-malformed".into(),
+            delivery: delivery.clone(),
+        })
+        .unwrap();
+        let mut broken = serde_json::to_value(&receipt).unwrap();
+        broken["receipt_digest"] = json!("NOT-A-DIGEST");
+        let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+            receipt: broken,
+            delivery: delivery.clone(),
+        })
+        .unwrap();
+        assert!(!verified.valid);
+        assert!(!verified.receipt_digest_match);
+        let codes: Vec<&str> = verified
+            .findings
+            .iter()
+            .map(|finding| finding.code.as_str())
+            .collect();
+        assert!(codes.contains(&"receipt_digest_malformed"), "{codes:?}");
+        assert!(
+            !codes.contains(&"receipt_digest_mismatch"),
+            "a digest of the wrong shape is a defect in the claimed digest, not evidence that the \
+             projection moved: {codes:?}"
+        );
+
+        let mut wrong = serde_json::to_value(&receipt).unwrap();
+        wrong["receipt_digest"] = json!("0".repeat(64));
+        let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+            receipt: wrong,
+            delivery,
+        })
+        .unwrap();
+        let codes: Vec<&str> = verified
+            .findings
+            .iter()
+            .map(|finding| finding.code.as_str())
+            .collect();
+        assert!(codes.contains(&"receipt_digest_mismatch"), "{codes:?}");
+        assert!(!codes.contains(&"receipt_digest_malformed"), "{codes:?}");
     }
 }

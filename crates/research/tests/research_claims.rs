@@ -900,3 +900,405 @@ fn the_dossier_echoes_the_planned_protocol_and_every_step_completed() {
     }
 }
 
+
+// ---------------------------------------------------------------- the configuration matrix
+//
+// Every claim above reads one or two runs. These read a matrix that varies the four world
+// families, six flag patterns, ascending and descending point sets, and paired seeds — the
+// axes along which a single-configuration test is blind.
+
+/// One configuration of the depth matrix.
+struct MatrixEntry {
+    research_id: &'static str,
+    family: &'static str,
+    points: &'static [u32],
+    seed: u64,
+    sweep: bool,
+    mutation: bool,
+    minimize: bool,
+}
+
+const fn entry(
+    research_id: &'static str,
+    family: &'static str,
+    points: &'static [u32],
+    seed: u64,
+    sweep: bool,
+    mutation: bool,
+    minimize: bool,
+) -> MatrixEntry {
+    MatrixEntry {
+        research_id,
+        family,
+        points,
+        seed,
+        sweep,
+        mutation,
+        minimize,
+    }
+}
+
+/// The matrix.
+///
+/// Exactly one entry runs the sweep: the sweep executes the committed default grid at the
+/// grid's own seed, so it is identical work in every request that asks for it, and a second
+/// sweeping entry would buy coverage of nothing but its own runtime.
+#[rustfmt::skip]
+const DEPTH_MATRIX: [MatrixEntry; 8] = [
+    entry("depth-ref-bare",        "reference_like",        &[0],                1,             false, false, false),
+    entry("depth-disc-multi",      "discriminating",        &[20, 60],           20_260_823,    false, false, false),
+    entry("depth-disc-reseeded",   "discriminating",        &[20, 60],           20_260_824,    false, false, false),
+    entry("depth-extconf-mutate",  "external_confirmation", &[30],               7,             false, true,  false),
+    entry("depth-policy-minimize", "policy_restricted",     &[15],               u64::MAX,      false, false, true),
+    entry("depth-ref-descending",  "reference_like",        &[45, 5],            4_294_967_296, false, true,  true),
+    entry("depth-disc-full",       "discriminating",        &[25, 75],           0,             true,  true,  true),
+    entry("depth-policy-six",      "policy_restricted",     &[1, 2, 3, 4, 5, 6], 123_456_789,   false, true,  true),
+];
+
+fn matrix_request(index: usize) -> ResearchRequest {
+    let entry = &DEPTH_MATRIX[index];
+    request_of(json!({
+        "research_id": entry.research_id,
+        "question": "Does this configuration reproduce, cite, and account for itself?",
+        "family": entry.family,
+        "distractor_points": entry.points,
+        "seed": entry.seed,
+        "run_sweep": entry.sweep,
+        "run_mutation": entry.mutation,
+        "run_minimize": entry.minimize,
+    }))
+}
+
+fn matrix_dossiers() -> &'static Vec<Value> {
+    static DOSSIERS: OnceLock<Vec<Value>> = OnceLock::new();
+    DOSSIERS.get_or_init(|| {
+        (0..DEPTH_MATRIX.len())
+            .map(|index| {
+                run_research(&matrix_request(index)).unwrap_or_else(|error| {
+                    panic!("{} must run: {error}", DEPTH_MATRIX[index].research_id)
+                })
+            })
+            .collect()
+    })
+}
+
+fn recorded_artifacts(dossier: &Value) -> Vec<(&str, &str, Option<&Value>)> {
+    dossier["steps"]
+        .as_array()
+        .expect("steps array")
+        .iter()
+        .flat_map(|step| step["outputs"].as_array().expect("outputs array"))
+        .map(|output| {
+            (
+                output["name"].as_str().expect("artifact name"),
+                output["sha256"].as_str().expect("artifact digest"),
+                output.get("artifact"),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn every_configuration_in_the_matrix_reproduces_its_dossier_report_and_figures_byte_for_byte() {
+    for (index, entry) in DEPTH_MATRIX.iter().enumerate() {
+        let id = entry.research_id;
+        let first = &matrix_dossiers()[index];
+        let second = run_research(&matrix_request(index)).expect("second run completes");
+        assert_eq!(
+            to_canonical_string(first).unwrap(),
+            to_canonical_string(&second).unwrap(),
+            "{id}: the dossier must be a deterministic function of the request"
+        );
+        let rendered_first = render_report(first).expect("first render");
+        let rendered_second = render_report(&second).expect("second render");
+        assert_eq!(
+            rendered_first.report_md, rendered_second.report_md,
+            "{id}: the report must render identically from an identical dossier"
+        );
+        assert_eq!(
+            rendered_first.figures, rendered_second.figures,
+            "{id}: every figure must render identically from an identical dossier"
+        );
+    }
+}
+
+#[test]
+fn the_reference_anchor_finding_is_identical_across_every_family_seed_and_point_set() {
+    let mut anchors: Vec<(&str, &Value, &str)> = Vec::new();
+    for (index, entry) in DEPTH_MATRIX.iter().enumerate() {
+        let id = entry.research_id;
+        let dossier = &matrix_dossiers()[index];
+        let findings = dossier["findings"].as_array().expect("findings array");
+        let anchor = findings
+            .iter()
+            .find(|finding| finding["rule"] == json!("reference_anchor"))
+            .unwrap_or_else(|| panic!("{id}: every dossier anchors to the pinned certificate"));
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|finding| finding["rule"] == json!("reference_anchor"))
+                .count(),
+            1,
+            "{id}: the anchor is the run's trust root and is recorded exactly once"
+        );
+        let certificate = recorded_artifacts(dossier)
+            .into_iter()
+            .find(|(name, ..)| *name == "reference-certificate")
+            .unwrap_or_else(|| panic!("{id}: the anchor step records its certificate"));
+        assert_eq!(
+            certificate.2.expect("the certificate always inlines")["certificate_sha256"],
+            json!(PINNED_REFERENCE_CERTIFICATE_SHA256),
+            "{id}: the recorded certificate carries the pinned parity digest"
+        );
+        anchors.push((id, anchor, certificate.1));
+    }
+    let (first_id, first_anchor, first_digest) = anchors[0];
+    for (id, anchor, digest) in &anchors[1..] {
+        assert_eq!(
+            to_canonical_string(anchor).unwrap(),
+            to_canonical_string(first_anchor).unwrap(),
+            "{id} and {first_id} must record the same anchor: the committed fixture pair does \
+             not depend on the request's family, seed or points"
+        );
+        assert_eq!(
+            *digest, first_digest,
+            "{id} and {first_id} must cite the same certificate artifact digest"
+        );
+    }
+}
+
+#[test]
+fn every_findings_support_digest_names_an_artifact_its_own_dossier_carries() {
+    let mut checked = 0usize;
+    for (index, entry) in DEPTH_MATRIX.iter().enumerate() {
+        let id = entry.research_id;
+        let dossier = &matrix_dossiers()[index];
+        let known: Vec<&str> = recorded_artifacts(dossier)
+            .into_iter()
+            .map(|(_, digest, _)| digest)
+            .collect();
+        for finding in dossier["findings"].as_array().expect("findings array") {
+            let supported = finding["supported_by"]
+                .as_array()
+                .expect("supported_by array");
+            assert!(
+                !supported.is_empty(),
+                "{id}: finding {} cites nothing",
+                finding["rule"]
+            );
+            for digest in supported {
+                let digest = digest.as_str().expect("citation is a string");
+                assert!(
+                    known.contains(&digest),
+                    "{id}: finding {} cites {digest}, which no recorded artifact carries",
+                    finding["rule"]
+                );
+                checked += 1;
+            }
+        }
+        let verification = verify_dossier(dossier).expect("verifiable");
+        assert_eq!(verification["valid"], json!(true), "{id}: {verification}");
+    }
+    assert!(
+        checked >= DEPTH_MATRIX.len() * 3,
+        "the matrix must exercise more than a handful of citations, checked {checked}"
+    );
+}
+
+#[test]
+fn every_figure_footer_digest_equals_the_dossier_record_of_the_artifact_its_caption_names() {
+    let mut checked = 0usize;
+    for (index, entry) in DEPTH_MATRIX.iter().enumerate() {
+        let id = entry.research_id;
+        let dossier = &matrix_dossiers()[index];
+        let rendered = render_report(dossier).expect("renders");
+        let artifacts = recorded_artifacts(dossier);
+        for (filename, svg) in &rendered.figures {
+            let caption_start = rendered
+                .report_md
+                .find(filename.as_str())
+                .unwrap_or_else(|| panic!("{id}: {filename} must be captioned"));
+            let caption = &rendered.report_md[caption_start..];
+            let source_line = caption
+                .lines()
+                .find(|line| line.starts_with("Source artifact `"))
+                .unwrap_or_else(|| panic!("{id}: {filename} must name its source artifact"));
+            let artifact_name = source_line
+                .split("Source artifact `")
+                .nth(1)
+                .and_then(|rest| rest.split('`').next())
+                .expect("artifact name extractable");
+            let caption_digest = source_line
+                .split("sha256 `")
+                .nth(1)
+                .and_then(|rest| rest.split('`').next())
+                .expect("caption digest extractable");
+            let recorded = artifacts
+                .iter()
+                .find(|(name, ..)| *name == artifact_name)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{id}: {filename} names {artifact_name}, which the dossier does not carry"
+                    )
+                });
+            assert_eq!(
+                recorded.1, caption_digest,
+                "{id}: {filename}'s caption digest must be the dossier's record for \
+                 {artifact_name}"
+            );
+            let footer = format!("source sha256: {caption_digest}");
+            assert!(
+                svg.contains(&footer),
+                "{id}: {filename}'s footer must carry the digest its caption cites"
+            );
+            let rendered_value = recorded.2.unwrap_or_else(|| {
+                panic!(
+                    "{id}: a figure source must inline, or the figure cites what no reader can \
+                     check"
+                )
+            });
+            assert_eq!(
+                ContentHash::of_value(rendered_value).unwrap().to_string(),
+                caption_digest,
+                "{id}: {filename}'s digest must recompute from the artifact the dossier carries"
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 20,
+        "the matrix must exercise every figure kind more than once, checked {checked}"
+    );
+}
+
+#[test]
+fn the_sweep_findings_counts_recompute_from_the_sweep_table_the_dossier_carries() {
+    let index = DEPTH_MATRIX
+        .iter()
+        .position(|entry| entry.sweep)
+        .expect("the matrix runs the sweep somewhere");
+    let dossier = &matrix_dossiers()[index];
+    let artifacts = recorded_artifacts(dossier);
+    let table = artifacts
+        .iter()
+        .find(|(name, ..)| *name == "sweep-table")
+        .expect("the sweep step records its table")
+        .2
+        .expect("the sweep table always inlines");
+    let cells = table["cells"].as_array().expect("cells array");
+    let total = cells.len();
+    let (mut ties, mut fiber_only, mut fiber_inadmissible, mut none_admissible) = (0, 0, 0, 0);
+    for cell in cells {
+        let rows = cell["rows"].as_array().expect("rows array");
+        let fiber_admissible = rows
+            .iter()
+            .find(|row| row["strategy"] == json!("fiber"))
+            .is_some_and(|row| row["admissible"] == json!(true));
+        let baselines = rows
+            .iter()
+            .filter(|row| {
+                row["strategy"] != json!("fiber") && row["strategy"] != json!("full-context")
+            })
+            .filter(|row| row["admissible"] == json!(true))
+            .count();
+        match (fiber_admissible, baselines) {
+            (true, 0) => fiber_only += 1,
+            (true, _) => ties += 1,
+            (false, 0) => {
+                fiber_inadmissible += 1;
+                none_admissible += 1;
+            }
+            (false, _) => fiber_inadmissible += 1,
+        }
+    }
+    let claims: Vec<(&str, &str)> = dossier["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .map(|finding| {
+            (
+                finding["rule"].as_str().expect("rule"),
+                finding["claim"].as_str().expect("claim"),
+            )
+        })
+        .collect();
+    for (rule, count) in [
+        ("sweep_ties", ties),
+        ("sweep_fiber_only", fiber_only),
+        ("sweep_fiber_inadmissible", fiber_inadmissible),
+        ("sweep_none_admissible", none_admissible),
+    ] {
+        let claim = claims
+            .iter()
+            .find(|(name, _)| *name == rule)
+            .map(|(_, claim)| *claim);
+        match (count, claim) {
+            (0, Some(claim)) => panic!("{rule} claims {claim:?} but the table has no such cell"),
+            (0, None) => {}
+            (count, Some(claim)) => assert!(
+                claim.contains(&format!("{count} of {total}")),
+                "{rule} must state {count} of {total}, claims {claim:?}"
+            ),
+            (count, None) => panic!("{count} of {total} cells are {rule} but no finding says so"),
+        }
+    }
+}
+
+#[test]
+fn the_mutation_and_minimization_steps_target_the_first_declared_point_not_the_smallest() {
+    let index = DEPTH_MATRIX
+        .iter()
+        .position(|entry| entry.research_id == "depth-ref-descending")
+        .expect("the matrix declares a descending point set");
+    let points = DEPTH_MATRIX[index].points;
+    assert!(
+        points[0] > points[points.len() - 1],
+        "this claim is only meaningful over points that descend"
+    );
+    let dossier = &matrix_dossiers()[index];
+    for kind in ["mutate_base_world", "minimize_base_world"] {
+        let step = dossier["steps"]
+            .as_array()
+            .expect("steps array")
+            .iter()
+            .find(|step| step["step"]["kind"] == json!(kind))
+            .unwrap_or_else(|| panic!("the run must carry a {kind} step"));
+        assert_eq!(
+            step["step"]["distractors"],
+            json!(points[0]),
+            "{kind} must target the first declared point, not the smallest one"
+        );
+    }
+    let rendered = render_report(dossier).expect("renders");
+    assert!(
+        rendered.report_md.contains(&format!(
+            "bioprism mutate family --world world-d{}.json",
+            points[0]
+        )),
+        "the reproduction section must name the same base world the mutation step used"
+    );
+    assert!(
+        rendered.report_md.contains(&format!(
+            "bioprism prism minimize --world world-d{}.json",
+            points[0]
+        )),
+        "the reproduction section must name the same base world the minimization step used"
+    );
+    let listed = rendered
+        .report_md
+        .lines()
+        .find(|line| line.starts_with("- distractor points: "))
+        .expect("the report lists its points");
+    assert_eq!(
+        listed,
+        format!(
+            "- distractor points: {}",
+            points
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        "the report must list the points in the order the request declared them"
+    );
+}
