@@ -9789,3 +9789,14 @@ the generated domain framing is replaced only for the transient provider message
 projections expose prompt mode, manifest identity, rendered/final prompt digests, and selection
 plan digest; rendered messages never enter the value-only projection. Prompt-bound idempotency
 keys also prevent a changed prompt implementation from reusing an earlier request identity.
+
+Staged workflow execution uses the same boundary for every stage. Python
+`run_workflow()` selects the current workflow stage by default (for example `scope` or
+`verify`) and forwards the registry, template, or caller-supplied selection plan through
+workflow learning, trajectory learning, recovery cycles, and trace wrappers. TypeScript
+`AutonomousWorkflowExecutor` does the equivalent for each durable stage, binding prompt
+template, registry, selection-plan, and stage identity into its execution-contract digest.
+Consequently, a registry replacement or prompt-contract change cannot silently resume a
+checkpoint created under a different prompt implementation; the caller must explicitly
+rehydrate with the matching prompt metadata. The workflow stage tests exercise this across
+all built-in domains and verify that transient prompt projections carry the actual stage id.

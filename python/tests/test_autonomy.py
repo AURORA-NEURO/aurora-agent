@@ -70,6 +70,7 @@ from prism_sdk import (
     ProviderTool,
     ProviderToolResult,
     builtin_autonomous_domain_evaluator_profiles,
+    builtin_autonomous_prompt_registry,
     builtin_autonomous_workflow_strategies,
     openai_provider,
     provider_image_url_part,
@@ -3625,17 +3626,26 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
     handle = store.register("openai", "all-domain-workflow-secret")
     workspace = _Workspace()
     brain = AutonomousBrain(workspace, runtime)
+    prompt_registry = builtin_autonomous_prompt_registry()
     try:
         for domain in AUTONOMOUS_DOMAINS:
             blueprint = brain.prepare_autonomous(
                 task=f"Prepare a bounded {domain} workflow result.",
                 domain=domain,
             )
+            prompt_selection = prompt_registry.select_for(
+                [
+                    {"domain": domain, "stage": stage.id, "required_capabilities": ()}
+                    for stage in blueprint.workflow.stages
+                ]
+            )
             result = brain.run_workflow(
                 blueprint=blueprint,
                 model_candidates=_model(),
                 credentials={"openai": handle},
                 approve_provider_call=True,
+                prompt_registry=prompt_registry,
+                prompt_selection=prompt_selection,
                 run_id=f"all-domain-{domain}",
                 max_stage_calls=1,
             )
@@ -3644,6 +3654,9 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
             assert result.stage_results[0].declared_status == "completed"
             assert result.stage_results[0].response_evaluation is not None
             assert result.stage_results[0].response_evaluation["stage_id"] == blueprint.workflow.stages[0].id  # type: ignore[index]
+            assert result.stage_results[0].result.prompt["autonomous_prompt"]["domain"] == domain  # type: ignore[union-attr,index]
+            assert result.stage_results[0].result.prompt["autonomous_prompt"]["stage"] == blueprint.workflow.stages[0].id  # type: ignore[union-attr,index]
+            assert result.stage_results[0].result.prompt["autonomous_prompt"]["selection_plan_digest"] == prompt_selection.plan_digest  # type: ignore[union-attr,index]
             assert result.checkpoint.completed_stage_ids == (blueprint.workflow.stages[0].id,)
             assert result.checkpoint.stages[0]["response_evaluation"] is not None
             assert result.execution_receipt.completed_stage_ids == (blueprint.workflow.stages[0].id,)

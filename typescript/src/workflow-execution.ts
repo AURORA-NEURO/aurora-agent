@@ -18,6 +18,7 @@ import type {
 import { semanticRouteAutonomousTask } from "./autonomous-routing.js";
 import type { AutonomousSemanticRouteOptions, AutonomousSemanticRouteResult } from "./autonomous-routing.js";
 import { AutonomousCostBudget } from "./llm.js";
+import { AutonomousPromptSelectionPlan } from "./autonomous-prompt-registry.js";
 import {
   evaluateAutonomousWorkflowStageResponse,
   replayAutonomousWorkflowStageResponseEvaluation,
@@ -1067,6 +1068,11 @@ async function workflowExecutionContractDigest(agent: AutonomousAgent, options: 
   const candidates = options.candidates ? [...options.candidates] : agent.models();
   const toolsDigest = options.tools === undefined ? null : await digestJson(options.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })));
   const executionPolicyDigest = options.execution ? await options.execution.policy.digest() : null;
+  const promptSelectionDigest = options.promptSelection === undefined
+    ? null
+    : options.promptSelection instanceof AutonomousPromptSelectionPlan
+      ? options.promptSelection.planDigest
+      : options.promptSelection.plan_digest ?? null;
   return digestJson({
     schema: AUTONOMOUS_WORKFLOW_EXECUTION_CONTRACT_SCHEMA,
     candidates_digest: await digestJson(candidates.map((candidate) => workflowCandidateContract(candidate))),
@@ -1086,6 +1092,13 @@ async function workflowExecutionContractDigest(agent: AutonomousAgent, options: 
     approve_effects: options.approveEffects === true,
     max_provider_failovers: options.maxProviderFailovers ?? null,
     execution_policy_digest: executionPolicyDigest,
+    prompt: {
+      mode: options.promptTemplate !== undefined ? "versioned_template" : options.promptRegistry !== undefined ? "registry_selection" : "legacy",
+      template_manifest_digest: options.promptTemplate?.manifestDigest ?? null,
+      registry_digest: options.promptRegistry?.registryDigest ?? null,
+      selection_plan_digest: promptSelectionDigest,
+      stage: options.promptStage ?? null,
+    },
   });
 }
 
@@ -1149,6 +1162,10 @@ function runOptions(options: AutonomousWorkflowExecuteOptions, stage: Autonomous
     credential: options.credential,
     credentialFor: options.credentialFor,
     context,
+    promptTemplate: options.promptTemplate,
+    promptRegistry: options.promptRegistry,
+    promptSelection: options.promptSelection,
+    promptStage: options.promptStage ?? stage.id,
     hints: [],
     maxInputTokens: options.maxInputTokens,
     maxOutputTokens: options.maxOutputTokens,

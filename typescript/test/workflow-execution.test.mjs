@@ -10,6 +10,7 @@ import {
   AutonomousWorkflowPersistenceCoordinator,
   TransactionalJsonAutonomousWorkflowSnapshotPersistence,
   AutonomousWorkflowExecutor,
+  AutonomousPromptTemplate,
   AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA,
   validateAutonomousWorkflowExecutionReceipt,
   CredentialStore,
@@ -20,6 +21,7 @@ import {
   digestJson,
   openaiCompatibleProvider,
   ProviderRuntimeError,
+  builtinAutonomousPromptRegistry,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200) {
@@ -438,12 +440,26 @@ test("workflow resume refuses a changed selection contract before provider dispa
   const agent = new AutonomousAgent(llm);
   agent.registerModel(model());
   const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const promptRegistry = builtinAutonomousPromptRegistry(["coding"]);
   const task = "Resume only with the same model-selection contract";
-  const first = await executor.start(task, { domain: "coding", jobId: "workflow-contract-1", candidates: agent.models(), approveProviderCall: true, maxStages: 1, maxCostPerMillionTokens: 10 });
+  const first = await executor.start(task, { domain: "coding", jobId: "workflow-contract-1", candidates: agent.models(), promptRegistry, approveProviderCall: true, maxStages: 1, maxCostPerMillionTokens: 10 });
   assert.equal(first.status, "paused");
   assert.equal(typeof first.checkpoint.execution_contract_digest, "string");
   await assert.rejects(
     () => executor.resume("workflow-contract-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 32, maxCostPerMillionTokens: 1 }),
+    /execution contract/,
+  );
+  promptRegistry.register(new AutonomousPromptTemplate({
+    promptId: "builtin.coding.specialist",
+    version: "1.0.1",
+    domain: "coding",
+    capabilities: ["implementation", "debugging", "testing"],
+    stages: ["*"],
+    templateDigest: "f".repeat(64),
+    render: () => [{ role: "system", content: "replacement coding guidance" }, { role: "user", content: "bounded objective" }],
+  }), { replace: true });
+  await assert.rejects(
+    () => executor.resume("workflow-contract-1", task, { candidates: agent.models(), promptRegistry, approveProviderCall: true, maxStages: 32, maxCostPerMillionTokens: 10 }),
     /execution contract/,
   );
   assert.equal(calls, 1, "contract mismatch must be rejected before the next stage dispatch");
@@ -741,11 +757,13 @@ test("workflow executor runs every built-in single-domain workflow through the s
   }
   const agent = new AutonomousAgent(llm);
   agent.registerModel({ ...model(), provider: "all-domain-workflows", model: "all-domain-workflows-model", capabilities: [...capabilities] });
+  const promptRegistry = builtinAutonomousPromptRegistry();
   for (const profile of profiles) {
     const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start(`Run a bounded ${profile.domain} workflow`, {
       domain: profile.domain,
       jobId: `all-domain-workflow-${profile.domain}`,
       candidates: agent.models(),
+      promptRegistry,
       approveProviderCall: true,
       maxStages: 32,
     });
@@ -754,6 +772,7 @@ test("workflow executor runs every built-in single-domain workflow through the s
     assert.equal(result.stage_results.length, profile.workflow.stages.length, profile.domain);
     assert.ok(result.stage_results.every((stage) => stage.declared_status === "completed" && stage.validation_errors.length === 0), profile.domain);
     assert.ok(result.stage_results.every((stage) => stage.response_evaluation?.domain === profile.domain && stage.response_evaluation?.stage_id === stage.stage.id), profile.domain);
+    assert.ok(result.stage_results.every((stage) => stage.run?.prompt?.mode === "registry_selection" && stage.run.prompt.stage === stage.stage.id), profile.domain);
     assert.ok(result.checkpoint.stage_outcomes.filter((outcome) => outcome.status === "completed").every((outcome) => outcome.response_evaluation?.domain === profile.domain), profile.domain);
     assert.equal(result.response_learning_episode_ids.length, 0, "learning is disabled for this execution");
     assert.equal(result.execution_receipt.next_action, "complete", profile.domain);
