@@ -27,6 +27,15 @@
       "category": "discipline"
     },
     {
+      "name": "aurora-science",
+      "source": "./plugins/aurora-science",
+      "description": "Optional: the measurement-science methodology for any evaluation effort (equal-engineering-baselines, discriminating-experiment-design, certificate-audited-analysis, metamorphic-evaluation, honest-figures, research-dossier-discipline).",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["methodology", "benchmarking", "evaluation", "reproducibility"],
+      "category": "discipline"
+    },
+    {
       "name": "aurora-workspace",
       "source": "./plugins/aurora-workspace",
       "description": "Optional: engineering skills for working inside the aurora-agent repo itself (add-module, check-parity, verify-crate, classify-blueprint-modules, measure-section-boilerplate).",

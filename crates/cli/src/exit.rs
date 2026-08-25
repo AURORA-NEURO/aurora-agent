@@ -44,6 +44,7 @@ use bioprism_mutation::MutationError;
 use bioprism_prism::MinimizeError;
 use bioprism_project::ProjectError;
 use bioprism_repair::RepairError;
+use bioprism_research::ResearchError;
 use bioprism_store::StoreError;
 use std::fmt;
 
@@ -482,6 +483,48 @@ impl CliError {
         }
     }
 
+    /// Routes a research-runner failure to the code carrying its 40.36 class.
+    ///
+    /// The split follows who has to move. A request document defect (`InvalidRequest`) and a
+    /// dossier handed to verification or rendering that is not a research dossier at all
+    /// (`InvalidDossier`), or that lacks content the operation needs (`ArtifactMissing`,
+    /// `ArtifactNotInlined` — by the error type's own account, a foreign or hand-edited
+    /// dossier), are the caller's documents to edit, so they are exit 3. Every other variant is
+    /// this binary's fault rather than the caller's: the worlds are generated in-process from
+    /// committed presets, the reference fixtures are compiled in, and the protocol is planned by
+    /// the same crate that executes it — so a world the workspace's own loader rejects, a broken
+    /// parity anchor, or a figure renderer refusing an artifact this very run produced all land
+    /// where [`CliError::internal`] lands, because the operator supplied nothing that could be
+    /// edited to clear them.
+    ///
+    /// Nothing here is exit 1: a digest mismatch on `research verify` is a verdict on a
+    /// completed check, reported through the outcome rather than through this constructor, and a
+    /// negative finding is a first-class result of a *successful* run, not a failure of any
+    /// kind. Written against the error type rather than at each call site so a new variant fails
+    /// to compile until somebody decides which code it belongs under.
+    pub fn from_research(error: ResearchError) -> Self {
+        let message = error.to_string();
+        match error {
+            ResearchError::InvalidRequest { .. }
+            | ResearchError::InvalidDossier { .. }
+            | ResearchError::ArtifactMissing { .. }
+            | ResearchError::ArtifactNotInlined { .. } => CliError::invalid(message),
+            ResearchError::Canonicalisation { .. }
+            | ResearchError::ReferenceFixtureUnusable { .. }
+            | ResearchError::ReferenceAnchorMismatch { .. }
+            | ResearchError::WorldRejected { .. }
+            | ResearchError::QueryRejected { .. }
+            | ResearchError::CompileFailed { .. }
+            | ResearchError::CertificateRoundTrip { .. }
+            | ResearchError::NoReferenceVerdict { .. }
+            | ResearchError::SweepFailed { .. }
+            | ResearchError::MutationFailed { .. }
+            | ResearchError::MinimizeFailed { .. }
+            | ResearchError::ProtocolOutOfOrder { .. }
+            | ResearchError::FigureFailed { .. } => CliError::internal(message),
+        }
+    }
+
     /// Routes an autonomy-grant refusal to `invalid_input`.
     ///
     /// Every [`GrantError`] names a field of the grant document that must change — an empty
@@ -713,6 +756,47 @@ mod tests {
             ExitCode::Io,
             "a world this binary assembled and then could not read is this binary's fault; there \
              is nothing for the operator to edit"
+        );
+    }
+
+    #[test]
+    fn a_research_request_defect_is_the_callers_and_a_runner_failure_is_this_binarys() {
+        let request = CliError::from_research(ResearchError::InvalidRequest {
+            reason: "distractor_points must name at least one point".into(),
+        });
+        assert_eq!(request.code, ExitCode::InvalidInput);
+        assert_eq!(request.code.retryability(), Some(Retryability::Terminal));
+
+        let foreign = CliError::from_research(ResearchError::ArtifactNotInlined {
+            name: "sweep-table".into(),
+            digest: "c".repeat(64),
+        });
+        assert_eq!(
+            foreign.code,
+            ExitCode::InvalidInput,
+            "a digest-only artifact names a foreign or hand-edited dossier, which is the \
+             caller's document to fix"
+        );
+
+        let anchor = CliError::from_research(ResearchError::ReferenceAnchorMismatch {
+            pinned: "a".repeat(64),
+            recomputed: "b".repeat(64),
+        });
+        assert_eq!(
+            anchor.code,
+            ExitCode::Io,
+            "the reference fixtures are compiled into the binary, so a broken parity anchor is \
+             this binary's fault; there is nothing for the operator to edit"
+        );
+
+        let generated = CliError::from_research(ResearchError::WorldRejected {
+            world_id: "research-discriminating-d50".into(),
+            reason: "missing facts".into(),
+        });
+        assert_eq!(
+            generated.code,
+            ExitCode::Io,
+            "a generated world its own loader rejects is routed exactly as world sweep routes it"
         );
     }
 

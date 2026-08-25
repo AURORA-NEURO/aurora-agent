@@ -1,0 +1,16 @@
+[package]
+name = "bioprism-figures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic SVG figures over serialized artifacts: six pure Value-to-SVG renderers with a canonical source digest in every footer — no I/O, no clock, no randomness, no styling API"
+
+[dependencies]
+bioprism-ids = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+sha2 = { workspace = true }

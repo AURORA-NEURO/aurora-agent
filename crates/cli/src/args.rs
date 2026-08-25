@@ -221,6 +221,25 @@ COMMANDS
                     Recompute an autopilot report's digest and require its stated limitations.
                     Exit 1 if the report does not verify.
 
+  research template
+                    Print a template research request to stdout (with --json, the bare request
+                    object, directly usable as --request). The question field is recorded
+                    verbatim and never interpreted: the runner executes the protocol the other
+                    fields declare, over synthetic decision worlds only.
+  research run      --request <path> --out-dir <dir> [--dry-run]
+                    Plan and execute the research protocol: anchor to the pinned reference
+                    certificate, then generate, compile and compare each declared distractor
+                    point, with optional sweep, mutation and minimization steps. Writes
+                    dossier.json, REPORT.md and figures/*.svg into --out-dir. --dry-run prints
+                    the planned protocol, no-dispatch: nothing runs and nothing is written.
+                    A completed run exits 0 even when every finding is negative; a tie is a
+                    first-class result, not a failure. Exit 3 for an invalid request, 5 when
+                    an artifact cannot be written.
+  research verify   --dossier <path>
+                    Recompute a research dossier's digest and check its structural contract
+                    (request digest, required limitations, step outcomes, finding support).
+                    Exit 1 if the dossier does not verify.
+
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
   -h, --help        Show this help.
@@ -475,6 +494,15 @@ pub enum Command {
     },
     AutopilotVerify {
         report: PathBuf,
+    },
+    ResearchTemplate,
+    ResearchRun {
+        request: PathBuf,
+        out_dir: PathBuf,
+        dry_run: bool,
+    },
+    ResearchVerify {
+        dossier: PathBuf,
     },
 }
 
@@ -950,6 +978,15 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         },
         ("autopilot", "verify") => Command::AutopilotVerify {
             report: options.take_path("--report")?,
+        },
+        ("research", "template") => Command::ResearchTemplate,
+        ("research", "run") => Command::ResearchRun {
+            request: options.take_path("--request")?,
+            out_dir: options.take_path("--out-dir")?,
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("research", "verify") => Command::ResearchVerify {
+            dossier: options.take_path("--dossier")?,
         },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
@@ -2030,6 +2067,115 @@ mod tests {
                     include_records: true,
                 },
             })
+        );
+    }
+
+    #[test]
+    fn research_run_parses_request_out_dir_and_dry_run() {
+        let parsed = parse(
+            [
+                "--json",
+                "research",
+                "run",
+                "--request",
+                "request.json",
+                "--out-dir",
+                "research-out",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse research run");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::ResearchRun {
+                    request: PathBuf::from("request.json"),
+                    out_dir: PathBuf::from("research-out"),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn research_run_requires_both_the_request_and_the_out_dir() {
+        let without_request = parse(
+            ["research", "run", "--out-dir", "research-out"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("a run without a request must be refused, never defaulted");
+        assert_eq!(without_request.code, crate::exit::ExitCode::Usage);
+        assert!(
+            without_request.message.contains("--request"),
+            "the message must name the flag the operator has to add: {}",
+            without_request.message
+        );
+
+        let without_out_dir = parse(
+            ["research", "run", "--request", "request.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("a run without an out-dir has nowhere to put the dossier it promises");
+        assert!(
+            without_out_dir.message.contains("--out-dir"),
+            "{}",
+            without_out_dir.message
+        );
+    }
+
+    #[test]
+    fn research_template_takes_no_options_and_verify_takes_a_dossier_path() {
+        let template = parse(["research", "template"].into_iter().map(String::from))
+            .expect("parse research template");
+        assert_eq!(
+            template,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ResearchTemplate,
+            })
+        );
+        parse(
+            ["research", "template", "--out", "request.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("research template writes nothing and accepts no options");
+
+        let verified = parse(
+            ["research", "verify", "--dossier", "dossier.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse research verify");
+        assert_eq!(
+            verified,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ResearchVerify {
+                    dossier: PathBuf::from("dossier.json"),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_every_research_subcommand() {
+        let text = super::help();
+        assert!(text.contains("research template"));
+        assert!(text.contains("research run      --request <path> --out-dir <dir> [--dry-run]"));
+        assert!(text.contains("research verify   --dossier <path>"));
+        assert!(
+            text.contains("verbatim and never interpreted"),
+            "help must state that the question is recorded, not understood"
+        );
+        assert!(
+            text.contains("exits 0 even when every finding is negative"),
+            "help must state that a negative finding is a completed run, not a failure"
         );
     }
 }

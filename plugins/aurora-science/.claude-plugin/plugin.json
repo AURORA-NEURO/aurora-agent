@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "aurora-science",
+  "version": "0.1.0",
+  "description": "The measurement-science methodology from the AURORA Agent workspace, packaged for any evaluation or benchmarking effort: equal-engineering baselines, discriminating experiment design, certificate-audited analysis, metamorphic evaluation, honest figures, and research-dossier discipline.",
+  "author": {
+    "name": "AURORA-NEURO"
+  },
+  "homepage": "https://github.com/AURORA-NEURO/aurora-agent",
+  "license": "Apache-2.0",
+  "keywords": ["methodology", "benchmarking", "evaluation", "baselines", "reproducibility", "honesty"]
+}
