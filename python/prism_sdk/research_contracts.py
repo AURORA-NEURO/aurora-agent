@@ -239,6 +239,8 @@ FEDERATED_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F12"
 FEDERATED_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-federated-evidence-research-copilot/1.0"
 EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F13"
 EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-evidence-surveillance-workflow-fabric/1.0"
+MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F14"
+MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-multimodal-evidence-workflow-fabric/1.0"
 
 
 class ResearchContractError(ValueError):

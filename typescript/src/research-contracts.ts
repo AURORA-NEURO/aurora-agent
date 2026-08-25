@@ -221,6 +221,8 @@ export const FEDERATED_EVIDENCE_COPILOT_FEATURE_ID = "AFA-brain-P01-F12" as cons
 export const FEDERATED_EVIDENCE_COPILOT_CONTRACT_VERSION = "brain-federated-evidence-research-copilot/1.0" as const;
 export const EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F13" as const;
 export const EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-evidence-surveillance-workflow-fabric/1.0" as const;
+export const MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID = "AFA-brain-P01-F14" as const;
+export const MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION = "brain-multimodal-evidence-workflow-fabric/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3862,6 +3864,25 @@ export function validateBrainEvidenceWorkflowFabricReceipt(receipt: BrainEvidenc
 }
 
 export function brainEvidenceWorkflowFabricReceiptDigest(receipt: BrainEvidenceWorkflowFabricReceipt): string { validateBrainEvidenceWorkflowFabricReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainMultimodalEvidenceWorkflowFabricReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; workflow_id: string; scope: string; study_order: string[]; modality_order: string[];
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; stage_order: string[]; plan_order: string[]; completed_order: string[]; blocked_order: string[]; compensation_order: string[]; candidate_order: string[]; qualified_order: string[]; unknown_order: string[];
+  evidence_receipt_digest: string; checkpoint_digest: string; workflow_digest: string; comparability_digest: string; approval_reference: string; replay_identity: string; budget_units: number; omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainMultimodalEvidenceWorkflowFabricReceipt(receipt: BrainMultimodalEvidenceWorkflowFabricReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID || receipt.contract_version !== MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION) throw new Error("multimodal workflow schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.scope.trim() || receipt.study_order.length < 2 || receipt.modality_order.length < 2 || !receipt.stage_order.length || !receipt.plan_order.length || !receipt.completed_order.length || !receipt.effect_receipts.length || !Number.isInteger(receipt.budget_units) || receipt.budget_units <= 0) throw new Error("multimodal workflow identity, study/modality floors, stages, plan, locality, budget, or effects are incomplete");
+  if (receipt.qualified_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.unknown_order.some((value) => !receipt.candidate_order.includes(value))) throw new Error("multimodal workflow state is not covered by candidates");
+  for (const values of [receipt.study_order, receipt.modality_order, receipt.stage_order, receipt.plan_order, receipt.completed_order, receipt.blocked_order, receipt.compensation_order, receipt.candidate_order, receipt.qualified_order, receipt.unknown_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("multimodal workflow ordering is invalid");
+  for (const value of [receipt.evidence_receipt_digest, receipt.checkpoint_digest, receipt.workflow_digest, receipt.comparability_digest, receipt.approval_reference, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("multimodal workflow digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("schedule:research-work:") && !effect.startsWith("compensate:research-work:") && effect !== "block:unsafe-release")) throw new Error("multimodal workflow effect is outside schedule/compensation gate");
+  if (receipt.disposition === "qualified" && !receipt.effect_receipts.some((effect) => effect.startsWith("schedule:research-work:"))) throw new Error("qualified multimodal workflow requires schedule receipt");
+  if (receipt.disposition === "blocked" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("blocked multimodal workflow must be explicitly blocked");
+}
+
+export function brainMultimodalEvidenceWorkflowFabricReceiptDigest(receipt: BrainMultimodalEvidenceWorkflowFabricReceipt): string { validateBrainMultimodalEvidenceWorkflowFabricReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

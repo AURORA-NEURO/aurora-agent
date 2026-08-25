@@ -84,6 +84,7 @@ from prism_sdk.brain_multimodal_copilot import BrainMultimodalEvidenceResearchCo
 from prism_sdk.brain_high_throughput_copilot import BrainHighThroughputEvidenceResearchCopilotReceipt
 from prism_sdk.brain_federated_copilot import BrainFederatedEvidenceResearchCopilotReceipt
 from prism_sdk.brain_evidence_workflow import BrainEvidenceWorkflowFabricReceipt
+from prism_sdk.brain_multimodal_workflow import BrainMultimodalEvidenceWorkflowFabricReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2674,6 +2675,16 @@ def test_brain_evidence_workflow_keeps_compensation_explicit():
         compensation_order=("compensate:research-work:retain-unresolved-evidence",), candidate_order=("evidence:a",), qualified_order=(), unknown_order=("evidence:a",),
         evidence_receipt_digest="a" * 64, checkpoint_digest="b" * 64, workflow_digest="c" * 64, replay_identity="d" * 64, budget_units=8,
         omissions=("workflow:no-qualified-evidence-to-schedule",), uncertainty=(), negative_evidence=(), effect_receipts=("compensate:research-work:workflow:evidence",), artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_multimodal_workflow_keeps_modality_compensation_explicit():
+    receipt = BrainMultimodalEvidenceWorkflowFabricReceipt(
+        request_id="request:multimodal-workflow", workflow_id="workflow:multimodal", scope="organoid:neural", study_order=("study:a", "study:b"), modality_order=("imaging", "transcriptomics"), disposition="partial",
+        stage_order=("stage:checkpoint", "stage:compare-modalities", "stage:surveil-evidence", "stage:validate-input"),
+        plan_order=("plan:publish-qualified-multimodal-artifact", "plan:stage:checkpoint", "plan:stage:compare-modalities", "plan:stage:surveil-evidence", "plan:stage:validate-input"), completed_order=("stage:checkpoint", "stage:compare-modalities", "stage:surveil-evidence", "stage:validate-input"), blocked_order=(), compensation_order=("compensate:research-work:retain-incomplete-modalities",), candidate_order=("evidence:a",), qualified_order=("evidence:a",), unknown_order=(), evidence_receipt_digest="a" * 64, checkpoint_digest="b" * 64, workflow_digest="c" * 64, comparability_digest="d" * 64, approval_reference="e" * 64, replay_identity="f" * 64, budget_units=8, omissions=("modality:transcriptomics:required-coverage-missing",), uncertainty=(), negative_evidence=(), effect_receipts=("compensate:research-work:workflow:multimodal",), artifact={"content_hash": "1" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
