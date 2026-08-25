@@ -43,6 +43,7 @@ pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
 pub mod multimodal_evidence_workflow_fabric;
+pub mod multimodal_research_workbench;
 pub mod throughput_contract_model;
 
 pub use evidence_contract_model::{
@@ -141,6 +142,12 @@ pub use multimodal_evidence_workflow_fabric::{
     MultimodalWorkflowError, MultimodalWorkflowReceipt, MultimodalWorkflowRequest,
     CONTRACT_VERSION as MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_research_workbench::{
+    compile_multimodal_research_workbench, multimodal_research_workbench_manifest,
+    MultimodalWorkbenchError, MultimodalWorkbenchReceipt, MultimodalWorkbenchRequest,
+    CONTRACT_VERSION as MULTIMODAL_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use throughput_contract_model::{
     model_throughput_contract, throughput_contract_model_manifest, ThroughputContractDisposition,

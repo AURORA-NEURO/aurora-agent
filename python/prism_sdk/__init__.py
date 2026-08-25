@@ -338,6 +338,7 @@ from .brain_multimodal_workflow import BrainMultimodalEvidenceWorkflowFabricRece
 from .brain_high_throughput_workflow import BrainHighThroughputEvidenceWorkflowFabricReceipt
 from .brain_federated_workflow import BrainFederatedEvidenceWorkflowFabricReceipt
 from .brain_evidence_workbench import BrainEvidenceResearchWorkbenchReceipt
+from .brain_multimodal_workbench import BrainMultimodalResearchWorkbenchReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

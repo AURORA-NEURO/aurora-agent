@@ -88,6 +88,7 @@ from prism_sdk.brain_multimodal_workflow import BrainMultimodalEvidenceWorkflowF
 from prism_sdk.brain_high_throughput_workflow import BrainHighThroughputEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_federated_workflow import BrainFederatedEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_evidence_workbench import BrainEvidenceResearchWorkbenchReceipt
+from prism_sdk.brain_multimodal_workbench import BrainMultimodalResearchWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2758,6 +2759,36 @@ def test_brain_evidence_workbench_keeps_read_only_view_explicit():
         negative_evidence=(),
         effect_receipts=("view:local-research-artifacts:workspace:brain",),
         artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_multimodal_workbench_keeps_modality_coverage_explicit():
+    receipt = BrainMultimodalResearchWorkbenchReceipt(
+        request_id="request:multimodal-workbench",
+        workspace_id="workspace:multimodal",
+        scope="organoid:neural",
+        study_order=("study:a", "study:b"),
+        modality_order=("imaging", "transcriptomics"),
+        disposition="partial",
+        view_order=("view:comparability-matrix", "view:modality-coverage", "view:source-lineage"),
+        panel_order=("panel:coverage", "panel:lineage"),
+        action_receipts=("action:render-comparability-matrix", "action:render-modality-coverage", "action:render-source-lineage"),
+        candidate_order=("evidence:a",),
+        qualified_order=("evidence:a",),
+        blocked_order=(),
+        unknown_order=(),
+        evidence_digest="a" * 64,
+        comparability_digest="b" * 64,
+        workbench_digest="c" * 64,
+        replay_identity="d" * 64,
+        budget_units=8,
+        omissions=("modality:transcriptomics:required-coverage-missing",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("view:local-multimodal-artifacts:workspace:multimodal",),
+        artifact={"content_hash": "e" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
