@@ -103,6 +103,8 @@ from .research_contracts import (
     FEDERATED_CONTEXT_COMPILATION_CONTRACT_VERSION,
     CONTEXT_OMISSION_ADJUDICATION_FEATURE_ID,
     CONTEXT_OMISSION_ADJUDICATION_CONTRACT_VERSION,
+    CONTEXT_RELEASE_ADMISSION_FEATURE_ID,
+    CONTEXT_RELEASE_ADMISSION_CONTRACT_VERSION,
     FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
     FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
     FederatedContinualRetrievalReceipt,
@@ -446,6 +448,7 @@ from .brain_federated_retrieval_copilot import BrainFederatedRetrievalCopilotRec
 from .brain_throughput_context_compilation import BrainThroughputContextCompilationReceipt, compile_throughput_context
 from .brain_federated_context_compilation import BrainFederatedContextCompilationReceipt, compile_federated_context
 from .brain_context_omission_adjudication import BrainContextOmissionAdjudicationReceipt, adjudicate_context_omissions
+from .brain_context_release_admission import BrainContextReleaseAdmissionReceipt, admit_context_release
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

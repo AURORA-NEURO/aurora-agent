@@ -59,6 +59,7 @@ pub mod multimodal_context_compilation;
 pub mod throughput_context_compilation;
 pub mod federated_context_compilation;
 pub mod context_omission_adjudication;
+pub mod context_release_admission;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -301,6 +302,13 @@ pub use context_omission_adjudication::{
     ContextOmissionAdjudicationReceipt, ContextOmissionAdjudicationRequest,
     CONTRACT_VERSION as CONTEXT_OMISSION_ADJUDICATION_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_OMISSION_ADJUDICATION_FEATURE_ID,
+};
+pub use context_release_admission::{
+    admit_context_release, context_release_admission_manifest,
+    ContextReleaseAdmissionError, ContextReleaseAdmissionReceipt,
+    ContextReleaseAdmissionRequest, RELEASE_ACTION,
+    CONTRACT_VERSION as CONTEXT_RELEASE_ADMISSION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_RELEASE_ADMISSION_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
