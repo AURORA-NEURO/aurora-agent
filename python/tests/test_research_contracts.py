@@ -9,6 +9,7 @@ from prism_sdk.research_contracts import MECHANISM_GATEWAY_FEATURE_ID, MECHANISM
 from prism_sdk.research_contracts import EVIDENCE_SURVEILLANCE_FEATURE_ID, EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, EvidenceSurveillanceReceipt
 from prism_sdk.research_contracts import RETRIEVAL_SYNTHESIS_FEATURE_ID, RETRIEVAL_SYNTHESIS_CONTRACT_VERSION, RetrievalSynthesisReceipt
 from prism_sdk.research_contracts import ADAPTER_CONTEXT_COMPILATION_FEATURE_ID, ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION, AdapterContextCompilationReceipt
+from prism_sdk.research_contracts import KNOWLEDGE_WORKFLOW_FEATURE_ID, KNOWLEDGE_WORKFLOW_CONTRACT_VERSION, KnowledgeWorkflowReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -782,4 +783,33 @@ def test_adapter_context_compilation_keeps_missing_fact_unknown():
     receipt.validate()
     assert receipt.feature_id == ADAPTER_CONTEXT_COMPILATION_FEATURE_ID
     assert receipt.contract_version == ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_knowledge_workflow_keeps_missing_claim_unknown():
+    receipt = KnowledgeWorkflowReceipt(
+        request_id="request:knowledge",
+        workflow_id="workflow:multimodal",
+        disposition="unknown",
+        world={
+            "schema_version": "aurora-research-contract/1.0",
+            "world_id": "typed-knowledge-world:workflow:multimodal",
+            "workflow_id": "workflow:multimodal",
+            "study_ids": ["study:a", "study:b"],
+            "resolved_claim_ids": ["claim:a"],
+            "disposition": "unknown",
+            "evidence_receipt_digest": None,
+            "omissions": ["required claim unavailable: claim:b"],
+            "uncertainty": ["claim derivation receipt is absent"],
+            "stages": ["scope_studies", "resolve_claim_identities", "attach_evidence_derivation", "emit_typed_knowledge_world"],
+            "boundary": PRECLINICAL_BOUNDARY,
+        },
+        checks=("incomplete claim closure remains unknown rather than asserted",),
+        omissions=("required claim unavailable: claim:b",),
+        uncertainty=("claim derivation receipt is absent",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == KNOWLEDGE_WORKFLOW_FEATURE_ID
+    assert receipt.contract_version == KNOWLEDGE_WORKFLOW_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

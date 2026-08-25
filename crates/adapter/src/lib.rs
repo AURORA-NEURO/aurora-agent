@@ -87,6 +87,7 @@ pub mod evidence_surveillance;
 pub mod fact;
 pub mod ingestion;
 pub mod inventory;
+pub mod knowledge_workflow;
 pub mod location;
 pub mod loss;
 pub mod mechanism_control_plane;
@@ -119,6 +120,12 @@ pub use evidence_surveillance::{
 pub use fact::{FactDraft, ValueQualifiers};
 pub use ingestion::Ingestion;
 pub use inventory::{InventoryAdapter, InventoryProfile};
+pub use knowledge_workflow::{
+    run_knowledge_workflow, ClaimsWorkflowRequest, KnowledgeWorkflowDisposition,
+    KnowledgeWorkflowError, KnowledgeWorkflowReceipt, TypedKnowledgeWorld,
+    CONTRACT_VERSION as KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_WORKFLOW_FEATURE_ID,
+};
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
 pub use mechanism_control_plane::{

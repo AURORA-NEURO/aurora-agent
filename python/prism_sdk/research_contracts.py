@@ -76,6 +76,8 @@ RETRIEVAL_SYNTHESIS_FEATURE_ID = "AFA-adapter-P02-F06"
 RETRIEVAL_SYNTHESIS_CONTRACT_VERSION = "multimodal-retrieval-synthesis/1.0"
 ADAPTER_CONTEXT_COMPILATION_FEATURE_ID = "AFA-adapter-P03-F27"
 ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION = "prospective-context-compilation-assurance/1.0"
+KNOWLEDGE_WORKFLOW_FEATURE_ID = "AFA-adapter-P04-F14"
+KNOWLEDGE_WORKFLOW_CONTRACT_VERSION = "multimodal-knowledge-workflow-fabric/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2063,3 +2065,39 @@ class AdapterContextCompilationReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "query_id": self.query_id, "resolved_fact_ids": list(self.resolved_fact_ids), "disposition": self.disposition, "evidence_receipt_digest": self.evidence_receipt_digest, "checks": list(self.checks), "omissions": list(self.omissions), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class KnowledgeWorkflowReceipt:
+    request_id: str
+    workflow_id: str
+    disposition: str
+    world: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = KNOWLEDGE_WORKFLOW_FEATURE_ID
+    contract_version: str = KNOWLEDGE_WORKFLOW_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != KNOWLEDGE_WORKFLOW_FEATURE_ID or self.contract_version != KNOWLEDGE_WORKFLOW_CONTRACT_VERSION:
+            raise ResearchContractError("knowledge workflow schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.workflow_id.strip() or not self.checks:
+            raise ResearchContractError("knowledge workflow identity or checks are incomplete")
+        if self.disposition not in {"passed", "blocked", "unknown"}:
+            raise ResearchContractError("knowledge workflow disposition is unknown")
+        if self.world.get("schema_version") != RESEARCH_CONTRACT_SCHEMA_VERSION or self.world.get("workflow_id") != self.workflow_id or self.world.get("boundary") != PRECLINICAL_BOUNDARY or not self.world.get("study_ids") or not self.world.get("stages"):
+            raise ResearchContractError("typed knowledge world linkage is invalid")
+        if tuple(self.world.get("omissions", ())) != self.omissions or tuple(self.world.get("uncertainty", ())) != self.uncertainty:
+            raise ResearchContractError("knowledge workflow omission linkage is invalid")
+        claims = self.world.get("resolved_claim_ids", ())
+        if len(set(claims)) != len(claims):
+            raise ResearchContractError("typed knowledge claim identities are not unique")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("knowledge workflow artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "world": dict(self.world), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "artifact": dict(self.artifact), "boundary": self.boundary})

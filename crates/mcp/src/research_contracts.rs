@@ -28,6 +28,10 @@ use bioprism_adapter::{
     run_evidence_surveillance, EvidenceFeedRequest, EvidenceSurveillanceReceipt,
     EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
+use bioprism_adapter::{
+    run_knowledge_workflow, ClaimsWorkflowRequest, KnowledgeWorkflowReceipt,
+    KNOWLEDGE_WORKFLOW_FEATURE_ID,
+};
 use bioprism_atlashub::{
     synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
     FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
@@ -149,6 +153,7 @@ pub const MECHANISM_GATEWAY_TOOL: &str = "federated_mechanism_gateway";
 pub const EVIDENCE_SURVEILLANCE_TOOL: &str = "evidence_surveillance_copilot";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
+pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -828,6 +833,24 @@ pub fn validate_adapter_context_compilation_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != CONTEXT_COMPILATION_FEATURE_ID {
         return Err("adapter context compilation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_knowledge_workflow_json(value: &Value) -> Result<Value, String> {
+    let request: ClaimsWorkflowRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid knowledge workflow request: {error}"))?;
+    let receipt = run_knowledge_workflow(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize knowledge workflow receipt: {error}"))
+}
+
+pub fn validate_knowledge_workflow_json(value: &Value) -> Result<KnowledgeWorkflowReceipt, String> {
+    let receipt: KnowledgeWorkflowReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid knowledge workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != KNOWLEDGE_WORKFLOW_FEATURE_ID {
+        return Err("knowledge workflow feature id mismatch".into());
     }
     Ok(receipt)
 }
