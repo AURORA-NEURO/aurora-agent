@@ -27,6 +27,11 @@ from .llm_runtime import (
     ProviderRequest,
     ProviderResponse,
 )
+from .autonomous_prompt_registry import (
+    AutonomousPromptRegistry,
+    AutonomousPromptSelectionPlan,
+    AutonomousPromptTemplate,
+)
 
 
 AUTONOMOUS_LLM_EVIDENCE_ADAPTER_SCHEMA = "bioprism-python-autonomous-llm-evidence-adapter/0.1"
@@ -131,13 +136,12 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
     return getattr(value, name, default)
 
 
-def _request_identity(context: Mapping[str, Any]) -> str:
+def _request_identity(context: Mapping[str, Any], *, rendered_prompt_digest: str | None = None) -> str:
     request = context.get("request")
     if not isinstance(request, Mapping):
         raise ArgumentError("LLM evidence adapter context request is malformed")
     requirement = context.get("requirement")
-    return content_digest(
-        {
+    identity: dict[str, Any] = {
             "schema": AUTONOMOUS_LLM_EVIDENCE_ADAPTER_SCHEMA,
             "plan_digest": context.get("plan_digest"),
             "requirement_id": _field(requirement, "requirement_id"),
@@ -146,7 +150,9 @@ def _request_identity(context: Mapping[str, Any]) -> str:
             "request_id": request.get("request_id"),
             "metadata": request.get("metadata", {}),
         }
-    )
+    if rendered_prompt_digest is not None:
+        identity["rendered_prompt_digest"] = rendered_prompt_digest
+    return content_digest(identity)
 
 
 def _default_parse_response(response: ProviderResponse, _context: Mapping[str, Any]) -> Any:
@@ -163,7 +169,7 @@ class AutonomousLLMEvidenceAdapter:
     provider: str
     runtime: LLMRuntime
     capabilities: tuple[str, ...]
-    prompt_for_context: PromptForContext
+    prompt_for_context: PromptForContext | None = None
     model: str | None = None
     model_for_context: ModelForContext | None = None
     source_kinds: tuple[str, ...] = ("llm_structured",)
@@ -177,6 +183,9 @@ class AutonomousLLMEvidenceAdapter:
     response_schema: Mapping[str, Any] | None = None
     invocation_observer: ProviderInvocationObserver | None = None
     invocation_kind: str = "autonomous_evidence_acquisition"
+    prompt_template: AutonomousPromptTemplate | None = None
+    prompt_registry: AutonomousPromptRegistry | None = None
+    prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "adapter_id", _identifier("LLM evidence adapter adapter_id", self.adapter_id))
@@ -187,8 +196,26 @@ class AutonomousLLMEvidenceAdapter:
         object.__setattr__(self, "provider", _identifier("LLM evidence adapter provider", self.provider))
         if not isinstance(self.runtime, LLMRuntime):
             raise ArgumentError("LLM evidence adapter requires an LLMRuntime")
-        if not callable(self.prompt_for_context):
-            raise ArgumentError("LLM evidence adapter prompt_for_context is required")
+        if self.prompt_for_context is not None and not callable(self.prompt_for_context):
+            raise ArgumentError("LLM evidence adapter prompt_for_context is malformed")
+        if self.prompt_template is not None and not isinstance(self.prompt_template, AutonomousPromptTemplate):
+            raise ArgumentError("LLM evidence adapter prompt_template is malformed")
+        if self.prompt_template is not None and self.prompt_template.manifest.domain != self.domain:
+            raise ArgumentError("LLM evidence adapter prompt_template domain does not match adapter domain")
+        if self.prompt_registry is not None and not isinstance(self.prompt_registry, AutonomousPromptRegistry):
+            raise ArgumentError("LLM evidence adapter prompt_registry is malformed")
+        if self.prompt_selection is not None and not isinstance(self.prompt_selection, (AutonomousPromptSelectionPlan, Mapping)):
+            raise ArgumentError("LLM evidence adapter prompt_selection is malformed")
+        if self.prompt_template is not None and (self.prompt_registry is not None or self.prompt_selection is not None):
+            raise ArgumentError("LLM evidence adapter cannot combine prompt_template with prompt registry selection")
+        if (self.prompt_registry is None) != (self.prompt_selection is None):
+            raise ArgumentError("LLM evidence adapter prompt_registry and prompt_selection must be supplied together")
+        if self.prompt_for_context is not None and (self.prompt_template is not None or self.prompt_registry is not None):
+            raise ArgumentError("LLM evidence adapter cannot combine prompt_for_context with a prompt registry template")
+        if self.prompt_for_context is None and self.prompt_template is None and self.prompt_registry is None:
+            raise ArgumentError("LLM evidence adapter requires prompt_for_context or a verified prompt template selection")
+        if self.prompt_registry is not None:
+            object.__setattr__(self, "prompt_selection", self.prompt_registry.verify_selection(self.prompt_selection))
         if self.model is None and self.model_for_context is None:
             raise ArgumentError("LLM evidence adapter requires model or model_for_context")
         if self.model is not None and self.model_for_context is not None:
@@ -249,7 +276,15 @@ class AutonomousLLMEvidenceAdapter:
         self._assert_context_domain(context)
         model = self.model if self.model is not None else self.model_for_context(context)  # type: ignore[misc]
         model = _text("LLM evidence adapter resolved model", model, MAX_AUTONOMOUS_LLM_EVIDENCE_MODEL_BYTES)
-        messages = self.prompt_for_context(context)
+        rendered_prompt = None
+        if self.prompt_for_context is not None:
+            messages = self.prompt_for_context(context)
+        elif self.prompt_template is not None:
+            rendered_prompt = self.prompt_template.render_transient(context)
+            messages = rendered_prompt.messages
+        else:
+            rendered_prompt = self.prompt_registry.render(self.prompt_selection, context)  # type: ignore[union-attr]
+            messages = rendered_prompt.messages
         if isinstance(messages, (str, bytes, bytearray)) or not isinstance(messages, Sequence) or not 1 <= len(messages) <= MAX_AUTONOMOUS_LLM_EVIDENCE_PROMPT_MESSAGES:
             raise ArgumentError("LLM evidence adapter prompt must contain between 1 and 64 messages")
         normalized_messages: list[Mapping[str, Any]] = []
@@ -268,7 +303,10 @@ class AutonomousLLMEvidenceAdapter:
             temperature=self.temperature,
             require_json=self.require_json,
             response_schema=self.response_schema,
-            idempotency_key=_request_identity(context),
+            idempotency_key=_request_identity(
+                context,
+                rendered_prompt_digest=None if rendered_prompt is None else rendered_prompt.rendered_prompt_digest,
+            ),
         )
         selected_credential = self.credential
         if self.credential_for is not None:
@@ -307,6 +345,22 @@ class AutonomousLLMEvidenceAdapter:
         return tuple(projected)
 
     def to_dict(self) -> dict[str, Any]:
+        prompt_metadata: dict[str, Any]
+        if self.prompt_for_context is not None:
+            prompt_metadata = {"mode": "caller_callback"}
+        elif self.prompt_template is not None:
+            prompt_metadata = {
+                "mode": "versioned_template",
+                "prompt_id": self.prompt_template.manifest.prompt_id,
+                "prompt_version": self.prompt_template.manifest.version,
+                "prompt_manifest_digest": self.prompt_template.manifest.manifest_digest,
+            }
+        else:
+            prompt_metadata = {
+                "mode": "registry_selection",
+                "registry_digest": self.prompt_registry.registry_digest,  # type: ignore[union-attr]
+                "selection_plan_digest": self.prompt_selection.plan_digest if isinstance(self.prompt_selection, AutonomousPromptSelectionPlan) else None,
+            }
         return {
             "schema": AUTONOMOUS_LLM_EVIDENCE_ADAPTER_SCHEMA,
             "adapter_id": self.adapter_id,
@@ -323,6 +377,7 @@ class AutonomousLLMEvidenceAdapter:
             },
             "credential_posture": "caller_owned_opaque_handle" if self.credential is not None or self.credential_for is not None else "provider_must_be_credentialless_or_fail_closed",
             "projector_configured": self.project is not None,
+            "prompt": prompt_metadata,
             "retention": "provider_messages_and_responses_transient;metadata_only_projection",
             "secret_material": "never_returned",
         }

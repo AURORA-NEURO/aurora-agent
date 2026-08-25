@@ -1461,3 +1461,17 @@ and normalized values remain available only to the caller. Strict plan/result ro
 route drift, normalizer drift, tampering, credential-shaped metadata, oversized values, and missing
 approval. All twelve domains are covered by consensus/dissent, disagreement, failure, and bounded
 fan-out tests.
+
+The next autonomous brain increment closes the final implicit prompt boundary in both SDKs.
+`AutonomousPromptTemplate` binds a caller-owned renderer to a versioned domain/stage/capability
+manifest, template digest, optional output-contract digest, message bound, and byte bound.
+`AutonomousPromptRegistry` produces deterministic, digest-addressed selection plans with exact
+stage preference, capability-fit ordering, candidate identities, and registry-drift refusal.
+Rendering verifies the plan before executing the transient renderer, validates provider-neutral
+message roles and JSON safety, rejects credential-shaped fields, and exposes only a prompt digest
+and bounded metadata in its projection. Python and TypeScript LLM evidence adapters accept the
+registry/selection boundary and bind the rendered-prompt digest into provider idempotency. The
+all-domain tests cover selection, stale replacement, tampered plans, secret-shaped messages,
+metadata redaction, and offline invocation. This is still not provider authorization: provider
+credentials, model dispatch, source acquisition, tool execution, effects, evaluator credit, and
+online learning remain separate explicit gates.

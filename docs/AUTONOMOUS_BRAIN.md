@@ -9722,3 +9722,43 @@ This is research/developer infrastructure. The brain does not diagnose, recommen
 enroll participants, or grant clinical authority. A successful model invocation is an observation,
 not a scientific or clinical claim. External tool execution must pass the existing capability,
 mission, runtime-effect, safety, and approval gates.
+
+## Versioned prompt selection
+
+The final prompt boundary is now explicit in both SDKs. `AutonomousPromptTemplate` binds a
+caller-owned renderer to a prompt id, implementation version, built-in domain, stage coverage,
+capability set, template digest, optional output-contract digest, message limit, and byte limit.
+The renderer is never serialized. Its manifest is metadata-only and can therefore participate in
+the same registry and replay checks as model and evidence-adapter manifests.
+
+`AutonomousPromptRegistry.select_for(...)` / `AutonomousPromptRegistry.selectFor(...)` accepts a
+bounded request matrix such as `{domain: "science", stage: "answer", required_capabilities:
+("analysis",)}`. Selection is deterministic: an exact stage beats a wildcard stage, the
+smallest capability superset wins, and prompt id/version provide a stable lexical tie-break.
+The resulting `AutonomousPromptSelectionPlan` carries the registry digest, every candidate id,
+the selected manifest digest, and a plan digest. It is a selection artifact only; it does not
+authorize a provider call, source dispatch, tool call, or effect.
+
+Before rendering, the registry verifies that the plan still addresses the current registry and
+that every selected manifest still satisfies its original request. Replacing a template changes
+the registry digest and invalidates old plans. A caller can persist the plan metadata and
+rehydrate it with `from_dict` / `fromJSON`, but a stale or internally tampered plan fails closed
+before the renderer or provider is reached.
+
+Rendering is transient and bounded. The selected renderer must return between one and the
+manifest's maximum messages, each with a supported provider-neutral role and JSON-safe content.
+Credential-shaped fields such as `api_key`, `token`, `secret`, and `credential` are rejected at
+this boundary. The result exposes the messages only to the immediate caller and returns a
+metadata-only projection containing the selected manifest digest and a digest of the rendered
+messages. The message content, task context, credentials, and provider response never enter a
+selection plan, health ledger, evidence receipt, learning episode, or JSON projection.
+
+The provider-backed LLM evidence adapters accept either the historical caller callback or a
+versioned template, or a registry plus verified selection plan. Registry-backed invocations bind
+the rendered-prompt digest into the provider idempotency identity, so replay cannot silently
+reuse a request with different prompt material. Model selection, prompt selection, provider
+credential resolution, provider invocation, evidence projection, evaluator settlement, and
+online learning remain separate boundaries; this prompt layer makes their linkage inspectable
+without granting the model any additional authority. The all-domain tests exercise template
+selection, registry drift, plan tampering, secret-shaped prompt material, transient redaction,
+and live offline invocation in both Python and TypeScript.

@@ -1200,6 +1200,33 @@ export type {
   AutonomousLLMEvidenceAdapterOptions,
 } from "./autonomous-evidence-llm-adapter.js";
 export {
+  AUTONOMOUS_PROMPT_REGISTRY_SCHEMA,
+  AUTONOMOUS_PROMPT_MANIFEST_SCHEMA,
+  AUTONOMOUS_PROMPT_SELECTION_SCHEMA,
+  AUTONOMOUS_PROMPT_SELECTION_ROW_SCHEMA,
+  AUTONOMOUS_PROMPT_RENDER_SCHEMA,
+  AUTONOMOUS_PROMPT_SELECTION_POLICY,
+  MAX_AUTONOMOUS_PROMPT_TEMPLATES,
+  MAX_AUTONOMOUS_PROMPT_CAPABILITIES,
+  MAX_AUTONOMOUS_PROMPT_STAGES,
+  MAX_AUTONOMOUS_PROMPT_SELECTIONS,
+  MAX_AUTONOMOUS_PROMPT_MESSAGES,
+  MAX_AUTONOMOUS_PROMPT_BYTES,
+  AutonomousPromptTemplate,
+  AutonomousPromptSelectionPlan,
+  AutonomousPromptRegistry,
+} from "./autonomous-prompt-registry.js";
+export type {
+  AutonomousPromptContext,
+  AutonomousPromptRenderer,
+  AutonomousPromptManifest,
+  AutonomousPromptTemplateOptions,
+  AutonomousPromptRenderResult,
+  AutonomousPromptSelectionRequest,
+  AutonomousPromptSelectionRow,
+  AutonomousPromptSelectionPlanJSON,
+} from "./autonomous-prompt-registry.js";
+export {
   AUTONOMOUS_EVIDENCE_RETRY_POLICY_SCHEMA,
   AUTONOMOUS_EVIDENCE_RETRY_ATTEMPT_SCHEMA,
   MAX_AUTONOMOUS_EVIDENCE_RETRY_ATTEMPTS,
