@@ -617,6 +617,16 @@ from .autonomous_action_admission_persistence import (
     TransactionalJsonAutonomousActionAdmissionSnapshotPersistence,
     AutonomousActionAdmissionPersistenceCoordinator,
 )
+from .autonomous_action_admission_controller import (
+    AUTONOMOUS_ACTION_REVIEW_QUEUE_SCHEMA,
+    AUTONOMOUS_ACTION_REVIEW_ROW_SCHEMA,
+    AUTONOMOUS_ACTION_DISPATCH_HANDOFF_SCHEMA,
+    AUTONOMOUS_ACTION_REVIEW_RETENTION,
+    AUTONOMOUS_ACTION_REVIEW_AUTHORITY,
+    AUTONOMOUS_ACTION_REVIEW_EXECUTION,
+    AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
+    AutonomousActionAdmissionController,
+)
 from .autonomous_domain_response import (
     AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA,
     AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_SCHEMA,
@@ -6346,6 +6356,14 @@ __all__ = [
     "JsonAutonomousActionAdmissionSnapshotPersistence",
     "TransactionalJsonAutonomousActionAdmissionSnapshotPersistence",
     "AutonomousActionAdmissionPersistenceCoordinator",
+    "AUTONOMOUS_ACTION_REVIEW_QUEUE_SCHEMA",
+    "AUTONOMOUS_ACTION_REVIEW_ROW_SCHEMA",
+    "AUTONOMOUS_ACTION_DISPATCH_HANDOFF_SCHEMA",
+    "AUTONOMOUS_ACTION_REVIEW_RETENTION",
+    "AUTONOMOUS_ACTION_REVIEW_AUTHORITY",
+    "AUTONOMOUS_ACTION_REVIEW_EXECUTION",
+    "AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL",
+    "AutonomousActionAdmissionController",
     "AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA",
     "AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_SCHEMA",
     "AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA",

@@ -8,6 +8,7 @@ from prism_sdk import (
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousAgent,
     AutonomousActionAdmissionPersistenceCoordinator,
+    AutonomousActionAdmissionController,
     InMemoryAutonomousActionAdmissionLedger,
     JsonAutonomousActionAdmissionSnapshotPersistence,
     LLMRuntime,
@@ -161,3 +162,56 @@ def test_action_admission_snapshots_are_canonical_restart_safe_cas_fenced_and_ta
     tampered_persistence = JsonAutonomousActionAdmissionSnapshotPersistence(tampered_store)
     with pytest.raises(ArgumentError, match="digest|record|metadata"):
         tampered_persistence.read()
+
+
+def test_operator_controller_projects_every_domain_and_requires_authorized_review_before_handoff() -> None:
+    agent = _agent()
+    ledger = InMemoryAutonomousActionAdmissionLedger(max_records=32)
+    controller = AutonomousActionAdmissionController(ledger)
+    for domain in AUTONOMOUS_DOMAIN_NAMES:
+        plan = agent.action_plan(task=_TASKS[domain], domain=domain, allow_cross_domain=False)
+        ledger.submit(plan, admit_autonomous_action_plan(plan), action_id=f"operator-{domain}")
+    queue = controller.queue()
+    assert len(queue["rows"]) == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert set(queue["domain_counts"]) == set(AUTONOMOUS_DOMAIN_NAMES)
+    assert all(len(row["plan_digest"]) == 64 for row in queue["rows"])
+    assert _TASKS["coding"] not in json.dumps(queue)
+
+    plan = agent.action_plan(task=_TASKS["data"], domain="data", allow_cross_domain=False)
+    pending = ledger.submit(plan, admit_autonomous_action_plan(plan), action_id="operator-approved-data")
+    with pytest.raises(ArgumentError, match="not ready"):
+        controller.dispatch_handoff("operator-approved-data")
+    reviewed = controller.review(
+        "operator-approved-data",
+        approvals=_all_approvals(plan),
+        reviewed=True,
+        authorization_digest="c" * 64,
+        expected_record_digest=pending["record_digest"],
+    )
+    assert reviewed["status"] == "admitted"
+    with pytest.raises(ArgumentError, match="expected_record_digest"):
+        controller.review(
+            "operator-approved-data",
+            approvals=_all_approvals(plan),
+            reviewed=True,
+            authorization_digest="d" * 64,
+            expected_record_digest=pending["record_digest"],
+        )
+    handoff = controller.dispatch_handoff("operator-approved-data")
+    assert handoff["status"] == "ready_for_downstream_gates"
+    assert handoff["requested_domains"] == ["data"]
+    assert handoff["plan"]["plan_digest"] == handoff["plan_digest"]
+    assert handoff["admission"]["plan_digest"] == handoff["plan_digest"]
+    assert "credential_scope" in handoff["downstream_gates"]
+    assert _TASKS["data"] not in json.dumps(handoff)
+
+    cross_plan = agent.action_plan(
+        task="coordinate coding and biomedical evidence",
+        hints=("coding", "biomedical"),
+        allow_cross_domain=True,
+    )
+    cross_admission = admit_autonomous_action_plan(cross_plan, approvals=_all_approvals(cross_plan), reviewed=True)
+    ledger.submit(cross_plan, cross_admission, action_id="operator-cross", reviewer_digest="e" * 64)
+    cross_handoff = controller.dispatch_handoff("operator-cross")
+    assert cross_handoff["cross_domain"] is True
+    assert len(cross_handoff["selected_domains"]) >= 2

@@ -1664,3 +1664,10 @@ adapters, generation links, and transactional compare-and-set fencing support re
 multi-writer recovery. All twelve domains and cross-domain plans are covered, and the ledger
 remains metadata-only. The remaining production responsibility is wiring the caller's identity
 provider/operator UI and secret/effect/evaluator systems to these explicit records.
+
+The operator review surface now sits directly above the ledger in both SDKs. The controller
+projects all twelve domains, requires an external authorization digest plus an expected record
+digest for review, rejects held/blocked records at the dispatch-handoff boundary, and returns
+separate downstream credential, provider/source, tool/effect, and evaluator gates. It remains a
+projection and handoff API rather than an execution or authorization oracle; deployment identity
+verification and the actual UI remain caller-owned.

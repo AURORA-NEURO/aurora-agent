@@ -1736,6 +1736,22 @@ export type {
   TransactionalAutonomousActionAdmissionSnapshotPersistence,
 } from "./autonomous-action-admission-persistence.js";
 export {
+  AUTONOMOUS_ACTION_REVIEW_QUEUE_SCHEMA,
+  AUTONOMOUS_ACTION_REVIEW_ROW_SCHEMA,
+  AUTONOMOUS_ACTION_DISPATCH_HANDOFF_SCHEMA,
+  AUTONOMOUS_ACTION_REVIEW_RETENTION,
+  AUTONOMOUS_ACTION_REVIEW_AUTHORITY,
+  AUTONOMOUS_ACTION_REVIEW_EXECUTION,
+  AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
+  AutonomousActionAdmissionController,
+} from "./autonomous-action-admission-controller.js";
+export type {
+  AutonomousActionReviewRow,
+  AutonomousActionReviewQueue,
+  AutonomousActionDispatchHandoff,
+  AutonomousActionOperatorReviewOptions,
+} from "./autonomous-action-admission-controller.js";
+export {
   AUTONOMOUS_DOMAIN_AUDIT_SCHEMA,
   AUTONOMOUS_DOMAIN_AUDIT_ROW_SCHEMA,
   MAX_AUTONOMOUS_DOMAIN_AUDIT_BYTES,

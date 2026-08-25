@@ -2827,6 +2827,18 @@ workers' resolver, whose existing job-spec digest then binds the review decision
 This closes the operator-review → persistence → worker-rehydration path without storing the task,
 prompt, credentials, provider response, evaluator evidence, connector payload, or effect value.
 
+`AutonomousActionAdmissionController` is the operator-facing layer above that ledger. Its queue
+projection covers every built-in domain with status counts, selected-domain counts, gate state,
+next actions, and only plan/admission/record digests. `review()` requires the deployment's
+authorization digest and an expected record digest, while `dispatchHandoff()` refuses held or
+blocked records and returns only a downstream-gates handoff. The handoff explicitly keeps
+credential scope, provider/source approval, tool/effect authority, and evaluator settlement as
+separate gates; it is not an execute call and cannot authorize a provider by itself. Python and
+TypeScript expose the same controller semantics, including cross-domain selected-domain checks
+and stale-operator refusal. The handoff includes the already-redacted plan and admission JSON so
+a worker resolver can rehydrate them directly without reaching into the ledger; it still contains
+no task, prompt, credential, provider, connector, evaluator, or effect value.
+
 ```python
 plan = agent.action_plan(task="analyze a bounded dataset", domain="data")
 execution = agent.execute_action_plan(

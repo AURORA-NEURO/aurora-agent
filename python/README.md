@@ -436,6 +436,13 @@ tampered status, missing reviewer identity, and admitted records without an oper
 Snapshots contain only the redacted plan/admission projections and their digests; the caller still
 owns task rehydration, credentials, provider invocation, evaluator truth, and effect authority.
 
+`AutonomousActionAdmissionController` adds the operator view above the ledger. `queue()` projects
+all domains and gate state without task text, `review()` requires the deployment's authorization
+digest plus the expected current record digest, and `dispatch_handoff()` refuses held/blocked
+records while returning only the plan/admission identities and downstream gates. It is a review
+records while returning the redacted plan/admission projections and downstream gates. It is a
+review controller, not an execution or authorization oracle.
+
 ### One-call deployment-managed execution
 
 When an application has already registered an environment source or secret-manager resolver,
